@@ -3,19 +3,30 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: bash scripts/bench.sh <repo-path> [runs=5]" >&2
+    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir>" >&2
     exit 2
 fi
 
-repo_path="$1"
-runs="${2:-5}"
-if [[ ! -d "$repo_path" ]]; then
-    echo "not a directory: $repo_path" >&2
-    exit 2
+mode="index"
+if [[ "$1" == "--app" ]]; then
+    if [[ $# -ne 2 || ! -d "$2" ]]; then
+        echo "usage: bash scripts/bench.sh --app <corpus-dir>" >&2
+        exit 2
+    fi
+    mode="app"
+    repo_path="$(cd "$2" && pwd -P)"
+    runs=3
+else
+    repo_path="$1"
+    runs="${2:-5}"
+    if [[ ! -d "$repo_path" ]]; then
+        echo "not a directory: $repo_path" >&2
+        exit 2
+    fi
+    case "$runs" in
+        ''|*[!0-9]*|0) echo "runs must be a positive integer" >&2; exit 2 ;;
+    esac
 fi
-case "$runs" in
-    ''|*[!0-9]*|0) echo "runs must be a positive integer" >&2; exit 2 ;;
-esac
 
 cd "$(dirname "$0")/.."
 
@@ -34,7 +45,43 @@ if [[ -n "${CODEX_SANDBOX:-}" ]]; then
 fi
 
 swift build -c release ${swift_options[@]+"${swift_options[@]}"} >&2
-binary="$(swift build -c release --show-bin-path ${swift_options[@]+"${swift_options[@]}"})/codeinsight"
+bin_path="$(swift build -c release --show-bin-path ${swift_options[@]+"${swift_options[@]}"})"
+
+if [[ "$mode" == "app" ]]; then
+    binary="$bin_path/codeinsight-app"
+    open_file="$(find "$repo_path" -type f -name '*.rs' -print | LC_ALL=C sort | sed -n '1p')"
+    if [[ -z "$open_file" ]]; then
+        echo "no Rust file found in: $repo_path" >&2
+        exit 2
+    fi
+
+    run_app_case() {
+        label="$1"
+        shift
+        values=()
+        run=1
+        while [[ $run -le 3 ]]; do
+            values[${#values[@]}]="$("$binary" "$@")"
+            run=$((run + 1))
+        done
+        printf '%s\n' "${values[@]}" | python3 -c '
+import json, sys
+rows = [json.loads(line) for line in sys.stdin if line.strip()]
+p50 = {}
+for key in rows[0]:
+    values = [row[key] for row in rows]
+    p50[key] = sorted(values)[1] if isinstance(values[0], (int, float)) else values[0]
+print(f"| `{sys.argv[1]}` | 3 | `{json.dumps(p50, sort_keys=True, separators=(chr(44), chr(58)))}` |")
+' "$label"
+    }
+
+    run_app_case "--self-test" --self-test
+    run_app_case "--self-test-open $open_file" --self-test-open "$open_file"
+    run_app_case "--self-test-project $repo_path" --self-test-project "$repo_path"
+    exit 0
+fi
+
+binary="$bin_path/codeinsight"
 
 elapsed_values=()
 run=1

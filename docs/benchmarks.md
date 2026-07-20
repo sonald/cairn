@@ -46,3 +46,33 @@ ripgrep（5 万行）412ms、tokio（16 万行）1.5s——**目标达成**，�
 与上方保留的串行单次基线比较（串行单次 / 并行 p50）：ripgrep
 `412 / 195 = 2.11x`，tokio `1,496 / 704 = 2.13x`。两组语义统计与串行
 基线完全一致；加速比仅作同机前后对照，旧基线是单次值，不是 p50。
+
+## M1 Reader Alpha 自测
+
+日期：2026-07-20。Apple Silicon (arm64e) macOS，release 构建。下面四项均由
+`codeinsight-app` 的预算判定返回 exit 0；数值为一次验收运行：
+
+| 场景 | 结果 |
+|------|------|
+| 空载 `--self-test` | `{"coldStartMS":179.095834,"idleFootprintMB":16.547653198242188}` |
+| regular `Tests/RustExtractorTests/Fixtures/use_alias/db.rs` | `{"firstVisibleMS":2.807042,"styledFragments":0,"syntaxVisibleMS":2.807042,"tier":"regular"}` |
+| huge `/tmp/codeinsight-m1-100k.rs` | `{"firstVisibleMS":2173.5151249999999,"styledFragments":280,"syntaxVisibleMS":9384.6200410000001,"tier":"huge"}` |
+| tokio 1.47.1 项目 | `{"fileCount":717,"indexReadyMS":1011.913875,"treeVisibleMS":10.108584}` |
+
+10 万行文件生成命令：
+
+```bash
+awk 'BEGIN { for (i = 1; i <= 100000; i++) printf "fn generated_%d() { let value = %d; }\n", i, i }' > /tmp/codeinsight-m1-100k.rs
+```
+
+huge 档 release 的 `syntaxVisibleMS` 为 9.38s，仍高于 5s；这是纯文本 first
+visible 后的异步语法补齐路径，不阻塞首屏。M1 预算只卡
+`firstVisibleMS < 2500` 与 `styledFragments < 500`，本次分别为 2.17s 与 280。
+
+`bash scripts/bench.sh --app <tokio-dir>` 连续运行每个 self-test 3 次、取 p50：
+
+| 命令 | runs | p50 |
+|------|------|-----|
+| `--self-test` | 3 | `{"coldStartMS":168.599291,"idleFootprintMB":16.516403198242188}` |
+| `--self-test-open …/benches/copy.rs` | 3 | `{"firstVisibleMS":11.218709,"styledFragments":83,"syntaxVisibleMS":11.218709,"tier":"regular"}` |
+| `--self-test-project <tokio-dir>` | 3 | `{"fileCount":717,"indexReadyMS":880.71575,"treeVisibleMS":9.95075}` |

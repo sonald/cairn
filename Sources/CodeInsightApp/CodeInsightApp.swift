@@ -4,6 +4,16 @@ import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
 
+private enum SelfTestBudgets {
+    static let coldStartMS = 500.0
+    static let idleFootprintMB = 100.0
+    static let regularFirstVisibleMS = 100.0
+    static let hugeFirstVisibleMS = 2_500.0
+    static let hugeStyledFragments = 500
+    static let projectTreeVisibleMS = 1_000.0
+    static let projectIndexReadyMS = 2_000.0
+}
+
 @main
 private struct CodeInsightApplication {
     @MainActor
@@ -336,7 +346,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(coldStartMS < 500 && idleFootprintMB < 100 ? 0 : 1)
+            Darwin.exit(
+                coldStartMS < SelfTestBudgets.coldStartMS
+                    && idleFootprintMB < SelfTestBudgets.idleFootprintMB
+                    ? 0 : 1
+            )
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)
@@ -360,7 +374,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(ready && treeVisibleMS < 1_000 ? 0 : 1)
+            Darwin.exit(
+                ready
+                    && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
+                    && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
+                    ? 0 : 1
+            )
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)
@@ -386,9 +405,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
             let withinBudget = tier == .regular
-                ? firstVisibleMS < 100
+                ? firstVisibleMS < SelfTestBudgets.regularFirstVisibleMS
                 : tier != .huge
-                    || (firstVisibleMS < 2_500 && styledFragments < 500)
+                    || (
+                        firstVisibleMS < SelfTestBudgets.hugeFirstVisibleMS
+                            && styledFragments < SelfTestBudgets.hugeStyledFragments
+                    )
             Darwin.exit(withinBudget ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
