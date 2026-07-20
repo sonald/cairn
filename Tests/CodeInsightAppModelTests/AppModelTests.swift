@@ -176,6 +176,204 @@ func symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() async throws {
     }
 }
 
+@MainActor
+@Test
+func contextWindowDebouncesClicksInsideTheSameToken() async throws {
+    let root = try temporaryProject([
+        "main.rs": "fn target() {}\nfn main() { target(); }",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var resolveCount = 0
+    let model = ContextWindowModel { session, file, offset, context in
+        resolveCount += 1
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    model.updateProjectState(.ready(session, context), root: root)
+    let offset = byteOffset(of: "target();", in: "fn target() {}\nfn main() { target(); }")
+
+    model.tokenClicked(file: "main.rs", offset: offset)
+    #expect(await waitUntil { model.candidateCount == 1 })
+    model.tokenClicked(file: "main.rs", offset: offset + 2)
+    for _ in 0..<10 { await Task.yield() }
+
+    #expect(resolveCount == 1)
+}
+
+@MainActor
+@Test
+func contextWindowDiscardsOutOfOrderRequests() async throws {
+    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    let path = try #require(pathID("main.rs", in: session))
+    let alpha = byteOffset(of: "alpha();", in: source)
+    let beta = byteOffset(of: "beta();", in: source)
+    let gate = ControlledContextResolver()
+    let model = ContextWindowModel(gate.resolve)
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: alpha)
+    #expect(await waitUntil { gate.isPending(alpha) })
+    model.tokenClicked(file: "main.rs", offset: beta)
+    #expect(await waitUntil { gate.isPending(beta) })
+    gate.complete(
+        beta,
+        with: try session.resolve(file: path, offset: beta, context: context)
+    )
+    #expect(await waitUntil { model.selectedCandidate?.line == 2 })
+    gate.complete(
+        alpha,
+        with: try session.resolve(file: path, offset: alpha, context: context)
+    )
+    for _ in 0..<10 { await Task.yield() }
+
+    #expect(model.selectedCandidate?.line == 2)
+}
+
+@MainActor
+@Test
+func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var resolveCount = 0
+    let model = ContextWindowModel { session, file, offset, context in
+        resolveCount += 1
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    model.updateProjectState(.ready(session, context), root: root)
+    model.setMode(.pinned)
+    let offset = byteOffset(of: "target();", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: offset)
+    for _ in 0..<10 { await Task.yield() }
+    #expect(resolveCount == 0)
+
+    let target = await model.explicitJump(file: "main.rs", offset: offset)
+    #expect(target?.line == 1)
+    #expect(resolveCount == 1)
+}
+
+@MainActor
+@Test
+func contextCandidateSelectionWraps() async throws {
+    let source = """
+        struct A; impl A { fn close(&self) {} }
+        struct B; impl B { fn close(&self) {} }
+        fn f(value: A) { value.close(); }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "close();", in: source))
+    #expect(await waitUntil { model.candidateCount == 2 })
+
+    model.selectPrevious()
+    #expect(model.selectedIndex == 1)
+    model.selectNext()
+    #expect(model.selectedIndex == 0)
+}
+
+@MainActor
+@Test
+func contextPendingTokenResolvesWhenIndexBecomesReady() async throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    var resolveCount = 0
+    let model = ContextWindowModel { session, file, offset, context in
+        resolveCount += 1
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    model.updateProjectState(
+        .indexing(root: root, startedAt: .now),
+        root: root
+    )
+
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "target();", in: source))
+    #expect(model.isIndexBuilding)
+    #expect(resolveCount == 0)
+
+    model.updateProjectState(
+        .ready(session, queryContext(for: session)),
+        root: root
+    )
+    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(resolveCount == 1)
+}
+
+@MainActor
+@Test
+func contextWindowResolvesUseAliasFixtureWithPresentationLabel() async throws {
+    let root = repositoryRoot
+        .appendingPathComponent("Tests/RustExtractorTests/Fixtures/use_alias")
+    let source = try String(
+        contentsOf: root.appendingPathComponent("main.rs"),
+        encoding: .utf8
+    )
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "open_db();", in: source)
+    )
+    #expect(await waitUntil { model.candidateCount == 1 })
+    let candidate = try #require(model.selectedCandidate)
+
+    #expect(candidate.label.lowercased().contains("strong"))
+    #expect(candidate.path == "db.rs")
+}
+
+@MainActor
+@Test
+func contextWindowPresentsLocalBindingKind() async throws {
+    let source = "fn f() {\n    let local = 1;\n    local;\n}"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "local;", in: source)
+    )
+    #expect(await waitUntil { model.candidateCount == 1 })
+
+    #expect(model.selectedCandidate?.bindingKind == "letBinding")
+    #expect(model.selectedCandidate?.line == 2)
+}
+
+@MainActor
+@Test
+func contextWindowExplainsUnresolvedExternalCrate() async throws {
+    let source = "use std::io::Read;\nfn f() { Read(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "Read();", in: source)
+    )
+    #expect(await waitUntil { model.candidateCount == 1 })
+
+    #expect(model.selectedCandidate?.excerpt == "external crate — not resolved (M1)")
+}
+
 private actor ControlledIndexService: IndexService {
     typealias Outcome = Result<EngineSession, any Error>
     private var pending: [String: CheckedContinuation<Outcome, Never>] = [:]
@@ -210,6 +408,28 @@ private actor ControlledIndexService: IndexService {
             await Task.yield()
         }
         return false
+    }
+}
+
+@MainActor
+private final class ControlledContextResolver {
+    private var pending: [UInt32: CheckedContinuation<[ResolutionCandidate], Never>] = [:]
+
+    func resolve(
+        session: EngineSession,
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) async throws -> [ResolutionCandidate] {
+        await withCheckedContinuation { pending[offset] = $0 }
+    }
+
+    func isPending(_ offset: UInt32) -> Bool {
+        pending[offset] != nil
+    }
+
+    func complete(_ offset: UInt32, with candidates: [ResolutionCandidate]) {
+        pending.removeValue(forKey: offset)?.resume(returning: candidates)
     }
 }
 
@@ -248,4 +468,23 @@ private func write(_ contents: String, to file: URL) throws {
         withIntermediateDirectories: true
     )
     try contents.write(to: file, atomically: true, encoding: .utf8)
+}
+
+private func queryContext(for session: EngineSession) -> QueryContext {
+    QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+}
+
+private func pathID(_ path: String, in session: EngineSession) -> PathID? {
+    session.manifest.files.first {
+        session.paths.resolve($0.pathID) == path
+    }?.pathID
+}
+
+private func byteOffset(of needle: String, in source: String) -> UInt32 {
+    let range = source.range(of: needle)!
+    return UInt32(source[..<range.lowerBound].utf8.count)
 }

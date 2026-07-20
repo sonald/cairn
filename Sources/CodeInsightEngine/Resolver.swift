@@ -3,6 +3,15 @@ import CodeInsightCore
 struct Resolver {
     let session: EngineSession
 
+    func tokenRange(file: PathID, offset: UInt32) -> ByteRange? {
+        guard let (_, index) = session.content(at: file) else { return nil }
+        return locatedName(
+            at: offset,
+            in: index,
+            bytes: session.sourceBytes(at: file)
+        )?.range
+    }
+
     func resolve(
         file: PathID,
         offset: UInt32,
@@ -155,7 +164,7 @@ struct Resolver {
         at offset: UInt32,
         in index: ContentIndex,
         bytes: [UInt8]?
-    ) -> (nameID: NameID, call: UnresolvedCall?)? {
+    ) -> (range: ByteRange, nameID: NameID, call: UnresolvedCall?)? {
         var matches: [(range: ByteRange, nameID: NameID, call: UnresolvedCall?)] = []
         matches += index.calls.compactMap { call in
             call.range.contains(offset) ? (call.range, call.nameID, call) : nil
@@ -168,7 +177,7 @@ struct Resolver {
             facet.nameRange.contains(offset) ? (facet.nameRange, facet.nameID, nil) : nil
         }
         if let match = matches.min(by: { $0.range.length < $1.range.length }) {
-            return (match.nameID, match.call)
+            return (match.range, match.nameID, match.call)
         }
 
         // TODO(M0): ASCII fallback only; persist local-reference ranges if
@@ -186,7 +195,11 @@ struct Resolver {
         guard index.bindings.contains(where: { $0.localNameID == nameID }) else {
             return nil
         }
-        return (nameID, nil)
+        return (
+            ByteRange(lowerBound: UInt32(lower), upperBound: UInt32(upper)),
+            nameID,
+            nil
+        )
     }
 
     private func isIdentifierByte(_ byte: UInt8) -> Bool {

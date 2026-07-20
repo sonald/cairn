@@ -139,14 +139,19 @@ public final class RenderingAttributesCoordinator {
 public final class ReaderTextView {
     public let view: NSTextView
     public let renderingCoordinator = RenderingAttributesCoordinator()
+    public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     private let backingTextStorage: NSTextStorage
     private var byteUTF16Map: ByteUTF16Map?
 
     public init() {
-        view = NSTextView(usingTextLayoutManager: true)
+        let textView = ClickTextView(usingTextLayoutManager: true)
+        view = textView
         backingTextStorage = NSTextStorage()
         view.textContentStorage?.textStorage = backingTextStorage
         configure()
+        textView.clickHandler = { [weak self] index, modifiers in
+            self?.onClick?(index, modifiers)
+        }
     }
 
     public func display(document: ReaderDocument) {
@@ -240,6 +245,10 @@ public final class ReaderTextView {
         view.showFindIndicator(for: lineRange)
     }
 
+    public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
+        byteUTF16Map?.byteOffset(forUTF16: index).flatMap(UInt32.init(exactly:))
+    }
+
     private var baseAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = ReaderTheme.lineHeightMultiple
@@ -286,5 +295,23 @@ public final class ReaderTextView {
                 .kern: ReaderTheme.functionNameKern,
             ], range: range)
         }
+    }
+}
+
+@MainActor
+private final class ClickTextView: NSTextView {
+    var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+
+    override func mouseDown(with event: NSEvent) {
+        let index = characterIndex(for: event)
+        super.mouseDown(with: event)
+        clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+    }
+}
+
+@MainActor
+private extension NSTextView {
+    func characterIndex(for event: NSEvent) -> Int {
+        characterIndexForInsertion(at: convert(event.locationInWindow, from: nil))
     }
 }

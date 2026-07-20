@@ -52,6 +52,20 @@ public struct ReaderDocument: Sendable {
         self.highlightSpans = highlightSpans
         self.outlineFacets = outlineFacets
     }
+
+    public init(
+        bytes: [UInt8],
+        highlightSpans: [HighlightSpan] = [],
+        outlineFacets: [OutlineFacet] = []
+    ) {
+        self.init(
+            bytes: bytes,
+            lineTable: LineTable(bytes: bytes),
+            byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+            highlightSpans: highlightSpans,
+            outlineFacets: outlineFacets
+        )
+    }
 }
 
 public enum FileTier: String, Sendable {

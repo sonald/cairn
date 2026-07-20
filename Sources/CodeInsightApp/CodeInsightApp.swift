@@ -200,6 +200,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.showSymbolSearch()
     }
 
+    @objc private func previousContextCandidate(_ sender: Any?) {
+        windowController?.selectPreviousContextCandidate(sender)
+    }
+
+    @objc private func nextContextCandidate(_ sender: Any?) {
+        windowController?.selectNextContextCandidate(sender)
+    }
+
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
 
@@ -236,6 +244,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         symbolItem.target = self
         goMenu.addItem(symbolItem)
+        let previousCandidate = NSMenuItem(
+            title: "Previous Context Candidate",
+            action: #selector(previousContextCandidate(_:)),
+            keyEquivalent: "\u{F702}"
+        )
+        previousCandidate.keyEquivalentModifierMask = [.command, .option]
+        previousCandidate.target = self
+        goMenu.addItem(previousCandidate)
+        let nextCandidate = NSMenuItem(
+            title: "Next Context Candidate",
+            action: #selector(nextContextCandidate(_:)),
+            keyEquivalent: "\u{F703}"
+        )
+        nextCandidate.keyEquivalentModifierMask = [.command, .option]
+        nextCandidate.target = self
+        goMenu.addItem(nextCandidate)
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
 

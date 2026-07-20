@@ -12,13 +12,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     let model: AppModel
     private let sidebarController = SidebarViewController()
     private let readerController = ReaderViewController()
+    private let contextController: ContextWindowViewController
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let indexLabel = NSTextField(labelWithString: "")
     private var displayedGeneration: UInt64?
+    private var displayedNavigationGeneration: UInt64?
     private var symbolSearchPanel: SymbolSearchPanel?
 
     init(model: AppModel, offscreen: Bool) {
         self.model = model
+        contextController = ContextWindowViewController(model: model.contextWindow)
         let content = NSSplitViewController()
         content.splitView.isVertical = false
 
@@ -35,7 +38,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
 
         content.addSplitViewItem(NSSplitViewItem(viewController: readerSplit))
         let contextItem = NSSplitViewItem(
-            viewController: ContextWindowViewController()
+            viewController: contextController
         )
         contextItem.minimumThickness = 120
         contextItem.maximumThickness = 280
@@ -58,7 +61,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         super.init(window: window)
         toolbar.delegate = self
         sidebarController.onOpenFile = { [weak model] url in
-            model?.selectFile(url)
+            model?.openFile(url)
+        }
+        readerController.onTokenClick = { [weak self] offset, commandClick in
+            self?.handleReaderClick(offset: offset, commandClick: commandClick)
+        }
+        contextController.onOpen = { [weak self] candidate in
+            self?.open(candidate)
         }
         render()
         observe()
@@ -76,9 +85,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
-                guard let self else { return }
-                self.model.selectFile(file)
-                self.readerController.navigate(to: file, byteOffset: offset)
+                self?.model.openFile(file, byteOffset: offset)
             }
         }
         symbolSearchPanel?.show(relativeTo: window)
@@ -115,6 +122,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             _ = model.generation
             _ = model.fileTree
             _ = model.selectedFile
+            _ = model.navigationGeneration
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -129,6 +137,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             displayedGeneration = model.generation
         }
         readerController.display(model.selectedFile)
+        if displayedNavigationGeneration != model.navigationGeneration {
+            if let file = model.selectedFile, let offset = model.selectedByteOffset {
+                readerController.navigate(to: file, byteOffset: offset)
+            }
+            displayedNavigationGeneration = model.navigationGeneration
+        }
         projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "CodeInsight"
 
         guard let toolbar = window?.toolbar else { return }
@@ -149,6 +163,49 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             }
         }
         symbolSearchPanel?.refreshProjectState()
+    }
+
+    @objc func selectPreviousContextCandidate(_ sender: Any?) {
+        model.contextWindow.selectPrevious()
+    }
+
+    @objc func selectNextContextCandidate(_ sender: Any?) {
+        model.contextWindow.selectNext()
+    }
+
+    private func handleReaderClick(offset: UInt32, commandClick: Bool) {
+        guard let file = model.selectedFile,
+              let path = projectPath(for: file)
+        else { return }
+        if commandClick {
+            Task { [weak self] in
+                guard let self,
+                      let candidate = await self.model.contextWindow.explicitJump(
+                        file: path,
+                        offset: offset
+                      )
+                else { return }
+                self.open(candidate)
+            }
+        } else {
+            model.contextWindow.tokenClicked(file: path, offset: offset)
+        }
+    }
+
+    private func open(_ candidate: ContextWindowModel.Candidate) {
+        guard let root = model.fileTree?.root else { return }
+        model.openFile(
+            root.appendingPathComponent(candidate.path),
+            byteOffset: candidate.targetByteOffset
+        )
+    }
+
+    private func projectPath(for file: URL) -> String? {
+        guard let root = model.fileTree?.root,
+              file.pathComponents.starts(with: root.pathComponents)
+        else { return nil }
+        return file.pathComponents.dropFirst(root.pathComponents.count)
+            .joined(separator: "/")
     }
 }
 
@@ -237,6 +294,7 @@ final class SidebarViewController: NSViewController,
 
 @MainActor
 final class ReaderViewController: NSViewController {
+    var onTokenClick: ((UInt32, Bool) -> Void)?
     private let label = NSTextField(labelWithString: "Open a project to begin")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
@@ -258,6 +316,19 @@ final class ReaderViewController: NSViewController {
             label.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
         ])
         view = scrollView
+        textView.onClick = { [weak self] characterIndex, modifiers in
+            guard let self,
+                  let offset = self.textView.byteOffset(
+                    forCharacterIndex: characterIndex
+                  )
+            else { return }
+            let meaningful = modifiers.intersection([.command, .option, .control, .shift])
+            if meaningful.isEmpty {
+                self.onTokenClick?(offset, false)
+            } else if meaningful == .command {
+                self.onTokenClick?(offset, true)
+            }
+        }
     }
 
     func display(_ file: URL?) {
@@ -317,21 +388,149 @@ final class ReaderViewController: NSViewController {
 
 @MainActor
 final class ContextWindowViewController: NSViewController {
-    override func loadView() {
-        view = placeholderView(text: "Select a symbol to see context")
-    }
-}
+    var onOpen: ((ContextWindowModel.Candidate) -> Void)?
 
-@MainActor
-private func placeholderView(text: String) -> NSView {
-    let container = NSView()
-    let label = NSTextField(labelWithString: text)
-    label.textColor = .secondaryLabelColor
-    label.translatesAutoresizingMaskIntoConstraints = false
-    container.addSubview(label)
-    NSLayoutConstraint.activate([
-        label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-        label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-    ])
-    return container
+    private let model: ContextWindowModel
+    private let modeControl = NSSegmentedControl(
+        labels: ["Follow", "Pin"],
+        trackingMode: .selectOne,
+        target: nil,
+        action: nil
+    )
+    private let previousButton = NSButton(title: "‹", target: nil, action: nil)
+    private let countLabel = NSTextField(labelWithString: "")
+    private let nextButton = NSButton(title: "›", target: nil, action: nil)
+    private let pathLabel = NSTextField(labelWithString: "")
+    private let candidateLabel = NSTextField(labelWithString: "")
+    private let miniReader = ReaderTextView()
+
+    init(model: ContextWindowModel) {
+        self.model = model
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        modeControl.selectedSegment = 0
+        modeControl.target = self
+        modeControl.action = #selector(modeChanged(_:))
+        previousButton.target = self
+        previousButton.action = #selector(selectPrevious(_:))
+        nextButton.target = self
+        nextButton.action = #selector(selectNext(_:))
+        pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        candidateLabel.textColor = .secondaryLabelColor
+        candidateLabel.font = .systemFont(ofSize: 11)
+
+        let header = NSStackView(views: [
+            modeControl,
+            previousButton,
+            countLabel,
+            nextButton,
+            pathLabel,
+            candidateLabel,
+        ])
+        header.orientation = .horizontal
+        header.alignment = .centerY
+        header.spacing = 8
+        header.translatesAutoresizingMaskIntoConstraints = false
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = miniReader.view
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView()
+        container.addSubview(header)
+        container.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            header.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        view = container
+        miniReader.onClick = { [weak self] _, modifiers in
+            guard modifiers.intersection([.command, .option, .control, .shift]) == .command,
+                  let self,
+                  let candidate = self.model.selectedCandidate
+            else { return }
+            self.onOpen?(candidate)
+        }
+        render()
+        observe()
+    }
+
+    @objc private func modeChanged(_ sender: NSSegmentedControl) {
+        model.setMode(sender.selectedSegment == 1 ? .pinned : .follow)
+    }
+
+    @objc private func selectPrevious(_ sender: Any?) {
+        model.selectPrevious()
+    }
+
+    @objc private func selectNext(_ sender: Any?) {
+        model.selectNext()
+    }
+
+    private func observe() {
+        withObservationTracking {
+            _ = model.mode
+            _ = model.stage
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.render()
+                self?.observe()
+            }
+        }
+    }
+
+    private func render() {
+        modeControl.selectedSegment = model.mode == .pinned ? 1 : 0
+        let text: String
+        let highlightsSyntax: Bool
+        if let candidate = model.selectedCandidate {
+            pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
+            candidateLabel.stringValue = [candidate.label, candidate.bindingKind]
+                .compactMap { $0 }
+                .joined(separator: " · ")
+            countLabel.stringValue = "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"
+            text = candidate.excerpt
+            highlightsSyntax = true
+        } else {
+            pathLabel.stringValue = ""
+            candidateLabel.stringValue = ""
+            countLabel.stringValue = ""
+            text = model.isIndexBuilding
+                ? "Indexing…"
+                : "Select a symbol to see context"
+            highlightsSyntax = false
+        }
+        previousButton.isEnabled = model.candidateCount > 1
+        nextButton.isEnabled = model.candidateCount > 1
+        miniReader.display(document: readerDocument(text, highlightsSyntax: highlightsSyntax))
+    }
+
+    private func readerDocument(
+        _ source: String,
+        highlightsSyntax: Bool
+    ) -> ReaderDocument {
+        let bytes = Array(source.utf8)
+        let highlighted = highlightsSyntax
+            ? try? RustHighlighter().highlight(bytes: bytes)
+            : nil
+        return ReaderDocument(
+            bytes: bytes,
+            highlightSpans: highlighted?.spans ?? [],
+            outlineFacets: highlighted?.outlineFacets ?? []
+        )
+    }
 }

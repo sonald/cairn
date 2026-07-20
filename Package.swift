@@ -73,7 +73,11 @@ let package = Package(
         ),
         .target(
             name: "CodeInsightAppModel",
-            dependencies: ["CodeInsightCore", "CodeInsightEngine"]
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightEngine",
+                "CodeInsightReaderCore",
+            ]
         ),
         .target(
             name: "CodeInsightReaderCore",

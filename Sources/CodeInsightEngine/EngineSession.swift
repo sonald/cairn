@@ -263,6 +263,15 @@ public final class EngineSession: Sendable {
         )
     }
 
+    public func tokenRange(
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) throws -> ByteRange? {
+        try validate(context)
+        return Resolver(session: self).tokenRange(file: file, offset: offset)
+    }
+
     func content(at pathID: PathID) -> (ContentIndexKey, ContentIndex)? {
         guard let key = contentKeysByPath[pathID],
               let index = contentIndexes[key]

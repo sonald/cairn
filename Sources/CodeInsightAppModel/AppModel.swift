@@ -95,11 +95,18 @@ public final class AppModel {
     public private(set) var generation: UInt64 = 0
     public private(set) var fileTree: FileTreeModel?
     public private(set) var selectedFile: URL?
+    public private(set) var selectedByteOffset: UInt32?
+    public private(set) var navigationGeneration: UInt64 = 0
+    public let contextWindow: ContextWindowModel
 
     private let indexService: any IndexService
 
-    public init(indexService: any IndexService = ProjectIndexService()) {
+    public init(
+        indexService: any IndexService = ProjectIndexService(),
+        contextWindow: ContextWindowModel = ContextWindowModel()
+    ) {
         self.indexService = indexService
+        self.contextWindow = contextWindow
     }
 
     public func openProject(root: URL) {
@@ -108,12 +115,16 @@ public final class AppModel {
         let root = root.standardizedFileURL
         fileTree = nil
         selectedFile = nil
+        selectedByteOffset = nil
+        navigationGeneration &+= 1
         projectState = .indexing(root: root, startedAt: .now)
+        contextWindow.updateProjectState(projectState, root: root)
 
         do {
             fileTree = try FileTreeModel(root: root)
         } catch {
             projectState = .failed
+            contextWindow.updateProjectState(projectState, root: root)
             return
         }
 
@@ -128,7 +139,13 @@ public final class AppModel {
     }
 
     public func selectFile(_ url: URL) {
+        openFile(url)
+    }
+
+    public func openFile(_ url: URL, byteOffset: UInt32? = nil) {
         selectedFile = url
+        selectedByteOffset = byteOffset
+        navigationGeneration &+= 1
     }
 
     @discardableResult
@@ -140,6 +157,7 @@ public final class AppModel {
              (.indexing, .ready),
              (.indexing, .failed):
             projectState = next
+            contextWindow.updateProjectState(next, root: fileTree?.root)
             return true
         default:
             return false
@@ -156,10 +174,12 @@ public final class AppModel {
                 generation: generation
             )
         )
+        contextWindow.updateProjectState(projectState, root: fileTree?.root)
     }
 
     private func failIndexing(generation: UInt64) {
         guard self.generation == generation else { return }
         projectState = .failed
+        contextWindow.updateProjectState(projectState, root: fileTree?.root)
     }
 }

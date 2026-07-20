@@ -69,6 +69,26 @@ func resolvesNearestShadowedBinding() throws {
 }
 
 @Test
+func tokenRangeLocatesNameWithoutResolvingCandidates() throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let start = offset(of: "target();", in: source)
+
+        #expect(try session.tokenRange(
+            file: path,
+            offset: start + 2,
+            context: queryContext(for: session)
+        ) == ByteRange(lowerBound: start, upperBound: start + 8))
+        #expect(try session.tokenRange(
+            file: path,
+            offset: offset(of: " { target", in: source),
+            context: queryContext(for: session)
+        ) == nil)
+    }
+}
+
+@Test
 func marksFunctionValueCallAsCallback() throws {
     let source = "fn f() { let h = |x: u32| x; h(1); }"
     try withProject(["main.rs": source]) { session in
@@ -159,6 +179,8 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.resolve(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.tokenRange(file: path, offset: 3, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -167,7 +189,7 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 4)
+        #expect(failures == 5)
     }
 }
 
@@ -187,6 +209,8 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.resolve(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.tokenRange(file: path, offset: 3, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -195,7 +219,7 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 4)
+        #expect(failures == 5)
     }
 }
 

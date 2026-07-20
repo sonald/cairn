@@ -96,3 +96,73 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     #expect(!document.highlightSpans.isEmpty)
     #expect(document.outlineFacets.count == 10_001)
 }
+
+@Test
+func excerptAttachesAdjacentDocCommentsAndMarksOverflow() {
+    let body = (1...26).map { "    let value\($0) = \($0);" }
+    let source = ([
+        "//! Module detail",
+        "/// Opens the database.",
+        "fn connect() {",
+    ] + body + ["}"]).joined(separator: "\n")
+    let start = UInt32(source.utf8.distance(
+        from: source.utf8.startIndex,
+        to: source.range(of: "fn connect")!.lowerBound
+    ))
+    let document = readerDocument(source)
+
+    let value = excerpt(
+        for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
+        in: document
+    )
+
+    #expect(value.hasPrefix("//! Module detail\n/// Opens the database.\nfn connect() {"))
+    #expect(value.hasSuffix("… 4 more lines"))
+}
+
+@Test
+func excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() {
+    let source = "// ordinary comment\n\nfn plain() {\n    work();\n}"
+    let start = UInt32(source[..<source.range(of: "fn plain")!.lowerBound].utf8.count)
+
+    let value = excerpt(
+        for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
+        in: readerDocument(source)
+    )
+
+    #expect(value == "fn plain() {\n    work();\n}")
+}
+
+@Test
+func excerptStopsCleanlyAtFileEnd() {
+    let source = "fn tail() {\n    work();\n}"
+
+    #expect(excerpt(
+        for: ByteRange(lowerBound: 0, upperBound: UInt32(source.utf8.count)),
+        in: readerDocument(source)
+    ) == source)
+}
+
+@Test
+func bindingExcerptUsesDeclarationLinePlusTwoLinesEachSide() {
+    let source = (1...8).map { "line \($0)" }.joined(separator: "\n")
+    let declaration = source.range(of: "line 5")!
+    let start = UInt32(source[..<declaration.lowerBound].utf8.count)
+
+    #expect(excerpt(
+        for: ByteRange(lowerBound: start, upperBound: start + 6),
+        in: readerDocument(source),
+        binding: true
+    ) == "line 3\nline 4\nline 5\nline 6\nline 7")
+}
+
+private func readerDocument(_ source: String) -> ReaderDocument {
+    let bytes = Array(source.utf8)
+    return ReaderDocument(
+        bytes: bytes,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: [],
+        outlineFacets: []
+    )
+}
