@@ -23,6 +23,7 @@ swift test ${swift_options[@]+"${swift_options[@]}"}
 
 if grep -rnE 'import AppKit|import SwiftUI' \
     Sources/CodeInsightCore Sources/TreeSitterKit \
+    Sources/CodeInsightAppModel Sources/CodeInsightReaderCore \
     Sources/CodeInsightRustExtractor Sources/CodeInsightEngine; then
     echo "AppKit/SwiftUI imports are not allowed in core targets." >&2
     exit 1

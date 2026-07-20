@@ -16,6 +16,7 @@ let package = Package(
         ),
         .library(name: "CodeInsightEngine", targets: ["CodeInsightEngine"]),
         .executable(name: "codeinsight", targets: ["CodeInsightCLI"]),
+        .executable(name: "codeinsight-app", targets: ["CodeInsightApp"]),
     ],
     dependencies: [
         .package(
@@ -70,6 +71,26 @@ let package = Package(
                 ),
             ]
         ),
+        .target(
+            name: "CodeInsightAppModel",
+            dependencies: ["CodeInsightCore", "CodeInsightEngine"]
+        ),
+        .target(
+            name: "CodeInsightReaderCore",
+            dependencies: [
+                "CodeInsightCore",
+                "TreeSitterKit",
+                "CTreeSitterRust",
+            ]
+        ),
+        .target(
+            name: "CodeInsightReaderUI",
+            dependencies: ["CodeInsightReaderCore"]
+        ),
+        .executableTarget(
+            name: "CodeInsightApp",
+            dependencies: ["CodeInsightAppModel", "CodeInsightReaderUI"]
+        ),
         .testTarget(
             name: "TreeSitterKitTests",
             dependencies: ["TreeSitterKit", "CTreeSitterRust"]
@@ -90,6 +111,10 @@ let package = Package(
         .testTarget(
             name: "CodeInsightEngineTests",
             dependencies: ["CodeInsightCore", "CodeInsightEngine"]
+        ),
+        .testTarget(
+            name: "CodeInsightAppModelTests",
+            dependencies: ["CodeInsightAppModel"]
         ),
     ]
 )
