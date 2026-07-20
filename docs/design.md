@@ -631,10 +631,25 @@ coverage/trustMode；若精确索引来自过期物化或错误 profile，UI 显
 `ByteRange` 是引擎权威坐标；UTF16Range 仅展示层转换。打开文件维护
 newline offsets + UTF-8↔UTF-16 checkpoint，点击定位二分，不从头遍历。
 
-### 9.2 大文件策略
+### 9.2 大文件策略（依据 M0-B 探针实测修订，数据见 Prototypes/TextKitProbe/FINDINGS.md）
 
-只有打开文件解码；只保留活跃标签页的 tree；高亮/排版属性仅视口 + 缓冲区惰性施加
-（NSTextContentStorage delegate）；不构造数十万 attribute run 的巨型 attributed string。
+M0-B 实测（10 万行 / 3MB 合成 Rust）确认视口门控收益巨大（实际写属性 196 个
+fragment 对全量 13 万，快 1.95s、省 191MB），但也发现 **lazy API ≠ lazy 成本**：
+AppKit 仍对全部 10 万 fragment 做预验证，lazy 路径首屏 3.46s / 459MB。据此修订：
+
+- 只有打开文件解码；只保留活跃标签页的 tree。
+- 高亮/排版属性用 **TextKit 2 viewport 驱动的 rendering attributes**（机制中立表述——
+  实测 NSTextContentStorage delegate 与不带范围判断的 renderingAttributesValidator
+  都会退化为全文件工作），validator 内必须再做 viewport+buffer 范围门控。
+  **验收指标是"实际写属性的 fragment 数"，不是"是否用了 lazy API"。**
+- 高亮存储坐标一律 byte range，视口命中后才经 checkpoint 转 NSRange；
+  不预先为全部 token 保存 UTF-16 range。
+- 可变字号是 layout 属性而非纯颜色高亮：默认幅度（+1/+2pt）待人工滚动检查定；
+  行高跳动明显则固定行高或退回 +1pt。
+- 不构造数十万 attribute run 的巨型 attributed string。
+- **自定义 content provider / 分块 backing store 明确不进当前架构**（决策 c，
+  2026-07-20）：接受原生 NSTextView 路径的实测上限，性能预算按文件规模分档（§15）；
+  仅当真实用户数据表明分档预算不可接受时才重启该方向。
 
 ### 9.3 排版
 
@@ -815,14 +830,23 @@ rg 可作对照基准或备用实现（它不能读虚拟 blob，但能读物化
 
 p50/p95 验收；记录环境（文件数/字节/行数/文件大小分布/冷热缓存/峰值 RSS/索引大小）。
 
-**打开文件（10 万行级）分四级**：
+**打开文件分四级 × 按规模分档**（决策 c，依据 M0-B 实测调整预算本身）：
 
 ```text
-first visible text   < 100ms      ← 核心卖点
-syntax visible       首屏高亮完成（视口范围）
-document parsed      全文件 tree 就绪（后台）
-semantic ready       scope/点击导航可用
+四级：first visible text → syntax visible（视口）→ document parsed（后台）→ semantic ready
 ```
+
+| 档位 | 范围 | first visible | syntax visible | 稳定内存 |
+|------|------|--------------|----------------|---------|
+| 常规 | ≤1 万行（绝大多数源码文件） | **< 100ms**（核心卖点） | < 200ms | 文件字节的常数倍 |
+| 大 | 1–5 万行 | < 500ms | < 1s | < 250MB |
+| 巨 | 5–10 万行+ | < 2.5s（纯文本先行，parse/高亮转异步） | 异步补齐 | < 600MB |
+
+说明：巨档预算来自 M0-B 实测——lazy 全同步路径 3.46s/459MB，其中 parse 737ms +
+高亮索引 492ms 可移出首屏路径，纯文本首屏 ~2.2s 是原生 NSTextView 的现实下限；
+接受之，不投入自定义 content provider（§9.2）。巨档文件占真实仓库比例极小
+（tokio 717 文件最大者远小于此），预算劣化影响面有限；分档阈值按行数先行，
+实现时可换算字节数。
 
 **Context Window 分温度**：
 
@@ -866,7 +890,7 @@ Cold  等待后台索引或 exact provider         先返回局部/fuzzy，异�
 | AnalysisProfile 判定错误（选错 tsconfig/feature） | Profile 可见可切（F6.3）；结果带 profile 标注；多 profile 数据模型 |
 | 不可信仓库安全 | Safe Mode 默认 + Trusted 显式授权 + helper 沙箱限额（§8.4） |
 | 三层+profile 模型实现复杂度 | M0-A CLI 先打通全模型；fixture 逐规则回归；分层可独立重建 |
-| TextKit 2 大文件性能 | §9 策略 + M0-B 专项 |
+| TextKit 2 大文件性能 | 已由 M0-B 探针量化（lazy 门控收益 + 全量预验证成本），按 §15 分档预算接受；validator 需 viewport 二次门控（§9.2） |
 | 快照串线/内部漂移 | generation 全链路 + 不可变捕获（§6.2）；M0-C 并发测试 |
 | 自研搜索性能不达标 | 字节字面量快路径 + PCRE2 候选压测 + 预算限额；不承诺 rg 级 |
 | 缓存无限增长 | §10.3 生命周期 + 配额 + LRU |
