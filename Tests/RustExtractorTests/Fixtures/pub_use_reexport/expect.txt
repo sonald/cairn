@@ -1,3 +1,3 @@
-# M0 does not follow the re-export chain; name posting still recalls a.rs.
-def5 main.rs:4:13 -> a.rs:1:8
-nostrong main.rs:4:13
+# Re-export resolution now follows b.rs through to the original definition.
+def main.rs:4:13 -> a.rs:1:8
+strong main.rs:4:13

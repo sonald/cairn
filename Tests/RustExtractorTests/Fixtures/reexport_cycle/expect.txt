@@ -1,0 +1,5 @@
+# The b.rs/c.rs cycle falls back to the unrelated same-name definition as possible.
+def main.rs:4:8 -> a.rs:1:12
+nostrong main.rs:4:8
+def main.rs:5:13 -> a.rs:1:12
+nostrong main.rs:5:13

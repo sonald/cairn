@@ -28,13 +28,13 @@ struct Resolver {
         let kind = located.call?.syntacticKind
         if let importIndex = located.importIndex {
             guard index.imports.indices.contains(Int(importIndex)) else { return [] }
-            return importCandidate(
+            return importCandidates(
                 index: importIndex,
                 binding: index.imports[Int(importIndex)],
                 from: file,
                 kind: kind,
                 context: context
-            ).map { [$0] } ?? []
+            )
         }
         if case .methodCall? = kind {
             return globalCandidates(
@@ -112,17 +112,19 @@ struct Resolver {
                 && visibleScopes.contains(binding.scopeID)
         {
             guard let importIndex = UInt32(exactly: importIndex) else { continue }
-            guard let resolved = importCandidate(
+            let resolved = importCandidates(
                 index: importIndex,
                 binding: binding,
                 from: file,
                 kind: kind,
                 context: context
-            ) else { continue }
-            if resolved.certainty == .unresolved {
-                unresolved.append(resolved)
-            } else {
-                imported.append(resolved)
+            )
+            for candidate in resolved {
+                if candidate.certainty == .unresolved {
+                    unresolved.append(candidate)
+                } else {
+                    imported.append(candidate)
+                }
             }
         }
         if !imported.isEmpty { return sorted(imported, from: file) }
@@ -228,13 +230,55 @@ struct Resolver {
         return (range, nameID, nil, nil, !hasLocalBinding)
     }
 
-    private func importCandidate(
+    private func importCandidates(
         index importIndex: UInt32,
         binding: ImportBinding,
         from source: PathID,
         kind: CallKind?,
         context: QueryContext
+    ) -> [ResolutionCandidate] {
+        var visited: Set<SymbolOccurrenceID> = []
+        if let resolved = importCandidate(
+            index: importIndex,
+            binding: binding,
+            from: source,
+            kind: kind,
+            context: context,
+            evidenceIndex: importIndex,
+            reexportHops: 0,
+            visited: &visited
+        ) {
+            return [resolved]
+        }
+        guard let importedName = binding.importedName else { return [] }
+        return globalCandidates(
+            nameID: importedName,
+            from: source,
+            certainty: .possible,
+            dispatch: dispatch(for: kind),
+            evidence: [.nameOnly(nameID: importedName)],
+            context: context
+        )
+    }
+
+    private func importCandidate(
+        index importIndex: UInt32,
+        binding: ImportBinding,
+        from source: PathID,
+        kind: CallKind?,
+        context: QueryContext,
+        evidenceIndex: UInt32,
+        reexportHops: Int,
+        requestedName: NameID? = nil,
+        visited: inout Set<SymbolOccurrenceID>
     ) -> ResolutionCandidate? {
+        let occurrence = SymbolOccurrenceID(
+            snapshotID: context.snapshotID,
+            pathID: source,
+            localKind: .importBinding,
+            localIndex: importIndex
+        )
+        guard visited.insert(occurrence).inserted else { return nil }
         guard let targetFile = session.moduleMap.targetFile(
             for: binding,
             from: source,
@@ -248,28 +292,65 @@ struct Resolver {
                 localIndex: importIndex,
                 certainty: .unresolved,
                 dispatch: dispatch(for: kind),
-                evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                evidence: [.uniqueImport(importBindingIndex: evidenceIndex)],
                 context: context
             )
         }
-        guard let importedName = binding.importedName,
+        guard let importedName = requestedName ?? binding.importedName,
               let (_, targetIndex) = session.content(at: targetFile)
         else { return nil }
         let matches = targetIndex.symbols.enumerated().filter {
             $0.element.parentFacetIndex == nil
                 && $0.element.nameID == importedName
+                && $0.element.kind != .rustImpl
         }
-        guard matches.count == 1,
-              let facetIndex = UInt32(exactly: matches[0].offset)
+        if matches.count == 1,
+           let facetIndex = UInt32(exactly: matches[0].offset)
+        {
+            return candidate(
+                pathID: targetFile,
+                localIndex: facetIndex,
+                certainty: capped(.strong, for: kind),
+                dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: evidenceIndex)],
+                context: context
+            )
+        }
+
+        guard matches.isEmpty,
+              reexportHops < 4
         else { return nil }
-        return candidate(
-            pathID: targetFile,
-            localIndex: facetIndex,
-            certainty: capped(.strong, for: kind),
-            dispatch: dispatch(for: kind),
-            evidence: [.uniqueImport(importBindingIndex: importIndex)],
-            context: context
-        )
+
+        var reexports: [(UInt32, ImportBinding, NameID?)] = []
+        for export in targetIndex.exports where export.exportedName == importedName {
+            guard let index = export.sourceBindingIndex,
+                  targetIndex.imports.indices.contains(Int(index))
+            else { continue }
+            reexports.append((index, targetIndex.imports[Int(index)], nil))
+        }
+        for (index, binding) in targetIndex.imports.enumerated()
+            where binding.flags.contains(.reexport)
+                && binding.flags.contains(.wildcard)
+        {
+            guard let index = UInt32(exactly: index) else { continue }
+            reexports.append((index, binding, importedName))
+        }
+
+        let resolved = reexports.compactMap { index, binding, requestedName in
+            var branchVisited = visited
+            return importCandidate(
+                index: index,
+                binding: binding,
+                from: targetFile,
+                kind: kind,
+                context: context,
+                evidenceIndex: evidenceIndex,
+                reexportHops: reexportHops + 1,
+                requestedName: requestedName,
+                visited: &branchVisited
+            )
+        }
+        return resolved.count == 1 ? resolved[0] : nil
     }
 
     private func isIdentifierByte(_ byte: UInt8) -> Bool {

@@ -1,0 +1,4 @@
+def main.rs:4:8 -> a.rs:1:12
+strong main.rs:4:8
+def main.rs:5:13 -> a.rs:1:12
+strong main.rs:5:13
