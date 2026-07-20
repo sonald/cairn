@@ -20,7 +20,15 @@ public struct ProjectIndexer: Sendable {
         "__pycache__", "dist", "build",
     ]
 
-    public init() {}
+    private let parallelism: Int
+
+    public init() {
+        parallelism = max(1, ProcessInfo.processInfo.activeProcessorCount)
+    }
+
+    init(parallelism: Int) {
+        self.parallelism = max(1, parallelism)
+    }
 
     public func index(root: URL) throws -> EngineSession {
         let startedAt = Date()
@@ -31,15 +39,16 @@ public struct ProjectIndexer: Sendable {
         let names = Interner<NameID>()
         let paths = Interner<PathID>()
         let strings = Interner<StringID>()
-        let interners = ExtractionInterners(names: names, strings: strings)
-        let extractor = RustExtractor()
 
         var occurrences: [FileOccurrence] = []
         var indexes: [ContentIndexKey: ContentIndex] = [:]
         var bytesByContent: [ContentID: [UInt8]] = [:]
         var hasErrors: [ContentIndexKey: Bool] = [:]
+        var fileInputs: [FileInput] = []
+        var uniqueInputs: [ExtractionInput] = []
+        var seenKeys: Set<ContentIndexKey> = []
 
-        for (offset, fileURL) in files.enumerated() {
+        for fileURL in files {
             let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
             let bytes = [UInt8](data)
             let contentID = ContentID.sha256(of: data)
@@ -49,27 +58,47 @@ public struct ProjectIndexer: Sendable {
                 grammarVersion: RustExtractorInfo.grammarVersion,
                 extractorVersion: RustExtractorInfo.extractorVersion
             )
-            if indexes[key] == nil {
-                let result = try extractor.extractWithDiagnostics(
+            fileInputs.append(FileInput(
+                relativePath: relativePath(of: fileURL, under: root),
+                contentID: contentID,
+                size: UInt64(data.count)
+            ))
+            if seenKeys.insert(key).inserted {
+                uniqueInputs.append(ExtractionInput(
+                    order: uniqueInputs.count,
                     bytes: bytes,
-                    key: key,
-                    interner: interners
-                )
-                indexes[key] = result.index
-                hasErrors[key] = result.containsErrorNodes
-                bytesByContent[contentID] = bytes
+                    key: key
+                ))
             }
+        }
+
+        // Each worker owns its parser and temporary interners. Global IDs are
+        // assigned only here, in first-path order, so scheduling cannot change
+        // NameID/StringID allocation.
+        for draft in try extract(uniqueInputs) {
+            indexes[draft.index.key] = remap(
+                draft.index,
+                localNames: draft.names,
+                localStrings: draft.strings,
+                names: names,
+                strings: strings
+            )
+            hasErrors[draft.index.key] = draft.containsErrorNodes
+            bytesByContent[draft.index.key.contentID] = draft.bytes
+        }
+
+        for (offset, input) in fileInputs.enumerated() {
             guard let occurrenceID = UInt32(exactly: offset) else {
                 preconditionFailure("File count exceeds UInt32")
             }
             occurrences.append(FileOccurrence(
                 occurrenceID: FileOccurrenceID(rawValue: occurrenceID),
-                pathID: paths.intern(relativePath(of: fileURL, under: root)),
-                contentID: contentID,
+                pathID: paths.intern(input.relativePath),
+                contentID: input.contentID,
                 detectedLanguage: .rust,
                 sourceKind: .untracked,
                 fileMode: .regular,
-                size: UInt64(data.count)
+                size: input.size
             ))
         }
 
@@ -146,5 +175,183 @@ public struct ProjectIndexer: Sendable {
         file.standardizedFileURL.pathComponents
             .dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private func extract(_ inputs: [ExtractionInput]) throws -> [ExtractionDraft] {
+        let result = BlockingResult<[ExtractionDraft]>()
+        let operation: @Sendable () async -> Void = {
+            do {
+                var drafts: [ExtractionDraft] = []
+                for start in stride(from: 0, to: inputs.count, by: parallelism) {
+                    let end = min(start + parallelism, inputs.count)
+                    drafts += try await withThrowingTaskGroup(
+                        of: ExtractionDraft.self
+                    ) { group in
+                        for input in inputs[start..<end] {
+                            group.addTask {
+                                let names = Interner<NameID>()
+                                let strings = Interner<StringID>()
+                                let result = try RustExtractor().extractWithDiagnostics(
+                                    bytes: input.bytes,
+                                    key: input.key,
+                                    interner: ExtractionInterners(
+                                        names: names,
+                                        strings: strings
+                                    )
+                                )
+                                return ExtractionDraft(
+                                    order: input.order,
+                                    bytes: input.bytes,
+                                    index: result.index,
+                                    names: names,
+                                    strings: strings,
+                                    containsErrorNodes: result.containsErrorNodes
+                                )
+                            }
+                        }
+                        return try await group.reduce(into: []) { $0.append($1) }
+                    }
+                }
+                result.complete(.success(drafts.sorted { $0.order < $1.order }))
+            } catch {
+                result.complete(.failure(error))
+            }
+        }
+        if #available(macOS 15.4, *) {
+            Task.detached(
+                executorPreference: DispatchQueue.global(qos: .userInitiated),
+                operation: operation
+            )
+        } else {
+            Task.detached(operation: operation)
+        }
+        return try result.wait().get()
+    }
+
+    private func remap(
+        _ index: ContentIndex,
+        localNames: Interner<NameID>,
+        localStrings: Interner<StringID>,
+        names: Interner<NameID>,
+        strings: Interner<StringID>
+    ) -> ContentIndex {
+        var referencedNames = Set(index.bindings.map(\.localNameID))
+        referencedNames.formUnion(index.bindings.compactMap { $0.targetHint?.nameID })
+        referencedNames.formUnion(index.symbols.map(\.nameID))
+        referencedNames.formUnion(index.calls.map(\.nameID))
+        referencedNames.formUnion(index.imports.compactMap(\.importedName))
+        referencedNames.formUnion(index.imports.compactMap(\.localName))
+        referencedNames.formUnion(index.exports.map(\.exportedName))
+
+        let nameMap = Dictionary(uniqueKeysWithValues: referencedNames
+            .sorted { $0.rawValue < $1.rawValue }
+            .map { ($0, names.intern(localNames.resolve($0))) })
+        let stringMap = Dictionary(uniqueKeysWithValues: Set(index.imports.map(\.moduleSpecifier))
+            .sorted { $0.rawValue < $1.rawValue }
+            .map { ($0, strings.intern(localStrings.resolve($0))) })
+
+        func name(_ id: NameID) -> NameID { nameMap[id]! }
+        func optionalName(_ id: NameID?) -> NameID? { id.map(name) }
+
+        return ContentIndex(
+            key: index.key,
+            scopes: index.scopes,
+            bindings: index.bindings.map {
+                BindingRecord(
+                    scopeID: $0.scopeID,
+                    localNameID: name($0.localNameID),
+                    space: $0.space,
+                    kind: $0.kind,
+                    declarationRange: $0.declarationRange,
+                    targetHint: $0.targetHint.map {
+                        UnresolvedSymbolRef(
+                            nameID: name($0.nameID),
+                            hintKind: $0.hintKind
+                        )
+                    }
+                )
+            },
+            executableRegions: index.executableRegions,
+            symbols: index.symbols.map {
+                DeclarationFacet(
+                    symbolGroupID: $0.symbolGroupID,
+                    space: $0.space,
+                    kind: $0.kind,
+                    nameID: name($0.nameID),
+                    range: $0.range,
+                    nameRange: $0.nameRange,
+                    parentFacetIndex: $0.parentFacetIndex,
+                    signatureFingerprint: $0.signatureFingerprint,
+                    bodyFingerprint: $0.bodyFingerprint
+                )
+            },
+            calls: index.calls.map {
+                UnresolvedCall(
+                    regionID: $0.regionID,
+                    nameID: name($0.nameID),
+                    range: $0.range,
+                    syntacticKind: $0.syntacticKind,
+                    qualifierRange: $0.qualifierRange,
+                    receiverRange: $0.receiverRange,
+                    argumentCount: $0.argumentCount
+                )
+            },
+            imports: index.imports.map {
+                ImportBinding(
+                    moduleSpecifier: stringMap[$0.moduleSpecifier]!,
+                    importedName: optionalName($0.importedName),
+                    localName: optionalName($0.localName),
+                    kind: $0.kind,
+                    flags: $0.flags,
+                    scopeID: $0.scopeID,
+                    range: $0.range
+                )
+            },
+            exports: index.exports.map {
+                ExportRecord(
+                    exportedName: name($0.exportedName),
+                    sourceBindingIndex: $0.sourceBindingIndex,
+                    range: $0.range
+                )
+            },
+            lineTable: index.lineTable
+        )
+    }
+
+    private struct FileInput: Sendable {
+        let relativePath: String
+        let contentID: ContentID
+        let size: UInt64
+    }
+
+    private struct ExtractionInput: Sendable {
+        let order: Int
+        let bytes: [UInt8]
+        let key: ContentIndexKey
+    }
+
+    private struct ExtractionDraft: Sendable {
+        let order: Int
+        let bytes: [UInt8]
+        let index: ContentIndex
+        let names: Interner<NameID>
+        let strings: Interner<StringID>
+        let containsErrorNodes: Bool
+    }
+}
+
+private final class BlockingResult<Value>: @unchecked Sendable {
+    private let semaphore = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var result: Result<Value, Error>?
+
+    func complete(_ result: Result<Value, Error>) {
+        lock.withLock { self.result = result }
+        semaphore.signal()
+    }
+
+    func wait() -> Result<Value, Error> {
+        semaphore.wait()
+        return lock.withLock { result! }
     }
 }

@@ -1,5 +1,5 @@
 import CodeInsightCore
-import CodeInsightEngine
+@testable import CodeInsightEngine
 import Foundation
 import Testing
 
@@ -117,6 +117,28 @@ func deduplicatesContentButKeepsEveryManifestPath() throws {
 }
 
 @Test
+func indexingIsDeterministicAcrossRuns() throws {
+    try withProjectRoot(determinismFixture) { root in
+        let first = try ProjectIndexer().index(root: root)
+        let second = try ProjectIndexer().index(root: root)
+
+        #expect(canonicalSessionDump(first) == canonicalSessionDump(second))
+        #expect(aggregateStatsDump(first.stats) == aggregateStatsDump(second.stats))
+    }
+}
+
+@Test
+func parallelIndexMatchesSerialIndex() throws {
+    try withProjectRoot(determinismFixture) { root in
+        let serial = try ProjectIndexer(parallelism: 1).index(root: root)
+        let parallel = try ProjectIndexer(parallelism: 4).index(root: root)
+
+        #expect(canonicalSessionDump(serial) == canonicalSessionDump(parallel))
+        #expect(aggregateStatsDump(serial.stats) == aggregateStatsDump(parallel.stats))
+    }
+}
+
+@Test
 func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
     try withProject(["main.rs": "fn main() {}"] ) { session in
         let wrong = QueryContext(
@@ -197,6 +219,15 @@ private func withProject(
     _ files: [String: String],
     test: (EngineSession) throws -> Void
 ) throws {
+    try withProjectRoot(files) { root in
+        try test(ProjectIndexer().index(root: root))
+    }
+}
+
+private func withProjectRoot(
+    _ files: [String: String],
+    test: (URL) throws -> Void
+) throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightEngineTests-\(UUID().uuidString)")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -210,7 +241,53 @@ private func withProject(
         )
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
-    try test(ProjectIndexer().index(root: root))
+    try test(root)
+}
+
+private let determinismFixture = [
+    "a.rs": "use crate::z::run as go; fn main() { go(); }",
+    "copy.rs": "pub fn run() {}",
+    "nested/model.rs": "struct Model { value: u32 } impl Model { fn read(&self) {} }",
+    "z.rs": "pub fn run() {}",
+]
+
+private func canonicalSessionDump(_ session: EngineSession) -> String {
+    var lines: [String] = []
+    var seen: Set<ContentIndexKey> = []
+    for file in session.manifest.files {
+        lines.append("path #\(file.pathID.rawValue) \(session.paths.resolve(file.pathID))")
+        let entry = session.contentIndexes.first { key, _ in
+            key.contentID == file.contentID && key.languageMode.language == .rust
+        }!
+        guard seen.insert(entry.key).inserted else { continue }
+        let index = entry.value
+        lines.append(CanonicalDump.render(
+            index,
+            names: session.names,
+            strings: session.strings
+        ))
+        lines.append("bindingNames \(index.bindings.map { $0.localNameID.rawValue })")
+        lines.append("bindingTargets \(index.bindings.map { $0.targetHint?.nameID.rawValue })")
+        lines.append("symbolNames \(index.symbols.map { $0.nameID.rawValue })")
+        lines.append("callNames \(index.calls.map { $0.nameID.rawValue })")
+        lines.append("importStrings \(index.imports.map { $0.moduleSpecifier.rawValue })")
+        lines.append("importNames \(index.imports.map { [$0.importedName?.rawValue, $0.localName?.rawValue] })")
+        lines.append("exportNames \(index.exports.map { $0.exportedName.rawValue })")
+    }
+    return lines.joined(separator: "\n")
+}
+
+private func aggregateStatsDump(_ stats: IndexStats) -> String {
+    [
+        stats.fileCount,
+        stats.uniqueContentCount,
+        stats.scopeCount,
+        stats.bindingCount,
+        stats.symbolCount,
+        stats.callCount,
+        stats.importCount,
+        stats.filesWithErrorNodes,
+    ].map(String.init).joined(separator: ",")
 }
 
 private func queryContext(for session: EngineSession) -> QueryContext {
