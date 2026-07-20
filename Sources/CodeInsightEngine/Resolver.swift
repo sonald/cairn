@@ -24,6 +24,7 @@ struct Resolver {
                 certainty: .possible,
                 dispatch: .dynamicDispatch,
                 evidence: [.methodNameOnly(nameID: located.nameID)],
+                context: context,
                 kinds: [.rustMethod, .rustFn]
             )
         }
@@ -34,6 +35,7 @@ struct Resolver {
                 certainty: .possible,
                 dispatch: .macroGenerated,
                 evidence: [.nameOnly(nameID: located.nameID)],
+                context: context,
                 space: .macro
             )
         }
@@ -98,6 +100,7 @@ struct Resolver {
                 // External crates are deliberately not resolved by the M0 engine.
                 unresolved.append(candidate(
                     pathID: file,
+                    localKind: .importBinding,
                     localIndex: importIndex,
                     certainty: .unresolved,
                     dispatch: dispatch(for: kind),
@@ -143,7 +146,8 @@ struct Resolver {
             from: file,
             certainty: certainty,
             dispatch: dispatch(for: kind),
-            evidence: [.nameOnly(nameID: located.nameID)]
+            evidence: [.nameOnly(nameID: located.nameID)],
+            context: context
         )
     }
 
@@ -167,7 +171,7 @@ struct Resolver {
             return (match.nameID, match.call)
         }
 
-        // ponytail: ASCII fallback only; persist local-reference ranges if
+        // TODO(M0): ASCII fallback only; persist local-reference ranges if
         // navigation expands beyond the M0 binding-shadowing check.
         guard let bytes, Int(offset) < bytes.count,
               isIdentifierByte(bytes[Int(offset)])
@@ -241,6 +245,7 @@ struct Resolver {
         certainty: Certainty,
         dispatch: DispatchKind,
         evidence: [ResolutionEvidence],
+        context: QueryContext,
         kinds: Set<DeclarationKind>? = nil,
         space: SymbolSpace? = nil
     ) -> [ResolutionCandidate] {
@@ -250,15 +255,11 @@ struct Resolver {
             if let space, facet.space != space { return nil }
             return candidate(
                 pathID: occurrence.pathID,
-                localIndex: occurrence.localSymbolIndex,
+                localIndex: occurrence.localIndex,
                 certainty: certainty,
                 dispatch: dispatch,
                 evidence: evidence,
-                context: QueryContext(
-                    snapshotID: occurrence.snapshotID,
-                    analysisProfileID: session.analysisProfile.id,
-                    generation: 1
-                )
+                context: context
             )
         }
         return sorted(results, from: source)
@@ -266,6 +267,7 @@ struct Resolver {
 
     private func candidate(
         pathID: PathID,
+        localKind: LocalOccurrenceKind = .declarationFacet,
         localIndex: UInt32,
         certainty: Certainty,
         dispatch: DispatchKind,
@@ -277,7 +279,8 @@ struct Resolver {
             target: SymbolOccurrenceID(
                 snapshotID: context.snapshotID,
                 pathID: pathID,
-                localSymbolIndex: localIndex
+                localKind: localKind,
+                localIndex: localIndex
             ),
             certainty: min(certainty, .strong),
             dispatch: dispatch,
@@ -318,7 +321,7 @@ struct Resolver {
             let lhsPath = session.paths.resolve($0.target.pathID)
             let rhsPath = session.paths.resolve($1.target.pathID)
             if lhsPath != rhsPath { return lhsPath < rhsPath }
-            return $0.target.localSymbolIndex < $1.target.localSymbolIndex
+            return $0.target.localIndex < $1.target.localIndex
         }
     }
 }

@@ -1,0 +1,5 @@
+# Lexical bindings win inside their scope; the import remains visible outside it.
+bind main.rs:5:1 -> main.rs:4:5
+strong main.rs:5:1
+def main.rs:7:10 -> db.rs:1:8
+strong main.rs:7:10

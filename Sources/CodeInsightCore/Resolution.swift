@@ -42,19 +42,28 @@ public enum ResolutionEvidence: Sendable {
     case methodNameOnly(nameID: NameID)
 }
 
+public enum LocalOccurrenceKind: Hashable, Sendable {
+    case declarationFacet
+    case callSite
+    case importBinding
+}
+
 public struct SymbolOccurrenceID: Hashable, Sendable {
     public let snapshotID: SnapshotID
     public let pathID: PathID
-    public let localSymbolIndex: UInt32
+    public let localKind: LocalOccurrenceKind
+    public let localIndex: UInt32
 
     public init(
         snapshotID: SnapshotID,
         pathID: PathID,
-        localSymbolIndex: UInt32
+        localKind: LocalOccurrenceKind,
+        localIndex: UInt32
     ) {
         self.snapshotID = snapshotID
         self.pathID = pathID
-        self.localSymbolIndex = localSymbolIndex
+        self.localKind = localKind
+        self.localIndex = localIndex
     }
 }
 

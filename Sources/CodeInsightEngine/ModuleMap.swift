@@ -17,6 +17,10 @@ public struct ModuleMap: Sendable {
         let pathIDsByString = Dictionary(uniqueKeysWithValues: manifest.files.map {
             (paths.resolve($0.pathID), $0.pathID)
         })
+        var indexesByContent: [ContentID: ContentIndex] = [:]
+        for (key, index) in indexes where indexesByContent[key.contentID] == nil {
+            indexesByContent[key.contentID] = index
+        }
         var children: [PathID: [NameID: PathID]] = [:]
         var parents: [PathID: PathID] = [:]
         var roots: Set<PathID> = []
@@ -29,9 +33,7 @@ public struct ModuleMap: Sendable {
             }
             guard
                 let bytes = bytesByContent[file.contentID],
-                let index = indexes.first(where: {
-                    $0.key.contentID == file.contentID
-                })?.value
+                let index = indexesByContent[file.contentID]
             else { continue }
 
             let directory = path.split(separator: "/").dropLast()

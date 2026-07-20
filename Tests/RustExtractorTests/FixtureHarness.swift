@@ -95,20 +95,52 @@ private func check(
         }
         let name = try definitionName(at: definition, session: session, label: label)
         let callers = try session.callers(of: name, context: context)
-        let actual = try callers.map { caller -> FixturePosition in
+        let actual = try callers.compactMap { caller -> FixturePosition? in
             let index = try content(at: caller.callSite.pathID, in: session)
-            guard index.calls.indices.contains(Int(caller.callSite.localSymbolIndex)) else {
+            guard caller.callSite.localKind == .callSite,
+                  index.calls.indices.contains(Int(caller.callSite.localIndex))
+            else {
                 throw FixtureError("\(label): call index is unavailable")
             }
-            let call = index.calls[Int(caller.callSite.localSymbolIndex)]
-            return try position(
+            let call = index.calls[Int(caller.callSite.localIndex)]
+            let source = try position(
                 pathID: caller.callSite.pathID,
                 offset: call.range.lowerBound,
                 session: session,
                 label: label
             )
+            let targets = try resolve(
+                source,
+                session: session,
+                context: context,
+                label: label
+            )
+            guard try targets.contains(where: {
+                try targetPosition(of: $0, session: session, label: label) == definition
+            }) else { return nil }
+            return source
         }.sorted()
         #expect(actual == expected.sorted(), "\(label): \(assertion), got \(actual)")
+
+    case "candidates":
+        let pair = try split(body, separator: ">=", label: label)
+        let source = try parsePosition(pair.0, label: label)
+        guard let minimum = Int(pair.1) else {
+            throw FixtureError("\(label): invalid candidate count: \(pair.1)")
+        }
+        let candidates = try resolve(source, session: session, context: context, label: label)
+        #expect(
+            candidates.count >= minimum,
+            "\(label): \(assertion), got \(candidates.count)"
+        )
+
+    case "strong":
+        let source = try parsePosition(body, label: label)
+        let candidates = try resolve(source, session: session, context: context, label: label)
+        #expect(
+            candidates.first?.certainty == .strong,
+            "\(label): \(assertion), got \(candidates.map(\.certainty))"
+        )
 
     case "unresolved":
         let source = try parsePosition(body, label: label)
@@ -209,17 +241,20 @@ private func targetPosition(
            index.bindings.indices.contains(Int(bindingIndex))
         {
             range = index.bindings[Int(bindingIndex)].declarationRange
-        } else if candidate.certainty == .unresolved,
-                  case let .uniqueImport(importIndex) = evidence,
-                  index.imports.indices.contains(Int(importIndex))
-        {
-            range = index.imports[Int(importIndex)].range
         }
     }
-    if range == nil,
-       index.symbols.indices.contains(Int(candidate.target.localSymbolIndex))
-    {
-        range = index.symbols[Int(candidate.target.localSymbolIndex)].nameRange
+    if range == nil {
+        let localIndex = Int(candidate.target.localIndex)
+        switch candidate.target.localKind {
+        case .declarationFacet where index.symbols.indices.contains(localIndex):
+            range = index.symbols[localIndex].nameRange
+        case .callSite where index.calls.indices.contains(localIndex):
+            range = index.calls[localIndex].range
+        case .importBinding where index.imports.indices.contains(localIndex):
+            range = index.imports[localIndex].range
+        default:
+            break
+        }
     }
     guard let range else {
         throw FixtureError("\(label): target range is unavailable")

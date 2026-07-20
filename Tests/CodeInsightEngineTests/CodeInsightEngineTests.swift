@@ -34,10 +34,12 @@ func resolvesUniqueRustImportAndFindsCaller() throws {
         let caller = try #require(callers.first {
             session.paths.resolve($0.callSite.pathID) == "main.rs"
         })
+        #expect(caller.callSite.localKind == .callSite)
         #expect(caller.certainty == .strong)
         #expect(hasUniqueImport(caller.evidence))
 
         let definitions = try session.definitions(of: "connect", context: context)
+        #expect(definitions.allSatisfy { $0.0.localKind == .declarationFacet })
         #expect(definitions.map { session.paths.resolve($0.2) } == ["db.rs", "util.rs"])
     }
 }
@@ -56,7 +58,7 @@ func resolvesNearestShadowedBinding() throws {
         let top = try #require(resolved.first)
 
         #expect(top.certainty == .strong)
-        #expect(top.target.localSymbolIndex == 1)
+        #expect(top.target.localIndex == 1)
         #expect(hasLexicalBinding(top.evidence, index: 1))
     }
 }
@@ -165,9 +167,29 @@ func externalRustImportDoesNotCrash() throws {
             context: queryContext(for: session)
         )
 
-        #expect(resolved.isEmpty || resolved.allSatisfy {
-            $0.certainty == .unresolved
-        })
+        let top = try #require(resolved.first)
+        #expect(top.certainty == .unresolved)
+        #expect(top.target.localKind == .importBinding)
+    }
+}
+
+@Test
+func indexesProgrammaticallyGeneratedProject() throws {
+    let files = Dictionary(uniqueKeysWithValues: (0..<200).map { fileIndex in
+        let source = (0..<20).map {
+            "fn file_\(fileIndex)_function_\($0)() {}"
+        }.joined(separator: "\n")
+        return ("file_\(fileIndex).rs", source)
+    })
+
+    try withProject(files) { session in
+        #expect(session.stats.fileCount == 200)
+        #expect(session.stats.uniqueContentCount == 200)
+        #expect(session.stats.symbolCount == 4_000)
+        #expect(session.stats.bindingCount == 0)
+        #expect(session.stats.callCount == 0)
+        #expect(session.stats.importCount == 0)
+        #expect(session.stats.filesWithErrorNodes == 0)
     }
 }
 

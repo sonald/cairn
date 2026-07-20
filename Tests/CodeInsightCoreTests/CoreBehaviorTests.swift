@@ -199,7 +199,8 @@ func publicModelsCompose() {
         target: SymbolOccurrenceID(
             snapshotID: snapshotID,
             pathID: pathID,
-            localSymbolIndex: 0
+            localKind: .declarationFacet,
+            localIndex: 0
         ),
         certainty: .strong,
         dispatch: .direct,

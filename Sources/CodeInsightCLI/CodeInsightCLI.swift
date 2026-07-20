@@ -163,7 +163,12 @@ extension CodeInsight {
             )
             let output = try callers.map { caller in
                 let index = try content(at: caller.callSite.pathID, in: session)
-                let call = index.calls[Int(caller.callSite.localSymbolIndex)]
+                guard caller.callSite.localKind == .callSite,
+                      index.calls.indices.contains(Int(caller.callSite.localIndex))
+                else {
+                    throw ValidationError("Caller location is unavailable.")
+                }
+                let call = index.calls[Int(caller.callSite.localIndex)]
                 return CallerJSON(
                     certainty: String(describing: caller.certainty),
                     dispatch: String(describing: caller.dispatch),
@@ -415,17 +420,18 @@ private func target(
         {
             return (index, index.bindings[Int(bindingIndex)].declarationRange)
         }
-        if candidate.certainty == .unresolved,
-           case let .uniqueImport(importBindingIndex) = evidence,
-           index.imports.indices.contains(Int(importBindingIndex))
-        {
-            return (index, index.imports[Int(importBindingIndex)].range)
-        }
     }
-    guard index.symbols.indices.contains(Int(candidate.target.localSymbolIndex)) else {
+    let localIndex = Int(candidate.target.localIndex)
+    switch candidate.target.localKind {
+    case .declarationFacet where index.symbols.indices.contains(localIndex):
+        return (index, index.symbols[localIndex].nameRange)
+    case .callSite where index.calls.indices.contains(localIndex):
+        return (index, index.calls[localIndex].range)
+    case .importBinding where index.imports.indices.contains(localIndex):
+        return (index, index.imports[localIndex].range)
+    default:
         throw ValidationError("Resolution target is unavailable.")
     }
-    return (index, index.symbols[Int(candidate.target.localSymbolIndex)].nameRange)
 }
 
 private func evidenceSummary(_ evidence: ResolutionEvidence) -> String {

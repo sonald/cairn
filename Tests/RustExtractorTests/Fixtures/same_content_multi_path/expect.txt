@@ -1,0 +1,6 @@
+# Identical bytes stay ambiguous across distinct manifest paths.
+def5 main.rs:3:13 -> util_a.rs:1:8
+candidates main.rs:3:13 >= 2
+nostrong main.rs:3:13
+callers util_a.rs:1:8 == main.rs:3:13
+callers util_b.rs:1:8 == main.rs:3:13

@@ -1,0 +1,7 @@
+# A file-local alias must not contaminate same-named calls in another file.
+def main.rs:4:13 -> a.rs:1:8
+strong main.rs:4:13
+def b.rs:2:23 -> b.rs:1:8
+strong b.rs:2:23
+callers a.rs:1:8 == main.rs:4:13
+callers b.rs:1:8 == b.rs:2:23

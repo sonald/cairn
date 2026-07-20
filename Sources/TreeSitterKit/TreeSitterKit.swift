@@ -30,13 +30,19 @@ public final class Parser {
     public func parse(_ bytes: [UInt8]) -> Tree? {
         guard let length = UInt32(exactly: bytes.count) else { return nil }
 
-        let tree = bytes.withUnsafeBytes { buffer in
-            ts_parser_parse_string(
-                raw,
-                nil,
-                buffer.baseAddress?.assumingMemoryBound(to: CChar.self),
-                length
-            )
+        let tree: OpaquePointer?
+        if bytes.isEmpty {
+            var terminator: CChar = 0
+            tree = ts_parser_parse_string(raw, nil, &terminator, 0)
+        } else {
+            tree = bytes.withUnsafeBytes { buffer in
+                ts_parser_parse_string(
+                    raw,
+                    nil,
+                    buffer.baseAddress!.assumingMemoryBound(to: CChar.self),
+                    length
+                )
+            }
         }
         return tree.map(Tree.init)
     }

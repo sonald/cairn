@@ -32,6 +32,10 @@ public final class EngineSession: Sendable {
 
     let namePosting: NamePosting
     let moduleMap: ModuleMap
+    private let filesByPath: [PathID: FileOccurrence]
+    private let contentKeysByPath: [PathID: ContentIndexKey]
+    private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
+    private let aliasIndex: [NameID: Set<NameID>]
     private let sourceBytesByContent: [ContentID: [UInt8]]
 
     init(
@@ -54,6 +58,37 @@ public final class EngineSession: Sendable {
         self.analysisProfile = analysisProfile
         self.moduleMap = moduleMap
         self.sourceBytesByContent = sourceBytesByContent
+        filesByPath = Dictionary(uniqueKeysWithValues: manifest.files.map {
+            ($0.pathID, $0)
+        })
+
+        let keysByContent = Dictionary(grouping: contentIndexes.keys) {
+            $0.contentID
+        }
+        var contentKeysByPath: [PathID: ContentIndexKey] = [:]
+        var occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]] = [:]
+        for file in manifest.files {
+            guard let keys = keysByContent[file.contentID] else { continue }
+            if let key = keys.first {
+                contentKeysByPath[file.pathID] = key
+            }
+            for key in keys where key.languageMode.language == file.detectedLanguage {
+                occurrencesByContentKey[key, default: []].append(file)
+            }
+        }
+        self.contentKeysByPath = contentKeysByPath
+        self.occurrencesByContentKey = occurrencesByContentKey
+
+        var aliasIndex: [NameID: Set<NameID>] = [:]
+        for index in contentIndexes.values {
+            for binding in index.imports {
+                guard let importedName = binding.importedName,
+                      let localName = binding.localName
+                else { continue }
+                aliasIndex[importedName, default: []].insert(localName)
+            }
+        }
+        self.aliasIndex = aliasIndex
         namePosting = NamePosting(indexes: contentIndexes)
     }
 
@@ -72,11 +107,7 @@ public final class EngineSession: Sendable {
         try validate(context)
         let nameID = names.intern(name)
         var callNameIDs: Set<NameID> = [nameID]
-        for index in contentIndexes.values {
-            for binding in index.imports where binding.importedName == nameID {
-                if let localName = binding.localName { callNameIDs.insert(localName) }
-            }
-        }
+        callNameIDs.formUnion(aliasIndex[nameID] ?? [])
 
         var seen: Set<SymbolOccurrenceID> = []
         var results: [CallerResult] = []
@@ -91,7 +122,8 @@ public final class EngineSession: Sendable {
                     let callSite = SymbolOccurrenceID(
                         snapshotID: snapshotID,
                         pathID: file.pathID,
-                        localSymbolIndex: posting.callIndex
+                        localKind: .callSite,
+                        localIndex: posting.callIndex
                     )
                     guard seen.insert(callSite).inserted,
                           let region = index.executableRegions.first(where: {
@@ -140,7 +172,7 @@ public final class EngineSession: Sendable {
             let lhs = paths.resolve($0.callSite.pathID)
             let rhs = paths.resolve($1.callSite.pathID)
             if lhs != rhs { return lhs < rhs }
-            return $0.callSite.localSymbolIndex < $1.callSite.localSymbolIndex
+            return $0.callSite.localIndex < $1.callSite.localIndex
         }
     }
 
@@ -158,11 +190,10 @@ public final class EngineSession: Sendable {
     }
 
     func content(at pathID: PathID) -> (ContentIndexKey, ContentIndex)? {
-        guard let file = manifest.files.first(where: { $0.pathID == pathID }) else {
-            return nil
-        }
-        return contentIndexes.first { $0.key.contentID == file.contentID }
-            .map { ($0.key, $0.value) }
+        guard let key = contentKeysByPath[pathID],
+              let index = contentIndexes[key]
+        else { return nil }
+        return (key, index)
     }
 
     func definitionOccurrences(
@@ -178,7 +209,8 @@ public final class EngineSession: Sendable {
                 let occurrence = SymbolOccurrenceID(
                     snapshotID: snapshotID,
                     pathID: file.pathID,
-                    localSymbolIndex: posting.facetIndex
+                    localKind: .declarationFacet,
+                    localIndex: posting.facetIndex
                 )
                 result.append((occurrence, facet, file.pathID))
             }
@@ -187,7 +219,7 @@ public final class EngineSession: Sendable {
             let lhs = paths.resolve($0.2)
             let rhs = paths.resolve($1.2)
             if lhs != rhs { return lhs < rhs }
-            return $0.0.localSymbolIndex < $1.0.localSymbolIndex
+            return $0.0.localIndex < $1.0.localIndex
         }
     }
 
@@ -197,22 +229,19 @@ public final class EngineSession: Sendable {
     }
 
     func sourceBytes(at pathID: PathID) -> [UInt8]? {
-        manifest.files.first(where: { $0.pathID == pathID })
-            .flatMap { sourceBytesByContent[$0.contentID] }
+        filesByPath[pathID].flatMap { sourceBytesByContent[$0.contentID] }
     }
 
     private func occurrences(of key: ContentIndexKey) -> [FileOccurrence] {
-        manifest.files.filter {
-            $0.contentID == key.contentID
-                && $0.detectedLanguage == key.languageMode.language
-        }
+        occurrencesByContentKey[key] ?? []
     }
 
     private func facet(for occurrence: SymbolOccurrenceID) -> DeclarationFacet? {
         guard let (_, index) = content(at: occurrence.pathID),
-              index.symbols.indices.contains(Int(occurrence.localSymbolIndex))
+              occurrence.localKind == .declarationFacet,
+              index.symbols.indices.contains(Int(occurrence.localIndex))
         else { return nil }
-        return index.symbols[Int(occurrence.localSymbolIndex)]
+        return index.symbols[Int(occurrence.localIndex)]
     }
 
     private func validate(_ context: QueryContext) throws {

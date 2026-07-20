@@ -328,6 +328,18 @@ func coversRequiredDeclarationKindsAndConstantRegions() throws {
     })
 }
 
+@Test
+func extractsEmptyRustContent() throws {
+    let index = try extract("").index
+
+    #expect(index.bindings.isEmpty)
+    #expect(index.executableRegions.isEmpty)
+    #expect(index.symbols.isEmpty)
+    #expect(index.calls.isEmpty)
+    #expect(index.imports.isEmpty)
+    #expect(index.exports.isEmpty)
+}
+
 private struct ExtractionResult {
     let index: ContentIndex
     let names: Interner<NameID>

@@ -1,0 +1,4 @@
+# Indexing the empty file must not disturb normal cross-file resolution.
+def main.rs:4:13 -> tiny.rs:1:8
+strong main.rs:4:13
+callers tiny.rs:1:8 == main.rs:4:13
