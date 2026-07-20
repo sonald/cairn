@@ -159,7 +159,15 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.resolve(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
-        #expect(failures == 3)
+        do {
+            _ = try session.searchSymbols(
+                query: "main",
+                limit: 10,
+                boost: SearchBoost(),
+                context: wrong
+            )
+        } catch { failures += 1 }
+        #expect(failures == 4)
     }
 }
 
@@ -179,7 +187,15 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.resolve(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
-        #expect(failures == 3)
+        do {
+            _ = try session.searchSymbols(
+                query: "main",
+                limit: 10,
+                boost: SearchBoost(),
+                context: wrong
+            )
+        } catch { failures += 1 }
+        #expect(failures == 4)
     }
 }
 
@@ -246,6 +262,77 @@ func evaluatesGoldSetMetricsAndKnownFailures() throws {
     )
     #expect(failing.total == 1)
     #expect(failing.unexpectedFailures == 1)
+}
+
+@Test
+func symbolSearchNormalizesAndUsesEveryRecallRoute() throws {
+    let normalized = SymbolSearchIndex.normalize("HTTPServer_value")
+    #expect(normalized.text == "httpservervalue")
+    #expect(normalized.wordStarts == [0, 4, 10])
+    #expect(normalized.acronym == "hsv")
+
+    try withProject([
+        "main.rs": "fn handle_connection() {} fn hyper_client() {} fn middle() {}",
+    ]) { session in
+        let context = queryContext(for: session)
+        let prefix = try searchedNames("hand", session: session, context: context)
+        let acronym = try searchedNames("hc", session: session, context: context)
+        let trigram = try searchedNames("ddl", session: session, context: context)
+        #expect(prefix.contains("handle_connection"))
+        #expect(acronym.contains("hyper_client"))
+        #expect(trigram.contains("middle"))
+    }
+}
+
+@Test
+func symbolSearchRanksSubsequenceAndWordBoundaries() throws {
+    try withProject([
+        "main.rs": """
+            fn handle_connection() {}
+            fn handleconnection() {}
+            fn handle_disconnected_connection() {}
+            """,
+    ]) { session in
+        let context = queryContext(for: session)
+        let fuzzy = try searchedNames("hndlconn", session: session, context: context)
+        #expect(fuzzy.first == "handle_connection")
+
+        let boundary = try searchedNames("handlecon", session: session, context: context)
+        #expect(boundary.first == "handle_connection")
+    }
+}
+
+@Test
+func symbolSearchBoostsCurrentFileAndIsDeterministic() throws {
+    try withProject([
+        "a.rs": "fn target_name() {}",
+        "nested/b.rs": "fn target_name() {}",
+    ]) { session in
+        let context = queryContext(for: session)
+        let current = try #require(pathID("nested/b.rs", in: session))
+        let boost = SearchBoost(currentFile: current, recentFiles: [])
+        let first = try session.searchSymbols(
+            query: "target",
+            limit: 10,
+            boost: boost,
+            context: context
+        )
+        let second = try session.searchSymbols(
+            query: "target",
+            limit: 10,
+            boost: boost,
+            context: context
+        )
+
+        #expect(first.first?.path == "nested/b.rs")
+        #expect(first.count == second.count)
+        #expect(zip(first, second).allSatisfy { lhs, rhs in
+            lhs.path == rhs.path
+                && lhs.occurrence.localIndex == rhs.occurrence.localIndex
+                && lhs.score == rhs.score
+                && lhs.matchRanges == rhs.matchRanges
+        })
+    }
 }
 
 private func withProject(
@@ -335,6 +422,19 @@ private func pathID(_ path: String, in session: EngineSession) -> PathID? {
     session.manifest.files.first {
         session.paths.resolve($0.pathID) == path
     }?.pathID
+}
+
+private func searchedNames(
+    _ query: String,
+    session: EngineSession,
+    context: QueryContext
+) throws -> [String] {
+    try session.searchSymbols(
+        query: query,
+        limit: 20,
+        boost: SearchBoost(),
+        context: context
+    ).map { session.names.resolve($0.nameID) }
 }
 
 private func offset(

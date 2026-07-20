@@ -196,7 +196,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    @objc private func placeholderAction(_ sender: Any?) {}
+    @objc private func openSymbol(_ sender: Any?) {
+        windowController?.showSymbolSearch()
+    }
 
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
@@ -229,7 +231,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let goMenu = NSMenu(title: "Go")
         let symbolItem = NSMenuItem(
             title: "Open Symbol…",
-            action: #selector(placeholderAction(_:)),
+            action: #selector(openSymbol(_:)),
             keyEquivalent: "t"
         )
         symbolItem.target = self

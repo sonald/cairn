@@ -9,7 +9,10 @@ import TreeSitterKit
 struct CodeInsight: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Inspect Rust source with CodeInsight.",
-        subcommands: [Parse.self, Index.self, Dump.self, Defs.self, Callers.self, Resolve.self, Goldset.self]
+        subcommands: [
+            Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
+            Resolve.self, Symsearch.self, Goldset.self,
+        ]
     )
 }
 
@@ -253,6 +256,70 @@ extension CodeInsight {
         }
     }
 
+    struct Symsearch: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "symsearch",
+            abstract: "Fuzzily search project symbols."
+        )
+
+        @Argument(help: "Symbol query.")
+        var query: String
+
+        @OptionGroup var options: ProjectOptions
+
+        @Option(name: .long, help: "Maximum number of results.")
+        var limit = 20
+
+        func validate() throws {
+            guard limit > 0 else {
+                throw ValidationError("--limit must be greater than zero.")
+            }
+        }
+
+        func run() throws {
+            let session = try indexProject(options.project)
+            let hits = try session.searchSymbols(
+                query: query,
+                limit: limit,
+                boost: SearchBoost(),
+                context: queryContext(for: session)
+            )
+            let output = hits.enumerated().map { offset, hit in
+                SymbolSearchJSON(
+                    rank: offset + 1,
+                    score: hit.score,
+                    kind: String(describing: hit.facet.kind),
+                    name: session.names.resolve(hit.nameID),
+                    file: hit.path,
+                    line: hit.line,
+                    column: hit.column,
+                    byteRange: ByteRangeJSON(hit.facet.nameRange),
+                    matchRanges: hit.matchRanges.map {
+                        MatchRangeJSON(lowerBound: $0.lowerBound, upperBound: $0.upperBound)
+                    }
+                )
+            }
+            if options.global.json {
+                try printJSON(output)
+            } else if output.isEmpty {
+                print("No symbols matched \"\(query)\".")
+            } else {
+                for hit in output {
+                    print(String(
+                        format: "%d  %.2f  %@  %@  %@:%u:%u",
+                        hit.rank,
+                        hit.score,
+                        hit.kind,
+                        hit.name,
+                        hit.file,
+                        hit.line,
+                        hit.column
+                    ))
+                }
+            }
+        }
+    }
+
     struct Goldset: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Evaluate resolution assertions against a corpus."
@@ -363,6 +430,23 @@ private struct ResolutionJSON: Codable {
     let evidence: [String]
     let target: LocationJSON
     let byteRange: ByteRangeJSON
+}
+
+private struct MatchRangeJSON: Codable {
+    let lowerBound: Int
+    let upperBound: Int
+}
+
+private struct SymbolSearchJSON: Codable {
+    let rank: Int
+    let score: Double
+    let kind: String
+    let name: String
+    let file: String
+    let line: UInt32
+    let column: UInt32
+    let byteRange: ByteRangeJSON
+    let matchRanges: [MatchRangeJSON]
 }
 
 private func indexProject(_ path: String) throws -> EngineSession {

@@ -140,6 +140,7 @@ public final class ReaderTextView {
     public let view: NSTextView
     public let renderingCoordinator = RenderingAttributesCoordinator()
     private let backingTextStorage: NSTextStorage
+    private var byteUTF16Map: ByteUTF16Map?
 
     public init() {
         view = NSTextView(usingTextLayoutManager: true)
@@ -154,6 +155,7 @@ public final class ReaderTextView {
             let layoutManager = view.textLayoutManager
         else { return }
 
+        byteUTF16Map = document.byteUTF16Map
         renderingCoordinator.update(document: document)
         let attributed = NSMutableAttributedString(
             string: source,
@@ -179,6 +181,7 @@ public final class ReaderTextView {
             let layoutManager = view.textLayoutManager
         else { return }
 
+        byteUTF16Map = document.byteUTF16Map
         renderingCoordinator.update(document: document)
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
@@ -224,6 +227,17 @@ public final class ReaderTextView {
                 return true
             }
         }
+    }
+
+    public func reveal(byteOffset: UInt32) {
+        guard let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset)),
+              location <= backingTextStorage.length
+        else { return }
+        let lineRange = (backingTextStorage.string as NSString).lineRange(
+            for: NSRange(location: location, length: 0)
+        )
+        view.scrollRangeToVisible(lineRange)
+        view.showFindIndicator(for: lineRange)
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {

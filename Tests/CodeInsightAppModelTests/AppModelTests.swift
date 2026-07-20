@@ -1,3 +1,4 @@
+import CodeInsightCore
 import CodeInsightEngine
 import Foundation
 import Testing
@@ -128,6 +129,51 @@ func realIndexServiceBuildsFixtureSession() async throws {
     #expect(session.stats.symbolCount == 3)
     #expect(session.stats.callCount == 1)
     #expect(session.stats.importCount == 1)
+}
+
+@MainActor
+@Test
+func symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() async throws {
+    let root = try temporaryProject([
+        "main.rs": "fn alpha() {}\nfn alpine() {}",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let model = SymbolSearchPanelModel()
+
+    model.updateQuery("al", projectState: .ready(session, context))
+    #expect(await waitUntil { model.rows.count == 2 })
+    #expect(model.selectedIndex == 0)
+
+    model.selectPrevious()
+    #expect(model.selectedIndex == 1)
+    model.selectNext()
+    #expect(model.selectedIndex == 0)
+
+    let request = try #require(model.openSelection())
+    #expect(request.path == "main.rs")
+    #expect(request.byteOffset == 3)
+
+    model.reset()
+    #expect(model.query.isEmpty)
+    #expect(model.rows.isEmpty)
+    #expect(model.selectedIndex == nil)
+
+    model.updateQuery(
+        "alpha",
+        projectState: .indexing(root: root, startedAt: .now)
+    )
+    #expect(model.rows.count == 1)
+    if case let .placeholder(message) = model.rows[0] {
+        #expect(message == "Indexing symbols…")
+    } else {
+        Issue.record("expected indexing placeholder")
+    }
 }
 
 private actor ControlledIndexService: IndexService {

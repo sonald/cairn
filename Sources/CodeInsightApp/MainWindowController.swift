@@ -15,6 +15,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let indexLabel = NSTextField(labelWithString: "")
     private var displayedGeneration: UInt64?
+    private var symbolSearchPanel: SymbolSearchPanel?
 
     init(model: AppModel, offscreen: Bool) {
         self.model = model
@@ -70,6 +71,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     func openProject(root: URL) {
         model.openProject(root: root)
         render()
+    }
+
+    func showSymbolSearch() {
+        if symbolSearchPanel == nil {
+            symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
+                guard let self else { return }
+                self.model.selectFile(file)
+                self.readerController.navigate(to: file, byteOffset: offset)
+            }
+        }
+        symbolSearchPanel?.show(relativeTo: window)
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -136,6 +148,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
                 toolbar.removeItem(at: index)
             }
         }
+        symbolSearchPanel?.refreshProjectState()
     }
 }
 
@@ -286,6 +299,11 @@ final class ReaderViewController: NSViewController {
             label.stringValue = "Could not open \(file.lastPathComponent)"
             label.isHidden = false
         }
+    }
+
+    func navigate(to file: URL, byteOffset: UInt32) {
+        display(file)
+        textView.reveal(byteOffset: byteOffset)
     }
 
     private func layoutTextViewFrame() {

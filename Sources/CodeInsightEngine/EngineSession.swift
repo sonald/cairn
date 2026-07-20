@@ -1,4 +1,19 @@
 import CodeInsightCore
+import Foundation
+
+private final class SymbolSearchCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var index: SymbolSearchIndex?
+
+    func get(orBuild build: () -> SymbolSearchIndex) -> SymbolSearchIndex {
+        lock.withLock {
+            if let index { return index }
+            let built = build()
+            index = built
+            return built
+        }
+    }
+}
 
 public enum EngineError: Error {
     case snapshotMismatch(expected: SnapshotID, actual: SnapshotID)
@@ -37,6 +52,7 @@ public final class EngineSession: Sendable {
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
     private let sourceBytesByContent: [ContentID: [UInt8]]
+    private let symbolSearchCache = SymbolSearchCache()
 
     init(
         manifest: SnapshotManifest,
@@ -176,6 +192,64 @@ public final class EngineSession: Sendable {
         }
     }
 
+    public func searchSymbols(
+        query: String,
+        limit: Int,
+        boost: SearchBoost,
+        context: QueryContext
+    ) throws -> [SymbolSearchHit] {
+        try validate(context)
+        guard limit > 0 else { return [] }
+        let index = symbolSearchCache.get {
+            SymbolSearchIndex(
+                nameIDs: Array(namePosting.definitions.keys),
+                names: names
+            )
+        }
+
+        let recentWeights = Dictionary(
+            boost.recentFiles.prefix(20).enumerated().reversed().map {
+                ($0.element, Double(20 - $0.offset))
+            },
+            uniquingKeysWith: max
+        )
+        let currentDirectory = boost.currentFile.map(directory)
+        var hits: [SymbolSearchHit] = []
+        for candidate in index.candidates(for: query) {
+            for (occurrence, facet, pathID) in definitionOccurrences(named: candidate.nameID) {
+                guard let (_, contentIndex) = content(at: pathID),
+                      let coordinate = contentIndex.lineTable.lineColumn(
+                        at: facet.nameRange.lowerBound
+                      )
+                else { continue }
+                var score = candidate.score + kindWeight(facet.kind)
+                if pathID == boost.currentFile {
+                    score += 32
+                } else if let currentDirectory,
+                          directory(of: pathID) == currentDirectory
+                {
+                    score += 12
+                }
+                score += recentWeights[pathID] ?? 0
+                hits.append(SymbolSearchHit(
+                    nameID: candidate.nameID,
+                    facet: facet,
+                    occurrence: occurrence,
+                    path: paths.resolve(pathID),
+                    line: coordinate.line,
+                    column: coordinate.column,
+                    score: score,
+                    matchRanges: candidate.matchRanges
+                ))
+            }
+        }
+        return hits.sorted {
+            if $0.score != $1.score { return $0.score > $1.score }
+            if $0.path != $1.path { return $0.path < $1.path }
+            return $0.occurrence.localIndex < $1.occurrence.localIndex
+        }.prefix(limit).map { $0 }
+    }
+
     public func resolve(
         file: PathID,
         offset: UInt32,
@@ -311,5 +385,18 @@ public final class EngineSession: Sendable {
             }
         }
         return .possible
+    }
+
+    private func kindWeight(_ kind: DeclarationKind) -> Double {
+        switch kind {
+        case .rustFn: 24
+        case .rustStruct: 22
+        case .rustMethod: 20
+        case .rustEnum, .rustTrait: 18
+        case .rustTypeAlias, .rustMod: 14
+        case .rustConst, .rustStatic: 10
+        case .rustImpl: 8
+        case .rustField: 0
+        }
     }
 }
