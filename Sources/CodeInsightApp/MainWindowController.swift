@@ -1,5 +1,7 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightReaderCore
+import CodeInsightReaderUI
 import Observation
 
 @MainActor
@@ -223,23 +225,76 @@ final class SidebarViewController: NSViewController,
 @MainActor
 final class ReaderViewController: NSViewController {
     private let label = NSTextField(labelWithString: "Open a project to begin")
+    private let textView = ReaderTextView()
+    private let loader = DocumentLoader()
+    private var displayedFile: URL?
+    private var loadGeneration: UInt64 = 0
 
     override func loadView() {
-        let container = NSView()
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.documentView = textView.view
+        textView.view.frame = scrollView.contentView.bounds
+
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
+        scrollView.addSubview(label)
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            label.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
         ])
-        view = container
+        view = scrollView
     }
 
     func display(_ file: URL?) {
         loadViewIfNeeded()
-        label.stringValue = file?.path ?? "Open a project to begin"
+        guard file != displayedFile else { return }
+        displayedFile = file
+        loadGeneration &+= 1
+        let generation = loadGeneration
+
+        guard let file else {
+            label.stringValue = "Open a project to begin"
+            label.isHidden = false
+            textView.view.string = ""
+            return
+        }
+
+        do {
+            let loaded = try loader.load(file: file)
+            label.isHidden = true
+            layoutTextViewFrame()
+            textView.display(document: loaded.document)
+            textView.view.textLayoutManager?
+                .textViewportLayoutController.layoutViewport()
+            if loaded.tier != .regular {
+                loader.loadSyntax(for: loaded.document) { [weak self] result in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.loadGeneration == generation else { return }
+                        switch result {
+                        case let .success(document):
+                            self.textView.updateSyntax(document: document)
+                        case .failure:
+                            self.label.stringValue = "Syntax highlighting failed"
+                            self.label.isHidden = false
+                        }
+                    }
+                }
+            }
+        } catch {
+            label.stringValue = "Could not open \(file.lastPathComponent)"
+            label.isHidden = false
+        }
     }
+
+    private func layoutTextViewFrame() {
+        view.layoutSubtreeIfNeeded()
+        if let scrollView = view as? NSScrollView {
+            textView.view.frame = scrollView.contentView.bounds
+        }
+    }
+
 }
 
 @MainActor

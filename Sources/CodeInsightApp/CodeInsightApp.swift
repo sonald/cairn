@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
 
@@ -14,7 +15,13 @@ private struct CodeInsightApplication {
         let delegate = AppDelegate(startedAt: startedAt)
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if let index = arguments.firstIndex(of: "--self-test-project"),
+            if let index = arguments.firstIndex(of: "--self-test-open"),
+               arguments.indices.contains(index + 1)
+            {
+                delegate.runOpenSelfTest(file: URL(
+                    fileURLWithPath: arguments[index + 1]
+                ))
+            } else if let index = arguments.firstIndex(of: "--self-test-project"),
                arguments.indices.contains(index + 1)
             {
                 delegate.runProjectSelfTest(root: URL(
@@ -84,6 +91,84 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             indexReadyMS: milliseconds(since: projectStartedAt),
             fileCount: fileCount,
             ready: ready
+        )
+    }
+
+    func runOpenSelfTest(file: URL) {
+        let textView = ReaderTextView()
+        let scrollView = NSScrollView(
+            frame: NSRect(x: 0, y: 0, width: 1024, height: 768)
+        )
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = true
+        scrollView.documentView = textView.view
+        textView.view.frame = scrollView.contentView.bounds
+        let window = NSWindow(
+            contentRect: scrollView.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = scrollView
+        let openedAt = ContinuousClock.now
+        let state = OpenSelfTestState(
+            openedAt: openedAt,
+            textView: textView,
+            window: window
+        )
+
+        do {
+            let loader = DocumentLoader()
+            let loaded = try loader.load(file: file)
+            state.tier = loaded.tier
+            state.textView.display(document: loaded.document)
+            state.textView.view.textLayoutManager?
+                .textViewportLayoutController.layoutViewport()
+            guard
+                let fragment = state.textView.view.textLayoutManager?
+                    .textLayoutFragment(for: .zero),
+                !fragment.textLineFragments.isEmpty
+            else { Darwin.exit(1) }
+            state.firstVisibleMS = milliseconds(since: openedAt)
+            if loaded.tier == .regular {
+                state.syntaxVisibleMS = state.firstVisibleMS
+            } else {
+                loader.loadSyntax(for: loaded.document) { result in
+                    Task { @MainActor in
+                        switch result {
+                        case let .success(document):
+                            state.textView.updateSyntax(document: document)
+                            try? await Task.sleep(for: .milliseconds(10))
+                            state.textView.view.textLayoutManager?
+                                .textViewportLayoutController.layoutViewport()
+                            state.window.displayIfNeeded()
+                            state.syntaxVisibleMS = milliseconds(since: state.openedAt)
+                        case .failure:
+                            state.failed = true
+                        }
+                    }
+                }
+            }
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+
+        let deadline = Date(timeIntervalSinceNow: 30)
+        while state.syntaxVisibleMS == nil, !state.failed, Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        guard
+            let tier = state.tier,
+            let firstVisibleMS = state.firstVisibleMS,
+            let syntaxVisibleMS = state.syntaxVisibleMS,
+            !state.failed
+        else { Darwin.exit(1) }
+        Self.finishOpenSelfTest(
+            tier: tier,
+            firstVisibleMS: firstVisibleMS,
+            syntaxVisibleMS: syntaxVisibleMS,
+            styledFragments: state.textView.renderingCoordinator.styledFragmentCount
         )
     }
 
@@ -197,6 +282,56 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)
         }
+    }
+
+    private static func finishOpenSelfTest(
+        tier: FileTier,
+        firstVisibleMS: Double,
+        syntaxVisibleMS: Double,
+        styledFragments: Int
+    ) -> Never {
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: [
+                    "tier": tier.rawValue,
+                    "firstVisibleMS": firstVisibleMS,
+                    "syntaxVisibleMS": syntaxVisibleMS,
+                    "styledFragments": styledFragments,
+                ],
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+            let withinBudget = tier == .regular
+                ? firstVisibleMS < 100
+                : tier != .huge
+                    || (firstVisibleMS < 2_500 && styledFragments < 500)
+            Darwin.exit(withinBudget ? 0 : 1)
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+    }
+}
+
+@MainActor
+private final class OpenSelfTestState {
+    let openedAt: ContinuousClock.Instant
+    let textView: ReaderTextView
+    let window: NSWindow
+    var tier: FileTier?
+    var firstVisibleMS: Double?
+    var syntaxVisibleMS: Double?
+    var failed = false
+
+    init(
+        openedAt: ContinuousClock.Instant,
+        textView: ReaderTextView,
+        window: NSWindow
+    ) {
+        self.openedAt = openedAt
+        self.textView = textView
+        self.window = window
     }
 }
 

@@ -42,9 +42,16 @@ public struct LineTable: Sendable {
         }
 
         var starts: [UInt32] = [0]
-        starts.reserveCapacity(bytes.count / 40 + 1)
-        for (index, byte) in bytes.enumerated() where byte == 0x0A {
-            starts.append(UInt32(index + 1))
+        starts.reserveCapacity(bytes.count / 28 + 1)
+        bytes.withUnsafeBufferPointer { buffer in
+            guard let pointer = buffer.baseAddress else { return }
+            var index = 0
+            while index < buffer.count {
+                if pointer[index] == 0x0A {
+                    starts.append(UInt32(index + 1))
+                }
+                index += 1
+            }
         }
 
         self.lineStarts = starts

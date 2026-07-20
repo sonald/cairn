@@ -89,7 +89,11 @@ let package = Package(
         ),
         .executableTarget(
             name: "CodeInsightApp",
-            dependencies: ["CodeInsightAppModel", "CodeInsightReaderUI"]
+            dependencies: [
+                "CodeInsightAppModel",
+                "CodeInsightReaderCore",
+                "CodeInsightReaderUI",
+            ]
         ),
         .testTarget(
             name: "TreeSitterKitTests",
@@ -115,6 +119,10 @@ let package = Package(
         .testTarget(
             name: "CodeInsightAppModelTests",
             dependencies: ["CodeInsightAppModel", "CodeInsightEngine"]
+        ),
+        .testTarget(
+            name: "CodeInsightReaderCoreTests",
+            dependencies: ["CodeInsightReaderCore"]
         ),
     ]
 )
