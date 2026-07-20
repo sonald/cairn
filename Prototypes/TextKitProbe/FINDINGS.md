@@ -82,3 +82,13 @@ swift run TextKitProbe view /tmp/codeinsight-textkitprobe-20260720/synthetic-100
 3. 继续以 byte range 为高亮存储坐标，只在视口命中后经 checkpoint 转 `NSRange`；不要预先为所有 token 保存 UTF-16 range。
 4. 把可变字号视为 layout 属性而不是纯颜色高亮：默认幅度需等人工滚动检查后在 +1/+2 中定；若跳动明显，优先固定行高或退回 +1。
 5. 增加 10 万行首屏与 footprint 的明确预算。当前原生 `NSTextView` 即使惰性写属性仍有 100,000 次预验证，若预算不接受 3.46 秒/459 MB，再以数据决定是否增加自定义 content provider；现在不把它预先写进正式架构。
+
+## 人工验收补记（2026-07-20，决策者亲测 view 模式）
+
+- **结论：默认行距偏紧。** 系统默认 lineHeightMultiple=1.0 的等宽 13pt 阅读密度过高。
+- 探针已加 `--line-spacing <1.0...2.0>`（NSParagraphStyle.lineHeightMultiple）供扫值：
+  `swift run TextKitProbe view <file> --lazy --font-delta 1 --line-spacing 1.25`
+- 巨文件成本（10 万行，同会话 lazy 对照）：1.3 vs 1.0 → 首屏 +390ms（+11%）、
+  footprint +188MB（+25%）。常规档文件（≤1 万行）该成本可忽略。
+- 跨进程 footprint 测量波动大（同配置 459 vs 750MB），结论只取同会话相对差。
+- 待办：决策者在 1.15 / 1.25 / 1.35 中扫出主工程默认值。

@@ -60,6 +60,7 @@ struct TextKitProbeCommand {
         var mode: HighlightMode = .lazy
         var fontDelta = 1
         var commentFont = false
+        var lineSpacing = 1.0
         var index = 1
         while index < arguments.count {
             switch arguments[index] {
@@ -72,13 +73,26 @@ struct TextKitProbeCommand {
                     throw CLIError.invalidFontDelta
                 }
                 fontDelta = value
+            case "--line-spacing":
+                index += 1
+                guard index < arguments.count, let value = Double(arguments[index]),
+                      (1.0...2.0).contains(value)
+                else {
+                    throw CLIError.unknownOption("--line-spacing expects 1.0...2.0")
+                }
+                lineSpacing = value
             default: throw CLIError.unknownOption(arguments[index])
             }
             index += 1
         }
         return (
             URL(fileURLWithPath: path).standardizedFileURL,
-            ProbeOptions(mode: mode, fontDelta: fontDelta, commentFont: commentFont)
+            ProbeOptions(
+                mode: mode,
+                fontDelta: fontDelta,
+                commentFont: commentFont,
+                lineSpacing: lineSpacing
+            )
         )
     }
 

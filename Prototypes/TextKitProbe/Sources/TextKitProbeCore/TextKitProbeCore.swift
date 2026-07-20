@@ -15,11 +15,20 @@ public struct ProbeOptions: Sendable {
     public var mode: HighlightMode
     public var fontDelta: Int
     public var commentFont: Bool
+    /// Line height multiple (1.0 = system default). Human acceptance on
+    /// 2026-07-20 judged the default too tight; sweep this to find the value.
+    public var lineSpacing: Double
 
-    public init(mode: HighlightMode, fontDelta: Int, commentFont: Bool) {
+    public init(
+        mode: HighlightMode,
+        fontDelta: Int,
+        commentFont: Bool,
+        lineSpacing: Double = 1.0
+    ) {
         self.mode = mode
         self.fontDelta = fontDelta
         self.commentFont = commentFont
+        self.lineSpacing = lineSpacing
     }
 }
 
@@ -128,11 +137,14 @@ public enum TextKitProbe {
             let layoutManager = textView.textLayoutManager
         else { throw ProbeError.textKit2Unavailable }
 
+        let paragraphStyle = NSMutableParagraphStyle()
+        paragraphStyle.lineHeightMultiple = CGFloat(options.lineSpacing)
         let base = NSAttributedString(
             string: source,
             attributes: [
                 .font: styles.baseFont,
                 .foregroundColor: NSColor.textColor,
+                .paragraphStyle: paragraphStyle,
             ]
         )
         let attributeAt = ContinuousClock.now
