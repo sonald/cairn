@@ -114,7 +114,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodeInsightAppModelTests",
-            dependencies: ["CodeInsightAppModel"]
+            dependencies: ["CodeInsightAppModel", "CodeInsightEngine"]
         ),
     ]
 )

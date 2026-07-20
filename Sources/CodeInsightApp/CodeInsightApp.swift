@@ -8,13 +8,20 @@ private struct CodeInsightApplication {
     @MainActor
     static func main() {
         let startedAt = ContinuousClock.now
-        let selfTest = CommandLine.arguments.dropFirst().contains("--self-test")
+        let arguments = Array(CommandLine.arguments.dropFirst())
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         let delegate = AppDelegate(startedAt: startedAt)
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if selfTest {
+            if let index = arguments.firstIndex(of: "--self-test-project"),
+               arguments.indices.contains(index + 1)
+            {
+                delegate.runProjectSelfTest(root: URL(
+                    fileURLWithPath: arguments[index + 1],
+                    isDirectory: true
+                ))
+            } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
             } else {
                 app.run()
@@ -26,6 +33,7 @@ private struct CodeInsightApplication {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate {
     private let startedAt: ContinuousClock.Instant
+    private let model = AppModel()
     private var windowController: MainWindowController?
 
     init(startedAt: ContinuousClock.Instant) {
@@ -47,9 +55,41 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         Self.finishSelfTest(coldStartMS: coldStartMS)
     }
 
+    func runProjectSelfTest(root: URL) {
+        launch(offscreen: true)
+        let projectStartedAt = ContinuousClock.now
+        windowController?.openProject(root: root)
+        let treeVisibleMS = milliseconds(since: projectStartedAt)
+        let fileCount = model.fileTree?.fileCount ?? 0
+        let deadline = Date(timeIntervalSinceNow: 30)
+        var ready = false
+        while Date() < deadline {
+            switch model.projectState {
+            case .ready:
+                ready = true
+            case .failed:
+                Self.finishProjectSelfTest(
+                    treeVisibleMS: treeVisibleMS,
+                    indexReadyMS: milliseconds(since: projectStartedAt),
+                    fileCount: fileCount,
+                    ready: false
+                )
+            default:
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+            }
+            if ready { break }
+        }
+        Self.finishProjectSelfTest(
+            treeVisibleMS: treeVisibleMS,
+            indexReadyMS: milliseconds(since: projectStartedAt),
+            fileCount: fileCount,
+            ready: ready
+        )
+    }
+
     private func launch(offscreen: Bool) {
         NSApplication.shared.mainMenu = makeMainMenu()
-        let windowController = MainWindowController(offscreen: offscreen)
+        let windowController = MainWindowController(model: model, offscreen: offscreen)
         self.windowController = windowController
         windowController.showWindow(nil)
     }
@@ -58,6 +98,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         _ sender: NSApplication
     ) -> Bool {
         true
+    }
+
+    @objc private func openProject(_ sender: Any?) {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Open"
+        if panel.runModal() == .OK, let root = panel.url {
+            windowController?.openProject(root: root)
+        }
     }
 
     @objc private func placeholderAction(_ sender: Any?) {}
@@ -81,7 +132,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         let fileMenu = NSMenu(title: "File")
         let openItem = NSMenuItem(
             title: "Open Project…",
-            action: #selector(placeholderAction(_:)),
+            action: #selector(openProject(_:)),
             keyEquivalent: "o"
         )
         openItem.target = self
@@ -118,6 +169,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
             Darwin.exit(coldStartMS < 500 && idleFootprintMB < 100 ? 0 : 1)
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+    }
+
+    private static func finishProjectSelfTest(
+        treeVisibleMS: Double,
+        indexReadyMS: Double,
+        fileCount: Int,
+        ready: Bool
+    ) -> Never {
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: [
+                    "treeVisibleMS": treeVisibleMS,
+                    "indexReadyMS": indexReadyMS,
+                    "fileCount": fileCount,
+                ],
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+            Darwin.exit(ready && treeVisibleMS < 1_000 ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)

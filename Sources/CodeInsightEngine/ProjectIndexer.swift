@@ -15,7 +15,7 @@ public struct IndexStats: Sendable {
 }
 
 public struct ProjectIndexer: Sendable {
-    private static let skippedDirectories: Set<String> = [
+    public static let skippedDirectories: Set<String> = [
         ".git", "target", "node_modules", ".build", "venv", ".venv",
         "__pycache__", "dist", "build",
     ]
