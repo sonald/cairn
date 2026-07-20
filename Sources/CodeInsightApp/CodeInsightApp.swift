@@ -406,6 +406,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             FileHandle.standardOutput.write(Data([0x0A]))
             let withinBudget = tier == .regular
                 ? firstVisibleMS < SelfTestBudgets.regularFirstVisibleMS
+                    && styledFragments > 0
                 : tier != .huge
                     || (
                         firstVisibleMS < SelfTestBudgets.hugeFirstVisibleMS

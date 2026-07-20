@@ -118,7 +118,14 @@ final class SymbolSearchPanel: NSWindowController,
     func tableViewSelectionDidChange(_ notification: Notification) {
         if tableView.selectedRow >= 0 {
             panelModel.select(tableView.selectedRow)
+            window?.makeFirstResponder(input)
         }
+    }
+
+    @objc private func openClickedRow(_ sender: Any?) {
+        guard tableView.clickedRow >= 0 else { return }
+        panelModel.select(tableView.clickedRow)
+        openSelection()
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -175,6 +182,8 @@ final class SymbolSearchPanel: NSWindowController,
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
+        tableView.target = self
+        tableView.doubleAction = #selector(openClickedRow(_:))
         tableView.rowSizeStyle = .custom
         tableView.intercellSpacing = .zero
 

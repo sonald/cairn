@@ -6,7 +6,11 @@ import CodeInsightReaderUI
 import Observation
 
 @MainActor
-final class MainWindowController: NSWindowController, NSToolbarDelegate {
+final class MainWindowController: NSWindowController, NSToolbarDelegate,
+    NSToolbarItemValidation
+{
+    private static let backItemIdentifier = NSToolbarItem.Identifier("Back")
+    private static let forwardItemIdentifier = NSToolbarItem.Identifier("Forward")
     private static let projectItemIdentifier = NSToolbarItem.Identifier("Project")
     private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
 
@@ -93,11 +97,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.projectItemIdentifier, .flexibleSpace]
+        [
+            Self.backItemIdentifier,
+            Self.forwardItemIdentifier,
+            Self.projectItemIdentifier,
+            .flexibleSpace,
+        ]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [Self.projectItemIdentifier, Self.indexItemIdentifier, .flexibleSpace]
+        [
+            Self.backItemIdentifier,
+            Self.forwardItemIdentifier,
+            Self.projectItemIdentifier,
+            Self.indexItemIdentifier,
+            .flexibleSpace,
+        ]
     }
 
     func toolbar(
@@ -107,6 +122,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     ) -> NSToolbarItem? {
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         switch itemIdentifier {
+        case Self.backItemIdentifier:
+            item.label = "Back"
+            item.image = NSImage(
+                systemSymbolName: "chevron.backward",
+                accessibilityDescription: "Back"
+            )
+            item.target = self
+            item.action = #selector(goBack(_:))
+        case Self.forwardItemIdentifier:
+            item.label = "Forward"
+            item.image = NSImage(
+                systemSymbolName: "chevron.forward",
+                accessibilityDescription: "Forward"
+            )
+            item.target = self
+            item.action = #selector(goForward(_:))
         case Self.projectItemIdentifier:
             item.view = projectLabel
         case Self.indexItemIdentifier:
@@ -115,6 +146,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
             return nil
         }
         return item
+    }
+
+    func validateToolbarItem(_ item: NSToolbarItem) -> Bool {
+        switch item.action {
+        case #selector(goBack(_:)):
+            model.navigationHistory.canGoBack
+        case #selector(goForward(_:)):
+            model.navigationHistory.canGoForward
+        default:
+            true
+        }
     }
 
     private func observe() {

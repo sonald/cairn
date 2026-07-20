@@ -1,0 +1,8 @@
+# Clicking imported names navigates through super/crate paths, including mod.rs.
+def bubble/inner.rs:1:12 -> bubble/mod.rs:1:12
+strong bubble/inner.rs:1:12
+def consumer.rs:1:20 -> bubble/mod.rs:1:12
+strong consumer.rs:1:20
+def consumer.rs:1:30 -> bubble/mod.rs:1:12
+candidates consumer.rs:2:21 >= 1
+unresolved consumer.rs:2:21

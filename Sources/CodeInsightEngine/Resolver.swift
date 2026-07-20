@@ -26,6 +26,16 @@ struct Resolver {
         else { return [] }
 
         let kind = located.call?.syntacticKind
+        if let importIndex = located.importIndex {
+            guard index.imports.indices.contains(Int(importIndex)) else { return [] }
+            return importCandidate(
+                index: importIndex,
+                binding: index.imports[Int(importIndex)],
+                from: file,
+                kind: kind,
+                context: context
+            ).map { [$0] } ?? []
+        }
         if case .methodCall? = kind {
             return globalCandidates(
                 nameID: located.nameID,
@@ -90,7 +100,9 @@ struct Resolver {
                 context: context
             )
         }
-        if !sameFile.isEmpty { return sorted(sameFile, from: file) }
+        if !sameFile.isEmpty && !located.identifierFallback {
+            return sorted(sameFile, from: file)
+        }
 
         let visibleScopes = Set(scopes.map(\.id))
         var imported: [ResolutionCandidate] = []
@@ -100,47 +112,29 @@ struct Resolver {
                 && visibleScopes.contains(binding.scopeID)
         {
             guard let importIndex = UInt32(exactly: importIndex) else { continue }
-            guard let targetFile = session.moduleMap.targetFile(
-                for: binding,
+            guard let resolved = importCandidate(
+                index: importIndex,
+                binding: binding,
                 from: file,
-                names: session.names,
-                strings: session.strings
-            ) else {
-                // External crates are deliberately not resolved by the M0 engine.
-                unresolved.append(candidate(
-                    pathID: file,
-                    localKind: .importBinding,
-                    localIndex: importIndex,
-                    certainty: .unresolved,
-                    dispatch: dispatch(for: kind),
-                    evidence: [.uniqueImport(importBindingIndex: importIndex)],
-                    context: context
-                ))
-                continue
-            }
-            guard let importedName = binding.importedName,
-                  let (_, targetIndex) = session.content(at: targetFile)
-            else { continue }
-            let matches = targetIndex.symbols.enumerated().filter {
-                $0.element.parentFacetIndex == nil
-                    && $0.element.nameID == importedName
-            }
-            guard matches.count == 1,
-                  let facetIndex = UInt32(exactly: matches[0].offset)
-            else { continue }
-            imported.append(candidate(
-                pathID: targetFile,
-                localIndex: facetIndex,
-                certainty: capped(.strong, for: kind),
-                dispatch: dispatch(for: kind),
-                evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                kind: kind,
                 context: context
-            ))
+            ) else { continue }
+            if resolved.certainty == .unresolved {
+                unresolved.append(resolved)
+            } else {
+                imported.append(resolved)
+            }
         }
         if !imported.isEmpty { return sorted(imported, from: file) }
         if !unresolved.isEmpty { return unresolved }
 
-        let definitions = session.definitionOccurrences(named: located.nameID)
+        let definitions = session.definitionOccurrences(named: located.nameID).filter {
+            guard located.identifierFallback else { return true }
+            switch $0.1.space {
+            case .type, .value: return true
+            default: return false
+            }
+        }
         let hasVisibleGlob = index.imports.contains {
             $0.flags.contains(.wildcard) && visibleScopes.contains($0.scopeID)
         }
@@ -150,6 +144,19 @@ struct Resolver {
         let certainty: Certainty = definitions.count == 1
             && !hasVisibleGlob && !hasVisibleNamedImport
             ? .probable : .possible
+        if located.identifierFallback {
+            return [SymbolSpace.type, .value].flatMap { space in
+                globalCandidates(
+                    nameID: located.nameID,
+                    from: file,
+                    certainty: certainty,
+                    dispatch: dispatch(for: kind),
+                    evidence: [.nameOnly(nameID: located.nameID)],
+                    context: context,
+                    space: space
+                )
+            }
+        }
         return globalCandidates(
             nameID: located.nameID,
             from: file,
@@ -164,7 +171,13 @@ struct Resolver {
         at offset: UInt32,
         in index: ContentIndex,
         bytes: [UInt8]?
-    ) -> (range: ByteRange, nameID: NameID, call: UnresolvedCall?)? {
+    ) -> (
+        range: ByteRange,
+        nameID: NameID,
+        call: UnresolvedCall?,
+        importIndex: UInt32?,
+        identifierFallback: Bool
+    )? {
         var matches: [(range: ByteRange, nameID: NameID, call: UnresolvedCall?)] = []
         matches += index.calls.compactMap { call in
             call.range.contains(offset) ? (call.range, call.nameID, call) : nil
@@ -177,11 +190,10 @@ struct Resolver {
             facet.nameRange.contains(offset) ? (facet.nameRange, facet.nameID, nil) : nil
         }
         if let match = matches.min(by: { $0.range.length < $1.range.length }) {
-            return (match.range, match.nameID, match.call)
+            return (match.range, match.nameID, match.call, nil, false)
         }
 
-        // TODO(M0): ASCII fallback only; persist local-reference ranges if
-        // navigation expands beyond the M0 binding-shadowing check.
+        // M0 identifier fallback is ASCII-only.
         guard let bytes, Int(offset) < bytes.count,
               isIdentifierByte(bytes[Int(offset)])
         else { return nil }
@@ -192,13 +204,71 @@ struct Resolver {
         let nameID = session.names.intern(
             String(decoding: bytes[lower..<upper], as: UTF8.self)
         )
-        guard index.bindings.contains(where: { $0.localNameID == nameID }) else {
-            return nil
+        let range = ByteRange(
+            lowerBound: UInt32(lower),
+            upperBound: UInt32(upper)
+        )
+        if let item = index.imports.enumerated().first(where: {
+            $0.element.range.contains(offset)
+                && ($0.element.localName == nameID
+                    || $0.element.importedName == nameID)
+        }), let importIndex = UInt32(exactly: item.offset) {
+            return (range, nameID, nil, importIndex, false)
         }
-        return (
-            ByteRange(lowerBound: UInt32(lower), upperBound: UInt32(upper)),
-            nameID,
-            nil
+        let hasLocalBinding = index.bindings.contains {
+            $0.localNameID == nameID
+        }
+        let hasGlobalDefinition = session.definitionOccurrences(named: nameID).contains {
+            switch $0.1.space {
+            case .type, .value: return true
+            default: return false
+            }
+        }
+        guard hasLocalBinding || hasGlobalDefinition else { return nil }
+        return (range, nameID, nil, nil, !hasLocalBinding)
+    }
+
+    private func importCandidate(
+        index importIndex: UInt32,
+        binding: ImportBinding,
+        from source: PathID,
+        kind: CallKind?,
+        context: QueryContext
+    ) -> ResolutionCandidate? {
+        guard let targetFile = session.moduleMap.targetFile(
+            for: binding,
+            from: source,
+            names: session.names,
+            strings: session.strings
+        ) else {
+            // External crates are deliberately not resolved by the M0 engine.
+            return candidate(
+                pathID: source,
+                localKind: .importBinding,
+                localIndex: importIndex,
+                certainty: .unresolved,
+                dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                context: context
+            )
+        }
+        guard let importedName = binding.importedName,
+              let (_, targetIndex) = session.content(at: targetFile)
+        else { return nil }
+        let matches = targetIndex.symbols.enumerated().filter {
+            $0.element.parentFacetIndex == nil
+                && $0.element.nameID == importedName
+        }
+        guard matches.count == 1,
+              let facetIndex = UInt32(exactly: matches[0].offset)
+        else { return nil }
+        return candidate(
+            pathID: targetFile,
+            localIndex: facetIndex,
+            certainty: capped(.strong, for: kind),
+            dispatch: dispatch(for: kind),
+            evidence: [.uniqueImport(importBindingIndex: importIndex)],
+            context: context
         )
     }
 

@@ -1,0 +1,9 @@
+# Type references without same-file bindings fall back to global definitions.
+def main.rs:5:12 -> models.rs:1:12
+candidates main.rs:5:12 >= 2
+nostrong main.rs:5:12
+def5 main.rs:6:17 -> models.rs:2:12
+def5 main.rs:7:23 -> models.rs:3:12
+def5 main.rs:7:23 -> duplicate.rs:2:12
+candidates main.rs:7:23 >= 2
+nostrong main.rs:7:23

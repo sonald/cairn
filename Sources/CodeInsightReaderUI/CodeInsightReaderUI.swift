@@ -152,6 +152,12 @@ public final class ReaderTextView {
         textView.clickHandler = { [weak self] index, modifiers in
             self?.onClick?(index, modifiers)
         }
+        textView.viewportChanged = { [weak self] in
+            guard let self,
+                  let layoutManager = self.view.textLayoutManager
+            else { return }
+            self.validateVisibleRenderingAttributes(in: layoutManager)
+        }
     }
 
     public func display(document: ReaderDocument) {
@@ -171,13 +177,16 @@ public final class ReaderTextView {
             map: document.byteUTF16Map,
             to: attributed
         )
-        backingTextStorage.setAttributedString(attributed)
         if document.highlightSpans.isEmpty {
             layoutManager.renderingAttributesValidator = nil
         } else {
             layoutManager.renderingAttributesValidator = { [weak renderingCoordinator] manager, fragment in
                 renderingCoordinator?.style(fragment: fragment, in: manager)
             }
+        }
+        backingTextStorage.setAttributedString(attributed)
+        if !document.highlightSpans.isEmpty {
+            validateVisibleRenderingAttributes(in: layoutManager)
         }
     }
 
@@ -204,33 +213,9 @@ public final class ReaderTextView {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
         }
         view.needsDisplay = true
-        DispatchQueue.main.async { [weak layoutManager, weak renderingCoordinator] in
-            guard
-                let layoutManager,
-                let renderingCoordinator,
-                let viewportRange = layoutManager.textViewportLayoutController.viewportRange
-            else { return }
-            layoutManager.renderingAttributesValidator = nil
-            layoutManager.renderingAttributesValidator = { manager, fragment in
-                renderingCoordinator.style(fragment: fragment, in: manager)
-            }
-            layoutManager.invalidateRenderingAttributes(for: viewportRange)
-            layoutManager.textViewportLayoutController.layoutViewport()
-            let viewport = layoutManager.textViewportLayoutController.viewportBounds
-                .insetBy(
-                    dx: 0,
-                    dy: -layoutManager.textViewportLayoutController.viewportBounds.height * 2
-                )
-            layoutManager.enumerateTextLayoutFragments(
-                from: viewportRange.location,
-                options: []
-            ) { fragment in
-                guard fragment.layoutFragmentFrame.minY <= viewport.maxY else {
-                    return false
-                }
-                layoutManager.renderingAttributesValidator?(layoutManager, fragment)
-                return true
-            }
+        DispatchQueue.main.async { [weak self, weak layoutManager] in
+            guard let self, let layoutManager else { return }
+            self.validateVisibleRenderingAttributes(in: layoutManager)
         }
     }
 
@@ -316,16 +301,66 @@ public final class ReaderTextView {
             ], range: range)
         }
     }
+
+    private func validateVisibleRenderingAttributes(in layoutManager: NSTextLayoutManager) {
+        let controller = layoutManager.textViewportLayoutController
+        controller.layoutViewport()
+        guard let viewportRange = controller.viewportRange else { return }
+        layoutManager.invalidateRenderingAttributes(for: viewportRange)
+        let viewport = controller.viewportBounds.insetBy(
+            dx: 0,
+            dy: -controller.viewportBounds.height * 2
+        )
+        layoutManager.enumerateTextLayoutFragments(
+            from: viewportRange.location,
+            options: []
+        ) { fragment in
+            guard fragment.layoutFragmentFrame.minY <= viewport.maxY else {
+                return false
+            }
+            layoutManager.renderingAttributesValidator?(layoutManager, fragment)
+            return true
+        }
+        view.needsDisplay = true
+    }
 }
 
 @MainActor
 private final class ClickTextView: NSTextView {
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+    var viewportChanged: (() -> Void)?
+    private var viewportOrigin: NSPoint?
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        NotificationCenter.default.removeObserver(
+            self,
+            name: NSView.boundsDidChangeNotification,
+            object: nil
+        )
+        guard let clipView = enclosingScrollView?.contentView else { return }
+        viewportOrigin = clipView.bounds.origin
+        clipView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(viewportDidChange(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: clipView
+        )
+    }
 
     override func mouseDown(with event: NSEvent) {
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
         clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+    }
+
+    @objc private func viewportDidChange(_ notification: Notification) {
+        guard let clipView = notification.object as? NSClipView,
+              clipView.bounds.origin != viewportOrigin
+        else { return }
+        viewportOrigin = clipView.bounds.origin
+        viewportChanged?()
     }
 }
 

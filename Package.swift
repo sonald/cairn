@@ -126,7 +126,7 @@ let package = Package(
         ),
         .testTarget(
             name: "CodeInsightReaderCoreTests",
-            dependencies: ["CodeInsightReaderCore"]
+            dependencies: ["CodeInsightReaderCore", "CodeInsightReaderUI"]
         ),
     ]
 )
