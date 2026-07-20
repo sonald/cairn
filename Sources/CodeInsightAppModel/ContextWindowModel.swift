@@ -167,6 +167,7 @@ public final class ContextWindowModel {
         requestID &+= 1
         let currentRequest = requestID
         guard let pathID = pathID(token.file, in: session) else {
+            locatedToken = nil
             stage = .idle
             return nil
         }
@@ -175,6 +176,7 @@ public final class ContextWindowModel {
             offset: token.offset,
             context: context
         ) else {
+            locatedToken = nil
             stage = .idle
             return nil
         }

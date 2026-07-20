@@ -325,6 +325,38 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
 
 @MainActor
 @Test
+func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
+    let source = "fn target() {}\nfn main() { target(); }\n// plain comment\n"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var resolveCount = 0
+    let model = ContextWindowModel { session, file, offset, context in
+        resolveCount += 1
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    model.updateProjectState(.ready(session, context), root: root)
+    let tokenOffset = byteOffset(of: "target();", in: source)
+    let commentOffset = byteOffset(of: "plain comment", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: tokenOffset)
+    #expect(await waitUntil { model.candidateCount == 1 })
+
+    // Click a location with no resolvable token: stage empties and the stale
+    // located token must be cleared, not retained.
+    model.tokenClicked(file: "main.rs", offset: commentOffset)
+    for _ in 0..<10 { await Task.yield() }
+
+    // Clicking the original token again must re-resolve instead of hitting the
+    // debounce guard with a stale locatedToken and staying blank forever.
+    model.tokenClicked(file: "main.rs", offset: tokenOffset)
+    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(resolveCount == 2)
+}
+
+@MainActor
+@Test
 func contextWindowDiscardsOutOfOrderRequests() async throws {
     let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
     let root = try temporaryProject(["main.rs": source])
