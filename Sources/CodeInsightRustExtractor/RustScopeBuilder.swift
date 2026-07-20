@@ -38,46 +38,55 @@ struct RustScopeBuilder {
         _ node: Node,
         parent: Node?,
         ancestors: [Node],
-        declaration: RustDeclarationSite
+        declaration: RustDeclarationSite,
+        byteOffset: UInt32
     ) {
         if let kind = scopeKind(for: node) {
             pushScope(
                 owner: node,
                 kind: kind,
-                range: bindingBody(in: node)?.coreByteRange
-                    ?? node.coreByteRange
+                range: bindingBody(in: node)?.coreByteRange(
+                    byteOffset: byteOffset
+                ) ?? node.coreByteRange(byteOffset: byteOffset),
+                byteOffset: byteOffset
             )
         }
 
-        let key = RustNodeKey(node)
+        let key = RustNodeKey(node, byteOffset: byteOffset)
         if let plan = pendingPatterns.removeValue(forKey: key) {
             activePatterns.append(plan)
         }
         if let plan = activePatterns.last,
-           isBindingIdentifier(node, parent: parent, plan: plan),
-           let name = node.text(in: bytes)
+           isBindingIdentifier(
+               node,
+               parent: parent,
+               plan: plan,
+               byteOffset: byteOffset
+           ),
+           let name = node.text(in: bytes, byteOffset: byteOffset)
         {
             bindings.append(BindingRecord(
                 scopeID: plan.scopeID,
                 localNameID: names.intern(name),
                 space: .value,
                 kind: plan.bindingKind,
-                declarationRange: node.coreByteRange,
+                declarationRange: node.coreByteRange(byteOffset: byteOffset),
                 targetHint: nil
             ))
         }
 
-        registerPatterns(from: node)
+        registerPatterns(from: node, byteOffset: byteOffset)
         pushRegionIfNeeded(
             for: node,
             parent: parent,
             ancestors: ancestors,
-            declaration: declaration
+            declaration: declaration,
+            byteOffset: byteOffset
         )
     }
 
-    mutating func exit(_ node: Node) {
-        let key = RustNodeKey(node)
+    mutating func exit(_ node: Node, byteOffset: UInt32) {
+        let key = RustNodeKey(node, byteOffset: byteOffset)
         if activePatterns.last?.root == key {
             activePatterns.removeLast()
         }
@@ -108,7 +117,8 @@ struct RustScopeBuilder {
     private mutating func pushScope(
         owner: Node,
         kind: ScopeKind,
-        range: CodeInsightCore.ByteRange
+        range: CodeInsightCore.ByteRange,
+        byteOffset: UInt32
     ) {
         guard let rawID = UInt32(exactly: scopes.count) else {
             preconditionFailure("Scope count exceeds UInt32")
@@ -120,7 +130,10 @@ struct RustScopeBuilder {
             kind: kind,
             range: range
         ))
-        activeScopes.append(ActiveScope(owner: RustNodeKey(owner), id: id))
+        activeScopes.append(ActiveScope(
+            owner: RustNodeKey(owner, byteOffset: byteOffset),
+            id: id
+        ))
     }
 
     private func scopeKind(for node: Node) -> ScopeKind? {
@@ -165,7 +178,10 @@ struct RustScopeBuilder {
         }
     }
 
-    private mutating func registerPatterns(from node: Node) {
+    private mutating func registerPatterns(
+        from node: Node,
+        byteOffset: UInt32
+    ) {
         guard let scopeID = currentScopeID else { return }
 
         switch node.kind {
@@ -173,26 +189,34 @@ struct RustScopeBuilder {
             register(
                 node.namedChildren.first,
                 scopeID: scopeID,
-                kind: .param
+                kind: .param,
+                byteOffset: byteOffset
             )
         case "self_parameter":
             register(
                 node.directNamedChild { $0.kind == "self" },
                 scopeID: scopeID,
-                kind: .param
+                kind: .param,
+                byteOffset: byteOffset
             )
         case "closure_parameters":
             for child in node.namedChildren
                 where child.kind != "parameter"
                     && child.kind != "self_parameter"
             {
-                register(child, scopeID: scopeID, kind: .param)
+                register(
+                    child,
+                    scopeID: scopeID,
+                    kind: .param,
+                    byteOffset: byteOffset
+                )
             }
         case "let_declaration":
             register(
                 node.directNamedChild { $0.kind != "mutable_specifier" },
                 scopeID: scopeID,
-                kind: .letBinding
+                kind: .letBinding,
+                byteOffset: byteOffset
             )
         case "match_arm":
             let matchPattern = node.directNamedChild {
@@ -201,19 +225,22 @@ struct RustScopeBuilder {
             register(
                 matchPattern?.namedChildren.first,
                 scopeID: scopeID,
-                kind: .patternBinding
+                kind: .patternBinding,
+                byteOffset: byteOffset
             )
         case "let_condition":
             register(
                 node.namedChildren.first,
                 scopeID: scopeID,
-                kind: .patternBinding
+                kind: .patternBinding,
+                byteOffset: byteOffset
             )
         case "for_expression":
             register(
                 node.directNamedChild { $0.kind != "label" },
                 scopeID: scopeID,
-                kind: .patternBinding
+                kind: .patternBinding,
+                byteOffset: byteOffset
             )
         default:
             break
@@ -223,10 +250,11 @@ struct RustScopeBuilder {
     private mutating func register(
         _ node: Node?,
         scopeID: ScopeID,
-        kind: BindingKind
+        kind: BindingKind,
+        byteOffset: UInt32
     ) {
         guard let node else { return }
-        let key = RustNodeKey(node)
+        let key = RustNodeKey(node, byteOffset: byteOffset)
         pendingPatterns[key] = PatternPlan(
             root: key,
             scopeID: scopeID,
@@ -237,7 +265,8 @@ struct RustScopeBuilder {
     private func isBindingIdentifier(
         _ node: Node,
         parent: Node?,
-        plan: PatternPlan
+        plan: PatternPlan,
+        byteOffset: UInt32
     ) -> Bool {
         if node.kind == "shorthand_field_identifier" {
             return true
@@ -252,8 +281,9 @@ struct RustScopeBuilder {
              "range_pattern", "struct_pattern":
             return false
         case "tuple_struct_pattern":
-            return parent.namedChildren.first.map(RustNodeKey.init)
-                != RustNodeKey(node)
+            return parent.namedChildren.first.map {
+                RustNodeKey($0, byteOffset: byteOffset)
+            } != RustNodeKey(node, byteOffset: byteOffset)
         default:
             return true
         }
@@ -263,7 +293,8 @@ struct RustScopeBuilder {
         for node: Node,
         parent: Node?,
         ancestors: [Node],
-        declaration: RustDeclarationSite
+        declaration: RustDeclarationSite,
+        byteOffset: UInt32
     ) {
         let kind: ExecutableRegionKind
         let range: CodeInsightCore.ByteRange
@@ -273,10 +304,10 @@ struct RustScopeBuilder {
             kind = isMethod(parent: parent, ancestors: ancestors)
                 ? .method
                 : .function
-            range = node.coreByteRange
+            range = node.coreByteRange(byteOffset: byteOffset)
         case "closure_expression":
             kind = .closure
-            range = node.coreByteRange
+            range = node.coreByteRange(byteOffset: byteOffset)
         case "const_item", "static_item":
             guard let initializerRange = declaration.initializerRange else {
                 return
@@ -300,7 +331,10 @@ struct RustScopeBuilder {
             enclosingScopeID: scopeID,
             associatedFacetIndex: declaration.facetIndex
         ))
-        activeRegions.append(ActiveRegion(owner: RustNodeKey(node), id: id))
+        activeRegions.append(ActiveRegion(
+            owner: RustNodeKey(node, byteOffset: byteOffset),
+            id: id
+        ))
     }
 
     private func isMethod(parent: Node?, ancestors: [Node]) -> Bool {

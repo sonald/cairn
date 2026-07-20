@@ -8,7 +8,11 @@ struct RustImports {
     private(set) var imports: [ImportBinding] = []
     private(set) var exports: [ExportRecord] = []
 
-    mutating func enter(_ node: Node, scopeID: ScopeID?) {
+    mutating func enter(
+        _ node: Node,
+        scopeID: ScopeID?,
+        byteOffset: UInt32
+    ) {
         guard let scopeID else { return }
 
         switch node.kind {
@@ -23,10 +27,15 @@ struct RustImports {
                 argument,
                 prefix: "",
                 scopeID: scopeID,
-                reexport: reexport
+                reexport: reexport,
+                byteOffset: byteOffset
             )
         case "extern_crate_declaration":
-            addExternCrate(node, scopeID: scopeID)
+            addExternCrate(
+                node,
+                scopeID: scopeID,
+                byteOffset: byteOffset
+            )
         default:
             break
         }
@@ -36,7 +45,8 @@ struct RustImports {
         _ node: Node,
         prefix: String,
         scopeID: ScopeID,
-        reexport: Bool
+        reexport: Bool,
+        byteOffset: UInt32
     ) {
         switch node.kind {
         case "use_list":
@@ -45,12 +55,16 @@ struct RustImports {
                     child,
                     prefix: prefix,
                     scopeID: scopeID,
-                    reexport: reexport
+                    reexport: reexport,
+                    byteOffset: byteOffset
                 )
             }
         case "scoped_use_list":
             let children = node.namedChildren
-            guard let path = children.first?.text(in: bytes),
+            guard let path = children.first?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  ),
                   let list = children.last,
                   list.kind == "use_list"
             else { return }
@@ -58,13 +72,20 @@ struct RustImports {
                 list,
                 prefix: joined(prefix, path),
                 scopeID: scopeID,
-                reexport: reexport
+                reexport: reexport,
+                byteOffset: byteOffset
             )
         case "use_as_clause":
             let children = node.namedChildren
             guard children.count >= 2,
-                  let path = children.first?.text(in: bytes),
-                  let alias = children.last?.text(in: bytes)
+                  let path = children.first?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  ),
+                  let alias = children.last?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  )
             else { return }
             let specifier = path == "self" ? prefix : joined(prefix, path)
             let imported = path == "self"
@@ -77,10 +98,13 @@ struct RustImports {
                 kind: .named,
                 flags: reexport ? [.reexport] : [],
                 scopeID: scopeID,
-                range: node.coreByteRange
+                range: node.coreByteRange(byteOffset: byteOffset)
             )
         case "use_wildcard":
-            let path = node.namedChildren.first?.text(in: bytes)
+            let path = node.namedChildren.first?.text(
+                in: bytes,
+                byteOffset: byteOffset
+            )
             add(
                 specifier: path.map { joined(prefix, $0) } ?? prefix,
                 importedName: nil,
@@ -88,7 +112,7 @@ struct RustImports {
                 kind: .namespace,
                 flags: reexport ? [.wildcard, .reexport] : [.wildcard],
                 scopeID: scopeID,
-                range: node.coreByteRange
+                range: node.coreByteRange(byteOffset: byteOffset)
             )
         case "self" where !prefix.isEmpty:
             let name = lastComponent(of: prefix)
@@ -99,11 +123,14 @@ struct RustImports {
                 kind: .named,
                 flags: reexport ? [.reexport] : [],
                 scopeID: scopeID,
-                range: node.coreByteRange
+                range: node.coreByteRange(byteOffset: byteOffset)
             )
         case "identifier", "scoped_identifier", "crate", "self", "super",
              "metavariable":
-            guard let path = node.text(in: bytes) else { return }
+            guard let path = node.text(
+                in: bytes,
+                byteOffset: byteOffset
+            ) else { return }
             let name = lastComponent(of: path)
             add(
                 specifier: joined(prefix, path),
@@ -112,19 +139,26 @@ struct RustImports {
                 kind: .named,
                 flags: reexport ? [.reexport] : [],
                 scopeID: scopeID,
-                range: node.coreByteRange
+                range: node.coreByteRange(byteOffset: byteOffset)
             )
         default:
             break
         }
     }
 
-    private mutating func addExternCrate(_ node: Node, scopeID: ScopeID) {
+    private mutating func addExternCrate(
+        _ node: Node,
+        scopeID: ScopeID,
+        byteOffset: UInt32
+    ) {
         let identifiers = node.namedChildren.filter { $0.kind == "identifier" }
         guard let nameNode = identifiers.first,
-              let name = nameNode.text(in: bytes)
+              let name = nameNode.text(in: bytes, byteOffset: byteOffset)
         else { return }
-        let localName = identifiers.last?.text(in: bytes) ?? name
+        let localName = identifiers.last?.text(
+            in: bytes,
+            byteOffset: byteOffset
+        ) ?? name
         add(
             specifier: name,
             importedName: name,
@@ -132,7 +166,7 @@ struct RustImports {
             kind: .module,
             flags: [],
             scopeID: scopeID,
-            range: node.coreByteRange
+            range: node.coreByteRange(byteOffset: byteOffset)
         )
     }
 

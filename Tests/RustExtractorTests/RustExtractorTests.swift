@@ -142,6 +142,91 @@ func skipsMacroDefinitionAndInvocationSubtrees() throws {
 }
 
 @Test
+func extractsBracedMacroItemsAtOriginalByteRanges() throws {
+    let source = """
+        fn before() {}
+        cfg_rt! {
+            /// Wrapped API.
+            #[inline]
+            use dep::Thing;
+            pub fn wrapped(value: i32) { helper(value); }
+            pub struct JoinHandle;
+            impl JoinHandle { pub fn abort(&self) {} }
+            cfg_io! { fn inner() {} }
+        }
+        """
+    let result = try extract(source)
+    let wrappedIndex = try #require(facetIndex(named: "wrapped", in: result))
+    let wrapped = result.index.symbols[wrappedIndex]
+    let wrappedScope = try #require(result.index.scopes.first {
+        $0.kind == .function && $0.range.contains(wrapped.nameRange.lowerBound)
+    })
+    let valueBinding = try #require(result.index.bindings.first {
+        result.names.resolve($0.localNameID) == "value"
+    })
+    let helperCall = try #require(result.index.calls.first {
+        result.names.resolve($0.nameID) == "helper"
+    })
+    let importBinding = try #require(result.index.imports.first)
+    let expectedOffset = try #require(source.range(of: "wrapped")).lowerBound
+    let expectedByteOffset = source.utf8.distance(
+        from: source.utf8.startIndex,
+        to: expectedOffset
+    )
+
+    #expect(text(in: source, range: wrapped.nameRange) == "wrapped")
+    #expect(wrapped.nameRange.lowerBound == UInt32(expectedByteOffset))
+    #expect(text(in: source, range: wrappedScope.range) ==
+        "pub fn wrapped(value: i32) { helper(value); }")
+    #expect(text(in: source, range: valueBinding.declarationRange) == "value")
+    #expect(text(in: source, range: helperCall.range) == "helper(value)")
+    #expect(text(in: source, range: importBinding.range) == "dep::Thing")
+    #expect(facetIndex(named: "JoinHandle", in: result) != nil)
+    #expect(facetIndex(named: "abort", in: result) != nil)
+    #expect(facetIndex(named: "inner", in: result) != nil)
+}
+
+@Test
+func reparsesOnlyItemShapedMacroBodiesAndKeepsTheMacroCall() throws {
+    let source = """
+        fn outer(x: i32) {
+            cfg_local! { fn local_item() {} }
+            println!("{}", x);
+            let _ = vec![1];
+            identity! { x };
+        }
+        """
+    let result = try extract(source)
+    let callNames = result.index.calls.map {
+        result.names.resolve($0.nameID)
+    }
+
+    #expect(facetIndex(named: "local_item", in: result) != nil)
+    #expect(callNames == ["cfg_local", "println", "vec", "identity"])
+    #expect(result.index.calls.allSatisfy {
+        $0.syntacticKind == .macroInvocation
+    })
+}
+
+@Test
+func limitsNestedMacroItemReparsingToThreeBodies() throws {
+    let source = """
+        outer! {
+            middle! {
+                inner! {
+                    fn at_limit() {}
+                    too_deep! { fn excluded() {} }
+                }
+            }
+        }
+        """
+    let result = try extract(source)
+
+    #expect(facetIndex(named: "at_limit", in: result) != nil)
+    #expect(facetIndex(named: "excluded", in: result) == nil)
+}
+
+@Test
 func extractsAliasedUseAndExternCrate() throws {
     let result = try extract(
         "use std::io::Read as R; extern crate serde as s;"

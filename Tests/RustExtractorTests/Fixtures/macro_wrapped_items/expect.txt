@@ -1,0 +1,3 @@
+def main.rs:3:13 -> wrapped.rs:2:12
+callers wrapped.rs:2:12 == main.rs:3:13
+def main.rs:3:22 -> wrapped.rs:8:16

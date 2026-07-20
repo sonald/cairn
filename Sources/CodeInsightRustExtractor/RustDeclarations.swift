@@ -31,7 +31,8 @@ struct RustDeclarations {
     mutating func enter(
         _ node: Node,
         parent: Node?,
-        ancestors: [Node]
+        ancestors: [Node],
+        byteOffset: UInt32
     ) -> RustDeclarationSite {
         _ = ancestors
 
@@ -76,7 +77,7 @@ struct RustDeclarations {
         }
 
         guard let (kind, space, nameNode) = declaration,
-              let name = nameNode.text(in: bytes),
+              let name = nameNode.text(in: bytes, byteOffset: byteOffset),
               let facetIndex = UInt32(exactly: facets.count)
         else {
             return .none
@@ -87,8 +88,8 @@ struct RustDeclarations {
             space: space,
             kind: kind,
             nameID: names.intern(name),
-            range: node.coreByteRange,
-            nameRange: nameNode.coreByteRange,
+            range: node.coreByteRange(byteOffset: byteOffset),
+            nameRange: nameNode.coreByteRange(byteOffset: byteOffset),
             parentFacetIndex: parentFacetIndex(for: kind),
             signatureFingerprint: nil,
             bodyFingerprint: nil
@@ -96,7 +97,7 @@ struct RustDeclarations {
 
         if isContainer(node: node, kind: kind) {
             containers.append(Container(
-                owner: RustNodeKey(node),
+                owner: RustNodeKey(node, byteOffset: byteOffset),
                 facetIndex: facetIndex,
                 kind: kind
             ))
@@ -104,12 +105,14 @@ struct RustDeclarations {
 
         return RustDeclarationSite(
             facetIndex: facetIndex,
-            initializerRange: initializer(in: node)?.coreByteRange
+            initializerRange: initializer(in: node)?.coreByteRange(
+                byteOffset: byteOffset
+            )
         )
     }
 
-    mutating func exit(_ node: Node) {
-        if containers.last?.owner == RustNodeKey(node) {
+    mutating func exit(_ node: Node, byteOffset: UInt32) {
+        if containers.last?.owner == RustNodeKey(node, byteOffset: byteOffset) {
             containers.removeLast()
         }
     }

@@ -40,46 +40,15 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             names: interner.names,
             strings: interner.strings
         )
-        var cursor = RustTreeCursor(root: tree.rootNode)
-        var ancestors: [Node] = []
-
-        while let event = cursor.next() {
-            switch event {
-            case let .enter(node):
-                let site = declarations.enter(
-                    node,
-                    parent: ancestors.last,
-                    ancestors: ancestors
-                )
-                scopes.enter(
-                    node,
-                    parent: ancestors.last,
-                    ancestors: ancestors,
-                    declaration: site
-                )
-                calls.enter(node, regionID: scopes.currentRegionID)
-                imports.enter(node, scopeID: scopes.currentImportScopeID)
-                ancestors.append(node)
-
-                if node.kind == "macro_definition"
-                    || node.kind == "macro_invocation"
-                {
-                    // Macro-generated symbols are unavailable without expansion;
-                    // skip token subtrees and degrade honestly instead of guessing.
-                    cursor.skipChildren()
-                } else if node.kind == "use_declaration"
-                    || node.kind == "extern_crate_declaration"
-                {
-                    // RustImports has already expanded these syntax-only subtrees.
-                    cursor.skipChildren()
-                }
-
-            case let .exit(node):
-                _ = ancestors.popLast()
-                scopes.exit(node)
-                declarations.exit(node)
-            }
-        }
+        traverse(
+            root: tree.rootNode,
+            parser: parser,
+            bytes: bytes,
+            scopes: &scopes,
+            declarations: &declarations,
+            calls: &calls,
+            imports: &imports
+        )
 
         return (ContentIndex(
             key: key,
@@ -92,6 +61,153 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             exports: imports.exports,
             lineTable: LineTable(bytes: bytes)
         ), tree.rootNode.hasError)
+    }
+
+    private func traverse(
+        root: Node,
+        parser: Parser,
+        bytes: [UInt8],
+        byteOffset: UInt32 = 0,
+        macroDepth: Int = 0,
+        baseAncestors: [Node] = [],
+        scopes: inout RustScopeBuilder,
+        declarations: inout RustDeclarations,
+        calls: inout RustCalls,
+        imports: inout RustImports
+    ) {
+        var cursor = RustTreeCursor(root: root)
+        var ancestors = baseAncestors
+
+        while let event = cursor.next() {
+            switch event {
+            case let .enter(node):
+                let parent = ancestors.last
+                let site = declarations.enter(
+                    node,
+                    parent: parent,
+                    ancestors: ancestors,
+                    byteOffset: byteOffset
+                )
+                scopes.enter(
+                    node,
+                    parent: parent,
+                    ancestors: ancestors,
+                    declaration: site,
+                    byteOffset: byteOffset
+                )
+                calls.enter(
+                    node,
+                    regionID: scopes.currentRegionID,
+                    byteOffset: byteOffset
+                )
+                imports.enter(
+                    node,
+                    scopeID: scopes.currentImportScopeID,
+                    byteOffset: byteOffset
+                )
+                ancestors.append(node)
+
+                if node.kind == "macro_invocation" {
+                    if macroDepth < 3,
+                       isItemMacroPosition(parent),
+                       let body = macroBody(
+                           of: node,
+                           parser: parser,
+                           bytes: bytes,
+                           byteOffset: byteOffset
+                       )
+                    {
+                        for item in body.items {
+                            traverse(
+                                root: item,
+                                parser: parser,
+                                bytes: bytes,
+                                byteOffset: body.byteOffset,
+                                macroDepth: macroDepth + 1,
+                                baseAncestors: Array(ancestors.dropLast()),
+                                scopes: &scopes,
+                                declarations: &declarations,
+                                calls: &calls,
+                                imports: &imports
+                            )
+                        }
+                    }
+                    cursor.skipChildren()
+                } else if node.kind == "macro_definition" {
+                    cursor.skipChildren()
+                } else if node.kind == "use_declaration"
+                    || node.kind == "extern_crate_declaration"
+                {
+                    // RustImports has already expanded these syntax-only subtrees.
+                    cursor.skipChildren()
+                }
+
+            case let .exit(node):
+                _ = ancestors.popLast()
+                scopes.exit(node, byteOffset: byteOffset)
+                declarations.exit(node, byteOffset: byteOffset)
+            }
+        }
+    }
+
+    private func isItemMacroPosition(_ parent: Node?) -> Bool {
+        switch parent?.kind {
+        case "source_file", "declaration_list", "block", "expression_statement":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func macroBody(
+        of node: Node,
+        parser: Parser,
+        bytes: [UInt8],
+        byteOffset: UInt32
+    ) -> (items: [Node], byteOffset: UInt32)? {
+        guard let tokenTree = node.directNamedChild(where: {
+            $0.kind == "token_tree"
+        }) else { return nil }
+        let range = tokenTree.byteRange
+        let lower = Int(byteOffset) + Int(range.lowerBound)
+        let upper = Int(byteOffset) + Int(range.upperBound)
+        guard lower < upper,
+              upper <= bytes.count,
+              bytes[lower] == 0x7B,
+              bytes[upper - 1] == 0x7D,
+              let bodyOffset = UInt32(exactly: lower + 1),
+              let tree = parser.parse(Array(bytes[(lower + 1)..<(upper - 1)])),
+              tree.rootNode.kind == "source_file",
+              !tree.rootNode.hasError
+        else { return nil }
+
+        let namedChildren = tree.rootNode.namedChildren
+        guard namedChildren.allSatisfy({
+            isAcceptedMacroItem($0.kind) || isItemTrivia($0.kind)
+        }) else {
+            return nil
+        }
+        return (
+            namedChildren.filter { isAcceptedMacroItem($0.kind) },
+            bodyOffset
+        )
+    }
+
+    private func isAcceptedMacroItem(_ kind: String) -> Bool {
+        switch kind {
+        case "function_item", "struct_item", "enum_item", "impl_item",
+             "trait_item", "mod_item", "const_item", "static_item",
+             "type_item", "use_declaration", "macro_invocation":
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func isItemTrivia(_ kind: String) -> Bool {
+        kind == "line_comment"
+            || kind == "block_comment"
+            || kind == "attribute_item"
     }
 }
 
@@ -151,18 +267,18 @@ struct RustNodeKey: Hashable {
     let lowerBound: UInt32
     let upperBound: UInt32
 
-    init(_ node: Node) {
+    init(_ node: Node, byteOffset: UInt32 = 0) {
         kind = node.kind
-        lowerBound = node.byteRange.lowerBound
-        upperBound = node.byteRange.upperBound
+        lowerBound = node.byteRange.lowerBound + byteOffset
+        upperBound = node.byteRange.upperBound + byteOffset
     }
 }
 
 extension Node {
-    var coreByteRange: CodeInsightCore.ByteRange {
+    func coreByteRange(byteOffset: UInt32 = 0) -> CodeInsightCore.ByteRange {
         CodeInsightCore.ByteRange(
-            lowerBound: byteRange.lowerBound,
-            upperBound: byteRange.upperBound
+            lowerBound: byteRange.lowerBound + byteOffset,
+            upperBound: byteRange.upperBound + byteOffset
         )
     }
 
@@ -170,9 +286,9 @@ extension Node {
         namedChildren.first(where: predicate)
     }
 
-    func text(in bytes: [UInt8]) -> String? {
-        let lower = Int(byteRange.lowerBound)
-        let upper = Int(byteRange.upperBound)
+    func text(in bytes: [UInt8], byteOffset: UInt32 = 0) -> String? {
+        let lower = Int(byteRange.lowerBound) + Int(byteOffset)
+        let upper = Int(byteRange.upperBound) + Int(byteOffset)
         guard lower <= upper, upper <= bytes.count else { return nil }
         return String(bytes: bytes[lower..<upper], encoding: .utf8)
     }

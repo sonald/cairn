@@ -6,18 +6,22 @@ struct RustCalls {
     let names: Interner<NameID>
     private(set) var calls: [UnresolvedCall] = []
 
-    mutating func enter(_ node: Node, regionID: ExecutableRegionID?) {
+    mutating func enter(
+        _ node: Node,
+        regionID: ExecutableRegionID?,
+        byteOffset: UInt32
+    ) {
         guard let regionID else { return }
 
         if node.kind == "macro_invocation" {
             guard let macro = node.namedChildren.first,
                   let nameNode = finalName(in: macro),
-                  let name = nameNode.text(in: bytes)
+                  let name = nameNode.text(in: bytes, byteOffset: byteOffset)
             else { return }
             calls.append(UnresolvedCall(
                 regionID: regionID,
                 nameID: names.intern(name),
-                range: node.coreByteRange,
+                range: node.coreByteRange(byteOffset: byteOffset),
                 syntacticKind: .macroInvocation,
                 qualifierRange: nil,
                 receiverRange: nil,
@@ -29,14 +33,14 @@ struct RustCalls {
         guard node.kind == "call_expression",
               let rawCallee = node.namedChildren.first,
               let callee = unwrapGenericFunction(rawCallee),
-              let call = classify(callee)
+              let call = classify(callee, byteOffset: byteOffset)
         else { return }
 
         let arguments = node.directNamedChild { $0.kind == "arguments" }
         calls.append(UnresolvedCall(
             regionID: regionID,
             nameID: names.intern(call.name),
-            range: node.coreByteRange,
+            range: node.coreByteRange(byteOffset: byteOffset),
             syntacticKind: call.kind,
             qualifierRange: call.qualifierRange,
             receiverRange: call.receiverRange,
@@ -51,7 +55,8 @@ struct RustCalls {
     }
 
     private func classify(
-        _ node: Node
+        _ node: Node,
+        byteOffset: UInt32
     ) -> (
         name: String,
         kind: CallKind,
@@ -60,21 +65,37 @@ struct RustCalls {
     )? {
         switch node.kind {
         case "identifier":
-            return node.text(in: bytes).map {
+            return node.text(in: bytes, byteOffset: byteOffset).map {
                 ($0, .directCall, nil, nil)
             }
         case "scoped_identifier":
             let children = node.namedChildren
             guard children.count >= 2,
-                  let name = children.last?.text(in: bytes)
+                  let name = children.last?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  )
             else { return nil }
-            return (name, .qualifiedCall, children.first?.coreByteRange, nil)
+            return (
+                name,
+                .qualifiedCall,
+                children.first?.coreByteRange(byteOffset: byteOffset),
+                nil
+            )
         case "field_expression":
             let children = node.namedChildren
             guard children.count >= 2,
-                  let name = children.last?.text(in: bytes)
+                  let name = children.last?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  )
             else { return nil }
-            return (name, .methodCall, nil, children.first?.coreByteRange)
+            return (
+                name,
+                .methodCall,
+                nil,
+                children.first?.coreByteRange(byteOffset: byteOffset)
+            )
         default:
             return nil
         }
