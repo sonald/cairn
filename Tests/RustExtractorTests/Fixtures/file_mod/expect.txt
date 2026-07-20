@@ -1,0 +1,3 @@
+# One fixture covers foo.rs and foo/mod.rs module layouts.
+def main.rs:6:1 -> db.rs:1:8
+def main.rs:7:1 -> cache/mod.rs:1:8

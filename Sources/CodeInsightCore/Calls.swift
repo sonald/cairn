@@ -1,0 +1,36 @@
+public enum CallKind: Sendable {
+    case directCall
+    case methodCall
+    case qualifiedCall
+    case indirectCall
+    case macroInvocation
+    case decoratorApply
+}
+
+public struct UnresolvedCall: Sendable {
+    public let regionID: ExecutableRegionID
+    public let nameID: NameID
+    public let range: ByteRange
+    public let syntacticKind: CallKind
+    public let qualifierRange: ByteRange?
+    public let receiverRange: ByteRange?
+    public let argumentCount: UInt16?
+
+    public init(
+        regionID: ExecutableRegionID,
+        nameID: NameID,
+        range: ByteRange,
+        syntacticKind: CallKind,
+        qualifierRange: ByteRange?,
+        receiverRange: ByteRange?,
+        argumentCount: UInt16?
+    ) {
+        self.regionID = regionID
+        self.nameID = nameID
+        self.range = range
+        self.syntacticKind = syntacticKind
+        self.qualifierRange = qualifierRange
+        self.receiverRange = receiverRange
+        self.argumentCount = argumentCount
+    }
+}

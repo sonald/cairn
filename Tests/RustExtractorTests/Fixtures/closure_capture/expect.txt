@@ -1,0 +1,2 @@
+bind main.rs:2:18 -> main.rs:2:10
+def main.rs:3:1 -> main.rs:2:5

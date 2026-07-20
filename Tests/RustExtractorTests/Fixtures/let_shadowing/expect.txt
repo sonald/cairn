@@ -1,0 +1,3 @@
+# Each use resolves to the nearest visible declaration.
+bind main.rs:3:1 -> main.rs:2:5
+bind main.rs:6:1 -> main.rs:5:5

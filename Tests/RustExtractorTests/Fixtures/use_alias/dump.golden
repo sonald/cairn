@@ -1,0 +1,17 @@
+scopes:
+  - #0 module 1:1..4:1 bytes=0..<61
+    - #1 function 3:1..3:25 bytes=36..<60
+      - #2 block 3:11..3:25 bytes=46..<60
+bindings:
+  (none)
+regions:
+  - #0 kind=function scope=#1 facet=#1 range=3:1..3:25 bytes=36..<60
+facets:
+  - #0 kind=rustMod space=module name=db parent=- nameAt=1:5..1:7 bytes=4..<6 range=1:1..1:8 bytes=0..<7
+  - #1 kind=rustFn space=value name=main parent=- nameAt=3:4..3:8 bytes=39..<43 range=3:1..3:25 bytes=36..<60
+calls:
+  - #0 kind=directCall name=open_db region=#0 range=3:13..3:22 bytes=48..<57
+imports:
+  - #0 kind=named module=db::connect imported=connect local=open_db flags=- scope=#0 range=2:5..2:27 bytes=12..<34
+exports:
+  (none)

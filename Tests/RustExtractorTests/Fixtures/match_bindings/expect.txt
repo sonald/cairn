@@ -1,0 +1,1 @@
+bind main.rs:3:12 -> main.rs:3:6

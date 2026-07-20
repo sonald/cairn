@@ -1,0 +1,3 @@
+# Alias resolves through the file module map, not the same-name distractor.
+def main.rs:3:13 -> db.rs:1:8
+callers db.rs:1:8 == main.rs:3:13

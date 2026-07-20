@@ -1,0 +1,4 @@
+# Macro definitions/expansion are intentionally outside M0.
+unresolved main.rs:3:1
+unresolved main.rs:4:1
+unresolved main.rs:5:1
