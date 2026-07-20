@@ -11,6 +11,128 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
 
 @MainActor
 @Test
+func navigationHistoryTruncatesForwardEntriesAfterNewPush() {
+    let history = NavigationHistory()
+    let a = jumpRecord("a.rs", offset: 10)
+    let b = jumpRecord("b.rs", offset: 20)
+    let c = jumpRecord("c.rs", offset: 30)
+
+    history.push(a)
+    history.push(b)
+    #expect(history.goBack(from: c) == b)
+    history.push(b)
+
+    #expect(history.records == [a, b])
+    #expect(!history.canGoForward)
+}
+
+@MainActor
+@Test
+func navigationHistoryDeduplicatesAdjacentRecords() {
+    let history = NavigationHistory()
+    let record = jumpRecord("main.rs", offset: 7)
+
+    history.push(record)
+    history.push(record)
+
+    #expect(history.records == [record])
+}
+
+@MainActor
+@Test
+func navigationHistoryEvictsTheOldestRecordAboveTwoHundred() {
+    let history = NavigationHistory()
+
+    for index in 0...200 {
+        history.push(jumpRecord("\(index).rs", offset: UInt32(index)))
+    }
+
+    #expect(history.records.count == 200)
+    #expect(history.records.first?.path == "1.rs")
+    #expect(history.records.last?.path == "200.rs")
+}
+
+@MainActor
+@Test
+func navigationHistoryBackAndForwardDoNotPush() {
+    let history = NavigationHistory()
+    let a = jumpRecord("a.rs", offset: 10)
+    let b = jumpRecord("b.rs", offset: 20)
+    let c = jumpRecord("c.rs", offset: 30)
+    history.push(a)
+    history.push(b)
+    let count = history.records.count
+
+    #expect(history.goBack(from: c) == b)
+    #expect(history.goBack(from: b) == a)
+    #expect(history.goForward() == b)
+    #expect(history.records.count == count)
+}
+
+@MainActor
+@Test
+func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() throws {
+    let root = try temporaryProject([
+        "a.rs": "first line\nsecond line is initially long\n",
+        "b.rs": "fn b() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+    let a = root.appendingPathComponent("a.rs")
+    let b = root.appendingPathComponent("b.rs")
+    let oldA = jumpRecord("a.rs", offset: 100, line: 2, column: 2)
+
+    model.navigate(to: a)
+    model.navigate(to: b, leaving: oldA)
+    try write("x\ny", to: a)
+    model.goBack(from: jumpRecord("b.rs", offset: 0))
+
+    #expect(opened.last?.0 == "a.rs")
+    #expect(opened.last?.1 == 3)
+}
+
+@MainActor
+@Test
+func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() throws {
+    let source = String(repeating: "0123456789", count: 10)
+    let root = try temporaryProject([
+        "a.rs": source,
+        "b.rs": source,
+        "c.rs": source,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+
+    model.navigate(to: root.appendingPathComponent("a.rs"), byteOffset: 10)
+    model.navigate(
+        to: root.appendingPathComponent("b.rs"),
+        byteOffset: 20,
+        leaving: jumpRecord("a.rs", offset: 10)
+    )
+    model.navigate(
+        to: root.appendingPathComponent("c.rs"),
+        byteOffset: 30,
+        leaving: jumpRecord("b.rs", offset: 20)
+    )
+    model.goBack(from: jumpRecord("c.rs", offset: 30))
+    model.goBack(from: jumpRecord("b.rs", offset: 20))
+    model.goForward()
+
+    #expect(opened.map { "\($0.0):\($0.1 ?? 0)" } == [
+        "a.rs:10", "b.rs:20", "c.rs:30", "b.rs:20", "a.rs:10", "b.rs:20",
+    ])
+}
+
+@MainActor
+@Test
 func projectStateAcceptsLegalTransitions() {
     let model = AppModel()
     let root = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
@@ -487,4 +609,23 @@ private func pathID(_ path: String, in session: EngineSession) -> PathID? {
 private func byteOffset(of needle: String, in source: String) -> UInt32 {
     let range = source.range(of: needle)!
     return UInt32(source[..<range.lowerBound].utf8.count)
+}
+
+private func jumpRecord(
+    _ path: String,
+    offset: UInt32,
+    line: UInt32 = 1,
+    column: UInt32? = nil
+) -> JumpRecord {
+    JumpRecord(
+        path: path,
+        contentID: nil,
+        byteOffset: offset,
+        line: line,
+        column: column ?? offset + 1,
+        symbolAnchor: nil,
+        snapshotID: SnapshotID(
+            rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
+        )
+    )
 }

@@ -98,15 +98,19 @@ public final class AppModel {
     public private(set) var selectedByteOffset: UInt32?
     public private(set) var navigationGeneration: UInt64 = 0
     public let contextWindow: ContextWindowModel
+    public let navigationHistory = NavigationHistory()
 
     private let indexService: any IndexService
+    private let navigationSink: @MainActor (URL, UInt32?) -> Void
 
     public init(
         indexService: any IndexService = ProjectIndexService(),
-        contextWindow: ContextWindowModel = ContextWindowModel()
+        contextWindow: ContextWindowModel = ContextWindowModel(),
+        navigationSink: @MainActor @escaping (URL, UInt32?) -> Void = { _, _ in }
     ) {
         self.indexService = indexService
         self.contextWindow = contextWindow
+        self.navigationSink = navigationSink
     }
 
     public func openProject(root: URL) {
@@ -117,6 +121,7 @@ public final class AppModel {
         selectedFile = nil
         selectedByteOffset = nil
         navigationGeneration &+= 1
+        navigationHistory.reset()
         projectState = .indexing(root: root, startedAt: .now)
         contextWindow.updateProjectState(projectState, root: root)
 
@@ -138,14 +143,26 @@ public final class AppModel {
         }
     }
 
-    public func selectFile(_ url: URL) {
-        openFile(url)
-    }
-
-    public func openFile(_ url: URL, byteOffset: UInt32? = nil) {
-        selectedFile = url
+    public func navigate(
+        to url: URL,
+        byteOffset: UInt32? = nil,
+        leaving current: JumpRecord? = nil
+    ) {
+        if let current { navigationHistory.push(current) }
+        selectedFile = url.standardizedFileURL
         selectedByteOffset = byteOffset
         navigationGeneration &+= 1
+        navigationSink(url.standardizedFileURL, byteOffset)
+    }
+
+    public func goBack(from current: JumpRecord) {
+        guard let record = navigationHistory.goBack(from: current) else { return }
+        replay(record)
+    }
+
+    public func goForward() {
+        guard let record = navigationHistory.goForward() else { return }
+        replay(record)
     }
 
     @discardableResult
@@ -181,5 +198,26 @@ public final class AppModel {
         guard self.generation == generation else { return }
         projectState = .failed
         contextWindow.updateProjectState(projectState, root: fileTree?.root)
+    }
+
+    private func replay(_ record: JumpRecord) {
+        guard let root = fileTree?.root else { return }
+        let file = root.appendingPathComponent(record.path).standardizedFileURL
+        guard file.pathComponents.starts(with: root.pathComponents),
+              let values = try? file.resourceValues(forKeys: [.fileSizeKey]),
+              let fileSize = values.fileSize
+        else { return }
+        let offset: UInt32
+        if Int(record.byteOffset) <= fileSize {
+            offset = record.byteOffset
+        } else if let bytes = try? Data(contentsOf: file).map({ $0 }) {
+            offset = LineTable(bytes: bytes).byteOffset(
+                line: record.line,
+                column: record.column
+            ) ?? 0
+        } else {
+            offset = 0
+        }
+        navigate(to: file, byteOffset: offset)
     }
 }

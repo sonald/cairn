@@ -66,6 +66,13 @@ public struct ReaderDocument: Sendable {
             outlineFacets: outlineFacets
         )
     }
+
+    public func symbolAnchor(at byteOffset: UInt32) -> String? {
+        outlineFacets
+            .filter { $0.range.contains(byteOffset) }
+            .min { $0.range.length < $1.range.length }?
+            .name
+    }
 }
 
 public enum FileTier: String, Sendable {
@@ -152,7 +159,7 @@ public struct RustHighlighter: Sendable {
                 // S3 only consumes function outline names/ranges, so collect them in
                 // this existing walk instead of running RustExtractor a second time.
                 if let name = text(in: bytes, range: range) {
-                    facets.append(OutlineFacet(name: name, range: range))
+                    facets.append(OutlineFacet(name: name, range: coreRange(node)))
                 }
             }
 

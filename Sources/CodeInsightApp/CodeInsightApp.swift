@@ -38,7 +38,7 @@ private struct CodeInsightApplication {
 }
 
 @MainActor
-private final class AppDelegate: NSObject, NSApplicationDelegate {
+private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let startedAt: ContinuousClock.Instant
     private let model = AppModel()
     private var windowController: MainWindowController?
@@ -208,6 +208,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         windowController?.selectNextContextCandidate(sender)
     }
 
+    @objc private func goBack(_ sender: Any?) {
+        windowController?.goBack(sender)
+    }
+
+    @objc private func goForward(_ sender: Any?) {
+        windowController?.goForward(sender)
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(goBack(_:)):
+            model.navigationHistory.canGoBack
+        case #selector(goForward(_:)):
+            model.navigationHistory.canGoForward
+        default:
+            true
+        }
+    }
+
     private func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
 
@@ -244,6 +263,44 @@ private final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         symbolItem.target = self
         goMenu.addItem(symbolItem)
+        goMenu.addItem(.separator())
+        let backItem = NSMenuItem(
+            title: "Back",
+            action: #selector(goBack(_:)),
+            keyEquivalent: "\u{F702}"
+        )
+        backItem.keyEquivalentModifierMask = [.command, .control]
+        backItem.target = self
+        goMenu.addItem(backItem)
+        let forwardItem = NSMenuItem(
+            title: "Forward",
+            action: #selector(goForward(_:)),
+            keyEquivalent: "\u{F703}"
+        )
+        forwardItem.keyEquivalentModifierMask = [.command, .control]
+        forwardItem.target = self
+        goMenu.addItem(forwardItem)
+        let alternateBackItem = NSMenuItem(
+            title: "Back",
+            action: #selector(goBack(_:)),
+            keyEquivalent: "["
+        )
+        alternateBackItem.keyEquivalentModifierMask = .command
+        alternateBackItem.target = self
+        alternateBackItem.isHidden = true
+        alternateBackItem.allowsKeyEquivalentWhenHidden = true
+        goMenu.addItem(alternateBackItem)
+        let alternateForwardItem = NSMenuItem(
+            title: "Forward",
+            action: #selector(goForward(_:)),
+            keyEquivalent: "]"
+        )
+        alternateForwardItem.keyEquivalentModifierMask = .command
+        alternateForwardItem.target = self
+        alternateForwardItem.isHidden = true
+        alternateForwardItem.allowsKeyEquivalentWhenHidden = true
+        goMenu.addItem(alternateForwardItem)
+        goMenu.addItem(.separator())
         let previousCandidate = NSMenuItem(
             title: "Previous Context Candidate",
             action: #selector(previousContextCandidate(_:)),

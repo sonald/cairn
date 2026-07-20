@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightCore
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
@@ -60,8 +61,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         if !offscreen { window.center() }
         super.init(window: window)
         toolbar.delegate = self
-        sidebarController.onOpenFile = { [weak model] url in
-            model?.openFile(url)
+        sidebarController.onOpenFile = { [weak self] url in
+            self?.navigate(to: url)
         }
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
@@ -85,7 +86,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
-                self?.model.openFile(file, byteOffset: offset)
+                self?.navigate(to: file, byteOffset: offset)
             }
         }
         symbolSearchPanel?.show(relativeTo: window)
@@ -173,6 +174,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
         model.contextWindow.selectNext()
     }
 
+    @objc func goBack(_ sender: Any?) {
+        guard let current = currentJumpRecord() else { return }
+        model.goBack(from: current)
+    }
+
+    @objc func goForward(_ sender: Any?) {
+        model.goForward()
+    }
+
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
         guard let file = model.selectedFile,
               let path = projectPath(for: file)
@@ -194,9 +204,33 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate {
 
     private func open(_ candidate: ContextWindowModel.Candidate) {
         guard let root = model.fileTree?.root else { return }
-        model.openFile(
-            root.appendingPathComponent(candidate.path),
+        navigate(
+            to: root.appendingPathComponent(candidate.path),
             byteOffset: candidate.targetByteOffset
+        )
+    }
+
+    private func navigate(to file: URL, byteOffset: UInt32? = nil) {
+        model.navigate(
+            to: file,
+            byteOffset: byteOffset,
+            leaving: currentJumpRecord()
+        )
+    }
+
+    private func currentJumpRecord() -> JumpRecord? {
+        guard case let .ready(session, _) = model.projectState,
+              let position = readerController.currentReadingPosition(),
+              let path = projectPath(for: position.file)
+        else { return nil }
+        return JumpRecord(
+            path: path,
+            contentID: position.contentID,
+            byteOffset: position.byteOffset,
+            line: position.line,
+            column: position.column,
+            symbolAnchor: position.symbolAnchor,
+            snapshotID: session.snapshotID
         )
     }
 
@@ -299,6 +333,7 @@ final class ReaderViewController: NSViewController {
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
     private var displayedFile: URL?
+    private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
 
     override func loadView() {
@@ -339,6 +374,7 @@ final class ReaderViewController: NSViewController {
         let generation = loadGeneration
 
         guard let file else {
+            displayedDocument = nil
             label.stringValue = "Open a project to begin"
             label.isHidden = false
             textView.view.string = ""
@@ -347,6 +383,7 @@ final class ReaderViewController: NSViewController {
 
         do {
             let loaded = try loader.load(file: file)
+            displayedDocument = loaded.document
             label.isHidden = true
             layoutTextViewFrame()
             textView.display(document: loaded.document)
@@ -358,6 +395,7 @@ final class ReaderViewController: NSViewController {
                         guard let self, self.loadGeneration == generation else { return }
                         switch result {
                         case let .success(document):
+                            self.displayedDocument = document
                             self.textView.updateSyntax(document: document)
                         case .failure:
                             self.label.stringValue = "Syntax highlighting failed"
@@ -367,6 +405,7 @@ final class ReaderViewController: NSViewController {
                 }
             }
         } catch {
+            displayedDocument = nil
             label.stringValue = "Could not open \(file.lastPathComponent)"
             label.isHidden = false
         }
@@ -375,6 +414,29 @@ final class ReaderViewController: NSViewController {
     func navigate(to file: URL, byteOffset: UInt32) {
         display(file)
         textView.reveal(byteOffset: byteOffset)
+    }
+
+    func currentReadingPosition() -> (
+        file: URL,
+        contentID: ContentID,
+        byteOffset: UInt32,
+        line: UInt32,
+        column: UInt32,
+        symbolAnchor: String?
+    )? {
+        guard let file = displayedFile,
+              let document = displayedDocument,
+              let byteOffset = textView.firstVisibleByteOffset(),
+              let coordinate = document.lineTable.lineColumn(at: byteOffset)
+        else { return nil }
+        return (
+            file: file,
+            contentID: ContentID.sha256(of: document.bytes),
+            byteOffset: byteOffset,
+            line: coordinate.line,
+            column: coordinate.column,
+            symbolAnchor: document.symbolAnchor(at: byteOffset)
+        )
     }
 
     private func layoutTextViewFrame() {

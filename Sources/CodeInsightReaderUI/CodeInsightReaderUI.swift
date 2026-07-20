@@ -249,6 +249,26 @@ public final class ReaderTextView {
         byteUTF16Map?.byteOffset(forUTF16: index).flatMap(UInt32.init(exactly:))
     }
 
+    public func firstVisibleByteOffset() -> UInt32? {
+        guard let layoutManager = view.textLayoutManager,
+              let content = layoutManager.textContentManager
+        else { return nil }
+        layoutManager.textViewportLayoutController.layoutViewport()
+        guard let viewport = layoutManager.textViewportLayoutController.viewportRange else {
+            return nil
+        }
+        let location = content.offset(
+            from: content.documentRange.location,
+            to: viewport.location
+        )
+        guard location != NSNotFound else { return nil }
+        let lineStart = (backingTextStorage.string as NSString).lineRange(
+            for: NSRange(location: location, length: 0)
+        ).location
+        return byteUTF16Map?.byteOffset(forUTF16: lineStart)
+            .flatMap(UInt32.init(exactly:))
+    }
+
     private var baseAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = ReaderTheme.lineHeightMultiple

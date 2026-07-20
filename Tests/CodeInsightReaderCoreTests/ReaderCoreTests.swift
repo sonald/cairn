@@ -28,8 +28,17 @@ func rustHighlighterProducesStableSpans() throws {
     ])
     #expect(result.outlineFacets == [OutlineFacet(
         name: "greet",
-        range: ByteRange(lowerBound: 3, upperBound: 8)
+        range: ByteRange(
+            lowerBound: 0,
+            upperBound: UInt32(source.dropLast().utf8.count)
+        )
     )])
+    let bodyOffset = UInt32(source[..<source.range(of: "let n")!.lowerBound].utf8.count)
+    #expect(ReaderDocument(
+        bytes: Array(source.utf8),
+        highlightSpans: result.spans,
+        outlineFacets: result.outlineFacets
+    ).symbolAnchor(at: bodyOffset) == "greet")
 }
 
 @Test
