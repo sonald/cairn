@@ -2,9 +2,13 @@ import AppKit
 import CodeInsightAppModel
 import Observation
 
+private final class KeyablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+}
+
 @MainActor
 final class SymbolSearchPanel: NSWindowController,
-    NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate
+    NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate, NSWindowDelegate
 {
     private let appModel: AppModel
     private let panelModel = SymbolSearchPanelModel()
@@ -12,13 +16,14 @@ final class SymbolSearchPanel: NSWindowController,
     private let tableView = NSTableView()
     private let onOpen: (URL, UInt32) -> Void
     private var debounceTask: Task<Void, Never>?
+    private weak var ownerWindow: NSWindow?
 
     init(appModel: AppModel, onOpen: @escaping (URL, UInt32) -> Void) {
         self.appModel = appModel
         self.onOpen = onOpen
-        let panel = NSPanel(
+        let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 400),
-            styleMask: [.titled, .fullSizeContentView],
+            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -27,6 +32,7 @@ final class SymbolSearchPanel: NSWindowController,
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = true
         super.init(window: panel)
+        panel.delegate = self
         configureView()
         observe()
     }
@@ -36,6 +42,7 @@ final class SymbolSearchPanel: NSWindowController,
     }
 
     func show(relativeTo owner: NSWindow?) {
+        ownerWindow = owner
         panelModel.reset()
         input.stringValue = ""
         guard let panel = window else { return }
@@ -118,8 +125,11 @@ final class SymbolSearchPanel: NSWindowController,
     func tableViewSelectionDidChange(_ notification: Notification) {
         if tableView.selectedRow >= 0 {
             panelModel.select(tableView.selectedRow)
-            window?.makeFirstResponder(input)
         }
+    }
+
+    func windowDidResignKey(_ notification: Notification) {
+        dismiss(restoreFocus: false)
     }
 
     @objc private func openClickedRow(_ sender: Any?) {
@@ -184,6 +194,7 @@ final class SymbolSearchPanel: NSWindowController,
         tableView.delegate = self
         tableView.target = self
         tableView.doubleAction = #selector(openClickedRow(_:))
+        tableView.refusesFirstResponder = true
         tableView.rowSizeStyle = .custom
         tableView.intercellSpacing = .zero
 
@@ -237,10 +248,13 @@ final class SymbolSearchPanel: NSWindowController,
         onOpen(file, request.byteOffset)
     }
 
-    private func dismiss() {
+    private func dismiss(restoreFocus: Bool = true) {
         debounceTask?.cancel()
         panelModel.reset()
         window?.orderOut(nil)
+        if restoreFocus {
+            ownerWindow?.makeKey()
+        }
     }
 
     private func styledName(_ name: String, ranges: [Range<Int>]) -> NSAttributedString {

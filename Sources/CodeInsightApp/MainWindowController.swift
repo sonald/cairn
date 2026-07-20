@@ -49,7 +49,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextItem.maximumThickness = 280
         content.addSplitViewItem(contextItem)
 
-        let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1100, height: 760)
+        let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1280, height: 820)
         let window = NSWindow(
             contentRect: frame,
             styleMask: offscreen
@@ -59,12 +59,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             defer: false
         )
         window.title = "CodeInsight"
+        window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = content
         let toolbar = NSToolbar(identifier: "MainToolbar")
-        window.toolbar = toolbar
-        if !offscreen { window.center() }
         super.init(window: window)
         toolbar.delegate = self
+        toolbar.displayMode = .iconOnly
+        toolbar.allowsUserCustomization = false
+        window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
+        window.toolbar = toolbar
+        if !offscreen {
+            window.center()
+            window.setFrameAutosaveName("CodeInsightMainWindow")
+        }
         sidebarController.onOpenFile = { [weak self] url in
             self?.navigate(to: url)
         }
@@ -139,8 +147,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             item.target = self
             item.action = #selector(goForward(_:))
         case Self.projectItemIdentifier:
+            item.label = "Project"
             item.view = projectLabel
         case Self.indexItemIdentifier:
+            item.label = "Index Status"
             item.view = indexLabel
         default:
             return nil
@@ -205,6 +215,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 toolbar.removeItem(at: index)
             }
         }
+        toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
     }
 
