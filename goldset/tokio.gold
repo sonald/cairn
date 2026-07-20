@@ -1,0 +1,34 @@
+# The oneshot alias at loom_local.rs:1 names loom_oneshot; channel is defined there at line 4.
+def tokio/src/runtime/tests/loom_local.rs:21:37 -> tokio/src/runtime/tests/loom_oneshot.rs:4:15
+# The oneshot alias at loom_multi_thread.rs:11 names loom_oneshot across files.
+def tokio/src/runtime/tests/loom_multi_thread.rs:108:37 -> tokio/src/runtime/tests/loom_oneshot.rs:4:15
+# The same cross-file alias supplies channel inside only_blocking_inner.
+def tokio/src/runtime/tests/loom_multi_thread.rs:138:49 -> tokio/src/runtime/tests/loom_oneshot.rs:4:15
+# The same cross-file alias supplies channel inside blocking_and_regular_inner.
+def tokio/src/runtime/tests/loom_multi_thread.rs:174:49 -> tokio/src/runtime/tests/loom_oneshot.rs:4:15
+# Direct same-file call; all three spawned closures call the helper at line 14.
+def tokio/src/runtime/tests/loom_current_thread.rs:60:41 -> tokio/src/runtime/tests/loom_current_thread.rs:14:4
+# Direct same-file call; the second closure calls the same helper at line 14.
+def tokio/src/runtime/tests/loom_current_thread.rs:61:41 -> tokio/src/runtime/tests/loom_current_thread.rs:14:4
+# Direct same-file call; the third closure calls the same helper at line 14.
+def tokio/src/runtime/tests/loom_current_thread.rs:62:41 -> tokio/src/runtime/tests/loom_current_thread.rs:14:4
+# Direct same-file call; mk_runtime is defined below the test at line 32.
+def tokio/src/runtime/tests/loom_multi_thread/yield_now.rs:11:18 -> tokio/src/runtime/tests/loom_multi_thread/yield_now.rs:32:4
+# Method call on loom_oneshot::Sender; manual receiver tracing selects Sender::send among 13 definitions.
+def5 tokio/src/runtime/tests/loom_local.rs:28:26 -> tokio/src/runtime/tests/loom_oneshot.rs:32:19
+# Sender typing is not proven by M0, so send must remain Possible.
+nostrong tokio/src/runtime/tests/loom_local.rs:28:26
+# Method call on loom_oneshot::Receiver; manual receiver tracing selects Receiver::recv among 15 definitions.
+def5 tokio/src/runtime/tests/loom_local.rs:37:30 -> tokio/src/runtime/tests/loom_oneshot.rs:39:19
+# Receiver typing is not proven by M0, so recv must remain Possible.
+nostrong tokio/src/runtime/tests/loom_local.rs:37:30
+# Method call on AtomicTake; the local impl at line 43 is the semantic target among eight definitions.
+def5 tokio/src/runtime/tests/loom_multi_thread.rs:72:20 -> tokio/src/runtime/tests/loom_multi_thread.rs:43:23
+# AtomicTake receiver typing is not proven by M0, so take must remain Possible.
+nostrong tokio/src/runtime/tests/loom_multi_thread.rs:72:20
+# assert is a macro invocation and macro expansion is outside M0.
+unresolved tokio/src/runtime/tests/loom_current_thread.rs:33:5
+# assert_eq is a macro invocation and macro expansion is outside M0.
+unresolved tokio/src/runtime/tests/loom_multi_thread/yield_now.rs:22:17
+# The returned pattern variable v is bound by Some(v) on the preceding line.
+bind tokio/src/runtime/tests/loom_oneshot.rs:42:24 -> tokio/src/runtime/tests/loom_oneshot.rs:41:25

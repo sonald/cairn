@@ -9,7 +9,7 @@ import TreeSitterKit
 struct CodeInsight: ParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Inspect Rust source with CodeInsight.",
-        subcommands: [Parse.self, Index.self, Dump.self, Defs.self, Callers.self, Resolve.self]
+        subcommands: [Parse.self, Index.self, Dump.self, Defs.self, Callers.self, Resolve.self, Goldset.self]
     )
 }
 
@@ -252,6 +252,33 @@ extension CodeInsight {
             }
         }
     }
+
+    struct Goldset: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Evaluate resolution assertions against a corpus."
+        )
+
+        @Argument(help: "Gold-set assertion file.")
+        var goldFile: String
+
+        @Option(name: .long, help: "Corpus root to index.")
+        var corpus: String
+
+        @OptionGroup var global: GlobalOptions
+
+        func run() throws {
+            let report = try evaluateGoldSet(
+                at: URL(fileURLWithPath: goldFile),
+                corpus: URL(fileURLWithPath: corpus, isDirectory: true)
+            )
+            if global.json {
+                try printJSON(report)
+            } else {
+                printGoldSet(report)
+            }
+            if report.unexpectedFailures > 0 { throw ExitCode.failure }
+        }
+    }
 }
 
 private enum RustLanguage {
@@ -454,6 +481,23 @@ private func printStats(_ stats: IndexStats) {
     print("imports: \(stats.importCount)")
     print("elapsedMilliseconds: \(stats.elapsedMilliseconds)")
     print("filesWithErrorNodes: \(stats.filesWithErrorNodes)")
+}
+
+private func printGoldSet(_ report: GoldSetReport) {
+    func ratio(_ passed: Int, _ total: Int) -> String {
+        let percent = total == 0 ? 0 : Double(passed) * 100 / Double(total)
+        return "\(passed)/\(total) (\(String(format: "%.1f", percent))%)"
+    }
+    print("metric\tvalue")
+    print("total\t\(report.total)")
+    print("def Top-1\t\(ratio(report.defTop1Passed, report.defTop1Total))")
+    print("def5 Top-5\t\(ratio(report.def5Top5Passed, report.def5Top5Total))")
+    print("nostrong violations\t\(report.noStrongViolations)")
+    print("unresolved\t\(ratio(report.unresolvedPassed, report.unresolvedTotal))")
+    print("no results\t\(report.noResults)")
+    print("KNOWN-FAIL\t\(report.knownFailures)")
+    print("unexpected failures\t\(report.unexpectedFailures)")
+    for failure in report.failures { print("FAIL\t\(failure)") }
 }
 
 private func printJSON<T: Encodable>(_ value: T) throws {

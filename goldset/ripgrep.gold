@@ -1,0 +1,35 @@
+# Direct same-file call; run is defined below at line 77.
+def crates/core/main.rs:44:11 -> crates/core/main.rs:77:4
+# Direct call verified against fn search at line 107, while mod search at line 17 is not callable.
+# KNOWN-FAIL: the resolver ranks the same-name module binding before the function.
+def crates/core/main.rs:87:54 -> crates/core/main.rs:107:4
+# Direct same-file call; the match arm invokes fn search_parallel at line 160.
+def crates/core/main.rs:88:31 -> crates/core/main.rs:160:4
+# Direct same-file call; the Mode::Files arm invokes fn files at line 235.
+def crates/core/main.rs:89:47 -> crates/core/main.rs:235:4
+# Direct same-file call; the parallel Mode::Files arm invokes line 271.
+def crates/core/main.rs:90:24 -> crates/core/main.rs:271:4
+# Direct same-file call; the Mode::Types arm invokes fn types at line 329.
+def crates/core/main.rs:91:31 -> crates/core/main.rs:329:4
+# Method call on HiArgs; manual type tracing selects HiArgs::threads, among three same-name definitions.
+def5 crates/core/main.rs:87:36 -> crates/core/flags/hiargs.rs:847:19
+# Receiver typing is not proven, so the threads candidates must remain Possible.
+nostrong crates/core/main.rs:87:36
+# Method call on ignore::WalkBuilder; build has 25 repository definitions, target verified at walk.rs:542.
+# KNOWN-FAIL: path-only ranking puts the semantic target outside the first five candidates.
+def5 crates/core/main.rs:112:10 -> crates/ignore/src/walk.rs:542:12
+# Receiver typing is not proven, so the build candidates must remain Possible.
+nostrong crates/core/main.rs:112:10
+# Method call on HiArgs; manual type tracing selects HiArgs::sort over regex literal's sort.
+def5 crates/core/main.rs:114:26 -> crates/core/flags/hiargs.rs:752:19
+# Receiver typing is not proven, so the two sort candidates must remain Possible.
+nostrong crates/core/main.rs:114:26
+# eprintln_locked is defined by macro_rules and macro expansion is outside M0.
+unresolved crates/core/main.rs:62:13
+# err_message is defined by macro_rules and macro expansion is outside M0.
+unresolved crates/core/main.rs:131:17
+# The searched use is dominated by let mut searched at line 117.
+bind crates/core/main.rs:143:37 -> crates/core/main.rs:117:13
+# The returned matched value is dominated by let mut matched at line 116.
+# KNOWN-FAIL: the resolver reports no candidate for this tail-expression binding use.
+bind crates/core/main.rs:150:8 -> crates/core/main.rs:116:13

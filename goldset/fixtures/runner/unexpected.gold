@@ -1,0 +1,2 @@
+# Deliberately wrong target verifies ordinary failures remain fatal.
+def main.rs:5:5 -> main.rs:4:4

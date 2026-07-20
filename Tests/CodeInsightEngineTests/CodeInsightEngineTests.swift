@@ -3,6 +3,11 @@ import CodeInsightCore
 import Foundation
 import Testing
 
+private let repositoryRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+
 @Test
 func resolvesUniqueRustImportAndFindsCaller() throws {
     let main = """
@@ -213,6 +218,34 @@ func indexesProgrammaticallyGeneratedProject() throws {
         #expect(session.stats.importCount == 0)
         #expect(session.stats.filesWithErrorNodes == 0)
     }
+}
+
+@Test
+func evaluatesGoldSetMetricsAndKnownFailures() throws {
+    let fixture = repositoryRoot.appendingPathComponent("goldset/fixtures/runner")
+    let report = try evaluateGoldSet(
+        at: fixture.appendingPathComponent("sample.gold"),
+        corpus: fixture
+    )
+
+    #expect(report.total == 8)
+    #expect(report.defTop1Passed == 1)
+    #expect(report.defTop1Total == 2)
+    #expect(report.def5Top5Passed == 1)
+    #expect(report.def5Top5Total == 1)
+    #expect(report.noStrongViolations == 1)
+    #expect(report.unresolvedPassed == 1)
+    #expect(report.unresolvedTotal == 1)
+    #expect(report.noResults == 1)
+    #expect(report.knownFailures == 2)
+    #expect(report.unexpectedFailures == 0)
+
+    let failing = try evaluateGoldSet(
+        at: fixture.appendingPathComponent("unexpected.gold"),
+        corpus: fixture
+    )
+    #expect(failing.total == 1)
+    #expect(failing.unexpectedFailures == 1)
 }
 
 private func withProject(

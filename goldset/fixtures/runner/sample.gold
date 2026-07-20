@@ -1,0 +1,16 @@
+# Alias resolves across the file module map.
+def main.rs:5:5 -> db.rs:1:8
+# Caller lookup returns the one semantic alias call.
+callers db.rs:1:8 == main.rs:5:5
+# Macros are intentionally unresolved in M0.
+unresolved main.rs:6:5
+# Local use resolves to its preceding lexical binding.
+bind main.rs:8:5 -> main.rs:7:9
+# Receiver types are not proven, but the semantic target is in the Top-5 set.
+def5 method.rs:9:21 -> method.rs:3:8
+# Method-name-only resolution must not claim Strong certainty.
+nostrong method.rs:9:21
+# KNOWN-FAIL: a proven alias is Strong, exercising the honesty violation metric.
+nostrong main.rs:5:5
+# KNOWN-FAIL: exercises exclusion from the exit status.
+def main.rs:5:5 -> main.rs:4:4
