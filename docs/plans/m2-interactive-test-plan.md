@@ -61,7 +61,7 @@ swift run -c release codeinsight-app
 | ID | 步骤 | 预期 |
 |----|------|------|
 | R3.1 | Cmd+Shift+F | 面板弹出，输入框有焦点 |
-| R3.2 | 输入 `append_text` | 结果流式出现，按文件分组（组头 = 路径 + 命中数），命中段加粗 |
+| R3.2 | 输入 `Backend`（oatmeal 中 ~403 命中/26 文件） | 结果流式出现，按文件分组（组头 = 路径 + 命中数），命中段加粗 |
 | R3.3 | 底部状态行 | "N matches in M files" 与实际组内容自洽 |
 | R3.4 | 快速连续修改查询（append → appen → append_te） | 无闪烁/旧结果残留 |
 | R3.5 | 点击 .* 开 regex，搜 `fn\s+new` | 有结果且行文本含 fn new 形态 |
