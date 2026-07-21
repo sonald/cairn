@@ -33,57 +33,59 @@ public struct CommitLog: Sendable {
     public let commits: [CommitInfo]
 
     public init(repositoryURL: URL) throws {
-        let repository = try GitRepository(url: repositoryURL)
-        let references = try Self.referencesByCommit(in: repository)
+        commits = try LibGit2Executor.sync {
+            let repository = try GitRepository(url: repositoryURL)
+            let references = try Self.referencesByCommit(in: repository)
 
-        var walk: OpaquePointer?
-        try check(git_revwalk_new(&walk, repository.raw), "git_revwalk_new")
-        guard let walk else {
-            throw GitError.git(
-                operation: "git_revwalk_new",
-                code: -1,
-                message: "returned no revwalk"
-            )
-        }
-        defer { git_revwalk_free(walk) }
-        try check(git_revwalk_push_head(walk), "git_revwalk_push_head")
-        try check(
-            git_revwalk_simplify_first_parent(walk),
-            "git_revwalk_simplify_first_parent"
-        )
-
-        var commits: [CommitInfo] = []
-        var oid = git_oid()
-        // ponytail: M3 caps history at 500; add paged revwalk state only when
-        // repositories with deeper useful history require it.
-        while commits.count < 500 {
-            let code = git_revwalk_next(&oid, walk)
-            if code == GIT_ITEROVER.rawValue { break }
-            try check(code, "git_revwalk_next")
-
-            var commit: OpaquePointer?
+            var walk: OpaquePointer?
+            try check(git_revwalk_new(&walk, repository.raw), "git_revwalk_new")
+            guard let walk else {
+                throw GitError.git(
+                    operation: "git_revwalk_new",
+                    code: -1,
+                    message: "returned no revwalk"
+                )
+            }
+            defer { git_revwalk_free(walk) }
+            try check(git_revwalk_push_head(walk), "git_revwalk_push_head")
             try check(
-                git_commit_lookup(&commit, repository.raw, &oid),
-                "git_commit_lookup"
+                git_revwalk_simplify_first_parent(walk),
+                "git_revwalk_simplify_first_parent"
             )
-            guard let commit else { continue }
-            defer { git_commit_free(commit) }
 
-            let fullSHA = withUnsafePointer(to: &oid) { oidString($0).hex }
-            let labels = references[fullSHA] ?? (branches: [], tags: [])
-            commits.append(CommitInfo(
-                shortSHA: String(fullSHA.prefix(7)),
-                fullSHA: fullSHA,
-                summary: git_commit_summary(commit).map(String.init(cString:)) ?? "",
-                authorName: git_commit_author(commit).map {
-                    String(cString: $0.pointee.name)
-                } ?? "",
-                date: Date(timeIntervalSince1970: TimeInterval(git_commit_time(commit))),
-                branchNames: labels.branches,
-                tagNames: labels.tags
-            ))
+            var commits: [CommitInfo] = []
+            var oid = git_oid()
+            // ponytail: M3 caps history at 500; add paged revwalk state only when
+            // repositories with deeper useful history require it.
+            while commits.count < 500 {
+                let code = git_revwalk_next(&oid, walk)
+                if code == GIT_ITEROVER.rawValue { break }
+                try check(code, "git_revwalk_next")
+
+                var commit: OpaquePointer?
+                try check(
+                    git_commit_lookup(&commit, repository.raw, &oid),
+                    "git_commit_lookup"
+                )
+                guard let commit else { continue }
+                defer { git_commit_free(commit) }
+
+                let fullSHA = withUnsafePointer(to: &oid) { oidString($0).hex }
+                let labels = references[fullSHA] ?? (branches: [], tags: [])
+                commits.append(CommitInfo(
+                    shortSHA: String(fullSHA.prefix(7)),
+                    fullSHA: fullSHA,
+                    summary: git_commit_summary(commit).map(String.init(cString:)) ?? "",
+                    authorName: git_commit_author(commit).map {
+                        String(cString: $0.pointee.name)
+                    } ?? "",
+                    date: Date(timeIntervalSince1970: TimeInterval(git_commit_time(commit))),
+                    branchNames: labels.branches,
+                    tagNames: labels.tags
+                ))
+            }
+            return commits
         }
-        self.commits = commits
     }
 
     private static func referencesByCommit(

@@ -1,6 +1,34 @@
 import CLibGit2
 import CodeInsightCore
+import Dispatch
 import Foundation
+
+enum LibGit2Executor {
+    private static let marker = DispatchSpecificKey<UInt8>()
+    private static let queue: DispatchQueue = {
+        let queue = DispatchQueue(label: "CodeInsightGit.libgit2")
+        queue.setSpecific(key: marker, value: 1)
+        return queue
+    }()
+    private static let initializationCode = git_libgit2_init()
+
+    static func sync<T>(_ operation: () throws -> T) throws -> T {
+        if DispatchQueue.getSpecific(key: marker) != nil {
+            return try initialized(operation)
+        }
+        return try queue.sync { try initialized(operation) }
+    }
+
+    private static func initialized<T>(_ operation: () throws -> T) throws -> T {
+        guard initializationCode >= 0 else {
+            throw gitError(
+                operation: "git_libgit2_init",
+                code: initializationCode
+            )
+        }
+        return try operation()
+    }
+}
 
 public struct GitOID: Hashable, Sendable, CustomStringConvertible {
     public let hex: String
@@ -52,59 +80,57 @@ public final class GitRepository {
     public let objectFormat: GitObjectFormat
 
     public init(url: URL) throws {
-        let initCode = git_libgit2_init()
-        guard initCode >= 0 else {
-            throw gitError(operation: "git_libgit2_init", code: initCode)
+        let opened: (OpaquePointer, GitObjectFormat) = try LibGit2Executor.sync {
+            var repository: OpaquePointer?
+            do {
+                try url.withUnsafeFileSystemRepresentation { path in
+                    try check(git_repository_open(&repository, path), "git_repository_open")
+                }
+                guard let repository else {
+                    throw GitError.git(
+                        operation: "git_repository_open",
+                        code: -1,
+                        message: "returned no repository"
+                    )
+                }
+
+                let oidType = codeinsight_repository_oid_type(repository)
+                let objectFormat: GitObjectFormat
+                switch oidType {
+                case codeinsight_oid_sha1():
+                    objectFormat = .sha1
+                case codeinsight_oid_sha256():
+                    objectFormat = .sha256
+                default:
+                    throw GitError.unsupportedObjectFormat(oidType)
+                }
+                return (repository, objectFormat)
+            } catch {
+                if let repository { git_repository_free(repository) }
+                throw error
+            }
         }
-
-        var repository: OpaquePointer?
-        do {
-            try url.withUnsafeFileSystemRepresentation { path in
-                try check(git_repository_open(&repository, path), "git_repository_open")
-            }
-            guard let repository else {
-                throw GitError.git(
-                    operation: "git_repository_open",
-                    code: -1,
-                    message: "returned no repository"
-                )
-            }
-
-            let oidType = codeinsight_repository_oid_type(repository)
-            let objectFormat: GitObjectFormat
-            switch oidType {
-            case codeinsight_oid_sha1():
-                objectFormat = .sha1
-            case codeinsight_oid_sha256():
-                objectFormat = .sha256
-            default:
-                throw GitError.unsupportedObjectFormat(oidType)
-            }
-
-            raw = repository
-            self.objectFormat = objectFormat
-        } catch {
-            if let repository { git_repository_free(repository) }
-            git_libgit2_shutdown()
-            throw error
-        }
+        raw = opened.0
+        objectFormat = opened.1
     }
 
     deinit {
-        git_repository_free(raw)
-        git_libgit2_shutdown()
+        let raw = raw
+        try? LibGit2Executor.sync { git_repository_free(raw) }
     }
 
     func readBlob(oid: git_oid) throws -> [UInt8] {
-        var oid = oid
-        var blob: OpaquePointer?
-        try check(git_blob_lookup(&blob, raw, &oid), "git_blob_lookup")
-        guard let blob else { return [] }
-        defer { git_blob_free(blob) }
+        try LibGit2Executor.sync {
+            var oid = oid
+            var blob: OpaquePointer?
+            try check(git_blob_lookup(&blob, raw, &oid), "git_blob_lookup")
+            guard let blob else { return [] }
+            defer { git_blob_free(blob) }
 
-        let count = git_blob_rawsize(blob)
-        guard count > 0, let bytes = git_blob_rawcontent(blob) else { return [] }
-        return [UInt8](Data(bytes: bytes, count: Int(count)))
+            let count = git_blob_rawsize(blob)
+            guard count > 0, let bytes = git_blob_rawcontent(blob) else { return [] }
+            return [UInt8](Data(bytes: bytes, count: Int(count)))
+        }
     }
 }
 
@@ -118,76 +144,79 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let commitOID: GitOID
 
     public init(repositoryURL: URL, revision: String = "HEAD") throws {
-        let repository = try GitRepository(url: repositoryURL)
+        let loaded: ([String: CapturedFile], GitObjectFormat, GitOID) =
+            try LibGit2Executor.sync {
+                let repository = try GitRepository(url: repositoryURL)
 
-        var object: OpaquePointer?
-        try revision.withCString { spec in
-            try check(
-                git_revparse_single(&object, repository.raw, spec),
-                "git_revparse_single"
-            )
-        }
-        guard let object else {
-            throw GitError.git(
-                operation: "git_revparse_single",
-                code: -1,
-                message: "returned no object"
-            )
-        }
-        defer { git_object_free(object) }
+                var object: OpaquePointer?
+                try revision.withCString { spec in
+                    try check(
+                        git_revparse_single(&object, repository.raw, spec),
+                        "git_revparse_single"
+                    )
+                }
+                guard let object else {
+                    throw GitError.git(
+                        operation: "git_revparse_single",
+                        code: -1,
+                        message: "returned no object"
+                    )
+                }
+                defer { git_object_free(object) }
 
-        var commit: OpaquePointer?
-        try check(
-            git_object_peel(&commit, object, GIT_OBJECT_COMMIT),
-            "git_object_peel(commit)"
-        )
-        guard let commit, let commitID = git_object_id(commit) else {
-            throw GitError.git(
-                operation: "git_object_peel(commit)",
-                code: -1,
-                message: "returned no commit"
-            )
-        }
-        defer { git_object_free(commit) }
+                var commit: OpaquePointer?
+                try check(
+                    git_object_peel(&commit, object, GIT_OBJECT_COMMIT),
+                    "git_object_peel(commit)"
+                )
+                guard let commit, let commitID = git_object_id(commit) else {
+                    throw GitError.git(
+                        operation: "git_object_peel(commit)",
+                        code: -1,
+                        message: "returned no commit"
+                    )
+                }
+                defer { git_object_free(commit) }
 
-        var tree: OpaquePointer?
-        try check(git_commit_tree(&tree, commit), "git_commit_tree")
-        guard let tree else {
-            throw GitError.git(
-                operation: "git_commit_tree",
-                code: -1,
-                message: "returned no tree"
-            )
-        }
-        defer { git_tree_free(tree) }
+                var tree: OpaquePointer?
+                try check(git_commit_tree(&tree, commit), "git_commit_tree")
+                guard let tree else {
+                    throw GitError.git(
+                        operation: "git_commit_tree",
+                        code: -1,
+                        message: "returned no tree"
+                    )
+                }
+                defer { git_tree_free(tree) }
 
-        let collector = TreeWalkCollector()
-        let payload = Unmanaged.passUnretained(collector).toOpaque()
-        try check(
-            git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
-            "git_tree_walk"
-        )
+                let collector = TreeWalkCollector()
+                let payload = Unmanaged.passUnretained(collector).toOpaque()
+                try check(
+                    git_tree_walk(tree, GIT_TREEWALK_PRE, collectTreeEntry, payload),
+                    "git_tree_walk"
+                )
 
-        var captured: [String: CapturedFile] = [:]
-        for entry in collector.entries {
-            let bytes: [UInt8]
-            if entry.fileMode == .gitlink {
-                bytes = Array(entry.oid.hex.utf8)
-            } else {
-                bytes = try repository.readBlob(oid: entry.rawOID)
+                var captured: [String: CapturedFile] = [:]
+                for entry in collector.entries {
+                    let bytes = if entry.fileMode == .gitlink {
+                        Array(entry.oid.hex.utf8)
+                    } else {
+                        try repository.readBlob(oid: entry.rawOID)
+                    }
+                    captured[entry.path] = CapturedFile(
+                        bytes: bytes,
+                        contentID: ContentID.sha256(of: bytes),
+                        fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
+                    )
+                }
+                return (captured, repository.objectFormat, oidString(commitID))
             }
-            captured[entry.path] = CapturedFile(
-                bytes: bytes,
-                contentID: ContentID.sha256(of: bytes),
-                fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
-            )
-        }
 
         snapshotID = SnapshotID(rawValue: UUID())
-        objectFormat = repository.objectFormat
+        objectFormat = loaded.1
         self.revision = revision
-        self.commitOID = oidString(commitID)
-        files = captured
+        commitOID = loaded.2
+        files = loaded.0
     }
 
     public func listFiles() -> [(
@@ -226,14 +255,20 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     public let sourceKind: SourceKind = .untracked
 
     public init(repositoryURL: URL) throws {
-        let repository = try GitRepository(url: repositoryURL)
-        guard let workdir = git_repository_workdir(repository.raw) else {
-            throw GitError.notAWorktree(repositoryURL.path)
+        let repositoryInfo: (URL, GitObjectFormat) = try LibGit2Executor.sync {
+            let repository = try GitRepository(url: repositoryURL)
+            guard let workdir = git_repository_workdir(repository.raw) else {
+                throw GitError.notAWorktree(repositoryURL.path)
+            }
+            return (
+                URL(
+                    fileURLWithPath: String(cString: workdir),
+                    isDirectory: true
+                ).standardizedFileURL,
+                repository.objectFormat
+            )
         }
-        let root = URL(
-            fileURLWithPath: String(cString: workdir),
-            isDirectory: true
-        ).standardizedFileURL
+        let root = repositoryInfo.0
 
         var captured: [String: CapturedFile] = [:]
         for file in try Self.rustFiles(under: root) {
@@ -246,7 +281,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         }
 
         snapshotID = SnapshotID(rawValue: UUID())
-        objectFormat = repository.objectFormat
+        objectFormat = repositoryInfo.1
         files = captured
     }
 

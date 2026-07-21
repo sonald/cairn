@@ -70,16 +70,13 @@ public extension IndexService {
 }
 
 public struct ProjectIndexService: IndexService {
-    private static let snapshotCaptureLock = NSLock()
     private let store = ProjectIndexStore()
 
     public init() {}
 
     public static func loadCommitHistory(root: URL) async throws -> [CommitInfo] {
         try await detachedValue {
-            try snapshotCaptureLock.withLock {
-                try CommitLog(repositoryURL: root).commits
-            }
+            try CommitLog(repositoryURL: root).commits
         }
     }
 
@@ -88,9 +85,7 @@ public struct ProjectIndexService: IndexService {
         return try await detachedValue {
             let snapshot: WorktreeSnapshot
             do {
-                snapshot = try Self.snapshotCaptureLock.withLock {
-                    try WorktreeSnapshot(repositoryURL: root)
-                }
+                snapshot = try WorktreeSnapshot(repositoryURL: root)
             } catch {
                 return try ProjectIndexer().index(root: root)
             }
@@ -104,12 +99,10 @@ public struct ProjectIndexService: IndexService {
     ) async throws -> any Snapshot {
         try await detachedValue {
             try Task.checkCancellation()
-            let snapshot: any Snapshot = try Self.snapshotCaptureLock.withLock {
-                if let revision {
-                    try CommitSnapshot(repositoryURL: root, revision: revision)
-                } else {
-                    try WorktreeSnapshot(repositoryURL: root)
-                }
+            let snapshot: any Snapshot = if let revision {
+                try CommitSnapshot(repositoryURL: root, revision: revision)
+            } else {
+                try WorktreeSnapshot(repositoryURL: root)
             }
             try Task.checkCancellation()
             return snapshot

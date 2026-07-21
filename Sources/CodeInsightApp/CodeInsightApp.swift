@@ -35,7 +35,14 @@ private struct CodeInsightApplication {
         let delegate = AppDelegate(startedAt: startedAt)
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if let index = arguments.firstIndex(of: "--self-test-open"),
+            if let index = arguments.firstIndex(of: "--self-test-history"),
+               arguments.indices.contains(index + 1)
+            {
+                delegate.runHistorySelfTest(root: URL(
+                    fileURLWithPath: arguments[index + 1],
+                    isDirectory: true
+                ))
+            } else if let index = arguments.firstIndex(of: "--self-test-open"),
                arguments.indices.contains(index + 1)
             {
                 delegate.runOpenSelfTest(file: URL(
@@ -114,6 +121,215 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             fileCount: fileCount,
             ready: ready
         )
+    }
+
+    func runHistorySelfTest(root: URL) -> Never {
+        launch(offscreen: true)
+        guard let windowController else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: false,
+                switchEnteredHistory: false,
+                navigationSequence: false,
+                error: "window unavailable"
+            )
+        }
+
+        windowController.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState {
+                return !self.model.commitPicker.isLoading
+            }
+            return false
+        }),
+        case .ready = model.projectState,
+        model.commitPicker.errorMessage == nil
+        else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: false,
+                switchEnteredHistory: false,
+                navigationSequence: false,
+                error: "project or commit history unavailable"
+            )
+        }
+
+        var selectionSynchronized = emitHistoryStep(
+            "openProject",
+            controller: windowController
+        )
+        guard let fileA = rustFiles(in: model.fileTree?.children ?? []).first,
+              waitUntil(timeout: 5, condition: {
+                  windowController.selectFileInSidebar(fileA)
+              }),
+              waitUntil(timeout: 5, condition: {
+                  self.model.selectedFile == fileA
+                      && windowController.displayedReaderFile == fileA
+              })
+        else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: false,
+                switchEnteredHistory: false,
+                navigationSequence: false,
+                error: "could not open file A through the sidebar"
+            )
+        }
+        selectionSynchronized = emitHistoryStep(
+            "openA",
+            controller: windowController
+        ) && selectionSynchronized
+
+        guard model.commitPicker.commits.indices.contains(1) else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: selectionSynchronized,
+                switchEnteredHistory: false,
+                navigationSequence: false,
+                error: "HEAD~1 unavailable"
+            )
+        }
+        let previousRevision = model.commitPicker.commits[1].fullSHA
+        guard windowController.selectCommit(previousRevision),
+              waitUntil(timeout: 30, condition: {
+                  self.model.currentRevision == previousRevision
+                      && self.model.snapshotPhase == .fullReady
+              })
+        else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: selectionSynchronized,
+                switchEnteredHistory: false,
+                navigationSequence: false,
+                error: "commit switch did not complete"
+            )
+        }
+        pumpRunLoop()
+        let switchEnteredHistory = model.navigationHistory.canGoBack
+        selectionSynchronized = emitHistoryStep(
+            "switchHEAD~1",
+            controller: windowController
+        ) && selectionSynchronized
+
+        guard let fileB = rustFiles(in: model.fileTree?.children ?? []).first(where: {
+            $0.standardizedFileURL != fileA.standardizedFileURL
+        }),
+        windowController.selectFileInSidebar(fileB),
+        waitUntil(timeout: 5, condition: {
+            self.model.selectedFile == fileB
+                && windowController.displayedReaderFile == fileB
+        })
+        else {
+            Self.finishHistorySelfTest(
+                selectionSynchronized: false,
+                switchEnteredHistory: switchEnteredHistory,
+                navigationSequence: false,
+                error: "could not open file B through the sidebar"
+            )
+        }
+        selectionSynchronized = emitHistoryStep(
+            "openB",
+            controller: windowController
+        ) && selectionSynchronized
+
+        var navigationSequence = historyStateMatches(
+            revision: previousRevision,
+            file: fileB,
+            controller: windowController
+        )
+        navigationSequence = performHistoryNavigation(
+            { windowController.goBack(nil) },
+            revision: previousRevision,
+            file: fileA
+        ) && navigationSequence
+        selectionSynchronized = emitHistoryStep(
+            "back1",
+            controller: windowController
+        ) && selectionSynchronized
+        navigationSequence = performHistoryNavigation(
+            { windowController.goBack(nil) },
+            revision: nil,
+            file: fileA
+        ) && navigationSequence
+        selectionSynchronized = emitHistoryStep(
+            "back2",
+            controller: windowController
+        ) && selectionSynchronized
+        navigationSequence = performHistoryNavigation(
+            { windowController.goForward(nil) },
+            revision: previousRevision,
+            file: fileA
+        ) && navigationSequence
+        selectionSynchronized = emitHistoryStep(
+            "forward1",
+            controller: windowController
+        ) && selectionSynchronized
+        navigationSequence = performHistoryNavigation(
+            { windowController.goForward(nil) },
+            revision: previousRevision,
+            file: fileB
+        ) && navigationSequence
+        selectionSynchronized = emitHistoryStep(
+            "forward2",
+            controller: windowController
+        ) && selectionSynchronized
+
+        Self.finishHistorySelfTest(
+            selectionSynchronized: selectionSynchronized,
+            switchEnteredHistory: switchEnteredHistory,
+            navigationSequence: navigationSequence,
+            error: nil
+        )
+    }
+
+    private func performHistoryNavigation(
+        _ action: () -> Void,
+        revision: String?,
+        file: URL
+    ) -> Bool {
+        guard let windowController else { return false }
+        let cursor = model.navigationHistory.cursor
+        action()
+        pumpRunLoop()
+        guard model.navigationHistory.cursor != cursor else { return false }
+        guard waitUntil(timeout: 30, condition: {
+            self.model.currentRevision == revision
+                && self.model.selectedFile == file
+                && self.model.snapshotPhase == .fullReady
+        }) else { return false }
+        pumpRunLoop()
+        return historyStateMatches(
+            revision: revision,
+            file: file,
+            controller: windowController
+        )
+    }
+
+    private func historyStateMatches(
+        revision: String?,
+        file: URL,
+        controller: MainWindowController
+    ) -> Bool {
+        model.currentRevision == revision
+            && controller.displayedReaderFile?.standardizedFileURL
+                == file.standardizedFileURL
+    }
+
+    @discardableResult
+    private func emitHistoryStep(
+        _ step: String,
+        controller: MainWindowController
+    ) -> Bool {
+        let readerFile = controller.displayedReaderFile
+        let treeFile = controller.selectedSidebarFile
+        Self.writeJSON([
+            "step": step,
+            "snapshotShort": model.currentRevision.map { String($0.prefix(7)) }
+                ?? "worktree",
+            "readerFile": (readerFile?.lastPathComponent as Any?) ?? NSNull(),
+            "treeSelectedFile": (treeFile?.lastPathComponent as Any?) ?? NSNull(),
+            "canGoBack": model.navigationHistory.canGoBack,
+            "canGoForward": model.navigationHistory.canGoForward,
+            "historyCount": model.navigationHistory.records.count,
+            "readerHasReadingPosition": controller.readerHasReadingPosition,
+        ])
+        return readerFile?.standardizedFileURL == treeFile?.standardizedFileURL
     }
 
     func runSwitchSelfTest(root: URL) -> Never {
@@ -664,6 +880,41 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
     }
 
+    private static func finishHistorySelfTest(
+        selectionSynchronized: Bool,
+        switchEnteredHistory: Bool,
+        navigationSequence: Bool,
+        error: String?
+    ) -> Never {
+        let passed = selectionSynchronized
+            && switchEnteredHistory
+            && navigationSequence
+            && error == nil
+        var summary: [String: Any] = [
+            "step": "summary",
+            "selectionSynchronized": selectionSynchronized,
+            "switchEnteredHistory": switchEnteredHistory,
+            "navigationSequence": navigationSequence,
+            "passed": passed,
+        ]
+        if let error { summary["error"] = error }
+        writeJSON(summary)
+        Darwin.exit(passed ? 0 : 1)
+    }
+
+    private static func writeJSON(_ object: [String: Any]) {
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+        }
+    }
+
     private static func finishOpenSelfTest(
         tier: FileTier,
         firstVisibleMS: Double,
@@ -769,4 +1020,28 @@ private func milliseconds(since start: ContinuousClock.Instant) -> Double {
     let duration = start.duration(to: .now)
     return Double(duration.components.seconds) * 1_000
         + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+}
+
+@MainActor
+private func waitUntil(
+    timeout: TimeInterval,
+    condition: () -> Bool
+) -> Bool {
+    let deadline = Date(timeIntervalSinceNow: timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+    }
+    return condition()
+}
+
+@MainActor
+private func pumpRunLoop() {
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+}
+
+private func rustFiles(in nodes: [FileTreeNode]) -> [URL] {
+    nodes.flatMap { node in
+        node.isDirectory ? rustFiles(in: node.children) : [node.url]
+    }
 }

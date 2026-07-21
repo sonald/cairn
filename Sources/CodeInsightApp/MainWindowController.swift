@@ -159,6 +159,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         render()
     }
 
+    func selectFileInSidebar(_ file: URL) -> Bool {
+        sidebarController.selectFile(file)
+    }
+
+    func selectCommit(_ revision: String) -> Bool {
+        if commitPickerPopover == nil {
+            commitPickerPopover = CommitPickerPopover(
+                appModel: model,
+                leavingRecord: { [weak self] in self?.currentJumpRecord() }
+            )
+        }
+        return commitPickerPopover?.chooseCommit(revision) == true
+    }
+
+    var displayedReaderFile: URL? { readerController.displayedFile }
+    var selectedSidebarFile: URL? { sidebarController.selectedFile }
+    var readerHasReadingPosition: Bool {
+        readerController.currentReadingPosition() != nil
+    }
+
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
@@ -359,7 +379,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             displayedGeneration = model.generation
             displayedSnapshotID = model.currentSnapshotID
         }
-        sidebarController.synchronizeFileSelection(to: model.selectedFile)
+        if !sidebarController.synchronizeFileSelection(to: model.selectedFile) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                _ = sidebarController.synchronizeFileSelection(to: model.selectedFile)
+            }
+        }
         readerController.display(
             model.selectedFile,
             snapshotID: model.currentSnapshotID,
@@ -537,9 +562,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .indexing, .ready:
             break
         }
-        guard let position = readerController.currentReadingPosition(),
-              let path = projectPath(for: position.file)
+        guard let selectedFile = model.selectedFile,
+              let path = projectPath(for: selectedFile)
         else { return nil }
+        guard let position = readerController.currentReadingPosition(
+            fallbackByteOffset: model.selectedByteOffset
+        ), position.file.standardizedFileURL == selectedFile.standardizedFileURL
+        else {
+            return JumpRecord(
+                path: path,
+                contentID: nil,
+                byteOffset: model.selectedByteOffset ?? 0,
+                line: 0,
+                column: 0,
+                symbolAnchor: nil,
+                snapshotID: model.currentSnapshotID
+            )
+        }
         return JumpRecord(
             path: path,
             contentID: position.contentID,
@@ -621,13 +660,14 @@ final class SidebarViewController: NSViewController,
         fileOutlineView.reloadData()
     }
 
-    func synchronizeFileSelection(to file: URL?) {
+    @discardableResult
+    func synchronizeFileSelection(to file: URL?) -> Bool {
         loadViewIfNeeded()
         isSynchronizingFileSelection = true
         defer { isSynchronizingFileSelection = false }
         guard let path = tree?.selectionPath(for: file), let node = path.last else {
             fileOutlineView.deselectAll(nil)
-            return
+            return true
         }
         for parent in path.dropLast() {
             fileOutlineView.expandItem(parent)
@@ -635,12 +675,37 @@ final class SidebarViewController: NSViewController,
         let row = fileOutlineView.row(forItem: node)
         guard row >= 0 else {
             fileOutlineView.deselectAll(nil)
-            return
+            return false
         }
         if fileOutlineView.selectedRow != row {
             fileOutlineView.selectRowIndexes([row], byExtendingSelection: false)
         }
         fileOutlineView.scrollRowToVisible(row)
+        return true
+    }
+
+    func selectFile(_ file: URL) -> Bool {
+        loadViewIfNeeded()
+        guard let path = tree?.selectionPath(for: file), let node = path.last else {
+            return false
+        }
+        for parent in path.dropLast() {
+            fileOutlineView.expandItem(parent)
+        }
+        let row = fileOutlineView.row(forItem: node)
+        guard row >= 0 else { return false }
+        fileOutlineView.selectRowIndexes([row], byExtendingSelection: false)
+        return true
+    }
+
+    var selectedFile: URL? {
+        loadViewIfNeeded()
+        guard fileOutlineView.selectedRow >= 0,
+              let node = fileOutlineView.item(atRow: fileOutlineView.selectedRow)
+                as? FileTreeNode,
+              !node.isDirectory
+        else { return nil }
+        return node.url
     }
 
     func setOutline(_ facets: [OutlineFacet]) {
@@ -867,7 +932,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private let label = NSTextField(labelWithString: "Open a project to begin")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
-    private var displayedFile: URL?
+    private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
     private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
@@ -1006,7 +1071,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         onReadingPositionChange?(byteOffset)
     }
 
-    func currentReadingPosition() -> (
+    func currentReadingPosition(fallbackByteOffset: UInt32? = nil) -> (
         file: URL,
         contentID: ContentID,
         byteOffset: UInt32,
@@ -1015,10 +1080,15 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         symbolAnchor: String?
     )? {
         guard let file = displayedFile,
-              let document = displayedDocument,
-              let byteOffset = textView.firstVisibleByteOffset(),
-              let coordinate = document.lineTable.lineColumn(at: byteOffset)
+              let document = displayedDocument
         else { return nil }
+        let byteOffset = min(
+            textView.firstVisibleByteOffset() ?? fallbackByteOffset ?? 0,
+            UInt32(clamping: document.bytes.count)
+        )
+        guard let coordinate = document.lineTable.lineColumn(at: byteOffset) else {
+            return nil
+        }
         return (
             file: file,
             contentID: document.contentID,

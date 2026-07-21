@@ -6,6 +6,41 @@ import Foundation
 import Testing
 @testable import CodeInsightAppModel
 
+private let snapshotSwitchRepositoryRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+
+@Test(.timeLimit(.minutes(1)))
+func libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() async throws {
+    let service = ProjectIndexService()
+    let completed = try await withThrowingTaskGroup(
+        of: Int.self,
+        returning: Int.self
+    ) { group in
+        for _ in 0..<8 {
+            group.addTask {
+                try await ProjectIndexService.loadCommitHistory(
+                    root: snapshotSwitchRepositoryRoot
+                ).count
+            }
+            group.addTask {
+                try await service.captureSnapshot(
+                    root: snapshotSwitchRepositoryRoot,
+                    revision: "HEAD~1"
+                ).listFiles().count
+            }
+        }
+        var completed = 0
+        for try await count in group {
+            #expect(count > 0)
+            completed += 1
+        }
+        return completed
+    }
+    #expect(completed == 16)
+}
+
 @MainActor
 @Test
 func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {

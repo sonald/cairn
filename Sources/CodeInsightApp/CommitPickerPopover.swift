@@ -162,16 +162,29 @@ final class CommitPickerPopover: NSViewController,
         let row = tableView.selectedRow
         guard row >= 0 else { return }
         if row == 0 {
-            appModel.switchToWorktree(leaving: leavingRecord())
+            choose(nil)
         } else {
             let commits = appModel.commitPicker.filteredCommits
             guard commits.indices.contains(row - 1) else { return }
-            appModel.switchToCommit(
-                commits[row - 1].fullSHA,
-                leaving: leavingRecord()
-            )
+            choose(commits[row - 1])
         }
         popover.performClose(nil)
+    }
+
+    func chooseCommit(_ revision: String) -> Bool {
+        guard let commit = appModel.commitPicker.commits.first(where: {
+            $0.fullSHA == revision || $0.shortSHA == revision
+        }) else { return false }
+        choose(commit)
+        return true
+    }
+
+    private func choose(_ commit: CommitInfo?) {
+        if let commit {
+            appModel.switchToCommit(commit.fullSHA, leaving: leavingRecord())
+        } else {
+            appModel.switchToWorktree(leaving: leavingRecord())
+        }
     }
 
     private func render() {
