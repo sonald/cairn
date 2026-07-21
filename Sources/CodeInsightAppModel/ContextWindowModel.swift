@@ -275,7 +275,7 @@ public final class ContextWindowModel {
                 path: path,
                 line: coordinate.line,
                 column: coordinate.column,
-                label: "\(certaintyLabel(resolution.certainty))·\(dispatchLabel(resolution.dispatch))",
+                label: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))",
                 excerpt: text,
                 bindingKind: bindingKind,
                 targetByteOffset: targetOffset
@@ -322,28 +322,6 @@ public final class ContextWindowModel {
         return nil
     }
 
-    private func certaintyLabel(_ certainty: Certainty) -> String {
-        switch certainty {
-        case .unresolved: "Unresolved"
-        case .possible: "Possible"
-        case .probable: "Probable"
-        case .strong: "Strong"
-        case .exact: "Exact"
-        }
-    }
-
-    private func dispatchLabel(_ dispatch: DispatchKind) -> String {
-        switch dispatch {
-        case .direct: "direct"
-        case .virtualDispatch: "virtual"
-        case .traitDispatch: "trait"
-        case .interfaceDispatch: "interface"
-        case .callback: "callback"
-        case .dynamicDispatch: "dynamic"
-        case .macroGenerated: "macroGenerated"
-        }
-    }
-
     private func bindingLabel(_ kind: BindingKind) -> String {
         switch kind {
         case .param: "param"
@@ -354,5 +332,27 @@ public final class ContextWindowModel {
         case .globalDecl: "globalDecl"
         case .nonlocalDecl: "nonlocalDecl"
         }
+    }
+}
+
+func resolutionCertaintyLabel(_ certainty: Certainty) -> String {
+    switch certainty {
+    case .unresolved: "Unresolved"
+    case .possible: "Possible"
+    case .probable: "Probable"
+    case .strong: "Strong"
+    case .exact: "Exact"
+    }
+}
+
+func resolutionDispatchLabel(_ dispatch: DispatchKind) -> String {
+    switch dispatch {
+    case .direct: "direct"
+    case .virtualDispatch: "virtual"
+    case .traitDispatch: "trait"
+    case .interfaceDispatch: "interface"
+    case .callback: "callback"
+    case .dynamicDispatch: "dynamic"
+    case .macroGenerated: "macroGenerated"
     }
 }
