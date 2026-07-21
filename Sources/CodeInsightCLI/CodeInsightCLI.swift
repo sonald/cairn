@@ -11,7 +11,8 @@ struct CodeInsight: ParsableCommand {
         abstract: "Inspect Rust source with CodeInsight.",
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
-            Calls.self, Resolve.self, Symsearch.self, Goldset.self,
+            Calls.self, Impls.self, Overrides.self, Resolve.self,
+            Symsearch.self, Goldset.self,
         ]
     )
 }
@@ -310,6 +311,149 @@ extension CodeInsight {
         }
     }
 
+    struct Impls: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List implementations of a Rust trait."
+        )
+
+        @Argument(help: "Trait name.")
+        var traitName: String
+
+        @OptionGroup var options: ProjectOptions
+
+        func run() throws {
+            let session = try indexProject(options.project)
+            let implementations = try session.implementations(
+                ofTrait: traitName,
+                context: queryContext(for: session)
+            )
+            let output = try implementations.map { implementation in
+                let index = try content(
+                    at: implementation.implementation.pathID,
+                    in: session
+                )
+                guard implementation.implementation.localKind == .declarationFacet,
+                      index.symbols.indices.contains(
+                        Int(implementation.implementation.localIndex)
+                      )
+                else {
+                    throw ValidationError("Implementation location is unavailable.")
+                }
+                let facet = index.symbols[Int(implementation.implementation.localIndex)]
+                let traitDefinitions = try implementation.traitDefinitions.map {
+                    candidate -> LocationJSON in
+                    let target = try target(of: candidate, in: session)
+                    return location(
+                        file: session.paths.resolve(candidate.target.pathID),
+                        offset: target.range.lowerBound,
+                        table: target.index.lineTable
+                    )
+                }
+                return ImplementationJSON(
+                    typeName: implementation.typeName,
+                    certainty: String(describing: implementation.certainty),
+                    location: location(
+                        file: session.paths.resolve(
+                            implementation.implementation.pathID
+                        ),
+                        offset: facet.nameRange.lowerBound,
+                        table: index.lineTable
+                    ),
+                    traitDefinitions: traitDefinitions
+                )
+            }
+            if options.global.json {
+                try printJSON(output)
+            } else {
+                for implementation in output {
+                    print("\(implementation.typeName) \(implementation.location.text) \(implementation.certainty)")
+                }
+            }
+        }
+    }
+
+    struct Overrides: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List overrides of a Rust trait method."
+        )
+
+        @Argument(help: "Trait and method as Trait.method.")
+        var traitMethod: String
+
+        @OptionGroup var options: ProjectOptions
+
+        func run() throws {
+            guard let separator = traitMethod.lastIndex(of: "."),
+                  separator != traitMethod.startIndex,
+                  traitMethod.index(after: separator) != traitMethod.endIndex
+            else {
+                throw ValidationError("Expected Trait.method.")
+            }
+            let traitName = String(traitMethod[..<separator])
+            let methodName = String(traitMethod[traitMethod.index(after: separator)...])
+            let session = try indexProject(options.project)
+            let context = queryContext(for: session)
+            let traitDefinitions = try session.definitions(
+                of: traitName,
+                context: context
+            ).filter { $0.1.kind == .rustTrait }
+            let traitMethod = try traitDefinitions.lazy.compactMap {
+                occurrence, _, pathID -> SymbolOccurrenceID? in
+                let index = try content(at: pathID, in: session)
+                guard let facetIndex = index.symbols.firstIndex(where: {
+                    $0.kind == .rustMethod
+                        && $0.parentFacetIndex == occurrence.localIndex
+                        && session.names.resolve($0.nameID) == methodName
+                }), let facetIndex = UInt32(exactly: facetIndex)
+                else { return nil }
+                return SymbolOccurrenceID(
+                    snapshotID: session.snapshotID,
+                    pathID: pathID,
+                    localKind: .declarationFacet,
+                    localIndex: facetIndex
+                )
+            }.first
+            guard let traitMethod else {
+                throw ValidationError(
+                    "Trait method is not indexed: \(traitName).\(methodName)"
+                )
+            }
+
+            let overrides = try session.overrides(
+                ofTraitMethod: traitMethod,
+                context: context
+            )
+            let output = try overrides.map { candidate in
+                let index = try content(at: candidate.target.pathID, in: session)
+                guard candidate.target.localKind == .declarationFacet,
+                      index.symbols.indices.contains(Int(candidate.target.localIndex))
+                else { throw ValidationError("Override location is unavailable.") }
+                let method = index.symbols[Int(candidate.target.localIndex)]
+                guard let parent = method.parentFacetIndex,
+                      index.symbols.indices.contains(Int(parent))
+                else { throw ValidationError("Override type is unavailable.") }
+                return OverrideJSON(
+                    typeName: session.names.resolve(index.symbols[Int(parent)].nameID),
+                    methodName: session.names.resolve(method.nameID),
+                    certainty: String(describing: candidate.certainty),
+                    dispatch: String(describing: candidate.dispatch),
+                    location: location(
+                        file: session.paths.resolve(candidate.target.pathID),
+                        offset: method.nameRange.lowerBound,
+                        table: index.lineTable
+                    )
+                )
+            }
+            if options.global.json {
+                try printJSON(output)
+            } else {
+                for override in output {
+                    print("\(override.typeName)::\(override.methodName) \(override.location.text) \(override.certainty) \(override.dispatch)")
+                }
+            }
+        }
+    }
+
     struct Resolve: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Resolve a project source position."
@@ -539,6 +683,21 @@ private struct OutgoingCallJSON: Codable {
 private struct OutgoingCallsJSON: Codable {
     let completeness: String
     let calls: [OutgoingCallJSON]
+}
+
+private struct ImplementationJSON: Codable {
+    let typeName: String
+    let certainty: String
+    let location: LocationJSON
+    let traitDefinitions: [LocationJSON]
+}
+
+private struct OverrideJSON: Codable {
+    let typeName: String
+    let methodName: String
+    let certainty: String
+    let dispatch: String
+    let location: LocationJSON
 }
 
 private struct ResolutionJSON: Codable {

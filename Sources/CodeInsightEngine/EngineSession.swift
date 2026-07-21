@@ -15,6 +15,32 @@ private final class SymbolSearchCache: @unchecked Sendable {
     }
 }
 
+private struct ImplIndex: Sendable {
+    let byTraitName: [NameID: [(ContentIndexKey, UInt32)]]
+    let byTypeName: [NameID: [(ContentIndexKey, UInt32)]]
+
+    init(indexes: [ContentIndexKey: ContentIndex]) {
+        var byTraitName: [NameID: [(ContentIndexKey, UInt32)]] = [:]
+        var byTypeName: [NameID: [(ContentIndexKey, UInt32)]] = [:]
+        for (key, index) in indexes {
+            for relation in index.implRelations {
+                if let traitNameID = relation.traitNameID {
+                    byTraitName[traitNameID, default: []].append((
+                        key,
+                        relation.implFacetIndex
+                    ))
+                }
+                byTypeName[relation.typeNameID, default: []].append((
+                    key,
+                    relation.implFacetIndex
+                ))
+            }
+        }
+        self.byTraitName = byTraitName
+        self.byTypeName = byTypeName
+    }
+}
+
 public enum EngineError: Error {
     case snapshotMismatch(expected: SnapshotID, actual: SnapshotID)
     case profileMismatch(expected: AnalysisProfileID, actual: AnalysisProfileID)
@@ -43,6 +69,13 @@ public struct OutgoingCallsResult: Sendable {
     public let completeness: Completeness
 }
 
+public struct ImplementationResult: Sendable {
+    public let implementation: SymbolOccurrenceID
+    public let typeName: String
+    public let certainty: Certainty
+    public let traitDefinitions: [ResolutionCandidate]
+}
+
 public final class EngineSession: Sendable {
     public let manifest: SnapshotManifest
     public let contentIndexes: [ContentIndexKey: ContentIndex]
@@ -63,6 +96,7 @@ public final class EngineSession: Sendable {
     private let contentKeysByPath: [PathID: ContentIndexKey]
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
+    private let implIndex: ImplIndex
     private let sourceBytesByContent: [ContentID: [UInt8]]
     private let symbolSearchCache = SymbolSearchCache()
 
@@ -117,6 +151,7 @@ public final class EngineSession: Sendable {
             }
         }
         self.aliasIndex = aliasIndex
+        implIndex = ImplIndex(indexes: contentIndexes)
         namePosting = NamePosting(indexes: contentIndexes)
     }
 
@@ -262,6 +297,116 @@ public final class EngineSession: Sendable {
             )
         }
         return OutgoingCallsResult(calls: calls, completeness: completeness)
+    }
+
+    public func implementations(
+        ofTrait name: String,
+        context: QueryContext
+    ) throws -> [ImplementationResult] {
+        try validate(context)
+        let traitNameID = names.intern(name)
+        let definitions = definitionOccurrences(named: traitNameID).filter {
+            $0.1.kind == .rustTrait
+        }
+        let certainty: Certainty = definitions.count == 1 ? .strong : .possible
+        let definitionCandidates = definitions.map { occurrence, _, _ in
+            ResolutionCandidate(
+                target: occurrence,
+                certainty: certainty,
+                dispatch: .traitDispatch,
+                provenance: .languageProof,
+                completeness: .complete,
+                evidence: [.nameOnly(nameID: traitNameID)]
+            )
+        }
+
+        var results: [ImplementationResult] = []
+        for (key, implFacetIndex) in implIndex.byTraitName[traitNameID] ?? [] {
+            guard let index = contentIndexes[key],
+                  index.symbols.indices.contains(Int(implFacetIndex)),
+                  let relation = index.implRelations.first(where: {
+                      $0.implFacetIndex == implFacetIndex
+                  })
+            else { continue }
+            for file in occurrences(of: key) {
+                results.append(ImplementationResult(
+                    implementation: SymbolOccurrenceID(
+                        snapshotID: snapshotID,
+                        pathID: file.pathID,
+                        localKind: .declarationFacet,
+                        localIndex: implFacetIndex
+                    ),
+                    typeName: names.resolve(relation.typeNameID),
+                    certainty: certainty,
+                    traitDefinitions: definitionCandidates
+                ))
+            }
+        }
+        return results.sorted {
+            let lhs = paths.resolve($0.implementation.pathID)
+            let rhs = paths.resolve($1.implementation.pathID)
+            if lhs != rhs { return lhs < rhs }
+            return $0.implementation.localIndex < $1.implementation.localIndex
+        }
+    }
+
+    public func overrides(
+        ofTraitMethod method: SymbolOccurrenceID,
+        context: QueryContext
+    ) throws -> [ResolutionCandidate] {
+        try validate(context)
+        guard method.snapshotID == snapshotID,
+              method.localKind == .declarationFacet,
+              let (_, traitIndex) = content(at: method.pathID),
+              traitIndex.symbols.indices.contains(Int(method.localIndex))
+        else { return [] }
+        let traitMethod = traitIndex.symbols[Int(method.localIndex)]
+        guard traitMethod.kind == .rustMethod,
+              let traitFacetIndex = traitMethod.parentFacetIndex,
+              traitIndex.symbols.indices.contains(Int(traitFacetIndex)),
+              traitIndex.symbols[Int(traitFacetIndex)].kind == .rustTrait
+        else { return [] }
+
+        let traitNameID = traitIndex.symbols[Int(traitFacetIndex)].nameID
+        let definitionCount = definitionOccurrences(named: traitNameID).filter {
+            $0.1.kind == .rustTrait
+        }.count
+        let certainty: Certainty = definitionCount == 1 ? .strong : .possible
+        var seen: Set<SymbolOccurrenceID> = []
+        var results: [ResolutionCandidate] = []
+        for (key, implFacetIndex) in implIndex.byTraitName[traitNameID] ?? [] {
+            guard let index = contentIndexes[key] else { continue }
+            for (facetIndex, facet) in index.symbols.enumerated() where
+                facet.kind == .rustMethod
+                    && facet.parentFacetIndex == implFacetIndex
+                    && facet.nameID == traitMethod.nameID
+            {
+                guard let facetIndex = UInt32(exactly: facetIndex) else { continue }
+                for file in occurrences(of: key) {
+                    let target = SymbolOccurrenceID(
+                        snapshotID: snapshotID,
+                        pathID: file.pathID,
+                        localKind: .declarationFacet,
+                        localIndex: facetIndex
+                    )
+                    guard seen.insert(target).inserted else { continue }
+                    results.append(ResolutionCandidate(
+                        target: target,
+                        certainty: certainty,
+                        dispatch: .traitDispatch,
+                        provenance: .languageProof,
+                        completeness: .complete,
+                        evidence: [.methodNameOnly(nameID: traitMethod.nameID)]
+                    ))
+                }
+            }
+        }
+        return results.sorted {
+            let lhs = paths.resolve($0.target.pathID)
+            let rhs = paths.resolve($1.target.pathID)
+            if lhs != rhs { return lhs < rhs }
+            return $0.target.localIndex < $1.target.localIndex
+        }
     }
 
     public func searchSymbols(

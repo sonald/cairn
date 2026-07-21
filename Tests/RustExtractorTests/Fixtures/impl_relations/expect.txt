@@ -1,0 +1,6 @@
+impls Render == strong@main.rs:3:17,strong@main.rs:5:20
+overrides main.rs:1:19 == strong@main.rs:3:29,strong@main.rs:5:34
+impls Display == strong@main.rs:10:23
+overrides main.rs:9:34 == strong@main.rs:10:34
+impls Duplicate == possible@a.rs:3:20,possible@b.rs:3:20
+overrides a.rs:1:22 == possible@a.rs:3:27,possible@b.rs:3:27

@@ -122,6 +122,59 @@ private func check(
         }.sorted()
         #expect(actual == expected.sorted(), "\(label): \(assertion), got \(actual)")
 
+    case "impls":
+        let pair = try split(body, separator: "==", label: label)
+        let expected = pair.1.split(separator: ",").map {
+            String($0).trimmingCharacters(in: .whitespaces)
+        }.sorted()
+        let actual = try session.implementations(
+            ofTrait: pair.0,
+            context: context
+        ).map { implementation in
+            let index = try content(
+                at: implementation.implementation.pathID,
+                in: session
+            )
+            guard implementation.implementation.localKind == .declarationFacet,
+                  index.symbols.indices.contains(
+                    Int(implementation.implementation.localIndex)
+                  )
+            else { throw FixtureError("\(label): impl facet is unavailable") }
+            let facet = index.symbols[Int(implementation.implementation.localIndex)]
+            let location = try position(
+                pathID: implementation.implementation.pathID,
+                offset: facet.nameRange.lowerBound,
+                session: session,
+                label: label
+            )
+            return "\(implementation.certainty)@\(location)"
+        }.sorted()
+        #expect(actual == expected, "\(label): \(assertion), got \(actual)")
+
+    case "overrides":
+        let pair = try split(body, separator: "==", label: label)
+        let source = try parsePosition(pair.0, label: label)
+        let expected = pair.1.split(separator: ",").map {
+            String($0).trimmingCharacters(in: .whitespaces)
+        }.sorted()
+        let method = try definitionOccurrence(
+            at: source,
+            session: session,
+            label: label
+        )
+        let actual = try session.overrides(
+            ofTraitMethod: method,
+            context: context
+        ).map { candidate in
+            let target = try targetPosition(
+                of: candidate,
+                session: session,
+                label: label
+            )
+            return "\(candidate.certainty)@\(target)"
+        }.sorted()
+        #expect(actual == expected, "\(label): \(assertion), got \(actual)")
+
     case "candidates":
         let pair = try split(body, separator: ">=", label: label)
         let source = try parsePosition(pair.0, label: label)
@@ -280,6 +333,27 @@ private func definitionName(
         throw FixtureError("\(label): no definition at \(source)")
     }
     return session.names.resolve(facet.nameID)
+}
+
+private func definitionOccurrence(
+    at source: FixturePosition,
+    session: EngineSession,
+    label: String
+) throws -> SymbolOccurrenceID {
+    let pathID = try requirePath(source.file, session: session, label: label)
+    let index = try content(at: pathID, in: session)
+    guard let offset = index.lineTable.byteOffset(line: source.line, column: source.column),
+          let facetIndex = index.symbols.firstIndex(where: {
+              $0.nameRange.contains(offset)
+          }),
+          let localIndex = UInt32(exactly: facetIndex)
+    else { throw FixtureError("\(label): no definition at \(source)") }
+    return SymbolOccurrenceID(
+        snapshotID: session.snapshotID,
+        pathID: pathID,
+        localKind: .declarationFacet,
+        localIndex: localIndex
+    )
 }
 
 private func position(

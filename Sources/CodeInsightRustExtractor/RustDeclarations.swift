@@ -21,6 +21,7 @@ struct RustDeclarations {
     let bytes: [UInt8]
     let names: Interner<NameID>
     private(set) var facets: [DeclarationFacet] = []
+    private(set) var implRelations: [ImplRelation] = []
     private var containers: [Container] = []
 
     init(bytes: [UInt8], names: Interner<NameID>) {
@@ -95,6 +96,28 @@ struct RustDeclarations {
             bodyFingerprint: nil
         ))
 
+        if kind == .rustImpl,
+           let implementation = implementationNames(in: node),
+           let typeName = implementation.type.text(
+               in: bytes,
+               byteOffset: byteOffset
+           )
+        {
+            let traitName = implementation.trait.flatMap {
+                $0.text(in: bytes, byteOffset: byteOffset)
+            }
+            if implementation.trait == nil || traitName != nil {
+                implRelations.append(ImplRelation(
+                    implFacetIndex: facetIndex,
+                    traitNameID: traitName.map(names.intern),
+                    traitNameRange: implementation.trait?.coreByteRange(
+                        byteOffset: byteOffset
+                    ),
+                    typeNameID: names.intern(typeName)
+                ))
+            }
+        }
+
         if isContainer(node: node, kind: kind) {
             containers.append(Container(
                 owner: RustNodeKey(node, byteOffset: byteOffset),
@@ -150,13 +173,22 @@ struct RustDeclarations {
     }
 
     private func implementedTypeName(in node: Node) -> Node? {
-        let candidates = node.namedChildren.filter {
+        implementationCandidates(in: node).last.flatMap(typeName)
+    }
+
+    private func implementationNames(in node: Node) -> (trait: Node?, type: Node)? {
+        let candidates = implementationCandidates(in: node)
+        guard let type = candidates.last.flatMap(typeName) else { return nil }
+        let trait = candidates.count > 1 ? candidates.first.flatMap(typeName) : nil
+        return (trait, type)
+    }
+
+    private func implementationCandidates(in node: Node) -> [Node] {
+        node.namedChildren.filter {
             $0.kind != "type_parameters"
                 && $0.kind != "where_clause"
                 && $0.kind != "declaration_list"
         }
-        guard let implementedType = candidates.last else { return nil }
-        return typeName(in: implementedType)
     }
 
     private func typeName(in node: Node) -> Node? {

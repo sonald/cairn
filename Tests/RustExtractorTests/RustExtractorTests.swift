@@ -86,6 +86,33 @@ func associatesImplMethodFacetAndRegion() throws {
 }
 
 @Test
+func extractsImplRelationsWithGenericScopedAndInherentTypes() throws {
+    let source = """
+        struct Plain;
+        struct Bar<T>(T);
+        impl Trait for Plain {}
+        impl<T> crate::traits::Trait<T> for crate::types::Bar<T> {}
+        impl Plain {}
+        """
+    let result = try extract(source)
+
+    #expect(result.index.implRelations.count == 3)
+    #expect(result.index.implRelations.map {
+        $0.traitNameID.map(result.names.resolve)
+    } == ["Trait", "Trait", nil])
+    #expect(result.index.implRelations.map {
+        result.names.resolve($0.typeNameID)
+    } == ["Plain", "Bar", "Plain"])
+    #expect(result.index.implRelations.map {
+        text(in: source, range: $0.traitNameRange)
+    } == ["Trait", "Trait", nil])
+    #expect(result.index.implRelations.allSatisfy { relation in
+        result.index.symbols.indices.contains(Int(relation.implFacetIndex))
+            && result.index.symbols[Int(relation.implFacetIndex)].kind == .rustImpl
+    })
+}
+
+@Test
 func bindsMatchPatternsInArmScope() throws {
     let result = try extract(
         "fn f(v: Option<i32>) { match v { Some(x) => x, None => 0 } }"
@@ -420,6 +447,7 @@ func extractsEmptyRustContent() throws {
     #expect(index.bindings.isEmpty)
     #expect(index.executableRegions.isEmpty)
     #expect(index.symbols.isEmpty)
+    #expect(index.implRelations.isEmpty)
     #expect(index.calls.isEmpty)
     #expect(index.imports.isEmpty)
     #expect(index.exports.isEmpty)

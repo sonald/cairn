@@ -238,6 +238,8 @@ public struct ProjectIndexer: Sendable {
         var referencedNames = Set(index.bindings.map(\.localNameID))
         referencedNames.formUnion(index.bindings.compactMap { $0.targetHint?.nameID })
         referencedNames.formUnion(index.symbols.map(\.nameID))
+        referencedNames.formUnion(index.implRelations.compactMap(\.traitNameID))
+        referencedNames.formUnion(index.implRelations.map(\.typeNameID))
         referencedNames.formUnion(index.calls.map(\.nameID))
         referencedNames.formUnion(index.imports.compactMap(\.importedName))
         referencedNames.formUnion(index.imports.compactMap(\.localName))
@@ -283,6 +285,14 @@ public struct ProjectIndexer: Sendable {
                     parentFacetIndex: $0.parentFacetIndex,
                     signatureFingerprint: $0.signatureFingerprint,
                     bodyFingerprint: $0.bodyFingerprint
+                )
+            },
+            implRelations: index.implRelations.map {
+                ImplRelation(
+                    implFacetIndex: $0.implFacetIndex,
+                    traitNameID: optionalName($0.traitNameID),
+                    traitNameRange: $0.traitNameRange,
+                    typeNameID: name($0.typeNameID)
                 )
             },
             calls: index.calls.map {

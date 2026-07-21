@@ -90,12 +90,32 @@ public struct DeclarationFacet: Sendable {
     }
 }
 
+public struct ImplRelation: Sendable {
+    public let implFacetIndex: UInt32
+    public let traitNameID: NameID?
+    public let traitNameRange: ByteRange?
+    public let typeNameID: NameID
+
+    public init(
+        implFacetIndex: UInt32,
+        traitNameID: NameID?,
+        traitNameRange: ByteRange?,
+        typeNameID: NameID
+    ) {
+        self.implFacetIndex = implFacetIndex
+        self.traitNameID = traitNameID
+        self.traitNameRange = traitNameRange
+        self.typeNameID = typeNameID
+    }
+}
+
 public struct ContentIndex: Sendable {
     public let key: ContentIndexKey
     public let scopes: [ScopeRecord]
     public let bindings: [BindingRecord]
     public let executableRegions: [ExecutableRegionRecord]
     public let symbols: [DeclarationFacet]
+    public let implRelations: [ImplRelation]
     public let calls: [UnresolvedCall]
     public let imports: [ImportBinding]
     public let exports: [ExportRecord]
@@ -107,6 +127,7 @@ public struct ContentIndex: Sendable {
         bindings: [BindingRecord],
         executableRegions: [ExecutableRegionRecord],
         symbols: [DeclarationFacet],
+        implRelations: [ImplRelation] = [],
         calls: [UnresolvedCall],
         imports: [ImportBinding],
         exports: [ExportRecord],
@@ -117,6 +138,7 @@ public struct ContentIndex: Sendable {
         self.bindings = bindings
         self.executableRegions = executableRegions
         self.symbols = symbols
+        self.implRelations = implRelations
         self.calls = calls
         self.imports = imports
         self.exports = exports

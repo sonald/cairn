@@ -46,6 +46,18 @@ public enum CanonicalDump {
         }
         appendNoneIfNeeded(to: &lines, count: index.symbols.count)
 
+        lines.append("implRelations:")
+        for relation in index.implRelations.sorted(by: {
+            $0.implFacetIndex < $1.implFacetIndex
+        }) {
+            let trait = relation.traitNameID.map(names.resolve) ?? "-"
+            let traitAt = relation.traitNameRange.map {
+                format($0, table: index.lineTable)
+            } ?? "-"
+            lines.append("  - impl=#\(relation.implFacetIndex) trait=\(trait) traitAt=\(traitAt) type=\(names.resolve(relation.typeNameID))")
+        }
+        appendNoneIfNeeded(to: &lines, count: index.implRelations.count)
+
         lines.append("calls:")
         for (callIndex, call) in index.calls.enumerated().sorted(by: {
             ordered($0.element.range, $0.offset, $1.element.range, $1.offset)

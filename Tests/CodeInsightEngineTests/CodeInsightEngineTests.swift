@@ -246,6 +246,83 @@ func outgoingCallsTruncateAfterFirst512CallSites() throws {
 }
 
 @Test
+func findsTraitImplementationsAndMethodOverrides() throws {
+    try withProject([
+        "main.rs": """
+            trait Render { fn render(&self); }
+            struct Simple;
+            impl Render for Simple { fn render(&self) {} }
+            struct Boxed<T>(T);
+            impl<T> Render for Boxed<T> { fn render(&self) {} }
+            struct Inherent;
+            impl Inherent { fn render(&self) {} }
+            """,
+        "a.rs": """
+            trait Duplicate { fn act(&self); }
+            struct A;
+            impl Duplicate for A { fn act(&self) {} }
+            """,
+        "b.rs": """
+            trait Duplicate { fn act(&self); }
+            struct B;
+            impl Duplicate for B { fn act(&self) {} }
+            """,
+    ]) { session in
+        let context = queryContext(for: session)
+        let implementations = try session.implementations(
+            ofTrait: "Render",
+            context: context
+        )
+        #expect(implementations.map(\.typeName) == ["Simple", "Boxed"])
+        #expect(implementations.allSatisfy { $0.certainty == .strong })
+        #expect(implementations.allSatisfy {
+            $0.traitDefinitions.count == 1
+                && $0.traitDefinitions[0].certainty == .strong
+                && $0.traitDefinitions[0].dispatch == .traitDispatch
+        })
+
+        let renderTrait = try #require(session.definitions(
+            of: "Render",
+            context: context
+        ).first)
+        let renderIndex = try #require(session.contentIndexes.first(where: {
+            key, _ in key.contentID == session.manifest.files.first(where: {
+                $0.pathID == renderTrait.2
+            })?.contentID
+        })?.value)
+        let renderMethodIndex = try #require(renderIndex.symbols.firstIndex {
+            $0.kind == .rustMethod
+                && $0.parentFacetIndex == renderTrait.0.localIndex
+                && session.names.resolve($0.nameID) == "render"
+        })
+        let overrides = try session.overrides(
+            ofTraitMethod: SymbolOccurrenceID(
+                snapshotID: session.snapshotID,
+                pathID: renderTrait.2,
+                localKind: .declarationFacet,
+                localIndex: UInt32(renderMethodIndex)
+            ),
+            context: context
+        )
+        #expect(overrides.count == 2)
+        #expect(overrides.allSatisfy {
+            $0.certainty == .strong && $0.dispatch == .traitDispatch
+        })
+
+        let ambiguous = try session.implementations(
+            ofTrait: "Duplicate",
+            context: context
+        )
+        #expect(ambiguous.map(\.typeName) == ["A", "B"])
+        #expect(ambiguous.allSatisfy {
+            $0.certainty == .possible
+                && $0.traitDefinitions.count == 2
+                && $0.traitDefinitions.allSatisfy { $0.certainty == .possible }
+        })
+    }
+}
+
+@Test
 func deduplicatesContentButKeepsEveryManifestPath() throws {
     let source = "pub fn same() {}"
     try withProject(["a.rs": source, "nested/b.rs": source]) { session in
@@ -304,6 +381,10 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.outgoingCalls(from: definition, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.implementations(ofTrait: "main", context: wrong) }
+        catch { failures += 1 }
+        do { _ = try session.overrides(ofTraitMethod: definition, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -312,7 +393,7 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 6)
+        #expect(failures == 8)
     }
 }
 
@@ -340,6 +421,10 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.outgoingCalls(from: definition, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.implementations(ofTrait: "main", context: wrong) }
+        catch { failures += 1 }
+        do { _ = try session.overrides(ofTraitMethod: definition, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -348,7 +433,7 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 6)
+        #expect(failures == 8)
     }
 }
 
