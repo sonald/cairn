@@ -91,6 +91,12 @@ print(f"| `{sys.argv[1]}` | 3 | `{json.dumps(p50, sort_keys=True, separators=(ch
     run_app_case "--self-test" --self-test
     run_app_case "--self-test-open $open_file" --self-test-open "$open_file"
     run_app_case "--self-test-project $repo_path" --self-test-project "$repo_path"
+    switch_repo="$repo_path"
+    if ! git -C "$switch_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
+        switch_repo="$PWD"
+    fi
+    run_app_case "--self-test-switch $switch_repo" \
+        --self-test-switch "$switch_repo"
     exit 0
 fi
 

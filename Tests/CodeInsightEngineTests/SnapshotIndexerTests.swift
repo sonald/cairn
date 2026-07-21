@@ -118,6 +118,34 @@ func repositoryAdjacentCommitReuseExceedsEightyPercent() throws {
     #expect(hitRate > 0.8)
 }
 
+@Test
+func snapshotIndexerCountsLFSPointerWithoutParsingItAsRust() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let pointer = Array("""
+        version https://git-lfs.github.com/spec/v1
+        oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        size 123456
+
+        """.utf8)
+    try fixture.commitLFSPointer(pointer)
+
+    let session = try ProjectIndexer().indexSnapshot(
+        CommitSnapshot(repositoryURL: fixture.root),
+        into: ProjectIndexStore()
+    )
+    let file = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "src/large.rs"
+    })
+
+    #expect(file.fileMode == .lfsPointer)
+    #expect(file.detectedLanguage == .rust)
+    #expect(session.stats.fileCount == 3)
+    #expect(session.stats.extractedCount == 2)
+    #expect(session.sourceBytesByContent[file.contentID] == pointer)
+    #expect(!session.contentIndexes.keys.contains { $0.contentID == file.contentID })
+}
+
 private func resolvedName(_ name: String, in session: EngineSession) throws -> String {
     let source = "fn \(name)() {}\nfn call() { \(name)(); }\n"
     let path = try #require(session.manifest.files.first {
@@ -193,6 +221,13 @@ private final class SnapshotGitFixture {
         try write("src/main.rs", "fn b() {}\nfn call() { b(); }\n")
         try git("add", "src/main.rs")
         try commit("newer")
+    }
+
+    func commitLFSPointer(_ bytes: [UInt8]) throws {
+        let file = root.appendingPathComponent("src/large.rs")
+        try Data(bytes).write(to: file)
+        try git("add", "src/large.rs")
+        try commit("lfs pointer")
     }
 
     private func write(_ path: String, _ contents: String) throws {

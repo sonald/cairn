@@ -149,7 +149,7 @@ final class RelationWindowController: NSViewController,
         return switch node.kind {
         case .edge: 38
         case .root: 32
-        case .group, .evidenceLine, .truncated, .loading: 24
+        case .group, .evidenceLine, .truncated, .loading, .error: 24
         }
     }
 
@@ -347,6 +347,10 @@ private final class RelationCellView: NSTableCellView {
             titleLabel.stringValue = node.title
             titleLabel.font = .systemFont(ofSize: 11)
             titleLabel.textColor = .systemOrange
+        case .error:
+            titleLabel.stringValue = node.title
+            titleLabel.font = .systemFont(ofSize: 11)
+            titleLabel.textColor = .systemRed
         }
     }
 

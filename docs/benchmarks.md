@@ -109,3 +109,27 @@ huge 使用同一 `/tmp/codeinsight-m1-100k.rs` 连续运行 3 次；M2 p50 为�
 在最终三次样本中全部通过：`firstVisibleMS < 2500`、首屏 outline 为 0、
 `styledFragments < 500`。release 重建后的首个冷样本曾出现一次
 `firstVisibleMS=2848.451125ms`（exit 1），随后三次均 exit 0，说明该冷启动预算仍有波动。
+
+## M3 Git 时间旅行自测
+
+日期：2026-07-21。Apple Silicon (arm64e) macOS，release 构建。
+`bash scripts/bench.sh --app <tokio-dir>` 的 tokio 1.47.1 语料是 tar 展开目录，
+不含 Git 历史；脚本因此按规则回退到 CodeInsight 本仓库运行
+`--self-test-switch`。四个场景均连续运行 3 次且全部 exit 0，表中为 p50。
+
+| 场景 | p50 |
+|---|---|
+| 空载 `--self-test` | `{"coldStartMS":192.912208,"idleFootprintMB":17.688278198242188}` |
+| regular `tokio/benches/copy.rs` | `{"firstVisibleMS":13.318875,"firstVisibleOutlineFacets":30,"outlineFacets":30,"styledFragments":161,"syntaxVisibleMS":13.318875,"tier":"regular"}` |
+| tokio 项目 `--self-test-project` | `{"fileCount":717,"indexReadyMS":843.625708,"treeVisibleMS":8.673708}` |
+| CodeInsight `--self-test-switch` | `{"cachedReadyMS":42.863417,"extracted":0,"firstPaintMS":38.233375,"fullReadyMS":43.647167,"reused":50}` |
+
+三级就绪顺序为 `firstPaint 38.23ms → cachedReady 42.86ms → fullReady
+43.65ms`，首屏低于 1s 硬预算。同一仓库的
+`codeinsight switch-stats --from HEAD --to HEAD~1` 结果为 `totalFiles=50`、
+`reusedCount=50`、`extractedCount=0`、`hitRate=100.0%`、
+`switchMilliseconds=37.724`。
+
+既有三项 self-test 均保持在原预算内：空载 192.91ms < 500ms，
+regular 首屏 13.32ms < 100ms，tokio 项目索引 843.63ms < 2s 且文件树
+8.67ms < 1s，未见 M3 回退。

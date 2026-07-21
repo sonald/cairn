@@ -92,6 +92,54 @@ func commitSnapshotPreservesTreeFileModes() throws {
     #expect(String(bytes: try snapshot.readBytes(path: "link.rs"), encoding: .utf8) == "sample.rs")
 }
 
+@Test
+func commitSnapshotMarksLFSPointersAndReturnsRawBytes() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let pointer = """
+        version https://git-lfs.github.com/spec/v1
+        oid sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
+        size 123456
+
+        """
+    try Data(pointer.utf8).write(
+        to: fixture.root.appendingPathComponent("large.rs")
+    )
+    try fixture.git("add", "large.rs")
+    try fixture.commit("lfs pointer")
+
+    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let file = try #require(snapshot.listFiles().first { $0.path == "large.rs" })
+
+    #expect(file.fileMode == .lfsPointer)
+    #expect(try snapshot.readBytes(path: "large.rs") == Array(pointer.utf8))
+}
+
+@Test
+func trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let contents = Array("fn tracked_ignored() {}\n".utf8)
+    try Data("ignored.rs\n".utf8).write(
+        to: fixture.root.appendingPathComponent(".gitignore")
+    )
+    try Data(contents).write(
+        to: fixture.root.appendingPathComponent("ignored.rs")
+    )
+    try fixture.git("add", ".gitignore")
+    try fixture.git("add", "-f", "ignored.rs")
+    try fixture.commit("tracked ignored file")
+
+    let commit = try CommitSnapshot(repositoryURL: fixture.root)
+    let worktree = try WorktreeSnapshot(repositoryURL: fixture.root)
+
+    // .gitignore must not hide a file once Git tracks it in either view.
+    #expect(commit.listFiles().contains { $0.path == "ignored.rs" })
+    #expect(worktree.listFiles().contains { $0.path == "ignored.rs" })
+    #expect(try commit.readBytes(path: "ignored.rs") == contents)
+    #expect(try worktree.readBytes(path: "ignored.rs") == contents)
+}
+
 private final class GitFixture {
     let root: URL
 

@@ -32,7 +32,7 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     model.setRoot(symbol: symbol, direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (0)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     let possible = try relationGroup("Possible", in: model.root)
     #expect(exact.children?.isEmpty == true)
@@ -43,6 +43,65 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     #expect(possible.children?.filter {
         $0.title == "ambiguous_target" && $0.subtitle == "Possible · direct"
     }.count == 2)
+}
+
+@MainActor
+@Test
+func relationTreeShowsExternalCallsAsUnresolved() async throws {
+    let root = try relationTemporaryProject([
+        "main.rs": """
+            fn root() {
+                let _ = std::mem::size_of::<u8>();
+                let _ = Box::pin(async {});
+            }
+            """,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let symbol = try #require(
+        session.definitions(of: "root", context: context).first?.0
+    )
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    model.setRoot(symbol: symbol, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let external = try relationGroup("External / Unresolved", in: model.root)
+    #expect(external.children?.map(\.title) == ["size_of", "pin"])
+    #expect(external.children?.allSatisfy { $0.subtitle == "Unresolved" } == true)
+}
+
+@MainActor
+@Test
+func relationTreeShowsAnErrorRowWhenLoadingFails() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        throw RelationTestError.expected
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    #expect(model.root?.children?.first?.kind == .error)
+    #expect(model.root?.children?.first?.title == "Could not load relations.")
+}
+
+@MainActor
+@Test
+func relationTreeShowsIndexBuildingPlaceholder() {
+    let model = RelationTreeModel()
+
+    model.updateProjectState(.indexing(
+        root: URL(fileURLWithPath: "/tmp/project"),
+        startedAt: .now
+    ))
+
+    #expect(model.root?.kind == .loading)
+    #expect(model.root?.title == "Index building…")
 }
 
 @MainActor
@@ -270,6 +329,10 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
     model.onSelect = { selected = $0 }
     model.select(child)
     #expect(selected === child)
+}
+
+private enum RelationTestError: Error {
+    case expected
 }
 
 private actor FakeRelationLoader {

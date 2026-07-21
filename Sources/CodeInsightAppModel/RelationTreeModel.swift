@@ -20,6 +20,7 @@ public final class RelationTreeModel {
             case evidenceLine
             case truncated
             case loading
+            case error
         }
 
         public let kind: Kind
@@ -122,7 +123,11 @@ public final class RelationTreeModel {
         case let .ready(session, context):
             self.session = session
             self.context = context
-        case .empty, .indexing, .failed:
+        case .indexing:
+            session = nil
+            context = nil
+            root = Node(kind: .loading, title: "Index building…")
+        case .empty, .failed:
             session = nil
             context = nil
         }
@@ -204,7 +209,13 @@ public final class RelationTreeModel {
                     session: session
                 )
             case .failure:
-                node.children = evidenceNodes(node.evidence, parent: node)
+                node.children = [
+                    Node(
+                        kind: .error,
+                        title: "Could not load relations.",
+                        parent: node
+                    ),
+                ] + evidenceNodes(node.evidence, parent: node)
             }
         }
     }
@@ -216,10 +227,13 @@ public final class RelationTreeModel {
         session: EngineSession
     ) -> [Node] {
         let capped = Array(loaded.edges.prefix(500))
+        let exact = capped.filter { $0.certainty == .exact }
         var children = [
             makeGroup(
-                "Exact",
-                edges: capped.filter { $0.certainty == .exact },
+                // Keep the empty group visible: it teaches that no exact provider
+                // contributed evidence instead of implying exact coverage.
+                exact.isEmpty ? "Exact (0)" : "Exact",
+                edges: exact,
                 under: parent,
                 direction: direction,
                 session: session
@@ -242,6 +256,16 @@ public final class RelationTreeModel {
                 session: session
             ),
         ]
+        let external = capped.filter { $0.certainty == .unresolved }
+        if direction == .calls, !external.isEmpty {
+            children.append(makeGroup(
+                "External / Unresolved",
+                edges: external,
+                under: parent,
+                direction: direction,
+                session: session
+            ))
+        }
         if loaded.isTruncated || loaded.edges.count > 500 {
             children.append(Node(
                 kind: .truncated,
@@ -288,7 +312,9 @@ public final class RelationTreeModel {
             let node = Node(
                 kind: .edge,
                 title: edge.title,
-                subtitle: "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
+                subtitle: edge.certainty == .unresolved
+                    ? "Unresolved"
+                    : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
                 badge: isCycle ? "↻" : nil,
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,
@@ -374,12 +400,14 @@ public final class RelationTreeModel {
             let result = try session.outgoingCalls(from: symbol, context: context)
             var edges: [LoadedEdge] = []
             for outgoing in result.calls {
+                var appendedCandidate = false
                 for candidate in outgoing.candidates {
                     guard let location = location(
                         for: candidate.target,
                         evidence: candidate.evidence,
                         in: session
                     ) else { continue }
+                    appendedCandidate = true
                     edges.append(LoadedEdge(
                         title: outgoing.calleeName,
                         certainty: candidate.certainty,
@@ -390,6 +418,20 @@ public final class RelationTreeModel {
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: candidate.evidence
+                    ))
+                }
+                if !appendedCandidate,
+                   let location = location(for: outgoing.callSite, in: session)
+                {
+                    edges.append(LoadedEdge(
+                        title: outgoing.calleeName,
+                        certainty: .unresolved,
+                        dispatch: .direct,
+                        symbol: nil,
+                        path: location.path,
+                        byteOffset: location.byteOffset,
+                        line: location.line,
+                        evidence: []
                     ))
                 }
             }

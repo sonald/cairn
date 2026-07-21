@@ -21,7 +21,8 @@ M0-C 探针结论（libgit2 接入、不可变捕获、generation 防串）为�
    selectedIndex 随组重排漂移。
 7. 右键 Show Relations 在 indexing 时展开空面板无提示；Cmd+Shift+H 无候选时静默。
 8. **K5 Pin 语义（延续）**：单击联动已按"Pin 不覆盖"实现（有测试），但右键
-   Show Relations 经 explicitJump 在 pinned 下仍改写 Context。待决策者手测统一定夺。
+   Show Relations 经 explicitJump 在 pinned 下仍改写 Context。**仍挂起待裁决**，
+   待决策者手测统一定夺。
 9. outgoingCalls 的 calls×regions 线性扫描（已留 TODO 注释），更大语料前 posting 化。
 
 ## M1 挂起项延续

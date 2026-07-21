@@ -179,7 +179,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
             captured[entry.path] = CapturedFile(
                 bytes: bytes,
                 contentID: ContentID.sha256(of: bytes),
-                fileMode: entry.fileMode
+                fileMode: capturedFileMode(bytes, fallback: entry.fileMode)
             )
         }
 
@@ -241,7 +241,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
             captured[Self.relativePath(of: file, under: root)] = CapturedFile(
                 bytes: bytes,
                 contentID: ContentID.sha256(of: bytes),
-                fileMode: .regular
+                fileMode: capturedFileMode(bytes, fallback: .regular)
             )
         }
 
@@ -304,6 +304,18 @@ private struct CapturedFile: Sendable {
     let bytes: [UInt8]
     let contentID: ContentID
     let fileMode: FileMode
+}
+
+private let lfsPointerPrefix = Array(
+    "version https://git-lfs.github.com/spec".utf8
+)
+
+private func capturedFileMode(
+    _ bytes: [UInt8],
+    fallback: FileMode
+) -> FileMode {
+    fallback == .regular && bytes.starts(with: lfsPointerPrefix)
+        ? .lfsPointer : fallback
 }
 
 private struct TreeEntry {

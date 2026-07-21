@@ -192,7 +192,7 @@ public struct ProjectIndexer: Sendable {
                 fileMode: file.fileMode,
                 size: UInt64(bytes.count)
             ))
-            guard language == .rust else { continue }
+            guard language == .rust, file.fileMode != .lfsPointer else { continue }
             let key = rustContentKey(file.contentID)
             if stored.contentIndexes[key] != nil {
                 reusedKeys.insert(key)
