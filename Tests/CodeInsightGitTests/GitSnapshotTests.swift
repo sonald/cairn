@@ -1,11 +1,112 @@
+import Dispatch
 import Foundation
 import Testing
+import os
 @testable import CodeInsightGit
 
 private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+
+@Test
+func libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() {
+    let completion = DispatchSemaphore(value: 0)
+    let failureDescription = OSAllocatedUnfairLock<String?>(initialState: nil)
+
+    Task.detached {
+        defer { completion.signal() }
+        do {
+            try await runLibGit2Stress()
+        } catch {
+            failureDescription.withLock { $0 = String(describing: error) }
+        }
+    }
+
+    guard completion.wait(timeout: .now() + .seconds(60)) == .success else {
+        Issue.record(
+            "libgit2 stress hung: 5 rounds of 8 CommitLog + 8 snapshot captures exceeded 60s"
+        )
+        return
+    }
+    if let failure = failureDescription.withLock({ $0 }) {
+        Issue.record("libgit2 stress error: \(failure)")
+    }
+}
+
+private func runLibGit2Stress() async throws {
+    var expected: (history: Int, commit: Int, worktree: Int)?
+    for round in 1...5 {
+        let counts = try await withThrowingTaskGroup(
+            of: (kind: Int, count: Int).self,
+            returning: (history: Int, commit: Int, worktree: Int).self
+        ) { group in
+            for index in 0..<8 {
+                group.addTask {
+                    (0, try CommitLog(repositoryURL: repositoryRoot).commits.count)
+                }
+                group.addTask {
+                    if index.isMultiple(of: 2) {
+                        return (
+                            1,
+                            try CommitSnapshot(repositoryURL: repositoryRoot)
+                                .listFiles().count
+                        )
+                    }
+                    return (
+                        2,
+                        try WorktreeSnapshot(repositoryURL: repositoryRoot)
+                            .listFiles().count
+                    )
+                }
+            }
+
+            var histories: [Int] = []
+            var commits: [Int] = []
+            var worktrees: [Int] = []
+            for try await result in group {
+                switch result.kind {
+                case 0: histories.append(result.count)
+                case 1: commits.append(result.count)
+                default: worktrees.append(result.count)
+                }
+            }
+            guard let history = histories.first,
+                  let commit = commits.first,
+                  let worktree = worktrees.first,
+                  histories.count == 8,
+                  commits.count == 4,
+                  worktrees.count == 4,
+                  history > 0,
+                  commit > 0,
+                  worktree > 0,
+                  histories.allSatisfy({ $0 == history }),
+                  commits.allSatisfy({ $0 == commit }),
+                  worktrees.allSatisfy({ $0 == worktree })
+            else {
+                throw NSError(
+                    domain: "CodeInsightGitTests.libgit2Stress",
+                    code: round,
+                    userInfo: [NSLocalizedDescriptionKey: "round \(round) returned inconsistent results"]
+                )
+            }
+            return (history, commit, worktree)
+        }
+
+        if let expected,
+           counts.history != expected.history
+            || counts.commit != expected.commit
+            || counts.worktree != expected.worktree
+        {
+            throw NSError(
+                domain: "CodeInsightGitTests.libgit2Stress",
+                code: round,
+                userInfo: [NSLocalizedDescriptionKey: "round \(round) differed from earlier rounds"]
+            )
+        }
+        expected = counts
+    }
+}
 
 @Test
 func commitLogReadsHeadFirstWithBranchLabels() throws {
