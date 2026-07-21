@@ -488,7 +488,7 @@ func contextWindowDiscardsOutOfOrderRequests() async throws {
 @MainActor
 @Test
 func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
-    let source = "fn target() {}\nfn main() { target(); }"
+    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
     let root = try temporaryProject(["main.rs": source])
     defer { try? FileManager.default.removeItem(at: root) }
     let session = try ProjectIndexer().index(root: root)
@@ -499,16 +499,50 @@ func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
         return try session.resolve(file: file, offset: offset, context: context)
     }
     model.updateProjectState(.ready(session, context), root: root)
+    let alpha = byteOffset(of: "alpha();", in: source)
+    let beta = byteOffset(of: "beta();", in: source)
+
+    let first = try #require(await model.explicitJump(file: "main.rs", offset: alpha))
     model.setMode(.pinned)
-    let offset = byteOffset(of: "target();", in: source)
+    let pinnedStage = model.stage
+    let pinnedCandidate = try #require(model.selectedCandidate)
+    let pinnedRequestID = model.requestID
 
-    model.tokenClicked(file: "main.rs", offset: offset)
+    model.tokenClicked(file: "main.rs", offset: beta)
     for _ in 0..<10 { await Task.yield() }
-    #expect(resolveCount == 0)
-
-    let target = await model.explicitJump(file: "main.rs", offset: offset)
-    #expect(target?.line == 1)
     #expect(resolveCount == 1)
+
+    let target = try #require(await model.explicitJump(file: "main.rs", offset: beta))
+    #expect(target.symbol != first.symbol)
+    #expect(resolveCount == 2)
+    #expect(model.requestID == pinnedRequestID)
+    #expect(model.selectedIndex == 0)
+    #expect(model.candidateCount == 1)
+    #expect(model.selectedCandidate?.symbol == pinnedCandidate.symbol)
+    #expect(model.selectedCandidate?.path == pinnedCandidate.path)
+    #expect(model.selectedCandidate?.line == pinnedCandidate.line)
+    #expect(model.selectedCandidate?.column == pinnedCandidate.column)
+    #expect(model.selectedCandidate?.label == pinnedCandidate.label)
+    #expect(model.selectedCandidate?.excerpt == pinnedCandidate.excerpt)
+    #expect(model.selectedCandidate?.bindingKind == pinnedCandidate.bindingKind)
+    #expect(model.selectedCandidate?.targetByteOffset == pinnedCandidate.targetByteOffset)
+    guard case let .candidates(pinnedCandidates, pinnedSelected) = pinnedStage,
+          case let .candidates(currentCandidates, currentSelected) = model.stage
+    else {
+        Issue.record("pinned explicit jump changed the context stage")
+        return
+    }
+    #expect(currentSelected == pinnedSelected)
+    #expect(currentCandidates.map(\.symbol) == pinnedCandidates.map(\.symbol))
+
+    model.setMode(.follow)
+    #expect(await model.explicitJump(file: "main.rs", offset: beta) != nil)
+    #expect(model.selectedCandidate?.symbol == target.symbol)
+
+    let followedRequestID = model.requestID
+    #expect(await model.resolvedCandidate(file: "main.rs", offset: alpha) != nil)
+    #expect(model.requestID == followedRequestID)
+    #expect(model.selectedCandidate?.symbol == target.symbol)
 }
 
 @MainActor

@@ -109,7 +109,11 @@ macOS 原生应用（AppKit/Swift），无 Electron、无 Tauri、无 WebView。
   Cmd+单击/双击主窗口跳转。
 - **F2.2（P0）渐进式回答**：Context Window 支持结果分级到达——
   先局部绑定（热路径），再 fuzzy 目标，精确结果就绪后原位升级并标注 provenance（§15）。
-- **F2.3（P0）Follow / Pin**：Pinned 模式固定内容，误点不冲掉正在读的函数。
+- **F2.3（P0）Follow / Pin —— 面板归属语义**（2026-07-21 决策者裁决）：
+  **Pin = 底部 Context 冻结，句号**；其他面板各行其是。具体：
+  Cmd+单击照常跳主区（并入历史），但底部保持钉住内容；
+  右键 Show Relations/Callers/Calls/Implements **只填右侧关系树、不动底部**（无条件，
+  不论是否 Pin）；关系树节点单击仍联动底部，但 Pin 时不覆盖；想换底部内容先解钉。
 - **F2.4（P0）多候选**：候选切换条 + certainty/dispatch 标注。
 - **F2.5（P0）递归预览**：内部可继续下钻，独立前进/后退历史。
 - **F2.6（P0）局部作用域感知**：点击局部变量/参数命中词法作用域（§5）。

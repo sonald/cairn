@@ -35,7 +35,14 @@ private struct CodeInsightApplication {
         let delegate = AppDelegate(startedAt: startedAt)
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if let index = arguments.firstIndex(of: "--self-test-history"),
+            if let index = arguments.firstIndex(of: "--self-test-pin"),
+               arguments.indices.contains(index + 1)
+            {
+                delegate.runPinSelfTest(root: URL(
+                    fileURLWithPath: arguments[index + 1],
+                    isDirectory: true
+                ))
+            } else if let index = arguments.firstIndex(of: "--self-test-history"),
                arguments.indices.contains(index + 1)
             {
                 delegate.runHistorySelfTest(root: URL(
@@ -278,6 +285,173 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runPinSelfTest(root: URL) -> Never {
+        launch(offscreen: true)
+        guard let windowController else {
+            finishPinSelfTest(controller: nil, error: "window unavailable")
+        }
+
+        windowController.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState { return true }
+            return false
+        }), case .ready = model.projectState
+        else {
+            finishPinSelfTest(
+                controller: windowController,
+                error: "project unavailable"
+            )
+        }
+
+        let files = rustFiles(in: model.fileTree?.children ?? [])
+        guard let fileA = files.first(where: { $0.lastPathComponent == "a.rs" }),
+              let fileB = files.first(where: { $0.lastPathComponent == "b.rs" }),
+              let mainFile = files.first(where: { $0.lastPathComponent == "main.rs" }),
+              let aBytes = try? Data(contentsOf: fileA),
+              let bBytes = try? Data(contentsOf: fileB),
+              let mainBytes = try? Data(contentsOf: mainFile),
+              let realRange = aBytes.range(of: Data("real".utf8)),
+              let localCallRange = bBytes.range(of: Data("y();".utf8)),
+              let callerRange = bBytes.range(of: Data("call_local".utf8)),
+              let mainCallRange = mainBytes.range(of: Data("y();".utf8)),
+              let realOffset = UInt32(exactly: realRange.lowerBound),
+              let localCallOffset = UInt32(exactly: localCallRange.lowerBound),
+              let callerOffset = UInt32(exactly: callerRange.lowerBound),
+              let mainCallOffset = UInt32(exactly: mainCallRange.lowerBound)
+        else {
+            finishPinSelfTest(
+                controller: windowController,
+                error: "expected a.rs, b.rs, and main.rs fixture symbols"
+            )
+        }
+
+        guard windowController.selectFileInSidebar(fileB),
+              waitUntil(timeout: 5, condition: {
+                  windowController.displayedReaderFile?.standardizedFileURL
+                      == fileB.standardizedFileURL
+              })
+        else {
+            finishPinSelfTest(
+                controller: windowController,
+                error: "could not open b.rs"
+            )
+        }
+        windowController.selfTestReaderClick(
+            offset: localCallOffset,
+            commandClick: false
+        )
+        guard waitUntil(timeout: 5, condition: { self.pinContextSummary != nil }),
+              let initialContext = pinContextSummary
+        else {
+            finishPinSelfTest(
+                controller: windowController,
+                error: "initial context did not load"
+            )
+        }
+        emitPinStep("contextLoaded", controller: windowController)
+
+        let relationBeforeFollow = pinRelationRootSummary
+        windowController.selfTestReaderRelation(
+            offset: callerOffset,
+            direction: .callers
+        )
+        let followRelationSet = waitUntil(timeout: 5, condition: {
+            self.pinRelationRootSummary != relationBeforeFollow
+                && self.pinRelationRootSummary != nil
+        })
+        pumpRunLoop()
+        let followRelationPreservedContext = pinContextSummary == initialContext
+        emitPinStep(
+            "followShowCallers",
+            controller: windowController,
+            extra: [
+                "relationRootSet": followRelationSet,
+                "contextPreserved": followRelationPreservedContext,
+            ]
+        )
+
+        guard windowController.selectFileInSidebar(mainFile),
+              waitUntil(timeout: 5, condition: {
+                  windowController.displayedReaderFile?.standardizedFileURL
+                      == mainFile.standardizedFileURL
+              })
+        else {
+            finishPinSelfTest(
+                controller: windowController,
+                error: "could not open main.rs"
+            )
+        }
+        windowController.selfTestSetContextPinned(true)
+        let pinnedContext = pinContextSummary
+        let readerBeforeCommandClick = windowController.displayedReaderFile
+        windowController.selfTestReaderClick(
+            offset: mainCallOffset,
+            commandClick: true
+        )
+        let commandClickNavigated = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == fileA.standardizedFileURL
+        }) && readerBeforeCommandClick?.standardizedFileURL
+            != windowController.displayedReaderFile?.standardizedFileURL
+        pumpRunLoop()
+        let commandClickPreservedContext = pinContextSummary == pinnedContext
+        emitPinStep(
+            "pinnedCommandClick",
+            controller: windowController,
+            extra: [
+                "readerChanged": commandClickNavigated,
+                "contextPreserved": commandClickPreservedContext,
+            ]
+        )
+
+        let relationBeforePinned = pinRelationRootSummary
+        windowController.selfTestReaderRelation(
+            offset: realOffset,
+            direction: .callers
+        )
+        let pinnedRelationChanged = waitUntil(timeout: 5, condition: {
+            self.pinRelationRootSummary != relationBeforePinned
+                && self.pinRelationRootSummary != nil
+        })
+        pumpRunLoop()
+        let pinnedRelationPreservedContext = pinContextSummary == pinnedContext
+        emitPinStep(
+            "pinnedShowCallers",
+            controller: windowController,
+            extra: [
+                "relationRootChanged": pinnedRelationChanged,
+                "contextPreserved": pinnedRelationPreservedContext,
+            ]
+        )
+
+        windowController.selfTestSetContextPinned(false)
+        windowController.selfTestReaderClick(offset: realOffset, commandClick: false)
+        let followUpdatedContext = waitUntil(timeout: 5, condition: {
+            self.pinContextSummary != nil && self.pinContextSummary != pinnedContext
+        })
+        pumpRunLoop()
+        emitPinStep(
+            "followClick",
+            controller: windowController,
+            extra: ["contextChanged": followUpdatedContext]
+        )
+
+        finishPinSelfTest(
+            controller: windowController,
+            checks: [
+                "initialContextLoaded": true,
+                "followRelationSet": followRelationSet,
+                "followRelationPreservedContext": followRelationPreservedContext,
+                "commandClickNavigated": commandClickNavigated,
+                "commandClickPreservedContext": commandClickPreservedContext,
+                "pinnedRelationChanged": pinnedRelationChanged,
+                "pinnedRelationPreservedContext": pinnedRelationPreservedContext,
+                "followUpdatedContext": followUpdatedContext,
+            ]
+        )
+    }
+
     private func performHistoryNavigation(
         _ action: () -> Void,
         revision: String?,
@@ -330,6 +504,50 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "readerHasReadingPosition": controller.readerHasReadingPosition,
         ])
         return readerFile?.standardizedFileURL == treeFile?.standardizedFileURL
+    }
+
+    private var pinContextSummary: String? {
+        model.contextWindow.selectedCandidate.map { "\($0.path):\($0.line)" }
+    }
+
+    private var pinRelationRootSummary: String? {
+        guard let root = model.relationTree.root else { return nil }
+        if let target = root.target {
+            return "\(root.title) \(target.path):\(root.line ?? 0)"
+        }
+        return root.title
+    }
+
+    private func emitPinStep(
+        _ step: String,
+        controller: MainWindowController?,
+        extra: [String: Any] = [:]
+    ) {
+        var object: [String: Any] = [
+            "step": step,
+            "readerFile": (controller?.displayedReaderFile?.lastPathComponent as Any?)
+                ?? NSNull(),
+            "contextSummary": (pinContextSummary as Any?) ?? NSNull(),
+            "relationRootSummary": (pinRelationRootSummary as Any?) ?? NSNull(),
+            "pinned": model.contextWindow.mode == .pinned,
+        ]
+        for (key, value) in extra { object[key] = value }
+        Self.writeJSON(object)
+    }
+
+    private func finishPinSelfTest(
+        controller: MainWindowController?,
+        checks: [String: Bool] = [:],
+        error: String? = nil
+    ) -> Never {
+        let passed = error == nil
+            && !checks.isEmpty
+            && checks.values.allSatisfy { $0 }
+        var summary: [String: Any] = checks
+        summary["passed"] = passed
+        if let error { summary["error"] = error }
+        emitPinStep("summary", controller: controller, extra: summary)
+        Darwin.exit(passed ? 0 : 1)
     }
 
     func runSwitchSelfTest(root: URL) -> Never {

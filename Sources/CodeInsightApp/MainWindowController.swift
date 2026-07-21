@@ -179,6 +179,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.currentReadingPosition() != nil
     }
 
+    func selfTestSetContextPinned(_ pinned: Bool) {
+        contextController.selfTestSetPinned(pinned)
+    }
+
+    func selfTestReaderClick(offset: UInt32, commandClick: Bool) {
+        handleReaderClick(offset: offset, commandClick: commandClick)
+    }
+
+    func selfTestReaderRelation(
+        offset: UInt32,
+        direction: RelationTreeModel.Direction
+    ) {
+        handleReaderRelation(offset: offset, direction: direction)
+    }
+
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
@@ -518,9 +533,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.isCollapsed = false
         Task { [weak self] in
             guard let self,
-                  let candidate = await model.contextWindow.explicitJump(
-                    file: path,
-                    offset: offset
+                  let candidate = await model.contextWindow.resolvedCandidate(
+                      file: path,
+                      offset: offset
                   )
             else { return }
             showRelations(symbol: candidate.symbol, direction: direction)
@@ -1180,6 +1195,12 @@ final class ContextWindowViewController: NSViewController {
 
     func apply(settings: ReaderSettings) {
         miniReader.apply(settings: settings)
+    }
+
+    func selfTestSetPinned(_ pinned: Bool) {
+        loadViewIfNeeded()
+        modeControl.selectedSegment = pinned ? 1 : 0
+        modeChanged(modeControl)
     }
 
     override func loadView() {

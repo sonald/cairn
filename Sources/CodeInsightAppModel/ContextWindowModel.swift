@@ -106,6 +106,11 @@ public final class ContextWindowModel {
     }
 
     public func setMode(_ mode: Mode) {
+        if mode == .pinned, self.mode != .pinned {
+            requestID &+= 1
+            pendingToken = nil
+            locatedToken = nil
+        }
         self.mode = mode
     }
 
@@ -153,7 +158,22 @@ public final class ContextWindowModel {
     }
 
     public func explicitJump(file: String, offset: UInt32) async -> Candidate? {
-        await lookup(Token(file: file, offset: offset))
+        if mode == .pinned {
+            return await resolvedCandidate(file: file, offset: offset)
+        }
+        return await lookup(Token(file: file, offset: offset))
+    }
+
+    public func resolvedCandidate(file: String, offset: UInt32) async -> Candidate? {
+        guard case let .ready(session, context) = projectState,
+              let pathID = pathID(file, in: session)
+        else { return nil }
+        return try? await resolveCandidates(
+            session: session,
+            pathID: pathID,
+            offset: offset,
+            context: context
+        ).first
     }
 
     public func selectNext() {
@@ -210,9 +230,12 @@ public final class ContextWindowModel {
 
         locatedToken = LocatedToken(file: token.file, range: range)
         do {
-            let resolved = try await resolver(session, pathID, token.offset, context)
-            guard requestID == currentRequest else { return nil }
-            let candidates = await present(resolved, session: session)
+            let candidates = try await resolveCandidates(
+                session: session,
+                pathID: pathID,
+                offset: token.offset,
+                context: context
+            )
             guard requestID == currentRequest else { return nil }
             guard !candidates.isEmpty else {
                 stage = .idle
@@ -226,6 +249,18 @@ public final class ContextWindowModel {
             stage = .idle
             return nil
         }
+    }
+
+    private func resolveCandidates(
+        session: EngineSession,
+        pathID: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) async throws -> [Candidate] {
+        await present(
+            try await resolver(session, pathID, offset, context),
+            session: session
+        )
     }
 
     private func present(

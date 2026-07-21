@@ -18,8 +18,9 @@ Safe/Trusted 双模式（design §8.4）+ diff 阅读（跨 commit，含 Compare
 
 ## M3 期间挂起延续
 
-- **K5 Pin 语义裁决**（M2 起）：单击不覆盖 / 右键 Show Relations 经 explicitJump
-  覆盖——仍等用户手测统一定夺。
+- ~~**K5 Pin 语义裁决**~~：**2026-07-21 已裁决并实现**（design §2.2 F2.3）——
+  Pin = 底部冻结；Cmd+单击跳主区不动底部；Show Relations 只填关系树不动底部（无条件）。
+  由 `--self-test-pin` 集成通道断言守护。
 - 分支图（graph）：M3 切换器只做线性列表 + branch/tag 标签。
 - Compare 跨 commit diff：M3 只做分屏布局，diff 留 M4（design F4.7 P1）。
 - huge syntaxVisible TextKit 属性重排优化（探针级专项）。
