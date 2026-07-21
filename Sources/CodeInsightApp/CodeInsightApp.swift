@@ -140,8 +140,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 !fragment.textLineFragments.isEmpty
             else { Darwin.exit(1) }
             state.firstVisibleMS = milliseconds(since: openedAt)
+            state.firstVisibleOutlineFacets = loaded.document.outlineFacets.count
             if loaded.tier == .regular {
                 state.syntaxVisibleMS = state.firstVisibleMS
+                state.outlineFacets = loaded.document.outlineFacets.count
             } else {
                 loader.loadSyntax(for: loaded.document) { result in
                     Task { @MainActor in
@@ -153,6 +155,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                                 .textViewportLayoutController.layoutViewport()
                             state.window.displayIfNeeded()
                             state.syntaxVisibleMS = milliseconds(since: state.openedAt)
+                            state.outlineFacets = document.outlineFacets.count
                         case .failure:
                             state.failed = true
                         }
@@ -172,13 +175,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             let tier = state.tier,
             let firstVisibleMS = state.firstVisibleMS,
             let syntaxVisibleMS = state.syntaxVisibleMS,
+            let firstVisibleOutlineFacets = state.firstVisibleOutlineFacets,
+            let outlineFacets = state.outlineFacets,
             !state.failed
         else { Darwin.exit(1) }
         Self.finishOpenSelfTest(
             tier: tier,
             firstVisibleMS: firstVisibleMS,
             syntaxVisibleMS: syntaxVisibleMS,
-            styledFragments: state.textView.renderingCoordinator.styledFragmentCount
+            styledFragments: state.textView.renderingCoordinator.styledFragmentCount,
+            firstVisibleOutlineFacets: firstVisibleOutlineFacets,
+            outlineFacets: outlineFacets
         )
     }
 
@@ -493,7 +500,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         tier: FileTier,
         firstVisibleMS: Double,
         syntaxVisibleMS: Double,
-        styledFragments: Int
+        styledFragments: Int,
+        firstVisibleOutlineFacets: Int,
+        outlineFacets: Int
     ) -> Never {
         do {
             let data = try JSONSerialization.data(
@@ -502,6 +511,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "firstVisibleMS": firstVisibleMS,
                     "syntaxVisibleMS": syntaxVisibleMS,
                     "styledFragments": styledFragments,
+                    "firstVisibleOutlineFacets": firstVisibleOutlineFacets,
+                    "outlineFacets": outlineFacets,
                 ],
                 options: [.sortedKeys]
             )
@@ -513,6 +524,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 : tier != .huge
                     || (
                         firstVisibleMS < SelfTestBudgets.hugeFirstVisibleMS
+                            && firstVisibleOutlineFacets == 0
                             && styledFragments < SelfTestBudgets.hugeStyledFragments
                     )
             Darwin.exit(withinBudget ? 0 : 1)
@@ -531,6 +543,8 @@ private final class OpenSelfTestState {
     var tier: FileTier?
     var firstVisibleMS: Double?
     var syntaxVisibleMS: Double?
+    var firstVisibleOutlineFacets: Int?
+    var outlineFacets: Int?
     var failed = false
 
     init(

@@ -27,11 +27,14 @@ func rustHighlighterProducesStableSpans() throws {
         "57..<61:string",
     ])
     #expect(result.outlineFacets == [OutlineFacet(
+        kind: .fn,
         name: "greet",
         range: ByteRange(
             lowerBound: 0,
             upperBound: UInt32(source.dropLast().utf8.count)
-        )
+        ),
+        nameRange: ByteRange(lowerBound: 3, upperBound: 8),
+        depth: 0
     )])
     let bodyOffset = UInt32(source[..<source.range(of: "let n")!.lowerBound].utf8.count)
     #expect(ReaderDocument(
@@ -39,6 +42,46 @@ func rustHighlighterProducesStableSpans() throws {
         highlightSpans: result.spans,
         outlineFacets: result.outlineFacets
     ).symbolAnchor(at: bodyOffset) == "greet")
+}
+
+@Test
+func rustHighlighterProducesOutlineSnapshot() throws {
+    let source = [
+        "mod outer {",
+        "    struct Widget;",
+        "    enum State { Ready }",
+        "    trait Work {",
+        "        fn required(&self);",
+        "    }",
+        "    impl Work for Widget {",
+        "        fn run(&self) {}",
+        "    }",
+        "    const LIMIT: usize = 3;",
+        "    static FLAG: bool = true;",
+        "    type Alias = Widget;",
+        "}",
+        "fn top() {}",
+    ].joined(separator: "\n")
+
+    let facets = try RustHighlighter().highlight(bytes: Array(source.utf8)).outlineFacets
+    let snapshot = facets.map {
+        "\($0.depth):\($0.kind.rawValue):\($0.name):"
+            + "\($0.nameRange.lowerBound)..<\($0.nameRange.upperBound)"
+    }
+
+    #expect(snapshot == [
+        "0:mod:outer:4..<9",
+        "1:struct:Widget:23..<29",
+        "1:enum:State:40..<45",
+        "1:trait:Work:66..<70",
+        "2:method:required:84..<92",
+        "1:impl:Widget:125..<131",
+        "2:method:run:145..<148",
+        "1:const:LIMIT:175..<180",
+        "1:static:FLAG:204..<208",
+        "1:typeAlias:Alias:232..<237",
+        "0:fn:top:253..<256",
+    ])
 }
 
 @Test

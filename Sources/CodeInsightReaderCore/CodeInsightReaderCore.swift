@@ -22,13 +22,38 @@ public struct HighlightSpan: Equatable, Sendable {
     }
 }
 
+public enum OutlineKind: String, Sendable {
+    case fn
+    case method
+    case `struct`
+    case `enum`
+    case trait
+    case `impl`
+    case mod
+    case `const`
+    case `static`
+    case typeAlias
+}
+
 public struct OutlineFacet: Equatable, Sendable {
+    public let kind: OutlineKind
     public let name: String
     public let range: CodeInsightCore.ByteRange
+    public let nameRange: CodeInsightCore.ByteRange
+    public let depth: Int
 
-    public init(name: String, range: CodeInsightCore.ByteRange) {
+    public init(
+        kind: OutlineKind,
+        name: String,
+        range: CodeInsightCore.ByteRange,
+        nameRange: CodeInsightCore.ByteRange,
+        depth: Int
+    ) {
+        self.kind = kind
         self.name = name
         self.range = range
+        self.nameRange = nameRange
+        self.depth = depth
     }
 }
 
@@ -129,8 +154,11 @@ public struct RustHighlighter: Sendable {
 
         var spans: [HighlightSpan] = []
         var facets: [OutlineFacet] = []
-        var stack = [tree.rootNode]
-        while let node = stack.popLast() {
+        var stack: [(node: Node, depth: Int, parentKind: String?, member: OutlineKind?)] = [
+            (tree.rootNode, 0, nil, nil),
+        ]
+        while let current = stack.popLast() {
+            let node = current.node
             let kind = node.kind
             let highlight: HighlightKind?
             if Self.comments.contains(kind) {
@@ -152,19 +180,51 @@ public struct RustHighlighter: Sendable {
                 continue
             }
 
-            if kind == "function_item",
-               let nameNode = node.namedChildren.first(where: { $0.kind == "identifier" }) {
-                let range = coreRange(nameNode)
-                spans.append(HighlightSpan(range: range, kind: .functionName))
-                // S3 only consumes function outline names/ranges, so collect them in
-                // this existing walk instead of running RustExtractor a second time.
-                if let name = text(in: bytes, range: range) {
-                    facets.append(OutlineFacet(name: name, range: coreRange(node)))
+            let outline = outlineItem(
+                for: node,
+                nodeKind: kind,
+                parentKind: current.parentKind,
+                member: current.member
+            )
+            if let outline {
+                let nameRange = coreRange(outline.nameNode)
+                if kind == "function_item" || kind == "function_signature_item" {
+                    spans.append(HighlightSpan(range: nameRange, kind: .functionName))
+                }
+                // Outline data belongs to this existing highlighter walk. Parsing
+                // again through RustExtractor would duplicate the large-file cost.
+                if let name = text(in: bytes, range: nameRange) {
+                    facets.append(OutlineFacet(
+                        kind: outline.kind,
+                        name: name,
+                        range: coreRange(node),
+                        nameRange: nameRange,
+                        depth: current.depth
+                    ))
                 }
             }
 
+            let isContainer = kind == "impl_item"
+                || kind == "trait_item"
+                || (kind == "mod_item" && node.namedChildren.contains {
+                    $0.kind == "declaration_list"
+                })
+            let childDepth = current.depth + (isContainer ? 1 : 0)
+            let childMember: OutlineKind?
+            switch kind {
+            case "impl_item":
+                childMember = .impl
+            case "trait_item":
+                childMember = .trait
+            case "source_file", "mod_item", "function_item", "function_signature_item":
+                childMember = nil
+            default:
+                childMember = current.member
+            }
             for index in (0..<node.childCount).reversed() {
-                if let child = node.child(at: index) { stack.append(child) }
+                if let child = node.child(at: index) {
+                    stack.append((child, childDepth, kind, childMember))
+                }
             }
         }
         spans.sort {
@@ -172,6 +232,78 @@ public struct RustHighlighter: Sendable {
                 < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
         }
         return (spans, facets)
+    }
+
+    private func outlineItem(
+        for node: Node,
+        nodeKind: String,
+        parentKind: String?,
+        member: OutlineKind?
+    ) -> (kind: OutlineKind, nameNode: Node)? {
+        let kind: OutlineKind
+        let nameNode: Node?
+        switch nodeKind {
+        case "function_item", "function_signature_item":
+            kind = parentKind == "declaration_list"
+                && (member == .impl || member == .trait)
+                ? .method
+                : .fn
+            nameNode = node.namedChildren.first {
+                $0.kind == "identifier" || $0.kind == "metavariable"
+            }
+        case "struct_item":
+            kind = .struct
+            nameNode = node.namedChildren.first { $0.kind == "type_identifier" }
+        case "enum_item":
+            kind = .enum
+            nameNode = node.namedChildren.first { $0.kind == "type_identifier" }
+        case "trait_item":
+            kind = .trait
+            nameNode = node.namedChildren.first { $0.kind == "type_identifier" }
+        case "impl_item":
+            guard let nameNode = implementedTypeName(in: node) else { return nil }
+            return (.impl, nameNode)
+        case "mod_item":
+            kind = .mod
+            nameNode = node.namedChildren.first { $0.kind == "identifier" }
+        case "const_item":
+            kind = .const
+            nameNode = node.namedChildren.first { $0.kind == "identifier" }
+        case "static_item":
+            kind = .static
+            nameNode = node.namedChildren.first { $0.kind == "identifier" }
+        case "type_item":
+            kind = .typeAlias
+            nameNode = node.namedChildren.first { $0.kind == "type_identifier" }
+        default:
+            return nil
+        }
+        guard let nameNode else { return nil }
+        return (kind, nameNode)
+    }
+
+    private func implementedTypeName(in node: Node) -> Node? {
+        node.namedChildren.last(where: {
+            $0.kind != "type_parameters"
+                && $0.kind != "where_clause"
+                && $0.kind != "declaration_list"
+        }).flatMap(typeName)
+    }
+
+    private func typeName(in node: Node) -> Node? {
+        switch node.kind {
+        case "identifier", "type_identifier", "primitive_type":
+            return node
+        case "scoped_type_identifier":
+            for child in node.namedChildren.reversed() {
+                if let name = typeName(in: child) { return name }
+            }
+        default:
+            for child in node.namedChildren {
+                if let name = typeName(in: child) { return name }
+            }
+        }
+        return nil
     }
 
     private func coreRange(_ node: Node) -> CodeInsightCore.ByteRange {

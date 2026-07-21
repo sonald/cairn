@@ -87,8 +87,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.onOpenFile = { [weak self] url in
             self?.navigate(to: url)
         }
+        sidebarController.onOpenOutline = { [weak self] offset in
+            guard let self, let file = model.selectedFile else { return }
+            navigate(to: file, byteOffset: offset)
+        }
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
+        }
+        readerController.onOutlineChange = { [weak self] facets in
+            guard let self else { return }
+            sidebarController.setOutline(facets)
+            if let offset = readerController.currentReadingPosition()?.byteOffset {
+                sidebarController.highlightOutline(at: offset)
+            }
+        }
+        readerController.onReadingPositionChange = { [weak self] offset in
+            self?.sidebarController.highlightOutline(at: offset)
         }
         readerController.onShowRelation = { [weak self] offset, direction in
             self?.handleReaderRelation(offset: offset, direction: direction)
@@ -365,37 +379,74 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
 @MainActor
 final class SidebarViewController: NSViewController,
-    NSOutlineViewDataSource, NSOutlineViewDelegate
+    NSOutlineViewDataSource, NSOutlineViewDelegate, NSSplitViewDelegate
 {
     var onOpenFile: ((URL) -> Void)?
-    private let outlineView = NSOutlineView()
+    var onOpenOutline: ((UInt32) -> Void)?
+    private let fileOutlineView = NSOutlineView()
+    private let symbolOutlineView = NSOutlineView()
+    private let splitView = NSSplitView()
+    private let outlineModel = OutlinePanelModel()
     private var tree: FileTreeModel?
+    private var facetRows: [NSNumber] = []
+    private var setInitialDivider = false
 
     override func loadView() {
-        let column = NSTableColumn(identifier: .init("File"))
-        outlineView.addTableColumn(column)
-        outlineView.outlineTableColumn = column
-        outlineView.headerView = nil
-        outlineView.dataSource = self
-        outlineView.delegate = self
+        configure(fileOutlineView, column: "File")
+        configure(symbolOutlineView, column: "Symbol")
+        symbolOutlineView.indentationPerLevel = 0
+        symbolOutlineView.target = self
+        symbolOutlineView.action = #selector(openOutlineRow(_:))
 
-        let scrollView = NSScrollView()
-        scrollView.documentView = outlineView
-        scrollView.hasVerticalScroller = true
-        view = scrollView
+        splitView.isVertical = false
+        splitView.dividerStyle = .thin
+        splitView.delegate = self
+        splitView.addArrangedSubview(pane(title: "Files", outlineView: fileOutlineView))
+        splitView.addArrangedSubview(pane(title: "Outline", outlineView: symbolOutlineView))
+        view = splitView
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard !setInitialDivider, splitView.bounds.height > 0 else { return }
+        splitView.setPosition(splitView.bounds.height * 0.65, ofDividerAt: 0)
+        setInitialDivider = true
     }
 
     func display(_ tree: FileTreeModel?) {
         self.tree = tree
         loadViewIfNeeded()
-        outlineView.reloadData()
+        fileOutlineView.reloadData()
+    }
+
+    func setOutline(_ facets: [OutlineFacet]) {
+        loadViewIfNeeded()
+        outlineModel.setDocument(facets)
+        facetRows = outlineModel.facets.indices.map { NSNumber(value: $0) }
+        symbolOutlineView.reloadData()
+        symbolOutlineView.deselectAll(nil)
+    }
+
+    func highlightOutline(at byteOffset: UInt32) {
+        let index = outlineModel.highlight(at: byteOffset)
+        guard let index else {
+            symbolOutlineView.deselectAll(nil)
+            return
+        }
+        let row = symbolOutlineView.row(forItem: facetRows[index])
+        guard row >= 0, symbolOutlineView.selectedRow != row else { return }
+        symbolOutlineView.selectRowIndexes([row], byExtendingSelection: false)
+        symbolOutlineView.scrollRowToVisible(row)
     }
 
     func outlineView(
         _ outlineView: NSOutlineView,
         numberOfChildrenOfItem item: Any?
     ) -> Int {
-        (item as? FileTreeNode)?.children.count ?? tree?.children.count ?? 0
+        if outlineView === symbolOutlineView {
+            return item == nil ? facetRows.count : 0
+        }
+        return (item as? FileTreeNode)?.children.count ?? tree?.children.count ?? 0
     }
 
     func outlineView(
@@ -403,11 +454,13 @@ final class SidebarViewController: NSViewController,
         child index: Int,
         ofItem item: Any?
     ) -> Any {
-        (item as? FileTreeNode)?.children[index] ?? tree!.children[index]
+        if outlineView === symbolOutlineView { return facetRows[index] }
+        return (item as? FileTreeNode)?.children[index] ?? tree!.children[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        (item as? FileTreeNode)?.isDirectory == true
+        if outlineView === symbolOutlineView { return false }
+        return (item as? FileTreeNode)?.isDirectory == true
     }
 
     func outlineView(
@@ -415,6 +468,12 @@ final class SidebarViewController: NSViewController,
         viewFor tableColumn: NSTableColumn?,
         item: Any
     ) -> NSView? {
+        if outlineView === symbolOutlineView {
+            guard let number = item as? NSNumber,
+                  outlineModel.facets.indices.contains(number.intValue)
+            else { return nil }
+            return outlineCell(for: outlineModel.facets[number.intValue])
+        }
         guard let node = item as? FileTreeNode else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("FileTreeCell")
         if let cell = outlineView.makeView(withIdentifier: identifier, owner: self)
@@ -438,11 +497,118 @@ final class SidebarViewController: NSViewController,
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
-        guard outlineView.selectedRow >= 0,
-              let node = outlineView.item(atRow: outlineView.selectedRow) as? FileTreeNode,
-              !node.isDirectory
+        guard let outlineView = notification.object as? NSOutlineView else { return }
+        if outlineView === symbolOutlineView {
+            return
+        } else {
+            guard outlineView.selectedRow >= 0,
+                  let node = outlineView.item(atRow: outlineView.selectedRow)
+                    as? FileTreeNode,
+                  !node.isDirectory
+            else { return }
+            onOpenFile?(node.url)
+        }
+    }
+
+    @objc private func openOutlineRow(_ sender: NSOutlineView) {
+        guard sender.clickedRow >= 0,
+              let row = sender.item(atRow: sender.clickedRow) as? NSNumber,
+              let offset = outlineModel.open(row.intValue)
         else { return }
-        onOpenFile?(node.url)
+        onOpenOutline?(offset)
+    }
+
+    func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
+        false
+    }
+
+    private func configure(_ outlineView: NSOutlineView, column title: String) {
+        let column = NSTableColumn(identifier: .init(title))
+        column.resizingMask = .autoresizingMask
+        outlineView.addTableColumn(column)
+        outlineView.outlineTableColumn = column
+        outlineView.headerView = nil
+        outlineView.dataSource = self
+        outlineView.delegate = self
+    }
+
+    private func pane(title: String, outlineView: NSOutlineView) -> NSView {
+        let label = NSTextField(labelWithString: title.uppercased())
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .secondaryLabelColor
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let scrollView = NSScrollView()
+        scrollView.documentView = outlineView
+        scrollView.hasVerticalScroller = true
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+
+        let pane = NSView()
+        pane.addSubview(label)
+        pane.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: pane.topAnchor, constant: 6),
+            label.leadingAnchor.constraint(equalTo: pane.leadingAnchor, constant: 8),
+            label.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -8),
+            scrollView.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            scrollView.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+        ])
+        return pane
+    }
+
+    private func outlineCell(for facet: OutlineFacet) -> NSView {
+        let identifier = NSUserInterfaceItemIdentifier("OutlineFacetCell")
+        let cell: NSStackView
+        if let reused = symbolOutlineView.makeView(withIdentifier: identifier, owner: self)
+            as? NSStackView
+        {
+            cell = reused
+        } else {
+            let image = NSImageView()
+            image.translatesAutoresizingMaskIntoConstraints = false
+            NSLayoutConstraint.activate([
+                image.widthAnchor.constraint(equalToConstant: 14),
+                image.heightAnchor.constraint(equalToConstant: 14),
+            ])
+            let label = NSTextField(labelWithString: "")
+            label.lineBreakMode = .byTruncatingTail
+            cell = NSStackView(views: [image, label])
+            cell.identifier = identifier
+            cell.orientation = .horizontal
+            cell.alignment = .centerY
+            cell.spacing = 4
+        }
+        let image = cell.arrangedSubviews[0] as! NSImageView
+        let label = cell.arrangedSubviews[1] as! NSTextField
+        image.image = NSImage(
+            systemSymbolName: symbolName(for: facet.kind),
+            accessibilityDescription: facet.kind.rawValue
+        )
+        label.stringValue = facet.name
+        cell.edgeInsets = NSEdgeInsets(
+            top: 0,
+            left: 4 + CGFloat(facet.depth) * 12,
+            bottom: 0,
+            right: 4
+        )
+        return cell
+    }
+
+    private func symbolName(for kind: OutlineKind) -> String {
+        switch kind {
+        case .fn: "function"
+        case .method: "m.square"
+        case .struct: "shippingbox"
+        case .enum: "list.bullet"
+        case .trait: "point.3.connected.trianglepath.dotted"
+        case .impl: "hammer"
+        case .mod: "folder"
+        case .const: "c.square"
+        case .static: "s.square"
+        case .typeAlias: "t.square"
+        }
     }
 }
 
@@ -450,6 +616,8 @@ final class SidebarViewController: NSViewController,
 final class ReaderViewController: NSViewController, NSMenuDelegate {
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
+    var onOutlineChange: (([OutlineFacet]) -> Void)?
+    var onReadingPositionChange: ((UInt32) -> Void)?
     private let label = NSTextField(labelWithString: "Open a project to begin")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
@@ -457,6 +625,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
     private var contextMenuOffset: UInt32?
+    private var readingPositionTask: Task<Void, Never>?
 
     override func loadView() {
         let scrollView = NSScrollView()
@@ -479,12 +648,16 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
                     forCharacterIndex: characterIndex
                   )
             else { return }
+            self.onReadingPositionChange?(offset)
             let meaningful = modifiers.intersection([.command, .option, .control, .shift])
             if meaningful.isEmpty {
                 self.onTokenClick?(offset, false)
             } else if meaningful == .command {
                 self.onTokenClick?(offset, true)
             }
+        }
+        textView.onViewportChange = { [weak self] in
+            self?.scheduleReadingPositionChange()
         }
 
         let relationMenu = NSMenu(title: "Relations")
@@ -519,8 +692,11 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         guard file != displayedFile else { return }
         displayedFile = file
         contextMenuOffset = nil
+        readingPositionTask?.cancel()
+        readingPositionTask = nil
         loadGeneration &+= 1
         let generation = loadGeneration
+        onOutlineChange?([])
 
         guard let file else {
             displayedDocument = nil
@@ -536,6 +712,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             label.isHidden = true
             layoutTextViewFrame()
             textView.display(document: loaded.document)
+            onOutlineChange?(loaded.document.outlineFacets)
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
             if loaded.tier != .regular {
@@ -546,6 +723,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
                         case let .success(document):
                             self.displayedDocument = document
                             self.textView.updateSyntax(document: document)
+                            self.onOutlineChange?(document.outlineFacets)
                         case .failure:
                             self.label.stringValue = "Syntax highlighting failed"
                             self.label.isHidden = false
@@ -563,6 +741,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     func navigate(to file: URL, byteOffset: UInt32) {
         display(file)
         textView.reveal(byteOffset: byteOffset)
+        onReadingPositionChange?(byteOffset)
     }
 
     func currentReadingPosition() -> (
@@ -592,6 +771,17 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         view.layoutSubtreeIfNeeded()
         if let scrollView = view as? NSScrollView {
             textView.view.frame = scrollView.contentView.bounds
+        }
+    }
+
+    private func scheduleReadingPositionChange() {
+        guard readingPositionTask == nil else { return }
+        readingPositionTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, let self else { return }
+            readingPositionTask = nil
+            guard let offset = currentReadingPosition()?.byteOffset else { return }
+            onReadingPositionChange?(offset)
         }
     }
 

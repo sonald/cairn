@@ -140,6 +140,7 @@ public final class ReaderTextView {
     public let view: NSTextView
     public let renderingCoordinator = RenderingAttributesCoordinator()
     public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
+    public var onViewportChange: (() -> Void)?
     private let backingTextStorage: NSTextStorage
     private var byteUTF16Map: ByteUTF16Map?
 
@@ -157,6 +158,7 @@ public final class ReaderTextView {
                   let layoutManager = self.view.textLayoutManager
             else { return }
             self.validateVisibleRenderingAttributes(in: layoutManager)
+            self.onViewportChange?()
         }
     }
 
