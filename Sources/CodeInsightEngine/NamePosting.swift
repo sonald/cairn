@@ -10,18 +10,22 @@ public struct NamePosting: Sendable {
 
     public init(indexes: [ContentIndexKey: ContentIndex]) {
         for (key, index) in indexes {
-            for (facetIndex, facet) in index.symbols.enumerated() {
-                guard let facetIndex = UInt32(exactly: facetIndex) else {
-                    preconditionFailure("Facet count exceeds UInt32")
-                }
-                definitions[facet.nameID, default: []].append((key, facetIndex))
+            add(index, for: key)
+        }
+    }
+
+    mutating func add(_ index: ContentIndex, for key: ContentIndexKey) {
+        for (facetIndex, facet) in index.symbols.enumerated() {
+            guard let facetIndex = UInt32(exactly: facetIndex) else {
+                preconditionFailure("Facet count exceeds UInt32")
             }
-            for (callIndex, call) in index.calls.enumerated() {
-                guard let callIndex = UInt32(exactly: callIndex) else {
-                    preconditionFailure("Call count exceeds UInt32")
-                }
-                calls[call.nameID, default: []].append((key, callIndex))
+            definitions[facet.nameID, default: []].append((key, facetIndex))
+        }
+        for (callIndex, call) in index.calls.enumerated() {
+            guard let callIndex = UInt32(exactly: callIndex) else {
+                preconditionFailure("Call count exceeds UInt32")
             }
+            calls[call.nameID, default: []].append((key, callIndex))
         }
     }
 }

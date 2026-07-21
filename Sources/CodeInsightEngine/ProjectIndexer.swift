@@ -36,13 +36,9 @@ public struct ProjectIndexer: Sendable {
         let files = try rustFiles(in: root).sorted {
             relativePath(of: $0, under: root) < relativePath(of: $1, under: root)
         }
-        let names = Interner<NameID>()
-        let paths = Interner<PathID>()
-        let strings = Interner<StringID>()
+        let store = ProjectIndexStore()
 
         var occurrences: [FileOccurrence] = []
-        var indexes: [ContentIndexKey: ContentIndex] = [:]
-        var bytesByContent: [ContentID: [UInt8]] = [:]
         var hasErrors: [ContentIndexKey: Bool] = [:]
         var fileInputs: [FileInput] = []
         var uniqueInputs: [ExtractionInput] = []
@@ -76,15 +72,15 @@ public struct ProjectIndexer: Sendable {
         // assigned only here, in first-path order, so scheduling cannot change
         // NameID/StringID allocation.
         for draft in try extract(uniqueInputs) {
-            indexes[draft.index.key] = remap(
+            let index = remap(
                 draft.index,
                 localNames: draft.names,
                 localStrings: draft.strings,
-                names: names,
-                strings: strings
+                names: store.names,
+                strings: store.strings
             )
+            store.insert(index, bytes: draft.bytes)
             hasErrors[draft.index.key] = draft.containsErrorNodes
-            bytesByContent[draft.index.key.contentID] = draft.bytes
         }
 
         for (offset, input) in fileInputs.enumerated() {
@@ -93,7 +89,7 @@ public struct ProjectIndexer: Sendable {
             }
             occurrences.append(FileOccurrence(
                 occurrenceID: FileOccurrenceID(rawValue: occurrenceID),
-                pathID: paths.intern(input.relativePath),
+                pathID: store.paths.intern(input.relativePath),
                 contentID: input.contentID,
                 detectedLanguage: .rust,
                 sourceKind: .untracked,
@@ -106,13 +102,7 @@ public struct ProjectIndexer: Sendable {
             snapshotID: SnapshotID(rawValue: UUID()),
             files: occurrences
         )
-        let moduleMap = ModuleMap(
-            manifest: manifest,
-            indexes: indexes,
-            bytesByContent: bytesByContent,
-            names: names,
-            paths: paths
-        )
+        let indexes = store.contentIndexes
         let stats = IndexStats(
             fileCount: occurrences.count,
             uniqueContentCount: indexes.count,
@@ -134,18 +124,17 @@ public struct ProjectIndexer: Sendable {
         )
         let profile = AnalysisProfile.placeholder(
             language: .rust,
-            root: paths.intern(".")
+            root: store.paths.intern(".")
+        )
+        let snapshotView = SnapshotView(
+            store: store,
+            manifest: manifest,
+            stats: stats,
+            analysisProfile: profile
         )
         return EngineSession(
-            manifest: manifest,
-            contentIndexes: indexes,
-            stats: stats,
-            names: names,
-            paths: paths,
-            strings: strings,
-            analysisProfile: profile,
-            moduleMap: moduleMap,
-            sourceBytesByContent: bytesByContent
+            store: store,
+            snapshotView: snapshotView
         )
     }
 

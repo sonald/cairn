@@ -77,13 +77,15 @@ public struct ImplementationResult: Sendable {
 }
 
 public final class EngineSession: Sendable {
-    public let manifest: SnapshotManifest
-    public let contentIndexes: [ContentIndexKey: ContentIndex]
-    public let stats: IndexStats
-    public let names: Interner<NameID>
-    public let paths: Interner<PathID>
-    public let strings: Interner<StringID>
-    public let analysisProfile: AnalysisProfile
+    public var manifest: SnapshotManifest { snapshotView.manifest }
+    public var contentIndexes: [ContentIndexKey: ContentIndex] {
+        store.contentIndexes
+    }
+    public var stats: IndexStats { snapshotView.stats }
+    public var names: Interner<NameID> { store.names }
+    public var paths: Interner<PathID> { store.paths }
+    public var strings: Interner<StringID> { store.strings }
+    public var analysisProfile: AnalysisProfile { snapshotView.analysisProfile }
 
     public var snapshotID: SnapshotID { manifest.snapshotID }
     public var moduleChildren: [PathID: [NameID: PathID]] {
@@ -91,35 +93,28 @@ public final class EngineSession: Sendable {
     }
 
     let namePosting: NamePosting
-    let moduleMap: ModuleMap
+    var moduleMap: ModuleMap { snapshotView.moduleMap }
+    let store: ProjectIndexStore
+    let snapshotView: SnapshotView
     private let filesByPath: [PathID: FileOccurrence]
     private let contentKeysByPath: [PathID: ContentIndexKey]
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
     private let implIndex: ImplIndex
-    let sourceBytesByContent: [ContentID: [UInt8]]
+    var sourceBytesByContent: [ContentID: [UInt8]] {
+        store.sourceBytesByContent
+    }
     private let symbolSearchCache = SymbolSearchCache()
 
     init(
-        manifest: SnapshotManifest,
-        contentIndexes: [ContentIndexKey: ContentIndex],
-        stats: IndexStats,
-        names: Interner<NameID>,
-        paths: Interner<PathID>,
-        strings: Interner<StringID>,
-        analysisProfile: AnalysisProfile,
-        moduleMap: ModuleMap,
-        sourceBytesByContent: [ContentID: [UInt8]]
+        store: ProjectIndexStore,
+        snapshotView: SnapshotView
     ) {
-        self.manifest = manifest
-        self.contentIndexes = contentIndexes
-        self.stats = stats
-        self.names = names
-        self.paths = paths
-        self.strings = strings
-        self.analysisProfile = analysisProfile
-        self.moduleMap = moduleMap
-        self.sourceBytesByContent = sourceBytesByContent
+        precondition(snapshotView.store === store)
+        self.store = store
+        self.snapshotView = snapshotView
+        let manifest = snapshotView.manifest
+        let contentIndexes = store.contentIndexes
         filesByPath = Dictionary(uniqueKeysWithValues: manifest.files.map {
             ($0.pathID, $0)
         })
@@ -152,7 +147,7 @@ public final class EngineSession: Sendable {
         }
         self.aliasIndex = aliasIndex
         implIndex = ImplIndex(indexes: contentIndexes)
-        namePosting = NamePosting(indexes: contentIndexes)
+        namePosting = store.namePosting
     }
 
     public func definitions(

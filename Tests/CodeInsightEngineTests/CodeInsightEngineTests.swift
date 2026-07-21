@@ -358,6 +358,56 @@ func parallelIndexMatchesSerialIndex() throws {
 }
 
 @Test
+func storeAndSnapshotViewPreserveFixtureFieldsAndQueries() throws {
+    let root = repositoryRoot.appendingPathComponent(
+        "Tests/RustExtractorTests/Fixtures/use_alias"
+    )
+    let session = try ProjectIndexer().index(root: root)
+    let store = session.store
+    let view = session.snapshotView
+
+    #expect(view.store === store)
+    #expect(session.names === store.names)
+    #expect(session.paths === store.paths)
+    #expect(session.strings === store.strings)
+    #expect(session.manifest.snapshotID == view.manifest.snapshotID)
+    #expect(session.manifest.files.map(\.pathID) == view.manifest.files.map(\.pathID))
+    #expect(Set(session.contentIndexes.keys) == Set(store.contentIndexes.keys))
+    #expect(session.sourceBytesByContent == store.sourceBytesByContent)
+    #expect(session.moduleChildren == view.moduleMap.moduleChildren)
+    #expect(aggregateStatsDump(session.stats) == aggregateStatsDump(view.stats))
+    #expect(session.stats.elapsedMilliseconds == view.stats.elapsedMilliseconds)
+    #expect(session.analysisProfile.id == view.analysisProfile.id)
+    #expect(session.analysisProfile.projectRoot == view.analysisProfile.projectRoot)
+
+    let rebuiltPosting = NamePosting(indexes: store.contentIndexes)
+    #expect(store.namePosting.definitions.mapValues(\.count)
+        == rebuiltPosting.definitions.mapValues(\.count))
+    #expect(store.namePosting.calls.mapValues(\.count)
+        == rebuiltPosting.calls.mapValues(\.count))
+
+    let context = queryContext(for: session)
+    let mainPath = try #require(pathID("main.rs", in: session))
+    let source = try String(
+        contentsOf: root.appendingPathComponent("main.rs"),
+        encoding: .utf8
+    )
+    let resolved = try session.resolve(
+        file: mainPath,
+        offset: offset(of: "open_db();", in: source),
+        context: context
+    )
+    let callers = try session.callers(of: "connect", context: context)
+
+    #expect(resolved.map {
+        "\(session.paths.resolve($0.target.pathID)):\($0.target.localKind):\($0.target.localIndex):\($0.certainty)"
+    } == ["db.rs:declarationFacet:0:strong"])
+    #expect(callers.map {
+        "\(session.paths.resolve($0.callSite.pathID)):\($0.callSite.localKind):\($0.callSite.localIndex):\($0.certainty)"
+    } == ["main.rs:callSite:0:strong"])
+}
+
+@Test
 func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
     try withProject(["main.rs": "fn main() {}"] ) { session in
         let definition = try #require(session.definitions(
