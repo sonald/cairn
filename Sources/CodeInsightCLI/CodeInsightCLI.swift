@@ -1,6 +1,7 @@
 import ArgumentParser
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightGit
 import CTreeSitterRust
 import Foundation
 import TreeSitterKit
@@ -12,7 +13,7 @@ struct CodeInsight: AsyncParsableCommand {
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
-            Search.self, Symsearch.self, Goldset.self,
+            Search.self, Symsearch.self, SnapshotCommand.self, Goldset.self,
         ]
     )
 }
@@ -30,6 +31,38 @@ struct ProjectOptions: ParsableArguments {
 }
 
 extension CodeInsight {
+    struct SnapshotCommand: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "snapshot",
+            abstract: "List files in a worktree or commit snapshot."
+        )
+
+        @Option(name: .long, help: "Git repository root.")
+        var project: String
+
+        @Option(name: .long, help: "Commit revision; defaults to the worktree.")
+        var commit: String?
+
+        @OptionGroup var global: GlobalOptions
+
+        func run() throws {
+            let url = URL(fileURLWithPath: project, isDirectory: true)
+            let snapshot: any CodeInsightGit.Snapshot = if let commit {
+                try CommitSnapshot(repositoryURL: url, revision: commit)
+            } else {
+                try WorktreeSnapshot(repositoryURL: url)
+            }
+            let files = snapshot.listFiles().map(SnapshotFileJSON.init)
+            if global.json {
+                try printJSON(files)
+            } else {
+                for file in files {
+                    print("\(file.path)\t\(file.contentID)\t\(file.fileMode)")
+                }
+            }
+        }
+    }
+
     struct Parse: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Parse a Rust source file."
@@ -676,6 +709,27 @@ private enum RustLanguage {
 private struct ParseJSON: Codable {
     let sExpression: String
     let hasError: Bool
+}
+
+private struct SnapshotFileJSON: Codable {
+    let path: String
+    let contentID: String
+    let fileMode: String
+
+    init(_ file: (path: String, contentID: ContentID, fileMode: FileMode)) {
+        path = file.path
+        contentID = file.contentID.bytes
+            .map { String(format: "%02x", $0) }
+            .joined()
+            .prefix(12)
+            .description
+        fileMode = switch file.fileMode {
+        case .regular: "regular"
+        case .symlink: "symlink"
+        case .gitlink: "gitlink"
+        case .lfsPointer: "lfsPointer"
+        }
+    }
 }
 
 private struct IndexStatsJSON: Codable {

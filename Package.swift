@@ -10,6 +10,7 @@ let package = Package(
     products: [
         .library(name: "TreeSitterKit", targets: ["TreeSitterKit"]),
         .library(name: "CodeInsightCore", targets: ["CodeInsightCore"]),
+        .library(name: "CodeInsightGit", targets: ["CodeInsightGit"]),
         .library(
             name: "CodeInsightRustExtractor",
             targets: ["CodeInsightRustExtractor"]
@@ -25,6 +26,11 @@ let package = Package(
         ),
     ],
     targets: [
+        .systemLibrary(
+            name: "CLibGit2",
+            pkgConfig: "libgit2",
+            providers: [.brew(["libgit2"])]
+        ),
         .target(
             name: "CTreeSitter",
             path: "Sources/CTreeSitter",
@@ -47,6 +53,16 @@ let package = Package(
         ),
         .target(name: "CodeInsightCore"),
         .target(
+            name: "CodeInsightGit",
+            dependencies: ["CLibGit2", "CodeInsightCore"],
+            swiftSettings: [
+                .unsafeFlags(["-Xcc", "-I/opt/homebrew/opt/libgit2/include"]),
+            ],
+            linkerSettings: [
+                .unsafeFlags(["-L/opt/homebrew/opt/libgit2/lib"]),
+            ]
+        ),
+        .target(
             name: "CodeInsightRustExtractor",
             dependencies: [
                 "CodeInsightCore",
@@ -63,6 +79,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightGit",
                 "TreeSitterKit",
                 "CTreeSitterRust",
                 .product(
@@ -106,6 +123,10 @@ let package = Package(
         .testTarget(
             name: "CodeInsightCoreTests",
             dependencies: ["CodeInsightCore"]
+        ),
+        .testTarget(
+            name: "CodeInsightGitTests",
+            dependencies: ["CodeInsightGit"]
         ),
         .testTarget(
             name: "RustExtractorTests",
