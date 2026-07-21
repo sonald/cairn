@@ -1,5 +1,6 @@
 import CodeInsightCore
 @testable import CodeInsightEngine
+import Dispatch
 import Foundation
 import Testing
 
@@ -130,7 +131,7 @@ func snapshotSearchCancellationTerminatesConsumer() async throws {
         (0..<100).map { index in
             ("file-\(index).rs", Array("needle \(index)\n".utf8))
         },
-        readDelay: 0.002
+        pauseAtScanCount: 3
     )
     let stream = try SnapshotSearchService(source: source).search(
         ContentSearchQuery(pattern: "needle"),
@@ -140,11 +141,13 @@ func snapshotSearchCancellationTerminatesConsumer() async throws {
         for try await _ in stream {}
     }
 
-    while source.totalScanCount == 0 { await Task.yield() }
+    source.waitForPausedScan()
     consumer.cancel()
     _ = await consumer.result
+    source.resumePausedScan()
 
-    #expect(source.totalScanCount < 100)
+    #expect(source.cancellationObservedAfterPause)
+    #expect(source.totalScanCount == 3)
 }
 
 @Test
@@ -192,12 +195,18 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
     let manifest: SnapshotManifest
     private let contents: [ContentID: [UInt8]]
     private let readDelay: TimeInterval
+    private let pauseAtScanCount: Int?
+    private let scanPaused = DispatchSemaphore(value: 0)
+    private let resumeScan = DispatchSemaphore(value: 0)
+    private let resumedScan = DispatchSemaphore(value: 0)
     private let lock = NSLock()
     private var scanCounts: [ContentID: Int] = [:]
+    private var observedCancellationAfterPause = false
 
     init(
         _ files: [(path: String, bytes: [UInt8])],
-        readDelay: TimeInterval = 0
+        readDelay: TimeInterval = 0,
+        pauseAtScanCount: Int? = nil
     ) {
         var contents: [ContentID: [UInt8]] = [:]
         let occurrences = files.enumerated().map { offset, file in
@@ -219,14 +228,37 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
         )
         self.contents = contents
         self.readDelay = readDelay
+        self.pauseAtScanCount = pauseAtScanCount
     }
 
     var totalScanCount: Int {
         lock.withLock { scanCounts.values.reduce(0, +) }
     }
 
+    var cancellationObservedAfterPause: Bool {
+        lock.withLock { observedCancellationAfterPause }
+    }
+
+    func waitForPausedScan() {
+        scanPaused.wait()
+    }
+
+    func resumePausedScan() {
+        resumeScan.signal()
+        resumedScan.wait()
+    }
+
     func bytes(for contentID: ContentID) -> [UInt8]? {
-        lock.withLock { scanCounts[contentID, default: 0] += 1 }
+        let shouldPause = lock.withLock {
+            scanCounts[contentID, default: 0] += 1
+            return scanCounts.values.reduce(0, +) == pauseAtScanCount
+        }
+        if shouldPause {
+            scanPaused.signal()
+            resumeScan.wait()
+            lock.withLock { observedCancellationAfterPause = Task.isCancelled }
+            resumedScan.signal()
+        }
         if readDelay > 0 { Thread.sleep(forTimeInterval: readDelay) }
         return contents[contentID]
     }
