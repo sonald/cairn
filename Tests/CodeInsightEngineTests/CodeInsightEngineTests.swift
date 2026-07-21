@@ -129,6 +129,123 @@ func methodCallsStayPossibleAcrossImpls() throws {
 }
 
 @Test
+func outgoingCallsResolveEveryRustCallKind() throws {
+    let source = """
+        fn direct_target() {}
+        fn qualified_target() {}
+        struct Receiver;
+        impl Receiver { fn method_target(&self) {} }
+        fn caller(receiver: Receiver) {
+            direct_target();
+            crate::qualified_target();
+            receiver.method_target();
+            unknown_macro!();
+        }
+        """
+    try withProject(["main.rs": source]) { session in
+        let context = queryContext(for: session)
+        let caller = try #require(
+            session.definitions(of: "caller", context: context).first?.0
+        )
+        let result = try session.outgoingCalls(from: caller, context: context)
+
+        #expect(result.completeness == .complete)
+        #expect(result.calls.map(\.calleeName) == [
+            "direct_target", "qualified_target", "method_target", "unknown_macro",
+        ])
+        #expect(result.calls.map(\.call.syntacticKind) == [
+            .directCall, .qualifiedCall, .methodCall, .macroInvocation,
+        ])
+
+        let direct = try #require(result.calls[0].candidates.first)
+        #expect(direct.certainty == .strong)
+        #expect(direct.dispatch == .direct)
+        #expect(direct.provenance == .fuzzyResolver)
+        #expect(direct.completeness == .complete)
+
+        let qualified = try #require(result.calls[1].candidates.first)
+        #expect(qualified.certainty == .strong)
+        #expect(qualified.dispatch == .direct)
+        #expect(qualified.provenance == .fuzzyResolver)
+        #expect(qualified.completeness == .complete)
+
+        let method = try #require(result.calls[2].candidates.first)
+        #expect(method.certainty == .possible)
+        #expect(method.dispatch == .dynamicDispatch)
+        #expect(method.provenance == .fuzzyResolver)
+        #expect(method.completeness == .complete)
+        #expect(result.calls[3].candidates.isEmpty)
+    }
+}
+
+@Test
+func outgoingCallsIncludeClosuresButExcludeNestedNamedFunctions() throws {
+    let source = """
+        fn direct() {}
+        fn in_closure() {}
+        fn in_nested() {}
+        fn outer() {
+            direct();
+            let closure = || in_closure();
+            fn nested() { in_nested(); }
+            nested();
+        }
+        """
+    try withProject(["main.rs": source]) { session in
+        let context = queryContext(for: session)
+        let outer = try #require(
+            session.definitions(of: "outer", context: context).first?.0
+        )
+        let nested = try #require(
+            session.definitions(of: "nested", context: context).first?.0
+        )
+
+        #expect(try session.outgoingCalls(
+            from: outer,
+            context: context
+        ).calls.map(\.calleeName) == ["direct", "in_closure", "nested"])
+        #expect(try session.outgoingCalls(
+            from: nested,
+            context: context
+        ).calls.map(\.calleeName) == ["in_nested"])
+    }
+}
+
+@Test
+func outgoingCallsFollowConstantInitializerRegionOwnership() throws {
+    let source = "fn initialize() {}\nconst VALUE: () = initialize();"
+    try withProject(["main.rs": source]) { session in
+        let context = queryContext(for: session)
+        let constant = try #require(
+            session.definitions(of: "VALUE", context: context).first?.0
+        )
+        let result = try session.outgoingCalls(from: constant, context: context)
+
+        #expect(result.completeness == .complete)
+        #expect(result.calls.map(\.calleeName) == ["initialize"])
+    }
+}
+
+@Test
+func outgoingCallsTruncateAfterFirst512CallSites() throws {
+    let body = Array(repeating: "target();", count: 513).joined(separator: "\n")
+    let source = "fn target() {}\nfn caller() {\n\(body)\n}"
+    try withProject(["main.rs": source]) { session in
+        let context = queryContext(for: session)
+        let caller = try #require(
+            session.definitions(of: "caller", context: context).first?.0
+        )
+        let result = try session.outgoingCalls(from: caller, context: context)
+
+        #expect(result.completeness == .truncated)
+        #expect(result.calls.count == 512)
+        #expect(result.calls.map(\.call.range.lowerBound) == result.calls
+            .map(\.call.range.lowerBound).sorted())
+        #expect(result.calls.last?.callSite.localIndex == 511)
+    }
+}
+
+@Test
 func deduplicatesContentButKeepsEveryManifestPath() throws {
     let source = "pub fn same() {}"
     try withProject(["a.rs": source, "nested/b.rs": source]) { session in
@@ -166,6 +283,10 @@ func parallelIndexMatchesSerialIndex() throws {
 @Test
 func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
     try withProject(["main.rs": "fn main() {}"] ) { session in
+        let definition = try #require(session.definitions(
+            of: "main",
+            context: queryContext(for: session)
+        ).first?.0)
         let wrong = QueryContext(
             snapshotID: SnapshotID(rawValue: UUID()),
             analysisProfileID: session.analysisProfile.id,
@@ -181,6 +302,8 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.tokenRange(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.outgoingCalls(from: definition, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -189,13 +312,17 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 5)
+        #expect(failures == 6)
     }
 }
 
 @Test
 func rejectsWrongProfileAcrossEveryQueryAPI() throws {
     try withProject(["main.rs": "fn main() {}"] ) { session in
+        let definition = try #require(session.definitions(
+            of: "main",
+            context: queryContext(for: session)
+        ).first?.0)
         let wrong = QueryContext(
             snapshotID: session.snapshotID,
             analysisProfileID: AnalysisProfileID(rawValue: UUID()),
@@ -211,6 +338,8 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
         catch { failures += 1 }
         do { _ = try session.tokenRange(file: path, offset: 3, context: wrong) }
         catch { failures += 1 }
+        do { _ = try session.outgoingCalls(from: definition, context: wrong) }
+        catch { failures += 1 }
         do {
             _ = try session.searchSymbols(
                 query: "main",
@@ -219,7 +348,7 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 5)
+        #expect(failures == 6)
     }
 }
 

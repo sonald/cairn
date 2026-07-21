@@ -11,7 +11,7 @@ struct CodeInsight: ParsableCommand {
         abstract: "Inspect Rust source with CodeInsight.",
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
-            Resolve.self, Symsearch.self, Goldset.self,
+            Calls.self, Resolve.self, Symsearch.self, Goldset.self,
         ]
     )
 }
@@ -199,6 +199,112 @@ extension CodeInsight {
                     for caller in group {
                         print("  \(caller.location.text) region=\(caller.regionKind) function=\(caller.function ?? "-")")
                     }
+                }
+            }
+        }
+    }
+
+    struct Calls: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "List calls made by the function at a source line."
+        )
+
+        @OptionGroup var options: ProjectOptions
+
+        @Option(name: .long, help: "Project-relative Rust file.")
+        var file: String
+
+        @Option(name: .long, help: "One-based source line in the function.")
+        var line: UInt32
+
+        func validate() throws {
+            guard line > 0 else {
+                throw ValidationError("--line must be greater than zero.")
+            }
+        }
+
+        func run() throws {
+            let session = try indexProject(options.project)
+            let pathID = try findPath(file, project: options.project, session: session)
+            let index = try content(at: pathID, in: session)
+            guard let lineStart = index.lineTable.byteOffset(line: line, column: 1)
+            else {
+                throw ValidationError("Line is outside \(file): \(line)")
+            }
+            let match = index.symbols.enumerated().filter { _, facet in
+                guard facet.kind == .rustFn || facet.kind == .rustMethod else {
+                    return false
+                }
+                return facet.range.contains(lineStart)
+                    || index.lineTable.lineColumn(
+                        at: facet.range.lowerBound
+                    )?.line == line
+            }.min {
+                if $0.element.range.length != $1.element.range.length {
+                    return $0.element.range.length < $1.element.range.length
+                }
+                return $0.element.range.lowerBound > $1.element.range.lowerBound
+            }
+            guard let match, let facetIndex = UInt32(exactly: match.offset) else {
+                throw ValidationError(
+                    "No function facet at or starting on \(file):\(line)."
+                )
+            }
+
+            let result = try session.outgoingCalls(
+                from: SymbolOccurrenceID(
+                    snapshotID: session.snapshotID,
+                    pathID: pathID,
+                    localKind: .declarationFacet,
+                    localIndex: facetIndex
+                ),
+                context: queryContext(for: session)
+            )
+            let output = try result.calls.map { outgoing in
+                let topCandidate = try outgoing.candidates.first.map { candidate in
+                    let target = try target(of: candidate, in: session)
+                    return ResolutionJSON(
+                        certainty: String(describing: candidate.certainty),
+                        dispatch: String(describing: candidate.dispatch),
+                        provenance: String(describing: candidate.provenance),
+                        completeness: String(describing: candidate.completeness),
+                        evidence: candidate.evidence.map(evidenceSummary),
+                        target: location(
+                            file: session.paths.resolve(candidate.target.pathID),
+                            offset: target.range.lowerBound,
+                            table: target.index.lineTable
+                        ),
+                        byteRange: ByteRangeJSON(target.range)
+                    )
+                }
+                return OutgoingCallJSON(
+                    calleeName: outgoing.calleeName,
+                    kind: String(describing: outgoing.call.syntacticKind),
+                    location: location(
+                        file: session.paths.resolve(outgoing.callSite.pathID),
+                        offset: outgoing.call.range.lowerBound,
+                        table: index.lineTable
+                    ),
+                    byteRange: ByteRangeJSON(outgoing.call.range),
+                    topCandidate: topCandidate
+                )
+            }
+            if options.global.json {
+                try printJSON(OutgoingCallsJSON(
+                    completeness: String(describing: result.completeness),
+                    calls: output
+                ))
+            } else if output.isEmpty {
+                print("No outgoing calls (\(result.completeness)).")
+            } else {
+                for call in output {
+                    let top = call.topCandidate.map {
+                        "\($0.certainty)·\($0.dispatch) -> \($0.target.text)"
+                    } ?? "unresolved·- -> -"
+                    print("\(call.calleeName) \(call.kind) \(call.location.text) \(top)")
+                }
+                if result.completeness == .truncated {
+                    print("truncated after \(output.count) calls")
                 }
             }
         }
@@ -420,6 +526,19 @@ private struct CallerJSON: Codable {
     let byteRange: ByteRangeJSON
     let regionKind: String
     let function: String?
+}
+
+private struct OutgoingCallJSON: Codable {
+    let calleeName: String
+    let kind: String
+    let location: LocationJSON
+    let byteRange: ByteRangeJSON
+    let topCandidate: ResolutionJSON?
+}
+
+private struct OutgoingCallsJSON: Codable {
+    let completeness: String
+    let calls: [OutgoingCallJSON]
 }
 
 private struct ResolutionJSON: Codable {

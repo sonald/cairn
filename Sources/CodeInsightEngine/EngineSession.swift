@@ -31,6 +31,18 @@ public struct CallerResult: Sendable {
     public let evidence: [ResolutionEvidence]
 }
 
+public struct OutgoingCall: Sendable {
+    public let callSite: SymbolOccurrenceID
+    public let call: UnresolvedCall
+    public let calleeName: String
+    public let candidates: [ResolutionCandidate]
+}
+
+public struct OutgoingCallsResult: Sendable {
+    public let calls: [OutgoingCall]
+    public let completeness: Completeness
+}
+
 public final class EngineSession: Sendable {
     public let manifest: SnapshotManifest
     public let contentIndexes: [ContentIndexKey: ContentIndex]
@@ -190,6 +202,66 @@ public final class EngineSession: Sendable {
             if lhs != rhs { return lhs < rhs }
             return $0.callSite.localIndex < $1.callSite.localIndex
         }
+    }
+
+    public func outgoingCalls(
+        from definition: SymbolOccurrenceID,
+        context: QueryContext
+    ) throws -> OutgoingCallsResult {
+        try validate(context)
+        guard definition.snapshotID == snapshotID,
+              definition.localKind == .declarationFacet,
+              let (_, index) = content(at: definition.pathID),
+              index.symbols.indices.contains(Int(definition.localIndex))
+        else {
+            return OutgoingCallsResult(calls: [], completeness: .complete)
+        }
+
+        let facet = index.symbols[Int(definition.localIndex)]
+        let matching = index.calls.enumerated().filter { _, call in
+            guard facet.range.lowerBound <= call.range.lowerBound,
+                  call.range.upperBound <= facet.range.upperBound
+            else { return false }
+            // ponytail: file-local calls × regions scan; add region parents if it gets hot.
+            let owner = index.executableRegions.filter {
+                $0.associatedFacetIndex != nil
+                    && $0.range.contains(call.range.lowerBound)
+            }.min {
+                if $0.range.length != $1.range.length {
+                    return $0.range.length < $1.range.length
+                }
+                return $0.id.rawValue > $1.id.rawValue
+            }?.associatedFacetIndex
+            return owner == definition.localIndex
+        }.sorted {
+            if $0.element.range.lowerBound != $1.element.range.lowerBound {
+                return $0.element.range.lowerBound < $1.element.range.lowerBound
+            }
+            return $0.offset < $1.offset
+        }
+        let completeness: Completeness = matching.count > 512
+            ? .truncated : .complete
+        let resolver = Resolver(session: self)
+        let calls = matching.prefix(512).compactMap {
+            callIndex, call -> OutgoingCall? in
+            guard let callIndex = UInt32(exactly: callIndex) else { return nil }
+            return OutgoingCall(
+                callSite: SymbolOccurrenceID(
+                    snapshotID: snapshotID,
+                    pathID: definition.pathID,
+                    localKind: .callSite,
+                    localIndex: callIndex
+                ),
+                call: call,
+                calleeName: names.resolve(call.nameID),
+                candidates: resolver.resolve(
+                    file: definition.pathID,
+                    offset: call.range.lowerBound,
+                    context: context
+                )
+            )
+        }
+        return OutgoingCallsResult(calls: calls, completeness: completeness)
     }
 
     public func searchSymbols(
