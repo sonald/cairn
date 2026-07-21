@@ -76,3 +76,36 @@ visible 后的异步语法补齐路径，不阻塞首屏。M1 预算只卡
 | `--self-test` | 3 | `{"coldStartMS":168.599291,"idleFootprintMB":16.516403198242188}` |
 | `--self-test-open …/benches/copy.rs` | 3 | `{"firstVisibleMS":11.218709,"styledFragments":83,"syntaxVisibleMS":11.218709,"tier":"regular"}` |
 | `--self-test-project <tokio-dir>` | 3 | `{"fileCount":717,"indexReadyMS":880.71575,"treeVisibleMS":9.95075}` |
+
+## M2 Relations Alpha 自测
+
+日期：2026-07-21。Apple Silicon (arm64e) macOS，release 构建；tokio 1.47.1
+语料与 M0/M1 相同。CLI 数字由
+`bash scripts/bench.sh --m2 <tokio-dir> 5` 采集，均包含每次命令重建内存索引，
+因此是端到端 CLI 耗时，不等同于 session 内单次关系展开耗时。
+
+| CLI 场景（含索引） | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `callers poll` | 5 | 874.6ms | 941.1ms | 1521.5ms |
+| `calls tokio/src/runtime/task/harness.rs:153` | 5 | 773.9ms | 821.7ms | 844.8ms |
+| `search block_on` | 5 | 775.5ms | 855.9ms | 869.5ms |
+
+三个 app self-test 均连续运行 3 次且全部 exit 0；下表记录 p50 JSON：
+
+| 场景 | p50 |
+|---|---|
+| 空载 `--self-test` | `{"coldStartMS":200.123458,"idleFootprintMB":17.15705108642578}` |
+| regular `tokio/benches/copy.rs` | `{"firstVisibleMS":12.018833,"firstVisibleOutlineFacets":30,"outlineFacets":30,"styledFragments":161,"syntaxVisibleMS":12.018833,"tier":"regular"}` |
+| tokio 项目 | `{"fileCount":717,"indexReadyMS":892.791666,"treeVisibleMS":9.764125}` |
+
+huge 使用同一 `/tmp/codeinsight-m1-100k.rs` 连续运行 3 次；M2 p50 为：
+
+`{"firstVisibleMS":2308.1365000000001,"firstVisibleOutlineFacets":0,"outlineFacets":100000,"styledFragments":280,"syntaxVisibleMS":9820.6941669999997,"tier":"huge"}`
+
+`syntaxVisibleMS` 对比 M1 单次基线为 `9384.620041ms → 9820.694167ms`
+（+4.6%，不同轮次数据）。ViewportGating 二分在运行探针中把首个可见 fragment
+从 400,000 spans 剪到 4 spans，validator 本身约 22–25ms；总时长没有随之下降，
+剩余主耗时是 TextKit 对 100,000 个 function-name 布局属性的延迟重排。huge 的硬预算
+在最终三次样本中全部通过：`firstVisibleMS < 2500`、首屏 outline 为 0、
+`styledFragments < 500`。release 重建后的首个冷样本曾出现一次
+`firstVisibleMS=2848.451125ms`（exit 1），随后三次均 exit 0，说明该冷启动预算仍有波动。

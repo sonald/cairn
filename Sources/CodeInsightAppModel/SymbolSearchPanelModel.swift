@@ -1,3 +1,4 @@
+import CodeInsightCore
 import CodeInsightEngine
 import Foundation
 import Observation
@@ -14,6 +15,9 @@ public final class SymbolSearchPanelModel {
     public private(set) var rows: [SymbolSearchRow] = []
     public private(set) var selectedIndex: Int?
     public private(set) var requestID: UInt64 = 0
+
+    @ObservationIgnored private var pathIDsSnapshotID: SnapshotID?
+    @ObservationIgnored private var pathIDsByPath: [String: PathID] = [:]
 
     public init() {}
 
@@ -37,12 +41,17 @@ public final class SymbolSearchPanelModel {
                 selectedIndex = nil
                 return
             }
-            let pathIDs = Dictionary(uniqueKeysWithValues: session.manifest.files.map {
-                (session.paths.resolve($0.pathID), $0.pathID)
-            })
+            if pathIDsSnapshotID != session.snapshotID {
+                pathIDsSnapshotID = session.snapshotID
+                pathIDsByPath = Dictionary(
+                    uniqueKeysWithValues: session.manifest.files.map {
+                        (session.paths.resolve($0.pathID), $0.pathID)
+                    }
+                )
+            }
             let boost = SearchBoost(
-                currentFile: currentPath.flatMap { pathIDs[$0] },
-                recentFiles: recentPaths.compactMap { pathIDs[$0] }
+                currentFile: currentPath.flatMap { pathIDsByPath[$0] },
+                recentFiles: recentPaths.compactMap { pathIDsByPath[$0] }
             )
             Task { [weak self] in
                 let hits = await Task.detached(priority: .userInitiated) {

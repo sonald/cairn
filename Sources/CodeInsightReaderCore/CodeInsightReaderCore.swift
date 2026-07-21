@@ -59,6 +59,7 @@ public struct OutlineFacet: Equatable, Sendable {
 
 public struct ReaderDocument: Sendable {
     public let bytes: [UInt8]
+    public let contentID: ContentID
     public let lineTable: LineTable
     public let byteUTF16Map: ByteUTF16Map
     public let highlightSpans: [HighlightSpan]
@@ -66,12 +67,14 @@ public struct ReaderDocument: Sendable {
 
     public init(
         bytes: [UInt8],
+        contentID: ContentID? = nil,
         lineTable: LineTable,
         byteUTF16Map: ByteUTF16Map,
         highlightSpans: [HighlightSpan],
         outlineFacets: [OutlineFacet]
     ) {
         self.bytes = bytes
+        self.contentID = contentID ?? ContentID.sha256(of: bytes)
         self.lineTable = lineTable
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans
@@ -348,7 +351,25 @@ public enum ViewportGating {
             UInt64(viewport.upperBound) + UInt64(buffer)
         ))
         let buffered = CodeInsightCore.ByteRange(lowerBound: lower, upperBound: upper)
-        return spans.filter { $0.range.overlaps(buffered) }
+        guard buffered.lowerBound < buffered.upperBound else { return [] }
+
+        var low = 0
+        var high = spans.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if spans[middle].range.upperBound <= buffered.lowerBound {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+
+        var result: [HighlightSpan] = []
+        for span in spans[low...] {
+            guard span.range.lowerBound < buffered.upperBound else { break }
+            if span.range.overlaps(buffered) { result.append(span) }
+        }
+        return result
     }
 }
 
@@ -364,9 +385,11 @@ public struct DocumentLoader: Sendable {
         }
         let lineTable = LineTable(bytes: bytes)
         let map = ByteUTF16Map(validUTF8: bytes)
+        let contentID = ContentID.sha256(of: bytes)
         let tier = FileTier(lineCount: lineTable.lineStarts.count)
         let plain = ReaderDocument(
             bytes: bytes,
+            contentID: contentID,
             lineTable: lineTable,
             byteUTF16Map: map,
             highlightSpans: [],
@@ -377,6 +400,7 @@ public struct DocumentLoader: Sendable {
             let highlighted = try RustHighlighter().highlight(bytes: bytes)
             return (ReaderDocument(
                 bytes: bytes,
+                contentID: contentID,
                 lineTable: lineTable,
                 byteUTF16Map: map,
                 highlightSpans: highlighted.spans,
@@ -398,6 +422,7 @@ public struct DocumentLoader: Sendable {
                 let highlighted = try RustHighlighter().highlight(bytes: document.bytes)
                 completion(.success(ReaderDocument(
                     bytes: document.bytes,
+                    contentID: document.contentID,
                     lineTable: document.lineTable,
                     byteUTF16Map: document.byteUTF16Map,
                     highlightSpans: highlighted.spans,

@@ -39,31 +39,45 @@ public final class ContextWindowModel {
         let range: ByteRange
     }
 
+    private struct DocumentKey: Hashable {
+        let path: String
+        let contentID: ContentID
+    }
+
     typealias Resolver = @MainActor (
         EngineSession,
         PathID,
         UInt32,
         QueryContext
     ) async throws -> [ResolutionCandidate]
+    typealias Loader = @Sendable (URL) async -> ReaderDocument?
 
     public private(set) var mode: Mode = .follow
     public private(set) var stage: Stage = .idle
     public private(set) var requestID: UInt64 = 0
 
     private let resolver: Resolver
+    private let loader: Loader
     private var projectState: ProjectState = .empty
     private var root: URL?
     private var pendingToken: Token?
     private var locatedToken: LocatedToken?
+    private var documents: [DocumentKey: ReaderDocument] = [:]
+    private var documentRecency: [DocumentKey] = []
 
     public init() {
         resolver = { session, file, offset, context in
             try session.resolve(file: file, offset: offset, context: context)
         }
+        loader = loadReaderDocument
     }
 
-    init(_ resolver: @escaping Resolver) {
+    init(
+        _ resolver: @escaping Resolver,
+        loader: @escaping Loader = loadReaderDocument
+    ) {
         self.resolver = resolver
+        self.loader = loader
     }
 
     public var selectedCandidate: Candidate? {
@@ -192,7 +206,8 @@ public final class ContextWindowModel {
         do {
             let resolved = try await resolver(session, pathID, token.offset, context)
             guard requestID == currentRequest else { return nil }
-            let candidates = present(resolved, session: session)
+            let candidates = await present(resolved, session: session)
+            guard requestID == currentRequest else { return nil }
             guard !candidates.isEmpty else {
                 stage = .idle
                 return nil
@@ -210,11 +225,11 @@ public final class ContextWindowModel {
     private func present(
         _ resolved: [ResolutionCandidate],
         session: EngineSession
-    ) -> [Candidate] {
-        var documents: [PathID: ReaderDocument] = [:]
-        return resolved.compactMap { resolution in
+    ) async -> [Candidate] {
+        var candidates: [Candidate] = []
+        for resolution in resolved {
             guard let index = contentIndex(at: resolution.target.pathID, in: session)
-            else { return nil }
+            else { continue }
 
             let targetRange: ByteRange
             let targetOffset: UInt32
@@ -231,19 +246,19 @@ public final class ContextWindowModel {
                 switch resolution.target.localKind {
                 case .declarationFacet:
                     guard index.symbols.indices.contains(Int(resolution.target.localIndex))
-                    else { return nil }
+                    else { continue }
                     let facet = index.symbols[Int(resolution.target.localIndex)]
                     targetRange = facet.range
                     targetOffset = facet.nameRange.lowerBound
                 case .importBinding:
                     guard index.imports.indices.contains(Int(resolution.target.localIndex))
-                    else { return nil }
+                    else { continue }
                     let binding = index.imports[Int(resolution.target.localIndex)]
                     targetRange = binding.range
                     targetOffset = binding.range.lowerBound
                 case .callSite:
                     guard index.calls.indices.contains(Int(resolution.target.localIndex))
-                    else { return nil }
+                    else { continue }
                     let call = index.calls[Int(resolution.target.localIndex)]
                     targetRange = call.range
                     targetOffset = call.range.lowerBound
@@ -251,7 +266,7 @@ public final class ContextWindowModel {
             }
 
             guard let coordinate = index.lineTable.lineColumn(at: targetOffset) else {
-                return nil
+                continue
             }
             let path = session.paths.resolve(resolution.target.pathID)
             let text: String
@@ -259,10 +274,12 @@ public final class ContextWindowModel {
                resolution.target.localKind == .importBinding
             {
                 text = "external crate — not resolved (M1)"
-            } else if let document = document(
-                for: resolution.target.pathID,
+            } else if let contentID = contentID(
+                at: resolution.target.pathID,
+                in: session
+            ), let document = await document(
                 path: path,
-                cache: &documents
+                contentID: contentID
             ) {
                 text = excerpt(
                     for: targetRange,
@@ -272,7 +289,7 @@ public final class ContextWindowModel {
             } else {
                 text = ""
             }
-            return Candidate(
+            candidates.append(Candidate(
                 symbol: resolution.target,
                 path: path,
                 line: coordinate.line,
@@ -281,8 +298,9 @@ public final class ContextWindowModel {
                 excerpt: text,
                 bindingKind: bindingKind,
                 targetByteOffset: targetOffset
-            )
+            ))
         }
+        return candidates
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {
@@ -300,18 +318,28 @@ public final class ContextWindowModel {
         }?.value
     }
 
+    private func contentID(at pathID: PathID, in session: EngineSession) -> ContentID? {
+        session.manifest.files.first { $0.pathID == pathID }?.contentID
+    }
+
     private func document(
-        for pathID: PathID,
         path: String,
-        cache: inout [PathID: ReaderDocument]
-    ) -> ReaderDocument? {
-        if let cached = cache[pathID] { return cached }
+        contentID: ContentID
+    ) async -> ReaderDocument? {
+        let key = DocumentKey(path: path, contentID: contentID)
+        if let cached = documents[key] {
+            documentRecency.removeAll { $0 == key }
+            documentRecency.append(key)
+            return cached
+        }
         guard let root,
-              let loaded = try? DocumentLoader().load(
-                file: root.appendingPathComponent(path)
-              ).document
+              let loaded = await loader(root.appendingPathComponent(path))
         else { return nil }
-        cache[pathID] = loaded
+        documents[key] = loaded
+        documentRecency.append(key)
+        if documentRecency.count > 8 {
+            documents.removeValue(forKey: documentRecency.removeFirst())
+        }
         return loaded
     }
 
@@ -335,6 +363,12 @@ public final class ContextWindowModel {
         case .nonlocalDecl: "nonlocalDecl"
         }
     }
+}
+
+private func loadReaderDocument(at file: URL) async -> ReaderDocument? {
+    await Task.detached(priority: .userInitiated) {
+        try? DocumentLoader().load(file: file).document
+    }.value
 }
 
 func resolutionCertaintyLabel(_ certainty: Certainty) -> String {

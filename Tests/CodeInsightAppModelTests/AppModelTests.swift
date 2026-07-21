@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
@@ -23,6 +24,24 @@ func navigationHistoryTruncatesForwardEntriesAfterNewPush() {
     history.push(b)
 
     #expect(history.records == [a, b])
+    #expect(!history.canGoForward)
+}
+
+@MainActor
+@Test
+func navigationHistoryReplacesCurrentRecordWhenBranchingAfterBack() {
+    let history = NavigationHistory()
+    let a = jumpRecord("a.rs", offset: 10)
+    let b = jumpRecord("b.rs", offset: 20)
+    let movedB = jumpRecord("b.rs", offset: 21)
+    let c = jumpRecord("c.rs", offset: 30)
+
+    history.push(a)
+    history.push(b)
+    #expect(history.goBack(from: c) == b)
+    history.push(movedB)
+
+    #expect(history.records == [a, movedB])
     #expect(!history.canGoForward)
 }
 
@@ -151,6 +170,20 @@ func projectStateRejectsIllegalTransitions() {
     #expect(!model.transition(to: .failed))
     #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
     #expect(!model.transition(to: .indexing(root: root, startedAt: .now)))
+}
+
+@MainActor
+@Test
+func navigationPushesWhileProjectIsIndexing() {
+    let model = AppModel()
+    let root = URL(fileURLWithPath: "/tmp/project", isDirectory: true)
+    let a = jumpRecord("a.rs", offset: 10, snapshotID: nil)
+
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    model.navigate(to: root.appendingPathComponent("a.rs"))
+    model.navigate(to: root.appendingPathComponent("b.rs"), leaving: a)
+
+    #expect(model.navigationHistory.records == [a])
 }
 
 @Test
@@ -300,6 +333,40 @@ func symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() async throws {
 
 @MainActor
 @Test
+func symbolSearchPathCacheRefreshesForANewSession() async throws {
+    let firstRoot = try temporaryProject(["z.rs": "fn one() {}"])
+    let secondRoot = try temporaryProject([
+        "a.rs": "fn target() {}",
+        "z.rs": "fn target() {}",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: firstRoot)
+        try? FileManager.default.removeItem(at: secondRoot)
+    }
+    let first = try ProjectIndexer().index(root: firstRoot)
+    let second = try ProjectIndexer().index(root: secondRoot)
+    let model = SymbolSearchPanelModel()
+
+    model.updateQuery(
+        "one",
+        projectState: .ready(first, queryContext(for: first)),
+        currentPath: "z.rs"
+    )
+    #expect(await waitUntil { !model.rows.isEmpty })
+
+    model.updateQuery(
+        "target",
+        projectState: .ready(second, queryContext(for: second)),
+        currentPath: "z.rs"
+    )
+    #expect(await waitUntil {
+        guard case let .result(name, hit) = model.rows.first else { return false }
+        return name == "target" && hit.path == "z.rs"
+    })
+}
+
+@MainActor
+@Test
 func contextWindowDebouncesClicksInsideTheSameToken() async throws {
     let root = try temporaryProject([
         "main.rs": "fn target() {}\nfn main() { target(); }",
@@ -321,6 +388,30 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
     for _ in 0..<10 { await Task.yield() }
 
     #expect(resolveCount == 1)
+}
+
+@MainActor
+@Test
+func contextWindowReusesLoadedTargetDocumentAcrossClicks() async throws {
+    let source = "fn target() {}\nfn main() { target(); target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    let loader = CountingContextLoader()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        loader: { file in await loader.load(file) }
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+    let first = byteOffset(of: "target();", in: source)
+    let second = first + UInt32("target(); ".utf8.count)
+
+    #expect(await model.explicitJump(file: "main.rs", offset: first) != nil)
+    #expect(await model.explicitJump(file: "main.rs", offset: second) != nil)
+    #expect(await loader.loadCount == 1)
 }
 
 @MainActor
@@ -629,6 +720,16 @@ private final class ControlledContextResolver {
     }
 }
 
+private actor CountingContextLoader {
+    private(set) var loadCount = 0
+
+    func load(_ file: URL) -> ReaderDocument? {
+        loadCount += 1
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return ReaderDocument(bytes: Array(data))
+    }
+}
+
 private struct FailingIndexService: IndexService {
     func index(root: URL) async throws -> EngineSession {
         throw Failure.expected
@@ -689,7 +790,10 @@ private func jumpRecord(
     _ path: String,
     offset: UInt32,
     line: UInt32 = 1,
-    column: UInt32? = nil
+    column: UInt32? = nil,
+    snapshotID: SnapshotID? = SnapshotID(
+        rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
+    )
 ) -> JumpRecord {
     JumpRecord(
         path: path,
@@ -698,8 +802,6 @@ private func jumpRecord(
         line: line,
         column: column ?? offset + 1,
         symbolAnchor: nil,
-        snapshotID: SnapshotID(
-            rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
-        )
+        snapshotID: snapshotID
     )
 }

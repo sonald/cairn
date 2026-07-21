@@ -353,8 +353,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func currentJumpRecord() -> JumpRecord? {
-        guard case let .ready(session, _) = model.projectState,
-              let position = readerController.currentReadingPosition(),
+        let snapshotID: SnapshotID?
+        switch model.projectState {
+        case let .ready(session, _):
+            snapshotID = session.snapshotID
+        case .indexing:
+            snapshotID = nil
+        case .empty, .failed:
+            return nil
+        }
+        guard let position = readerController.currentReadingPosition(),
               let path = projectPath(for: position.file)
         else { return nil }
         return JumpRecord(
@@ -364,7 +372,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             line: position.line,
             column: position.column,
             symbolAnchor: position.symbolAnchor,
-            snapshotID: session.snapshotID
+            snapshotID: snapshotID
         )
     }
 
@@ -759,7 +767,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         else { return nil }
         return (
             file: file,
-            contentID: ContentID.sha256(of: document.bytes),
+            contentID: document.contentID,
             byteOffset: byteOffset,
             line: coordinate.line,
             column: coordinate.column,

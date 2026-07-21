@@ -2,8 +2,8 @@
 
 set -euo pipefail
 
-if [[ $# -lt 1 || $# -gt 2 ]]; then
-    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir>" >&2
+if [[ $# -lt 1 || $# -gt 3 ]]; then
+    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5]" >&2
     exit 2
 fi
 
@@ -16,17 +16,30 @@ if [[ "$1" == "--app" ]]; then
     mode="app"
     repo_path="$(cd "$2" && pwd -P)"
     runs=3
+elif [[ "$1" == "--m2" ]]; then
+    if [[ $# -lt 2 || $# -gt 3 || ! -d "$2" ]]; then
+        echo "usage: bash scripts/bench.sh --m2 <tokio-dir> [runs=5]" >&2
+        exit 2
+    fi
+    mode="m2"
+    repo_path="$(cd "$2" && pwd -P)"
+    runs="${3:-5}"
 else
+    if [[ $# -gt 2 ]]; then
+        echo "usage: bash scripts/bench.sh <repo-path> [runs=5]" >&2
+        exit 2
+    fi
     repo_path="$1"
     runs="${2:-5}"
     if [[ ! -d "$repo_path" ]]; then
         echo "not a directory: $repo_path" >&2
         exit 2
     fi
-    case "$runs" in
-        ''|*[!0-9]*|0) echo "runs must be a positive integer" >&2; exit 2 ;;
-    esac
 fi
+
+case "$runs" in
+    ''|*[!0-9]*|0) echo "runs must be a positive integer" >&2; exit 2 ;;
+esac
 
 cd "$(dirname "$0")/.."
 
@@ -78,6 +91,43 @@ print(f"| `{sys.argv[1]}` | 3 | `{json.dumps(p50, sort_keys=True, separators=(ch
     run_app_case "--self-test" --self-test
     run_app_case "--self-test-open $open_file" --self-test-open "$open_file"
     run_app_case "--self-test-project $repo_path" --self-test-project "$repo_path"
+    exit 0
+fi
+
+if [[ "$mode" == "m2" ]]; then
+    calls_file="tokio/src/runtime/task/harness.rs"
+    calls_line="$(awk '/pub\(super\) fn poll\(self\)/ { print NR; exit }' "$repo_path/$calls_file")"
+    if [[ -z "$calls_line" ]]; then
+        echo "tokio poll function not found: $calls_file" >&2
+        exit 2
+    fi
+
+    benchmark_command() {
+        label="$1"
+        shift
+        python3 - "$label" "$runs" "$@" <<'PY'
+import math, subprocess, sys, time
+label, runs, *command = sys.argv[1:]
+values = []
+for _ in range(int(runs)):
+    started = time.perf_counter()
+    subprocess.run(command, stdout=subprocess.DEVNULL, check=True)
+    values.append((time.perf_counter() - started) * 1000)
+values.sort()
+rank = lambda percentile: values[math.ceil(len(values) * percentile) - 1]
+print(f"| `{label}` | {runs} | {values[0]:.1f}ms | {rank(0.5):.1f}ms | {rank(0.95):.1f}ms |")
+PY
+    }
+
+    echo '| CLI 场景（含索引） | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    benchmark_command "callers poll" \
+        "$bin_path/codeinsight" callers poll --project "$repo_path" --json
+    benchmark_command "calls $calls_file:$calls_line" \
+        "$bin_path/codeinsight" calls --project "$repo_path" \
+        --file "$calls_file" --line "$calls_line" --json
+    benchmark_command "search block_on" \
+        "$bin_path/codeinsight" search block_on --project "$repo_path" --json
     exit 0
 fi
 

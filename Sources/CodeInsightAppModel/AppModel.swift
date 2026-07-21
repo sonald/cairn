@@ -127,24 +127,26 @@ public final class AppModel {
     }
 
     public func openProject(root: URL) {
+        let root = root.standardizedFileURL
+        guard transition(to: .indexing(root: root, startedAt: .now)) else {
+            assertionFailure("Illegal project state transition to indexing")
+            return
+        }
         generation &+= 1
         let openGeneration = generation
-        let root = root.standardizedFileURL
         fileTree = nil
         selectedFile = nil
         selectedByteOffset = nil
         navigationGeneration &+= 1
         navigationHistory.reset()
-        projectState = .indexing(root: root, startedAt: .now)
-        contextWindow.updateProjectState(projectState, root: root)
-        relationTree.updateProjectState(projectState)
 
         do {
             fileTree = try FileTreeModel(root: root)
         } catch {
-            projectState = .failed
-            contextWindow.updateProjectState(projectState, root: root)
-            relationTree.updateProjectState(projectState)
+            guard transition(to: .failed) else {
+                assertionFailure("Illegal project state transition to failed")
+                return
+            }
             return
         }
 
@@ -189,7 +191,18 @@ public final class AppModel {
              (.indexing, .ready),
              (.indexing, .failed):
             projectState = next
-            contextWindow.updateProjectState(next, root: fileTree?.root)
+            let root = if case let .indexing(root, _) = next {
+                root
+            } else {
+                fileTree?.root
+            }
+            contextWindow.updateProjectState(next, root: root)
+            relationTree.updateProjectState(next)
+            return true
+        case let (.indexing(currentRoot, _), .indexing(nextRoot, _))
+            where currentRoot.standardizedFileURL != nextRoot.standardizedFileURL:
+            projectState = next
+            contextWindow.updateProjectState(next, root: nextRoot)
             relationTree.updateProjectState(next)
             return true
         default:
@@ -199,23 +212,25 @@ public final class AppModel {
 
     private func finishIndexing(_ session: EngineSession, generation: UInt64) {
         guard self.generation == generation else { return }
-        projectState = .ready(
+        guard transition(to: .ready(
             session,
             QueryContext(
                 snapshotID: session.snapshotID,
                 analysisProfileID: session.analysisProfile.id,
                 generation: generation
             )
-        )
-        contextWindow.updateProjectState(projectState, root: fileTree?.root)
-        relationTree.updateProjectState(projectState)
+        )) else {
+            assertionFailure("Illegal project state transition to ready")
+            return
+        }
     }
 
     private func failIndexing(generation: UInt64) {
         guard self.generation == generation else { return }
-        projectState = .failed
-        contextWindow.updateProjectState(projectState, root: fileTree?.root)
-        relationTree.updateProjectState(projectState)
+        guard transition(to: .failed) else {
+            assertionFailure("Illegal project state transition to failed")
+            return
+        }
     }
 
     private func replay(_ record: JumpRecord) {

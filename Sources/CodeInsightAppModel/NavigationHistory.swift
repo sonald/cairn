@@ -7,7 +7,7 @@ public struct JumpRecord: Equatable, Sendable {
     public let line: UInt32
     public let column: UInt32
     public let symbolAnchor: String?
-    public let snapshotID: SnapshotID
+    public let snapshotID: SnapshotID?
 
     public init(
         path: String,
@@ -16,7 +16,7 @@ public struct JumpRecord: Equatable, Sendable {
         line: UInt32,
         column: UInt32,
         symbolAnchor: String?,
-        snapshotID: SnapshotID
+        snapshotID: SnapshotID?
     ) {
         self.path = path
         self.contentID = contentID
@@ -50,6 +50,12 @@ public final class NavigationHistory {
     public func push(_ record: JumpRecord) {
         if cursor < records.count {
             records.removeSubrange((cursor + 1)..<records.count)
+            if records.indices.contains(cursor), records[cursor].path == record.path {
+                records[cursor] = record
+                forwardRecord = nil
+                cursor = records.count
+                return
+            }
         }
         forwardRecord = nil
         if records.last != record {

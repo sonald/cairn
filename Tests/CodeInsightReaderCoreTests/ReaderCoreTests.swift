@@ -127,6 +127,58 @@ func viewportGatingReturnsOnlyBufferedIntersections() {
 }
 
 @Test
+func viewportGatingHandlesEmptySingleAndBoundaryRanges() {
+    let span = HighlightSpan(
+        range: ByteRange(lowerBound: 10, upperBound: 20),
+        kind: .keyword
+    )
+
+    #expect(ViewportGating.spans(
+        [],
+        intersecting: ByteRange(lowerBound: 10, upperBound: 20),
+        buffer: 0
+    ).isEmpty)
+    #expect(ViewportGating.spans(
+        [span],
+        intersecting: ByteRange(lowerBound: 10, upperBound: 20),
+        buffer: 0
+    ) == [span])
+    #expect(ViewportGating.spans(
+        [span],
+        intersecting: ByteRange(lowerBound: 20, upperBound: 21),
+        buffer: 0
+    ).isEmpty)
+    #expect(ViewportGating.spans(
+        [span],
+        intersecting: ByteRange(lowerBound: 9, upperBound: 10),
+        buffer: 0
+    ).isEmpty)
+}
+
+@Test
+func viewportGatingMatchesLinearScanForLargeSortedInput() {
+    let spans = (0..<20_000).map { index in
+        let lower = UInt32(index * 7)
+        return HighlightSpan(
+            range: ByteRange(lowerBound: lower, upperBound: lower + 3),
+            kind: .keyword
+        )
+    }
+
+    for viewport in stride(from: UInt32(0), to: 140_000, by: 997) {
+        let range = ByteRange(lowerBound: viewport, upperBound: viewport + 311)
+        let lower = viewport > 17 ? viewport - 17 : 0
+        let upper = range.upperBound + 17
+        let buffered = ByteRange(lowerBound: lower, upperBound: upper)
+        #expect(ViewportGating.spans(
+            spans,
+            intersecting: range,
+            buffer: 17
+        ) == spans.filter { $0.range.overlaps(buffered) })
+    }
+}
+
+@Test
 func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     let file = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightReaderCoreTests-\(UUID().uuidString).rs")
@@ -138,6 +190,7 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     let loaded = try loader.load(file: file)
 
     #expect(loaded.tier == .large)
+    #expect(loaded.document.contentID == ContentID.sha256(of: loaded.document.bytes))
     #expect(loaded.document.highlightSpans.isEmpty)
     let completed = await withCheckedContinuation { continuation in
         loader.loadSyntax(for: loaded.document) { result in
@@ -145,6 +198,7 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
         }
     }
     let document = try completed.get()
+    #expect(document.contentID == loaded.document.contentID)
     #expect(!document.highlightSpans.isEmpty)
     #expect(document.outlineFacets.count == 10_001)
 }
