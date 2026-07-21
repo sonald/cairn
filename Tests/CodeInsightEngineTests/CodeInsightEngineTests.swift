@@ -393,7 +393,13 @@ func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 8)
+        do {
+            _ = try session.search(
+                ContentSearchQuery(pattern: "main"),
+                context: wrong
+            )
+        } catch { failures += 1 }
+        #expect(failures == 9)
     }
 }
 
@@ -433,7 +439,13 @@ func rejectsWrongProfileAcrossEveryQueryAPI() throws {
                 context: wrong
             )
         } catch { failures += 1 }
-        #expect(failures == 8)
+        do {
+            _ = try session.search(
+                ContentSearchQuery(pattern: "main"),
+                context: wrong
+            )
+        } catch { failures += 1 }
+        #expect(failures == 9)
     }
 }
 

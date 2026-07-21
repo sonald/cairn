@@ -6,13 +6,13 @@ import Foundation
 import TreeSitterKit
 
 @main
-struct CodeInsight: ParsableCommand {
+struct CodeInsight: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         abstract: "Inspect Rust source with CodeInsight.",
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
-            Symsearch.self, Goldset.self,
+            Search.self, Symsearch.self, Goldset.self,
         ]
     )
 }
@@ -570,6 +570,77 @@ extension CodeInsight {
         }
     }
 
+    struct Search: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            abstract: "Search project source contents."
+        )
+
+        @Argument(help: "Literal or regular expression to search for.")
+        var pattern: String
+
+        @OptionGroup var options: ProjectOptions
+
+        @Flag(name: .long, help: "Interpret the pattern as a regular expression.")
+        var regex = false
+
+        @Flag(name: .long, help: "Match case sensitively.")
+        var caseSensitive = false
+
+        func run() async throws {
+            let session = try indexProject(options.project)
+            let stream = try session.search(
+                ContentSearchQuery(
+                    pattern: pattern,
+                    isRegex: regex,
+                    caseSensitive: caseSensitive
+                ),
+                context: queryContext(for: session)
+            )
+            var matchesByPath: [PathID: [SearchMatch]] = [:]
+            var completeness = Completeness.complete
+            var truncatedPathIDs: Set<PathID> = []
+            for try await batch in stream {
+                for (pathID, matches) in batch.matchesByPath {
+                    matchesByPath[pathID, default: []].append(contentsOf: matches)
+                }
+                completeness = batch.completeness
+                truncatedPathIDs.formUnion(batch.truncatedPathIDs)
+            }
+
+            let files = matchesByPath.map { pathID, matches in
+                ContentSearchFileJSON(
+                    file: session.paths.resolve(pathID),
+                    matches: matches.sorted {
+                        $0.byteRange.lowerBound < $1.byteRange.lowerBound
+                    }.map(ContentSearchMatchJSON.init),
+                    isTruncated: truncatedPathIDs.contains(pathID)
+                )
+            }.sorted { $0.file < $1.file }
+            let totalMatches = files.reduce(0) { $0 + $1.matches.count }
+            let truncatedFiles = truncatedPathIDs.map(session.paths.resolve).sorted()
+
+            if options.global.json {
+                try printJSON(ContentSearchJSON(
+                    completeness: String(describing: completeness),
+                    totalMatches: totalMatches,
+                    fileCount: files.count,
+                    files: files,
+                    truncatedFiles: truncatedFiles
+                ))
+            } else {
+                for file in files {
+                    for match in file.matches {
+                        print("\(file.file):\(match.line):\(match.column): \(match.lineText)")
+                    }
+                }
+                print("\(totalMatches) matches in \(files.count) files")
+                if completeness == .truncated {
+                    print("Results truncated.")
+                }
+            }
+        }
+    }
+
     struct Goldset: ParsableCommand {
         static let configuration = CommandConfiguration(
             abstract: "Evaluate resolution assertions against a corpus."
@@ -725,6 +796,34 @@ private struct SymbolSearchJSON: Codable {
     let column: UInt32
     let byteRange: ByteRangeJSON
     let matchRanges: [MatchRangeJSON]
+}
+
+private struct ContentSearchJSON: Codable {
+    let completeness: String
+    let totalMatches: Int
+    let fileCount: Int
+    let files: [ContentSearchFileJSON]
+    let truncatedFiles: [String]
+}
+
+private struct ContentSearchFileJSON: Codable {
+    let file: String
+    let matches: [ContentSearchMatchJSON]
+    let isTruncated: Bool
+}
+
+private struct ContentSearchMatchJSON: Codable {
+    let line: UInt32
+    let column: UInt32
+    let byteRange: ByteRangeJSON
+    let lineText: String
+
+    init(_ match: SearchMatch) {
+        line = match.line
+        column = match.column
+        byteRange = ByteRangeJSON(match.byteRange)
+        lineText = match.lineText
+    }
 }
 
 private func indexProject(_ path: String) throws -> EngineSession {

@@ -97,7 +97,7 @@ public final class EngineSession: Sendable {
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
     private let implIndex: ImplIndex
-    private let sourceBytesByContent: [ContentID: [UInt8]]
+    let sourceBytesByContent: [ContentID: [UInt8]]
     private let symbolSearchCache = SymbolSearchCache()
 
     init(
@@ -544,7 +544,7 @@ public final class EngineSession: Sendable {
         return index.symbols[Int(occurrence.localIndex)]
     }
 
-    private func validate(_ context: QueryContext) throws {
+    func validate(_ context: QueryContext) throws {
         guard context.snapshotID == snapshotID else {
             throw EngineError.snapshotMismatch(
                 expected: snapshotID,
