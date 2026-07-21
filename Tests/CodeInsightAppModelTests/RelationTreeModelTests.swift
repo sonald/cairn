@@ -151,6 +151,7 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
         symbol: fixture.b,
         path: "main.rs",
         byteOffset: 0,
+        line: 1,
         evidence: []
     )
     let newEdge = RelationTreeModel.LoadedEdge(
@@ -160,6 +161,7 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
         symbol: fixture.a,
         path: "main.rs",
         byteOffset: 0,
+        line: 1,
         evidence: []
     )
     let fake = FakeRelationLoader(
@@ -200,6 +202,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
             symbol: nil,
             path: "main.rs",
             byteOffset: UInt32($0),
+            line: 1,
             evidence: []
         )
     }
@@ -229,6 +232,7 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
         symbol: fixture.b,
         path: "main.rs",
         byteOffset: 15,
+        line: 1,
         evidence: [
             .sameFile(pathID: fixture.a.pathID),
             .uniqueImport(importBindingIndex: 3),

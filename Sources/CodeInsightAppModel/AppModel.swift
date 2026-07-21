@@ -98,6 +98,7 @@ public final class AppModel {
     public private(set) var selectedByteOffset: UInt32?
     public private(set) var navigationGeneration: UInt64 = 0
     public let contextWindow: ContextWindowModel
+    public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
 
     private let indexService: any IndexService
@@ -111,6 +112,18 @@ public final class AppModel {
         self.indexService = indexService
         self.contextWindow = contextWindow
         self.navigationSink = navigationSink
+        relationTree.onSelect = { [weak self] node in
+            guard let self,
+                  contextWindow.mode != .pinned,
+                  let target = node.target
+            else { return }
+            Task { [weak self] in
+                _ = await self?.contextWindow.explicitJump(
+                    file: target.path,
+                    offset: target.byteOffset
+                )
+            }
+        }
     }
 
     public func openProject(root: URL) {
@@ -124,12 +137,14 @@ public final class AppModel {
         navigationHistory.reset()
         projectState = .indexing(root: root, startedAt: .now)
         contextWindow.updateProjectState(projectState, root: root)
+        relationTree.updateProjectState(projectState)
 
         do {
             fileTree = try FileTreeModel(root: root)
         } catch {
             projectState = .failed
             contextWindow.updateProjectState(projectState, root: root)
+            relationTree.updateProjectState(projectState)
             return
         }
 
@@ -175,6 +190,7 @@ public final class AppModel {
              (.indexing, .failed):
             projectState = next
             contextWindow.updateProjectState(next, root: fileTree?.root)
+            relationTree.updateProjectState(next)
             return true
         default:
             return false
@@ -192,12 +208,14 @@ public final class AppModel {
             )
         )
         contextWindow.updateProjectState(projectState, root: fileTree?.root)
+        relationTree.updateProjectState(projectState)
     }
 
     private func failIndexing(generation: UInt64) {
         guard self.generation == generation else { return }
         projectState = .failed
         contextWindow.updateProjectState(projectState, root: fileTree?.root)
+        relationTree.updateProjectState(projectState)
     }
 
     private func replay(_ record: JumpRecord) {

@@ -226,12 +226,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.goForward(sender)
     }
 
+    @objc private func toggleRelations(_ sender: Any?) {
+        windowController?.toggleRelations()
+    }
+
+    @objc private func showCallers(_ sender: Any?) {
+        windowController?.showRelations(direction: .callers)
+    }
+
+    @objc private func showCalls(_ sender: Any?) {
+        windowController?.showRelations(direction: .calls)
+    }
+
+    @objc private func showImplementations(_ sender: Any?) {
+        windowController?.showRelations(direction: .implementations)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(goBack(_:)):
             model.navigationHistory.canGoBack
         case #selector(goForward(_:)):
             model.navigationHistory.canGoForward
+        case #selector(showCallers(_:)),
+             #selector(showCalls(_:)),
+             #selector(showImplementations(_:)):
+            model.contextWindow.selectedCandidate != nil
         default:
             true
         }
@@ -359,6 +379,42 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         goMenu.addItem(nextCandidate)
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
+
+        let relationsItem = NSMenuItem()
+        let relationsMenu = NSMenu(title: "Relations")
+        let toggleItem = NSMenuItem(
+            title: "Show/Hide Relations",
+            action: #selector(toggleRelations(_:)),
+            keyEquivalent: "r"
+        )
+        toggleItem.keyEquivalentModifierMask = [.command, .control]
+        toggleItem.target = self
+        relationsMenu.addItem(toggleItem)
+        relationsMenu.addItem(.separator())
+        let callersItem = NSMenuItem(
+            title: "Show Callers",
+            action: #selector(showCallers(_:)),
+            keyEquivalent: "h"
+        )
+        callersItem.keyEquivalentModifierMask = [.command, .shift]
+        callersItem.target = self
+        relationsMenu.addItem(callersItem)
+        let callsItem = NSMenuItem(
+            title: "Show Calls",
+            action: #selector(showCalls(_:)),
+            keyEquivalent: ""
+        )
+        callsItem.target = self
+        relationsMenu.addItem(callsItem)
+        let implementationsItem = NSMenuItem(
+            title: "Show Implementations",
+            action: #selector(showImplementations(_:)),
+            keyEquivalent: ""
+        )
+        implementationsItem.target = self
+        relationsMenu.addItem(implementationsItem)
+        relationsItem.submenu = relationsMenu
+        mainMenu.addItem(relationsItem)
 
         return mainMenu
     }

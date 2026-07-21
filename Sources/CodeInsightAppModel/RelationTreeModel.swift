@@ -27,6 +27,7 @@ public final class RelationTreeModel {
         public let subtitle: String?
         public let badge: String?
         public let target: (path: String, byteOffset: UInt32)?
+        public let line: UInt32?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
@@ -42,6 +43,7 @@ public final class RelationTreeModel {
             subtitle: String? = nil,
             badge: String? = nil,
             target: (path: String, byteOffset: UInt32)? = nil,
+            line: UInt32? = nil,
             children: [Node]? = [],
             isExpandable: Bool = false,
             parent: Node? = nil,
@@ -54,6 +56,7 @@ public final class RelationTreeModel {
             self.subtitle = subtitle
             self.badge = badge
             self.target = target
+            self.line = line
             self.children = children
             self.isExpandable = isExpandable
             self.parent = parent
@@ -70,6 +73,7 @@ public final class RelationTreeModel {
         let symbol: SymbolOccurrenceID?
         let path: String
         let byteOffset: UInt32
+        let line: UInt32
         let evidence: [ResolutionEvidence]
     }
 
@@ -124,20 +128,25 @@ public final class RelationTreeModel {
         }
     }
 
-    public func setRoot(symbol: SymbolOccurrenceID, direction: Direction) {
+    @discardableResult
+    public func setRoot(
+        symbol: SymbolOccurrenceID,
+        direction: Direction
+    ) -> Task<Void, Never>? {
         generation &+= 1
         self.direction = direction
         guard let session, let location = Self.location(for: symbol, in: session),
               let title = Self.symbolTitle(symbol, in: session)
         else {
             root = nil
-            return
+            return nil
         }
 
         let node = Node(
             kind: .root,
             title: title,
-            target: location,
+            target: (location.path, location.byteOffset),
+            line: location.line,
             children: nil,
             isExpandable: Self.canExpand(
                 symbol,
@@ -152,7 +161,7 @@ public final class RelationTreeModel {
         )
         if !node.isExpandable { node.children = [] }
         root = node
-        _ = expansionTask(for: node)
+        return expansionTask(for: node)
     }
 
     public func expand(_ node: Node) async {
@@ -282,6 +291,7 @@ public final class RelationTreeModel {
                 subtitle: "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
                 badge: isCycle ? "↻" : nil,
                 target: (edge.path, edge.byteOffset),
+                line: edge.line,
                 children: canExpand ? nil : [],
                 isExpandable: canExpand,
                 parent: group,
@@ -353,6 +363,7 @@ public final class RelationTreeModel {
                         symbol: callerSymbol,
                         path: location.path,
                         byteOffset: location.byteOffset,
+                        line: location.line,
                         evidence: caller.evidence
                     )
                 },
@@ -377,6 +388,7 @@ public final class RelationTreeModel {
                             ? nil : candidate.target,
                         path: location.path,
                         byteOffset: location.byteOffset,
+                        line: location.line,
                         evidence: candidate.evidence
                     ))
                 }
@@ -408,6 +420,7 @@ public final class RelationTreeModel {
                             symbol: implementation.implementation,
                             path: location.path,
                             byteOffset: location.byteOffset,
+                            line: location.line,
                             evidence: implementation.traitDefinitions.flatMap(\.evidence)
                         )
                     },
@@ -436,6 +449,7 @@ public final class RelationTreeModel {
                         symbol: candidate.target,
                         path: location.path,
                         byteOffset: location.byteOffset,
+                        line: location.line,
                         evidence: candidate.evidence
                     )
                 },
@@ -490,7 +504,7 @@ public final class RelationTreeModel {
         for symbol: SymbolOccurrenceID,
         evidence: [ResolutionEvidence] = [],
         in session: EngineSession
-    ) -> (path: String, byteOffset: UInt32)? {
+    ) -> (path: String, byteOffset: UInt32, line: UInt32)? {
         guard symbol.snapshotID == session.snapshotID,
               let index = contentIndex(at: symbol.pathID, in: session)
         else { return nil }
@@ -518,7 +532,10 @@ public final class RelationTreeModel {
                 offset = index.imports[Int(symbol.localIndex)].range.lowerBound
             }
         }
-        return (session.paths.resolve(symbol.pathID), offset)
+        guard let line = index.lineTable.lineColumn(at: offset)?.line else {
+            return nil
+        }
+        return (session.paths.resolve(symbol.pathID), offset, line)
     }
 
     private nonisolated static func contentIndex(

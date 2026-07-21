@@ -13,6 +13,7 @@ public final class ContextWindowModel {
     }
 
     public struct Candidate: Sendable {
+        public let symbol: SymbolOccurrenceID
         public let path: String
         public let line: UInt32
         public let column: UInt32
@@ -272,6 +273,7 @@ public final class ContextWindowModel {
                 text = ""
             }
             return Candidate(
+                symbol: resolution.target,
                 path: path,
                 line: coordinate.line,
                 column: coordinate.column,

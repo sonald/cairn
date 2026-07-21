@@ -416,6 +416,48 @@ func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
 
 @MainActor
 @Test
+func relationSelectionUpdatesContextUnlessPinned() async throws {
+    let source = "fn target() {}\nfn caller() { target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var requests: [(path: String, offset: UInt32)] = []
+    let contextWindow = ContextWindowModel { session, file, offset, context in
+        requests.append((session.paths.resolve(file), offset))
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    let model = AppModel(
+        indexService: FailingIndexService(),
+        contextWindow: contextWindow
+    )
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    let caller = try #require(
+        session.definitions(of: "caller", context: context).first?.0
+    )
+
+    let loadTask = model.relationTree.setRoot(symbol: caller, direction: .calls)
+    if let loadTask { await loadTask.value }
+    let strong = try #require(model.relationTree.root?.children?.first {
+        $0.kind == .group && $0.title == "Strong"
+    })
+    let edge = try #require(strong.children?.first { $0.title == "target" })
+
+    contextWindow.setMode(.pinned)
+    model.relationTree.select(edge)
+    for _ in 0..<10 { await Task.yield() }
+    #expect(requests.isEmpty)
+
+    contextWindow.setMode(.follow)
+    model.relationTree.select(edge)
+    #expect(await waitUntil { requests.count == 1 })
+    #expect(requests.first?.path == "main.rs")
+    #expect(requests.first?.offset == byteOffset(of: "target() {}", in: source))
+}
+
+@MainActor
+@Test
 func contextCandidateSelectionWraps() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }

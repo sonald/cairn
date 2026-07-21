@@ -18,6 +18,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let sidebarController = SidebarViewController()
     private let readerController = ReaderViewController()
     private let contextController: ContextWindowViewController
+    private let relationController: RelationWindowController
+    private let relationItem: NSSplitViewItem
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let indexLabel = NSTextField(labelWithString: "")
     private var displayedGeneration: UInt64?
@@ -27,6 +29,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     init(model: AppModel, offscreen: Bool) {
         self.model = model
         contextController = ContextWindowViewController(model: model.contextWindow)
+        relationController = RelationWindowController(model: model.relationTree)
+        relationController.view.frame.size.width = 300
+        relationItem = NSSplitViewItem(viewController: relationController)
         let content = NSSplitViewController()
         content.splitView.isVertical = false
 
@@ -40,6 +45,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerSplit.addSplitViewItem(
             NSSplitViewItem(viewController: readerController)
         )
+        relationItem.minimumThickness = 220
+        relationItem.maximumThickness = 500
+        relationItem.canCollapse = true
+        readerSplit.addSplitViewItem(relationItem)
+        relationItem.isCollapsed = true
 
         content.addSplitViewItem(NSSplitViewItem(viewController: readerSplit))
         let contextItem = NSSplitViewItem(
@@ -79,8 +89,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
         }
+        readerController.onShowRelation = { [weak self] offset, direction in
+            self?.handleReaderRelation(offset: offset, direction: direction)
+        }
         contextController.onOpen = { [weak self] candidate in
             self?.open(candidate)
+        }
+        relationController.onOpen = { [weak self] path, offset in
+            self?.open(path: path, byteOffset: offset)
         }
         render()
         observe()
@@ -102,6 +118,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
         }
         symbolSearchPanel?.show(relativeTo: window)
+    }
+
+    func toggleRelations() {
+        relationItem.isCollapsed.toggle()
+    }
+
+    func showRelations(direction: RelationTreeModel.Direction) {
+        guard let symbol = model.contextWindow.selectedCandidate?.symbol else { return }
+        showRelations(symbol: symbol, direction: direction)
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -255,12 +280,43 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
+    private func handleReaderRelation(
+        offset: UInt32,
+        direction: RelationTreeModel.Direction
+    ) {
+        guard let file = model.selectedFile,
+              let path = projectPath(for: file)
+        else { return }
+        relationItem.isCollapsed = false
+        Task { [weak self] in
+            guard let self,
+                  let candidate = await model.contextWindow.explicitJump(
+                    file: path,
+                    offset: offset
+                  )
+            else { return }
+            showRelations(symbol: candidate.symbol, direction: direction)
+        }
+    }
+
     private func open(_ candidate: ContextWindowModel.Candidate) {
+        open(path: candidate.path, byteOffset: candidate.targetByteOffset)
+    }
+
+    private func open(path: String, byteOffset: UInt32) {
         guard let root = model.fileTree?.root else { return }
         navigate(
-            to: root.appendingPathComponent(candidate.path),
-            byteOffset: candidate.targetByteOffset
+            to: root.appendingPathComponent(path),
+            byteOffset: byteOffset
         )
+    }
+
+    private func showRelations(
+        symbol: SymbolOccurrenceID,
+        direction: RelationTreeModel.Direction
+    ) {
+        relationItem.isCollapsed = false
+        relationController.setRoot(symbol: symbol, direction: direction)
     }
 
     private func navigate(to file: URL, byteOffset: UInt32? = nil) {
@@ -380,14 +436,16 @@ final class SidebarViewController: NSViewController,
 }
 
 @MainActor
-final class ReaderViewController: NSViewController {
+final class ReaderViewController: NSViewController, NSMenuDelegate {
     var onTokenClick: ((UInt32, Bool) -> Void)?
+    var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     private let label = NSTextField(labelWithString: "Open a project to begin")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
     private var displayedFile: URL?
     private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
+    private var contextMenuOffset: UInt32?
 
     override func loadView() {
         let scrollView = NSScrollView()
@@ -417,12 +475,39 @@ final class ReaderViewController: NSViewController {
                 self.onTokenClick?(offset, true)
             }
         }
+
+        let relationMenu = NSMenu(title: "Relations")
+        relationMenu.autoenablesItems = false
+        relationMenu.delegate = self
+        relationMenu.addItem(NSMenuItem(
+            title: "Show Callers",
+            action: #selector(showCallers(_:)),
+            keyEquivalent: ""
+        ))
+        relationMenu.addItem(NSMenuItem(
+            title: "Show Calls",
+            action: #selector(showCalls(_:)),
+            keyEquivalent: ""
+        ))
+        relationMenu.addItem(NSMenuItem(
+            title: "Show Implementations",
+            action: #selector(showImplementations(_:)),
+            keyEquivalent: ""
+        ))
+        for item in relationMenu.items { item.target = self }
+        textView.view.menu = relationMenu
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        contextMenuOffset = contextMenuByteOffset()
+        for item in menu.items { item.isEnabled = contextMenuOffset != nil }
     }
 
     func display(_ file: URL?) {
         loadViewIfNeeded()
         guard file != displayedFile else { return }
         displayedFile = file
+        contextMenuOffset = nil
         loadGeneration &+= 1
         let generation = loadGeneration
 
@@ -497,6 +582,38 @@ final class ReaderViewController: NSViewController {
         if let scrollView = view as? NSScrollView {
             textView.view.frame = scrollView.contentView.bounds
         }
+    }
+
+    @objc private func showCallers(_ sender: Any?) {
+        showRelation(.callers)
+    }
+
+    @objc private func showCalls(_ sender: Any?) {
+        showRelation(.calls)
+    }
+
+    @objc private func showImplementations(_ sender: Any?) {
+        showRelation(.implementations)
+    }
+
+    private func showRelation(_ direction: RelationTreeModel.Direction) {
+        guard let contextMenuOffset else { return }
+        onShowRelation?(contextMenuOffset, direction)
+    }
+
+    private func contextMenuByteOffset() -> UInt32? {
+        guard displayedDocument != nil else { return nil }
+        let characterIndex: Int
+        if let event = NSApplication.shared.currentEvent,
+           event.window === textView.view.window
+        {
+            characterIndex = textView.view.characterIndexForInsertion(
+                at: textView.view.convert(event.locationInWindow, from: nil)
+            )
+        } else {
+            characterIndex = textView.view.selectedRange().location
+        }
+        return textView.byteOffset(forCharacterIndex: characterIndex)
     }
 
 }
