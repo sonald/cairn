@@ -2,7 +2,7 @@ import AppKit
 import CodeInsightAppModel
 import Observation
 
-private final class KeyablePanel: NSPanel {
+final class KeyablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 

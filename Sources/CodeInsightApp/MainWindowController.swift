@@ -25,6 +25,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var displayedGeneration: UInt64?
     private var displayedNavigationGeneration: UInt64?
     private var symbolSearchPanel: SymbolSearchPanel?
+    private var searchPanel: SearchPanel?
 
     init(model: AppModel, offscreen: Bool) {
         self.model = model
@@ -118,6 +119,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
         }
         symbolSearchPanel?.show(relativeTo: window)
+    }
+
+    func showProjectSearch() {
+        if searchPanel == nil {
+            searchPanel = SearchPanel(appModel: model) { [weak self] file, offset in
+                self?.navigate(to: file, byteOffset: offset)
+            }
+        }
+        searchPanel?.show(relativeTo: window)
     }
 
     func toggleRelations() {
@@ -242,6 +252,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
+        searchPanel?.refreshProjectState()
     }
 
     @objc func selectPreviousContextCandidate(_ sender: Any?) {

@@ -160,6 +160,8 @@ func snapshotSearchCentersLongLineExcerptOnMatch() async throws {
     let match = try #require(result.matches.first)
 
     #expect(match.lineText.utf8.count == 240)
+    #expect(match.lineTextRange == ByteRange(lowerBound: 183, upperBound: 423))
+    #expect(match.byteRange.lowerBound - match.lineTextRange.lowerBound == 117)
     #expect(match.lineText.contains("NEEDLE"))
     #expect(match.lineText.first == "a")
     #expect(match.lineText.last == "b")

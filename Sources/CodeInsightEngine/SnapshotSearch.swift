@@ -28,19 +28,22 @@ public struct SearchMatch: Sendable {
     public let line: UInt32
     public let column: UInt32
     public let lineText: String
+    public let lineTextRange: ByteRange
 
     public init(
         pathID: PathID,
         byteRange: ByteRange,
         line: UInt32,
         column: UInt32,
-        lineText: String
+        lineText: String,
+        lineTextRange: ByteRange
     ) {
         self.pathID = pathID
         self.byteRange = byteRange
         self.line = line
         self.column = column
         self.lineText = lineText
+        self.lineTextRange = lineTextRange
     }
 }
 
@@ -231,16 +234,18 @@ public struct SnapshotSearchService: Sendable {
                             guard let coordinate = lineTable.lineColumn(
                                 at: range.lowerBound
                             ) else { return nil }
+                            let excerpt = Self.lineExcerpt(
+                                in: bytes,
+                                range: range,
+                                lineTable: lineTable
+                            )
                             return SearchMatch(
                                 pathID: occurrence.pathID,
                                 byteRange: range,
                                 line: coordinate.line,
                                 column: coordinate.column,
-                                lineText: Self.lineText(
-                                    in: bytes,
-                                    range: range,
-                                    lineTable: lineTable
-                                )
+                                lineText: excerpt.text,
+                                lineTextRange: excerpt.range
                             )
                         }
                         processedPathIDs.insert(occurrence.pathID)
@@ -359,13 +364,13 @@ public struct SnapshotSearchService: Sendable {
         return ranges
     }
 
-    private static func lineText(
+    private static func lineExcerpt(
         in bytes: [UInt8],
         range: ByteRange,
         lineTable: LineTable
-    ) -> String {
+    ) -> (text: String, range: ByteRange) {
         guard let coordinate = lineTable.lineColumn(at: range.lowerBound) else {
-            return ""
+            return ("", range)
         }
         let lineIndex = Int(coordinate.line - 1)
         let lineStart = Int(lineTable.lineStarts[lineIndex])
@@ -389,7 +394,13 @@ public struct SnapshotSearchService: Sendable {
             )
             excerptEnd = excerptStart + maximumBytes
         }
-        return String(decoding: bytes[excerptStart..<excerptEnd], as: UTF8.self)
+        return (
+            String(decoding: bytes[excerptStart..<excerptEnd], as: UTF8.self),
+            ByteRange(
+                lowerBound: UInt32(excerptStart),
+                upperBound: UInt32(excerptEnd)
+            )
+        )
     }
 
     private static func asciiFold(_ byte: UInt8) -> UInt8 {

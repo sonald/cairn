@@ -11,13 +11,17 @@ func searchPanelDebouncesRapidQueries() async throws {
     defer { fixture.remove() }
     let counter = CountingSearcher()
     let model = SearchPanelModel(searcher: counter.search)
+    model.setCaseSensitive(true)
+    model.setRegex(true)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setQuery("first")
     model.setQuery("second")
 
     #expect(await searchWaitUntil { await counter.queries.count == 1 })
-    #expect(await counter.queries == ["second"])
+    #expect((await counter.queries).map(\.pattern) == ["second"])
+    #expect((await counter.queries).map(\.caseSensitive) == [true])
+    #expect((await counter.queries).map(\.isRegex) == [true])
 }
 
 @MainActor
@@ -56,25 +60,30 @@ func searchPanelDiscardsLateQueryResults() async throws {
 func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
     let fixture = try SearchPanelFixture()
     defer { fixture.remove() }
-    let batch = SearchBatch(
+    let batches = [SearchBatch(
         matchesByPath: [
-            fixture.b: [searchMatch(path: fixture.b, offset: 30)],
             fixture.a: [
                 searchMatch(path: fixture.a, offset: 20),
                 searchMatch(path: fixture.a, offset: 10),
             ],
         ],
+        isFinal: false,
+        completeness: .complete
+    ), SearchBatch(
+        matchesByPath: [
+            fixture.b: [searchMatch(path: fixture.b, offset: 30)],
+        ],
         isFinal: true,
         completeness: .truncated,
         truncatedPathIDs: [fixture.b]
-    )
-    let model = SearchPanelModel { _, _, _ in stream(batches: [batch]) }
+    )]
+    let model = SearchPanelModel { _, _, _ in stream(batches: batches) }
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setQuery("needle")
     #expect(await searchWaitUntil { model.totalMatches == 3 })
 
     #expect(model.groups.map(\.path) == ["a.rs", "b.rs"])
-    #expect(model.groups[0].matches.map(\.byteRange.lowerBound) == [10, 20])
+    #expect(model.groups[0].matches.map(\.value.byteRange.lowerBound) == [10, 20])
     #expect(model.fileCount == 2)
     #expect(model.isTruncated)
     #expect(model.selectedIndex == 0)
@@ -106,14 +115,14 @@ func searchPanelShowsEmptyAndIndexingPlaceholders() throws {
 }
 
 private actor CountingSearcher {
-    private(set) var queries: [String] = []
+    private(set) var queries: [ContentSearchQuery] = []
 
     func search(
         session: EngineSession,
         query: ContentSearchQuery,
         context: QueryContext
     ) async throws -> AsyncThrowingStream<SearchBatch, Error> {
-        queries.append(query.pattern)
+        queries.append(query)
         return stream(batches: [SearchBatch(
             matchesByPath: [:],
             isFinal: true,
@@ -200,7 +209,8 @@ private func searchMatch(path: PathID, offset: UInt32) -> SearchMatch {
         byteRange: ByteRange(lowerBound: offset, upperBound: offset + 1),
         line: 1,
         column: offset + 1,
-        lineText: "needle"
+        lineText: "needle",
+        lineTextRange: ByteRange(lowerBound: offset, upperBound: offset + 6)
     )
 }
 

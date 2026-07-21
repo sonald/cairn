@@ -6,10 +6,24 @@ import Observation
 @MainActor
 @Observable
 public final class SearchPanelModel {
-    public struct Group: Sendable {
+    public final class Match: Sendable {
+        public let value: SearchMatch
+
+        fileprivate init(_ value: SearchMatch) {
+            self.value = value
+        }
+    }
+
+    public final class Group {
         public let pathID: PathID
         public let path: String
-        public let matches: [SearchMatch]
+        public fileprivate(set) var matches: [Match]
+
+        fileprivate init(pathID: PathID, path: String, matches: [Match]) {
+            self.pathID = pathID
+            self.path = path
+            self.matches = matches
+        }
     }
 
     typealias Searcher = @Sendable (
@@ -27,11 +41,13 @@ public final class SearchPanelModel {
     public private(set) var isTruncated = false
     public private(set) var selectedIndex: Int?
     public private(set) var requestID: UInt64 = 0
+    public private(set) var isCaseSensitive = false
+    public private(set) var isRegex = false
 
     private let searcher: Searcher
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var projectState = ProjectState.empty
-    @ObservationIgnored private var matchesByPath: [PathID: [SearchMatch]] = [:]
+    @ObservationIgnored private var groupsByPath: [PathID: Group] = [:]
 
     public init() {
         searcher = { session, query, context in
@@ -57,6 +73,18 @@ public final class SearchPanelModel {
         restart()
     }
 
+    public func setCaseSensitive(_ enabled: Bool) {
+        guard isCaseSensitive != enabled else { return }
+        isCaseSensitive = enabled
+        restart()
+    }
+
+    public func setRegex(_ enabled: Bool) {
+        guard isRegex != enabled else { return }
+        isRegex = enabled
+        restart()
+    }
+
     public func selectPrevious() {
         moveSelection(by: -1)
     }
@@ -76,7 +104,7 @@ public final class SearchPanelModel {
             if remaining < group.matches.count {
                 return (
                     group.path,
-                    group.matches[remaining].byteRange.lowerBound
+                    group.matches[remaining].value.byteRange.lowerBound
                 )
             }
             remaining -= group.matches.count
@@ -105,7 +133,11 @@ public final class SearchPanelModel {
             }
             placeholder = ""
             isSearching = true
-            let query = ContentSearchQuery(pattern: query)
+            let query = ContentSearchQuery(
+                pattern: query,
+                isRegex: isRegex,
+                caseSensitive: isCaseSensitive
+            )
             let searcher = searcher
             searchTask = Task { [weak self] in
                 do {
@@ -140,7 +172,7 @@ public final class SearchPanelModel {
 
     private func clearResults() {
         groups = []
-        matchesByPath = [:]
+        groupsByPath = [:]
         isSearching = false
         totalMatches = 0
         fileCount = 0
@@ -150,18 +182,18 @@ public final class SearchPanelModel {
 
     private func apply(_ batch: SearchBatch, session: EngineSession) {
         for (pathID, matches) in batch.matchesByPath {
-            matchesByPath[pathID, default: []].append(contentsOf: matches)
-            matchesByPath[pathID]?.sort {
-                $0.byteRange.lowerBound < $1.byteRange.lowerBound
-            }
-        }
-        groups = matchesByPath.map { pathID, matches in
-            Group(
+            let group = groupsByPath[pathID] ?? Group(
                 pathID: pathID,
                 path: session.paths.resolve(pathID),
-                matches: matches
+                matches: []
             )
-        }.sorted { $0.path < $1.path }
+            groupsByPath[pathID] = group
+            group.matches.append(contentsOf: matches.map(Match.init))
+            group.matches.sort {
+                $0.value.byteRange.lowerBound < $1.value.byteRange.lowerBound
+            }
+        }
+        groups = groupsByPath.values.sorted { $0.path < $1.path }
         totalMatches = groups.reduce(0) { $0 + $1.matches.count }
         fileCount = groups.count
         isTruncated = isTruncated || batch.completeness == .truncated

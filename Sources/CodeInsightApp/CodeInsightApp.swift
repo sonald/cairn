@@ -210,6 +210,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showSymbolSearch()
     }
 
+    @objc private func findInProject(_ sender: Any?) {
+        windowController?.showProjectSearch()
+    }
+
     @objc private func previousContextCandidate(_ sender: Any?) {
         windowController?.selectPreviousContextCandidate(sender)
     }
@@ -313,6 +317,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ))
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
+
+        let findItem = NSMenuItem()
+        let findMenu = NSMenu(title: "Find")
+        let findInProjectItem = NSMenuItem(
+            title: "Find in Project…",
+            action: #selector(findInProject(_:)),
+            keyEquivalent: "f"
+        )
+        findInProjectItem.keyEquivalentModifierMask = [.command, .shift]
+        findInProjectItem.target = self
+        findMenu.addItem(findInProjectItem)
+        findItem.submenu = findMenu
+        mainMenu.addItem(findItem)
 
         let goItem = NSMenuItem()
         let goMenu = NSMenu(title: "Go")
