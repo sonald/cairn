@@ -197,15 +197,216 @@ func appModelResolvesAgainstTheSelectedCommitSession() async throws {
     #expect(context.generation == model.generation)
 }
 
+@MainActor
+@Test
+func navigationReplaySwitchesSnapshotsBeforeLocatingAndCanReturnForward() async throws {
+    let files = [
+        "a.rs": "fn a() { let value = 1; }\n",
+        "b.rs": "fn b() { let value = 2; }\n",
+    ]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let worktree = TestSnapshot(
+        label: "worktree",
+        snapshotID: initial.snapshotID,
+        files: files
+    )
+    let commit = TestSnapshot(label: "C", files: files)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        worktreeSnapshot: worktree,
+        snapshots: ["C": commit]
+    )
+    var locatedSnapshots: [SnapshotID?] = []
+    var model: AppModel!
+    model = AppModel(indexService: service) { _, _ in
+        locatedSnapshots.append(model.currentSnapshotID)
+    }
+    let a = root.appendingPathComponent("a.rs")
+    let b = root.appendingPathComponent("b.rs")
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigationHistory.push(snapshotJumpRecord(
+        "a.rs",
+        offset: 8,
+        snapshotID: worktree.snapshotID
+    ))
+    model.switchToCommit("C")
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigate(to: b, byteOffset: 9)
+
+    model.goBack(from: snapshotJumpRecord(
+        "b.rs",
+        offset: 9,
+        snapshotID: commit.snapshotID
+    ))
+
+    #expect(await snapshotWaitUntil {
+        model.currentSnapshotID == worktree.snapshotID
+            && model.selectedFile == a
+            && model.selectedByteOffset == 8
+    })
+    #expect(locatedSnapshots.last == worktree.snapshotID)
+
+    model.goForward()
+
+    #expect(await snapshotWaitUntil {
+        model.currentSnapshotID == commit.snapshotID
+            && model.selectedFile == b
+            && model.selectedByteOffset == 9
+    })
+    #expect(locatedSnapshots.last == commit.snapshotID)
+}
+
+@MainActor
+@Test
+func crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
+    let files = ["a.rs": "x\ny\n", "b.rs": "fn b() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let worktree = TestSnapshot(
+        label: "worktree",
+        snapshotID: initial.snapshotID,
+        files: files
+    )
+    let commit = TestSnapshot(label: "C", files: [
+        "a.rs": "first line\nsecond line is much longer\n",
+        "b.rs": "fn b() {}\n",
+    ])
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        worktreeSnapshot: worktree,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+    let a = root.appendingPathComponent("a.rs")
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigationHistory.push(snapshotJumpRecord(
+        "a.rs",
+        offset: 100,
+        line: 2,
+        column: 1,
+        snapshotID: worktree.snapshotID
+    ))
+    model.switchToCommit("C")
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+
+    model.goBack(from: snapshotJumpRecord(
+        "b.rs",
+        offset: 0,
+        snapshotID: commit.snapshotID
+    ))
+
+    #expect(await snapshotWaitUntil {
+        model.currentSnapshotID == worktree.snapshotID
+            && model.selectedFile == a
+            && model.selectedByteOffset == 2
+    })
+}
+
+@MainActor
+@Test
+func crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() async throws {
+    let source = "fn moved_target() {\n    let value = 1;\n}\n"
+    let files = ["a.rs": source, "b.rs": "fn b() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let worktree = TestSnapshot(
+        label: "worktree",
+        snapshotID: initial.snapshotID,
+        files: files
+    )
+    let commit = TestSnapshot(label: "C", files: [
+        "a.rs": "fn replacement() {}\n",
+        "b.rs": "fn b() {}\n",
+    ])
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        worktreeSnapshot: worktree,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+    let a = root.appendingPathComponent("a.rs")
+    let nameOffset = UInt32(source[..<source.range(of: "moved_target")!.lowerBound].utf8.count)
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigationHistory.push(snapshotJumpRecord(
+        "a.rs",
+        offset: 100,
+        line: 99,
+        column: 99,
+        symbolAnchor: "moved_target",
+        snapshotID: worktree.snapshotID
+    ))
+    model.switchToCommit("C")
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+
+    model.goBack(from: snapshotJumpRecord(
+        "b.rs",
+        offset: 0,
+        snapshotID: commit.snapshotID
+    ))
+
+    #expect(await snapshotWaitUntil {
+        model.currentSnapshotID == worktree.snapshotID
+            && model.selectedFile == a
+            && model.selectedByteOffset == nameOffset
+    })
+}
+
+@MainActor
+@Test
+func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
+    let files = ["a.rs": "fn a() {}\n", "b.rs": "fn b() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let service = ControlledSnapshotIndexService(initialSession: initial, snapshots: [:])
+    let model = AppModel(indexService: service)
+    let a = root.appendingPathComponent("a.rs")
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    let generation = model.generation
+    model.navigationHistory.push(snapshotJumpRecord(
+        "a.rs",
+        offset: 3,
+        snapshotID: initial.snapshotID
+    ))
+
+    model.goBack(from: snapshotJumpRecord(
+        "b.rs",
+        offset: 4,
+        snapshotID: initial.snapshotID
+    ))
+
+    #expect(model.generation == generation)
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.selectedFile == a)
+    #expect(model.selectedByteOffset == 3)
+}
+
 private final class TestSnapshot: Snapshot, @unchecked Sendable {
     let label: String
-    let snapshotID = SnapshotID(rawValue: UUID())
+    let snapshotID: SnapshotID
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.tracked
     private let files: [String: [UInt8]]
 
-    init(label: String, files: [String: String]) {
+    init(
+        label: String,
+        snapshotID: SnapshotID = SnapshotID(rawValue: UUID()),
+        files: [String: String]
+    ) {
         self.label = label
+        self.snapshotID = snapshotID
         self.files = files.mapValues { Array($0.utf8) }
     }
 
@@ -223,6 +424,7 @@ private final class TestSnapshot: Snapshot, @unchecked Sendable {
 
 private actor ControlledSnapshotIndexService: IndexService {
     private let initialSession: EngineSession
+    private let worktreeSnapshot: TestSnapshot?
     private let snapshots: [String: TestSnapshot]
     private let store = ProjectIndexStore()
     private var blockedCached: Set<String>
@@ -232,11 +434,13 @@ private actor ControlledSnapshotIndexService: IndexService {
 
     init(
         initialSession: EngineSession,
+        worktreeSnapshot: TestSnapshot? = nil,
         snapshots: [String: TestSnapshot],
         blockedCached: Set<String> = [],
         blockedFull: Set<String> = []
     ) {
         self.initialSession = initialSession
+        self.worktreeSnapshot = worktreeSnapshot
         self.snapshots = snapshots
         self.blockedCached = blockedCached
         self.blockedFull = blockedFull
@@ -245,9 +449,12 @@ private actor ControlledSnapshotIndexService: IndexService {
     func index(root: URL) async throws -> EngineSession { initialSession }
 
     func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
-        guard let revision, let snapshot = snapshots[revision] else {
-            throw SnapshotTestError.missing(revision ?? "worktree")
+        let snapshot = if let revision {
+            snapshots[revision]
+        } else {
+            worktreeSnapshot
         }
+        guard let snapshot else { throw SnapshotTestError.missing(revision ?? "worktree") }
         labelsBySnapshotID[snapshot.snapshotID] = snapshot.label
         return snapshot
     }
@@ -390,6 +597,25 @@ private func snapshotWrite(_ contents: String, to file: URL) throws {
         withIntermediateDirectories: true
     )
     try contents.write(to: file, atomically: true, encoding: .utf8)
+}
+
+private func snapshotJumpRecord(
+    _ path: String,
+    offset: UInt32,
+    line: UInt32 = 1,
+    column: UInt32? = nil,
+    symbolAnchor: String? = nil,
+    snapshotID: SnapshotID
+) -> JumpRecord {
+    JumpRecord(
+        path: path,
+        contentID: nil,
+        byteOffset: offset,
+        line: line,
+        column: column ?? offset + 1,
+        symbolAnchor: symbolAnchor,
+        snapshotID: snapshotID
+    )
 }
 
 private enum SnapshotTestError: Error {

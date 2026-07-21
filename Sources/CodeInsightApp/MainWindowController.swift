@@ -432,14 +432,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func currentJumpRecord() -> JumpRecord? {
-        let snapshotID: SnapshotID?
         switch model.projectState {
-        case let .ready(session, _):
-            snapshotID = session.snapshotID
-        case .indexing:
-            snapshotID = nil
         case .empty, .failed:
             return nil
+        case .indexing, .ready:
+            break
         }
         guard let position = readerController.currentReadingPosition(),
               let path = projectPath(for: position.file)
@@ -451,7 +448,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             line: position.line,
             column: position.column,
             symbolAnchor: position.symbolAnchor,
-            snapshotID: snapshotID
+            snapshotID: model.currentSnapshotID
         )
     }
 

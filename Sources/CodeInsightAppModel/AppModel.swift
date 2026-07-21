@@ -248,6 +248,11 @@ public struct FileTreeModel: Sendable {
 @MainActor
 @Observable
 public final class AppModel {
+    private enum SnapshotDestination {
+        case worktree
+        case commit(String)
+    }
+
     public private(set) var projectState: ProjectState = .empty
     public private(set) var generation: UInt64 = 0
     public private(set) var snapshotPhase: SnapshotPhase?
@@ -268,6 +273,10 @@ public final class AppModel {
     private let navigationSink: @MainActor (URL, UInt32?) -> Void
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     private var projectRoot: URL?
+    @ObservationIgnored private var snapshotDestinations: [
+        SnapshotID: SnapshotDestination
+    ] = [:]
+    @ObservationIgnored private var pendingReplay: JumpRecord?
 
     public init(
         indexService: any IndexService = ProjectIndexService(),
@@ -306,6 +315,8 @@ public final class AppModel {
         commitPicker.setCurrentRevision(nil)
         commitPicker.load(repositoryURL: root)
         currentSnapshotID = nil
+        snapshotDestinations.removeAll(keepingCapacity: true)
+        pendingReplay = nil
         documentSource = nil
         snapshotPhase = nil
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
@@ -340,10 +351,12 @@ public final class AppModel {
     }
 
     public func switchToCommit(_ revision: String) {
+        pendingReplay = nil
         switchSnapshot(revision: revision)
     }
 
     public func switchToWorktree() {
+        pendingReplay = nil
         switchSnapshot(revision: nil)
     }
 
@@ -410,6 +423,7 @@ public final class AppModel {
     private func finishIndexing(_ session: EngineSession, generation: UInt64) {
         guard self.generation == generation else { return }
         currentSnapshotID = session.snapshotID
+        snapshotDestinations[session.snapshotID] = .worktree
         snapshotPhase = .fullReady
         coverage = Self.coverage(for: session)
         guard transition(to: .ready(
@@ -427,6 +441,7 @@ public final class AppModel {
 
     private func failIndexing(generation: UInt64) {
         guard self.generation == generation else { return }
+        pendingReplay = nil
         guard transition(to: .failed) else {
             assertionFailure("Illegal project state transition to failed")
             return
@@ -506,6 +521,11 @@ public final class AppModel {
             selectedByteOffset = nil
         }
         currentSnapshotID = snapshot.snapshotID
+        if let revision {
+            snapshotDestinations[snapshot.snapshotID] = .commit(revision)
+        } else {
+            snapshotDestinations[snapshot.snapshotID] = .worktree
+        }
         documentSource = if revision == nil {
             nil
         } else {
@@ -524,6 +544,10 @@ public final class AppModel {
             }.count
         )
         navigationGeneration &+= 1
+        if let record = pendingReplay {
+            pendingReplay = nil
+            replayWithinCurrentSnapshot(record)
+        }
     }
 
     private func publishSession(
@@ -581,20 +605,66 @@ public final class AppModel {
     }
 
     private func replay(_ record: JumpRecord) {
+        guard let targetSnapshotID = record.snapshotID,
+              targetSnapshotID != currentSnapshotID
+        else {
+            replayWithinCurrentSnapshot(record)
+            return
+        }
+        guard projectRoot != nil else { return }
+        guard let destination = snapshotDestinations[targetSnapshotID] else {
+            if currentSnapshotID == nil {
+                replayWithinCurrentSnapshot(record)
+            }
+            return
+        }
+        pendingReplay = record
+        switch destination {
+        case .worktree:
+            switchSnapshot(revision: nil)
+        case let .commit(revision):
+            switchSnapshot(revision: revision)
+        }
+    }
+
+    private func replayWithinCurrentSnapshot(_ record: JumpRecord) {
         guard let root = fileTree?.root else { return }
         let file = root.appendingPathComponent(record.path).standardizedFileURL
-        guard file.pathComponents.starts(with: root.pathComponents),
-              let bytes = try? (documentSource.map { try $0(file) }
-                  ?? Array(Data(contentsOf: file)))
-        else { return }
-        let offset: UInt32
-        if Int(record.byteOffset) <= bytes.count {
-            offset = record.byteOffset
+        guard file.pathComponents.starts(with: root.pathComponents) else { return }
+        let loader = if let documentSource {
+            DocumentLoader(source: documentSource)
         } else {
-            offset = LineTable(bytes: bytes).byteOffset(
-                line: record.line,
-                column: record.column
-            ) ?? 0
+            DocumentLoader()
+        }
+        guard let loaded = try? loader.load(file: file) else { return }
+        let document = loaded.document
+        let offset: UInt32
+        // 1. Preserve the exact byte position whenever it still fits this version.
+        if Int(record.byteOffset) <= document.bytes.count {
+            offset = record.byteOffset
+        // 2. A shorter file invalidates the byte; retry its recorded line/column.
+        } else if let lineOffset = document.lineTable.byteOffset(
+            line: record.line,
+            column: record.column
+        ) {
+            offset = lineOffset
+        // 3. Invalid coordinates fall back to the same named symbol's declaration.
+        } else if let symbolAnchor = record.symbolAnchor {
+            let facets = if loaded.tier == .regular {
+                document.outlineFacets
+            } else {
+                (try? RustHighlighter().highlight(bytes: document.bytes))?
+                    .outlineFacets ?? []
+            }
+            if let facet = facets.first(where: { $0.name == symbolAnchor }) {
+                offset = facet.nameRange.lowerBound
+            } else {
+                // 4. A missing symbol leaves the file head as the last safe target.
+                offset = 0
+            }
+        } else {
+            // 4. No valid coordinate or anchor remains, so open the file head.
+            offset = 0
         }
         navigate(to: file, byteOffset: offset)
     }
