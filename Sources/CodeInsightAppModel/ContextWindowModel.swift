@@ -60,6 +60,7 @@ public final class ContextWindowModel {
     private let loader: Loader
     private var projectState: ProjectState = .empty
     private var root: URL?
+    private var contentSource: DocumentLoader.ContentSource?
     private var pendingToken: Token?
     private var locatedToken: LocatedToken?
     private var documents: [DocumentKey: ReaderDocument] = [:]
@@ -108,12 +109,17 @@ public final class ContextWindowModel {
         self.mode = mode
     }
 
-    public func updateProjectState(_ state: ProjectState, root: URL?) {
+    public func updateProjectState(
+        _ state: ProjectState,
+        root: URL?,
+        contentSource: DocumentLoader.ContentSource? = nil
+    ) {
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
             pendingToken = nil
         }
         self.root = normalizedRoot
+        self.contentSource = contentSource
         projectState = state
 
         switch state {
@@ -332,9 +338,17 @@ public final class ContextWindowModel {
             documentRecency.append(key)
             return cached
         }
-        guard let root,
-              let loaded = await loader(root.appendingPathComponent(path))
-        else { return nil }
+        guard let root else { return nil }
+        let file = root.appendingPathComponent(path)
+        let loaded: ReaderDocument?
+        if let contentSource {
+            loaded = await Task.detached(priority: .userInitiated) {
+                try? DocumentLoader(source: contentSource).load(file: file).document
+            }.value
+        } else {
+            loaded = await loader(file)
+        }
+        guard let loaded else { return nil }
         documents[key] = loaded
         documentRecency.append(key)
         if documentRecency.count > 8 {

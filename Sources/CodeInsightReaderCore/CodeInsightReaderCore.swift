@@ -374,12 +374,20 @@ public enum ViewportGating {
 }
 
 public struct DocumentLoader: Sendable {
-    public init() {}
+    public typealias ContentSource = @Sendable (URL) throws -> [UInt8]
+
+    private let source: ContentSource
+
+    public init(source: @escaping ContentSource = { file in
+        Array(try Data(contentsOf: file, options: .mappedIfSafe))
+    }) {
+        self.source = source
+    }
 
     public func load(
         file: URL
     ) throws -> (document: ReaderDocument, tier: FileTier) {
-        let bytes = Array(try Data(contentsOf: file, options: .mappedIfSafe))
+        let bytes = try source(file)
         guard String(bytes: bytes, encoding: .utf8) != nil else {
             throw CocoaError(.fileReadCorruptFile)
         }

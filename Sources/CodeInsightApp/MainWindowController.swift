@@ -23,6 +23,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let indexLabel = NSTextField(labelWithString: "")
     private var displayedGeneration: UInt64?
+    private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
     private var symbolSearchPanel: SymbolSearchPanel?
     private var searchPanel: SearchPanel?
@@ -222,6 +223,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         withObservationTracking {
             _ = model.projectState
             _ = model.generation
+            _ = model.snapshotPhase
+            _ = model.currentSnapshotID
             _ = model.fileTree
             _ = model.selectedFile
             _ = model.navigationGeneration
@@ -234,14 +237,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func render() {
-        if displayedGeneration != model.generation {
+        if displayedGeneration != model.generation
+            || displayedSnapshotID != model.currentSnapshotID
+        {
             sidebarController.display(model.fileTree)
             displayedGeneration = model.generation
+            displayedSnapshotID = model.currentSnapshotID
         }
-        readerController.display(model.selectedFile)
+        readerController.display(
+            model.selectedFile,
+            snapshotID: model.currentSnapshotID,
+            source: model.documentSource
+        )
         if displayedNavigationGeneration != model.navigationGeneration {
             if let file = model.selectedFile, let offset = model.selectedByteOffset {
-                readerController.navigate(to: file, byteOffset: offset)
+                readerController.navigate(
+                    to: file,
+                    byteOffset: offset,
+                    snapshotID: model.currentSnapshotID,
+                    source: model.documentSource
+                )
             }
             displayedNavigationGeneration = model.navigationGeneration
         }
@@ -630,6 +645,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
     private var displayedFile: URL?
+    private var displayedSnapshotID: SnapshotID?
     private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
     private var contextMenuOffset: UInt32?
@@ -695,10 +711,15 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         for item in menu.items { item.isEnabled = contextMenuOffset != nil }
     }
 
-    func display(_ file: URL?) {
+    func display(
+        _ file: URL?,
+        snapshotID: SnapshotID? = nil,
+        source: DocumentLoader.ContentSource? = nil
+    ) {
         loadViewIfNeeded()
-        guard file != displayedFile else { return }
+        guard file != displayedFile || snapshotID != displayedSnapshotID else { return }
         displayedFile = file
+        displayedSnapshotID = snapshotID
         contextMenuOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
@@ -715,7 +736,8 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         }
 
         do {
-            let loaded = try loader.load(file: file)
+            let activeLoader = source.map { DocumentLoader(source: $0) } ?? loader
+            let loaded = try activeLoader.load(file: file)
             displayedDocument = loaded.document
             label.isHidden = true
             layoutTextViewFrame()
@@ -724,7 +746,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
             if loaded.tier != .regular {
-                loader.loadSyntax(for: loaded.document) { [weak self] result in
+                activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
                     Task { @MainActor [weak self] in
                         guard let self, self.loadGeneration == generation else { return }
                         switch result {
@@ -746,8 +768,13 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         }
     }
 
-    func navigate(to file: URL, byteOffset: UInt32) {
-        display(file)
+    func navigate(
+        to file: URL,
+        byteOffset: UInt32,
+        snapshotID: SnapshotID? = nil,
+        source: DocumentLoader.ContentSource? = nil
+    ) {
+        display(file, snapshotID: snapshotID, source: source)
         textView.reveal(byteOffset: byteOffset)
         onReadingPositionChange?(byteOffset)
     }

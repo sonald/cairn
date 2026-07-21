@@ -97,6 +97,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightGit",
                 "CodeInsightReaderCore",
             ]
         ),
@@ -154,6 +155,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightAppModel",
                 "CodeInsightEngine",
+                "CodeInsightGit",
                 "CodeInsightReaderCore",
             ]
         ),

@@ -3,6 +3,7 @@ import CodeInsightAppModel
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
+import Observation
 
 private enum SelfTestBudgets {
     static let coldStartMS = 500.0
@@ -12,6 +13,7 @@ private enum SelfTestBudgets {
     static let hugeStyledFragments = 500
     static let projectTreeVisibleMS = 1_000.0
     static let projectIndexReadyMS = 2_000.0
+    static let snapshotFirstPaintMS = 1_000.0
 }
 
 @main
@@ -20,6 +22,14 @@ private struct CodeInsightApplication {
     static func main() {
         let startedAt = ContinuousClock.now
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if let index = arguments.firstIndex(of: "--self-test-switch"),
+           arguments.indices.contains(index + 1)
+        {
+            AppDelegate(startedAt: startedAt).runSwitchSelfTest(root: URL(
+                fileURLWithPath: arguments[index + 1],
+                isDirectory: true
+            ))
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         let delegate = AppDelegate(startedAt: startedAt)
@@ -102,6 +112,65 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             fileCount: fileCount,
             ready: ready
         )
+    }
+
+    func runSwitchSelfTest(root: URL) -> Never {
+        model.openProject(root: root)
+        let openDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < openDeadline {
+            if case .ready = model.projectState { break }
+            if case .failed = model.projectState {
+                Self.finishSwitchSelfTest(state: nil, reused: 0, extracted: 0, ready: false)
+            }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+        }
+        guard case .ready = model.projectState else {
+            Self.finishSwitchSelfTest(state: nil, reused: 0, extracted: 0, ready: false)
+        }
+
+        let state = SwitchSelfTestState(startedAt: .now)
+        observeSwitch(state)
+        model.switchToCommit("HEAD~1")
+        let deadline = Date(timeIntervalSinceNow: 30)
+        while Date() < deadline {
+            if model.snapshotPhase == .fullReady,
+               case let .ready(session, _) = model.projectState
+            {
+                Self.finishSwitchSelfTest(
+                    state: state,
+                    reused: session.stats.reusedCount,
+                    extracted: session.stats.extractedCount,
+                    ready: true
+                )
+            }
+            if case .failed = model.projectState {
+                Self.finishSwitchSelfTest(
+                    state: state,
+                    reused: 0,
+                    extracted: 0,
+                    ready: false
+                )
+            }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+        }
+        Self.finishSwitchSelfTest(
+            state: state,
+            reused: 0,
+            extracted: 0,
+            ready: false
+        )
+    }
+
+    private func observeSwitch(_ state: SwitchSelfTestState) {
+        withObservationTracking {
+            _ = model.snapshotPhase
+        } onChange: { [weak self, weak state] in
+            Task { @MainActor [weak self, weak state] in
+                guard let self, let state else { return }
+                state.record(model.snapshotPhase)
+                observeSwitch(state)
+            }
+        }
     }
 
     func runOpenSelfTest(file: URL) {
@@ -496,6 +565,42 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
     }
 
+    private static func finishSwitchSelfTest(
+        state: SwitchSelfTestState?,
+        reused: Int,
+        extracted: Int,
+        ready: Bool
+    ) -> Never {
+        do {
+            let firstPaintMS = state?.firstPaintMS ?? -1
+            let cachedReadyMS = state?.cachedReadyMS ?? -1
+            let fullReadyMS = state?.fullReadyMS ?? -1
+            let data = try JSONSerialization.data(
+                withJSONObject: [
+                    "firstPaintMS": firstPaintMS,
+                    "cachedReadyMS": cachedReadyMS,
+                    "fullReadyMS": fullReadyMS,
+                    "reused": reused,
+                    "extracted": extracted,
+                ],
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+            Darwin.exit(
+                firstPaintMS >= 0
+                    && firstPaintMS < SelfTestBudgets.snapshotFirstPaintMS
+                    && cachedReadyMS >= firstPaintMS
+                    && fullReadyMS >= cachedReadyMS
+                    && ready
+                    ? 0 : 1
+            )
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+    }
+
     private static func finishOpenSelfTest(
         tier: FileTier,
         firstVisibleMS: Double,
@@ -555,6 +660,32 @@ private final class OpenSelfTestState {
         self.openedAt = openedAt
         self.textView = textView
         self.window = window
+    }
+}
+
+@MainActor
+private final class SwitchSelfTestState {
+    let startedAt: ContinuousClock.Instant
+    var firstPaintMS: Double?
+    var cachedReadyMS: Double?
+    var fullReadyMS: Double?
+
+    init(startedAt: ContinuousClock.Instant) {
+        self.startedAt = startedAt
+    }
+
+    func record(_ phase: SnapshotPhase?) {
+        let elapsed = milliseconds(since: startedAt)
+        switch phase {
+        case .firstPaint:
+            if firstPaintMS == nil { firstPaintMS = elapsed }
+        case .cachedReady:
+            if cachedReadyMS == nil { cachedReadyMS = elapsed }
+        case .fullReady:
+            if fullReadyMS == nil { fullReadyMS = elapsed }
+        case nil:
+            break
+        }
     }
 }
 

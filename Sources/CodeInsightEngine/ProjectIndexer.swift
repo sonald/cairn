@@ -165,6 +165,7 @@ public struct ProjectIndexer: Sendable {
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore
     ) throws -> PreparedSnapshot {
+        try Task.checkCancellation()
         let startedAt = Date()
         let stored = store.snapshot()
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
@@ -175,6 +176,7 @@ public struct ProjectIndexer: Sendable {
         var capturedBytes: [ContentID: [UInt8]] = [:]
 
         for (offset, file) in files.enumerated() {
+            try Task.checkCancellation()
             let bytes = try snapshot.readBytes(path: file.path)
             capturedBytes[file.contentID] = bytes
             let language = detectedLanguage(for: file.path)
@@ -202,6 +204,7 @@ public struct ProjectIndexer: Sendable {
                 ))
             }
         }
+        try Task.checkCancellation()
         store.insert(capturedBytes)
 
         let manifest = SnapshotManifest(
@@ -239,9 +242,11 @@ public struct ProjectIndexer: Sendable {
     public func completeSnapshot(
         _ prepared: PreparedSnapshot
     ) throws -> EngineSession {
+        try Task.checkCancellation()
         let drafts = try extract(prepared.missingInputs)
         // Extraction is pure and completes before the shared store changes;
         // failed work therefore leaves no partially extracted snapshot behind.
+        try Task.checkCancellation()
         for draft in drafts {
             let index = remap(
                 draft.index,
