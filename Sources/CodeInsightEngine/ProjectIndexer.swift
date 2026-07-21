@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightGit
 import CodeInsightRustExtractor
 import Foundation
 
@@ -12,9 +13,23 @@ public struct IndexStats: Sendable {
     public let importCount: Int
     public let elapsedMilliseconds: UInt64
     public let filesWithErrorNodes: Int
+    public let reusedCount: Int
+    public let extractedCount: Int
 }
 
 public struct ProjectIndexer: Sendable {
+    public struct PreparedSnapshot: Sendable {
+        public let cachedSession: EngineSession
+        public var pendingExtractionCount: Int { missingInputs.count }
+
+        fileprivate let store: ProjectIndexStore
+        fileprivate let manifest: SnapshotManifest
+        fileprivate let analysisProfile: AnalysisProfile
+        fileprivate let missingInputs: [ExtractionInput]
+        fileprivate let reusedCount: Int
+        fileprivate let startedAt: Date
+    }
+
     public static let skippedDirectories: Set<String> = [
         ".git", "target", "node_modules", ".build", "venv", ".venv",
         "__pycache__", "dist", "build",
@@ -79,7 +94,11 @@ public struct ProjectIndexer: Sendable {
                 names: store.names,
                 strings: store.strings
             )
-            store.insert(index, bytes: draft.bytes)
+            store.insert(
+                index,
+                bytes: draft.bytes,
+                containsErrorNodes: draft.containsErrorNodes
+            )
             hasErrors[draft.index.key] = draft.containsErrorNodes
         }
 
@@ -120,7 +139,9 @@ public struct ProjectIndexer: Sendable {
                     extractorVersion: RustExtractorInfo.extractorVersion
                 )
                 return count + (hasErrors[key] == true ? 1 : 0)
-            }
+            },
+            reusedCount: 0,
+            extractedCount: uniqueInputs.count
         )
         let profile = AnalysisProfile.placeholder(
             language: .rust,
@@ -135,6 +156,171 @@ public struct ProjectIndexer: Sendable {
         return EngineSession(
             store: store,
             snapshotView: snapshotView
+        )
+    }
+
+    /// Builds a manifest and a queryable cached-only session. S4 can publish
+    /// `cachedSession` for first paint, then run `completeSnapshot` off-thread.
+    public func prepareSnapshot(
+        _ snapshot: any Snapshot,
+        into store: ProjectIndexStore
+    ) throws -> PreparedSnapshot {
+        let startedAt = Date()
+        let stored = store.snapshot()
+        let files = snapshot.listFiles().sorted { $0.path < $1.path }
+        var occurrences: [FileOccurrence] = []
+        var missingInputs: [ExtractionInput] = []
+        var missingKeys: Set<ContentIndexKey> = []
+        var reusedKeys: Set<ContentIndexKey> = []
+        var capturedBytes: [ContentID: [UInt8]] = [:]
+
+        for (offset, file) in files.enumerated() {
+            let bytes = try snapshot.readBytes(path: file.path)
+            capturedBytes[file.contentID] = bytes
+            let language = detectedLanguage(for: file.path)
+            guard let occurrenceID = UInt32(exactly: offset) else {
+                preconditionFailure("File count exceeds UInt32")
+            }
+            occurrences.append(FileOccurrence(
+                occurrenceID: FileOccurrenceID(rawValue: occurrenceID),
+                pathID: store.paths.intern(file.path),
+                contentID: file.contentID,
+                detectedLanguage: language,
+                sourceKind: snapshot.sourceKind,
+                fileMode: file.fileMode,
+                size: UInt64(bytes.count)
+            ))
+            guard language == .rust else { continue }
+            let key = rustContentKey(file.contentID)
+            if stored.contentIndexes[key] != nil {
+                reusedKeys.insert(key)
+            } else if missingKeys.insert(key).inserted {
+                missingInputs.append(ExtractionInput(
+                    order: missingInputs.count,
+                    bytes: bytes,
+                    key: key
+                ))
+            }
+        }
+        store.insert(capturedBytes)
+
+        let manifest = SnapshotManifest(
+            snapshotID: snapshot.snapshotID,
+            files: occurrences
+        )
+        let analysisProfile = AnalysisProfile.placeholder(
+            language: .rust,
+            root: store.paths.intern(".")
+        )
+        let stats = snapshotStats(
+            manifest: manifest,
+            stored: stored,
+            reusedCount: reusedKeys.count,
+            extractedCount: 0,
+            startedAt: startedAt
+        )
+        let view = SnapshotView(
+            store: store,
+            manifest: manifest,
+            stats: stats,
+            analysisProfile: analysisProfile
+        )
+        return PreparedSnapshot(
+            cachedSession: EngineSession(store: store, snapshotView: view),
+            store: store,
+            manifest: manifest,
+            analysisProfile: analysisProfile,
+            missingInputs: missingInputs,
+            reusedCount: reusedKeys.count,
+            startedAt: startedAt
+        )
+    }
+
+    public func completeSnapshot(
+        _ prepared: PreparedSnapshot
+    ) throws -> EngineSession {
+        let drafts = try extract(prepared.missingInputs)
+        // Extraction is pure and completes before the shared store changes;
+        // failed work therefore leaves no partially extracted snapshot behind.
+        for draft in drafts {
+            let index = remap(
+                draft.index,
+                localNames: draft.names,
+                localStrings: draft.strings,
+                names: prepared.store.names,
+                strings: prepared.store.strings
+            )
+            prepared.store.insert(
+                index,
+                bytes: draft.bytes,
+                containsErrorNodes: draft.containsErrorNodes
+            )
+        }
+        let stored = prepared.store.snapshot()
+        let stats = snapshotStats(
+            manifest: prepared.manifest,
+            stored: stored,
+            reusedCount: prepared.reusedCount,
+            extractedCount: drafts.count,
+            startedAt: prepared.startedAt
+        )
+        let view = SnapshotView(
+            store: prepared.store,
+            manifest: prepared.manifest,
+            stats: stats,
+            analysisProfile: prepared.analysisProfile
+        )
+        return EngineSession(store: prepared.store, snapshotView: view)
+    }
+
+    public func indexSnapshot(
+        _ snapshot: any Snapshot,
+        into store: ProjectIndexStore
+    ) throws -> EngineSession {
+        try completeSnapshot(prepareSnapshot(snapshot, into: store))
+    }
+
+    private func detectedLanguage(for path: String) -> LanguageID? {
+        URL(fileURLWithPath: path).pathExtension.lowercased() == "rs" ? .rust : nil
+    }
+
+    private func rustContentKey(_ contentID: ContentID) -> ContentIndexKey {
+        ContentIndexKey(
+            contentID: contentID,
+            languageMode: LanguageMode(language: .rust),
+            grammarVersion: RustExtractorInfo.grammarVersion,
+            extractorVersion: RustExtractorInfo.extractorVersion
+        )
+    }
+
+    private func snapshotStats(
+        manifest: SnapshotManifest,
+        stored: ProjectIndexStore.State,
+        reusedCount: Int,
+        extractedCount: Int,
+        startedAt: Date
+    ) -> IndexStats {
+        let rustFiles = manifest.files.filter { $0.detectedLanguage == .rust }
+        let keys = Set(rustFiles.map { rustContentKey($0.contentID) })
+        let indexes = keys.compactMap { stored.contentIndexes[$0] }
+        return IndexStats(
+            fileCount: rustFiles.count,
+            uniqueContentCount: indexes.count,
+            scopeCount: indexes.reduce(0) { $0 + $1.scopes.count },
+            bindingCount: indexes.reduce(0) { $0 + $1.bindings.count },
+            symbolCount: indexes.reduce(0) { $0 + $1.symbols.count },
+            callCount: indexes.reduce(0) { $0 + $1.calls.count },
+            importCount: indexes.reduce(0) { $0 + $1.imports.count },
+            elapsedMilliseconds: UInt64(max(
+                0,
+                Date().timeIntervalSince(startedAt) * 1_000
+            )),
+            filesWithErrorNodes: rustFiles.reduce(0) { count, file in
+                count + (stored.containsErrorNodes[rustContentKey(file.contentID)] == true
+                    ? 1 : 0)
+            },
+            reusedCount: reusedCount,
+            extractedCount: extractedCount
         )
     }
 
@@ -323,7 +509,7 @@ public struct ProjectIndexer: Sendable {
         let size: UInt64
     }
 
-    private struct ExtractionInput: Sendable {
+    fileprivate struct ExtractionInput: Sendable {
         let order: Int
         let bytes: [UInt8]
         let key: ContentIndexKey

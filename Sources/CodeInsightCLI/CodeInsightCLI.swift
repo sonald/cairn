@@ -13,7 +13,8 @@ struct CodeInsight: AsyncParsableCommand {
         subcommands: [
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
-            Search.self, Symsearch.self, SnapshotCommand.self, Goldset.self,
+            Search.self, Symsearch.self, SnapshotCommand.self, SwitchStats.self,
+            Goldset.self,
         ]
     )
 }
@@ -60,6 +61,47 @@ extension CodeInsight {
                     print("\(file.path)\t\(file.contentID)\t\(file.fileMode)")
                 }
             }
+        }
+    }
+
+    struct SwitchStats: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "switch-stats",
+            abstract: "Measure content reuse between two commits."
+        )
+
+        @Option(name: .long, help: "Git repository root.")
+        var project: String
+
+        @Option(name: .long, help: "Commit indexed first.")
+        var from: String
+
+        @Option(name: .long, help: "Commit switched to second.")
+        var to: String
+
+        func run() throws {
+            let root = URL(fileURLWithPath: project, isDirectory: true)
+            let indexer = ProjectIndexer()
+            let store = ProjectIndexStore()
+            let fromSnapshot = try CommitSnapshot(
+                repositoryURL: root,
+                revision: from
+            )
+            _ = try indexer.indexSnapshot(fromSnapshot, into: store)
+
+            let startedAt = Date()
+            let toSnapshot = try CommitSnapshot(repositoryURL: root, revision: to)
+            let session = try indexer.indexSnapshot(toSnapshot, into: store)
+            let elapsed = Date().timeIntervalSince(startedAt) * 1_000
+            let total = session.stats.reusedCount + session.stats.extractedCount
+            let hitRate = total == 0
+                ? 0 : Double(session.stats.reusedCount) * 100 / Double(total)
+
+            print("totalFiles: \(total)")
+            print("reusedCount: \(session.stats.reusedCount)")
+            print("extractedCount: \(session.stats.extractedCount)")
+            print("hitRate: \(String(format: "%.1f%%", hitRate))")
+            print("switchMilliseconds: \(String(format: "%.3f", elapsed))")
         }
     }
 

@@ -40,6 +40,7 @@ public enum GitError: Error, LocalizedError {
 public protocol Snapshot: Sendable {
     var snapshotID: SnapshotID { get }
     var objectFormat: GitObjectFormat { get }
+    var sourceKind: SourceKind { get }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)]
     func readBytes(path: String) throws -> [UInt8]
@@ -112,6 +113,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
+    public let sourceKind: SourceKind = .tracked
     public let revision: String
     public let commitOID: GitOID
 
@@ -219,6 +221,9 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
+    // A directory import has no per-file Git status in the M1 model, so all
+    // captured worktree files retain the existing .untracked convention.
+    public let sourceKind: SourceKind = .untracked
 
     public init(repositoryURL: URL) throws {
         let repository = try GitRepository(url: repositoryURL)

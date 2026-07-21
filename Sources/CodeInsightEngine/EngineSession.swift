@@ -79,7 +79,7 @@ public struct ImplementationResult: Sendable {
 public final class EngineSession: Sendable {
     public var manifest: SnapshotManifest { snapshotView.manifest }
     public var contentIndexes: [ContentIndexKey: ContentIndex] {
-        store.contentIndexes
+        storeState.contentIndexes
     }
     public var stats: IndexStats { snapshotView.stats }
     public var names: Interner<NameID> { store.names }
@@ -96,13 +96,15 @@ public final class EngineSession: Sendable {
     var moduleMap: ModuleMap { snapshotView.moduleMap }
     let store: ProjectIndexStore
     let snapshotView: SnapshotView
+    private let storeState: ProjectIndexStore.State
     private let filesByPath: [PathID: FileOccurrence]
     private let contentKeysByPath: [PathID: ContentIndexKey]
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
     private let implIndex: ImplIndex
+    private let searchableDefinitionNameIDs: [NameID]
     var sourceBytesByContent: [ContentID: [UInt8]] {
-        store.sourceBytesByContent
+        storeState.sourceBytesByContent
     }
     private let symbolSearchCache = SymbolSearchCache()
 
@@ -113,8 +115,9 @@ public final class EngineSession: Sendable {
         precondition(snapshotView.store === store)
         self.store = store
         self.snapshotView = snapshotView
+        storeState = snapshotView.storeState
         let manifest = snapshotView.manifest
-        let contentIndexes = store.contentIndexes
+        let contentIndexes = storeState.contentIndexes
         filesByPath = Dictionary(uniqueKeysWithValues: manifest.files.map {
             ($0.pathID, $0)
         })
@@ -126,10 +129,10 @@ public final class EngineSession: Sendable {
         var occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]] = [:]
         for file in manifest.files {
             guard let keys = keysByContent[file.contentID] else { continue }
-            if let key = keys.first {
-                contentKeysByPath[file.pathID] = key
-            }
             for key in keys where key.languageMode.language == file.detectedLanguage {
+                if contentKeysByPath[file.pathID] == nil {
+                    contentKeysByPath[file.pathID] = key
+                }
                 occurrencesByContentKey[key, default: []].append(file)
             }
         }
@@ -137,7 +140,9 @@ public final class EngineSession: Sendable {
         self.occurrencesByContentKey = occurrencesByContentKey
 
         var aliasIndex: [NameID: Set<NameID>] = [:]
-        for index in contentIndexes.values {
+        let viewIndexes = Dictionary(uniqueKeysWithValues: occurrencesByContentKey.keys
+            .compactMap { key in contentIndexes[key].map { (key, $0) } })
+        for index in viewIndexes.values {
             for binding in index.imports {
                 guard let importedName = binding.importedName,
                       let localName = binding.localName
@@ -146,8 +151,13 @@ public final class EngineSession: Sendable {
             }
         }
         self.aliasIndex = aliasIndex
-        implIndex = ImplIndex(indexes: contentIndexes)
-        namePosting = store.namePosting
+        implIndex = ImplIndex(indexes: viewIndexes)
+        namePosting = storeState.namePosting
+        let viewKeys = Set(viewIndexes.keys)
+        searchableDefinitionNameIDs = namePosting.definitions.compactMap {
+            nameID, postings in
+            postings.contains { viewKeys.contains($0.key) } ? nameID : nil
+        }
     }
 
     public func definitions(
@@ -414,7 +424,7 @@ public final class EngineSession: Sendable {
         guard limit > 0 else { return [] }
         let index = symbolSearchCache.get {
             SymbolSearchIndex(
-                nameIDs: Array(namePosting.definitions.keys),
+                nameIDs: searchableDefinitionNameIDs,
                 names: names
             )
         }

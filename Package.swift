@@ -72,7 +72,11 @@ let package = Package(
         ),
         .target(
             name: "CodeInsightEngine",
-            dependencies: ["CodeInsightCore", "CodeInsightRustExtractor"]
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightGit",
+                "CodeInsightRustExtractor",
+            ]
         ),
         .executableTarget(
             name: "CodeInsightCLI",
@@ -139,7 +143,11 @@ let package = Package(
         ),
         .testTarget(
             name: "CodeInsightEngineTests",
-            dependencies: ["CodeInsightCore", "CodeInsightEngine"]
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightEngine",
+                "CodeInsightGit",
+            ]
         ),
         .testTarget(
             name: "CodeInsightAppModelTests",

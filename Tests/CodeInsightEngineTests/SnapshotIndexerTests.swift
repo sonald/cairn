@@ -1,0 +1,247 @@
+import CodeInsightCore
+@testable import CodeInsightEngine
+import CodeInsightGit
+import Foundation
+import Testing
+
+private let snapshotIndexerRepositoryRoot = URL(fileURLWithPath: #filePath)
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+    .deletingLastPathComponent()
+
+@Test
+func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+
+    let store = ProjectIndexStore()
+    let indexer = ProjectIndexer(parallelism: 2)
+    let newerSnapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let newer = try indexer.indexSnapshot(newerSnapshot, into: store)
+    let olderSnapshot = try CommitSnapshot(
+        repositoryURL: fixture.root,
+        revision: "HEAD~1"
+    )
+    let preparedOlder = try indexer.prepareSnapshot(olderSnapshot, into: store)
+
+    #expect(preparedOlder.pendingExtractionCount == 1)
+    #expect(preparedOlder.cachedSession.stats.reusedCount == 1)
+    #expect(preparedOlder.cachedSession.stats.extractedCount == 0)
+    #expect(try preparedOlder.cachedSession.definitions(
+        of: "shared",
+        context: snapshotQueryContext(for: preparedOlder.cachedSession)
+    ).count == 1)
+    #expect(try preparedOlder.cachedSession.definitions(
+        of: "a",
+        context: snapshotQueryContext(for: preparedOlder.cachedSession)
+    ).isEmpty)
+
+    let older = try indexer.completeSnapshot(preparedOlder)
+    #expect(newer.stats.reusedCount == 0)
+    #expect(newer.stats.extractedCount == 2)
+    #expect(older.stats.reusedCount == 1)
+    #expect(older.stats.extractedCount == 1)
+    #expect(try resolvedName("b", in: newer) == "b")
+    #expect(try resolvedName("a", in: older) == "a")
+
+    let package = try #require(older.manifest.files.first {
+        older.paths.resolve($0.pathID) == "Package.swift"
+    })
+    #expect(package.detectedLanguage == nil)
+    if case .tracked = package.sourceKind {} else {
+        Issue.record("Commit snapshot files must be tracked")
+    }
+    #expect(!older.contentIndexes.keys.contains {
+        $0.contentID == package.contentID
+    })
+    #expect(older.sourceBytesByContent[package.contentID] != nil)
+
+    let repeated = try indexer.indexSnapshot(olderSnapshot, into: store)
+    #expect(repeated.stats.reusedCount == 2)
+    #expect(repeated.stats.extractedCount == 0)
+    #expect(repeated.contentIndexes.count == older.contentIndexes.count)
+
+    let worktree = try indexer.indexSnapshot(
+        WorktreeSnapshot(repositoryURL: fixture.root),
+        into: ProjectIndexStore()
+    )
+    #expect(worktree.manifest.files.allSatisfy {
+        if case .untracked = $0.sourceKind { return true }
+        return false
+    })
+}
+
+@Test
+func snapshotIndexingIsDeterministicForTheSameSequence() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+
+    let newer = try CommitSnapshot(repositoryURL: fixture.root)
+    let older = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD~1")
+
+    func runSequence() throws -> String {
+        let indexer = ProjectIndexer(parallelism: 4)
+        let store = ProjectIndexStore()
+        let first = try indexer.indexSnapshot(newer, into: store)
+        let second = try indexer.indexSnapshot(older, into: store)
+        return try [first, second].map(snapshotQueryDump).joined(separator: "\n---\n")
+    }
+
+    #expect(try runSequence() == runSequence())
+}
+
+@Test
+func repositoryAdjacentCommitReuseExceedsEightyPercent() throws {
+    let indexer = ProjectIndexer()
+    let store = ProjectIndexStore()
+    let head = try CommitSnapshot(repositoryURL: snapshotIndexerRepositoryRoot)
+    _ = try indexer.indexSnapshot(head, into: store)
+
+    let startedAt = Date()
+    let previous = try CommitSnapshot(
+        repositoryURL: snapshotIndexerRepositoryRoot,
+        revision: "HEAD~1"
+    )
+    let session = try indexer.indexSnapshot(previous, into: store)
+    let elapsed = Date().timeIntervalSince(startedAt) * 1_000
+    let total = session.stats.reusedCount + session.stats.extractedCount
+    let hitRate = total == 0 ? 0 : Double(session.stats.reusedCount) / Double(total)
+
+    print(String(
+        format: "S3 HEAD->HEAD~1 totalFiles=%d reusedCount=%d extractedCount=%d hitRate=%.1f%% switchMS=%.3f",
+        total,
+        session.stats.reusedCount,
+        session.stats.extractedCount,
+        hitRate * 100,
+        elapsed
+    ))
+    #expect(hitRate > 0.8)
+}
+
+private func resolvedName(_ name: String, in session: EngineSession) throws -> String {
+    let source = "fn \(name)() {}\nfn call() { \(name)(); }\n"
+    let path = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "src/main.rs"
+    }?.pathID)
+    let callOffset = UInt32(source.utf8.distance(
+        from: source.utf8.startIndex,
+        to: source.range(of: "\(name)();")!.lowerBound.samePosition(in: source.utf8)!
+    ))
+    let candidate = try #require(session.resolve(
+        file: path,
+        offset: callOffset,
+        context: snapshotQueryContext(for: session)
+    ).first)
+    let (_, index) = try #require(session.content(at: candidate.target.pathID))
+    let facet = try #require(index.symbols.indices.contains(Int(candidate.target.localIndex))
+        ? index.symbols[Int(candidate.target.localIndex)] : nil)
+    return session.names.resolve(facet.nameID)
+}
+
+private func snapshotQueryDump(_ session: EngineSession) throws -> String {
+    let context = snapshotQueryContext(for: session)
+    var lines: [String] = []
+    var seen: Set<ContentIndexKey> = []
+    for file in session.manifest.files {
+        lines.append("path #\(file.pathID.rawValue) \(session.paths.resolve(file.pathID))")
+        guard let (key, index) = session.content(at: file.pathID),
+              seen.insert(key).inserted
+        else { continue }
+        lines.append(CanonicalDump.render(
+            index,
+            names: session.names,
+            strings: session.strings
+        ))
+        lines.append("bindingNames \(index.bindings.map { $0.localNameID.rawValue })")
+        lines.append("symbolNames \(index.symbols.map { $0.nameID.rawValue })")
+        lines.append("callNames \(index.calls.map { $0.nameID.rawValue })")
+        lines.append("importStrings \(index.imports.map { $0.moduleSpecifier.rawValue })")
+    }
+    lines += try ["a", "b", "shared"].map { name in
+        let definitions = try session.definitions(of: name, context: context).map {
+            occurrence, facet, pathID in
+            "\(session.paths.resolve(pathID)):\(occurrence.localIndex):\(facet.nameID.rawValue)"
+        }
+        return "\(name)=\(definitions.joined(separator: ","))"
+    }
+    return lines.joined(separator: "\n")
+}
+
+private func snapshotQueryContext(for session: EngineSession) -> QueryContext {
+    QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+}
+
+private final class SnapshotGitFixture {
+    let root: URL
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightSnapshotIndexerTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try git("init", "-q")
+        try write("Package.swift", "// non-Rust manifest entry\n")
+        try write("src/main.rs", "fn a() {}\nfn call() { a(); }\n")
+        try write("src/shared.rs", "pub fn shared() {}\n")
+        try git("add", ".")
+        try commit("older")
+        try write("src/main.rs", "fn b() {}\nfn call() { b(); }\n")
+        try git("add", "src/main.rs")
+        try commit("newer")
+    }
+
+    private func write(_ path: String, _ contents: String) throws {
+        let url = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try contents.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    private func commit(_ message: String) throws {
+        try git(
+            "-c", "user.name=CodeInsight",
+            "-c", "user.email=codeinsight@example.com",
+            "commit", "-q", "-m", message
+        )
+    }
+
+    @discardableResult
+    private func git(_ arguments: String...) throws -> String {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = arguments
+        process.currentDirectoryURL = root
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(
+                data: errorPipe.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "git failed"
+            throw SnapshotFixtureError.git(message)
+        }
+        return String(
+            data: outputPipe.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+    }
+
+    func remove() {
+        try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private enum SnapshotFixtureError: Error {
+    case git(String)
+}
