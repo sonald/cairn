@@ -117,6 +117,7 @@ let package = Package(
             name: "CodeInsightApp",
             dependencies: [
                 "CodeInsightAppModel",
+                "CodeInsightGit",
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
             ]

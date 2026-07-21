@@ -8,6 +8,20 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
 
 @Test
+func commitLogReadsHeadFirstWithBranchLabels() throws {
+    let commits = try CommitLog(repositoryURL: repositoryRoot).commits
+    let expectedSHA = try repositoryGit("rev-parse", "HEAD")
+    let expectedSummary = try repositoryGit("log", "-1", "--format=%s")
+
+    #expect(commits.count > 10)
+    let head = try #require(commits.first)
+    #expect(head.fullSHA == expectedSHA)
+    #expect(head.shortSHA == String(expectedSHA.prefix(7)))
+    #expect(head.summary == expectedSummary)
+    #expect(head.branchNames.contains("main"))
+}
+
+@Test
 func commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() throws {
     let head = try CommitSnapshot(repositoryURL: repositoryRoot)
     let previous = try CommitSnapshot(repositoryURL: repositoryRoot, revision: "HEAD~1")
@@ -130,4 +144,27 @@ private final class GitFixture {
 
 private enum FixtureError: Error {
     case git(String)
+}
+
+private func repositoryGit(_ arguments: String...) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = repositoryRoot
+    let output = Pipe()
+    let error = Pipe()
+    process.standardOutput = output
+    process.standardError = error
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw FixtureError.git(String(
+            data: error.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? "git failed")
+    }
+    return String(
+        data: output.fileHandleForReading.readDataToEndOfFile(),
+        encoding: .utf8
+    )?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 }

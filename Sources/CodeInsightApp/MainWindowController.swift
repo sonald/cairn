@@ -12,6 +12,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private static let backItemIdentifier = NSToolbarItem.Identifier("Back")
     private static let forwardItemIdentifier = NSToolbarItem.Identifier("Forward")
     private static let projectItemIdentifier = NSToolbarItem.Identifier("Project")
+    private static let commitItemIdentifier = NSToolbarItem.Identifier("Commit")
     private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
 
     let model: AppModel
@@ -21,12 +22,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let relationController: RelationWindowController
     private let relationItem: NSSplitViewItem
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
+    private let commitButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
     private var symbolSearchPanel: SymbolSearchPanel?
     private var searchPanel: SearchPanel?
+    private var commitPickerPopover: CommitPickerPopover?
 
     init(model: AppModel, offscreen: Bool) {
         self.model = model
@@ -159,6 +162,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.backItemIdentifier,
             Self.forwardItemIdentifier,
             Self.projectItemIdentifier,
+            Self.commitItemIdentifier,
             .flexibleSpace,
         ]
     }
@@ -168,6 +172,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.backItemIdentifier,
             Self.forwardItemIdentifier,
             Self.projectItemIdentifier,
+            Self.commitItemIdentifier,
             Self.indexItemIdentifier,
             .flexibleSpace,
         ]
@@ -199,6 +204,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.projectItemIdentifier:
             item.label = "Project"
             item.view = projectLabel
+        case Self.commitItemIdentifier:
+            item.label = "Version"
+            item.view = commitButton
+            item.visibilityPriority = .high
+            commitButton.target = self
+            commitButton.action = #selector(showCommitPicker(_:))
+            commitButton.bezelStyle = .rounded
+            commitButton.font = .systemFont(ofSize: 12, weight: .semibold)
+            commitButton.cell?.lineBreakMode = .byTruncatingTail
+            commitButton.frame.size = NSSize(width: 260, height: 28)
+            commitButton.setAccessibilityLabel("Current version")
         case Self.indexItemIdentifier:
             item.label = "Index Status"
             item.view = indexLabel
@@ -224,10 +240,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.projectState
             _ = model.generation
             _ = model.snapshotPhase
+            _ = model.coverage
+            _ = model.currentRevision
             _ = model.currentSnapshotID
             _ = model.fileTree
             _ = model.selectedFile
             _ = model.navigationGeneration
+            _ = model.commitPicker.currentCommit
+            _ = model.commitPicker.isLoading
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -261,18 +281,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             displayedNavigationGeneration = model.navigationGeneration
         }
         projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "CodeInsight"
+        renderCommitButton()
 
         guard let toolbar = window?.toolbar else { return }
-        switch model.projectState {
-        case .indexing:
-            indexLabel.stringValue = "Indexing \(model.fileTree?.fileCount ?? 0) files…"
+        let statusText = model.coverage.statusText(for: model.snapshotPhase)
+            ?? initialIndexStatus
+        if let statusText {
+            indexLabel.stringValue = statusText
             if toolbar.items.allSatisfy({ $0.itemIdentifier != Self.indexItemIdentifier }) {
                 toolbar.insertItem(
                     withItemIdentifier: Self.indexItemIdentifier,
                     at: toolbar.items.count
                 )
             }
-        default:
+        } else {
             if let index = toolbar.items.firstIndex(where: {
                 $0.itemIdentifier == Self.indexItemIdentifier
             }) {
@@ -282,6 +304,48 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+    }
+
+    private var initialIndexStatus: String? {
+        guard model.snapshotPhase == nil,
+              case .indexing = model.projectState
+        else { return nil }
+        return "Indexing \(model.fileTree?.fileCount ?? 0) files…"
+    }
+
+    private func renderCommitButton() {
+        guard let revision = model.currentRevision else {
+            commitButton.title = "Working Tree"
+            commitButton.bezelColor = nil
+            commitButton.contentTintColor = .controlTextColor
+            commitButton.toolTip = "Working Tree"
+            commitButton.isEnabled = model.fileTree != nil
+            return
+        }
+
+        let commit = model.commitPicker.currentCommit
+        let sha = commit?.shortSHA ?? String(revision.prefix(7))
+        let summary = commit.map { Self.truncated($0.summary, limit: 34) } ?? ""
+        commitButton.title = summary.isEmpty
+            ? "⎇ \(sha)"
+            : "⎇ \(sha) \(summary)"
+        commitButton.bezelColor = .controlAccentColor
+        commitButton.contentTintColor = .white
+        commitButton.toolTip = commit.map { "\($0.fullSHA) — \($0.summary)" }
+            ?? revision
+        commitButton.isEnabled = model.fileTree != nil
+    }
+
+    private static func truncated(_ value: String, limit: Int) -> String {
+        guard value.count > limit else { return value }
+        return String(value.prefix(limit - 1)) + "…"
+    }
+
+    @objc private func showCommitPicker(_ sender: NSButton) {
+        if commitPickerPopover == nil {
+            commitPickerPopover = CommitPickerPopover(appModel: model)
+        }
+        commitPickerPopover?.show(relativeTo: sender)
     }
 
     @objc func selectPreviousContextCandidate(_ sender: Any?) {

@@ -29,6 +29,15 @@ public struct SnapshotCoverage: Equatable, Sendable {
         self.filesTotal = filesTotal
         self.importsResolved = importsResolved
     }
+
+    public func statusText(for phase: SnapshotPhase?) -> String? {
+        guard let phase, phase != .fullReady else { return nil }
+        let files = "Files \(filesIndexed)/\(filesTotal)"
+        guard let importsResolved else {
+            return "\(files) · resolving imports"
+        }
+        return "\(files) · Imports resolved \(importsResolved)"
+    }
 }
 
 public protocol IndexService: Sendable {
@@ -65,6 +74,14 @@ public struct ProjectIndexService: IndexService {
     private let store = ProjectIndexStore()
 
     public init() {}
+
+    public static func loadCommitHistory(root: URL) async throws -> [CommitInfo] {
+        try await detachedValue {
+            try snapshotCaptureLock.withLock {
+                try CommitLog(repositoryURL: root).commits
+            }
+        }
+    }
 
     public func index(root: URL) async throws -> EngineSession {
         let store = store
@@ -235,7 +252,7 @@ public final class AppModel {
     public private(set) var generation: UInt64 = 0
     public private(set) var snapshotPhase: SnapshotPhase?
     public private(set) var coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
-    public private(set) var currentRevision: String?
+    public var currentRevision: String? { commitPicker.currentRevision }
     public private(set) var currentSnapshotID: SnapshotID?
     public private(set) var fileTree: FileTreeModel?
     public private(set) var selectedFile: URL?
@@ -243,6 +260,7 @@ public final class AppModel {
     public private(set) var navigationGeneration: UInt64 = 0
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
+    public let commitPicker: CommitPickerModel
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
 
@@ -254,10 +272,12 @@ public final class AppModel {
     public init(
         indexService: any IndexService = ProjectIndexService(),
         contextWindow: ContextWindowModel = ContextWindowModel(),
+        commitPicker: CommitPickerModel = CommitPickerModel(),
         navigationSink: @MainActor @escaping (URL, UInt32?) -> Void = { _, _ in }
     ) {
         self.indexService = indexService
         self.contextWindow = contextWindow
+        self.commitPicker = commitPicker
         self.navigationSink = navigationSink
         relationTree.onSelect = { [weak self] node in
             guard let self,
@@ -283,7 +303,8 @@ public final class AppModel {
         generation &+= 1
         let openGeneration = generation
         projectRoot = root
-        currentRevision = nil
+        commitPicker.setCurrentRevision(nil)
+        commitPicker.load(repositoryURL: root)
         currentSnapshotID = nil
         documentSource = nil
         snapshotPhase = nil
@@ -417,7 +438,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         generation &+= 1
         let switchGeneration = generation
-        currentRevision = revision
+        commitPicker.setCurrentRevision(revision)
         snapshotPhase = nil
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
         publishProjectState(.indexing(root: root, startedAt: .now), root: root)

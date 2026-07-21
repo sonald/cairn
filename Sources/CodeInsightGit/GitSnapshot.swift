@@ -349,16 +349,16 @@ private func fileMode(of entry: OpaquePointer) -> FileMode? {
     }
 }
 
-private func oidString(_ oid: UnsafePointer<git_oid>) -> GitOID {
+func oidString(_ oid: UnsafePointer<git_oid>) -> GitOID {
     GitOID(hex: String(cString: git_oid_tostr_s(oid)))
 }
 
-private func check(_ code: Int32, _ operation: String) throws {
+func check(_ code: Int32, _ operation: String) throws {
     guard code < 0 else { return }
     throw gitError(operation: operation, code: code)
 }
 
-private func gitError(operation: String, code: Int32) -> GitError {
+func gitError(operation: String, code: Int32) -> GitError {
     let message = git_error_last().map { error in
         String(cString: error.pointee.message)
     } ?? "unknown libgit2 error"
