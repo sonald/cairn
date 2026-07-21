@@ -33,7 +33,7 @@ swift run -c release codeinsight-app
 | ID | 步骤 | 预期 |
 |----|------|------|
 | G1.1 | 打开 oatmeal，观察顶栏 | 有当前版本标识，显示 "Working Tree"（醒目可见） |
-| G1.2 | 点击切换器 | 弹出：搜索框 + commit 列表（短 sha、summary、日期），Working Tree 置顶；含 branch 标签（如 main/master） |
+| G1.2 | 点击切换器 | 弹出：搜索框 + commit 列表（短 sha、summary、日期），Working Tree 置顶；含 branch 标签（如 main/master）。**注**：列表走 first-parent 线性历史，oatmeal 显示 250 条而 `git rev-list --count HEAD` 是 254——差额是被合并的侧分支 commit，**符合设计不是截断**（`git rev-list --count --first-parent HEAD` 即 250）；上限 500 条 |
 | G1.3 | 搜索框输入一段 summary 关键词（如 "highlight"） | 列表过滤到匹配 commit |
 | G1.4 | 输入一个短 sha 前缀 | 按 sha 前缀过滤命中 |
 | G1.5 | 选一个较旧 commit | 切换发生；顶栏标识变为 "⎇ <sha> <summary>"，与 Working Tree 视觉可区分 |
@@ -53,7 +53,7 @@ swift run -c release codeinsight-app
 
 | ID | 步骤 | 预期 |
 |----|------|------|
-| G3.1 | 切到一个很旧、差异大的 commit | 切换期间工具栏出现覆盖状态（如 "Files X/Y…"，分项非单一百分比）；完成后消失 |
+| G3.1 | 切到一个很旧、差异大的 commit | 切换期间工具栏出现覆盖状态（如 "Files X/Y…"，分项非单一百分比）；完成后消失。**注**：本机切换常在 0.5–1.3s 内完成，截图采样容易错过——若采样不到记 BLOCKED 并说明，不算 FAIL（需高帧率录屏或人为放慢索引才能确认） |
 | G3.2 | 切换刚发生、语义未完全就绪时立即单击符号 | Context 要么立即可用（缓存命中），要么显示 building 占位后补齐——不空白卡死 |
 | G3.3 | first paint 后立即滚动/浏览文件 | 文件浏览不被语义索引阻塞（可读） |
 
@@ -61,9 +61,10 @@ swift run -c release codeinsight-app
 
 | ID | 步骤 | 预期 |
 |----|------|------|
-| G4.1 | Working Tree 打开文件 A → 切 commit 看文件 B → 点工具栏后退 | 回到 Working Tree 的 A 原位（**快照也切回 Working Tree**） |
-| G4.2 | 前进一次 | 回到该 commit 的 B |
-| G4.3 | 后退/前进按钮灰显状态 | 两端正确灰显 |
+| G4.1 | Working Tree 打开文件 A → 切 commit（此时 A 若存在会沿用显示）→ 打开文件 B → 点后退 | **第一次后退**回到"该 commit + 文件 A"（切换与开文件是两次导航，浏览器语义各占一条历史）；顶栏仍是该 commit，**文件树选中必须同步为 A**（阅读区/版本/文件树三者一致） |
+| G4.2 | 再点一次后退 | 回到 **Working Tree 的 A**（快照切回 Working Tree） |
+| G4.3 | 连续前进两次 | 对称还原：先"commit + A"，再"commit + B"；每步三者一致 |
+| G4.4 | 后退/前进按钮灰显状态 | 两端正确灰显 |
 
 ## G5 面板预设 + 排版
 

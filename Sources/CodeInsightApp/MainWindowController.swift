@@ -359,6 +359,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             displayedGeneration = model.generation
             displayedSnapshotID = model.currentSnapshotID
         }
+        sidebarController.synchronizeFileSelection(to: model.selectedFile)
         readerController.display(
             model.selectedFile,
             snapshotID: model.currentSnapshotID,
@@ -438,7 +439,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     @objc private func showCommitPicker(_ sender: NSButton) {
         if commitPickerPopover == nil {
-            commitPickerPopover = CommitPickerPopover(appModel: model)
+            commitPickerPopover = CommitPickerPopover(
+                appModel: model,
+                leavingRecord: { [weak self] in self?.currentJumpRecord() }
+            )
         }
         commitPickerPopover?.show(relativeTo: sender)
     }
@@ -570,6 +574,7 @@ final class SidebarViewController: NSViewController,
     private var tree: FileTreeModel?
     private var facetRows: [NSNumber] = []
     private var setInitialDivider = false
+    private var isSynchronizingFileSelection = false
 
     override func loadView() {
         configure(fileOutlineView, column: "File")
@@ -614,6 +619,28 @@ final class SidebarViewController: NSViewController,
         self.tree = tree
         loadViewIfNeeded()
         fileOutlineView.reloadData()
+    }
+
+    func synchronizeFileSelection(to file: URL?) {
+        loadViewIfNeeded()
+        isSynchronizingFileSelection = true
+        defer { isSynchronizingFileSelection = false }
+        guard let path = tree?.selectionPath(for: file), let node = path.last else {
+            fileOutlineView.deselectAll(nil)
+            return
+        }
+        for parent in path.dropLast() {
+            fileOutlineView.expandItem(parent)
+        }
+        let row = fileOutlineView.row(forItem: node)
+        guard row >= 0 else {
+            fileOutlineView.deselectAll(nil)
+            return
+        }
+        if fileOutlineView.selectedRow != row {
+            fileOutlineView.selectRowIndexes([row], byExtendingSelection: false)
+        }
+        fileOutlineView.scrollRowToVisible(row)
     }
 
     func setOutline(_ facets: [OutlineFacet]) {
@@ -698,6 +725,7 @@ final class SidebarViewController: NSViewController,
         if outlineView === symbolOutlineView {
             return
         } else {
+            guard !isSynchronizingFileSelection else { return }
             guard outlineView.selectedRow >= 0,
                   let node = outlineView.item(atRow: outlineView.selectedRow)
                     as? FileTreeNode,

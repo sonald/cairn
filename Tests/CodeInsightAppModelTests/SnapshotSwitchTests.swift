@@ -199,7 +199,7 @@ func appModelResolvesAgainstTheSelectedCommitSession() async throws {
 
 @MainActor
 @Test
-func navigationReplaySwitchesSnapshotsBeforeLocatingAndCanReturnForward() async throws {
+func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
     let files = [
         "a.rs": "fn a() { let value = 1; }\n",
         "b.rs": "fn b() { let value = 2; }\n",
@@ -218,46 +218,123 @@ func navigationReplaySwitchesSnapshotsBeforeLocatingAndCanReturnForward() async 
         worktreeSnapshot: worktree,
         snapshots: ["C": commit]
     )
-    var locatedSnapshots: [SnapshotID?] = []
-    var model: AppModel!
-    model = AppModel(indexService: service) { _, _ in
-        locatedSnapshots.append(model.currentSnapshotID)
-    }
+    let model = AppModel(indexService: service)
     let a = root.appendingPathComponent("a.rs")
     let b = root.appendingPathComponent("b.rs")
-
-    model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
-    model.navigationHistory.push(snapshotJumpRecord(
+    let worktreeA = snapshotJumpRecord(
         "a.rs",
         offset: 8,
         snapshotID: worktree.snapshotID
-    ))
-    model.switchToCommit("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
-    model.navigate(to: b, byteOffset: 9)
-
-    model.goBack(from: snapshotJumpRecord(
+    )
+    let commitA = snapshotJumpRecord(
+        "a.rs",
+        offset: 8,
+        snapshotID: commit.snapshotID
+    )
+    let commitB = snapshotJumpRecord(
         "b.rs",
         offset: 9,
         snapshotID: commit.snapshotID
-    ))
+    )
 
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigate(to: a, byteOffset: 8)
+    #expect(model.currentSnapshotID == worktree.snapshotID)
+    #expect(model.selectedFile == a)
+
+    model.switchToCommit("C", leaving: worktreeA)
+    #expect(model.navigationHistory.records.last?.snapshotID == worktree.snapshotID)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(model.currentSnapshotID == commit.snapshotID)
+    #expect(model.selectedFile == a)
+
+    model.navigate(to: b, byteOffset: 9, leaving: commitA)
+    #expect(model.currentSnapshotID == commit.snapshotID)
+    #expect(model.selectedFile == b)
+    #expect(model.navigationHistory.records == [worktreeA, commitA])
+
+    model.goBack(from: commitB)
+    #expect(model.currentSnapshotID == commit.snapshotID)
+    #expect(model.selectedFile == a)
+    #expect(model.selectedByteOffset == 8)
+    #expect(model.navigationHistory.records.count == 2)
+
+    model.goBack(from: commitA)
     #expect(await snapshotWaitUntil {
         model.currentSnapshotID == worktree.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == 8
     })
-    #expect(locatedSnapshots.last == worktree.snapshotID)
+    #expect(model.navigationHistory.records.count == 2)
 
     model.goForward()
-
     #expect(await snapshotWaitUntil {
         model.currentSnapshotID == commit.snapshotID
-            && model.selectedFile == b
-            && model.selectedByteOffset == 9
+            && model.selectedFile == a
+            && model.selectedByteOffset == 8
     })
-    #expect(locatedSnapshots.last == commit.snapshotID)
+    #expect(model.navigationHistory.records.count == 2)
+
+    model.goForward()
+    #expect(model.currentSnapshotID == commit.snapshotID)
+    #expect(model.selectedFile == b)
+    #expect(model.selectedByteOffset == 9)
+    #expect(model.navigationHistory.records.count == 2)
+}
+
+@MainActor
+@Test
+func snapshotSwitchDoesNotPushWithoutASelectedFile() async throws {
+    let files = ["a.rs": "fn a() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let commit = TestSnapshot(label: "C", files: files)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.switchToCommit("C", leaving: snapshotJumpRecord(
+        "a.rs",
+        offset: 0,
+        snapshotID: initial.snapshotID
+    ))
+
+    #expect(model.navigationHistory.records.isEmpty)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+}
+
+@MainActor
+@Test
+func snapshotSwitchClearsASelectionMissingFromTheTarget() async throws {
+    let files = ["a.rs": "fn a() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let commit = TestSnapshot(label: "C", files: ["b.rs": "fn b() {}\n"])
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+    let a = root.appendingPathComponent("a.rs")
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigate(to: a)
+    model.switchToCommit("C", leaving: snapshotJumpRecord(
+        "a.rs",
+        offset: 0,
+        snapshotID: initial.snapshotID
+    ))
+
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(model.selectedFile == nil)
 }
 
 @MainActor

@@ -8,6 +8,7 @@ final class CommitPickerPopover: NSViewController,
     NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate
 {
     private let appModel: AppModel
+    private let leavingRecord: () -> JumpRecord?
     private let popover = NSPopover()
     private let input = NSTextField()
     private let tableView = NSTableView()
@@ -19,8 +20,9 @@ final class CommitPickerPopover: NSViewController,
         return formatter
     }()
 
-    init(appModel: AppModel) {
+    init(appModel: AppModel, leavingRecord: @escaping () -> JumpRecord?) {
         self.appModel = appModel
+        self.leavingRecord = leavingRecord
         super.init(nibName: nil, bundle: nil)
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 560, height: 480)
@@ -160,11 +162,14 @@ final class CommitPickerPopover: NSViewController,
         let row = tableView.selectedRow
         guard row >= 0 else { return }
         if row == 0 {
-            appModel.switchToWorktree()
+            appModel.switchToWorktree(leaving: leavingRecord())
         } else {
             let commits = appModel.commitPicker.filteredCommits
             guard commits.indices.contains(row - 1) else { return }
-            appModel.switchToCommit(commits[row - 1].fullSHA)
+            appModel.switchToCommit(
+                commits[row - 1].fullSHA,
+                leaving: leavingRecord()
+            )
         }
         popover.performClose(nil)
     }

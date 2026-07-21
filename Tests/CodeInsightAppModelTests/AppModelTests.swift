@@ -207,6 +207,12 @@ func fileTreeSortsSkipsAndKeepsOnlyRustBranches() throws {
     #expect(tree.children.map(\.name) == ["src", "a.rs", "z.rs"])
     #expect(tree.children[0].children.map(\.name) == ["a.rs", "z.rs"])
     #expect(tree.fileCount == 4)
+    #expect(
+        tree.selectionPath(for: root.appendingPathComponent("src/a.rs"))?
+            .map(\.name) == ["src", "a.rs"]
+    )
+    #expect(tree.selectionPath(for: root.appendingPathComponent("missing.rs")) == nil)
+    #expect(tree.selectionPath(for: nil) == nil)
 }
 
 @MainActor

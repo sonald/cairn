@@ -179,6 +179,14 @@ public struct FileTreeModel: Sendable {
         fileCount = Self.fileCount(in: children)
     }
 
+    public func selectionPath(for selectedFile: URL?) -> [FileTreeNode]? {
+        guard let selectedFile else { return nil }
+        return Self.selectionPath(
+            for: selectedFile.standardizedFileURL,
+            in: children
+        )
+    }
+
     private static func children(in directory: URL) throws -> [FileTreeNode] {
         let keys: Set<URLResourceKey> = [
             .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
@@ -242,6 +250,19 @@ public struct FileTreeModel: Sendable {
         nodes.reduce(0) { count, node in
             count + (node.isDirectory ? fileCount(in: node.children) : 1)
         }
+    }
+
+    private static func selectionPath(
+        for selectedFile: URL,
+        in nodes: [FileTreeNode]
+    ) -> [FileTreeNode]? {
+        for node in nodes {
+            if node.url.standardizedFileURL == selectedFile { return [node] }
+            if let descendants = selectionPath(for: selectedFile, in: node.children) {
+                return [node] + descendants
+            }
+        }
+        return nil
     }
 }
 
@@ -350,13 +371,18 @@ public final class AppModel {
         }
     }
 
-    public func switchToCommit(_ revision: String) {
+    public func switchToCommit(
+        _ revision: String,
+        leaving current: JumpRecord? = nil
+    ) {
         pendingReplay = nil
+        if selectedFile != nil, let current { navigationHistory.push(current) }
         switchSnapshot(revision: revision)
     }
 
-    public func switchToWorktree() {
+    public func switchToWorktree(leaving current: JumpRecord? = nil) {
         pendingReplay = nil
+        if selectedFile != nil, let current { navigationHistory.push(current) }
         switchSnapshot(revision: nil)
     }
 
