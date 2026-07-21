@@ -264,6 +264,36 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
 
+        // Without an Edit menu, Cmd+C/Cmd+A have no key-equivalent route in a
+        // programmatic menu bar (found by interactive walkthrough T3.4).
+        // Actions target nil so the responder chain (reader text view, search
+        // field) handles them.
+        let editItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(NSMenuItem(
+            title: "Cut",
+            action: #selector(NSText.cut(_:)),
+            keyEquivalent: "x"
+        ))
+        editMenu.addItem(NSMenuItem(
+            title: "Copy",
+            action: #selector(NSText.copy(_:)),
+            keyEquivalent: "c"
+        ))
+        editMenu.addItem(NSMenuItem(
+            title: "Paste",
+            action: #selector(NSText.paste(_:)),
+            keyEquivalent: "v"
+        ))
+        editMenu.addItem(.separator())
+        editMenu.addItem(NSMenuItem(
+            title: "Select All",
+            action: #selector(NSText.selectAll(_:)),
+            keyEquivalent: "a"
+        ))
+        editItem.submenu = editMenu
+        mainMenu.addItem(editItem)
+
         let goItem = NSMenuItem()
         let goMenu = NSMenu(title: "Go")
         let symbolItem = NSMenuItem(
