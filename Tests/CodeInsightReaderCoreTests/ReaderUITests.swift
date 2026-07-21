@@ -19,7 +19,7 @@ func regularDocumentRendersSyntaxColorsOffscreen() throws {
         #expect(reader.renderingCoordinator.styledFragmentCount > 0)
         #expect(renderedColors(in: reader).contains { colorsEqual(
             $0,
-            ReaderTheme.color(for: .keyword)
+            ReaderTheme(settings: ReaderSettings()).color(for: .keyword)
         ) })
     }
 }
@@ -51,7 +51,7 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
     #expect(reader.renderingCoordinator.styledFragmentCount > before)
     #expect(renderedColors(in: reader, intersecting: lastKeyword).contains { colorsEqual(
         $0,
-        ReaderTheme.color(for: .keyword)
+        ReaderTheme(settings: ReaderSettings()).color(for: .keyword)
     ) })
 }
 

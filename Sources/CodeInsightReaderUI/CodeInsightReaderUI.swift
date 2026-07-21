@@ -2,47 +2,30 @@ import AppKit
 import CodeInsightReaderCore
 
 @MainActor
-public enum ReaderTheme {
-    public static let lineHeightMultiple: CGFloat = 1.25
-    public static let baseFontSize: CGFloat = 13
-    public static let functionNameDelta: CGFloat = 1
-    public static let functionNameKern: CGFloat = 0.15
-
-    public static let baseFont = NSFont.monospacedSystemFont(
-        ofSize: baseFontSize,
-        weight: .regular
-    )
-    public static let functionNameFont = NSFont.monospacedSystemFont(
-        ofSize: baseFontSize + functionNameDelta,
-        weight: .semibold
-    )
-
-    public static func color(for kind: HighlightKind) -> NSColor {
-        switch kind {
-        case .keyword:
-            dynamic(light: 0x9C36B5, dark: 0xE879F9)
-        case .comment:
-            dynamic(light: 0x4D7C0F, dark: 0xA3E635)
-        case .string:
-            dynamic(light: 0xB42318, dark: 0xFDA29B)
-        case .number:
-            dynamic(light: 0x7F56D9, dark: 0xC4B5FD)
-        case .functionName:
-            dynamic(light: 0x175CD3, dark: 0x84ADFF)
-        case .typeName:
-            dynamic(light: 0x087E8B, dark: 0x67E8F9)
-        }
+public extension ReaderTheme {
+    func color(for kind: HighlightKind) -> NSColor {
+        dynamicColor { isDark in rgb(for: kind, isDark: isDark) }
     }
 
-    private static func dynamic(light: UInt32, dark: UInt32) -> NSColor {
+    var backgroundColor: NSColor {
+        dynamicColor(backgroundRGB(isDark:))
+    }
+
+    var foregroundColor: NSColor {
+        dynamicColor(foregroundRGB(isDark:))
+    }
+
+    private func dynamicColor(
+        _ value: @escaping @Sendable (Bool) -> UInt32
+    ) -> NSColor {
         NSColor(name: nil) { appearance in
-            let value = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-                ? dark
-                : light
+            let rgb = value(
+                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            )
             return NSColor(
-                red: CGFloat((value >> 16) & 0xff) / 255,
-                green: CGFloat((value >> 8) & 0xff) / 255,
-                blue: CGFloat(value & 0xff) / 255,
+                red: CGFloat((rgb >> 16) & 0xff) / 255,
+                green: CGFloat((rgb >> 8) & 0xff) / 255,
+                blue: CGFloat(rgb & 0xff) / 255,
                 alpha: 1
             )
         }
@@ -55,12 +38,14 @@ public final class RenderingAttributesCoordinator {
 
     private var spans: [HighlightSpan] = []
     private var map: ByteUTF16Map?
+    private var theme = ReaderTheme(settings: ReaderSettings())
 
     public init() {}
 
-    public func update(document: ReaderDocument) {
+    public func update(document: ReaderDocument, theme: ReaderTheme) {
         spans = document.highlightSpans
         map = document.byteUTF16Map
+        self.theme = theme
         styledFragmentCount = 0
     }
 
@@ -112,7 +97,7 @@ public final class RenderingAttributesCoordinator {
                 )
             else { continue }
             manager.setRenderingAttributes(
-                [.foregroundColor: ReaderTheme.color(for: span.kind)],
+                [.foregroundColor: theme.color(for: span.kind)],
                 for: textRange
             )
             wroteAttributes = true
@@ -143,13 +128,17 @@ public final class ReaderTextView {
     public var onViewportChange: (() -> Void)?
     private let backingTextStorage: NSTextStorage
     private var byteUTF16Map: ByteUTF16Map?
+    private var displayedDocument: ReaderDocument?
+    private var theme: ReaderTheme
 
-    public init() {
+    public init(settings: ReaderSettings = ReaderSettings()) {
+        theme = ReaderTheme(settings: settings)
         let textView = ClickTextView(usingTextLayoutManager: true)
         view = textView
         backingTextStorage = NSTextStorage()
         view.textContentStorage?.textStorage = backingTextStorage
         configure()
+        applyThemeColors()
         textView.clickHandler = { [weak self] index, modifiers in
             self?.onClick?(index, modifiers)
         }
@@ -169,12 +158,13 @@ public final class ReaderTextView {
         else { return }
 
         byteUTF16Map = document.byteUTF16Map
-        renderingCoordinator.update(document: document)
+        displayedDocument = document
+        renderingCoordinator.update(document: document, theme: theme)
         let attributed = NSMutableAttributedString(
             string: source,
             attributes: baseAttributes
         )
-        applyFunctionNameLayout(
+        applyTypography(
             document.highlightSpans,
             map: document.byteUTF16Map,
             to: attributed
@@ -198,11 +188,12 @@ public final class ReaderTextView {
         else { return }
 
         byteUTF16Map = document.byteUTF16Map
-        renderingCoordinator.update(document: document)
+        displayedDocument = document
+        renderingCoordinator.update(document: document, theme: theme)
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
         backingTextStorage.beginEditing()
-        applyFunctionNameLayout(
+        applyTypography(
             document.highlightSpans,
             map: document.byteUTF16Map,
             to: backingTextStorage
@@ -219,6 +210,40 @@ public final class ReaderTextView {
             guard let self, let layoutManager else { return }
             self.validateVisibleRenderingAttributes(in: layoutManager)
         }
+    }
+
+    public func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        applyThemeColors()
+        guard let document = displayedDocument,
+              let layoutManager = view.textLayoutManager
+        else { return }
+
+        renderingCoordinator.update(document: document, theme: theme)
+        let viewportRange = layoutManager.textViewportLayoutController.viewportRange
+        layoutManager.renderingAttributesValidator = nil
+        backingTextStorage.beginEditing()
+        backingTextStorage.setAttributes(
+            baseAttributes,
+            range: NSRange(location: 0, length: backingTextStorage.length)
+        )
+        applyTypography(
+            document.highlightSpans,
+            map: document.byteUTF16Map,
+            to: backingTextStorage
+        )
+        backingTextStorage.endEditing()
+        if !document.highlightSpans.isEmpty {
+            layoutManager.renderingAttributesValidator = {
+                [weak renderingCoordinator] manager, fragment in
+                renderingCoordinator?.style(fragment: fragment, in: manager)
+            }
+        }
+        if let viewportRange {
+            layoutManager.invalidateRenderingAttributes(for: viewportRange)
+            validateVisibleRenderingAttributes(in: layoutManager)
+        }
+        view.needsDisplay = true
     }
 
     public func reveal(byteOffset: UInt32) {
@@ -258,10 +283,13 @@ public final class ReaderTextView {
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = ReaderTheme.lineHeightMultiple
+        paragraph.lineHeightMultiple = theme.lineHeightMultiple
         return [
-            .font: ReaderTheme.baseFont,
-            .foregroundColor: NSColor.textColor,
+            .font: NSFont.monospacedSystemFont(
+                ofSize: theme.fontSize,
+                weight: .regular
+            ),
+            .foregroundColor: theme.foregroundColor,
             .paragraphStyle: paragraph,
         ]
     }
@@ -271,7 +299,6 @@ public final class ReaderTextView {
         view.isSelectable = true
         view.isRichText = false
         view.drawsBackground = true
-        view.backgroundColor = .textBackgroundColor
         view.textContainerInset = NSSize(width: 12, height: 12)
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = true
@@ -287,20 +314,38 @@ public final class ReaderTextView {
         )
     }
 
-    private func applyFunctionNameLayout(
+    private func applyThemeColors() {
+        view.backgroundColor = theme.backgroundColor
+    }
+
+    private func applyTypography(
         _ spans: [HighlightSpan],
         map: ByteUTF16Map,
         to attributed: NSMutableAttributedString
     ) {
-        for span in spans where span.kind == .functionName {
+        for span in spans {
             guard let range = map.nsRange(
                 byteLowerBound: Int(span.range.lowerBound),
                 byteUpperBound: Int(span.range.upperBound)
             ) else { continue }
-            attributed.addAttributes([
-                .font: ReaderTheme.functionNameFont,
-                .kern: ReaderTheme.functionNameKern,
-            ], range: range)
+            switch span.kind {
+            case .functionName:
+                attributed.addAttributes([
+                    .font: NSFont.monospacedSystemFont(
+                        ofSize: theme.functionNameFontSize,
+                        weight: .semibold
+                    ),
+                    .kern: 0.15,
+                ], range: range)
+            case .comment where theme.humanistComments:
+                attributed.addAttribute(
+                    .font,
+                    value: NSFont.systemFont(ofSize: theme.fontSize),
+                    range: range
+                )
+            default:
+                break
+            }
         }
     }
 

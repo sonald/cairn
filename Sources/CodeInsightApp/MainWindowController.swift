@@ -18,8 +18,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     let model: AppModel
     private let sidebarController = SidebarViewController()
     private let readerController = ReaderViewController()
+    private let secondaryReaderController = ReaderViewController()
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
+    private let contentSplitController = NSSplitViewController()
+    private let upperSplitController = NSSplitViewController()
+    private let readerSplitController = NSSplitViewController()
+    private let sidebarItem: NSSplitViewItem
+    private let readerGroupItem: NSSplitViewItem
+    private let secondaryReaderItem: NSSplitViewItem
+    private let contextItem: NSSplitViewItem
     private let relationItem: NSSplitViewItem
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let commitButton = NSButton()
@@ -30,39 +38,55 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var symbolSearchPanel: SymbolSearchPanel?
     private var searchPanel: SearchPanel?
     private var commitPickerPopover: CommitPickerPopover?
+    private var panelPreset = PanelPresetModel.reading
 
-    init(model: AppModel, offscreen: Bool) {
+    init(model: AppModel, settings: ReaderSettings, offscreen: Bool) {
         self.model = model
         contextController = ContextWindowViewController(model: model.contextWindow)
         relationController = RelationWindowController(model: model.relationTree)
         relationController.view.frame.size.width = 300
         relationItem = NSSplitViewItem(viewController: relationController)
-        let content = NSSplitViewController()
-        content.splitView.isVertical = false
-
-        let readerSplit = NSSplitViewController()
-        readerSplit.splitView.isVertical = true
-        let sidebarItem = NSSplitViewItem(
+        sidebarItem = NSSplitViewItem(
             sidebarWithViewController: sidebarController
         )
-        sidebarItem.minimumThickness = 180
-        readerSplit.addSplitViewItem(sidebarItem)
-        readerSplit.addSplitViewItem(
-            NSSplitViewItem(viewController: readerController)
+        let primaryReaderItem = NSSplitViewItem(viewController: readerController)
+        secondaryReaderItem = NSSplitViewItem(
+            viewController: secondaryReaderController
         )
+        readerGroupItem = NSSplitViewItem(viewController: readerSplitController)
+        contextItem = NSSplitViewItem(viewController: contextController)
+
+        contentSplitController.splitView.isVertical = false
+        upperSplitController.splitView.isVertical = true
+        readerSplitController.splitView.isVertical = true
+
+        primaryReaderItem.minimumThickness = 300
+        primaryReaderItem.canCollapse = false
+        secondaryReaderItem.minimumThickness = 300
+        secondaryReaderItem.canCollapse = true
+        secondaryReaderItem.isCollapsed = true
+        readerSplitController.addSplitViewItem(primaryReaderItem)
+        readerSplitController.addSplitViewItem(secondaryReaderItem)
+
+        sidebarItem.minimumThickness = 180
+        sidebarItem.canCollapse = true
+        readerGroupItem.minimumThickness = 300
+        readerGroupItem.canCollapse = false
         relationItem.minimumThickness = 220
         relationItem.maximumThickness = 500
         relationItem.canCollapse = true
-        readerSplit.addSplitViewItem(relationItem)
+        upperSplitController.addSplitViewItem(sidebarItem)
+        upperSplitController.addSplitViewItem(readerGroupItem)
+        upperSplitController.addSplitViewItem(relationItem)
         relationItem.isCollapsed = true
 
-        content.addSplitViewItem(NSSplitViewItem(viewController: readerSplit))
-        let contextItem = NSSplitViewItem(
-            viewController: contextController
-        )
+        let upperItem = NSSplitViewItem(viewController: upperSplitController)
+        upperItem.minimumThickness = 300
         contextItem.minimumThickness = 120
         contextItem.maximumThickness = 280
-        content.addSplitViewItem(contextItem)
+        contextItem.canCollapse = true
+        contentSplitController.addSplitViewItem(upperItem)
+        contentSplitController.addSplitViewItem(contextItem)
 
         let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1280, height: 820)
         let window = NSWindow(
@@ -75,7 +99,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         window.title = "CodeInsight"
         window.minSize = NSSize(width: 900, height: 600)
-        window.contentViewController = content
+        window.contentViewController = contentSplitController
         let toolbar = NSToolbar(identifier: "MainToolbar")
         super.init(window: window)
         toolbar.delegate = self
@@ -90,6 +114,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         sidebarController.onOpenFile = { [weak self] url in
             self?.navigate(to: url)
+        }
+        sidebarController.onOpenFileInSecondary = { [weak self] url in
+            self?.openInSecondaryReader(url)
         }
         sidebarController.onOpenOutline = { [weak self] offset in
             guard let self, let file = model.selectedFile else { return }
@@ -117,7 +144,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.onOpen = { [weak self] path, offset in
             self?.open(path: path, byteOffset: offset)
         }
+        applyReaderSettings(settings)
         render()
+        applyPanelPreset(.reading)
         observe()
     }
 
@@ -150,6 +179,72 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func toggleRelations() {
         relationItem.isCollapsed.toggle()
+    }
+
+    func applyPanelPreset(_ preset: PanelPresetModel) {
+        panelPreset = preset
+        let layout = preset.layout
+        sidebarItem.isCollapsed = layout.sidebarCollapsed
+        readerGroupItem.isCollapsed = layout.readerCollapsed
+        contextItem.isCollapsed = layout.contextCollapsed
+        relationItem.isCollapsed = layout.relationsCollapsed
+        // M3 Compare is a split container only. Cross-commit diff highlighting is M4.
+        secondaryReaderItem.isCollapsed = !layout.readerSplit
+
+        sidebarItem.holdingPriority = .init(rawValue: 251)
+        readerGroupItem.holdingPriority = .init(rawValue: 253)
+        relationItem.holdingPriority = .init(rawValue: 250)
+        contextItem.holdingPriority = .init(rawValue: 250)
+        secondaryReaderItem.holdingPriority = .init(rawValue: 251)
+        applyPanelSizes()
+        DispatchQueue.main.async { [weak self] in self?.applyPanelSizes() }
+    }
+
+    func applyReaderSettings(_ settings: ReaderSettings) {
+        readerController.apply(settings: settings)
+        secondaryReaderController.apply(settings: settings)
+        contextController.apply(settings: settings)
+    }
+
+    private func applyPanelSizes() {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let layout = panelPreset.layout
+        let upperSplit = upperSplitController.splitView
+        if !layout.sidebarCollapsed, upperSplit.bounds.width > 0 {
+            upperSplit.setPosition(
+                upperSplit.bounds.width * layout.sidebarFraction,
+                ofDividerAt: 0
+            )
+        }
+        if !layout.relationsCollapsed, upperSplit.bounds.width > 0 {
+            upperSplit.setPosition(
+                upperSplit.bounds.width * (1 - layout.relationsFraction),
+                ofDividerAt: 1
+            )
+        }
+        let contentSplit = contentSplitController.splitView
+        if !layout.contextCollapsed, contentSplit.bounds.height > 0 {
+            contentSplit.setPosition(
+                contentSplit.bounds.height * (1 - layout.contextFraction),
+                ofDividerAt: 0
+            )
+        }
+        let readerSplit = readerSplitController.splitView
+        if layout.readerSplit, readerSplit.bounds.width > 0 {
+            readerSplit.setPosition(
+                readerSplit.bounds.width * (1 - layout.secondaryReaderFraction),
+                ofDividerAt: 0
+            )
+        }
+    }
+
+    private func openInSecondaryReader(_ file: URL) {
+        applyPanelPreset(.compare)
+        secondaryReaderController.display(
+            file,
+            snapshotID: model.currentSnapshotID,
+            source: model.documentSource
+        )
     }
 
     func showRelations(direction: RelationTreeModel.Direction) {
@@ -466,6 +561,7 @@ final class SidebarViewController: NSViewController,
     NSOutlineViewDataSource, NSOutlineViewDelegate, NSSplitViewDelegate
 {
     var onOpenFile: ((URL) -> Void)?
+    var onOpenFileInSecondary: ((URL) -> Void)?
     var onOpenOutline: ((UInt32) -> Void)?
     private let fileOutlineView = NSOutlineView()
     private let symbolOutlineView = NSOutlineView()
@@ -481,6 +577,23 @@ final class SidebarViewController: NSViewController,
         symbolOutlineView.indentationPerLevel = 0
         symbolOutlineView.target = self
         symbolOutlineView.action = #selector(openOutlineRow(_:))
+
+        let fileMenu = NSMenu(title: "Open File")
+        let openLeft = NSMenuItem(
+            title: "Open in Left Reader",
+            action: #selector(openFileInLeftReader(_:)),
+            keyEquivalent: ""
+        )
+        openLeft.target = self
+        fileMenu.addItem(openLeft)
+        let openRight = NSMenuItem(
+            title: "Open in Right Reader (Compare)",
+            action: #selector(openFileInRightReader(_:)),
+            keyEquivalent: ""
+        )
+        openRight.target = self
+        fileMenu.addItem(openRight)
+        fileOutlineView.menu = fileMenu
 
         splitView.isVertical = false
         splitView.dividerStyle = .thin
@@ -600,6 +713,27 @@ final class SidebarViewController: NSViewController,
               let offset = outlineModel.open(row.intValue)
         else { return }
         onOpenOutline?(offset)
+    }
+
+    @objc private func openFileInLeftReader(_ sender: Any?) {
+        guard let file = contextMenuFile() else { return }
+        onOpenFile?(file)
+    }
+
+    @objc private func openFileInRightReader(_ sender: Any?) {
+        guard let file = contextMenuFile() else { return }
+        onOpenFileInSecondary?(file)
+    }
+
+    private func contextMenuFile() -> URL? {
+        let row = fileOutlineView.clickedRow >= 0
+            ? fileOutlineView.clickedRow
+            : fileOutlineView.selectedRow
+        guard row >= 0,
+              let node = fileOutlineView.item(atRow: row) as? FileTreeNode,
+              !node.isDirectory
+        else { return nil }
+        return node.url
     }
 
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
@@ -772,6 +906,10 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         for item in menu.items { item.isEnabled = contextMenuOffset != nil }
     }
 
+    func apply(settings: ReaderSettings) {
+        textView.apply(settings: settings)
+    }
+
     func display(
         _ file: URL?,
         snapshotID: SnapshotID? = nil,
@@ -940,6 +1078,10 @@ final class ContextWindowViewController: NSViewController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(settings: ReaderSettings) {
+        miniReader.apply(settings: settings)
     }
 
     override func loadView() {

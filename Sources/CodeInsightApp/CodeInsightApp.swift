@@ -61,7 +61,9 @@ private struct CodeInsightApplication {
 private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let startedAt: ContinuousClock.Instant
     private let model = AppModel()
+    private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
+    private var settingsWindowController: ReaderSettingsWindowController?
 
     init(startedAt: ContinuousClock.Instant) {
         self.startedAt = startedAt
@@ -260,7 +262,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     private func launch(offscreen: Bool) {
         NSApplication.shared.mainMenu = makeMainMenu()
-        let windowController = MainWindowController(model: model, offscreen: offscreen)
+        let windowController = MainWindowController(
+            model: model,
+            settings: readerSettings,
+            offscreen: offscreen
+        )
         self.windowController = windowController
         windowController.showWindow(nil)
     }
@@ -280,6 +286,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if panel.runModal() == .OK, let root = panel.url {
             windowController?.openProject(root: root)
         }
+    }
+
+    @objc private func showSettings(_ sender: Any?) {
+        if settingsWindowController == nil {
+            settingsWindowController = ReaderSettingsWindowController(
+                settings: readerSettings
+            ) { [weak self] settings in
+                guard let self else { return }
+                readerSettings = settings
+                settings.save(to: .standard)
+                windowController?.applyReaderSettings(settings)
+            }
+        }
+        settingsWindowController?.showWindow(nil)
+        settingsWindowController?.window?.center()
+        NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     @objc private func openSymbol(_ sender: Any?) {
@@ -308,6 +330,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     @objc private func toggleRelations(_ sender: Any?) {
         windowController?.toggleRelations()
+    }
+
+    @objc private func applyPanelPreset(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let preset = PanelPresetModel(rawValue: rawValue)
+        else { return }
+        windowController?.applyPanelPreset(preset)
     }
 
     @objc private func showCallers(_ sender: Any?) {
@@ -342,6 +371,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "CodeInsight")
+        let settingsItem = NSMenuItem(
+            title: "Settings…",
+            action: #selector(showSettings(_:)),
+            keyEquivalent: ","
+        )
+        settingsItem.target = self
+        appMenu.addItem(settingsItem)
+        appMenu.addItem(.separator())
         let quitItem = NSMenuItem(
             title: "Quit CodeInsight",
             action: #selector(NSApplication.terminate(_:)),
@@ -472,6 +509,32 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         goMenu.addItem(nextCandidate)
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
+
+        let viewItem = NSMenuItem()
+        let viewMenu = NSMenu(title: "View")
+        let presetItem = NSMenuItem(title: "Preset", action: nil, keyEquivalent: "")
+        let presetMenu = NSMenu(title: "Preset")
+        let presets: [(PanelPresetModel, String, String)] = [
+            (.reading, "Reading", "1"),
+            (.relations, "Relations", "2"),
+            (.compare, "Compare — Split Only; Diff in M4", "3"),
+            (.focus, "Focus", "4"),
+        ]
+        for (preset, title, key) in presets {
+            let item = NSMenuItem(
+                title: title,
+                action: #selector(applyPanelPreset(_:)),
+                keyEquivalent: key
+            )
+            item.keyEquivalentModifierMask = .command
+            item.target = self
+            item.representedObject = preset.rawValue
+            presetMenu.addItem(item)
+        }
+        presetItem.submenu = presetMenu
+        viewMenu.addItem(presetItem)
+        viewItem.submenu = viewMenu
+        mainMenu.addItem(viewItem)
 
         let relationsItem = NSMenuItem()
         let relationsMenu = NSMenu(title: "Relations")
