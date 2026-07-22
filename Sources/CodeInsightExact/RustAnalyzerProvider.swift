@@ -8,20 +8,27 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
 
     private let projectURL: URL
     private let executableURL: URL
+    private let cacheURL: URL
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
 
     public init(
         projectURL: URL,
         executableURL: URL,
+        cacheURL: URL? = nil,
         requestTimeout: TimeInterval = 30,
         closeGrace: TimeInterval = 1
     ) throws {
         self.projectURL = projectURL.standardizedFileURL
         self.executableURL = executableURL.standardizedFileURL
+        self.cacheURL = cacheURL ?? Self.defaultCacheURL
         self.requestTimeout = requestTimeout
         self.closeGrace = closeGrace
-        toolVersion = try Self.readToolVersion(executableURL: executableURL)
+        toolVersion = try Self.readToolVersion(
+            executableURL: executableURL,
+            projectURL: projectURL,
+            cacheURL: self.cacheURL
+        )
     }
 
     public static func findExecutable(
@@ -61,13 +68,21 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             coverage = .full
         }
 
+        let launch = try Sandbox(
+            projectURL: projectURL,
+            cacheURL: cacheURL,
+            trustMode: trustMode,
+            helperURL: executableURL
+        )
         let client = try LSPClient(
-            executableURL: executableURL,
-            workingDirectory: projectURL
+            executableURL: launch.executableURL,
+            arguments: launch.arguments,
+            workingDirectory: launch.workingDirectoryURL,
+            environment: launch.environment
         )
         let session = RustAnalyzerSession(
             client: client,
-            executableURL: executableURL,
+            launch: launch,
             projectURL: projectURL,
             snapshot: snapshot,
             initializationOptions: options,
@@ -92,11 +107,36 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
         }
     }
 
-    private static func readToolVersion(executableURL: URL) throws -> String {
+    private static var defaultCacheURL: URL {
+        let root = FileManager.default.urls(
+            for: .cachesDirectory,
+            in: .userDomainMask
+        ).first ?? FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Caches", isDirectory: true)
+        return root.appendingPathComponent(
+            "CodeInsight/Exact",
+            isDirectory: true
+        )
+    }
+
+    private static func readToolVersion(
+        executableURL: URL,
+        projectURL: URL,
+        cacheURL: URL
+    ) throws -> String {
+        let launch = try Sandbox(
+            projectURL: projectURL,
+            cacheURL: cacheURL,
+            trustMode: .safe,
+            helperURL: executableURL,
+            helperArguments: ["--version"]
+        )
         let process = Process()
         let pipe = Pipe()
-        process.executableURL = executableURL
-        process.arguments = ["--version"]
+        process.executableURL = launch.executableURL
+        process.arguments = launch.arguments
+        process.currentDirectoryURL = launch.workingDirectoryURL
+        process.environment = launch.environment
         process.standardOutput = pipe
         process.standardError = pipe
         try process.run()
@@ -118,7 +158,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
     private let stateLock = NSLock()
     private let operationLock = NSLock()
-    private let executableURL: URL
+    private let launch: Sandbox
     private let projectURL: URL
     private let snapshot: any Snapshot
     private let initializationOptions: [String: Any]
@@ -138,7 +178,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
     init(
         client: LSPClient,
-        executableURL: URL,
+        launch: Sandbox,
         projectURL: URL,
         snapshot: any Snapshot,
         initializationOptions: [String: Any],
@@ -147,7 +187,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         attribution: ExactAttribution
     ) {
         self.client = client
-        self.executableURL = executableURL
+        self.launch = launch
         self.projectURL = projectURL
         self.snapshot = snapshot
         self.initializationOptions = initializationOptions
@@ -298,8 +338,10 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         oldClient.close(grace: closeGrace)
         Thread.sleep(forTimeInterval: 0.1)
         let newClient = try LSPClient(
-            executableURL: executableURL,
-            workingDirectory: projectURL
+            executableURL: launch.executableURL,
+            arguments: launch.arguments,
+            workingDirectory: launch.workingDirectoryURL,
+            environment: launch.environment
         )
         stateLock.lock()
         guard state != .closed else {

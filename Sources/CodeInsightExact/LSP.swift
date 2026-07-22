@@ -130,7 +130,8 @@ public final class LSPClient: @unchecked Sendable {
     public init(
         executableURL: URL,
         arguments: [String] = [],
-        workingDirectory: URL? = nil
+        workingDirectory: URL? = nil,
+        environment: [String: String]? = nil
     ) throws {
         let process = Process()
         let input = Pipe()
@@ -139,6 +140,7 @@ public final class LSPClient: @unchecked Sendable {
         process.executableURL = executableURL
         process.arguments = arguments
         process.currentDirectoryURL = workingDirectory
+        process.environment = environment
         process.standardInput = input
         process.standardOutput = output
         process.standardError = errors

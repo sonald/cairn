@@ -2,108 +2,121 @@ import CodeInsightCore
 import CodeInsightGit
 import Darwin
 import Foundation
-import XCTest
+import Testing
+
 @testable import CodeInsightExact
 
-final class CodeInsightExactTests: XCTestCase {
-    func testFrameDecoderReadsSingleFrame() throws {
-        var decoder = LSPFrameDecoder()
-        let messages = try decoder.append(LSPFraming.encode([
+@Test
+func frameDecoderReadsSingleFrame() throws {
+    var decoder = LSPFrameDecoder()
+    let messages = try decoder.append(
+        LSPFraming.encode([
             "jsonrpc": "2.0", "id": 1, "result": true,
         ]))
 
-        XCTAssertEqual(messages.count, 1)
-        XCTAssertEqual(messages[0]["result"] as? Bool, true)
+    #expect(messages.count == 1)
+    #expect(messages[0]["result"] as? Bool == true)
+}
+
+@Test
+func frameDecoderRetainsSplitFrame() throws {
+    let frame = try LSPFraming.encode([
+        "jsonrpc": "2.0", "id": 1, "result": "split",
+    ])
+    var decoder = LSPFrameDecoder()
+
+    #expect(try decoder.append(frame.prefix(9)).isEmpty)
+    #expect(try decoder.append(frame.dropFirst(9).prefix(17)).isEmpty)
+    let messages = try decoder.append(frame.dropFirst(26))
+
+    #expect(messages.count == 1)
+    #expect(messages[0]["result"] as? String == "split")
+}
+
+@Test
+func frameDecoderReadsCoalescedFrames() throws {
+    let first = try LSPFraming.encode([
+        "jsonrpc": "2.0", "id": 1, "result": 1,
+    ])
+    let second = try LSPFraming.encode([
+        "jsonrpc": "2.0", "id": 2, "result": 2,
+    ])
+    var decoder = LSPFrameDecoder()
+
+    let messages = try decoder.append(first + second)
+
+    #expect(messages.count == 2)
+    #expect((messages[0]["result"] as? NSNumber)?.intValue == 1)
+    #expect((messages[1]["result"] as? NSNumber)?.intValue == 2)
+}
+
+@Test
+func frameDecoderCountsUTF8Bytes() throws {
+    let body = Data(#"{"jsonrpc":"2.0","result":"你好😀"}"#.utf8)
+    var frame = Data("Content-Length: \(body.count)\r\n\r\n".utf8)
+    frame.append(body)
+    var decoder = LSPFrameDecoder()
+
+    let messages = try decoder.append(frame)
+
+    #expect(messages[0]["result"] as? String == "你好😀")
+}
+
+@Test
+func byteAndLSPUTF16PositionsRoundTrip() throws {
+    let bytes = Array("a你😀z\n汉🙂b".utf8)
+    let map = try #require(LSPPositionMap(utf8: bytes))
+    let positions = [
+        (0, LSPPosition(line: 0, character: 0)),
+        (1, LSPPosition(line: 0, character: 1)),
+        (4, LSPPosition(line: 0, character: 2)),
+        (8, LSPPosition(line: 0, character: 4)),
+        (10, LSPPosition(line: 1, character: 0)),
+        (13, LSPPosition(line: 1, character: 1)),
+        (17, LSPPosition(line: 1, character: 3)),
+        (18, LSPPosition(line: 1, character: 4)),
+    ]
+
+    for (byteOffset, position) in positions {
+        #expect(map.position(forByteOffset: byteOffset) == position)
+        #expect(map.byteOffset(for: position) == byteOffset)
     }
+    #expect(map.position(forByteOffset: 2) == nil)
+    #expect(map.byteOffset(for: LSPPosition(line: 0, character: 3)) == nil)
+}
 
-    func testFrameDecoderRetainsSplitFrame() throws {
-        let frame = try LSPFraming.encode([
-            "jsonrpc": "2.0", "id": 1, "result": "split",
-        ])
-        var decoder = LSPFrameDecoder()
+@Test
+func exactProfileKeyHashesCargoFileBytes() throws {
+    let root = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
 
-        XCTAssertTrue(try decoder.append(frame.prefix(9)).isEmpty)
-        XCTAssertTrue(try decoder.append(frame.dropFirst(9).prefix(17)).isEmpty)
-        let messages = try decoder.append(frame.dropFirst(26))
+    let profile = try ExactProfileKey(projectURL: root)
 
-        XCTAssertEqual(messages.count, 1)
-        XCTAssertEqual(messages[0]["result"] as? String, "split")
-    }
+    #expect(
+        profile.configFingerprint
+            == "940ac77af3bcb2c15c059645193eceadc81f5d3b516f312736ef6d6b7afd40a9"
+    )
+    #expect(
+        profile.environmentFingerprint
+            == "7f33dae8274d15e6219fcb8705a73a5f5e952fe8404d815ac8cb68685605e3e4"
+    )
+}
 
-    func testFrameDecoderReadsCoalescedFrames() throws {
-        let first = try LSPFraming.encode([
-            "jsonrpc": "2.0", "id": 1, "result": 1,
-        ])
-        let second = try LSPFraming.encode([
-            "jsonrpc": "2.0", "id": 2, "result": 2,
-        ])
-        var decoder = LSPFrameDecoder()
+@Test
+func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
+    let (exitEvents, exitContinuation) = AsyncStream<Void>.makeStream()
 
-        let messages = try decoder.append(first + second)
-
-        XCTAssertEqual(messages.count, 2)
-        XCTAssertEqual((messages[0]["result"] as? NSNumber)?.intValue, 1)
-        XCTAssertEqual((messages[1]["result"] as? NSNumber)?.intValue, 2)
-    }
-
-    func testFrameDecoderCountsUTF8Bytes() throws {
-        let body = Data(#"{"jsonrpc":"2.0","result":"你好😀"}"#.utf8)
-        var frame = Data("Content-Length: \(body.count)\r\n\r\n".utf8)
-        frame.append(body)
-        var decoder = LSPFrameDecoder()
-
-        let messages = try decoder.append(frame)
-
-        XCTAssertEqual(messages[0]["result"] as? String, "你好😀")
-    }
-
-    func testByteAndLSPUTF16PositionsRoundTrip() throws {
-        let bytes = Array("a你😀z\n汉🙂b".utf8)
-        let map = try XCTUnwrap(LSPPositionMap(utf8: bytes))
-        let positions = [
-            (0, LSPPosition(line: 0, character: 0)),
-            (1, LSPPosition(line: 0, character: 1)),
-            (4, LSPPosition(line: 0, character: 2)),
-            (8, LSPPosition(line: 0, character: 4)),
-            (10, LSPPosition(line: 1, character: 0)),
-            (13, LSPPosition(line: 1, character: 1)),
-            (17, LSPPosition(line: 1, character: 3)),
-            (18, LSPPosition(line: 1, character: 4)),
-        ]
-
-        for (byteOffset, position) in positions {
-            XCTAssertEqual(map.position(forByteOffset: byteOffset), position)
-            XCTAssertEqual(map.byteOffset(for: position), byteOffset)
-        }
-        XCTAssertNil(map.position(forByteOffset: 2))
-        XCTAssertNil(map.byteOffset(for: LSPPosition(line: 0, character: 3)))
-    }
-
-    func testExactProfileKeyHashesCargoFileBytes() throws {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
-
-        let profile = try ExactProfileKey(projectURL: root)
-
-        XCTAssertEqual(
-            profile.configFingerprint,
-            "940ac77af3bcb2c15c059645193eceadc81f5d3b516f312736ef6d6b7afd40a9"
-        )
-        XCTAssertEqual(
-            profile.environmentFingerprint,
-            "7f33dae8274d15e6219fcb8705a73a5f5e952fe8404d815ac8cb68685605e3e4"
-        )
-    }
-
-    func testPipeFakeRunsInitializeDefinitionShutdownLifecycle() throws {
+    try await confirmation("fake LSP server received exit") { receivedExit in
         let clientToServer = Pipe()
         let serverToClient = Pipe()
-        let done = expectation(description: "fake LSP server received exit")
         let server = PipeFakeLSPServer(
             input: clientToServer.fileHandleForReading,
             output: serverToClient.fileHandleForWriting,
-            done: done
+            done: {
+                receivedExit()
+                exitContinuation.finish()
+            }
         )
         server.start()
         let client = LSPClient(
@@ -125,98 +138,585 @@ final class CodeInsightExactTests: XCTestCase {
         )
         client.close(grace: 0.2)
 
-        wait(for: [done], timeout: 2)
-        XCTAssertNil(server.error)
-        XCTAssertEqual(server.requestMethods, [
-            "initialize", "textDocument/definition", "shutdown",
-        ])
-        XCTAssertEqual(Set(server.requestIDs).count, 3)
-        XCTAssertTrue(server.receivedInitialized)
-        XCTAssertTrue(server.receivedExit)
-        XCTAssertTrue(server.receivedRegisterCapabilityResponse)
-        let location = try XCTUnwrap(result as? [String: Any])
-        XCTAssertEqual(location["uri"] as? String, "file:///fixture/src/lib.rs")
+        for await _ in exitEvents {}
+        #expect(server.error == nil)
+        #expect(
+            server.requestMethods == [
+                "initialize", "textDocument/definition", "shutdown",
+            ])
+        #expect(Set(server.requestIDs).count == 3)
+        #expect(server.receivedInitialized)
+        #expect(server.receivedExit)
+        #expect(server.receivedRegisterCapabilityResponse)
+        let location = try #require(result as? [String: Any])
+        #expect(location["uri"] as? String == "file:///fixture/src/lib.rs")
     }
+}
 
-    func testCloseForceKillsAndReapsUnresponsiveProcess() throws {
-        let client = try LSPClient(
-            executableURL: URL(fileURLWithPath: "/bin/sh"),
-            arguments: ["-c", "trap '' 15; while :; do :; done"]
-        )
-        let pid = try XCTUnwrap(client.processIdentifier)
-        Thread.sleep(forTimeInterval: 0.05)
+@Test
+func closeForceKillsAndReapsUnresponsiveProcess() throws {
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "trap '' 15; while :; do :; done"]
+    )
+    let pid = try #require(client.processIdentifier)
+    Thread.sleep(forTimeInterval: 0.05)
 
-        let started = Date()
-        client.close(grace: 0.05)
+    let started = Date()
+    client.close(grace: 0.05)
 
-        XCTAssertLessThan(Date().timeIntervalSince(started), 1)
-        XCTAssertFalse(client.isRunning)
-        XCTAssertTrue(client.didForceKill)
-        XCTAssertTrue(client.didReap)
-        errno = 0
-        XCTAssertEqual(waitpid(pid, nil, WNOHANG), -1)
-        XCTAssertEqual(errno, ECHILD)
+    #expect(Date().timeIntervalSince(started) < 1)
+    #expect(!client.isRunning)
+    #expect(client.didForceKill)
+    #expect(client.didReap)
+    errno = 0
+    #expect(waitpid(pid, nil, WNOHANG) == -1)
+    #expect(errno == ECHILD)
+}
+
+@Test
+func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
+    guard let executableURL = RustAnalyzerProvider.findExecutable() else {
+        // Environmental coverage: CI without rust-analyzer remains green.
+        return
     }
-
-    func testRustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
-        guard let executableURL = RustAnalyzerProvider.findExecutable() else {
-            throw XCTSkip("rust-analyzer not found")
-        }
-        let fixture = try copiedFixture()
-        defer { try? FileManager.default.removeItem(at: fixture) }
-        let snapshot = try DirectorySnapshot(root: fixture)
-        let provider = try RustAnalyzerProvider(
+    let fixture = try copiedFixture()
+    defer { try? FileManager.default.removeItem(at: fixture) }
+    let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactCache-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    defer { try? FileManager.default.removeItem(at: cache) }
+    let snapshot = try DirectorySnapshot(root: fixture)
+    let provider: RustAnalyzerProvider
+    let session: any ExactSession
+    do {
+        provider = try RustAnalyzerProvider(
             projectURL: fixture,
             executableURL: executableURL,
+            cacheURL: cache,
             requestTimeout: 10,
             closeGrace: 0.5
         )
-        let session = try provider.prepare(
+        session = try provider.prepare(
             snapshot: snapshot,
             profile: ExactProfileKey(projectURL: fixture),
             trustMode: .safe
         )
-        defer { session.close() }
-        XCTAssertEqual(session.readiness, .preparing)
-        let bytes = try snapshot.readBytes(path: "src/main.rs")
-        let source = try XCTUnwrap(String(data: Data(bytes), encoding: .utf8))
-        let call = try XCTUnwrap(
-            source.range(of: "answer();", options: .backwards)
-        )
-        let byteOffset = source[..<call.lowerBound].utf8.count
+    } catch ExactError.unavailable(let detail)
+        where detail.contains("sandbox-exec")
+    {
+        // Safe exact is intentionally disabled instead of running bare.
+        print("SKIP rust-analyzer: \(detail); noBareExecution=true")
+        return
+    }
+    defer { session.close() }
+    #expect(session.readiness == .preparing)
+    let bytes = try snapshot.readBytes(path: "src/main.rs")
+    let source = try #require(String(data: Data(bytes), encoding: .utf8))
+    let call = try #require(
+        source.range(of: "answer();", options: .backwards)
+    )
+    let byteOffset = source[..<call.lowerBound].utf8.count
 
-        let location = try XCTUnwrap(session.definition(
+    let location = try #require(
+        try session.definition(
             file: "src/main.rs",
             byteOffset: byteOffset
         ))
 
-        XCTAssertEqual(session.readiness, .ready)
-        XCTAssertEqual(location.file, "src/lib.rs")
-        XCTAssertEqual(location.line, 1)
-        XCTAssertEqual(location.column, 8)
-        XCTAssertEqual(session.attribution.coverage, .partial)
-        XCTAssertEqual(session.attribution.configFingerprint.count, 64)
-        XCTAssertEqual(session.attribution.environmentFingerprint.count, 64)
+    #expect(session.readiness == .ready)
+    #expect(location.file == "src/lib.rs")
+    #expect(location.line == 1)
+    #expect(location.column == 8)
+    #expect(session.attribution.coverage == .partial)
+    #expect(session.attribution.configFingerprint.count == 64)
+    #expect(session.attribution.environmentFingerprint.count == 64)
+}
+
+@Test
+func sandboxDeniesProjectWrites() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project, withIntermediateDirectories: true)
+    let denied = project.appendingPathComponent("DENIED")
+    guard
+        let sandbox = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf denied > \"$1\"", "probe", denied.path]
+        )
+    else { return }
+
+    let result = try run(sandbox)
+
+    #expect(result.status != 0)
+    #expect(!FileManager.default.fileExists(atPath: denied.path))
+    print("sandbox-semantics projectWrite=denied status=\(result.status)")
+}
+
+@Test
+func sandboxAllowsPrivateCacheWrites() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project, withIntermediateDirectories: true)
+    let allowed = cache.appendingPathComponent("ALLOWED")
+    guard
+        let sandbox = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf allowed > \"$1\"", "probe", allowed.path]
+        )
+    else { return }
+
+    let result = try run(sandbox)
+
+    if result.status != 0 { print("cache-write output=\(result.output)") }
+    #expect(result.status == 0)
+    #expect(try String(contentsOf: allowed, encoding: .utf8) == "allowed")
+    print("sandbox-semantics cacheWrite=allowed status=\(result.status)")
+}
+
+@Test
+func sandboxDeniesNetworkToLocalListener() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project, withIntermediateDirectories: true)
+    guard
+        try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/usr/bin/true"),
+            arguments: []
+        ) != nil
+    else { return }
+    let (listener, port) = try localListener()
+    defer { Darwin.close(listener) }
+
+    let direct = try run(
+        executable: URL(fileURLWithPath: "/usr/bin/nc"),
+        arguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
+    )
+    #expect(direct.status == 0)
+    guard
+        let deniedLaunch = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/usr/bin/nc"),
+            arguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
+        )
+    else { return }
+    let denied = try run(deniedLaunch)
+
+    #expect(denied.status != 0)
+    print("sandbox-semantics network=denied status=\(denied.status)")
+}
+
+@Test
+func trustedSandboxAllowsTargetButStillDeniesNetwork() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let target = project.appendingPathComponent("target", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: target, withIntermediateDirectories: true)
+    let allowed = target.appendingPathComponent("ALLOWED")
+    guard
+        let writeSandbox = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .trusted,
+            helper: URL(fileURLWithPath: "/bin/sh"),
+            arguments: ["-c", "printf target > \"$1\"", "probe", allowed.path]
+        )
+    else { return }
+
+    let write = try run(writeSandbox)
+    if write.status != 0 { print("target-write output=\(write.output)") }
+    #expect(write.status == 0)
+    #expect(try String(contentsOf: allowed, encoding: .utf8) == "target")
+    #expect(writeSandbox.environment["CARGO_NET_OFFLINE"] == "1")
+
+    let (listener, port) = try localListener()
+    defer { Darwin.close(listener) }
+    let networkSandbox = try Sandbox(
+        projectURL: project,
+        cacheURL: cache,
+        trustMode: .trusted,
+        helperURL: URL(fileURLWithPath: "/usr/bin/nc"),
+        helperArguments: ["-z", "-w", "1", "127.0.0.1", String(port)]
+    )
+    let network = try run(networkSandbox)
+    #expect(network.status != 0)
+    print(
+        "sandbox-semantics trustedTarget=allowed network=denied"
+            + " offline=1"
+    )
+}
+
+@Test
+func sandboxShimSetsCPUAndAddressSpaceLimits() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let cache = root.appendingPathComponent("cache", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project, withIntermediateDirectories: true)
+    let script = """
+        test "$(ulimit -S -t)" = "$1" && test "$(ulimit -S -v)" = "$2"
+        """
+    guard
+        let sandbox = try availableSandbox(
+            project: project,
+            cache: cache,
+            mode: .safe,
+            helper: URL(fileURLWithPath: "/bin/sh"),
+            arguments: [
+                "-c", script, "probe",
+                String(Sandbox.cpuTimeLimitSeconds),
+                String(Sandbox.addressSpaceLimitKiB),
+            ]
+        )
+    else { return }
+
+    let result = try run(sandbox)
+
+    #expect(result.status == 0)
+    print(
+        "rlimit cpuSeconds=\(Sandbox.cpuTimeLimitSeconds)"
+            + " addressSpaceKiB=\(Sandbox.addressSpaceLimitKiB)"
+    )
+}
+
+@Test
+func trustRegistryRoundTrip() async throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("trust.json")
+    let repository = root.appendingPathComponent("repo", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: repository,
+        withIntermediateDirectories: true
+    )
+    let registry = TrustRegistry(fileURL: file)
+    let grantedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+    try await registry.grant(
+        repository.appendingPathComponent("../repo"),
+        mode: .trusted,
+        grantedAt: grantedAt
+    )
+    #expect(modeName(await registry.query(repository)) == "trusted")
+    let object = try #require(
+        try JSONSerialization.jsonObject(with: Data(contentsOf: file))
+            as? [String: Any]
+    )
+    let entry = try #require(object[repository.path] as? [String: Any])
+    #expect(entry["mode"] as? String == "trusted")
+    #expect(entry["grantedAt"] as? String != nil)
+    let reloaded = TrustRegistry(fileURL: file)
+    #expect(modeName(await reloaded.query(repository)) == "trusted")
+    try await reloaded.revoke(repository)
+    #expect(await reloaded.query(repository) == nil)
+}
+
+@Test
+func trustRegistryTreatsCorruptJSONAsEmptyAndRecovers() async throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("trust.json")
+    try Data("{not-json".utf8).write(to: file)
+    let repository = root.appendingPathComponent("repo", isDirectory: true)
+    let registry = TrustRegistry(fileURL: file)
+
+    #expect(await registry.query(repository) == nil)
+    try await registry.grant(repository, mode: .safe)
+    let reloaded = TrustRegistry(fileURL: file)
+    #expect(modeName(await reloaded.query(repository)) == "safe")
+}
+
+@Test
+func trustRegistrySerializesConcurrentWrites() async throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("trust.json")
+    let registry = TrustRegistry(fileURL: file)
+    let repositories = (0..<24).map {
+        root.appendingPathComponent("repo-\($0)", isDirectory: true)
     }
 
-    private func copiedFixture() throws -> URL {
-        let source = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
-        let destination = FileManager.default.temporaryDirectory
-            .appendingPathComponent(
-                "CodeInsightExactTests-\(UUID().uuidString)",
-                isDirectory: true
-            )
-        try FileManager.default.copyItem(at: source, to: destination)
-        return destination
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        for repository in repositories {
+            group.addTask {
+                try await registry.grant(repository, mode: .trusted)
+            }
+        }
+        try await group.waitForAll()
     }
+
+    let reloaded = TrustRegistry(fileURL: file)
+    for repository in repositories {
+        #expect(modeName(await reloaded.query(repository)) == "trusted")
+    }
+}
+
+@Test
+func rustAnalyzerSafeMarkerControlWhenInstalled() throws {
+    guard let executableURL = RustAnalyzerProvider.findExecutable() else {
+        // Environmental coverage: CI without rust-analyzer remains green.
+        return
+    }
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let safeFixture = try copiedFixture(into: root.appendingPathComponent("safe"))
+    let trustedFixture = try copiedFixture(
+        into: root.appendingPathComponent("trusted")
+    )
+
+    do {
+        let safe = try runDefinition(
+            fixture: safeFixture,
+            cache: root.appendingPathComponent("safe-cache"),
+            executable: executableURL,
+            mode: .safe
+        )
+        #expect(safe.file == "src/lib.rs")
+        #expect(safe.line == 1)
+        #expect(safe.column == 8)
+        let safeTarget = safeFixture.appendingPathComponent("target")
+        let safeMarker = safeTarget.appendingPathComponent("BUILD_SCRIPT_RAN")
+        #expect(!FileManager.default.fileExists(atPath: safeMarker.path))
+        #expect(!FileManager.default.fileExists(atPath: safeTarget.path))
+
+        let marker = trustedFixture.appendingPathComponent(
+            "target/BUILD_SCRIPT_RAN"
+        )
+        let trusted = try runDefinition(
+            fixture: trustedFixture,
+            cache: root.appendingPathComponent("trusted-cache"),
+            executable: executableURL,
+            mode: .trusted,
+            waitFor: marker
+        )
+        #expect(trusted.file == "src/lib.rs")
+        #expect(trusted.line == 1)
+        #expect(trusted.column == 8)
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+        print(
+            "marker-control safeMarkerAbsent=true safeTargetAbsent=true"
+                + " trustedMarkerPresent=true"
+        )
+    } catch ExactError.unavailable(let detail)
+        where detail.contains("sandbox-exec")
+    {
+        // The control must never bypass an unavailable OS sandbox.
+        print("SKIP marker-control: \(detail); noBareExecution=true")
+    }
+}
+
+private func copiedFixture() throws -> URL {
+    let source = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
+    let destination = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightExactTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    try FileManager.default.copyItem(at: source, to: destination)
+    return destination
+}
+
+private func copiedFixture(into destination: URL) throws -> URL {
+    let source = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
+    try FileManager.default.copyItem(at: source, to: destination)
+    return destination
+}
+
+private func temporaryTestDirectory() throws -> URL {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactTests-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+    return url
+}
+
+private func availableSandbox(
+    project: URL,
+    cache: URL,
+    mode: TrustMode,
+    helper: URL,
+    arguments: [String]
+) throws -> Sandbox? {
+    do {
+        return try Sandbox(
+            projectURL: project,
+            cacheURL: cache,
+            trustMode: mode,
+            helperURL: helper,
+            helperArguments: arguments
+        )
+    } catch ExactError.unavailable(let detail) {
+        #expect(detail.contains("sandbox-exec"))
+        print("sandbox-exec unavailable: \(detail); noBareExecution=true")
+        return nil
+    }
+}
+
+private struct ProcessResult {
+    let status: Int32
+    let output: String
+}
+
+private func run(_ sandbox: Sandbox) throws -> ProcessResult {
+    try run(
+        executable: sandbox.executableURL,
+        arguments: sandbox.arguments,
+        environment: sandbox.environment,
+        workingDirectory: sandbox.workingDirectoryURL
+    )
+}
+
+private func run(
+    executable: URL,
+    arguments: [String],
+    environment: [String: String]? = nil,
+    workingDirectory: URL? = nil
+) throws -> ProcessResult {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = executable
+    process.arguments = arguments
+    process.environment = environment
+    process.currentDirectoryURL = workingDirectory
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+    return ProcessResult(
+        status: process.terminationStatus,
+        output: String(
+            data: output.fileHandleForReading.readDataToEndOfFile(),
+            encoding: .utf8
+        ) ?? ""
+    )
+}
+
+private func localListener() throws -> (descriptor: Int32, port: UInt16) {
+    let descriptor = Darwin.socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { throw currentPOSIXError() }
+    do {
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.bind(
+                    descriptor,
+                    $0,
+                    socklen_t(MemoryLayout<sockaddr_in>.size)
+                )
+            }
+        }
+        guard bindResult == 0 else { throw currentPOSIXError() }
+        guard Darwin.listen(descriptor, 4) == 0 else {
+            throw currentPOSIXError()
+        }
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let nameResult = withUnsafeMutablePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                Darwin.getsockname(descriptor, $0, &length)
+            }
+        }
+        guard nameResult == 0 else { throw currentPOSIXError() }
+        return (descriptor, UInt16(bigEndian: address.sin_port))
+    } catch {
+        Darwin.close(descriptor)
+        throw error
+    }
+}
+
+private func currentPOSIXError() -> NSError {
+    NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+}
+
+private func modeName(_ mode: TrustMode?) -> String? {
+    switch mode {
+    case .safe: "safe"
+    case .trusted: "trusted"
+    case nil: nil
+    }
+}
+
+private func runDefinition(
+    fixture: URL,
+    cache: URL,
+    executable: URL,
+    mode: TrustMode,
+    waitFor marker: URL? = nil
+) throws -> ExactLocation {
+    let snapshot = try DirectorySnapshot(root: fixture)
+    let provider = try RustAnalyzerProvider(
+        projectURL: fixture,
+        executableURL: executable,
+        cacheURL: cache,
+        requestTimeout: 15,
+        closeGrace: 0.5
+    )
+    let session = try provider.prepare(
+        snapshot: snapshot,
+        profile: ExactProfileKey(projectURL: fixture),
+        trustMode: mode
+    )
+    defer { session.close() }
+    let bytes = try snapshot.readBytes(path: "src/main.rs")
+    let source = try #require(String(data: Data(bytes), encoding: .utf8))
+    let call = try #require(source.range(of: "answer();", options: .backwards))
+    let location = try #require(
+        try session.definition(
+            file: "src/main.rs",
+            byteOffset: source[..<call.lowerBound].utf8.count
+        ))
+    if let marker {
+        try #require(waitForFile(marker, timeout: 15))
+    }
+    return location
+}
+
+private func waitForFile(_ url: URL, timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if FileManager.default.fileExists(atPath: url.path) { return true }
+        Thread.sleep(forTimeInterval: 0.05)
+    }
+    return FileManager.default.fileExists(atPath: url.path)
 }
 
 private final class PipeFakeLSPServer: @unchecked Sendable {
     private let input: FileHandle
     private let output: FileHandle
-    private let done: XCTestExpectation
+    private let done: () -> Void
     private let lock = NSLock()
     private var _requestMethods: [String] = []
     private var _requestIDs: [Int] = []
@@ -234,7 +734,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     }
     var error: Error? { locked { _error } }
 
-    init(input: FileHandle, output: FileHandle, done: XCTestExpectation) {
+    init(input: FileHandle, output: FileHandle, done: @escaping () -> Void) {
         self.input = input
         self.output = output
         self.done = done
@@ -257,7 +757,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         } catch {
             locked { _error = error }
         }
-        done.fulfill()
+        done()
     }
 
     private func handle(_ message: [String: Any]) throws -> Bool {
@@ -303,7 +803,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
             } else if method == "exit" {
                 locked { _receivedExit = true }
                 try output.close()
-                done.fulfill()
+                done()
                 return true
             }
         } else if (message["id"] as? NSNumber)?.intValue == 900,
