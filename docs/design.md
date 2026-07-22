@@ -9,7 +9,10 @@
 > 符号模型引入 Scope/Binding/SymbolSpace、调用解析拆为四个正交维度、
 > 精确模式与 Safe/Trusted 信任边界正式化、WorktreeSnapshot 真正不可变化、
 > 缓存生命周期设计，并清理全部内部矛盾。
-> "CodeInsight" 仅为仓库代号，正式产品名待定（与 Revenera Code Insight 等撞名）。
+> **正式产品名：Cairn**（2026-07-22 定名）。石堆路标——在陌生代码地形里导航、
+> 留书签与历史锚点，契合只读阅读器 + git 时间旅行的定位。"CodeInsight" 保留为
+> 仓库/模块代号（改名成本高且与产品定位无关，模块前缀不动）；bundle id 与显示名用 Cairn。
+> 正式发布前需做正规商标 clearance（本定名基于定位契合与表层撞名初查，非法律检索）。
 
 ---
 
