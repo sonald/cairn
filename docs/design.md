@@ -2,7 +2,8 @@
 
 > 一个**只读**的 macOS 原生代码阅读器：把项目丢进去，秒级建立符号索引，
 > 以 Source Insight 式的 Context Window、Call Tree 和独特排版美学，
-> 帮你读懂陌生的复杂代码。首发支持 Rust / Python / TypeScript，支持在 git 历史中自由穿梭。
+> 帮你读懂陌生的复杂代码。**实施路线（2026-07 裁决）：M0–M4 单点打透 Rust（含 exact
+> 增强与正式发布）；TypeScript / Python 整语言面推至 M5。** 支持在 git 历史中自由穿梭。
 >
 > v3 修订：吸收第二轮同行评审。核心变化——数据模型升级为 3+1 层（新增 AnalysisProfile）、
 > 符号模型引入 Scope/Binding/SymbolSpace、调用解析拆为四个正交维度、
@@ -60,6 +61,9 @@ macOS 原生应用（AppKit/Swift），无 Electron、无 Tauri、无 WebView。
 ### 1.3 目标用户与首要语言
 
 **首要支持语言：Rust、Python、TypeScript**（JS 见 F1.5 能力分级；C/C++、Go 后续扩展）。
+**实施现状（2026-07）**：M0–M4 只落地了 Rust（提取器/阅读面/exact 全套）；
+Python、TypeScript 的整语言面（提取器 + 文件树/阅读 + exact）作为 M5 主体——
+设计目标不变，只是实施节奏单点打透。
 
 - 接手陌生大型代码库（后端服务、基础设施工具、前端工程）的工程师
 - 代码审计、安全审查者（**仓库本身可能不可信**——这是 Safe Mode 存在的理由）
