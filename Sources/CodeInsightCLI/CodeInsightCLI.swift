@@ -1,6 +1,7 @@
 import ArgumentParser
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import CodeInsightGit
 import CTreeSitterRust
 import Foundation
@@ -14,7 +15,7 @@ struct CodeInsight: AsyncParsableCommand {
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
             Search.self, Symsearch.self, SnapshotCommand.self, SwitchStats.self,
-            Goldset.self,
+            Goldset.self, ExactDef.self,
         ]
     )
 }
@@ -32,6 +33,84 @@ struct ProjectOptions: ParsableArguments {
 }
 
 extension CodeInsight {
+    struct ExactDef: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "exact-def",
+            abstract: "Resolve a definition with rust-analyzer."
+        )
+
+        @Option(name: .long, help: "Git worktree root.")
+        var project: String
+
+        @Option(name: .long, help: "Project-relative Rust file.")
+        var file: String
+
+        @Option(name: .long, help: "One-based source line.")
+        var line: Int
+
+        @Option(name: .long, help: "One-based UTF-8 byte column.")
+        var column: Int
+
+        func validate() throws {
+            guard line > 0, column > 0 else {
+                throw ValidationError("--line and --column must be positive.")
+            }
+        }
+
+        func run() throws {
+            guard let executableURL = RustAnalyzerProvider.findExecutable()
+            else { throw ValidationError("rust-analyzer not found") }
+
+            let root = URL(fileURLWithPath: project, isDirectory: true)
+                .standardizedFileURL
+            let relative = file.hasPrefix("./")
+                ? String(file.dropFirst(2)) : file
+            guard !relative.hasPrefix("/") else {
+                throw ValidationError("--file must be project-relative.")
+            }
+            let snapshot = try WorktreeSnapshot(repositoryURL: root)
+            let bytes = try snapshot.readBytes(path: relative)
+            guard let line = UInt32(exactly: line),
+                  let column = UInt32(exactly: column),
+                  let byteOffset = LineTable(bytes: bytes).byteOffset(
+                    line: line,
+                    column: column
+                  )
+            else {
+                throw ValidationError("Position is outside \(relative).")
+            }
+
+            let provider = try RustAnalyzerProvider(
+                projectURL: root,
+                executableURL: executableURL
+            )
+            let session = try provider.prepare(
+                snapshot: snapshot,
+                profile: ExactProfileKey(projectURL: root),
+                trustMode: .safe
+            )
+            defer { session.close() }
+            guard let location = try session.definition(
+                file: relative,
+                byteOffset: Int(byteOffset)
+            ) else {
+                throw ValidationError("definition not found")
+            }
+
+            print("\(location.file):\(location.line):\(location.column)")
+            let attribution = session.attribution
+            print(
+                "attribution provider=\(attribution.provider) "
+                    + "toolVersion=\(attribution.toolVersion) "
+                    + "configFingerprint=\(attribution.configFingerprint) "
+                    + "environmentFingerprint=\(attribution.environmentFingerprint) "
+                    + "trustMode=safe "
+                    + "generatedAt=\(ISO8601DateFormatter().string(from: attribution.generatedAt)) "
+                    + "coverage=\(attribution.coverage.rawValue)"
+            )
+        }
+    }
+
     struct SnapshotCommand: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "snapshot",

@@ -11,6 +11,7 @@ let package = Package(
         .library(name: "TreeSitterKit", targets: ["TreeSitterKit"]),
         .library(name: "CodeInsightCore", targets: ["CodeInsightCore"]),
         .library(name: "CodeInsightGit", targets: ["CodeInsightGit"]),
+        .library(name: "CodeInsightExact", targets: ["CodeInsightExact"]),
         .library(
             name: "CodeInsightRustExtractor",
             targets: ["CodeInsightRustExtractor"]
@@ -71,6 +72,10 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CodeInsightExact",
+            dependencies: ["CodeInsightCore", "CodeInsightGit"]
+        ),
+        .target(
             name: "CodeInsightEngine",
             dependencies: [
                 "CodeInsightCore",
@@ -83,6 +88,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightExact",
                 "CodeInsightGit",
                 "TreeSitterKit",
                 "CTreeSitterRust",
@@ -133,6 +139,15 @@ let package = Package(
         .testTarget(
             name: "CodeInsightGitTests",
             dependencies: ["CodeInsightGit"]
+        ),
+        .testTarget(
+            name: "CodeInsightExactTests",
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightExact",
+                "CodeInsightGit",
+            ],
+            exclude: ["Fixtures"]
         ),
         .testTarget(
             name: "RustExtractorTests",
