@@ -155,6 +155,29 @@ public struct ReaderTheme: Equatable, Sendable {
         }
     }
 
+    public func diffRGB(for kind: DiffCore.MarkerKind, isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark:
+            switch kind {
+            case .added: 0x3FB950
+            case .removed: 0xF85149
+            case .changed: 0xD29922
+            }
+        case .siClassic:
+            switch kind {
+            case .added: 0x3F6B42
+            case .removed: 0x9A3B32
+            case .changed: 0xA66A1F
+            }
+        case .auto, .light:
+            switch kind {
+            case .added: 0x1A7F37
+            case .removed: 0xCF222E
+            case .changed: 0xBF8700
+            }
+        }
+    }
+
     private func resolvedSelection(isDark: Bool) -> ReaderSettings.Theme {
         selection == .auto ? (isDark ? .dark : .light) : selection
     }

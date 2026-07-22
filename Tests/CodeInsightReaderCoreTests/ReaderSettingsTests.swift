@@ -82,3 +82,16 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
     #expect(light.backgroundRGB(isDark: true) == 0xFFFFFF)
     #expect(dark.backgroundRGB(isDark: false) == 0x1E1E1E)
 }
+
+@Test
+func readerThemeProvidesDistinctDiffColorsForEveryTheme() {
+    for selection in ReaderSettings.Theme.allCases {
+        let theme = ReaderTheme(settings: ReaderSettings(theme: selection))
+        let colors = Set([
+            theme.diffRGB(for: .added, isDark: selection == .dark),
+            theme.diffRGB(for: .removed, isDark: selection == .dark),
+            theme.diffRGB(for: .changed, isDark: selection == .dark),
+        ])
+        #expect(colors.count == 3)
+    }
+}

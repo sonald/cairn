@@ -84,6 +84,11 @@ struct RustDeclarations {
             return .none
         }
 
+        let fingerprints = fingerprints(
+            for: node,
+            kind: kind,
+            byteOffset: byteOffset
+        )
         facets.append(DeclarationFacet(
             symbolGroupID: SymbolGroupID(rawValue: facetIndex),
             space: space,
@@ -92,8 +97,8 @@ struct RustDeclarations {
             range: node.coreByteRange(byteOffset: byteOffset),
             nameRange: nameNode.coreByteRange(byteOffset: byteOffset),
             parentFacetIndex: parentFacetIndex(for: kind),
-            signatureFingerprint: nil,
-            bodyFingerprint: nil
+            signatureFingerprint: fingerprints.signature,
+            bodyFingerprint: fingerprints.body
         ))
 
         if kind == .rustImpl,
@@ -222,5 +227,28 @@ struct RustDeclarations {
             }
         }
         return nil
+    }
+
+    private func fingerprints(
+        for node: Node,
+        kind: DeclarationKind,
+        byteOffset: UInt32
+    ) -> (signature: ContentID?, body: ContentID?) {
+        guard kind == .rustFn || kind == .rustMethod else { return (nil, nil) }
+        let declarationRange = node.coreByteRange(byteOffset: byteOffset)
+        let bodyRange = node.directNamedChild { $0.kind == "block" }?
+            .coreByteRange(byteOffset: byteOffset)
+        let signatureRange = CodeInsightCore.ByteRange(
+            lowerBound: declarationRange.lowerBound,
+            upperBound: bodyRange?.lowerBound ?? declarationRange.upperBound
+        )
+        return (
+            fingerprint(signatureRange),
+            bodyRange.map(fingerprint)
+        )
+    }
+
+    private func fingerprint(_ range: CodeInsightCore.ByteRange) -> ContentID {
+        ContentID.sha256(of: Array(bytes[Int(range.lowerBound)..<Int(range.upperBound)]))
     }
 }

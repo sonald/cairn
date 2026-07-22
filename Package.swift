@@ -113,6 +113,7 @@ let package = Package(
             name: "CodeInsightReaderCore",
             dependencies: [
                 "CodeInsightCore",
+                "CodeInsightRustExtractor",
                 "TreeSitterKit",
                 "CTreeSitterRust",
             ]

@@ -56,6 +56,22 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
 }
 
 @MainActor
+@Test
+func diffGutterStoresMarkersAndHunkRevealSelectsTheLine() {
+    let document = ReaderDocument(bytes: Array("one\ntwo\nthree\n".utf8))
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.documentView = reader.view
+    reader.installDiffGutter(in: scrollView)
+    reader.display(document: document)
+    reader.setDiffMarkers([2: .changed, 3: .added])
+
+    #expect(reader.diffMarkerCounts == [.changed: 1, .added: 1])
+    #expect(reader.revealDiffLine(3))
+    #expect(reader.selectedLineNumber == 3)
+}
+
+@MainActor
 private func renderOffscreen(
     _ document: ReaderDocument
 ) -> (ReaderTextView, NSScrollView, NSWindow) {

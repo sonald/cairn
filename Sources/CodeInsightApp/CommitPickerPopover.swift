@@ -8,7 +8,9 @@ final class CommitPickerPopover: NSViewController,
     NSTextFieldDelegate, NSTableViewDataSource, NSTableViewDelegate
 {
     private let appModel: AppModel
-    private let leavingRecord: () -> JumpRecord?
+    private let allowsWorktree: Bool
+    private let selectedRevision: () -> String?
+    private let onChoose: (CommitInfo?) -> Void
     private let popover = NSPopover()
     private let input = NSTextField()
     private let tableView = NSTableView()
@@ -20,9 +22,16 @@ final class CommitPickerPopover: NSViewController,
         return formatter
     }()
 
-    init(appModel: AppModel, leavingRecord: @escaping () -> JumpRecord?) {
+    init(
+        appModel: AppModel,
+        allowsWorktree: Bool = true,
+        selectedRevision: @escaping () -> String?,
+        onChoose: @escaping (CommitInfo?) -> Void
+    ) {
         self.appModel = appModel
-        self.leavingRecord = leavingRecord
+        self.allowsWorktree = allowsWorktree
+        self.selectedRevision = selectedRevision
+        self.onChoose = onChoose
         super.init(nibName: nil, bundle: nil)
         popover.behavior = .transient
         popover.contentSize = NSSize(width: 560, height: 480)
@@ -100,7 +109,7 @@ final class CommitPickerPopover: NSViewController,
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int {
-        1 + appModel.commitPicker.filteredCommits.count
+        (allowsWorktree ? 1 : 0) + appModel.commitPicker.filteredCommits.count
     }
 
     func tableView(
@@ -108,14 +117,15 @@ final class CommitPickerPopover: NSViewController,
         viewFor tableColumn: NSTableColumn?,
         row: Int
     ) -> NSView? {
-        if row == 0 { return worktreeCell() }
+        if allowsWorktree, row == 0 { return worktreeCell() }
         let commits = appModel.commitPicker.filteredCommits
-        guard commits.indices.contains(row - 1) else { return nil }
-        return commitCell(commits[row - 1])
+        let index = row - (allowsWorktree ? 1 : 0)
+        guard commits.indices.contains(index) else { return nil }
+        return commitCell(commits[index])
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        row == 0 ? 48 : 58
+        allowsWorktree && row == 0 ? 48 : 58
     }
 
     func controlTextDidChange(_ notification: Notification) {
@@ -161,12 +171,13 @@ final class CommitPickerPopover: NSViewController,
     private func chooseSelection() {
         let row = tableView.selectedRow
         guard row >= 0 else { return }
-        if row == 0 {
+        if allowsWorktree, row == 0 {
             choose(nil)
         } else {
             let commits = appModel.commitPicker.filteredCommits
-            guard commits.indices.contains(row - 1) else { return }
-            choose(commits[row - 1])
+            let index = row - (allowsWorktree ? 1 : 0)
+            guard commits.indices.contains(index) else { return }
+            choose(commits[index])
         }
         popover.performClose(nil)
     }
@@ -180,11 +191,7 @@ final class CommitPickerPopover: NSViewController,
     }
 
     private func choose(_ commit: CommitInfo?) {
-        if let commit {
-            appModel.switchToCommit(commit.fullSHA, leaving: leavingRecord())
-        } else {
-            appModel.switchToWorktree(leaving: leavingRecord())
-        }
+        onChoose(commit)
     }
 
     private func render() {
@@ -193,16 +200,24 @@ final class CommitPickerPopover: NSViewController,
         let picker = appModel.commitPicker
         let row: Int
         if !picker.query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            row = picker.filteredCommits.isEmpty ? 0 : 1
-        } else if let current = picker.currentCommit,
-                  let index = picker.filteredCommits.firstIndex(of: current)
+            row = picker.filteredCommits.isEmpty
+                ? (allowsWorktree ? 0 : -1)
+                : (allowsWorktree ? 1 : 0)
+        } else if let revision = selectedRevision(),
+                  let index = picker.filteredCommits.firstIndex(where: {
+                      $0.fullSHA == revision || $0.shortSHA == revision
+                  })
         {
-            row = index + 1
+            row = index + (allowsWorktree ? 1 : 0)
         } else {
-            row = 0
+            row = allowsWorktree ? 0 : (picker.filteredCommits.isEmpty ? -1 : 0)
         }
-        tableView.selectRowIndexes([row], byExtendingSelection: false)
-        tableView.scrollRowToVisible(row)
+        if row >= 0 {
+            tableView.selectRowIndexes([row], byExtendingSelection: false)
+            tableView.scrollRowToVisible(row)
+        } else {
+            tableView.deselectAll(nil)
+        }
 
         if picker.isLoading {
             statusLabel.stringValue = "Loading history…"
@@ -241,7 +256,7 @@ final class CommitPickerPopover: NSViewController,
         labels.alignment = .leading
         labels.spacing = 1
         return rowCell(
-            checkmarked: appModel.currentRevision == nil,
+            checkmarked: selectedRevision() == nil,
             content: labels
         )
     }
@@ -284,7 +299,9 @@ final class CommitPickerPopover: NSViewController,
         labels.alignment = .leading
         labels.spacing = 3
         return rowCell(
-            checkmarked: appModel.commitPicker.currentCommit == commit,
+            checkmarked: selectedRevision().map {
+                $0 == commit.fullSHA || $0 == commit.shortSHA
+            } ?? false,
             content: labels
         )
     }

@@ -295,6 +295,7 @@ public final class AppModel {
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
     public let commitPicker: CommitPickerModel
+    public let compare: CompareModel
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
 
@@ -306,6 +307,7 @@ public final class AppModel {
     private let indexService: any IndexService
     private let navigationSink: @MainActor (URL, UInt32?) -> Void
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var compareSnapshotTask: Task<Void, Never>?
     private var projectRoot: URL?
     @ObservationIgnored private var snapshotDestinations: [
         SnapshotID: SnapshotDestination
@@ -317,12 +319,14 @@ public final class AppModel {
         contextWindow: ContextWindowModel = ContextWindowModel(),
         exactCoordinator: ExactCoordinator = ExactCoordinator(),
         commitPicker: CommitPickerModel = CommitPickerModel(),
+        compare: CompareModel = CompareModel(),
         navigationSink: @MainActor @escaping (URL, UInt32?) -> Void = { _, _ in }
     ) {
         self.indexService = indexService
         self.contextWindow = contextWindow
         self.exactCoordinator = exactCoordinator
         self.commitPicker = commitPicker
+        self.compare = compare
         self.navigationSink = navigationSink
         contextWindow.attachExactCoordinator(exactCoordinator)
         relationTree.attachExactCoordinator(exactCoordinator)
@@ -347,6 +351,8 @@ public final class AppModel {
             return
         }
         snapshotTask?.cancel()
+        compareSnapshotTask?.cancel()
+        compare.clear()
         generation &+= 1
         let openGeneration = generation
         exactCoordinator.invalidate(generation: openGeneration)
@@ -430,6 +436,40 @@ public final class AppModel {
         switchSnapshot(revision: nil)
     }
 
+    public func selectCompareCommit(_ revision: String) {
+        guard let root = projectRoot else { return }
+        compareSnapshotTask?.cancel()
+        let compareGeneration = compare.beginLoading(revision: revision)
+        let mainGeneration = generation
+        compareSnapshotTask = Task { [weak self, indexService] in
+            do {
+                let snapshot = try await indexService.captureSnapshot(
+                    root: root,
+                    revision: revision
+                )
+                try Task.checkCancellation()
+                guard let self, generation == mainGeneration else { return }
+                guard compare.install(
+                    snapshot: snapshot,
+                    root: root,
+                    revision: revision,
+                    generation: compareGeneration
+                ) else { return }
+                updateCompareFile()
+            } catch is CancellationError {
+                return
+            } catch {
+                self?.compare.fail(generation: compareGeneration, error: error)
+            }
+        }
+    }
+
+    public func clearCompare() {
+        compareSnapshotTask?.cancel()
+        compareSnapshotTask = nil
+        compare.clear()
+    }
+
     public func navigate(
         to url: URL,
         byteOffset: UInt32? = nil,
@@ -440,6 +480,7 @@ public final class AppModel {
         selectedByteOffset = byteOffset
         navigationGeneration &+= 1
         navigationSink(url.standardizedFileURL, byteOffset)
+        updateCompareFile()
     }
 
     public func goBack(from current: JumpRecord) {
@@ -522,6 +563,8 @@ public final class AppModel {
     private func switchSnapshot(revision: String?) {
         guard let root = projectRoot else { return }
         snapshotTask?.cancel()
+        compareSnapshotTask?.cancel()
+        compare.clear()
         generation &+= 1
         let switchGeneration = generation
         exactCoordinator.invalidate(generation: switchGeneration)
@@ -650,6 +693,10 @@ public final class AppModel {
             revision: currentRevision,
             generation: generation
         )
+    }
+
+    private func updateCompareFile() {
+        compare.update(file: selectedFile, leftSource: documentSource)
     }
 
     private func publishProjectState(_ state: ProjectState, root: URL?) {

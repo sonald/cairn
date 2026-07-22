@@ -20,6 +20,14 @@ private enum SelfTestBudgets {
     static let snapshotFirstPaintMS = 1_000.0
 }
 
+private struct DiffSelfTestTarget {
+    let file: URL
+    let path: String
+    let worktreeBytes: [UInt8]
+    let commitBytes: [UInt8]
+    let expected: DiffCore.Result
+}
+
 @main
 private struct CodeInsightApplication {
     @MainActor
@@ -69,6 +77,13 @@ private struct CodeInsightApplication {
         withExtendedLifetime(delegate) {
             if let exactRoot {
                 delegate.runExactSelfTest(root: exactRoot)
+            } else if let index = arguments.firstIndex(of: "--self-test-diff"),
+                      arguments.indices.contains(index + 1)
+            {
+                delegate.runDiffSelfTest(root: URL(
+                    fileURLWithPath: arguments[index + 1],
+                    isDirectory: true
+                ))
             } else if let index = arguments.firstIndex(of: "--self-test-pin"),
                arguments.indices.contains(index + 1)
             {
@@ -173,6 +188,199 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extracted: extracted,
             ready: ready
         )
+    }
+
+    func runDiffSelfTest(root: URL) -> Never {
+        launch(offscreen: true)
+        guard let controller = windowController else {
+            finishDiffSelfTest(error: "window unavailable")
+        }
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState {
+                return !self.model.commitPicker.isLoading
+            }
+            return false
+        }),
+        case .ready = model.projectState,
+        model.commitPicker.errorMessage == nil,
+        model.commitPicker.commits.indices.contains(1)
+        else {
+            finishDiffSelfTest(error: "project or HEAD~1 unavailable")
+        }
+        emitDiffStep("openProject", controller: controller)
+
+        let revision = model.commitPicker.commits[1].fullSHA
+        let snapshot: CommitSnapshot
+        let target: DiffSelfTestTarget
+        do {
+            snapshot = try CommitSnapshot(repositoryURL: root, revision: revision)
+            guard let found = diffSelfTestTarget(root: root, snapshot: snapshot) else {
+                finishDiffSelfTest(error: "no multi-line file differs from HEAD~1")
+            }
+            target = found
+        } catch {
+            finishDiffSelfTest(error: error.localizedDescription)
+        }
+
+        controller.openFileForSelfTest(target.file)
+        guard waitUntil(timeout: 5, condition: {
+            self.model.selectedFile == target.file
+                && controller.displayedReaderFile == target.file
+        }) else {
+            finishDiffSelfTest(error: "left reader did not open target file")
+        }
+        emitDiffStep("openFile", controller: controller, extra: [
+            "file": target.path,
+            "worktreeByteCount": target.worktreeBytes.count,
+        ])
+
+        controller.applyPanelPreset(.compare)
+        guard controller.selectCompareCommit(revision),
+              waitUntil(timeout: 30, condition: {
+                  self.model.compare.rightRevision == revision
+                      && self.model.compare.diff != nil
+                      && controller.selfTestRightReaderBytes != nil
+              })
+        else {
+            finishDiffSelfTest(error: "right CommitPicker selection did not finish")
+        }
+        pumpRunLoop()
+
+        let rightReaderMatchesCommitBlob = controller.selfTestRightReaderBytes
+            == target.commitBytes
+        let rightReaderDiffersFromWorktree = controller.selfTestRightReaderBytes
+            != target.worktreeBytes
+        emitDiffStep("selectHEAD~1", controller: controller, extra: [
+            "revision": revision,
+            "rightReaderByteCount": controller.selfTestRightReaderBytes?.count ?? 0,
+            "commitBlobByteCount": target.commitBytes.count,
+            "rightReaderMatchesCommitBlob": rightReaderMatchesCommitBlob,
+            "rightReaderDiffersFromWorktree": rightReaderDiffersFromWorktree,
+        ])
+
+        let actualGutterCounts = controller.selfTestGutterCounts
+        let expectedGutterCounts = target.expected.gutterCounts
+        let gutterCountsMatch = actualGutterCounts == expectedGutterCounts
+        emitDiffStep("gutter", controller: controller, extra: [
+            "gutterCounts": Self.jsonGutterCounts(actualGutterCounts),
+            "expectedGutterCounts": Self.jsonGutterCounts(expectedGutterCounts),
+            "gutterCountsMatch": gutterCountsMatch,
+        ])
+
+        let navigation = controller.selfTestNavigateNextDiffHunk()
+        pumpRunLoop()
+        let hunkNavMoved = navigation.before != nil
+            && navigation.after != nil
+            && navigation.before != navigation.after
+            && model.compare.selectedHunkIndex == 0
+        emitDiffStep("nextHunk", controller: controller, extra: [
+            "beforeLine": (navigation.before as Any?) ?? NSNull(),
+            "afterLine": (navigation.after as Any?) ?? NSNull(),
+            "selectedHunkIndex": (model.compare.selectedHunkIndex as Any?) ?? NSNull(),
+            "hunkNavMoved": hunkNavMoved,
+        ])
+
+        controller.applyPanelPreset(.reading)
+        pumpRunLoop()
+        let readingPresetCollapsedRight = controller.selfTestSecondaryReaderCollapsed
+        emitDiffStep("readingPreset", controller: controller, extra: [
+            "rightReaderCollapsed": readingPresetCollapsedRight,
+        ])
+
+        finishDiffSelfTest(
+            controller: controller,
+            checks: [
+                "rightReaderMatchesCommitBlob": rightReaderMatchesCommitBlob,
+                "rightReaderDiffersFromWorktree": rightReaderDiffersFromWorktree,
+                "gutterCountsMatch": gutterCountsMatch,
+                "hunkNavMoved": hunkNavMoved,
+                "readingPresetCollapsedRight": readingPresetCollapsedRight,
+            ],
+            gutterCounts: actualGutterCounts
+        )
+    }
+
+    private func diffSelfTestTarget(
+        root: URL,
+        snapshot: CommitSnapshot
+    ) -> DiffSelfTestTarget? {
+        let candidates = snapshot.listFiles().map(\.path).filter {
+            let ext = URL(fileURLWithPath: $0).pathExtension
+            return ext == "rs" || ext == "swift"
+        }.sorted {
+            let leftRust = $0.hasSuffix(".rs")
+            let rightRust = $1.hasSuffix(".rs")
+            return leftRust == rightRust ? $0 < $1 : leftRust
+        }
+        for path in candidates {
+            let file = root.appendingPathComponent(path).standardizedFileURL
+            guard let worktree = try? Array(Data(contentsOf: file)),
+                  let committed = try? snapshot.readBytes(path: path),
+                  worktree != committed
+            else { continue }
+            let expected = DiffCore().compare(left: worktree, right: committed)
+            guard !expected.truncated,
+                  !expected.hunks.isEmpty,
+                  max(expected.leftLineCount, expected.rightLineCount) > 1
+            else { continue }
+            return DiffSelfTestTarget(
+                file: file,
+                path: path,
+                worktreeBytes: worktree,
+                commitBytes: committed,
+                expected: expected
+            )
+        }
+        return nil
+    }
+
+    private func emitDiffStep(
+        _ step: String,
+        controller: MainWindowController?,
+        extra: [String: Any] = [:]
+    ) {
+        var object: [String: Any] = [
+            "step": step,
+            "leftRevision": model.currentRevision ?? "worktree",
+            "rightRevision": (model.compare.rightRevision as Any?) ?? NSNull(),
+            "file": (model.selectedFile?.path as Any?) ?? NSNull(),
+            "hunkCount": model.compare.diff?.hunks.count ?? 0,
+            "rightReaderCollapsed": controller?.selfTestSecondaryReaderCollapsed ?? true,
+        ]
+        for (key, value) in extra { object[key] = value }
+        Self.writeJSON(object)
+    }
+
+    private func finishDiffSelfTest(
+        controller: MainWindowController? = nil,
+        checks: [String: Bool] = [:],
+        gutterCounts: [DiffCore.MarkerKind: Int] = [:],
+        error: String? = nil
+    ) -> Never {
+        let passed = error == nil
+            && !checks.isEmpty
+            && checks.values.allSatisfy { $0 }
+        var summary: [String: Any] = checks
+        summary["step"] = "summary"
+        summary["passed"] = passed
+        summary["gutterCounts"] = Self.jsonGutterCounts(gutterCounts)
+        summary["rightReaderCollapsed"] = controller?.selfTestSecondaryReaderCollapsed
+            ?? true
+        if let error { summary["error"] = error }
+        Self.writeJSON(summary)
+        Darwin.exit(passed ? 0 : 1)
+    }
+
+    private static func jsonGutterCounts(
+        _ counts: [DiffCore.MarkerKind: Int]
+    ) -> [String: Int] {
+        [
+            "added": counts[.added] ?? 0,
+            "removed": counts[.removed] ?? 0,
+            "changed": counts[.changed] ?? 0,
+        ]
     }
 
     func runHistorySelfTest(root: URL) -> Never {
@@ -1167,6 +1375,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.goForward(sender)
     }
 
+    @objc private func previousDiffHunk(_ sender: Any?) {
+        windowController?.previousDiffHunk(sender)
+    }
+
+    @objc private func nextDiffHunk(_ sender: Any?) {
+        windowController?.nextDiffHunk(sender)
+    }
+
     @objc private func toggleRelations(_ sender: Any?) {
         windowController?.toggleRelations()
     }
@@ -1196,6 +1412,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             model.navigationHistory.canGoBack
         case #selector(goForward(_:)):
             model.navigationHistory.canGoForward
+        case #selector(previousDiffHunk(_:)), #selector(nextDiffHunk(_:)):
+            !(model.compare.diff?.hunks.isEmpty ?? true)
         case #selector(showCallers(_:)),
              #selector(showCalls(_:)),
              #selector(showImplementations(_:)):
@@ -1356,6 +1574,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         nextCandidate.keyEquivalentModifierMask = [.command, .option]
         nextCandidate.target = self
         goMenu.addItem(nextCandidate)
+        goMenu.addItem(.separator())
+        let previousHunk = NSMenuItem(
+            title: "Previous Diff Hunk",
+            action: #selector(previousDiffHunk(_:)),
+            keyEquivalent: "\u{F700}"
+        )
+        previousHunk.keyEquivalentModifierMask = [.command, .option]
+        previousHunk.target = self
+        goMenu.addItem(previousHunk)
+        let nextHunk = NSMenuItem(
+            title: "Next Diff Hunk",
+            action: #selector(nextDiffHunk(_:)),
+            keyEquivalent: "\u{F701}"
+        )
+        nextHunk.keyEquivalentModifierMask = [.command, .option]
+        nextHunk.target = self
+        goMenu.addItem(nextHunk)
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
 
@@ -1366,7 +1601,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let presets: [(PanelPresetModel, String, String)] = [
             (.reading, "Reading", "1"),
             (.relations, "Relations", "2"),
-            (.compare, "Compare — Split Only; Diff in M4", "3"),
+            (.compare, "Compare", "3"),
             (.focus, "Focus", "4"),
         ]
         for (preset, title, key) in presets {

@@ -19,7 +19,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     let model: AppModel
     private let sidebarController = SidebarViewController()
     private let readerController = ReaderViewController()
-    private let secondaryReaderController = ReaderViewController()
+    private let secondaryReaderController = ReaderViewController(showsCompareControls: true)
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
     private let contentSplitController = NSSplitViewController()
@@ -40,6 +40,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var symbolSearchPanel: SymbolSearchPanel?
     private var searchPanel: SearchPanel?
     private var commitPickerPopover: CommitPickerPopover?
+    private var compareCommitPickerPopover: CommitPickerPopover?
     private var panelPreset = PanelPresetModel.reading
 
     init(model: AppModel, settings: ReaderSettings, offscreen: Bool) {
@@ -140,6 +141,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.onShowRelation = { [weak self] offset, direction in
             self?.handleReaderRelation(offset: offset, direction: direction)
         }
+        secondaryReaderController.onChooseCompareVersion = { [weak self] in
+            self?.showCompareCommitPicker()
+        }
+        secondaryReaderController.onPreviousDiffHunk = { [weak self] in
+            self?.previousDiffHunk(nil)
+        }
+        secondaryReaderController.onNextDiffHunk = { [weak self] in
+            self?.nextDiffHunk(nil)
+        }
+        secondaryReaderController.onFunctionChange = { [weak self] change in
+            self?.openFunctionChange(change)
+        }
         contextController.onOpen = { [weak self] candidate in
             self?.open(candidate)
         }
@@ -165,14 +178,33 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.selectFile(file)
     }
 
+    func openFileForSelfTest(_ file: URL) {
+        navigate(to: file)
+    }
+
     func selectCommit(_ revision: String) -> Bool {
         if commitPickerPopover == nil {
             commitPickerPopover = CommitPickerPopover(
                 appModel: model,
-                leavingRecord: { [weak self] in self?.currentJumpRecord() }
+                selectedRevision: { [weak model] in model?.currentRevision },
+                onChoose: { [weak self] commit in
+                    if let commit {
+                        self?.model.switchToCommit(
+                            commit.fullSHA,
+                            leaving: self?.currentJumpRecord()
+                        )
+                    } else {
+                        self?.model.switchToWorktree(leaving: self?.currentJumpRecord())
+                    }
+                }
             )
         }
         return commitPickerPopover?.chooseCommit(revision) == true
+    }
+
+    func selectCompareCommit(_ revision: String) -> Bool {
+        prepareCompareCommitPicker()
+        return compareCommitPickerPopover?.chooseCommit(revision) == true
     }
 
     var displayedReaderFile: URL? { readerController.displayedFile }
@@ -194,6 +226,47 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestExactGroupRowCount: Int {
         relationController.selfTestExactGroupRowCount
+    }
+    var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
+    var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
+        let left = readerController.diffMarkerCounts
+        let right = secondaryReaderController.diffMarkerCounts
+        var counts = left
+        for (kind, count) in right { counts[kind, default: 0] += count }
+        return counts
+    }
+    var selfTestSelectedDiffLine: Int? {
+        secondaryReaderController.selectedDiffLine ?? readerController.selectedDiffLine
+    }
+    var selfTestSecondaryReaderCollapsed: Bool { secondaryReaderItem.isCollapsed }
+
+    func selfTestNavigateNextDiffHunk() -> (before: Int?, after: Int?) {
+        guard let hunk = model.compare.diff?.hunks.first else { return (nil, nil) }
+        if let target = hunk.lines.first(where: {
+            $0.kind != .context && $0.rightLine != nil
+        })?.rightLine {
+            let lineCount = model.compare.diff?.rightLineCount ?? 0
+            let prime = target == 1 ? lineCount : 1
+            if prime > 0, prime != target {
+                _ = secondaryReaderController.revealDiffLine(prime)
+            }
+            let before = secondaryReaderController.selectedDiffLine
+            nextDiffHunk(nil)
+            return (before, secondaryReaderController.selectedDiffLine)
+        }
+        if let target = hunk.lines.first(where: {
+            $0.kind != .context && $0.leftLine != nil
+        })?.leftLine {
+            let lineCount = model.compare.diff?.leftLineCount ?? 0
+            let prime = target == 1 ? lineCount : 1
+            if prime > 0, prime != target {
+                _ = readerController.revealDiffLine(prime)
+            }
+            let before = readerController.selectedDiffLine
+            nextDiffHunk(nil)
+            return (before, readerController.selectedDiffLine)
+        }
+        return (nil, nil)
     }
 
     func selfTestSetContextPinned(_ pinned: Bool) {
@@ -240,7 +313,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerGroupItem.isCollapsed = layout.readerCollapsed
         contextItem.isCollapsed = layout.contextCollapsed
         relationItem.isCollapsed = layout.relationsCollapsed
-        // M3 Compare is a split container only. Cross-commit diff highlighting is M4.
         secondaryReaderItem.isCollapsed = !layout.readerSplit
 
         sidebarItem.holdingPriority = .init(rawValue: 251)
@@ -291,12 +363,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func openInSecondaryReader(_ file: URL) {
+        navigate(to: file)
         applyPanelPreset(.compare)
-        secondaryReaderController.display(
-            file,
-            snapshotID: model.currentSnapshotID,
-            source: model.documentSource
-        )
     }
 
     func showRelations(direction: RelationTreeModel.Direction) {
@@ -402,6 +470,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.navigationGeneration
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.isLoading
+            _ = model.compare.rightRevision
+            _ = model.compare.rightSnapshotID
+            _ = model.compare.diff
+            _ = model.compare.functionChanges
+            _ = model.compare.selectedHunkIndex
+            _ = model.compare.isLoading
+            _ = model.compare.errorMessage
             _ = model.exactCoordinator.readiness
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -429,6 +504,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.selectedFile,
             snapshotID: model.currentSnapshotID,
             source: model.documentSource
+        )
+        secondaryReaderController.display(
+            model.compare.rightSnapshotID == nil ? nil : model.selectedFile,
+            snapshotID: model.compare.rightSnapshotID,
+            source: model.compare.rightSource
+        )
+        readerController.setDiffMarkers(model.compare.diff?.leftMarkers ?? [:])
+        secondaryReaderController.setDiffMarkers(
+            model.compare.diff?.rightMarkers ?? [:]
+        )
+        secondaryReaderController.configureCompareControls(
+            versionTitle: compareVersionTitle,
+            functionChanges: model.compare.functionChanges,
+            selectedHunkIndex: model.compare.selectedHunkIndex,
+            hunkCount: model.compare.diff?.hunks.count ?? 0,
+            truncated: model.compare.diff?.truncated ?? false,
+            errorMessage: model.compare.errorMessage
         )
         if displayedNavigationGeneration != model.navigationGeneration {
             if let file = model.selectedFile, let offset = model.selectedByteOffset {
@@ -466,6 +558,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+    }
+
+    private var compareVersionTitle: String {
+        guard let revision = model.compare.rightRevision else {
+            return "Choose comparison version…"
+        }
+        let commit = model.commitPicker.commits.first {
+            $0.fullSHA == revision || $0.shortSHA == revision
+        }
+        let sha = commit?.shortSHA ?? String(revision.prefix(7))
+        return commit.map { "⎇ \(sha) \(Self.truncated($0.summary, limit: 28))" }
+            ?? "⎇ \(sha)"
     }
 
     private func renderExactStatus() {
@@ -538,10 +642,40 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if commitPickerPopover == nil {
             commitPickerPopover = CommitPickerPopover(
                 appModel: model,
-                leavingRecord: { [weak self] in self?.currentJumpRecord() }
+                selectedRevision: { [weak model] in model?.currentRevision },
+                onChoose: { [weak self] commit in
+                    if let commit {
+                        self?.model.switchToCommit(
+                            commit.fullSHA,
+                            leaving: self?.currentJumpRecord()
+                        )
+                    } else {
+                        self?.model.switchToWorktree(leaving: self?.currentJumpRecord())
+                    }
+                }
             )
         }
         commitPickerPopover?.show(relativeTo: sender)
+    }
+
+    private func showCompareCommitPicker() {
+        prepareCompareCommitPicker()
+        compareCommitPickerPopover?.show(
+            relativeTo: secondaryReaderController.compareVersionAnchor
+        )
+    }
+
+    private func prepareCompareCommitPicker() {
+        guard compareCommitPickerPopover == nil else { return }
+        compareCommitPickerPopover = CommitPickerPopover(
+            appModel: model,
+            allowsWorktree: false,
+            selectedRevision: { [weak model] in model?.compare.rightRevision },
+            onChoose: { [weak model] commit in
+                guard let commit else { return }
+                model?.selectCompareCommit(commit.fullSHA)
+            }
+        )
     }
 
     @objc func selectPreviousContextCandidate(_ sender: Any?) {
@@ -559,6 +693,47 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     @objc func goForward(_ sender: Any?) {
         model.goForward()
+    }
+
+    @objc func previousDiffHunk(_ sender: Any?) {
+        guard let hunk = model.compare.selectPreviousHunk() else { return }
+        reveal(hunk)
+    }
+
+    @objc func nextDiffHunk(_ sender: Any?) {
+        guard let hunk = model.compare.selectNextHunk() else { return }
+        reveal(hunk)
+    }
+
+    private func reveal(_ hunk: DiffCore.Hunk) {
+        if let line = hunk.lines.first(where: {
+            $0.kind != .context && $0.rightLine != nil
+        })?.rightLine {
+            _ = secondaryReaderController.revealDiffLine(line)
+        } else if let line = hunk.lines.first(where: {
+            $0.kind != .context && $0.leftLine != nil
+        })?.leftLine {
+            _ = readerController.revealDiffLine(line)
+        }
+    }
+
+    private func openFunctionChange(_ change: DiffCore.FunctionChange) {
+        guard let file = model.selectedFile else { return }
+        if let range = change.rightRange {
+            secondaryReaderController.navigate(
+                to: file,
+                byteOffset: range.lowerBound,
+                snapshotID: model.compare.rightSnapshotID,
+                source: model.compare.rightSource
+            )
+        } else if let range = change.leftRange {
+            readerController.navigate(
+                to: file,
+                byteOffset: range.lowerBound,
+                snapshotID: model.currentSnapshotID,
+                source: model.documentSource
+            )
+        }
     }
 
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
@@ -1001,9 +1176,20 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
     var onReadingPositionChange: ((UInt32) -> Void)?
+    var onChooseCompareVersion: (() -> Void)?
+    var onPreviousDiffHunk: (() -> Void)?
+    var onNextDiffHunk: (() -> Void)?
+    var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
     private let label = NSTextField(labelWithString: "Open a project to begin")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
+    private let showsCompareControls: Bool
+    private let compareVersionButton = NSButton()
+    private let previousHunkButton = NSButton()
+    private let nextHunkButton = NSButton()
+    private let functionSummaryStack = NSStackView()
+    private var displayedFunctionChanges: [DiffCore.FunctionChange] = []
+    private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
     private var displayedDocument: ReaderDocument?
@@ -1011,8 +1197,18 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
 
+    init(showsCompareControls: Bool = false) {
+        self.showsCompareControls = showsCompareControls
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func loadView() {
         let scrollView = NSScrollView()
+        self.scrollView = scrollView
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
         scrollView.documentView = textView.view
@@ -1025,7 +1221,11 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             label.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
         ])
-        view = scrollView
+        if showsCompareControls {
+            view = compareContainer(scrollView: scrollView)
+        } else {
+            view = scrollView
+        }
         textView.onClick = { [weak self] characterIndex, modifiers in
             guard let self,
                   let offset = self.textView.byteOffset(
@@ -1066,6 +1266,102 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         textView.view.menu = relationMenu
     }
 
+    private func compareContainer(scrollView: NSScrollView) -> NSView {
+        compareVersionButton.title = "Choose comparison version…"
+        compareVersionButton.bezelStyle = .rounded
+        compareVersionButton.target = self
+        compareVersionButton.action = #selector(chooseCompareVersion(_:))
+        compareVersionButton.setAccessibilityLabel("Comparison version")
+
+        previousHunkButton.title = "↑"
+        previousHunkButton.bezelStyle = .inline
+        previousHunkButton.target = self
+        previousHunkButton.action = #selector(previousDiffHunk(_:))
+        previousHunkButton.setAccessibilityLabel("Previous diff hunk")
+        nextHunkButton.title = "↓"
+        nextHunkButton.bezelStyle = .inline
+        nextHunkButton.target = self
+        nextHunkButton.action = #selector(nextDiffHunk(_:))
+        nextHunkButton.setAccessibilityLabel("Next diff hunk")
+
+        let spacer = NSView()
+        let controls = NSStackView(views: [
+            compareVersionButton, spacer, previousHunkButton, nextHunkButton,
+        ])
+        controls.orientation = .horizontal
+        controls.alignment = .centerY
+        controls.spacing = 6
+        controls.translatesAutoresizingMaskIntoConstraints = false
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        functionSummaryStack.orientation = .horizontal
+        functionSummaryStack.alignment = .centerY
+        functionSummaryStack.spacing = 8
+        functionSummaryStack.translatesAutoresizingMaskIntoConstraints = false
+        let summaryScroll = NSScrollView()
+        summaryScroll.documentView = functionSummaryStack
+        summaryScroll.hasHorizontalScroller = true
+        summaryScroll.drawsBackground = false
+        summaryScroll.borderType = .noBorder
+        summaryScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        let container = NSView()
+        container.addSubview(controls)
+        container.addSubview(summaryScroll)
+        container.addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            controls.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            controls.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            controls.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            controls.heightAnchor.constraint(equalToConstant: 28),
+            summaryScroll.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 2),
+            summaryScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
+            summaryScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            summaryScroll.heightAnchor.constraint(equalToConstant: 30),
+            functionSummaryStack.leadingAnchor.constraint(
+                equalTo: summaryScroll.contentView.leadingAnchor
+            ),
+            functionSummaryStack.topAnchor.constraint(
+                equalTo: summaryScroll.contentView.topAnchor
+            ),
+            functionSummaryStack.bottomAnchor.constraint(
+                equalTo: summaryScroll.contentView.bottomAnchor
+            ),
+            scrollView.topAnchor.constraint(equalTo: summaryScroll.bottomAnchor, constant: 2),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+        return container
+    }
+
+    @objc private func chooseCompareVersion(_ sender: Any?) {
+        onChooseCompareVersion?()
+    }
+
+    @objc private func previousDiffHunk(_ sender: Any?) {
+        onPreviousDiffHunk?()
+    }
+
+    @objc private func nextDiffHunk(_ sender: Any?) {
+        onNextDiffHunk?()
+    }
+
+    @objc private func openFunctionChange(_ sender: NSButton) {
+        guard displayedFunctionChanges.indices.contains(sender.tag) else { return }
+        onFunctionChange?(displayedFunctionChanges[sender.tag])
+    }
+
+    private static func title(_ kind: DiffCore.FunctionChange.Kind) -> String {
+        switch kind {
+        case .added: "Added"
+        case .removed: "Removed"
+        case .signatureChanged: "Signature"
+        case .bodyChanged: "Body"
+        }
+    }
+
     func menuNeedsUpdate(_ menu: NSMenu) {
         contextMenuOffset = contextMenuByteOffset()
         for item in menu.items { item.isEnabled = contextMenuOffset != nil }
@@ -1073,6 +1369,83 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
     func apply(settings: ReaderSettings) {
         textView.apply(settings: settings)
+    }
+
+    func configureCompareControls(
+        versionTitle: String,
+        functionChanges: [DiffCore.FunctionChange],
+        selectedHunkIndex: Int?,
+        hunkCount: Int,
+        truncated: Bool,
+        errorMessage: String?
+    ) {
+        guard showsCompareControls else { return }
+        loadViewIfNeeded()
+        compareVersionButton.title = versionTitle
+        previousHunkButton.isEnabled = hunkCount > 0
+        nextHunkButton.isEnabled = hunkCount > 0
+        previousHunkButton.toolTip = hunkCount == 0
+            ? "No diff hunks"
+            : "Previous hunk"
+        nextHunkButton.toolTip = hunkCount == 0
+            ? "No diff hunks"
+            : "Next hunk"
+        if let selectedHunkIndex {
+            nextHunkButton.title = "↓ \(selectedHunkIndex + 1)/\(hunkCount)"
+        } else {
+            nextHunkButton.title = "↓"
+        }
+        displayedFunctionChanges = functionChanges
+        functionSummaryStack.arrangedSubviews.forEach {
+            functionSummaryStack.removeArrangedSubview($0)
+            $0.removeFromSuperview()
+        }
+        let status = errorMessage
+            ?? (truncated ? "Large diff — side-by-side only" : nil)
+        if let status {
+            let label = NSTextField(labelWithString: status)
+            label.textColor = .secondaryLabelColor
+            functionSummaryStack.addArrangedSubview(label)
+        } else if functionChanges.isEmpty {
+            let label = NSTextField(labelWithString: "No function changes")
+            label.textColor = .secondaryLabelColor
+            functionSummaryStack.addArrangedSubview(label)
+        } else {
+            for (index, change) in functionChanges.enumerated() {
+                let button = NSButton(
+                    title: "\(Self.title(change.kind)) · \(change.displayName)",
+                    target: self,
+                    action: #selector(openFunctionChange(_:))
+                )
+                button.bezelStyle = .inline
+                button.tag = index
+                functionSummaryStack.addArrangedSubview(button)
+            }
+        }
+    }
+
+    func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
+        loadViewIfNeeded()
+        if !markers.isEmpty,
+           scrollView?.verticalRulerView == nil,
+           let scrollView
+        {
+            textView.installDiffGutter(in: scrollView)
+        }
+        textView.setDiffMarkers(markers)
+    }
+
+    var displayedBytes: [UInt8]? { textView.displayedBytes }
+    var diffMarkerCounts: [DiffCore.MarkerKind: Int] { textView.diffMarkerCounts }
+    var selectedDiffLine: Int? { textView.selectedLineNumber }
+    var compareVersionAnchor: NSView {
+        loadViewIfNeeded()
+        return compareVersionButton
+    }
+
+    @discardableResult
+    func revealDiffLine(_ line: Int) -> Bool {
+        textView.revealDiffLine(line)
     }
 
     func display(
@@ -1096,6 +1469,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             label.stringValue = "Open a project to begin"
             label.isHidden = false
             textView.view.string = ""
+            textView.setDiffMarkers([:])
             return
         }
 
@@ -1173,7 +1547,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
     private func layoutTextViewFrame() {
         view.layoutSubtreeIfNeeded()
-        if let scrollView = view as? NSScrollView {
+        if let scrollView {
             textView.view.frame = scrollView.contentView.bounds
         }
     }

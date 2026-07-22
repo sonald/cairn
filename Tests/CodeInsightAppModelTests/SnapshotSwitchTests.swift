@@ -475,6 +475,46 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
     #expect(model.selectedByteOffset == 3)
 }
 
+@MainActor
+@Test
+func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
+    let root = try snapshotTemporaryProject(["main.rs": "fn current() {}"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let service = ControlledSnapshotIndexService(initialSession: initial, snapshots: [:])
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: root)
+    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    model.navigate(to: root.appendingPathComponent("main.rs"))
+
+    var right: TestSnapshot? = TestSnapshot(
+        label: "right",
+        files: ["main.rs": "fn previous() {}"]
+    )
+    weak let retainedRight = right
+    let compareGeneration = model.compare.beginLoading(revision: "RIGHT")
+    #expect(model.compare.install(
+        snapshot: right!,
+        root: root,
+        revision: "RIGHT",
+        generation: compareGeneration
+    ))
+    model.compare.update(file: model.selectedFile, leftSource: model.documentSource)
+    right = nil
+    #expect(retainedRight != nil)
+    #expect(model.compare.rightBytes == Array("fn previous() {}".utf8))
+
+    model.switchToCommit("C")
+
+    #expect(model.compare.rightRevision == nil)
+    #expect(model.compare.rightSnapshotID == nil)
+    #expect(model.compare.rightSource == nil)
+    #expect(model.compare.rightBytes == nil)
+    #expect(model.compare.diff == nil)
+    #expect(retainedRight == nil)
+}
+
 private final class TestSnapshot: Snapshot, @unchecked Sendable {
     let label: String
     let snapshotID: SnapshotID

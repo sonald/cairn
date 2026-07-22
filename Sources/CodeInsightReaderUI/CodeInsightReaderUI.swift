@@ -7,6 +7,10 @@ public extension ReaderTheme {
         dynamicColor { isDark in rgb(for: kind, isDark: isDark) }
     }
 
+    func color(for kind: DiffCore.MarkerKind) -> NSColor {
+        dynamicColor { isDark in diffRGB(for: kind, isDark: isDark) }
+    }
+
     var backgroundColor: NSColor {
         dynamicColor(backgroundRGB(isDark:))
     }
@@ -130,6 +134,8 @@ public final class ReaderTextView {
     private var byteUTF16Map: ByteUTF16Map?
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
+    private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
+    private weak var diffRuler: NSRulerView?
 
     public init(settings: ReaderSettings = ReaderSettings()) {
         theme = ReaderTheme(settings: settings)
@@ -147,6 +153,7 @@ public final class ReaderTextView {
                   let layoutManager = self.view.textLayoutManager
             else { return }
             self.validateVisibleRenderingAttributes(in: layoutManager)
+            self.diffRuler?.needsDisplay = true
             self.onViewportChange?()
         }
     }
@@ -159,6 +166,8 @@ public final class ReaderTextView {
 
         byteUTF16Map = document.byteUTF16Map
         displayedDocument = document
+        diffMarkers = [:]
+        diffRuler?.needsDisplay = true
         renderingCoordinator.update(document: document, theme: theme)
         let attributed = NSMutableAttributedString(
             string: source,
@@ -215,6 +224,7 @@ public final class ReaderTextView {
     public func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
         applyThemeColors()
+        diffRuler?.needsDisplay = true
         guard let document = displayedDocument,
               let layoutManager = view.textLayoutManager
         else { return }
@@ -256,6 +266,54 @@ public final class ReaderTextView {
         view.scrollRangeToVisible(lineRange)
         view.showFindIndicator(for: lineRange)
     }
+
+    public func installDiffGutter(in scrollView: NSScrollView) {
+        let ruler = DiffGutterRulerView(scrollView: scrollView, reader: self)
+        scrollView.verticalRulerView = ruler
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
+        diffRuler = ruler
+    }
+
+    public func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
+        diffMarkers = markers
+        diffRuler?.needsDisplay = true
+    }
+
+    public var diffMarkerCounts: [DiffCore.MarkerKind: Int] {
+        Dictionary(grouping: diffMarkers.values, by: { $0 }).mapValues(\.count)
+    }
+
+    @discardableResult
+    public func revealDiffLine(_ line: Int) -> Bool {
+        guard line > 0,
+              let document = displayedDocument,
+              document.lineTable.lineStarts.indices.contains(line - 1),
+              let location = byteUTF16Map?.utf16Offset(
+                  forByte: Int(document.lineTable.lineStarts[line - 1])
+              )
+        else { return false }
+        let range = (backingTextStorage.string as NSString).lineRange(
+            for: NSRange(location: location, length: 0)
+        )
+        view.setSelectedRange(range)
+        view.scrollRangeToVisible(range)
+        view.showFindIndicator(for: range)
+        return true
+    }
+
+    public var selectedLineNumber: Int? {
+        guard let document = displayedDocument,
+              let byteOffset = byteUTF16Map?.byteOffset(
+                  forUTF16: view.selectedRange().location
+              ),
+              let byteOffset = UInt32(exactly: byteOffset),
+              let position = document.lineTable.lineColumn(at: byteOffset)
+        else { return nil }
+        return Int(position.line)
+    }
+
+    public var displayedBytes: [UInt8]? { displayedDocument?.bytes }
 
     public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
         byteUTF16Map?.byteOffset(forUTF16: index).flatMap(UInt32.init(exactly:))
@@ -369,6 +427,52 @@ public final class ReaderTextView {
             return true
         }
         view.needsDisplay = true
+    }
+
+    fileprivate func drawDiffMarkers(in ruler: NSRulerView) {
+        guard let document = displayedDocument, let window = view.window else { return }
+        for (line, kind) in diffMarkers {
+            guard line > 0,
+                  document.lineTable.lineStarts.indices.contains(line - 1),
+                  let location = byteUTF16Map?.utf16Offset(
+                      forByte: Int(document.lineTable.lineStarts[line - 1])
+                  )
+            else { continue }
+            let screenRect = view.firstRect(
+                forCharacterRange: NSRange(location: location, length: 0),
+                actualRange: nil
+            )
+            let markerRect = ruler.convert(window.convertFromScreen(screenRect), from: nil)
+            let bar = NSRect(
+                x: 1,
+                y: markerRect.minY,
+                width: max(2, ruler.ruleThickness - 2),
+                height: max(2, markerRect.height)
+            )
+            guard bar.intersects(ruler.bounds) else { continue }
+            theme.color(for: kind).setFill()
+            bar.fill()
+        }
+    }
+}
+
+@MainActor
+private final class DiffGutterRulerView: NSRulerView {
+    private weak var reader: ReaderTextView?
+
+    init(scrollView: NSScrollView, reader: ReaderTextView) {
+        self.reader = reader
+        super.init(scrollView: scrollView, orientation: .verticalRuler)
+        ruleThickness = 7
+        clientView = reader.view
+    }
+
+    required init(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func drawHashMarksAndLabels(in rect: NSRect) {
+        reader?.drawDiffMarkers(in: self)
     }
 }
 
