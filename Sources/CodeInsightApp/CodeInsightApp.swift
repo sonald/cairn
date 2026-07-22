@@ -1,5 +1,9 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightCore
+import CodeInsightEngine
+import CodeInsightExact
+import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
@@ -32,10 +36,40 @@ private struct CodeInsightApplication {
         }
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
-        let delegate = AppDelegate(startedAt: startedAt)
+        let exactRoot = arguments.firstIndex(of: "--self-test-exact")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let delegate: AppDelegate
+        if let exactRoot {
+            let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
+            let provider = InProcessExactProvider(
+                location: exactSelfTestTarget(root: fixtureRoot)?.definition
+            )
+            let coordinator = ExactCoordinator(
+                providerFactory: { _ in provider },
+                snapshotFactory: { root, _ in
+                    try ExactSelfTestDirectorySnapshot(root: root)
+                },
+                sandboxAvailable: { true },
+                trustRegistry: TrustRegistry(fileURL: FileManager.default
+                    .temporaryDirectory
+                    .appendingPathComponent("CodeInsightExactSelfTest-trust.json"))
+            )
+            delegate = AppDelegate(
+                startedAt: startedAt,
+                model: AppModel(
+                    indexService: ExactSelfTestIndexService(),
+                    exactCoordinator: coordinator
+                )
+            )
+        } else {
+            delegate = AppDelegate(startedAt: startedAt)
+        }
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if let index = arguments.firstIndex(of: "--self-test-pin"),
+            if let exactRoot {
+                delegate.runExactSelfTest(root: exactRoot)
+            } else if let index = arguments.firstIndex(of: "--self-test-pin"),
                arguments.indices.contains(index + 1)
             {
                 delegate.runPinSelfTest(root: URL(
@@ -74,13 +108,14 @@ private struct CodeInsightApplication {
 @MainActor
 private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
     private let startedAt: ContinuousClock.Instant
-    private let model = AppModel()
+    private let model: AppModel
     private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
     private var settingsWindowController: ReaderSettingsWindowController?
 
-    init(startedAt: ContinuousClock.Instant) {
+    init(startedAt: ContinuousClock.Instant, model: AppModel = AppModel()) {
         self.startedAt = startedAt
+        self.model = model
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -305,9 +340,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
 
         let files = rustFiles(in: model.fileTree?.children ?? [])
-        guard let fileA = files.first(where: { $0.lastPathComponent == "a.rs" }),
-              let fileB = files.first(where: { $0.lastPathComponent == "b.rs" }),
-              let mainFile = files.first(where: { $0.lastPathComponent == "main.rs" }),
+        let fixture = root.standardizedFileURL.appendingPathComponent(
+            "Tests/RustExtractorTests/Fixtures/alias_cross_file_negative",
+            isDirectory: true
+        )
+        let expectedFiles = ["a.rs", "b.rs", "main.rs"].map {
+            fixture.appendingPathComponent($0).standardizedFileURL
+        }
+        let fileA = expectedFiles[0]
+        let fileB = expectedFiles[1]
+        let mainFile = expectedFiles[2]
+        guard expectedFiles.allSatisfy(files.contains),
               let aBytes = try? Data(contentsOf: fileA),
               let bBytes = try? Data(contentsOf: fileB),
               let mainBytes = try? Data(contentsOf: mainFile),
@@ -450,6 +493,284 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "followUpdatedContext": followUpdatedContext,
             ]
         )
+    }
+
+    func runExactSelfTest(root: URL) -> Never {
+        launch(offscreen: true)
+        let projectRoot = exactSelfTestFixtureRoot(root: root)
+        guard let windowController,
+              let target = exactSelfTestTarget(root: projectRoot)
+        else {
+            finishExactSelfTest(
+                controller: windowController,
+                checks: [:],
+                realProvider: "not-run",
+                error: "exact self-test target unavailable"
+            )
+        }
+
+        windowController.openProject(root: projectRoot)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState { return true }
+            return false
+        }), case .ready = model.projectState else {
+            finishExactSelfTest(
+                controller: windowController,
+                checks: [:],
+                realProvider: "not-run",
+                error: "project unavailable"
+            )
+        }
+        guard waitUntil(timeout: 5, condition: {
+                  windowController.selectFileInSidebar(target.file)
+              }),
+              waitUntil(timeout: 5, condition: {
+                  windowController.displayedReaderFile?.standardizedFileURL
+                      == target.file.standardizedFileURL
+              })
+        else {
+            finishExactSelfTest(
+                controller: windowController,
+                checks: [:],
+                realProvider: "not-run",
+                error: "could not open exact self-test file"
+                    + " (treeContainsTarget="
+                    + "\(model.fileTree?.selectionPath(for: target.file) != nil))"
+            )
+        }
+
+        windowController.selfTestReaderClick(
+            offset: target.clickOffset,
+            commandClick: false
+        )
+        let fuzzyVisible = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextCandidateCount >= 1
+                && windowController.selfTestContextProvenance?.contains("Exact") == false
+        })
+        let fuzzyCount = windowController.selfTestContextCandidateCount
+        emitExactStep(
+            "fuzzy",
+            variant: "fake",
+            controller: windowController
+        )
+
+        let exactVisible = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextProvenance?.contains("Exact") == true
+        })
+        let fuzzyRetained = windowController.selfTestContextCandidateCount >= fuzzyCount
+        emitExactStep(
+            "exact",
+            variant: "fake",
+            controller: windowController
+        )
+        let exactSummary = windowController.selfTestContextSummary
+        let exactCount = windowController.selfTestContextCandidateCount
+
+        windowController.selfTestSetContextPinned(true)
+        let pinnedStable = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextPinned
+                && windowController.selfTestContextSummary == exactSummary
+                && windowController.selfTestContextCandidateCount == exactCount
+        })
+        emitExactStep(
+            "pinnedExact",
+            variant: "fake",
+            controller: windowController
+        )
+
+        let real = runRealExactVariant(root: root)
+        finishExactSelfTest(
+            controller: windowController,
+            checks: [
+                "fuzzyVisible": fuzzyVisible,
+                "exactVisible": exactVisible,
+                "fuzzyRetained": fuzzyRetained,
+                "pinnedTargetStable": pinnedStable,
+                "realProviderPassedOrSkipped": real.passed,
+            ],
+            realProvider: real.status,
+            error: nil
+        )
+    }
+
+    private func runRealExactVariant(
+        root: URL
+    ) -> (status: String, passed: Bool) {
+        guard let executable = RustAnalyzerProvider.findExecutable() else {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer",
+                controller: nil,
+                extra: ["reason": "rust-analyzer not installed"]
+            )
+            return ("skipped:not-installed", true)
+        }
+
+        let fixtureRoot = exactSelfTestFixtureRoot(root: root)
+        guard let target = exactSelfTestTarget(root: fixtureRoot) else {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer",
+                controller: nil,
+                extra: ["reason": "real-provider fixture unavailable"]
+            )
+            return ("skipped:fixture-unavailable", true)
+        }
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightExactRealSelfTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: cache) }
+
+        let coordinator = ExactCoordinator(
+            providerFactory: { projectURL in
+                try RustAnalyzerProvider(
+                    projectURL: projectURL,
+                    executableURL: executable,
+                    cacheURL: cache,
+                    requestTimeout: 30,
+                    closeGrace: 0.5
+                )
+            },
+            snapshotFactory: { root, _ in
+                try ExactSelfTestDirectorySnapshot(root: root)
+            },
+            trustRegistry: TrustRegistry(fileURL: FileManager.default
+                .temporaryDirectory
+                .appendingPathComponent("CodeInsightExactRealSelfTest-trust.json"))
+        )
+        let realModel = AppModel(
+            indexService: ExactSelfTestIndexService(),
+            exactCoordinator: coordinator
+        )
+        let controller = MainWindowController(
+            model: realModel,
+            settings: readerSettings,
+            offscreen: true
+        )
+        controller.showWindow(nil)
+        defer { controller.close() }
+        controller.openProject(root: fixtureRoot)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = realModel.projectState { return true }
+            if case .ready = realModel.projectState { return true }
+            return false
+        }), case .ready = realModel.projectState,
+        waitUntil(timeout: 5, condition: {
+            controller.selectFileInSidebar(target.file)
+        }),
+        waitUntil(timeout: 5, condition: {
+            controller.displayedReaderFile?.standardizedFileURL
+                == target.file.standardizedFileURL
+        }) else {
+            emitExactStep(
+                "failed",
+                variant: "rust-analyzer",
+                controller: controller,
+                extra: ["reason": "project or file unavailable"]
+            )
+            return ("failed:project", false)
+        }
+
+        controller.selfTestReaderClick(offset: target.clickOffset, commandClick: false)
+        let fuzzyVisible = waitUntil(timeout: 5, condition: {
+            controller.selfTestContextCandidateCount >= 1
+                && controller.selfTestContextProvenance?.contains("Exact") == false
+        })
+        let fuzzyCount = controller.selfTestContextCandidateCount
+        emitExactStep(
+            "fuzzy",
+            variant: "rust-analyzer",
+            controller: controller
+        )
+        guard fuzzyVisible else { return ("failed:fuzzy", false) }
+
+        let finished = waitUntil(timeout: 45, condition: {
+            if controller.selfTestContextProvenance?.contains("Exact") == true {
+                return true
+            }
+            switch coordinator.readiness {
+            case .off, .unavailable:
+                return true
+            case .preparing, .ready:
+                return false
+            }
+        })
+        if case .off(let reason) = coordinator.readiness {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("skipped:sandbox-unavailable", true)
+        }
+        if case .unavailable(let reason) = coordinator.readiness {
+            emitExactStep(
+                "failed",
+                variant: "rust-analyzer",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("failed:unavailable", false)
+        }
+        let exactVisible = finished
+            && controller.selfTestContextProvenance?.contains("Exact") == true
+        let fuzzyRetained = controller.selfTestContextCandidateCount >= fuzzyCount
+        emitExactStep(
+            "exact",
+            variant: "rust-analyzer",
+            controller: controller
+        )
+        return (
+            exactVisible && fuzzyRetained ? "passed" : "failed:exact",
+            exactVisible && fuzzyRetained
+        )
+    }
+
+    private func emitExactStep(
+        _ step: String,
+        variant: String,
+        controller: MainWindowController?,
+        extra: [String: Any] = [:]
+    ) {
+        var object: [String: Any] = [
+            "step": step,
+            "variant": variant,
+            "readerFile": (controller?.displayedReaderFile?.lastPathComponent as Any?)
+                ?? NSNull(),
+            "contextSummary": (controller?.selfTestContextSummary as Any?)
+                ?? NSNull(),
+            "contextProvenance": (controller?.selfTestContextProvenance as Any?)
+                ?? NSNull(),
+            "candidateCount": controller?.selfTestContextCandidateCount ?? 0,
+            "pinned": controller?.selfTestContextPinned ?? false,
+        ]
+        for (key, value) in extra { object[key] = value }
+        Self.writeJSON(object)
+    }
+
+    private func finishExactSelfTest(
+        controller: MainWindowController?,
+        checks: [String: Bool],
+        realProvider: String,
+        error: String?
+    ) -> Never {
+        let passed = error == nil
+            && !checks.isEmpty
+            && checks.values.allSatisfy { $0 }
+        var summary: [String: Any] = checks
+        summary["passed"] = passed
+        summary["realProvider"] = realProvider
+        if let error { summary["error"] = error }
+        emitExactStep(
+            "summary",
+            variant: "all",
+            controller: controller,
+            extra: summary
+        )
+        Darwin.exit(passed ? 0 : 1)
     }
 
     private func performHistoryNavigation(
@@ -1219,6 +1540,131 @@ private final class SwitchSelfTestState {
             break
         }
     }
+}
+
+private struct ExactSelfTestTarget {
+    let file: URL
+    let clickOffset: UInt32
+    let definition: ExactLocation
+}
+
+private struct ExactSelfTestIndexService: IndexService {
+    func index(root: URL) async throws -> EngineSession {
+        try await Task.detached(priority: .userInitiated) {
+            try ProjectIndexer().index(root: root)
+        }.value
+    }
+}
+
+private struct ExactSelfTestDirectorySnapshot: Snapshot {
+    let snapshotID = SnapshotID(rawValue: UUID())
+    let objectFormat = GitObjectFormat.sha1
+    let sourceKind = SourceKind.untracked
+    private let root: URL
+    private let files = ["src/lib.rs", "src/main.rs"]
+
+    init(root: URL) throws {
+        self.root = root.standardizedFileURL
+        for file in files {
+            _ = try Data(contentsOf: self.root.appendingPathComponent(file))
+        }
+    }
+
+    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+        files.compactMap { path in
+            guard let bytes = try? readBytes(path: path) else { return nil }
+            return (path, ContentID.sha256(of: bytes), .regular)
+        }
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        guard files.contains(path) else { throw GitError.missingPath(path) }
+        return [UInt8](try Data(
+            contentsOf: root.appendingPathComponent(path),
+            options: .mappedIfSafe
+        ))
+    }
+
+}
+
+private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
+    let capabilities: ExactCapabilities = [.definition]
+    let toolVersion = "in-process-fake-1"
+    private let location: ExactLocation?
+
+    init(location: ExactLocation?) { self.location = location }
+
+    func prepare(
+        snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        trustMode: TrustMode
+    ) throws -> any ExactSession {
+        InProcessExactSession(
+            location: location,
+            attribution: ExactAttribution(
+                provider: "fake-exact",
+                toolVersion: toolVersion,
+                configFingerprint: profile.configFingerprint,
+                environmentFingerprint: profile.environmentFingerprint,
+                trustMode: trustMode,
+                generatedAt: Date(timeIntervalSince1970: 0),
+                coverage: trustMode == .safe ? .partial : .full
+            )
+        )
+    }
+}
+
+private final class InProcessExactSession: ExactSession, @unchecked Sendable {
+    let readiness: ExactReadiness = .ready
+    let attribution: ExactAttribution
+    private let location: ExactLocation?
+
+    init(location: ExactLocation?, attribution: ExactAttribution) {
+        self.location = location
+        self.attribution = attribution
+    }
+
+    func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+        Thread.sleep(forTimeInterval: 0.25)
+        return location
+    }
+
+    func cancel() {}
+    func close() {}
+}
+
+private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
+    let root = root.standardizedFileURL
+    let path = "src/main.rs"
+    let definitionPath = "src/lib.rs"
+    let file = root.appendingPathComponent(path)
+    guard let source = try? String(contentsOf: file, encoding: .utf8),
+          let click = source.range(of: "answer();", options: .backwards),
+          let definitionBytes = try? Data(contentsOf: root
+              .appendingPathComponent(definitionPath)),
+          let definition = definitionBytes.range(of: Data("answer".utf8)),
+          let clickOffset = UInt32(exactly: source[..<click.lowerBound].utf8.count),
+          let definitionOffset = UInt32(exactly: definition.lowerBound),
+          let coordinate = LineTable(bytes: Array(definitionBytes))
+              .lineColumn(at: definitionOffset)
+    else { return nil }
+    return ExactSelfTestTarget(
+        file: file,
+        clickOffset: clickOffset,
+        definition: ExactLocation(
+            file: definitionPath,
+            byteOffset: Int(definitionOffset),
+            line: Int(coordinate.line),
+            column: Int(coordinate.column)
+        )
+    )
+}
+
+private func exactSelfTestFixtureRoot(root: URL) -> URL {
+    root.standardizedFileURL.appendingPathComponent(
+        "Tests/CodeInsightExactTests/Fixtures/exact_fixture",
+        isDirectory: true
+    )
 }
 
 private func physicalFootprintBytes() -> UInt64? {

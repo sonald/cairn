@@ -178,6 +178,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var readerHasReadingPosition: Bool {
         readerController.currentReadingPosition() != nil
     }
+    var selfTestContextSummary: String? { contextController.selfTestSummary }
+    var selfTestContextProvenance: String? {
+        contextController.selfTestProvenance
+    }
+    var selfTestContextCandidateCount: Int {
+        contextController.selfTestCandidateCount
+    }
+    var selfTestContextPinned: Bool { contextController.selfTestPinned }
 
     func selfTestSetContextPinned(_ pinned: Bool) {
         contextController.selfTestSetPinned(pinned)
@@ -1203,6 +1211,27 @@ final class ContextWindowViewController: NSViewController {
         modeChanged(modeControl)
     }
 
+    var selfTestSummary: String? {
+        loadViewIfNeeded()
+        return pathLabel.stringValue.isEmpty ? nil : pathLabel.stringValue
+    }
+
+    var selfTestProvenance: String? {
+        loadViewIfNeeded()
+        return candidateLabel.stringValue.isEmpty
+            ? nil : candidateLabel.stringValue
+    }
+
+    var selfTestCandidateCount: Int {
+        loadViewIfNeeded()
+        return Int(countLabel.stringValue.split(separator: "/").last ?? "") ?? 0
+    }
+
+    var selfTestPinned: Bool {
+        loadViewIfNeeded()
+        return modeControl.selectedSegment == 1
+    }
+
     override func loadView() {
         modeControl.selectedSegment = 0
         modeControl.target = self
@@ -1289,7 +1318,10 @@ final class ContextWindowViewController: NSViewController {
         let highlightsSyntax: Bool
         if let candidate = model.selectedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
-            candidateLabel.stringValue = [candidate.label, candidate.bindingKind]
+            candidateLabel.stringValue = [
+                candidate.provenanceBadge,
+                candidate.bindingKind,
+            ]
                 .compactMap { $0 }
                 .joined(separator: " · ")
             countLabel.stringValue = "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"

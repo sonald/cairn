@@ -29,3 +29,5 @@ if grep -rnE 'import AppKit|import SwiftUI' \
     echo "AppKit/SwiftUI imports are not allowed in core targets." >&2
     exit 1
 fi
+
+.build/debug/codeinsight-app --self-test-exact .

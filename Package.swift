@@ -103,6 +103,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightExact",
                 "CodeInsightGit",
                 "CodeInsightReaderCore",
             ]
@@ -123,6 +124,9 @@ let package = Package(
             name: "CodeInsightApp",
             dependencies: [
                 "CodeInsightAppModel",
+                "CodeInsightCore",
+                "CodeInsightEngine",
+                "CodeInsightExact",
                 "CodeInsightGit",
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
@@ -171,6 +175,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightAppModel",
                 "CodeInsightEngine",
+                "CodeInsightExact",
                 "CodeInsightGit",
                 "CodeInsightReaderCore",
             ]

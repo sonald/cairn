@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
@@ -279,6 +280,7 @@ public final class AppModel {
     public private(set) var navigationGeneration: UInt64 = 0
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
+    public let exactCoordinator: ExactCoordinator
     public let commitPicker: CommitPickerModel
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
@@ -295,13 +297,16 @@ public final class AppModel {
     public init(
         indexService: any IndexService = ProjectIndexService(),
         contextWindow: ContextWindowModel = ContextWindowModel(),
+        exactCoordinator: ExactCoordinator = ExactCoordinator(),
         commitPicker: CommitPickerModel = CommitPickerModel(),
         navigationSink: @MainActor @escaping (URL, UInt32?) -> Void = { _, _ in }
     ) {
         self.indexService = indexService
         self.contextWindow = contextWindow
+        self.exactCoordinator = exactCoordinator
         self.commitPicker = commitPicker
         self.navigationSink = navigationSink
+        contextWindow.attachExactCoordinator(exactCoordinator)
         relationTree.onSelect = { [weak self] node in
             guard let self,
                   contextWindow.mode != .pinned,
@@ -325,6 +330,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         generation &+= 1
         let openGeneration = generation
+        exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
         commitPicker.setCurrentRevision(nil)
         commitPicker.load(repositoryURL: root)
@@ -456,6 +462,7 @@ public final class AppModel {
             assertionFailure("Illegal project state transition to ready")
             return
         }
+        prepareExact(generation: generation)
     }
 
     private func failIndexing(generation: UInt64) {
@@ -472,6 +479,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         generation &+= 1
         let switchGeneration = generation
+        exactCoordinator.invalidate(generation: switchGeneration)
         commitPicker.setCurrentRevision(revision)
         snapshotPhase = nil
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
@@ -587,6 +595,16 @@ public final class AppModel {
             assertionFailure("Illegal project state transition to ready")
             return
         }
+        if phase == .fullReady { prepareExact(generation: generation) }
+    }
+
+    private func prepareExact(generation: UInt64) {
+        guard let projectRoot else { return }
+        exactCoordinator.prepare(
+            projectURL: projectRoot,
+            revision: currentRevision,
+            generation: generation
+        )
     }
 
     private func publishProjectState(_ state: ProjectState, root: URL?) {

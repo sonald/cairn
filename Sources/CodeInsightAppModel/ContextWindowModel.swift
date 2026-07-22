@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import CodeInsightReaderCore
 import Foundation
 import Observation
@@ -21,6 +22,10 @@ public final class ContextWindowModel {
         public let excerpt: String
         public let bindingKind: String?
         public let targetByteOffset: UInt32
+        public let certainty: Certainty
+        public let provenance: ResolutionProvenance
+        public let exactAttribution: ExactAttribution?
+        public let provenanceBadge: String
     }
 
     public enum Stage: Sendable {
@@ -51,6 +56,11 @@ public final class ContextWindowModel {
         QueryContext
     ) async throws -> [ResolutionCandidate]
     typealias Loader = @Sendable (URL) async -> ReaderDocument?
+    typealias ExactResolver = @MainActor (
+        String,
+        UInt32,
+        UInt64
+    ) async -> ExactOverlay.Entry?
 
     public private(set) var mode: Mode = .follow
     public private(set) var stage: Stage = .idle
@@ -58,11 +68,13 @@ public final class ContextWindowModel {
 
     private let resolver: Resolver
     private let loader: Loader
+    private var exactResolver: ExactResolver?
     private var projectState: ProjectState = .empty
     private var root: URL?
     private var contentSource: DocumentLoader.ContentSource?
     private var pendingToken: Token?
     private var locatedToken: LocatedToken?
+    private var displayedToken: Token?
     private var documents: [DocumentKey: ReaderDocument] = [:]
     private var documentRecency: [DocumentKey] = []
 
@@ -71,14 +83,27 @@ public final class ContextWindowModel {
             try session.resolve(file: file, offset: offset, context: context)
         }
         loader = loadReaderDocument
+        exactResolver = nil
     }
 
     init(
         _ resolver: @escaping Resolver,
-        loader: @escaping Loader = loadReaderDocument
+        loader: @escaping Loader = loadReaderDocument,
+        exactResolver: ExactResolver? = nil
     ) {
         self.resolver = resolver
         self.loader = loader
+        self.exactResolver = exactResolver
+    }
+
+    func attachExactCoordinator(_ coordinator: ExactCoordinator) {
+        exactResolver = { [weak coordinator] file, offset, generation in
+            await coordinator?.definition(
+                file: file,
+                byteOffset: offset,
+                generation: generation
+            )
+        }
     }
 
     public var selectedCandidate: Candidate? {
@@ -106,12 +131,25 @@ public final class ContextWindowModel {
     }
 
     public func setMode(_ mode: Mode) {
-        if mode == .pinned, self.mode != .pinned {
+        let enteringPin = mode == .pinned && self.mode != .pinned
+        if enteringPin {
             requestID &+= 1
             pendingToken = nil
             locatedToken = nil
         }
         self.mode = mode
+        if enteringPin,
+           let displayedToken,
+           case let .ready(session, context) = projectState,
+           selectedCandidate != nil
+        {
+            startExactUpgrade(
+                displayedToken,
+                session: session,
+                context: context,
+                request: requestID
+            )
+        }
     }
 
     public func updateProjectState(
@@ -122,6 +160,7 @@ public final class ContextWindowModel {
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
             pendingToken = nil
+            displayedToken = nil
         }
         self.root = normalizedRoot
         self.contentSource = contentSource
@@ -131,6 +170,7 @@ public final class ContextWindowModel {
         case .indexing:
             requestID &+= 1
             locatedToken = nil
+            displayedToken = nil
             stage = .indexBuilding
         case .ready:
             if let pendingToken {
@@ -145,6 +185,7 @@ public final class ContextWindowModel {
             requestID &+= 1
             pendingToken = nil
             locatedToken = nil
+            displayedToken = nil
             stage = .idle
         }
     }
@@ -242,6 +283,13 @@ public final class ContextWindowModel {
                 return nil
             }
             stage = .candidates(candidates, selected: 0)
+            displayedToken = token
+            startExactUpgrade(
+                token,
+                session: session,
+                context: context,
+                request: currentRequest
+            )
             return candidates[0]
         } catch {
             guard requestID == currentRequest else { return nil }
@@ -338,10 +386,174 @@ public final class ContextWindowModel {
                 label: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))",
                 excerpt: text,
                 bindingKind: bindingKind,
-                targetByteOffset: targetOffset
+                targetByteOffset: targetOffset,
+                certainty: resolution.certainty,
+                provenance: resolution.provenance,
+                exactAttribution: nil,
+                provenanceBadge: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))"
             ))
         }
         return candidates
+    }
+
+    private func startExactUpgrade(
+        _ token: Token,
+        session: EngineSession,
+        context: QueryContext,
+        request: UInt64
+    ) {
+        guard exactResolver != nil else { return }
+        Task { [weak self] in
+            await self?.upgradeExact(
+                token,
+                session: session,
+                context: context,
+                request: request
+            )
+        }
+    }
+
+    private func upgradeExact(
+        _ token: Token,
+        session: EngineSession,
+        context: QueryContext,
+        request: UInt64
+    ) async {
+        guard let exactResolver,
+              let exact = await exactResolver(
+                  token.file,
+                  token.offset,
+                  context.generation
+              ),
+              requestID == request,
+              case let .ready(currentSession, currentContext) = projectState,
+              currentContext.generation == context.generation,
+              currentSession.snapshotID == session.snapshotID
+        else { return }
+        await applyExact(exact, session: session)
+    }
+
+    private func applyExact(
+        _ exact: ExactOverlay.Entry,
+        session: EngineSession
+    ) async {
+        guard case let .candidates(current, selected) = stage,
+              current.indices.contains(selected),
+              let targetOffset = UInt32(exactly: exact.location.byteOffset)
+        else { return }
+        let targetPath = projectPath(exact.location.file)
+        if let index = current.firstIndex(where: {
+            $0.path == targetPath && $0.targetByteOffset == targetOffset
+        }) {
+            var candidates = current
+            let upgraded = exactCandidate(
+                upgrading: candidates[index],
+                attribution: exact.attribution
+            )
+            if mode == .pinned {
+                guard index == selected else { return }
+                candidates[index] = upgraded
+                stage = .candidates(candidates, selected: selected)
+            } else if index == selected {
+                candidates[index] = upgraded
+                stage = .candidates(candidates, selected: selected)
+            } else {
+                candidates.remove(at: index)
+                candidates.insert(upgraded, at: 0)
+                stage = .candidates(candidates, selected: 0)
+            }
+            return
+        }
+
+        guard mode != .pinned,
+              let candidate = await exactCandidate(
+                  at: targetPath,
+                  offset: targetOffset,
+                  attribution: exact.attribution,
+                  session: session
+              )
+        else { return }
+        stage = .candidates([candidate] + current, selected: 0)
+    }
+
+    private func exactCandidate(
+        upgrading candidate: Candidate,
+        attribution: ExactAttribution
+    ) -> Candidate {
+        let label = "Exact·direct"
+        return Candidate(
+            symbol: candidate.symbol,
+            path: candidate.path,
+            line: candidate.line,
+            column: candidate.column,
+            label: label,
+            excerpt: candidate.excerpt,
+            bindingKind: candidate.bindingKind,
+            targetByteOffset: candidate.targetByteOffset,
+            certainty: .exact,
+            provenance: .lsp,
+            exactAttribution: attribution,
+            provenanceBadge: exactBadge(label, attribution: attribution)
+        )
+    }
+
+    private func exactCandidate(
+        at path: String,
+        offset: UInt32,
+        attribution: ExactAttribution,
+        session: EngineSession
+    ) async -> Candidate? {
+        guard let pathID = pathID(path, in: session),
+              let index = contentIndex(at: pathID, in: session),
+              let symbolIndex = index.symbols.firstIndex(where: {
+                  $0.nameRange.contains(offset) || $0.nameRange.lowerBound == offset
+              }),
+              let coordinate = index.lineTable.lineColumn(at: offset),
+              let contentID = contentID(at: pathID, in: session),
+              let document = await document(path: path, contentID: contentID)
+        else { return nil }
+        let facet = index.symbols[symbolIndex]
+        let label = "Exact·direct"
+        return Candidate(
+            symbol: SymbolOccurrenceID(
+                snapshotID: session.snapshotID,
+                pathID: pathID,
+                localKind: .declarationFacet,
+                localIndex: UInt32(symbolIndex)
+            ),
+            path: path,
+            line: coordinate.line,
+            column: coordinate.column,
+            label: label,
+            excerpt: excerpt(for: facet.range, in: document, binding: false),
+            bindingKind: nil,
+            targetByteOffset: offset,
+            certainty: .exact,
+            provenance: .lsp,
+            exactAttribution: attribution,
+            provenanceBadge: exactBadge(label, attribution: attribution)
+        )
+    }
+
+    private func projectPath(_ path: String) -> String {
+        guard path.hasPrefix("/"), let root else { return path }
+        let file = URL(fileURLWithPath: path).standardizedFileURL
+        guard file.pathComponents.starts(with: root.pathComponents) else {
+            return path
+        }
+        return file.pathComponents.dropFirst(root.pathComponents.count)
+            .joined(separator: "/")
+    }
+
+    private func exactBadge(
+        _ label: String,
+        attribution: ExactAttribution
+    ) -> String {
+        let trust = switch attribution.trustMode {
+        case .safe: "Safe"
+        case .trusted: "Trusted"
+        }
+        return "\(label) · \(attribution.provider) · \(trust)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {
