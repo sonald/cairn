@@ -14,6 +14,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private static let projectItemIdentifier = NSToolbarItem.Identifier("Project")
     private static let commitItemIdentifier = NSToolbarItem.Identifier("Commit")
     private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
+    private static let exactItemIdentifier = NSToolbarItem.Identifier("ExactStatus")
 
     let model: AppModel
     private let sidebarController = SidebarViewController()
@@ -32,6 +33,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let projectLabel = NSTextField(labelWithString: "CodeInsight")
     private let commitButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
+    private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
@@ -186,6 +188,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.selfTestCandidateCount
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
+    var selfTestExactStatusText: String { exactLabel.stringValue }
+    var selfTestExactGroupTitle: String? {
+        relationController.selfTestExactGroupTitle
+    }
+    var selfTestExactGroupRowCount: Int {
+        relationController.selfTestExactGroupRowCount
+    }
 
     func selfTestSetContextPinned(_ pinned: Bool) {
         contextController.selfTestSetPinned(pinned)
@@ -302,6 +311,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.projectItemIdentifier,
             Self.commitItemIdentifier,
             .flexibleSpace,
+            Self.exactItemIdentifier,
         ]
     }
 
@@ -312,6 +322,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.projectItemIdentifier,
             Self.commitItemIdentifier,
             Self.indexItemIdentifier,
+            Self.exactItemIdentifier,
             .flexibleSpace,
         ]
     }
@@ -356,6 +367,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.indexItemIdentifier:
             item.label = "Index Status"
             item.view = indexLabel
+        case Self.exactItemIdentifier:
+            item.label = "Exact Status"
+            item.view = exactLabel
+            exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+            exactLabel.setAccessibilityLabel("Exact provider status")
         default:
             return nil
         }
@@ -386,6 +402,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.navigationGeneration
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.isLoading
+            _ = model.exactCoordinator.readiness
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -426,6 +443,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "CodeInsight"
         renderCommitButton()
+        renderExactStatus()
 
         guard let toolbar = window?.toolbar else { return }
         let statusText = model.coverage.statusText(for: model.snapshotPhase)
@@ -448,6 +466,37 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+    }
+
+    private func renderExactStatus() {
+        let status: String
+        let color: NSColor
+        let detail: String?
+        switch model.exactCoordinator.readiness {
+        case .ready:
+            status = "Exact: ready"
+            color = .systemGreen
+            detail = nil
+        case .preparing:
+            status = "Exact: preparing"
+            color = .secondaryLabelColor
+            detail = nil
+        case .unavailable(let reason):
+            status = reason.localizedCaseInsensitiveContains("sandbox")
+                ? "Exact: unavailable (sandbox)"
+                : "Exact: unavailable"
+            color = .systemRed
+            detail = reason
+        case .off(let reason):
+            status = reason.localizedCaseInsensitiveContains("sandbox")
+                ? "Exact: unavailable (sandbox)"
+                : "Exact: off (Safe)"
+            color = .systemOrange
+            detail = reason
+        }
+        exactLabel.stringValue = status
+        exactLabel.textColor = color
+        exactLabel.toolTip = detail
     }
 
     private var initialIndexStatus: String? {

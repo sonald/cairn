@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightAppModel
 import CodeInsightReaderCore
 import SwiftUI
 
@@ -6,13 +7,20 @@ import SwiftUI
 final class ReaderSettingsWindowController: NSWindowController {
     init(
         settings: ReaderSettings,
+        exactCoordinator: ExactCoordinator,
+        onRevoke: @escaping @MainActor (URL) async -> Void,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
         let hostingController = NSHostingController(
-            rootView: ReaderSettingsView(settings: settings, onChange: onChange)
+            rootView: SettingsView(
+                settings: settings,
+                exactCoordinator: exactCoordinator,
+                onRevoke: onRevoke,
+                onChange: onChange
+            )
         )
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Reader Settings"
+        window.title = "Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -20,6 +28,27 @@ final class ReaderSettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private struct SettingsView: View {
+    let settings: ReaderSettings
+    let exactCoordinator: ExactCoordinator
+    let onRevoke: @MainActor (URL) async -> Void
+    let onChange: @MainActor (ReaderSettings) -> Void
+
+    var body: some View {
+        TabView {
+            ReaderSettingsView(settings: settings, onChange: onChange)
+                .tabItem { Label("Reader", systemImage: "textformat") }
+            TrustSettingsView(
+                coordinator: exactCoordinator,
+                onRevoke: onRevoke
+            )
+            .tabItem { Label("Trust", systemImage: "checkmark.shield") }
+        }
+        .padding()
+        .frame(width: 560, height: 360)
     }
 }
 
@@ -72,9 +101,56 @@ private struct ReaderSettingsView: View {
         }
         .formStyle(.grouped)
         .padding()
-        .frame(width: 440, height: 300)
         .onChange(of: settings) { _, value in
             onChange(value)
         }
+    }
+}
+
+private struct TrustSettingsView: View {
+    @Bindable var coordinator: ExactCoordinator
+    let onRevoke: @MainActor (URL) async -> Void
+
+    var body: some View {
+        Group {
+            if coordinator.trustedRepositories.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "checkmark.shield")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.secondary)
+                    Text("No Trusted Repositories")
+                        .font(.headline)
+                    Text("Repositories you trust will appear here.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                List(coordinator.trustedRepositories.indices, id: \.self) { index in
+                    let repository = coordinator.trustedRepositories[index]
+                    HStack(spacing: 12) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(repository.path)
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(2)
+                            Text(repository.grantedAt, format: .dateTime
+                                .year().month().day().hour().minute())
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button("Revoke") {
+                            Task {
+                                await onRevoke(URL(
+                                    fileURLWithPath: repository.path,
+                                    isDirectory: true
+                                ))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
+        }
+        .task { await coordinator.refreshTrust() }
     }
 }

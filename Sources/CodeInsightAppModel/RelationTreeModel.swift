@@ -69,13 +69,39 @@ public final class RelationTreeModel {
 
     struct LoadedEdge: Sendable {
         let title: String
-        let certainty: Certainty
+        var certainty: Certainty
         let dispatch: DispatchKind
         let symbol: SymbolOccurrenceID?
         let path: String
         let byteOffset: UInt32
         let line: UInt32
         let evidence: [ResolutionEvidence]
+        let exactQuery: (file: String, byteOffset: UInt32)?
+        let fuzzyTarget: (file: String, byteOffset: UInt32)?
+
+        init(
+            title: String,
+            certainty: Certainty,
+            dispatch: DispatchKind,
+            symbol: SymbolOccurrenceID?,
+            path: String,
+            byteOffset: UInt32,
+            line: UInt32,
+            evidence: [ResolutionEvidence],
+            exactQuery: (file: String, byteOffset: UInt32)? = nil,
+            fuzzyTarget: (file: String, byteOffset: UInt32)? = nil
+        ) {
+            self.title = title
+            self.certainty = certainty
+            self.dispatch = dispatch
+            self.symbol = symbol
+            self.path = path
+            self.byteOffset = byteOffset
+            self.line = line
+            self.evidence = evidence
+            self.exactQuery = exactQuery
+            self.fuzzyTarget = fuzzyTarget
+        }
     }
 
     struct LoadResult: Sendable {
@@ -89,6 +115,11 @@ public final class RelationTreeModel {
         SymbolOccurrenceID,
         Direction
     ) async throws -> LoadResult
+    typealias ExactResolver = @MainActor @Sendable (
+        String,
+        UInt32,
+        UInt64
+    ) async -> ExactOverlay.Entry?
 
     public private(set) var root: Node?
     public private(set) var direction: Direction = .callers
@@ -97,6 +128,7 @@ public final class RelationTreeModel {
     public var onSelect: @MainActor (Node) -> Void = { _ in }
 
     private let loader: Loader
+    private var exactResolver: ExactResolver?
     private var session: EngineSession?
     private var context: QueryContext?
 
@@ -109,10 +141,25 @@ public final class RelationTreeModel {
                 direction: direction
             )
         }
+        exactResolver = nil
     }
 
-    init(loader: @escaping Loader) {
+    init(
+        loader: @escaping Loader,
+        exactResolver: ExactResolver? = nil
+    ) {
         self.loader = loader
+        self.exactResolver = exactResolver
+    }
+
+    func attachExactCoordinator(_ coordinator: ExactCoordinator) {
+        exactResolver = { [weak coordinator] file, offset, generation in
+            await coordinator?.definition(
+                file: file,
+                byteOffset: offset,
+                generation: generation
+            )
+        }
     }
 
     public func updateProjectState(_ state: ProjectState) {
@@ -202,6 +249,14 @@ public final class RelationTreeModel {
 
             switch result {
             case let .success(loaded):
+                let loaded = await promoteExactEdges(
+                    loaded,
+                    generation: context.generation
+                )
+                guard generation == currentGeneration,
+                      node.loadRequestID == currentRequestID,
+                      self.session === session
+                else { return }
                 node.children = makeChildren(
                     from: loaded,
                     under: node,
@@ -218,6 +273,38 @@ public final class RelationTreeModel {
                 ] + evidenceNodes(node.evidence, parent: node)
             }
         }
+    }
+
+    private func promoteExactEdges(
+        _ loaded: LoadResult,
+        generation: UInt64
+    ) async -> LoadResult {
+        guard let exactResolver else { return loaded }
+        var edges = loaded.edges
+        await withTaskGroup(of: (Int, Bool).self) { group in
+            for (index, edge) in edges.prefix(500).enumerated() {
+                guard let query = edge.exactQuery,
+                      let fuzzyTarget = edge.fuzzyTarget
+                else { continue }
+                group.addTask {
+                    let exact = await exactResolver(
+                        query.file,
+                        query.byteOffset,
+                        generation
+                    )
+                    return (
+                        index,
+                        exact?.location.file == fuzzyTarget.file
+                            && exact?.location.byteOffset
+                                == Int(fuzzyTarget.byteOffset)
+                    )
+                }
+            }
+            for await (index, matches) in group where matches {
+                edges[index].certainty = .exact
+            }
+        }
+        return LoadResult(edges: edges, isTruncated: loaded.isTruncated)
     }
 
     private func makeChildren(
@@ -315,7 +402,9 @@ public final class RelationTreeModel {
                 subtitle: edge.certainty == .unresolved
                     ? "Unresolved"
                     : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
-                badge: isCycle ? "↻" : nil,
+                badge: edge.certainty == .exact
+                    ? (isCycle ? "Exact · lsp · ↻" : "Exact · lsp")
+                    : (isCycle ? "↻" : nil),
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,
                 children: canExpand ? nil : [],
@@ -367,6 +456,7 @@ public final class RelationTreeModel {
             guard let name = symbolTitle(symbol, in: session) else {
                 return LoadResult(edges: [], isTruncated: false)
             }
+            let fuzzyTarget = location(for: symbol, in: session)
             let callers = try session.callers(of: name, context: context)
             return LoadResult(
                 edges: callers.compactMap { caller in
@@ -390,7 +480,9 @@ public final class RelationTreeModel {
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: caller.evidence
+                        evidence: caller.evidence,
+                        exactQuery: (location.path, location.byteOffset),
+                        fuzzyTarget: fuzzyTarget.map { ($0.path, $0.byteOffset) }
                     )
                 },
                 isTruncated: callers.contains { isTruncated($0.completeness) }
@@ -400,6 +492,7 @@ public final class RelationTreeModel {
             let result = try session.outgoingCalls(from: symbol, context: context)
             var edges: [LoadedEdge] = []
             for outgoing in result.calls {
+                let callSite = location(for: outgoing.callSite, in: session)
                 var appendedCandidate = false
                 for candidate in outgoing.candidates {
                     guard let location = location(
@@ -417,7 +510,9 @@ public final class RelationTreeModel {
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: candidate.evidence
+                        evidence: candidate.evidence,
+                        exactQuery: callSite.map { ($0.path, $0.byteOffset) },
+                        fuzzyTarget: (location.path, location.byteOffset)
                     ))
                 }
                 if !appendedCandidate,

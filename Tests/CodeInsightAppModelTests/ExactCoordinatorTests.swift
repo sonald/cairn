@@ -69,6 +69,62 @@ func exactCoordinatorTurnsOffSafeModeWithoutSandbox() async throws {
 
 @MainActor
 @Test
+func exactCoordinatorTrustUIStateFlowsGrantAndRevoke() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    let grantedAt = Date(timeIntervalSince1970: 1_700_000_000)
+
+    await coordinator.refreshTrust()
+    #expect(coordinator.trustedRepositories.isEmpty)
+
+    try await coordinator.grantTrust(fixture.root, grantedAt: grantedAt)
+    #expect(coordinator.trustedRepositories.count == 1)
+    #expect(coordinator.trustedRepositories.first?.path == fixture.root.path)
+    #expect(coordinator.trustedRepositories.first?.grantedAt == grantedAt)
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(state.trustModes.last == "trusted")
+
+    try await coordinator.revokeTrust(fixture.root)
+    #expect(coordinator.trustedRepositories.isEmpty)
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
+    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(state.trustModes.last == "safe")
+}
+
+@MainActor
+@Test
+func appModelTrustActionsRebuildExactSessionImmediately() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    let model = AppModel(exactCoordinator: coordinator)
+
+    model.openProject(root: fixture.root)
+    #expect(await exactWaitUntil {
+        guard case .ready = model.projectState else { return false }
+        return coordinator.readiness == .ready
+    })
+    #expect(state.trustModes == ["safe"])
+
+    try await model.grantCurrentRepositoryTrust()
+    #expect(await exactWaitUntil {
+        state.prepareCount == 2 && coordinator.readiness == .ready
+    })
+    #expect(state.trustModes == ["safe", "trusted"])
+
+    try await model.revokeRepositoryTrust(fixture.root)
+    #expect(await exactWaitUntil {
+        state.prepareCount == 3 && coordinator.readiness == .ready
+    })
+    #expect(state.trustModes == ["safe", "trusted", "safe"])
+}
+
+@MainActor
+@Test
 func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
@@ -333,6 +389,7 @@ private final class ExactProviderState: @unchecked Sendable {
     private let behavior: Behavior
     private var prepares = 0
     private var definitions = 0
+    private var modes: [String] = []
 
     init(
         behavior: @escaping Behavior = { _, _, _ in
@@ -344,10 +401,16 @@ private final class ExactProviderState: @unchecked Sendable {
 
     var prepareCount: Int { locked { prepares } }
     var definitionCount: Int { locked { definitions } }
+    var trustModes: [String] { locked { modes } }
 
     func makeSession(attribution: ExactAttribution) -> ExactStateSession {
         let ordinal = locked {
             prepares += 1
+            let mode = switch attribution.trustMode {
+            case .safe: "safe"
+            case .trusted: "trusted"
+            }
+            modes.append(mode)
             return prepares
         }
         return ExactStateSession(

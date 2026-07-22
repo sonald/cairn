@@ -22,7 +22,7 @@ public enum SnapshotPhase: Int, Sendable {
 public struct SnapshotCoverage: Equatable, Sendable {
     public let filesIndexed: Int
     public let filesTotal: Int
-    /// M3 S4 does not yet expose an honest module-import reachability count.
+    /// Reserved for a real module-import reachability count.
     public let importsResolved: Int?
 
     public init(filesIndexed: Int, filesTotal: Int, importsResolved: Int? = nil) {
@@ -35,7 +35,7 @@ public struct SnapshotCoverage: Equatable, Sendable {
         guard let phase, phase != .fullReady else { return nil }
         let files = "Files \(filesIndexed)/\(filesTotal)"
         guard let importsResolved else {
-            return "\(files) · resolving imports"
+            return files
         }
         return "\(files) · Imports resolved \(importsResolved)"
     }
@@ -285,6 +285,11 @@ public final class AppModel {
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
 
+    public var canTrustCurrentRepository: Bool {
+        guard case .ready = projectState, let projectRoot else { return false }
+        return !exactCoordinator.isTrusted(projectRoot)
+    }
+
     private let indexService: any IndexService
     private let navigationSink: @MainActor (URL, UInt32?) -> Void
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
@@ -307,6 +312,7 @@ public final class AppModel {
         self.commitPicker = commitPicker
         self.navigationSink = navigationSink
         contextWindow.attachExactCoordinator(exactCoordinator)
+        relationTree.attachExactCoordinator(exactCoordinator)
         relationTree.onSelect = { [weak self] node in
             guard let self,
                   contextWindow.mode != .pinned,
@@ -368,6 +374,28 @@ public final class AppModel {
                 self?.failIndexing(generation: openGeneration)
             }
         }
+    }
+
+    public func grantCurrentRepositoryTrust() async throws {
+        guard let root = projectRoot else { return }
+        let trustGeneration = generation
+        try await exactCoordinator.grantTrust(root)
+        guard generation == trustGeneration,
+              projectRoot?.standardizedFileURL == root.standardizedFileURL,
+              case .ready = projectState
+        else { return }
+        prepareExact(generation: trustGeneration)
+    }
+
+    public func revokeRepositoryTrust(_ repositoryURL: URL) async throws {
+        let trustGeneration = generation
+        try await exactCoordinator.revokeTrust(repositoryURL)
+        guard generation == trustGeneration,
+              projectRoot?.resolvingSymlinksInPath().standardizedFileURL
+                == repositoryURL.resolvingSymlinksInPath().standardizedFileURL,
+              case .ready = projectState
+        else { return }
+        prepareExact(generation: trustGeneration)
     }
 
     public func switchToCommit(

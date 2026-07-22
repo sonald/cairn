@@ -66,7 +66,8 @@ func snapshotCoverageFormatsPartsUntilFullReady() {
 
     #expect(
         coverage.statusText(for: .cachedReady)
-            == "Files 120/717 · resolving imports"
+            == "Files 120/717"
     )
+    #expect(coverage.statusText(for: .cachedReady)?.contains("resolving") == false)
     #expect(coverage.statusText(for: .fullReady) == nil)
 }

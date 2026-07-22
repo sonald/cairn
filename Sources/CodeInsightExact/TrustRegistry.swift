@@ -51,6 +51,12 @@ public actor TrustRegistry {
         }
     }
 
+    public func trustedRepositories() -> [(path: String, grantedAt: Date)] {
+        entries.compactMap { path, entry in
+            entry.mode == "trusted" ? (path, entry.grantedAt) : nil
+        }.sorted { $0.path < $1.path }
+    }
+
     private func save() throws {
         try FileManager.default.createDirectory(
             at: fileURL.deletingLastPathComponent(),

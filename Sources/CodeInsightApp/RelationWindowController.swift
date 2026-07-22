@@ -19,6 +19,27 @@ final class RelationWindowController: NSViewController,
     private let outlineView = RelationOutlineView()
     private var currentSymbol: SymbolOccurrenceID?
 
+    var selfTestExactGroupTitle: String? {
+        selfTestExactGroupItem?.title
+    }
+
+    var selfTestExactGroupRowCount: Int {
+        guard let group = selfTestExactGroupItem else { return 0 }
+        return group.children?.filter { outlineView.row(forItem: $0) >= 0 }.count ?? 0
+    }
+
+    private var selfTestExactGroupItem: RelationTreeModel.Node? {
+        guard isViewLoaded else { return nil }
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
+                  node.kind == .group,
+                  node.title.hasPrefix("Exact")
+            else { continue }
+            return node
+        }
+        return nil
+    }
+
     init(model: RelationTreeModel) {
         self.model = model
         super.init(nibName: nil, bundle: nil)

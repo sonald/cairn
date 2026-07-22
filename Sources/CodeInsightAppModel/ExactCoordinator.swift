@@ -92,6 +92,9 @@ public final class ExactCoordinator {
     }
 
     public private(set) var readiness: Readiness = .off("no project")
+    public private(set) var trustedRepositories: [
+        (path: String, grantedAt: Date)
+    ] = []
 
     @ObservationIgnored private let providerFactory: ProviderFactory
     @ObservationIgnored private let snapshotFactory: SnapshotFactory
@@ -161,10 +164,12 @@ public final class ExactCoordinator {
 
         prepareTask = Task { [weak self] in
             let trustMode = await trustRegistry.query(root) ?? .safe
+            let trustedRepositories = await trustRegistry.trustedRepositories()
             guard let self, epoch == currentEpoch,
                   expectedGeneration == generation,
                   !Task.isCancelled
             else { return }
+            self.trustedRepositories = trustedRepositories
             guard trustMode != .safe || sandboxAvailable() else {
                 readiness = .off("Safe exact disabled: sandbox-exec unavailable")
                 prepareTask = nil
@@ -229,6 +234,32 @@ public final class ExactCoordinator {
             }
             if epoch == currentEpoch { prepareTask = nil }
         }
+    }
+
+    public func refreshTrust() async {
+        trustedRepositories = await trustRegistry.trustedRepositories()
+    }
+
+    public func grantTrust(
+        _ repositoryURL: URL,
+        grantedAt: Date = Date()
+    ) async throws {
+        try await trustRegistry.grant(
+            repositoryURL,
+            mode: .trusted,
+            grantedAt: grantedAt
+        )
+        await refreshTrust()
+    }
+
+    public func revokeTrust(_ repositoryURL: URL) async throws {
+        try await trustRegistry.revoke(repositoryURL)
+        await refreshTrust()
+    }
+
+    func isTrusted(_ repositoryURL: URL) -> Bool {
+        let path = repositoryURL.resolvingSymlinksInPath().standardizedFileURL.path
+        return trustedRepositories.contains { $0.path == path }
     }
 
     public func definition(

@@ -567,6 +567,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactSummary = windowController.selfTestContextSummary
         let exactCount = windowController.selfTestContextCandidateCount
 
+        let relationFileVisible = waitUntil(timeout: 5, condition: {
+            windowController.selectFileInSidebar(target.relationFile)
+        }) && waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.relationFile.standardizedFileURL
+        })
+        if relationFileVisible {
+            windowController.selfTestReaderRelation(
+                offset: target.relationCallOffset,
+                direction: .callers
+            )
+        }
+        let exactGroupVisible = waitUntil(timeout: 5, condition: {
+            windowController.selfTestExactGroupRowCount > 0
+        })
+        let exactGroupHeaderHonest = windowController.selfTestExactGroupTitle == "Exact"
+        let exactStatusVisible = windowController.selfTestExactStatusText
+            .contains("Exact:")
+        emitExactStep(
+            "relations",
+            variant: "fake",
+            controller: windowController
+        )
+
         windowController.selfTestSetContextPinned(true)
         let pinnedStable = waitUntil(timeout: 5, condition: {
             windowController.selfTestContextPinned
@@ -587,6 +611,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "exactVisible": exactVisible,
                 "fuzzyRetained": fuzzyRetained,
                 "pinnedTargetStable": pinnedStable,
+                "exactGroupVisible": exactGroupVisible,
+                "exactGroupHeaderHonest": exactGroupHeaderHonest,
+                "exactStatusVisible": exactStatusVisible,
+                "relationFileVisible": relationFileVisible,
                 "realProviderPassedOrSkipped": real.passed,
             ],
             realProvider: real.status,
@@ -746,6 +774,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ?? NSNull(),
             "candidateCount": controller?.selfTestContextCandidateCount ?? 0,
             "pinned": controller?.selfTestContextPinned ?? false,
+            "exactGroupRowCount": controller?.selfTestExactGroupRowCount ?? 0,
+            "exactGroupTitle": (controller?.selfTestExactGroupTitle as Any?)
+                ?? NSNull(),
+            "exactStatusText": controller?.selfTestExactStatusText
+                ?? "Exact: unavailable",
         ]
         for (key, value) in extra { object[key] = value }
         Self.writeJSON(object)
@@ -1046,7 +1079,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     @objc private func showSettings(_ sender: Any?) {
         if settingsWindowController == nil {
             settingsWindowController = ReaderSettingsWindowController(
-                settings: readerSettings
+                settings: readerSettings,
+                exactCoordinator: model.exactCoordinator,
+                onRevoke: { [weak self] repositoryURL in
+                    guard let self else { return }
+                    do {
+                        try await model.revokeRepositoryTrust(repositoryURL)
+                    } catch {
+                        presentTrustError(error)
+                    }
+                }
             ) { [weak self] settings in
                 guard let self else { return }
                 readerSettings = settings
@@ -1057,6 +1099,38 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         settingsWindowController?.showWindow(nil)
         settingsWindowController?.window?.center()
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    @objc private func trustThisRepository(_ sender: Any?) {
+        guard let window = windowController?.window,
+              model.canTrustCurrentRepository
+        else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Trust This Repository?"
+        alert.informativeText = "This will allow this repository's build scripts "
+            + "and proc macros to execute. Network access remains disabled."
+        alert.addButton(withTitle: "Trust")
+        alert.addButton(withTitle: "Cancel")
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn, let self else { return }
+            Task { @MainActor in
+                do {
+                    try await model.grantCurrentRepositoryTrust()
+                } catch {
+                    presentTrustError(error)
+                }
+            }
+        }
+    }
+
+    private func presentTrustError(_ error: any Error) {
+        let alert = NSAlert(error: error)
+        if let window = windowController?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     @objc private func openSymbol(_ sender: Any?) {
@@ -1116,6 +1190,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
              #selector(showCalls(_:)),
              #selector(showImplementations(_:)):
             model.contextWindow.selectedCandidate != nil
+        case #selector(trustThisRepository(_:)):
+            model.canTrustCurrentRepository
         default:
             true
         }
@@ -1153,6 +1229,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openItem.target = self
         fileMenu.addItem(openItem)
+        fileMenu.addItem(.separator())
+        let trustItem = NSMenuItem(
+            title: "Trust This Repository…",
+            action: #selector(trustThisRepository(_:)),
+            keyEquivalent: ""
+        )
+        trustItem.target = self
+        fileMenu.addItem(trustItem)
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
 
@@ -1546,6 +1630,8 @@ private struct ExactSelfTestTarget {
     let file: URL
     let clickOffset: UInt32
     let definition: ExactLocation
+    let relationFile: URL
+    let relationCallOffset: UInt32
 }
 
 private struct ExactSelfTestIndexService: IndexService {
@@ -1638,14 +1724,26 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
     let path = "src/main.rs"
     let definitionPath = "src/lib.rs"
     let file = root.appendingPathComponent(path)
+    let relationFile = root.appendingPathComponent(definitionPath)
     guard let source = try? String(contentsOf: file, encoding: .utf8),
           let click = source.range(of: "answer();", options: .backwards),
-          let definitionBytes = try? Data(contentsOf: root
-              .appendingPathComponent(definitionPath)),
-          let definition = definitionBytes.range(of: Data("answer".utf8)),
+          let definitionSource = try? String(
+              contentsOf: relationFile,
+              encoding: .utf8
+          ),
+          let definition = definitionSource.range(of: "answer"),
+          let relationCall = definitionSource.range(
+              of: "answer()",
+              options: .backwards
+          ),
           let clickOffset = UInt32(exactly: source[..<click.lowerBound].utf8.count),
-          let definitionOffset = UInt32(exactly: definition.lowerBound),
-          let coordinate = LineTable(bytes: Array(definitionBytes))
+          let definitionOffset = UInt32(exactly: definitionSource[
+              ..<definition.lowerBound
+          ].utf8.count),
+          let relationCallOffset = UInt32(exactly: definitionSource[
+              ..<relationCall.lowerBound
+          ].utf8.count),
+          let coordinate = LineTable(bytes: Array(definitionSource.utf8))
               .lineColumn(at: definitionOffset)
     else { return nil }
     return ExactSelfTestTarget(
@@ -1656,7 +1754,9 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
             byteOffset: Int(definitionOffset),
             line: Int(coordinate.line),
             column: Int(coordinate.column)
-        )
+        ),
+        relationFile: relationFile,
+        relationCallOffset: relationCallOffset
     )
 }
 

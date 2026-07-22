@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
@@ -43,6 +44,53 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     #expect(possible.children?.filter {
         $0.title == "ambiguous_target" && $0.subtitle == "Possible · direct"
     }.count == 2)
+}
+
+@MainActor
+@Test
+func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edges = [
+        ("matching", UInt32(10)),
+        ("mismatching", UInt32(11)),
+        ("no exact", UInt32(12)),
+    ].map { title, queryOffset in
+        RelationTreeModel.LoadedEdge(
+            title: title,
+            certainty: .strong,
+            dispatch: .direct,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 20,
+            line: 1,
+            evidence: [],
+            exactQuery: ("main.rs", queryOffset),
+            fuzzyTarget: ("main.rs", 20)
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: edges, isTruncated: false)
+        },
+        exactResolver: { _, offset, _ in
+            switch offset {
+            case 10: relationExactEntry(file: "main.rs", byteOffset: 20)
+            case 11: relationExactEntry(file: "main.rs", byteOffset: 21)
+            default: nil
+            }
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let exact = try relationGroup("Exact", in: model.root)
+    let strong = try relationGroup("Strong", in: model.root)
+    #expect(exact.children?.map(\.title) == ["matching"])
+    #expect(exact.children?.first?.badge == "Exact · lsp")
+    #expect(strong.children?.map(\.title) == ["mismatching", "no exact"])
 }
 
 @MainActor
@@ -460,4 +508,27 @@ private func relationContentIndex(
         $0.key.contentID == file.contentID
             && $0.key.languageMode.language == file.detectedLanguage
     }?.value
+}
+
+private func relationExactEntry(
+    file: String,
+    byteOffset: UInt32
+) -> ExactOverlay.Entry {
+    ExactOverlay.Entry(
+        location: ExactLocation(
+            file: file,
+            byteOffset: Int(byteOffset),
+            line: 1,
+            column: Int(byteOffset) + 1
+        ),
+        attribution: ExactAttribution(
+            provider: "fake-exact",
+            toolVersion: "fake-1",
+            configFingerprint: "config",
+            environmentFingerprint: "environment",
+            trustMode: .safe,
+            generatedAt: Date(timeIntervalSince1970: 0),
+            coverage: .partial
+        )
+    )
 }
