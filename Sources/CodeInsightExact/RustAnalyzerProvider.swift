@@ -154,7 +154,20 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
 }
 
 private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
-    let attribution: ExactAttribution
+    var attribution: ExactAttribution {
+        let coverage: ExactCoverage = offlineDependenciesUnavailable
+            ? .dependenciesUnavailableOffline
+            : baseAttribution.coverage
+        return ExactAttribution(
+            provider: baseAttribution.provider,
+            toolVersion: baseAttribution.toolVersion,
+            configFingerprint: baseAttribution.configFingerprint,
+            environmentFingerprint: baseAttribution.environmentFingerprint,
+            trustMode: baseAttribution.trustMode,
+            generatedAt: baseAttribution.generatedAt,
+            coverage: coverage
+        )
+    }
 
     private let stateLock = NSLock()
     private let operationLock = NSLock()
@@ -169,6 +182,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private var openedFiles: Set<String> = []
     private var cancelled = false
     private var didRestart = false
+    private let baseAttribution: ExactAttribution
 
     var readiness: ExactReadiness {
         stateLock.lock()
@@ -193,7 +207,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         self.initializationOptions = initializationOptions
         self.requestTimeout = requestTimeout
         self.closeGrace = closeGrace
-        self.attribution = attribution
+        baseAttribution = attribution
         observe(client)
     }
 
@@ -494,4 +508,27 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         if state == .preparing || state == .ready { state = .ready }
         stateLock.unlock()
     }
+
+    private var offlineDependenciesUnavailable: Bool {
+        rustAnalyzerCoverage(
+            base: baseAttribution.coverage,
+            diagnostic: client.diagnosticText
+        ) == .dependenciesUnavailableOffline
+    }
+}
+
+func rustAnalyzerCoverage(
+    base: ExactCoverage,
+    diagnostic: String
+) -> ExactCoverage {
+    let diagnostic = diagnostic.lowercased()
+    let offline = diagnostic.contains("--offline")
+        || diagnostic.contains("offline mode")
+        || diagnostic.contains("cargo_net_offline")
+    guard offline,
+          diagnostic.contains("failed")
+            || diagnostic.contains("no matching package")
+            || diagnostic.contains("not found")
+    else { return base }
+    return .dependenciesUnavailableOffline
 }

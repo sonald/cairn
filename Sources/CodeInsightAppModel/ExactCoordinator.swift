@@ -85,6 +85,7 @@ public final class ExactCoordinator {
         let snapshot: any Snapshot
         let profile: ExactProfileKey
         let trustMode: TrustMode
+        let materializedRoot: URL?
     }
 
     private struct Prepared: Sendable {
@@ -92,6 +93,7 @@ public final class ExactCoordinator {
     }
 
     public private(set) var readiness: Readiness = .off("no project")
+    public private(set) var coverage: ExactCoverage?
     public private(set) var trustedRepositories: [
         (path: String, grantedAt: Date)
     ] = []
@@ -100,6 +102,7 @@ public final class ExactCoordinator {
     @ObservationIgnored private let snapshotFactory: SnapshotFactory
     @ObservationIgnored private let sandboxAvailable: @Sendable () -> Bool
     @ObservationIgnored private let trustRegistry: TrustRegistry
+    @ObservationIgnored private let materializer: Materializer
     @ObservationIgnored private var overlay = ExactOverlay()
     @ObservationIgnored private var active: Active?
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
@@ -127,12 +130,14 @@ public final class ExactCoordinator {
                 atPath: "/usr/bin/sandbox-exec"
             )
         },
-        trustRegistry: TrustRegistry = TrustRegistry()
+        trustRegistry: TrustRegistry = TrustRegistry(),
+        materializer: Materializer = Materializer()
     ) {
         self.providerFactory = providerFactory
         self.snapshotFactory = snapshotFactory
         self.sandboxAvailable = sandboxAvailable
         self.trustRegistry = trustRegistry
+        self.materializer = materializer
     }
 
     public func invalidate(generation: UInt64) {
@@ -147,6 +152,7 @@ public final class ExactCoordinator {
             Task.detached { oldSession.close() }
         }
         readiness = .preparing
+        coverage = nil
     }
 
     public func prepare(
@@ -161,6 +167,7 @@ public final class ExactCoordinator {
         let snapshotFactory = snapshotFactory
         let sandboxAvailable = sandboxAvailable
         let trustRegistry = trustRegistry
+        let materializer = materializer
 
         prepareTask = Task { [weak self] in
             let trustMode = await trustRegistry.query(root) ?? .safe
@@ -179,13 +186,27 @@ public final class ExactCoordinator {
             do {
                 let prepared = try await Task.detached(priority: .utility) {
                     let snapshot = try snapshotFactory(root, revision)
-                    let profile = try ExactProfileKey(projectURL: root)
-                    let provider = try providerFactory(root)
-                    let versionIdentity = if let commit = snapshot as? CommitSnapshot {
-                        commit.commitOID.hex
+                    let profile: ExactProfileKey
+                    let providerRoot: URL
+                    let materializedRoot: URL?
+                    let versionIdentity: String
+                    if let commit = snapshot as? CommitSnapshot {
+                        profile = try ExactProfileKey(snapshot: commit)
+                        let resolvedRoot = try materializer.materialize(
+                            commit,
+                            configFingerprint: profile.configFingerprint
+                        ).url
+                        materializedRoot = resolvedRoot
+                        providerRoot = resolvedRoot
+                        versionIdentity = commit.commitOID.hex
                     } else {
-                        "worktree:\(root.resolvingSymlinksInPath().path)"
+                        profile = try ExactProfileKey(projectURL: root)
+                        providerRoot = root
+                        materializedRoot = nil
+                        versionIdentity =
+                            "worktree:\(root.resolvingSymlinksInPath().path)"
                     }
+                    let provider = try providerFactory(providerRoot)
                     let key = ExactOverlay.ReuseKey(
                         versionIdentity: versionIdentity,
                         configFingerprint: profile.configFingerprint,
@@ -203,7 +224,8 @@ public final class ExactCoordinator {
                         session: session,
                         snapshot: snapshot,
                         profile: profile,
-                        trustMode: trustMode
+                        trustMode: trustMode,
+                        materializedRoot: materializedRoot
                     ))
                 }.value
                 guard epoch == currentEpoch,
@@ -214,6 +236,7 @@ public final class ExactCoordinator {
                     return
                 }
                 active = prepared.active
+                coverage = prepared.active.session.attribution.coverage
                 switch prepared.active.session.readiness {
                 case .unavailable(let reason):
                     readiness = .unavailable(reason)
@@ -255,6 +278,22 @@ public final class ExactCoordinator {
     public func revokeTrust(_ repositoryURL: URL) async throws {
         try await trustRegistry.revoke(repositoryURL)
         await refreshTrust()
+    }
+
+    public func clearMaterializedCache() async throws {
+        epoch &+= 1
+        prepareTask?.cancel()
+        prepareTask = nil
+        let oldSession = active?.session
+        active = nil
+        oldSession?.cancel()
+        readiness = .off("materialized cache cleared")
+        coverage = nil
+        let materializer = materializer
+        try await Task.detached(priority: .utility) {
+            oldSession?.close()
+            try materializer.clear()
+        }.value
     }
 
     func isTrusted(_ repositoryURL: URL) -> Bool {
@@ -339,7 +378,8 @@ public final class ExactCoordinator {
                 session: newSession,
                 snapshot: previous.snapshot,
                 profile: previous.profile,
-                trustMode: previous.trustMode
+                trustMode: previous.trustMode,
+                materializedRoot: previous.materializedRoot
             )
             active = restarted
             Task.detached { previous.session.close() }
@@ -388,13 +428,34 @@ public final class ExactCoordinator {
     ) -> ExactOverlay.Entry? {
         guard isCurrent(source) else { return nil }
         readiness = .ready
+        coverage = source.session.attribution.coverage
         guard let location else { return nil }
+        let mappedLocation = mapped(location, from: source.materializedRoot)
         let entry = ExactOverlay.Entry(
-            location: location,
+            location: mappedLocation,
             attribution: source.session.attribution
         )
         overlay.store(entry, for: source.key, file: file, byteOffset: byteOffset)
         return entry
+    }
+
+    private func mapped(
+        _ location: ExactLocation,
+        from materializedRoot: URL?
+    ) -> ExactLocation {
+        guard let materializedRoot,
+              location.file.hasPrefix("/"),
+              let path = try? Materializer.snapshotPath(
+                  for: URL(fileURLWithPath: location.file),
+                  under: materializedRoot
+              )
+        else { return location }
+        return ExactLocation(
+            file: path,
+            byteOffset: location.byteOffset,
+            line: location.line,
+            column: location.column
+        )
     }
 
     private func isCurrent(_ candidate: Active) -> Bool {

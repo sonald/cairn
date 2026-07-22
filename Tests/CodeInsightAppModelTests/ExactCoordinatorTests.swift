@@ -202,6 +202,69 @@ func exactCoordinatorInvalidatesAnOlderSnapshotResult() async throws {
 
 @MainActor
 @Test
+func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
+    let root = try exactTemporaryProject([
+        "src/lib.rs": "pub fn target() {}\n",
+        "src/main.rs": "use exact_test::target;\nfn main() { target(); }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let snapshot = try CommitSnapshot(repositoryURL: root)
+    let profile = try ExactProfileKey(snapshot: snapshot)
+    let materializer = Materializer(
+        rootURL: root.appendingPathComponent("cache/materialized")
+    )
+    let expectedRoot = materializer.rootURL
+        .appendingPathComponent(snapshot.commitOID.hex)
+        .appendingPathComponent(profile.configFingerprint)
+    let providerRoot = ExactVersionBox("")
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(
+            file: expectedRoot.appendingPathComponent("src/lib.rs").path,
+            byteOffset: 4,
+            line: 1,
+            column: 5
+        )
+    }
+    let coordinator = ExactCoordinator(
+        providerFactory: { root in
+            providerRoot.value = root.path
+            return ExactTestProvider(state: state)
+        },
+        snapshotFactory: { root, revision in
+            try CommitSnapshot(
+                repositoryURL: root,
+                revision: revision ?? "HEAD"
+            )
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        ),
+        materializer: materializer
+    )
+
+    coordinator.prepare(projectURL: root, revision: "HEAD", generation: 1)
+    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    let result = await coordinator.definition(
+        file: "src/main.rs",
+        byteOffset: 0,
+        generation: 1
+    )
+
+    #expect(providerRoot.value == expectedRoot.path)
+    #expect(providerRoot.value.contains(
+        "materialized/\(snapshot.commitOID.hex)/"
+    ))
+    #expect(result?.location.file == "src/lib.rs")
+}
+
+@MainActor
+@Test
 func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
@@ -692,6 +755,26 @@ private func exactTemporaryProject(_ files: [String: String]) throws -> URL {
     return root
 }
 
+private func exactGit(_ root: URL, _ arguments: String...) throws {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw ExactTestError.git(
+            String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "git failed"
+        )
+    }
+}
+
 private func exactQueryContext(
     for session: EngineSession,
     generation: UInt64
@@ -710,4 +793,5 @@ private func exactByteOffset(of needle: String, in source: String) -> UInt32 {
 
 private enum ExactTestError: Error {
     case missing(String)
+    case git(String)
 }

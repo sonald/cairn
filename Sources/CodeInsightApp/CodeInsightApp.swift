@@ -822,6 +822,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
 
         let real = runRealExactVariant(root: root)
+        let historical = runHistoricalExactVariant()
         finishExactSelfTest(
             controller: windowController,
             checks: [
@@ -834,9 +835,148 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "exactStatusVisible": exactStatusVisible,
                 "relationFileVisible": relationFileVisible,
                 "realProviderPassedOrSkipped": real.passed,
+                "historicalExactVisible": historical.exactVisible,
+                "providerRootIsMaterialized": historical.providerRootIsMaterialized,
+                "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
             ],
             realProvider: real.status,
             error: nil
+        )
+    }
+
+    private func runHistoricalExactVariant() -> (
+        providerRootIsMaterialized: Bool,
+        uiPathIsRepoRelative: Bool,
+        exactVisible: Bool
+    ) {
+        let fixture: URL
+        do {
+            fixture = try makeHistoricalExactSelfTestRepository()
+        } catch {
+            emitExactStep(
+                "failed",
+                variant: "historical-fake",
+                controller: nil,
+                extra: ["reason": error.localizedDescription]
+            )
+            return (false, false, false)
+        }
+        defer { try? FileManager.default.removeItem(at: fixture) }
+
+        let snapshot: CommitSnapshot
+        let target: ExactSelfTestTarget
+        do {
+            snapshot = try CommitSnapshot(
+                repositoryURL: fixture,
+                revision: "HEAD~1"
+            )
+            guard let found = exactSelfTestTarget(root: fixture) else {
+                throw ExactSelfTestError.fixture("target unavailable")
+            }
+            target = found
+        } catch {
+            emitExactStep(
+                "failed",
+                variant: "historical-fake",
+                controller: nil,
+                extra: ["reason": error.localizedDescription]
+            )
+            return (false, false, false)
+        }
+
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightExactHistorySelfTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let materializer = Materializer(
+            rootURL: cache.appendingPathComponent("materialized")
+        )
+        let providerState = ExactSelfTestProviderState()
+        let coordinator = ExactCoordinator(
+            providerFactory: { root in
+                providerState.root = root
+                return InProcessExactProvider(location: ExactLocation(
+                    file: root.appendingPathComponent("src/lib.rs").path,
+                    byteOffset: 7,
+                    line: 1,
+                    column: 8
+                ))
+            },
+            trustRegistry: TrustRegistry(
+                fileURL: cache.appendingPathComponent("trust.json")
+            ),
+            materializer: materializer
+        )
+        let historyModel = AppModel(
+            indexService: ProjectIndexService(),
+            exactCoordinator: coordinator
+        )
+        let controller = MainWindowController(
+            model: historyModel,
+            settings: readerSettings,
+            offscreen: true
+        )
+        controller.showWindow(nil)
+        defer { controller.close() }
+        controller.openProject(root: fixture)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = historyModel.projectState { return true }
+            if case .ready = historyModel.projectState {
+                return !historyModel.commitPicker.isLoading
+            }
+            return false
+        }), case .ready = historyModel.projectState,
+        controller.selectCommit(snapshot.commitOID.hex),
+        waitUntil(timeout: 30, condition: {
+            historyModel.currentRevision == snapshot.commitOID.hex
+                && historyModel.snapshotPhase == .fullReady
+                && coordinator.readiness == .ready
+        }),
+        controller.selectFileInSidebar(target.file),
+        waitUntil(timeout: 5, condition: {
+            controller.displayedReaderFile?.standardizedFileURL
+                == target.file.standardizedFileURL
+        }) else {
+            emitExactStep(
+                "failed",
+                variant: "historical-fake",
+                controller: controller,
+                extra: ["reason": "HEAD~1 switch or file open failed"]
+            )
+            return (false, false, false)
+        }
+
+        controller.selfTestReaderClick(
+            offset: target.clickOffset,
+            commandClick: false
+        )
+        let exactVisible = waitUntil(timeout: 5, condition: {
+            controller.selfTestContextProvenance?.contains("Exact") == true
+        })
+        let providerRoot = providerState.root
+        let providerRootIsMaterialized = providerRoot?.path.contains(
+            "/materialized/\(snapshot.commitOID.hex)/"
+        ) == true
+        let uiPath = historyModel.contextWindow.selectedCandidate?.path
+        let uiPathIsRepoRelative = uiPath == "src/lib.rs"
+            && uiPath?.hasPrefix("/") == false
+        emitExactStep(
+            "historicalExact",
+            variant: "historical-fake",
+            controller: controller,
+            extra: [
+                "revision": snapshot.commitOID.hex,
+                "providerRoot": (providerRoot?.path as Any?) ?? NSNull(),
+                "providerRootIsMaterialized": providerRootIsMaterialized,
+                "uiPath": (uiPath as Any?) ?? NSNull(),
+                "uiPathIsRepoRelative": uiPathIsRepoRelative,
+            ]
+        )
+        return (
+            providerRootIsMaterialized,
+            uiPathIsRepoRelative,
+            exactVisible
         )
     }
 
@@ -1968,6 +2108,24 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     func close() {}
 }
 
+private final class ExactSelfTestProviderState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storedRoot: URL?
+
+    var root: URL? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return storedRoot
+        }
+        set {
+            lock.lock()
+            storedRoot = newValue
+            lock.unlock()
+        }
+    }
+}
+
 private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
     let root = root.standardizedFileURL
     let path = "src/main.rs"
@@ -2014,6 +2172,77 @@ private func exactSelfTestFixtureRoot(root: URL) -> URL {
         "Tests/CodeInsightExactTests/Fixtures/exact_fixture",
         isDirectory: true
     )
+}
+
+private func makeHistoricalExactSelfTestRepository() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactHistoryFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    do {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("src"),
+            withIntermediateDirectories: true
+        )
+        try Data(
+            "[package]\nname='history'\nversion='0.1.0'\nedition='2021'\n".utf8
+        ).write(to: root.appendingPathComponent("Cargo.toml"))
+        try Data(
+            "use history::answer;\nfn main() { let _ = answer(); }\n".utf8
+        ).write(to: root.appendingPathComponent("src/main.rs"))
+        try Data("pub fn answer() -> u8 { 1 }\n".utf8)
+            .write(to: root.appendingPathComponent("src/lib.rs"))
+        try exactSelfTestGit(root, "init", "-q")
+        try exactSelfTestGit(root, "config", "user.name", "CodeInsight Tests")
+        try exactSelfTestGit(
+            root,
+            "config",
+            "user.email",
+            "tests@codeinsight.invalid"
+        )
+        try exactSelfTestGit(root, "add", "-A")
+        try exactSelfTestGit(root, "commit", "-q", "-m", "definition line 1")
+        try Data("// moved\n// again\npub fn answer() -> u8 { 2 }\n".utf8)
+            .write(to: root.appendingPathComponent("src/lib.rs"))
+        try exactSelfTestGit(root, "add", "-A")
+        try exactSelfTestGit(root, "commit", "-q", "-m", "definition line 3")
+        return root
+    } catch {
+        try? FileManager.default.removeItem(at: root)
+        throw error
+    }
+}
+
+private func exactSelfTestGit(_ root: URL, _ arguments: String...) throws {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw ExactSelfTestError.git(
+            String(
+                data: output.fileHandleForReading.readDataToEndOfFile(),
+                encoding: .utf8
+            ) ?? "git failed"
+        )
+    }
+}
+
+private enum ExactSelfTestError: Error, LocalizedError {
+    case fixture(String)
+    case git(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .fixture(let detail): detail
+        case .git(let detail): detail
+        }
+    }
 }
 
 private func physicalFootprintBytes() -> UInt64? {

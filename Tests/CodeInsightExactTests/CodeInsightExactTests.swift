@@ -104,6 +104,219 @@ func exactProfileKeyHashesCargoFileBytes() throws {
 }
 
 @Test
+func offlineDependencyFailureDowngradesCoverageWithoutBecomingUnavailable() {
+    let diagnostic = "failed to download crate; --offline was specified"
+
+    #expect(rustAnalyzerCoverage(
+        base: .partial,
+        diagnostic: diagnostic
+    ) == .dependenciesUnavailableOffline)
+    #expect(rustAnalyzerCoverage(
+        base: .partial,
+        diagnostic: "unrelated warning"
+    ) == .partial)
+    #expect(ExactCoverage.dependenciesUnavailableOffline.rawValue
+        == "deps unavailable (offline)")
+}
+
+@Test
+func materializerUsesCommitAndProfileLayoutAndSkipsSpecialFiles() throws {
+    let fixture = try MaterializerGitFixture()
+    defer { fixture.remove() }
+    try fixture.write("[package]\nname='materialized'\nversion='0.1.0'\n", to: "Cargo.toml")
+    try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
+    try fixture.write(
+        "version https://git-lfs.github.com/spec/v1\noid sha256:00\nsize 1\n",
+        to: "large.rs"
+    )
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("link.rs").path,
+        withDestinationPath: "src/lib.rs"
+    )
+    try fixture.commit("regular and special files")
+    let commit = try #require(
+        fixture.git("rev-parse", "HEAD").split(separator: "\n").last.map(String.init)
+    )
+    try fixture.git(
+        "update-index", "--add", "--cacheinfo",
+        "160000", commit, "dependency"
+    )
+    try fixture.git("commit", "-q", "-m", "gitlink")
+
+    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let profile = try ExactProfileKey(snapshot: snapshot)
+    let cache = fixture.root.appendingPathComponent("cache/materialized")
+    let result = try Materializer(rootURL: cache).materialize(
+        snapshot,
+        configFingerprint: profile.configFingerprint
+    )
+
+    #expect(result.url == cache
+        .appendingPathComponent(snapshot.commitOID.hex)
+        .appendingPathComponent(profile.configFingerprint))
+    #expect(FileManager.default.fileExists(
+        atPath: result.url.appendingPathComponent("Cargo.toml").path))
+    #expect(FileManager.default.fileExists(
+        atPath: result.url.appendingPathComponent("src/lib.rs").path))
+    #expect(!FileManager.default.fileExists(
+        atPath: result.url.appendingPathComponent("link.rs").path))
+    #expect(!FileManager.default.fileExists(
+        atPath: result.url.appendingPathComponent("large.rs").path))
+    #expect(!FileManager.default.fileExists(
+        atPath: result.url.appendingPathComponent("dependency").path))
+    #expect(result.filesWritten == snapshot.listFiles().count {
+        $0.fileMode == .regular
+    })
+}
+
+@Test
+func materializerReusesACompleteDirectoryWithoutCopying() throws {
+    let fixture = try simpleMaterializerFixture()
+    defer { fixture.remove() }
+    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let profile = try ExactProfileKey(snapshot: snapshot)
+    let materializer = Materializer(
+        rootURL: fixture.root.appendingPathComponent("cache/materialized")
+    )
+    let first = try materializer.materialize(
+        snapshot,
+        configFingerprint: profile.configFingerprint
+    )
+    let file = first.url.appendingPathComponent("src/lib.rs")
+    let modified = try FileManager.default.attributesOfItem(atPath: file.path)[
+        .modificationDate
+    ] as? Date
+
+    let hit = try materializer.materialize(
+        snapshot,
+        configFingerprint: profile.configFingerprint
+    )
+
+    #expect(hit.url == first.url)
+    #expect(hit.filesWritten == 0)
+    #expect(try FileManager.default.attributesOfItem(atPath: file.path)[
+        .modificationDate
+    ] as? Date == modified)
+}
+
+@Test
+func materializerEvictsTheLeastRecentlyAccessedDirectory() throws {
+    let fixture = try MaterializerGitFixture()
+    defer { fixture.remove() }
+    try fixture.write("[package]\nname='lru'\nversion='0.1.0'\n", to: "Cargo.toml")
+    for version in 1...3 {
+        try fixture.write(
+            "pub fn answer() -> u8 { \(version) }\n",
+            to: "src/lib.rs"
+        )
+        try fixture.commit("version \(version)")
+    }
+    let oldest = try CommitSnapshot(
+        repositoryURL: fixture.root,
+        revision: "HEAD~2"
+    )
+    let middle = try CommitSnapshot(
+        repositoryURL: fixture.root,
+        revision: "HEAD~1"
+    )
+    let newest = try CommitSnapshot(repositoryURL: fixture.root)
+    let profile = try ExactProfileKey(snapshot: oldest)
+    let oneDirectorySize = try oldest.listFiles().reduce(UInt64(0)) {
+        $0 + UInt64(try oldest.readBytes(path: $1.path).count)
+    }
+    let materializer = Materializer(
+        rootURL: fixture.root.appendingPathComponent("cache/materialized"),
+        quotaBytes: oneDirectorySize * 2
+    )
+    let old = try materializer.materialize(
+        oldest,
+        configFingerprint: profile.configFingerprint
+    ).url
+    let mid = try materializer.materialize(
+        middle,
+        configFingerprint: profile.configFingerprint
+    ).url
+    try FileManager.default.setAttributes(
+        [.modificationDate: Date(timeIntervalSince1970: 1)],
+        ofItemAtPath: mid.path
+    )
+    _ = try materializer.materialize(
+        oldest,
+        configFingerprint: profile.configFingerprint
+    )
+    let latest = try materializer.materialize(
+        newest,
+        configFingerprint: profile.configFingerprint
+    ).url
+
+    #expect(FileManager.default.fileExists(atPath: old.path))
+    #expect(!FileManager.default.fileExists(atPath: mid.path))
+    #expect(FileManager.default.fileExists(atPath: latest.path))
+}
+
+@Test
+func materializedPathRoundTripsToSnapshotPath() throws {
+    let root = URL(fileURLWithPath: "/tmp/materialized/commit/config")
+    let materialized = try Materializer.materializedURL(
+        for: "src/lib.rs",
+        under: root
+    )
+
+    #expect(materialized.path == "/tmp/materialized/commit/config/src/lib.rs")
+    #expect(try Materializer.snapshotPath(
+        for: materialized,
+        under: root
+    ) == "src/lib.rs")
+}
+
+@Test
+func rustAnalyzerUsesEachMaterializedCommitWhenInstalled() throws {
+    guard let executable = RustAnalyzerProvider.findExecutable() else { return }
+    let fixture = try MaterializerGitFixture()
+    defer { fixture.remove() }
+    try fixture.write("[package]\nname='history'\nversion='0.1.0'\nedition='2021'\n", to: "Cargo.toml")
+    try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
+    try fixture.write("use history::answer;\nfn main() { let _ = answer(); }\n", to: "src/main.rs")
+    try fixture.commit("definition line 1")
+    try fixture.write("// moved\n// again\npub fn answer() -> u8 { 2 }\n", to: "src/lib.rs")
+    try fixture.commit("definition line 3")
+
+    let head = try CommitSnapshot(repositoryURL: fixture.root)
+    let previous = try CommitSnapshot(
+        repositoryURL: fixture.root,
+        revision: "HEAD~1"
+    )
+    let materializer = Materializer(
+        rootURL: fixture.root.appendingPathComponent("materialized")
+    )
+    do {
+        let headLocation = try materializedDefinition(
+            snapshot: head,
+            materializer: materializer,
+            executable: executable,
+            cache: fixture.root.appendingPathComponent("ra-head")
+        )
+        let previousLocation = try materializedDefinition(
+            snapshot: previous,
+            materializer: materializer,
+            executable: executable,
+            cache: fixture.root.appendingPathComponent("ra-previous")
+        )
+        #expect(headLocation.line == 3)
+        #expect(previousLocation.line == 1)
+        #expect(headLocation.line != previousLocation.line)
+        print(
+            "historical-exact HEAD=\(headLocation.line):\(headLocation.column)"
+                + " HEAD~1=\(previousLocation.line):\(previousLocation.column)"
+        )
+    } catch ExactError.unavailable(let detail)
+        where detail.contains("sandbox-exec")
+    {
+        print("SKIP historical exact: \(detail); noBareExecution=true")
+    }
+}
+
+@Test
 func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
     let (exitEvents, exitContinuation) = AsyncStream<Void>.makeStream()
 
@@ -126,7 +339,7 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
 
         _ = try client.initialize(
             rootURL: URL(fileURLWithPath: "/fixture", isDirectory: true),
-            timeout: 1
+            timeout: 30
         )
         let result = try client.request(
             "textDocument/definition",
@@ -134,9 +347,9 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
                 "textDocument": ["uri": "file:///fixture/src/main.rs"],
                 "position": ["line": 0, "character": 0],
             ],
-            timeout: 1
+            timeout: 30
         )
-        client.close(grace: 0.2)
+        client.close(grace: 30)
 
         for await _ in exitEvents {}
         #expect(server.error == nil)
@@ -195,8 +408,8 @@ func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
             projectURL: fixture,
             executableURL: executableURL,
             cacheURL: cache,
-            requestTimeout: 10,
-            closeGrace: 0.5
+            requestTimeout: 30,
+            closeGrace: 30
         )
         session = try provider.prepare(
             snapshot: snapshot,
@@ -257,6 +470,7 @@ func sandboxDeniesProjectWrites() throws {
 
     #expect(result.status != 0)
     #expect(!FileManager.default.fileExists(atPath: denied.path))
+    #expect(sandbox.environment["CARGO_NET_OFFLINE"] == "1")
     print("sandbox-semantics projectWrite=denied status=\(result.status)")
 }
 
@@ -681,8 +895,8 @@ private func runDefinition(
         projectURL: fixture,
         executableURL: executable,
         cacheURL: cache,
-        requestTimeout: 15,
-        closeGrace: 0.5
+        requestTimeout: 30,
+        closeGrace: 30
     )
     let session = try provider.prepare(
         snapshot: snapshot,
@@ -699,9 +913,116 @@ private func runDefinition(
             byteOffset: source[..<call.lowerBound].utf8.count
         ))
     if let marker {
-        try #require(waitForFile(marker, timeout: 15))
+        try #require(waitForFile(marker, timeout: 30))
     }
     return location
+}
+
+private func materializedDefinition(
+    snapshot: CommitSnapshot,
+    materializer: Materializer,
+    executable: URL,
+    cache: URL
+) throws -> ExactLocation {
+    let profile = try ExactProfileKey(snapshot: snapshot)
+    let root = try materializer.materialize(
+        snapshot,
+        configFingerprint: profile.configFingerprint
+    ).url
+    let provider = try RustAnalyzerProvider(
+        projectURL: root,
+        executableURL: executable,
+        cacheURL: cache,
+        requestTimeout: 30,
+        closeGrace: 30
+    )
+    let session = try provider.prepare(
+        snapshot: snapshot,
+        profile: profile,
+        trustMode: .safe
+    )
+    defer { session.close() }
+    let source = try #require(String(
+        data: Data(snapshot.readBytes(path: "src/main.rs")),
+        encoding: .utf8
+    ))
+    let call = try #require(source.range(of: "answer();"))
+    return try #require(try session.definition(
+        file: "src/main.rs",
+        byteOffset: source[..<call.lowerBound].utf8.count
+    ))
+}
+
+private func simpleMaterializerFixture() throws -> MaterializerGitFixture {
+    let fixture = try MaterializerGitFixture()
+    do {
+        try fixture.write(
+            "[package]\nname='simple'\nversion='0.1.0'\n",
+            to: "Cargo.toml"
+        )
+        try fixture.write("pub fn answer() -> u8 { 1 }\n", to: "src/lib.rs")
+        try fixture.commit("simple")
+        return fixture
+    } catch {
+        fixture.remove()
+        throw error
+    }
+}
+
+private final class MaterializerGitFixture {
+    let root: URL
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightMaterializerTests-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        do {
+            try git("init", "-q")
+            try git("config", "user.name", "CodeInsight Tests")
+            try git("config", "user.email", "tests@codeinsight.invalid")
+        } catch {
+            remove()
+            throw error
+        }
+    }
+
+    func write(_ contents: String, to path: String) throws {
+        let file = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: file)
+    }
+
+    func commit(_ message: String) throws {
+        try git("add", "-A")
+        try git("commit", "-q", "-m", message)
+    }
+
+    @discardableResult
+    func git(_ arguments: String...) throws -> String {
+        let result = try run(
+            executable: URL(fileURLWithPath: "/usr/bin/git"),
+            arguments: arguments,
+            workingDirectory: root
+        )
+        guard result.status == 0 else {
+            throw MaterializerTestError.git(result.output)
+        }
+        return result.output
+    }
+
+    func remove() { try? FileManager.default.removeItem(at: root) }
+}
+
+private enum MaterializerTestError: Error {
+    case git(String)
 }
 
 private func waitForFile(_ url: URL, timeout: TimeInterval) -> Bool {

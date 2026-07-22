@@ -36,16 +36,35 @@ private struct SettingsView: View {
     let exactCoordinator: ExactCoordinator
     let onRevoke: @MainActor (URL) async -> Void
     let onChange: @MainActor (ReaderSettings) -> Void
+    @State private var cacheMessage: String? = nil
 
     var body: some View {
         TabView {
             ReaderSettingsView(settings: settings, onChange: onChange)
                 .tabItem { Label("Reader", systemImage: "textformat") }
-            TrustSettingsView(
-                coordinator: exactCoordinator,
-                onRevoke: onRevoke
-            )
-            .tabItem { Label("Trust", systemImage: "checkmark.shield") }
+            VStack(spacing: 12) {
+                TrustSettingsView(
+                    coordinator: exactCoordinator,
+                    onRevoke: onRevoke
+                )
+                Divider()
+                HStack {
+                    Text(cacheMessage ?? "Historical Exact snapshots use a 2 GB cache.")
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Clear Materialized Cache") {
+                        Task {
+                            do {
+                                try await exactCoordinator.clearMaterializedCache()
+                                cacheMessage = "Materialized cache cleared."
+                            } catch {
+                                cacheMessage = error.localizedDescription
+                            }
+                        }
+                    }
+                }
+            }
+            .tabItem { Label("Exact", systemImage: "checkmark.shield") }
         }
         .padding()
         .frame(width: 560, height: 360)

@@ -553,7 +553,7 @@ public final class ContextWindowModel {
         case .safe: "Safe"
         case .trusted: "Trusted"
         }
-        return "\(label) · \(attribution.provider) · \(trust)"
+        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {

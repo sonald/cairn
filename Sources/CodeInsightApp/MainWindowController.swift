@@ -478,6 +478,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.compare.isLoading
             _ = model.compare.errorMessage
             _ = model.exactCoordinator.readiness
+            _ = model.exactCoordinator.coverage
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -578,9 +579,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let detail: String?
         switch model.exactCoordinator.readiness {
         case .ready:
-            status = "Exact: ready"
-            color = .systemGreen
-            detail = nil
+            if model.exactCoordinator.coverage == .dependenciesUnavailableOffline {
+                status = "Exact: deps unavailable (offline)"
+                color = .systemOrange
+                detail = "Dependency coverage is unavailable because network access is disabled."
+            } else {
+                status = "Exact: ready"
+                color = .systemGreen
+                detail = nil
+            }
         case .preparing:
             status = "Exact: preparing"
             color = .secondaryLabelColor

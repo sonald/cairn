@@ -13,9 +13,10 @@ public struct ExactCapabilities: OptionSet, Sendable {
     public static let definition = ExactCapabilities(rawValue: 1 << 0)
 }
 
-public enum ExactCoverage: String, Sendable {
+public enum ExactCoverage: String, Equatable, Sendable {
     case full
     case partial
+    case dependenciesUnavailableOffline = "deps unavailable (offline)"
 }
 
 public enum ExactReadiness: Equatable, Sendable {
@@ -57,13 +58,29 @@ public struct ExactProfileKey: Hashable, Sendable {
         ) ? try Self.sha256(contentsOf: lock) : ""
     }
 
+    public init(snapshot: any Snapshot) throws {
+        let cargo: [UInt8]
+        do {
+            cargo = try snapshot.readBytes(path: "Cargo.toml")
+        } catch {
+            throw ExactError.missingConfiguration("Cargo.toml")
+        }
+        configFingerprint = Self.sha256(bytes: cargo)
+        environmentFingerprint = (try? snapshot.readBytes(path: "Cargo.lock"))
+            .map(Self.sha256(bytes:)) ?? ""
+    }
+
     public init(configFingerprint: String, environmentFingerprint: String) {
         self.configFingerprint = configFingerprint
         self.environmentFingerprint = environmentFingerprint
     }
 
     private static func sha256(contentsOf url: URL) throws -> String {
-        SHA256.hash(data: try Data(contentsOf: url, options: .mappedIfSafe))
+        sha256(bytes: try Data(contentsOf: url, options: .mappedIfSafe))
+    }
+
+    private static func sha256<D: DataProtocol>(bytes: D) -> String {
+        SHA256.hash(data: Data(bytes))
             .map { String(format: "%02x", $0) }
             .joined()
     }

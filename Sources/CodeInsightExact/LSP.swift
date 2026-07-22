@@ -109,6 +109,7 @@ public final class LSPClient: @unchecked Sendable {
     private var cancelledRequestIDs: Set<Int> = []
     private var responses: [Int: [String: Any]] = [:]
     private var stderr = Data()
+    private var serverDiagnostics = ""
     private var readError: Error?
     private var reachedEOF = false
     private var closed = false
@@ -125,6 +126,13 @@ public final class LSPClient: @unchecked Sendable {
 
     public var processIdentifier: Int32? {
         process?.processIdentifier
+    }
+
+    var diagnosticText: String {
+        condition.lock()
+        defer { condition.unlock() }
+        return (String(data: stderr, encoding: .utf8) ?? "")
+            + serverDiagnostics
     }
 
     public init(
@@ -378,6 +386,15 @@ public final class LSPClient: @unchecked Sendable {
                    let id = message["id"]
                 {
                     serverRequests.append((id, method, message["params"]))
+                } else if let method = message["method"] as? String,
+                          method == "window/showMessage"
+                            || method == "window/logMessage"
+                            || method.localizedCaseInsensitiveContains("status")
+                {
+                    serverDiagnostics += "\n\(method): \(String(describing: message["params"]))"
+                    if serverDiagnostics.utf8.count > 65_536 {
+                        serverDiagnostics = String(serverDiagnostics.suffix(32_768))
+                    }
                 } else if let id = (message["id"] as? NSNumber)?.intValue,
                           pendingRequestIDs.contains(id)
                 {
