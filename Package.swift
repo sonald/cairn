@@ -81,7 +81,8 @@ let package = Package(
                 "CodeInsightCore",
                 "CodeInsightGit",
                 "CodeInsightRustExtractor",
-            ]
+            ],
+            linkerSettings: [.linkedLibrary("sqlite3")]
         ),
         .executableTarget(
             name: "CodeInsightCLI",

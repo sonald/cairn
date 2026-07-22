@@ -141,15 +141,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let fileCount = model.fileTree?.fileCount ?? 0
         let deadline = Date(timeIntervalSinceNow: 30)
         var ready = false
+        var reused = 0
+        var extracted = 0
         while Date() < deadline {
             switch model.projectState {
-            case .ready:
+            case let .ready(session, _):
                 ready = true
+                reused = session.stats.reusedCount
+                extracted = session.stats.extractedCount
             case .failed:
                 Self.finishProjectSelfTest(
                     treeVisibleMS: treeVisibleMS,
                     indexReadyMS: milliseconds(since: projectStartedAt),
                     fileCount: fileCount,
+                    reused: reused,
+                    extracted: extracted,
                     ready: false
                 )
             default:
@@ -157,10 +163,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             }
             if ready { break }
         }
+        let indexReadyMS = milliseconds(since: projectStartedAt)
+        model.flushPersistentIndexCache()
         Self.finishProjectSelfTest(
             treeVisibleMS: treeVisibleMS,
-            indexReadyMS: milliseconds(since: projectStartedAt),
+            indexReadyMS: indexReadyMS,
             fileCount: fileCount,
+            reused: reused,
+            extracted: extracted,
             ready: ready
         )
     }
@@ -1442,6 +1452,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         treeVisibleMS: Double,
         indexReadyMS: Double,
         fileCount: Int,
+        reused: Int,
+        extracted: Int,
         ready: Bool
     ) -> Never {
         do {
@@ -1450,6 +1462,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "treeVisibleMS": treeVisibleMS,
                     "indexReadyMS": indexReadyMS,
                     "fileCount": fileCount,
+                    "reused": reused,
+                    "extracted": extracted,
                 ],
                 options: [.sortedKeys]
             )

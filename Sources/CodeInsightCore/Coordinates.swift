@@ -1,4 +1,4 @@
-public struct ByteRange: Comparable, Sendable {
+public struct ByteRange: Codable, Comparable, Sendable {
     public let lowerBound: UInt32
     public let upperBound: UInt32
 
@@ -31,7 +31,7 @@ public struct ByteRange: Comparable, Sendable {
     }
 }
 
-public struct LineTable: Sendable {
+public struct LineTable: Codable, Equatable, Sendable {
     public let lineStarts: [UInt32]
 
     private let byteCount: UInt32

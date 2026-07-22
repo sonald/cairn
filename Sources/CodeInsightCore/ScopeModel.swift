@@ -1,4 +1,4 @@
-public struct ScopeID: Hashable, Sendable {
+public struct ScopeID: Codable, Hashable, Sendable {
     public let rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -6,7 +6,7 @@ public struct ScopeID: Hashable, Sendable {
     }
 }
 
-public enum ScopeKind: Sendable {
+public enum ScopeKind: UInt8, Codable, Sendable {
     case block
     case function
     case module
@@ -16,7 +16,7 @@ public enum ScopeKind: Sendable {
     case matchArm
 }
 
-public struct ScopeRecord: Sendable {
+public struct ScopeRecord: Codable, Sendable {
     public let id: ScopeID
     public let parent: ScopeID?
     public let kind: ScopeKind
@@ -35,7 +35,7 @@ public struct ScopeRecord: Sendable {
     }
 }
 
-public enum SymbolSpace: Sendable {
+public enum SymbolSpace: UInt8, Codable, Sendable {
     case value
     case type
     case namespace
@@ -45,7 +45,7 @@ public enum SymbolSpace: Sendable {
     case label
 }
 
-public enum BindingKind: Sendable {
+public enum BindingKind: UInt8, Codable, Sendable {
     case param
     case letBinding
     case importBinding
@@ -55,13 +55,13 @@ public enum BindingKind: Sendable {
     case nonlocalDecl
 }
 
-public enum UnresolvedSymbolHintKind: Sendable {
+public enum UnresolvedSymbolHintKind: UInt8, Codable, Sendable {
     case unqualified
     case qualified
     case member
 }
 
-public struct UnresolvedSymbolRef: Sendable {
+public struct UnresolvedSymbolRef: Codable, Sendable {
     public let nameID: NameID
     public let hintKind: UnresolvedSymbolHintKind
 
@@ -71,7 +71,7 @@ public struct UnresolvedSymbolRef: Sendable {
     }
 }
 
-public struct BindingRecord: Sendable {
+public struct BindingRecord: Codable, Sendable {
     public let scopeID: ScopeID
     public let localNameID: NameID
     public let space: SymbolSpace
@@ -96,7 +96,7 @@ public struct BindingRecord: Sendable {
     }
 }
 
-public struct ExecutableRegionID: Hashable, Sendable {
+public struct ExecutableRegionID: Codable, Hashable, Sendable {
     public let rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -104,7 +104,7 @@ public struct ExecutableRegionID: Hashable, Sendable {
     }
 }
 
-public enum ExecutableRegionKind: Sendable {
+public enum ExecutableRegionKind: UInt8, Codable, Sendable {
     case function
     case method
     case closure
@@ -115,7 +115,7 @@ public enum ExecutableRegionKind: Sendable {
     case constantInitializer
 }
 
-public struct ExecutableRegionRecord: Sendable {
+public struct ExecutableRegionRecord: Codable, Sendable {
     public let id: ExecutableRegionID
     public let kind: ExecutableRegionKind
     public let range: ByteRange

@@ -1,4 +1,4 @@
-public enum CallKind: Sendable {
+public enum CallKind: UInt8, Codable, Sendable {
     case directCall
     case methodCall
     case qualifiedCall
@@ -7,7 +7,7 @@ public enum CallKind: Sendable {
     case decoratorApply
 }
 
-public struct UnresolvedCall: Sendable {
+public struct UnresolvedCall: Codable, Sendable {
     public let regionID: ExecutableRegionID
     public let nameID: NameID
     public let range: ByteRange

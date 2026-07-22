@@ -50,6 +50,7 @@ public protocol IndexService: Sendable {
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession
+    func flushPersistentIndexCache()
 }
 
 public extension IndexService {
@@ -68,10 +69,14 @@ public extension IndexService {
     ) async throws -> EngineSession {
         throw CocoaError(.featureUnsupported)
     }
+
+    func flushPersistentIndexCache() {}
 }
 
-public struct ProjectIndexService: IndexService {
+public final class ProjectIndexService: IndexService, @unchecked Sendable {
     private let store = ProjectIndexStore()
+    private let lock = NSLock()
+    private var indexer = ProjectIndexer()
 
     public init() {}
 
@@ -83,14 +88,16 @@ public struct ProjectIndexService: IndexService {
 
     public func index(root: URL) async throws -> EngineSession {
         let store = store
+        let indexer = ProjectIndexer(persistingProjectAt: root)
+        lock.withLock { self.indexer = indexer }
         return try await detachedValue {
             let snapshot: WorktreeSnapshot
             do {
                 snapshot = try WorktreeSnapshot(repositoryURL: root)
             } catch {
-                return try ProjectIndexer().index(root: root)
+                return try indexer.index(root: root)
             }
-            return try ProjectIndexer().indexSnapshot(snapshot, into: store)
+            return try indexer.indexSnapshot(snapshot, into: store)
         }
     }
 
@@ -114,8 +121,9 @@ public struct ProjectIndexService: IndexService {
         _ snapshot: any Snapshot
     ) async throws -> ProjectIndexer.PreparedSnapshot {
         let store = store
+        let indexer: ProjectIndexer = lock.withLock { self.indexer }
         return try await detachedValue {
-            try ProjectIndexer().prepareSnapshot(snapshot, into: store)
+            try indexer.prepareSnapshot(snapshot, into: store)
         }
     }
 
@@ -125,6 +133,11 @@ public struct ProjectIndexService: IndexService {
         try await detachedValue {
             try ProjectIndexer().completeSnapshot(prepared)
         }
+    }
+
+    public func flushPersistentIndexCache() {
+        let indexer: ProjectIndexer = lock.withLock { self.indexer }
+        indexer.flushPersistentWrites()
     }
 }
 
@@ -374,6 +387,10 @@ public final class AppModel {
                 self?.failIndexing(generation: openGeneration)
             }
         }
+    }
+
+    public func flushPersistentIndexCache() {
+        indexService.flushPersistentIndexCache()
     }
 
     public func grantCurrentRepositoryTrust() async throws {

@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-public struct ContentID: Hashable, Sendable {
+public struct ContentID: Codable, Hashable, Sendable {
     public let algorithm: UInt8
     public let bytes: [UInt8]
 
@@ -20,7 +20,7 @@ public struct ContentID: Hashable, Sendable {
     }
 }
 
-public struct NameID: RawRepresentable, Hashable, Sendable {
+public struct NameID: Codable, RawRepresentable, Hashable, Sendable {
     public let rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -36,7 +36,7 @@ public struct PathID: RawRepresentable, Hashable, Sendable {
     }
 }
 
-public struct StringID: RawRepresentable, Hashable, Sendable {
+public struct StringID: Codable, RawRepresentable, Hashable, Sendable {
     public let rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -82,5 +82,9 @@ where ID: RawRepresentable & Hashable & Sendable, ID.RawValue == UInt32 {
             preconditionFailure("ID does not belong to this interner")
         }
         return stringsByID[index]
+    }
+
+    public var values: [String] {
+        lock.withLock { stringsByID }
     }
 }

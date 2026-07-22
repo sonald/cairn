@@ -19,9 +19,12 @@ public struct GoldSetReport: Codable, Sendable {
 
 public func evaluateGoldSet(
     at goldFile: URL,
-    corpus: URL
+    corpus: URL,
+    persist: Bool = false
 ) throws -> GoldSetReport {
-    let session = try ProjectIndexer().index(root: corpus)
+    let indexer = persist ? ProjectIndexer(persistingProjectAt: corpus) : ProjectIndexer()
+    let session = try indexer.index(root: corpus)
+    if persist { indexer.flushPersistentWrites() }
     let context = QueryContext(
         snapshotID: session.snapshotID,
         analysisProfileID: session.analysisProfile.id,

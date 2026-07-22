@@ -26,6 +26,8 @@ public struct ProjectIndexer: Sendable {
         fileprivate let manifest: SnapshotManifest
         fileprivate let analysisProfile: AnalysisProfile
         fileprivate let missingInputs: [ExtractionInput]
+        fileprivate let deferredDrafts: [ExtractionDraft]
+        fileprivate let cache: IndexCache?
         fileprivate let reusedCount: Int
         fileprivate let startedAt: Date
     }
@@ -36,13 +38,30 @@ public struct ProjectIndexer: Sendable {
     ]
 
     private let parallelism: Int
+    private let cache: IndexCache?
 
     public init() {
         parallelism = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        cache = nil
+    }
+
+    public init(persistingProjectAt root: URL) {
+        parallelism = max(1, ProcessInfo.processInfo.activeProcessorCount)
+        cache = try? IndexCache(projectURL: root)
     }
 
     init(parallelism: Int) {
         self.parallelism = max(1, parallelism)
+        cache = nil
+    }
+
+    init(parallelism: Int, cache: IndexCache?) {
+        self.parallelism = max(1, parallelism)
+        self.cache = cache
+    }
+
+    public func flushPersistentWrites() {
+        cache?.flush()
     }
 
     public func index(root: URL) throws -> EngineSession {
@@ -83,24 +102,28 @@ public struct ProjectIndexer: Sendable {
             }
         }
 
+        var cachedDrafts: [ExtractionDraft] = []
+        var extractionInputs: [ExtractionInput] = []
+        let cachedByOrder = Dictionary(uniqueKeysWithValues: loadCachedDrafts(
+            for: uniqueInputs
+        ).map { ($0.order, $0) })
+        for input in uniqueInputs {
+            if let draft = cachedByOrder[input.order] {
+                cachedDrafts.append(draft)
+            } else {
+                extractionInputs.append(input)
+            }
+        }
+        let extractedDrafts = try extract(extractionInputs)
+        let drafts = (cachedDrafts + extractedDrafts).sorted { $0.order < $1.order }
         // Each worker owns its parser and temporary interners. Global IDs are
-        // assigned only here, in first-path order, so scheduling cannot change
-        // NameID/StringID allocation.
-        for draft in try extract(uniqueInputs) {
-            let index = remap(
-                draft.index,
-                localNames: draft.names,
-                localStrings: draft.strings,
-                names: store.names,
-                strings: store.strings
-            )
-            store.insert(
-                index,
-                bytes: draft.bytes,
-                containsErrorNodes: draft.containsErrorNodes
-            )
+        // assigned only here, in first-path order, so scheduling and cache hits
+        // cannot change NameID/StringID allocation.
+        store.insert(remap(drafts, into: store))
+        for draft in drafts {
             hasErrors[draft.index.key] = draft.containsErrorNodes
         }
+        persist(extractedDrafts)
 
         for (offset, input) in fileInputs.enumerated() {
             guard let occurrenceID = UInt32(exactly: offset) else {
@@ -140,8 +163,8 @@ public struct ProjectIndexer: Sendable {
                 )
                 return count + (hasErrors[key] == true ? 1 : 0)
             },
-            reusedCount: 0,
-            extractedCount: uniqueInputs.count
+            reusedCount: cachedDrafts.count,
+            extractedCount: extractedDrafts.count
         )
         let profile = AnalysisProfile.placeholder(
             language: .rust,
@@ -170,7 +193,7 @@ public struct ProjectIndexer: Sendable {
         let stored = store.snapshot()
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
         var occurrences: [FileOccurrence] = []
-        var missingInputs: [ExtractionInput] = []
+        var newInputs: [ExtractionInput] = []
         var missingKeys: Set<ContentIndexKey> = []
         var reusedKeys: Set<ContentIndexKey> = []
         var capturedBytes: [ContentID: [UInt8]] = [:]
@@ -197,15 +220,39 @@ public struct ProjectIndexer: Sendable {
             if stored.contentIndexes[key] != nil {
                 reusedKeys.insert(key)
             } else if missingKeys.insert(key).inserted {
-                missingInputs.append(ExtractionInput(
-                    order: missingInputs.count,
+                newInputs.append(ExtractionInput(
+                    order: newInputs.count,
                     bytes: bytes,
                     key: key
                 ))
             }
         }
         try Task.checkCancellation()
+        var missingInputs: [ExtractionInput] = []
+        var leadingDrafts: [ExtractionDraft] = []
+        var deferredDrafts: [ExtractionDraft] = []
+        var canInstallCachedDraft = true
+        var readyReusedKeys = reusedKeys
+        let cachedByOrder = Dictionary(uniqueKeysWithValues: loadCachedDrafts(
+            for: newInputs
+        ).map { ($0.order, $0) })
+        for input in newInputs {
+            if let draft = cachedByOrder[input.order] {
+                reusedKeys.insert(input.key)
+                if canInstallCachedDraft {
+                    leadingDrafts.append(draft)
+                    readyReusedKeys.insert(input.key)
+                } else {
+                    deferredDrafts.append(draft)
+                }
+            } else {
+                canInstallCachedDraft = false
+                missingInputs.append(input)
+            }
+        }
         store.insert(capturedBytes)
+        store.insert(remap(leadingDrafts, into: store))
+        let storedAfterCache = store.snapshot()
 
         let manifest = SnapshotManifest(
             snapshotID: snapshot.snapshotID,
@@ -217,8 +264,8 @@ public struct ProjectIndexer: Sendable {
         )
         let stats = snapshotStats(
             manifest: manifest,
-            stored: stored,
-            reusedCount: reusedKeys.count,
+            stored: storedAfterCache,
+            reusedCount: readyReusedKeys.count,
             extractedCount: 0,
             startedAt: startedAt
         )
@@ -234,6 +281,8 @@ public struct ProjectIndexer: Sendable {
             manifest: manifest,
             analysisProfile: analysisProfile,
             missingInputs: missingInputs,
+            deferredDrafts: deferredDrafts,
+            cache: cache,
             reusedCount: reusedKeys.count,
             startedAt: startedAt
         )
@@ -243,30 +292,20 @@ public struct ProjectIndexer: Sendable {
         _ prepared: PreparedSnapshot
     ) throws -> EngineSession {
         try Task.checkCancellation()
-        let drafts = try extract(prepared.missingInputs)
+        let extractedDrafts = try extract(prepared.missingInputs)
+        let drafts = (prepared.deferredDrafts + extractedDrafts)
+            .sorted { $0.order < $1.order }
         // Extraction is pure and completes before the shared store changes;
         // failed work therefore leaves no partially extracted snapshot behind.
         try Task.checkCancellation()
-        for draft in drafts {
-            let index = remap(
-                draft.index,
-                localNames: draft.names,
-                localStrings: draft.strings,
-                names: prepared.store.names,
-                strings: prepared.store.strings
-            )
-            prepared.store.insert(
-                index,
-                bytes: draft.bytes,
-                containsErrorNodes: draft.containsErrorNodes
-            )
-        }
+        prepared.store.insert(remap(drafts, into: prepared.store))
+        persist(extractedDrafts, to: prepared.cache)
         let stored = prepared.store.snapshot()
         let stats = snapshotStats(
             manifest: prepared.manifest,
             stored: stored,
             reusedCount: prepared.reusedCount,
-            extractedCount: drafts.count,
+            extractedCount: extractedDrafts.count,
             startedAt: prepared.startedAt
         )
         let view = SnapshotView(
@@ -355,6 +394,81 @@ public struct ProjectIndexer: Sendable {
         file.standardizedFileURL.pathComponents
             .dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private func loadCachedDrafts(
+        for inputs: [ExtractionInput]
+    ) -> [ExtractionDraft] {
+        guard let cache else { return [] }
+        let payloads = cache.payloads(for: inputs.map { cacheKey(for: $0.key) })
+        let result = BlockingResult<[ExtractionDraft]>()
+        let operation: @Sendable () async -> Void = {
+            var drafts: [ExtractionDraft] = []
+            for start in stride(from: 0, to: inputs.count, by: parallelism) {
+                let end = min(start + parallelism, inputs.count)
+                drafts += await withTaskGroup(of: ExtractionDraft?.self) { group in
+                    for input in inputs[start..<end] {
+                        group.addTask {
+                            guard let payload = payloads[cacheKey(for: input.key)] else {
+                                return nil
+                            }
+                            do {
+                                return try ContentIndexDraftCodec.decode(
+                                    payload,
+                                    order: input.order,
+                                    bytes: input.bytes,
+                                    expectedKey: input.key
+                                )
+                            } catch {
+                                cache.removePayload(for: cacheKey(for: input.key))
+                                return nil
+                            }
+                        }
+                    }
+                    return await group.reduce(into: []) { drafts, draft in
+                        if let draft { drafts.append(draft) }
+                    }
+                }
+            }
+            result.complete(.success(drafts.sorted { $0.order < $1.order }))
+        }
+        if #available(macOS 15.4, *) {
+            Task.detached(
+                executorPreference: DispatchQueue.global(qos: .userInitiated),
+                operation: operation
+            )
+        } else {
+            Task.detached(operation: operation)
+        }
+        return (try? result.wait().get()) ?? []
+    }
+
+    private func remap(
+        _ drafts: [ExtractionDraft],
+        into store: ProjectIndexStore
+    ) -> [(ContentIndex, [UInt8], Bool)] {
+        drafts.map { draft in
+            (
+                remap(
+                    draft.index,
+                    localNames: draft.names,
+                    localStrings: draft.strings,
+                    names: store.names,
+                    strings: store.strings
+                ),
+                draft.bytes,
+                draft.containsErrorNodes
+            )
+        }
+    }
+
+    private func persist(
+        _ drafts: [ExtractionDraft],
+        to cache: IndexCache? = nil
+    ) {
+        let cache = cache ?? self.cache
+        guard let cache else { return }
+        cache.store(drafts)
     }
 
     private func extract(_ inputs: [ExtractionInput]) throws -> [ExtractionDraft] {
@@ -520,14 +634,15 @@ public struct ProjectIndexer: Sendable {
         let key: ContentIndexKey
     }
 
-    private struct ExtractionDraft: Sendable {
-        let order: Int
-        let bytes: [UInt8]
-        let index: ContentIndex
-        let names: Interner<NameID>
-        let strings: Interner<StringID>
-        let containsErrorNodes: Bool
-    }
+}
+
+struct ExtractionDraft: Sendable {
+    let order: Int
+    let bytes: [UInt8]
+    let index: ContentIndex
+    let names: Interner<NameID>
+    let strings: Interner<StringID>
+    let containsErrorNodes: Bool
 }
 
 private final class BlockingResult<Value>: @unchecked Sendable {

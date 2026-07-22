@@ -29,6 +29,9 @@ struct ProjectOptions: ParsableArguments {
     @Option(name: .long, help: "Project root to index.")
     var project: String
 
+    @Flag(name: .long, help: "Persist extracted content indexes.")
+    var persist = false
+
     @OptionGroup var global: GlobalOptions
 }
 
@@ -225,10 +228,13 @@ extension CodeInsight {
         @Flag(name: .long, help: "Print detailed index statistics.")
         var stats = false
 
+        @Flag(name: .long, help: "Persist extracted content indexes.")
+        var persist = false
+
         @OptionGroup var global: GlobalOptions
 
         func run() throws {
-            let session = try indexProject(path)
+            let session = try indexProject(path, persist: persist)
             if global.json {
                 try printJSON(IndexStatsJSON(session.stats))
             } else if stats {
@@ -250,7 +256,7 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let pathID = try findPath(file, project: options.project, session: session)
             let index = try content(at: pathID, in: session)
             let dump = CanonicalDump.render(index, names: session.names, strings: session.strings)
@@ -273,7 +279,7 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let definitions = try session.definitions(
                 of: name,
                 context: queryContext(for: session)
@@ -314,7 +320,7 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let callers = try session.callers(
                 of: name,
                 context: queryContext(for: session)
@@ -379,7 +385,7 @@ extension CodeInsight {
         }
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let pathID = try findPath(file, project: options.project, session: session)
             let index = try content(at: pathID, in: session)
             guard let lineStart = index.lineTable.byteOffset(line: line, column: 1)
@@ -476,7 +482,7 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let implementations = try session.implementations(
                 ofTrait: traitName,
                 context: queryContext(for: session)
@@ -545,7 +551,7 @@ extension CodeInsight {
             }
             let traitName = String(traitMethod[..<separator])
             let methodName = String(traitMethod[traitMethod.index(after: separator)...])
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let context = queryContext(for: session)
             let traitDefinitions = try session.definitions(
                 of: traitName,
@@ -619,7 +625,7 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let parsed = try parsePosition(position)
             let pathID = try findPath(parsed.file, project: options.project, session: session)
             let sourceIndex = try content(at: pathID, in: session)
@@ -681,7 +687,7 @@ extension CodeInsight {
         }
 
         func run() throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let hits = try session.searchSymbols(
                 query: query,
                 limit: limit,
@@ -741,7 +747,7 @@ extension CodeInsight {
         var caseSensitive = false
 
         func run() async throws {
-            let session = try indexProject(options.project)
+            let session = try indexProject(options.project, persist: options.persist)
             let stream = try session.search(
                 ContentSearchQuery(
                     pattern: pattern,
@@ -806,12 +812,16 @@ extension CodeInsight {
         @Option(name: .long, help: "Corpus root to index.")
         var corpus: String
 
+        @Flag(name: .long, help: "Persist extracted content indexes.")
+        var persist = false
+
         @OptionGroup var global: GlobalOptions
 
         func run() throws {
             let report = try evaluateGoldSet(
                 at: URL(fileURLWithPath: goldFile),
-                corpus: URL(fileURLWithPath: corpus, isDirectory: true)
+                corpus: URL(fileURLWithPath: corpus, isDirectory: true),
+                persist: persist
             )
             if global.json {
                 try printJSON(report)
@@ -1001,8 +1011,12 @@ private struct ContentSearchMatchJSON: Codable {
     }
 }
 
-private func indexProject(_ path: String) throws -> EngineSession {
-    try ProjectIndexer().index(root: URL(fileURLWithPath: path, isDirectory: true))
+private func indexProject(_ path: String, persist: Bool = false) throws -> EngineSession {
+    let root = URL(fileURLWithPath: path, isDirectory: true)
+    let indexer = persist ? ProjectIndexer(persistingProjectAt: root) : ProjectIndexer()
+    let session = try indexer.index(root: root)
+    if persist { indexer.flushPersistentWrites() }
+    return session
 }
 
 private func queryContext(for session: EngineSession) -> QueryContext {

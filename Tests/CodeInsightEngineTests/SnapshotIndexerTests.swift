@@ -146,6 +146,181 @@ func snapshotIndexerCountsLFSPointerWithoutParsingItAsRust() throws {
     #expect(!session.contentIndexes.keys.contains { $0.contentID == file.contentID })
 }
 
+@Test
+func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+
+    let direct = try ProjectIndexer(parallelism: 1).index(root: fixture.root)
+    let cache = try IndexCache(fileURL: cacheURL)
+    let writer = ProjectIndexer(
+        parallelism: 2,
+        cache: cache
+    )
+    let first = try writer.index(root: fixture.root)
+    writer.flushPersistentWrites()
+    let storedKey = try #require(first.contentIndexes.keys.first)
+    let reloaded = try ProjectIndexer(
+        parallelism: 2,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: fixture.root)
+
+    #expect(first.stats.extractedCount == 2)
+    #expect(cache.payload(for: cacheKey(for: storedKey))?
+        .starts(with: Data("CIDX".utf8)) == true)
+    #expect(reloaded.stats.extractedCount == 0)
+    #expect(reloaded.stats.reusedCount == 2)
+    try expectEquivalentContent(direct, reloaded)
+}
+
+@Test
+func corruptPersistentPayloadSilentlyFallsBackToExtraction() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let cache = try IndexCache(fileURL: cacheURL)
+    let indexer = ProjectIndexer(parallelism: 1, cache: cache)
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
+    let direct = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore()
+    )
+    _ = try indexer.indexSnapshot(snapshot, into: ProjectIndexStore())
+    indexer.flushPersistentWrites()
+    let firstRustContentID = try #require(direct.manifest.files.first {
+        $0.detectedLanguage == .rust
+    }?.contentID)
+    let poisonedKey = try #require(direct.contentIndexes.keys.first {
+        $0.contentID == firstRustContentID
+    })
+    cache.storeSynchronously([
+        (cacheKey(for: poisonedKey), Data("not a draft".utf8), 1),
+    ])
+
+    let prepared = try indexer.prepareSnapshot(snapshot, into: ProjectIndexStore())
+    #expect(prepared.pendingExtractionCount == 1)
+    #expect(prepared.cachedSession.stats.reusedCount == 0)
+    let recovered = try indexer.completeSnapshot(prepared)
+    #expect(recovered.stats.extractedCount == 1)
+    #expect(recovered.stats.reusedCount == 1)
+    try expectEquivalentContent(direct, recovered)
+}
+
+@Test
+func extractorVersionMismatchRebuildsTheWholeDatabase() throws {
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL, extractorVersion: 40)
+    cache?.storeSynchronously([("old", Data([1, 2, 3]), 1)])
+    #expect(cache?.payload(for: "old") == Data([1, 2, 3]))
+    cache = nil
+
+    let bumped = try IndexCache(fileURL: cacheURL, extractorVersion: 41)
+    #expect(bumped.payload(for: "old") == nil)
+    #expect(bumped.metadata.extractorVersion == 41)
+}
+
+@Test
+func persistentCacheEvictsLeastRecentlyUsedPayloads() throws {
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let cache = try IndexCache(fileURL: cacheURL, quotaBytes: 8)
+    cache.storeSynchronously([
+        ("a", Data(repeating: 1, count: 4), 1),
+        ("b", Data(repeating: 2, count: 4), 2),
+    ])
+    #expect(cache.payload(for: "a") != nil)
+    cache.storeSynchronously([("c", Data(repeating: 3, count: 4), 3)])
+
+    #expect(cache.payload(for: "a") != nil)
+    #expect(cache.payload(for: "b") == nil)
+    #expect(cache.payload(for: "c") != nil)
+}
+
+@Test
+func batchInsertMatchesSequentialInsert() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let session = try ProjectIndexer(parallelism: 1).index(root: fixture.root)
+    let entries = session.contentIndexes.values.sorted {
+        cacheKey(for: $0.key) < cacheKey(for: $1.key)
+    }.map { index in
+        (
+            index,
+            session.sourceBytesByContent[index.key.contentID]!,
+            false
+        )
+    }
+    let sequential = ProjectIndexStore()
+    for entry in entries {
+        sequential.insert(
+            entry.0,
+            bytes: entry.1,
+            containsErrorNodes: entry.2
+        )
+    }
+    let batch = ProjectIndexStore()
+    batch.insert(entries)
+
+    let sequentialState = sequential.snapshot()
+    let batchState = batch.snapshot()
+    #expect(Set(sequentialState.contentIndexes.keys) == Set(batchState.contentIndexes.keys))
+    #expect(sequentialState.sourceBytesByContent == batchState.sourceBytesByContent)
+    #expect(sequentialState.containsErrorNodes == batchState.containsErrorNodes)
+    for key in sequentialState.contentIndexes.keys {
+        #expect(try encodedIndex(sequentialState.contentIndexes[key]!)
+            == encodedIndex(batchState.contentIndexes[key]!))
+    }
+    #expect(postingDump(sequentialState.namePosting) == postingDump(batchState.namePosting))
+}
+
+private func expectEquivalentContent(
+    _ direct: EngineSession,
+    _ cached: EngineSession
+) throws {
+    #expect(Set(direct.contentIndexes.keys) == Set(cached.contentIndexes.keys))
+    #expect(direct.sourceBytesByContent == cached.sourceBytesByContent)
+    for key in direct.contentIndexes.keys {
+        let directIndex = direct.contentIndexes[key]!
+        let cachedIndex = cached.contentIndexes[key]!
+        #expect(try encodedIndex(directIndex) == encodedIndex(cachedIndex))
+        #expect(CanonicalDump.render(
+            directIndex,
+            names: direct.names,
+            strings: direct.strings
+        ) == CanonicalDump.render(
+            cachedIndex,
+            names: cached.names,
+            strings: cached.strings
+        ))
+    }
+}
+
+private func encodedIndex(_ index: ContentIndex) throws -> Data {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    return try encoder.encode(index)
+}
+
+private func postingDump(_ posting: NamePosting) -> [String] {
+    let definitions = posting.definitions.flatMap { name, values in
+        values.map { "d:\(name.rawValue):\(cacheKey(for: $0.key)):\($0.facetIndex)" }
+    }
+    let calls = posting.calls.flatMap { name, values in
+        values.map { "c:\(name.rawValue):\(cacheKey(for: $0.key)):\($0.callIndex)" }
+    }
+    return (definitions + calls).sorted()
+}
+
+private func temporaryCacheURL() -> URL {
+    FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightIndexCacheTests-\(UUID().uuidString)")
+        .appendingPathComponent("cache.sqlite3")
+}
+
 private func resolvedName(_ name: String, in session: EngineSession) throws -> String {
     let source = "fn \(name)() {}\nfn call() { \(name)(); }\n"
     let path = try #require(session.manifest.files.first {

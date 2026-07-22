@@ -1,11 +1,11 @@
-public enum LanguageID: Sendable {
+public enum LanguageID: UInt8, Codable, Sendable {
     case rust
     case python
     case typescript
     case javascript
 }
 
-public struct LanguageMode: Hashable, Sendable {
+public struct LanguageMode: Codable, Hashable, Sendable {
     public let language: LanguageID
     public let variant: StringID?
 
@@ -15,7 +15,7 @@ public struct LanguageMode: Hashable, Sendable {
     }
 }
 
-public struct ContentIndexKey: Hashable, Sendable {
+public struct ContentIndexKey: Codable, Hashable, Sendable {
     public let contentID: ContentID
     public let languageMode: LanguageMode
     public let grammarVersion: UInt32
@@ -34,7 +34,7 @@ public struct ContentIndexKey: Hashable, Sendable {
     }
 }
 
-public enum DeclarationKind: Sendable {
+public enum DeclarationKind: UInt8, Codable, Sendable {
     case rustFn
     case rustStruct
     case rustEnum
@@ -48,7 +48,7 @@ public enum DeclarationKind: Sendable {
     case rustField
 }
 
-public struct SymbolGroupID: Hashable, Sendable {
+public struct SymbolGroupID: Codable, Hashable, Sendable {
     public let rawValue: UInt32
 
     public init(rawValue: UInt32) {
@@ -56,7 +56,7 @@ public struct SymbolGroupID: Hashable, Sendable {
     }
 }
 
-public struct DeclarationFacet: Sendable {
+public struct DeclarationFacet: Codable, Sendable {
     public let symbolGroupID: SymbolGroupID
     public let space: SymbolSpace
     public let kind: DeclarationKind
@@ -90,7 +90,7 @@ public struct DeclarationFacet: Sendable {
     }
 }
 
-public struct ImplRelation: Sendable {
+public struct ImplRelation: Codable, Sendable {
     public let implFacetIndex: UInt32
     public let traitNameID: NameID?
     public let traitNameRange: ByteRange?
@@ -109,7 +109,7 @@ public struct ImplRelation: Sendable {
     }
 }
 
-public struct ContentIndex: Sendable {
+public struct ContentIndex: Codable, Sendable {
     public let key: ContentIndexKey
     public let scopes: [ScopeRecord]
     public let bindings: [BindingRecord]

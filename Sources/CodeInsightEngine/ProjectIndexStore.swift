@@ -59,12 +59,18 @@ public final class ProjectIndexStore: @unchecked Sendable {
         bytes: [UInt8],
         containsErrorNodes: Bool
     ) {
+        insert([(index, bytes, containsErrorNodes)])
+    }
+
+    func insert(_ entries: [(ContentIndex, [UInt8], Bool)]) {
         lock.withLock {
-            guard storedContentIndexes[index.key] == nil else { return }
-            storedContentIndexes[index.key] = index
-            storedSourceBytes[index.key.contentID] = bytes
-            storedNamePosting.add(index, for: index.key)
-            storedContainsErrorNodes[index.key] = containsErrorNodes
+            for (index, bytes, containsErrorNodes) in entries {
+                guard storedContentIndexes[index.key] == nil else { continue }
+                storedContentIndexes[index.key] = index
+                storedSourceBytes[index.key.contentID] = bytes
+                storedNamePosting.add(index, for: index.key)
+                storedContainsErrorNodes[index.key] = containsErrorNodes
+            }
         }
     }
 }

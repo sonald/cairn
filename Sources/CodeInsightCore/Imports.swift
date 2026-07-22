@@ -1,4 +1,4 @@
-public struct ImportFlags: OptionSet, Sendable {
+public struct ImportFlags: Codable, OptionSet, Sendable {
     public let rawValue: UInt8
 
     public init(rawValue: UInt8) {
@@ -12,7 +12,7 @@ public struct ImportFlags: OptionSet, Sendable {
     public static let dynamic = ImportFlags(rawValue: 1 << 4)
 }
 
-public enum ImportKind: Sendable {
+public enum ImportKind: UInt8, Codable, Sendable {
     case module
     case named
     case `default`
@@ -20,7 +20,7 @@ public enum ImportKind: Sendable {
     case sideEffect
 }
 
-public struct ImportBinding: Sendable {
+public struct ImportBinding: Codable, Sendable {
     public let moduleSpecifier: StringID
     public let importedName: NameID?
     public let localName: NameID?
@@ -48,7 +48,7 @@ public struct ImportBinding: Sendable {
     }
 }
 
-public struct ExportRecord: Sendable {
+public struct ExportRecord: Codable, Sendable {
     public let exportedName: NameID
     public let sourceBindingIndex: UInt32?
     public let range: ByteRange
