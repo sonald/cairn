@@ -30,8 +30,23 @@ if grep -rnE 'import AppKit|import SwiftUI' \
     exit 1
 fi
 
-if grep -rnE '\.indices,[[:space:]]*id:' Sources; then
-    echo "SwiftUI ForEach/List must not use collection.indices as identity; index identity can crash after mutation." >&2
+swiftui_unstable_identity_regex='(ForEach|List)\([[:space:]]*0[[:space:]]*\.\.<|(ForEach|List)\([^)]*\.enumerated\(\)|\.indices,[[:space:]]*id:'
+swiftui_unstable_identity_samples=(
+    'List(0..<items.count, id: \.self)'
+    'ForEach( 0 ..< items.count, id: \.self)'
+    'ForEach(Array(items.enumerated()), id: \.offset)'
+    'List(items.enumerated(), id: \.offset)'
+    'List(items.indices, id: \.self)'
+)
+for sample in "${swiftui_unstable_identity_samples[@]}"; do
+    if ! grep -Eq "$swiftui_unstable_identity_regex" <<<"$sample"; then
+        echo "禁令 regex 覆盖不全: $sample" >&2
+        exit 1
+    fi
+done
+
+if grep -rnE "$swiftui_unstable_identity_regex" Sources; then
+    echo "SwiftUI ForEach/List must not use unstable index/range/enumerated identity; it can crash after mutation." >&2
     exit 1
 fi
 

@@ -321,6 +321,10 @@ public final class RelationTreeModel {
                     edges[index].certainty = .exact
                     edges[index].exactOrigin = exact.origin
                 } else if direction == .calls,
+                          // RustAnalyzerProvider.parseDefinition returns paths inside
+                          // its project/materialized root as relative, and outside as
+                          // absolute. A changed convention can wrongly demote local
+                          // edges; review this branch with any provider path change.
                           exact.location.file.hasPrefix("/"),
                           edge.certainty == .probable || edge.certainty == .possible,
                           !edge.evidence.isEmpty,

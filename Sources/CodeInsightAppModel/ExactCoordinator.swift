@@ -115,7 +115,7 @@ public final class ExactCoordinator {
     @ObservationIgnored private let trustRegistry: TrustRegistry
     @ObservationIgnored private let materializer: Materializer
     @ObservationIgnored private var overlay = ExactOverlay()
-    @ObservationIgnored private var active: Active?
+    private var active: Active?
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
     @ObservationIgnored private var epoch: UInt64 = 0
     @ObservationIgnored private var expectedGeneration: UInt64 = 0

@@ -1,4 +1,4 @@
-# M4 Backlog（M3 终审 2026-07-21 产出）
+# M4 Backlog（2026-07-23 终审）
 
 ## M4 主体（design §16 + §8）
 
@@ -6,59 +6,72 @@ Exact Provider（机会式精确增强：rust-analyzer/tsserver/Pyright 或 SCIP
 Safe/Trusted 双模式（design §8.4）+ diff 阅读（跨 commit，含 Compare 预设的 diff）+
 索引持久化 + 正式发布（签名/公证、libgit2 静态链接）。
 
-## M3 终审非阻塞项（Opus review）
+## 已解决，可结案
 
-1. **ProjectIndexStore 计算属性锁内整拷**：`contentIndexes`/`namePosting`/
-   `sourceBytesByContent` 每次访问 lock.withLock 整字典拷贝（S2 形态）。S3 已提示热
-   路径取一次引用，但更大仓库前应给 store 加"稳定引用快照"或读写锁，避免查询循环
-   反复整拷。当前 tokio/oatmeal 量级未咬（switch 38–104ms）。
-2. **coverage.importsResolved 诚实性**：S4 允许 importsResolved 近似/占位——确认 UI
-   显示的是如实数字或明确标"近似"，不造精确感。
-3. libgit2 正式分发：静态链接或随包 vendor（M4 发布必需）。
-4. **RA 孙进程崩溃清理**：当前 crash guard 只覆盖登记的 RA 直系 PID；若要覆盖
-   cargo / proc-macro-srv，需放弃 Foundation `Process`，改
-   `posix_spawn` + `POSIX_SPAWN_SETPGROUP` 后按进程组清理，或引入 kqueue
-   看护进程。
+1. **ProjectIndexStore 计算属性锁内整拷**：S5 已在
+   `ProjectIndexStore.swift` 引入 `State` + `snapshot()`，查询热路径经
+   `EngineSession.storeState` 读取、不再过锁，`ProjectIndexer` 也已使用批量
+   `insert`。
+2. **coverage.importsResolved 诚实性**：`AppModel.swift` 将其定义为 `Int?`，
+   `statusText` 仅在非 nil 时显示；Sources 内 6 个 `SnapshotCoverage(...)`
+   构造点均未伪造该值，并有 nil 断言守护。
+3. **libgit2 正式分发**：S8 的 `scripts/vendor-libgit2.sh` 固定 v1.9.6 与
+   SHA-256，构建静态库并关闭 SSH/HTTPS/NTLM/GSSAPI；`Package.swift` 提供
+   brew/vendored 双路径，`scripts/make-app.sh` 默认要求 vendored 发布产物。
+4. **Compare 跨 commit diff**：S6 已交付 `DiffCore`、`CompareModel`、hunk
+   导航，且 `--self-test-diff` 在 `scripts/ci.sh` 恒跑。
+5. **FileTreeModel / replay 主线程 IO**：S8 已通过 `AppModel.swift` 的
+   `detachedValue` 将 `openProject` 全盘扫描及 replay 文件加载、highlight
+   移出主线程。
 
-## M4-Fix 终审产出（Fable 5, 2026-07-23，`1239b70..bdf299e`）
+## backlog 清理轮 A–D
 
-**必须留档的 caveat：**
+- `bd06dab`（A）：取消选中会清空 `selectedRelationSymbol`，并补齐
+  name-only 边的诚实标注。
+- `7df5d8e`（B）：provider-proven External 方法调用会从 Possible 降组。
+- `6068c1c`（C）：SearchPanel 以匹配身份保持选中，避免组重排后 Enter
+  打开错误文件。
+- CHUNK D（本片，按约束未提交）：扩展 SwiftUI 不稳定身份静态禁令并加 regex
+  自检；让 `ExactCoordinator.attribution` 正确参与 Observation；记录
+  RelationTree/provider 路径约定耦合。
 
-5. **C1(G4.4) Revoke 崩溃"无头不可证"**：修复是**按构造消除**（`List(trustedRepositories)`
-   行闭包持 `TrustedRepository` 值拷贝，源码已无任何 index 回查，SwiftUI 重估过期行
-   最坏只渲染一帧陈旧数据）。但**无头测不出原崩溃**——把 List 改回
-   `indices + 行内回查` 旧写法，新增的 trust-revoke 通道 5/5 仍 exit 0（触发需真实
-   显示周期里的 NSTableView 行生命周期，依赖可见窗口的 CA commit 节奏）。
-   现有兜底：ci 静态禁令 grep `\.indices,\s*id:` + 人工 G4.4 复验（建议连做两次，
-   原为 2/2 复现，二值信号强）。XCUITest 真窗口复现成本高且易 flaky，本轮不做。
-   **2026-07-23 结案：决策者重跑 30 分钟交互走查 = PASS**，G4.4 崩溃由人工实测背书
-   （此前 2/2 稳定复现，修后不再出现）。自动化侧仍只有静态禁令，未来若改动
-   TrustSettingsView 的列表身份写法，仍须人工复验一次——无头证明不了这条。
-6. **ci 禁令 regex 的同类形态盲区**：只拦 `.indices, id:`，不覆盖
-   `0..<items.count, id: \.self` / `enumerated()` 等同类危险形态。作为 code review
-   规则记录，暂不扩 grep（误报风险）。
-7. **`methodNameOnly` 吸收外部方法调用成 Possible 的语义复审**：G8.1 只解决了空组的
-   诚实性（恒显 "(0)"），**没解决吸收语义**——真实代码上 External 组仍可能偏少。
-8. **`selectedRelationSymbol` 取消选中不清空**：`selectSelection` 在 `selectedRow < 0`
-   或选中组行时早退、不清该字段；用户点空白取消选中后再点方向段控，会换根到"看上去
-   已取消选中"的上一个 edge。非阻塞。
-9. **设置窗口缓存导致 stale settings 展示**（可能）。
-10. **LSPClient `serverDiagnostics` 64KB 截断**理论上可使 offline→partial 回翻
-    （修前同义，非回归，下一事件自愈）；coverage 并发送达乱序窗口同理自愈。
-11. **`ExactCoordinator.attribution` 是计算属性**、不参与 Observation 追踪，tooltip
-    刷新搭 readiness/coverage/trustMode 的便车；若未来 attribution 独立变化需补发布。
+## 防线留档
 
-## M3 期间挂起延续
+- **C1(G4.4) Revoke 崩溃仍属“无头不可证”**：真正的 bug 检测器是可见窗口
+  G4.4（修前 2/2 复现，修后 30 分钟交互走查 PASS）；CI grep 只是按构造阻止
+  `.indices, id:`、锚定 `ForEach`/`List` 的 `0..<` 与 `enumerated()` 回归，
+  内嵌样本仅验证禁令 regex 自身覆盖，不等价于复现显示周期崩溃。
+- **attribution Observation 测试是真正的 bug 检测器**：旧
+  `@ObservationIgnored active` 下 prepare/invalidate 两次通知均失败，删除该
+  标注后两次均触发；Sources 零命中检查则仍只是静态边界防回归断言。
 
-- ~~**K5 Pin 语义裁决**~~：**2026-07-21 已裁决并实现**（design §2.2 F2.3）——
-  Pin = 底部冻结；Cmd+单击跳主区不动底部；Show Relations 只填关系树不动底部（无条件）。
-  由 `--self-test-pin` 集成通道断言守护。
-- 分支图（graph）：M3 切换器只做线性列表 + branch/tag 标签。
-- Compare 跨 commit diff：M3 只做分屏布局，diff 留 M4（design F4.7 P1）。
-- huge syntaxVisible TextKit 属性重排优化（探针级专项）。
-- AX 值变更防御专项（现有 4+ 个 NSOutlineView）。
-- FileTreeModel / replay 越界兜底的主线程 IO 异步化（超大仓库）。
-- SearchPanel 5000 命中极限掉帧、selectedIndex 随组重排漂移。
+## 存档 wontfix
+
+- **设置窗口缓存 stale settings**：当前不可达，因为 `readerSettings` 唯一突变点
+  是设置窗口自身 `onChange`，没有第二入口。**未来新增任何设置突变入口（如
+  Cmd+± 字号）前，必须先移除 `settingsWindowController` 缓存或改绑定。**
+- **LSPClient `serverDiagnostics` 64KB 截断**：每事件重发全量且每事件重算
+  coverage，理论回翻窗口会在下一事件自愈，当前修复复杂度大于收益；M5 若做
+  coverage 状态机时一并收。
+
+## 继续挂 M5
+
+- RA 孙进程进程组化：需弃 Foundation `Process` 重写 spawn，会触及 exact 主干。
+- SearchPanel 5000 命中极限渲染：34ms 节流已缓解，无头无法证明真实帧表现。
+- Context “位于依赖”展示：补全 design F2.7。
+- receiver 类型建模：`UnresolvedCall.receiverRange` 已在 Core 预留。
+- 分支图。
+- AX 值变更防御专项。
+- huge syntaxVisible TextKit 属性重排优化。
+- TS/Python 整语言面。
+
+## 改 provider 时的联动检查项
+
+- `RelationTreeModel` 的 provider-proven External 降组以
+  `exact.location.file.hasPrefix("/")` 判定项目外目标，依赖
+  `RustAnalyzerProvider.parseDefinition` 对项目/物化根内返回相对路径、根外
+  返回绝对路径的约定；若 provider 改为返回项目内绝对路径会误降组，因此任何
+  provider 路径约定变更都必须同步复查此处。
 
 ## 交互测试待人工确认（工具注入能力限制）
 

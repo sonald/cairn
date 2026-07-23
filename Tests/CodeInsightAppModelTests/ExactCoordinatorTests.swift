@@ -4,8 +4,53 @@ import CodeInsightExact
 import CodeInsightGit
 import Dispatch
 import Foundation
+import Observation
 import Testing
 @testable import CodeInsightAppModel
+
+@MainActor
+@Test
+func exactCoordinatorAttributionObservationTracksPrepareAndInvalidate()
+    async throws
+{
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let prepareGate = DispatchSemaphore(value: 0)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in ExactTestProvider(state: state) },
+        snapshotFactory: { _, _ in
+            prepareGate.wait()
+            return ExactTestSnapshot(files: fixture.files)
+        },
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await exactWaitUntil { coordinator.trustMode == .safe })
+
+    await confirmation("prepare publishes attribution") { observed in
+        withObservationTracking {
+            _ = coordinator.attribution
+        } onChange: {
+            observed()
+        }
+        prepareGate.signal()
+        #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    }
+    #expect(coordinator.attribution != nil)
+
+    await confirmation("invalidate clears attribution") { observed in
+        withObservationTracking {
+            _ = coordinator.attribution
+        } onChange: {
+            observed()
+        }
+        coordinator.invalidate(generation: 2)
+    }
+    #expect(coordinator.attribution == nil)
+}
 
 @MainActor
 @Test
