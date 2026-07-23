@@ -901,6 +901,49 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             offset: target.relationCallOffset,
             direction: .callers
         )
+        let deselectRootReady = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "answer"
+                && model.relationTree.direction == .callers
+                && windowController.selfTestExactGroupRowCount > 0
+        })
+        let selectedForDeselect = deselectRootReady
+            && windowController.selfTestSelectRelationEdge(titled: "relation_root")
+        let contextBeforeDeselect = (
+            summary: windowController.selfTestContextSummary,
+            provenance: windowController.selfTestContextProvenance,
+            candidateCount: windowController.selfTestContextCandidateCount,
+            pinned: windowController.selfTestContextPinned
+        )
+        windowController.selfTestDeselectRelation()
+        let deselectPreservedContext =
+            windowController.selfTestContextSummary == contextBeforeDeselect.summary
+            && windowController.selfTestContextProvenance
+                == contextBeforeDeselect.provenance
+            && windowController.selfTestContextCandidateCount
+                == contextBeforeDeselect.candidateCount
+            && windowController.selfTestContextPinned == contextBeforeDeselect.pinned
+        if selectedForDeselect {
+            windowController.selfTestChangeRelationDirection(.calls)
+        }
+        let deselectedRootPreserved = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "answer"
+                && model.relationTree.direction == .calls
+        })
+        emitExactStep(
+            "relation-deselect-root",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "selectedEdge": selectedForDeselect,
+                "rootTitle": model.relationTree.root?.title ?? "",
+                "contextPreserved": deselectPreservedContext,
+            ]
+        )
+
+        windowController.selfTestReaderRelation(
+            offset: target.relationCallOffset,
+            direction: .callers
+        )
         let answerCallersReady = waitUntil(timeout: 5, condition: {
             model.relationTree.root?.title == "answer"
                 && model.relationTree.direction == .callers
@@ -980,6 +1023,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "selectedForDirection": selectedForDirection,
             "selectedEdgeDrivesRoot": selectedEdgeDrivesRoot,
             "directionGenerationIncremented": directionGenerationIncremented,
+            "deselectRootReady": deselectRootReady,
+            "selectedForDeselect": selectedForDeselect,
+            "deselectedRootPreserved": deselectedRootPreserved,
+            "deselectPreservedContext": deselectPreservedContext,
             "answerCallersReady": answerCallersReady,
             "selectedForOpen": selectedForOpen,
             "doubleClickNavigatesAndSetsRoot": doubleClickNavigatesAndSetsRoot,

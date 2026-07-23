@@ -48,6 +48,82 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
 
 @MainActor
 @Test
+func relationTreeLabelsNameOnlyCallsHonestly() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let methodName = fixture.session.names.intern("method")
+    let edges = [
+        RelationTreeModel.LoadedEdge(
+            title: "possible-name-only",
+            certainty: .possible,
+            dispatch: .dynamicDispatch,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 15,
+            line: 1,
+            evidence: [.methodNameOnly(nameID: methodName)]
+        ),
+        RelationTreeModel.LoadedEdge(
+            title: "probable-name-only",
+            certainty: .probable,
+            dispatch: .dynamicDispatch,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 15,
+            line: 1,
+            evidence: [.methodNameOnly(nameID: methodName)]
+        ),
+        RelationTreeModel.LoadedEdge(
+            title: "same-file",
+            certainty: .possible,
+            dispatch: .dynamicDispatch,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 15,
+            line: 1,
+            evidence: [
+                .methodNameOnly(nameID: methodName),
+                .sameFile(pathID: fixture.a.pathID),
+            ]
+        ),
+        RelationTreeModel.LoadedEdge(
+            title: "unique-import",
+            certainty: .probable,
+            dispatch: .dynamicDispatch,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 15,
+            line: 1,
+            evidence: [
+                .methodNameOnly(nameID: methodName),
+                .uniqueImport(importBindingIndex: 0),
+            ]
+        ),
+    ]
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: edges, isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let possible = try relationGroup("Possible", in: model.root)
+    let subtitles = Dictionary(
+        uniqueKeysWithValues: possible.children?.compactMap { node in
+            node.subtitle.map { (node.title, $0) }
+        } ?? []
+    )
+    #expect(subtitles == [
+        "possible-name-only": "Possible · dynamic · name match only",
+        "probable-name-only": "Probable · dynamic · name match only",
+        "same-file": "Possible · dynamic",
+        "unique-import": "Probable · dynamic",
+    ])
+}
+
+@MainActor
+@Test
 func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -215,6 +291,43 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
     )
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     #expect(model.root?.title == "a")
+}
+
+@MainActor
+@Test
+func clearingRelationSelectionDoesNotNotifyContext() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edge = RelationTreeModel.LoadedEdge(
+        title: "b",
+        certainty: .strong,
+        dispatch: .direct,
+        symbol: fixture.b,
+        path: "main.rs",
+        byteOffset: 15,
+        line: 1,
+        evidence: []
+    )
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [edge], isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let strong = try relationGroup("Strong", in: model.root)
+    let child = try #require(strong.children?.first)
+    var selectedTitles: [String] = []
+    model.onSelect = { selectedTitles.append($0.title) }
+    model.select(child)
+    let selectedBeforeClear = model.selectedRelationSymbol
+
+    model.clearSelection()
+
+    #expect(
+        selectedBeforeClear == fixture.b
+            && model.selectedRelationSymbol == nil
+            && selectedTitles == ["b"]
+    )
 }
 
 @MainActor

@@ -234,6 +234,10 @@ public final class RelationTreeModel {
         onSelect(node)
     }
 
+    public func clearSelection() {
+        selectedRelationSymbol = nil
+    }
+
     private func expansionTask(for node: Node) -> Task<Void, Never>? {
         guard node.isExpandable, node.children == nil,
               let symbol = node.symbol, let session, let context
@@ -418,12 +422,23 @@ public final class RelationTreeModel {
             } else {
                 badge = isCycle ? "↻" : nil
             }
+            var subtitle = edge.certainty == .unresolved
+                ? "Unresolved"
+                : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))"
+            if direction == .calls,
+               edge.certainty == .probable || edge.certainty == .possible,
+               !edge.evidence.isEmpty,
+               edge.evidence.allSatisfy({
+                   if case .methodNameOnly = $0 { return true }
+                   return false
+               })
+            {
+                subtitle += " · name match only"
+            }
             let node = Node(
                 kind: .edge,
                 title: edge.title,
-                subtitle: edge.certainty == .unresolved
-                    ? "Unresolved"
-                    : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
+                subtitle: subtitle,
                 badge: badge,
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,

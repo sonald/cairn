@@ -56,6 +56,12 @@ final class RelationWindowController: NSViewController,
         return false
     }
 
+    func selfTestDeselect() {
+        guard isViewLoaded else { return }
+        outlineView.selectRowIndexes([], byExtendingSelection: false)
+        selectSelection(outlineView)
+    }
+
     func selfTestChangeDirection(_ direction: RelationTreeModel.Direction) {
         directionControl.selectedSegment = segment(for: direction)
         directionChanged(directionControl)
@@ -218,7 +224,10 @@ final class RelationWindowController: NSViewController,
               let node = outlineView.item(atRow: outlineView.selectedRow)
                 as? RelationTreeModel.Node,
               node.kind == .edge
-        else { return }
+        else {
+            model.clearSelection()
+            return
+        }
         model.select(node)
     }
 

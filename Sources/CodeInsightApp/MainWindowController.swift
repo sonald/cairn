@@ -292,6 +292,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.selfTestSelectEdge(titled: title)
     }
 
+    func selfTestDeselectRelation() {
+        relationController.selfTestDeselect()
+    }
+
     func selfTestChangeRelationDirection(_ direction: RelationTreeModel.Direction) {
         relationController.selfTestChangeDirection(direction)
     }
