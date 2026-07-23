@@ -230,6 +230,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestExternalGroupTitle: String? {
         relationController.selfTestExternalGroupTitle
     }
+    func selfTestVisibleRelationEdgeTitles(inGroup titlePrefix: String) -> [String] {
+        relationController.selfTestVisibleEdgeTitles(inGroup: titlePrefix)
+    }
+    func selfTestVisibleRelationEdgeSubtitle(
+        titled title: String,
+        inGroup titlePrefix: String
+    ) -> String? {
+        relationController.selfTestVisibleEdgeSubtitle(
+            titled: title,
+            inGroup: titlePrefix
+        )
+    }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {

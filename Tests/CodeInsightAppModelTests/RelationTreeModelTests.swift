@@ -141,7 +141,7 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
             byteOffset: 20,
             line: 1,
             evidence: [],
-            exactQuery: ("main.rs", queryOffset),
+            exactQuery: ("main.rs", queryOffset, 1),
             fuzzyTarget: ("main.rs", 20)
         )
     }
@@ -171,6 +171,72 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     #expect(exact.children?.map(\.title) == ["matching"])
     #expect(exact.children?.first?.badge == "Exact · lsp · hist")
     #expect(strong.children?.map(\.title) == ["mismatching", "no exact"])
+}
+
+@MainActor
+@Test
+func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let methodName = fixture.session.names.intern("method")
+    let edges = [
+        ("external", Certainty.possible, UInt32(10)),
+        ("matching", Certainty.possible, UInt32(11)),
+        ("no exact", Certainty.probable, UInt32(12)),
+        ("strong", Certainty.strong, UInt32(13)),
+    ].map { title, certainty, queryOffset in
+        RelationTreeModel.LoadedEdge(
+            title: title,
+            certainty: certainty,
+            dispatch: .dynamicDispatch,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 20,
+            line: 1,
+            evidence: [.methodNameOnly(nameID: methodName)],
+            exactQuery: ("main.rs", queryOffset, 1),
+            fuzzyTarget: ("main.rs", 20)
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: edges, isTruncated: false)
+        },
+        exactResolver: { _, offset, _ in
+            switch offset {
+            case 10, 13:
+                relationExactEntry(
+                    file: "/dependency/src/client.rs",
+                    byteOffset: 40
+                )
+            case 11:
+                relationExactEntry(file: "main.rs", byteOffset: 20)
+            default:
+                nil
+            }
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let exact = try relationGroup("Exact", in: model.root)
+    let strong = try relationGroup("Strong", in: model.root)
+    let possible = try relationGroup("Possible", in: model.root)
+    #expect(exact.children?.map(\.title) == ["matching"])
+    #expect(strong.children?.map(\.title) == ["strong"])
+    #expect(possible.children?.map(\.title) == ["no exact"])
+    let external = model.root?.children?.first {
+        $0.kind == .group && $0.title == "External / Unresolved"
+    }
+    let externalEdge = external?.children?.first
+    #expect(external != nil)
+    #expect(externalEdge?.title == "external")
+    #expect(externalEdge?.subtitle == "External · in dependency (rust-analyzer)")
+    #expect(externalEdge?.target?.path == "main.rs")
+    #expect(externalEdge?.target?.byteOffset == 10)
+    #expect(externalEdge?.children?.map(\.title) == ["method name match"])
 }
 
 @MainActor

@@ -39,6 +39,31 @@ final class RelationWindowController: NSViewController,
         return cell.textField?.stringValue
     }
 
+    func selfTestVisibleEdgeTitles(inGroup titlePrefix: String) -> [String] {
+        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
+              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        else { return [] }
+        return group.children?.compactMap { child in
+            guard child.kind == .edge, outlineView.row(forItem: child) >= 0
+            else { return nil }
+            return child.title
+        } ?? []
+    }
+
+    func selfTestVisibleEdgeSubtitle(
+        titled title: String,
+        inGroup titlePrefix: String
+    ) -> String? {
+        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
+              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        else { return nil }
+        return group.children?.first {
+            $0.kind == .edge
+                && $0.title == title
+                && outlineView.row(forItem: $0) >= 0
+        }?.subtitle
+    }
+
     func selfTestSelectEdge(titled title: String) -> Bool {
         guard isViewLoaded else { return false }
         for row in 0..<outlineView.numberOfRows {

@@ -76,7 +76,7 @@ public final class RelationTreeModel {
         let byteOffset: UInt32
         let line: UInt32
         let evidence: [ResolutionEvidence]
-        let exactQuery: (file: String, byteOffset: UInt32)?
+        let exactQuery: (file: String, byteOffset: UInt32, line: UInt32)?
         let fuzzyTarget: (file: String, byteOffset: UInt32)?
         var exactOrigin: ExactOrigin?
 
@@ -89,7 +89,7 @@ public final class RelationTreeModel {
             byteOffset: UInt32,
             line: UInt32,
             evidence: [ResolutionEvidence],
-            exactQuery: (file: String, byteOffset: UInt32)? = nil,
+            exactQuery: (file: String, byteOffset: UInt32, line: UInt32)? = nil,
             fuzzyTarget: (file: String, byteOffset: UInt32)? = nil,
             exactOrigin: ExactOrigin? = nil
         ) {
@@ -265,6 +265,7 @@ public final class RelationTreeModel {
             case let .success(loaded):
                 let loaded = await promoteExactEdges(
                     loaded,
+                    direction: direction,
                     generation: context.generation
                 )
                 guard generation == currentGeneration,
@@ -291,14 +292,15 @@ public final class RelationTreeModel {
 
     private func promoteExactEdges(
         _ loaded: LoadResult,
+        direction: Direction,
         generation: UInt64
     ) async -> LoadResult {
         guard let exactResolver else { return loaded }
         var edges = loaded.edges
-        await withTaskGroup(of: (Int, ExactOrigin?).self) { group in
+        await withTaskGroup(of: (Int, ExactOverlay.Entry?).self) { group in
             for (index, edge) in edges.prefix(500).enumerated() {
                 guard let query = edge.exactQuery,
-                      let fuzzyTarget = edge.fuzzyTarget
+                      edge.fuzzyTarget != nil
                 else { continue }
                 group.addTask {
                     let exact = await exactResolver(
@@ -306,15 +308,40 @@ public final class RelationTreeModel {
                         query.byteOffset,
                         generation
                     )
-                    let matches = exact?.location.file == fuzzyTarget.file
-                        && exact?.location.byteOffset == Int(fuzzyTarget.byteOffset)
-                    return (index, matches ? exact?.origin : nil)
+                    return (index, exact)
                 }
             }
-            for await (index, origin) in group {
-                guard let origin else { continue }
-                edges[index].certainty = .exact
-                edges[index].exactOrigin = origin
+            for await (index, exact) in group {
+                guard let exact else { continue }
+                let edge = edges[index]
+                if let fuzzyTarget = edge.fuzzyTarget,
+                   exact.location.file == fuzzyTarget.file,
+                   exact.location.byteOffset == Int(fuzzyTarget.byteOffset)
+                {
+                    edges[index].certainty = .exact
+                    edges[index].exactOrigin = exact.origin
+                } else if direction == .calls,
+                          exact.location.file.hasPrefix("/"),
+                          edge.certainty == .probable || edge.certainty == .possible,
+                          !edge.evidence.isEmpty,
+                          edge.evidence.allSatisfy({
+                              if case .methodNameOnly = $0 { return true }
+                              return false
+                          }),
+                          let query = edge.exactQuery
+                {
+                    edges[index] = LoadedEdge(
+                        title: edge.title,
+                        certainty: .unresolved,
+                        dispatch: edge.dispatch,
+                        symbol: nil,
+                        path: query.file,
+                        byteOffset: query.byteOffset,
+                        line: query.line,
+                        evidence: edge.evidence,
+                        exactOrigin: exact.origin
+                    )
+                }
             }
         }
         return LoadResult(edges: edges, isTruncated: loaded.isTruncated)
@@ -422,9 +449,13 @@ public final class RelationTreeModel {
             } else {
                 badge = isCycle ? "↻" : nil
             }
-            var subtitle = edge.certainty == .unresolved
-                ? "Unresolved"
-                : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))"
+            var subtitle = if edge.certainty == .unresolved {
+                edge.exactOrigin == nil
+                    ? "Unresolved"
+                    : "External · in dependency (rust-analyzer)"
+            } else {
+                "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))"
+            }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
                !edge.evidence.isEmpty,
@@ -516,7 +547,11 @@ public final class RelationTreeModel {
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: caller.evidence,
-                        exactQuery: (location.path, location.byteOffset),
+                        exactQuery: (
+                            location.path,
+                            location.byteOffset,
+                            location.line
+                        ),
                         fuzzyTarget: fuzzyTarget.map { ($0.path, $0.byteOffset) }
                     )
                 },
@@ -546,7 +581,9 @@ public final class RelationTreeModel {
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: candidate.evidence,
-                        exactQuery: callSite.map { ($0.path, $0.byteOffset) },
+                        exactQuery: callSite.map {
+                            ($0.path, $0.byteOffset, $0.line)
+                        },
                         fuzzyTarget: (location.path, location.byteOffset)
                     ))
                 }

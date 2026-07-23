@@ -50,8 +50,17 @@ private struct CodeInsightApplication {
         let delegate: AppDelegate
         if let exactRoot {
             let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
+            let target = exactSelfTestTarget(root: fixtureRoot)
             let provider = InProcessExactProvider(
-                location: exactSelfTestTarget(root: fixtureRoot)?.definition
+                location: target?.definition,
+                externalFile: "src/lib.rs",
+                externalOffset: target.flatMap(\.externalCallOffset).map(Int.init),
+                externalLocation: ExactLocation(
+                    file: "/dependency/src/slice.rs",
+                    byteOffset: 40,
+                    line: 4,
+                    column: 5
+                )
             )
             let coordinator = ExactCoordinator(
                 providerFactory: { _ in provider },
@@ -1006,6 +1015,53 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ]
         )
 
+        let externalDemotionFileVisible = target.externalRootOffset != nil
+            && waitUntil(timeout: 5, condition: {
+                windowController.selectFileInSidebar(target.relationFile)
+            }) && waitUntil(timeout: 5, condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            })
+        if externalDemotionFileVisible,
+           let externalRootOffset = target.externalRootOffset
+        {
+            windowController.selfTestReaderRelation(
+                offset: externalRootOffset,
+                direction: .calls
+            )
+        }
+        let providerProvenExternalDemoted = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "dependency_call"
+                && windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "External / Unresolved"
+                ).contains("len")
+                && !windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "Possible"
+                ).contains("len")
+        })
+        let externalDemotionSubtitle =
+            windowController.selfTestVisibleRelationEdgeSubtitle(
+                titled: "len",
+                inGroup: "External / Unresolved"
+            )
+        let externalDemotionSubtitleHonest =
+            externalDemotionSubtitle
+                == "External · in dependency (rust-analyzer)"
+        emitExactStep(
+            "relation-external-demotion",
+            variant: "external-demotion-fake",
+            controller: windowController,
+            extra: [
+                "externalTitles": windowController
+                    .selfTestVisibleRelationEdgeTitles(
+                        inGroup: "External / Unresolved"
+                    ),
+                "possibleTitles": windowController
+                    .selfTestVisibleRelationEdgeTitles(inGroup: "Possible"),
+                "subtitle": externalDemotionSubtitle ?? "",
+            ]
+        )
+
         let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
         let realOffline = runRealOfflineCoverageVariant(root: root)
@@ -1033,6 +1089,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "signatureTraitFileVisible": signatureTraitFileVisible,
             "externalGroupVisible": externalGroupVisible,
             "externalGroupHeaderHonest": externalGroupHeaderHonest,
+            "externalDemotionFileVisible": externalDemotionFileVisible,
+            "providerProvenExternalDemoted": providerProvenExternalDemoted,
+            "externalDemotionSubtitleHonest": externalDemotionSubtitleHonest,
             "realProviderPassedOrSkipped": real.passed,
             "realOfflineCoveragePassedOrSkipped": realOffline.passed,
             "historicalExactVisible": historical.exactVisible,
@@ -2503,6 +2562,8 @@ private struct ExactSelfTestTarget {
     let relationFile: URL
     let relationCallOffset: UInt32
     let signatureTraitOffset: UInt32?
+    let externalRootOffset: UInt32?
+    let externalCallOffset: UInt32?
 }
 
 private struct ExactSelfTestIndexService: IndexService {
@@ -2548,13 +2609,22 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
     let capabilities: ExactCapabilities = [.definition]
     let toolVersion = "in-process-fake-1"
     private let location: ExactLocation?
+    private let externalFile: String?
+    private let externalOffset: Int?
+    private let externalLocation: ExactLocation?
     private let state: ExactSelfTestProviderState?
 
     init(
         location: ExactLocation?,
+        externalFile: String? = nil,
+        externalOffset: Int? = nil,
+        externalLocation: ExactLocation? = nil,
         state: ExactSelfTestProviderState? = nil
     ) {
         self.location = location
+        self.externalFile = externalFile
+        self.externalOffset = externalOffset
+        self.externalLocation = externalLocation
         self.state = state
     }
 
@@ -2566,6 +2636,9 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         let ordinal = state?.recordPrepare(trustMode: trustMode)
         return InProcessExactSession(
             location: location,
+            externalFile: externalFile,
+            externalOffset: externalOffset,
+            externalLocation: externalLocation,
             attribution: ExactAttribution(
                 provider: "fake-exact",
                 toolVersion: toolVersion,
@@ -2585,16 +2658,25 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     let readiness: ExactReadiness = .ready
     let attribution: ExactAttribution
     private let location: ExactLocation?
+    private let externalFile: String?
+    private let externalOffset: Int?
+    private let externalLocation: ExactLocation?
     private let ordinal: Int?
     private let state: ExactSelfTestProviderState?
 
     init(
         location: ExactLocation?,
+        externalFile: String?,
+        externalOffset: Int?,
+        externalLocation: ExactLocation?,
         attribution: ExactAttribution,
         ordinal: Int?,
         state: ExactSelfTestProviderState?
     ) {
         self.location = location
+        self.externalFile = externalFile
+        self.externalOffset = externalOffset
+        self.externalLocation = externalLocation
         self.attribution = attribution
         self.ordinal = ordinal
         self.state = state
@@ -2602,6 +2684,9 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
         Thread.sleep(forTimeInterval: 0.25)
+        if file == externalFile, byteOffset == externalOffset {
+            return externalLocation
+        }
         return location
     }
 
@@ -2690,6 +2775,15 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
     let signatureTraitOffset = definitionSource.range(of: "Backend").flatMap {
         UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
     }
+    let externalRootOffset = definitionSource.range(of: "dependency_call").flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
+    let externalCallOffset = definitionSource.range(
+        of: "values.len()",
+        options: .backwards
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
     return ExactSelfTestTarget(
         file: file,
         clickOffset: clickOffset,
@@ -2701,7 +2795,9 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
         ),
         relationFile: relationFile,
         relationCallOffset: relationCallOffset,
-        signatureTraitOffset: signatureTraitOffset
+        signatureTraitOffset: signatureTraitOffset,
+        externalRootOffset: externalRootOffset,
+        externalCallOffset: externalCallOffset
     )
 }
 
