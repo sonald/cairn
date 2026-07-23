@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
-    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5]" >&2
+    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5] | --m4 <rust-repo> [runs=5]" >&2
     exit 2
 fi
 
@@ -22,6 +22,14 @@ elif [[ "$1" == "--m2" ]]; then
         exit 2
     fi
     mode="m2"
+    repo_path="$(cd "$2" && pwd -P)"
+    runs="${3:-5}"
+elif [[ "$1" == "--m4" ]]; then
+    if [[ $# -lt 2 || $# -gt 3 || ! -d "$2" ]]; then
+        echo "usage: bash scripts/bench.sh --m4 <rust-repo> [runs=5]" >&2
+        exit 2
+    fi
+    mode="m4"
     repo_path="$(cd "$2" && pwd -P)"
     runs="${3:-5}"
 else
@@ -134,6 +142,130 @@ PY
         --file "$calls_file" --line "$calls_line" --json
     benchmark_command "search block_on" \
         "$bin_path/codeinsight" search block_on --project "$repo_path" --json
+    exit 0
+fi
+
+if [[ "$mode" == "m4" ]]; then
+    binary="$bin_path/codeinsight-app"
+    # Cross-commit diff needs a Git repo whose worktree differs from HEAD~1.
+    # A Rust corpus unpacked from a tarball has no Git history, so the diff
+    # section runs against this repository (same fallback as --app --switch).
+    diff_repo="$repo_path"
+    if ! git -C "$diff_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
+        diff_repo="$PWD"
+    fi
+
+    cache_root="$(mktemp -d "${TMPDIR:-/tmp}/codeinsight-m4-cache.XXXXXX")"
+    trap 'rm -rf "$cache_root"' EXIT
+
+    percentile_row() {
+        # label unit   (numeric values on stdin, one per line) -> markdown row.
+        # Uses python -c so the piped values stay on stdin (a heredoc would
+        # redirect stdin to the script source and swallow the values).
+        python3 -c 'import math, sys
+label, unit = sys.argv[1], sys.argv[2]
+vals = sorted(float(x) for x in sys.stdin if x.strip())
+if not vals:
+    print(f"| `{label}` | 0 | — | — | — |")
+    raise SystemExit
+rank = lambda p: vals[math.ceil(len(vals) * p) - 1]
+print(f"| `{label}` | {len(vals)} | {vals[0]:.3f}{unit} | {rank(0.5):.3f}{unit} | {rank(0.95):.3f}{unit} |")
+' "$1" "$2"
+    }
+
+    json_field() {
+        python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"
+    }
+
+    # --- persistence: cold (empty cache) vs hot (warm cache), isolated root ---
+    cold_ready=(); hot_ready=(); cold_extracted="?"; hot_reused="?"
+    run=1
+    while [[ $run -le $runs ]]; do
+        rm -rf "$cache_root"; mkdir -p "$cache_root"
+        cold_json="$(CODEINSIGHT_INDEX_CACHE_ROOT="$cache_root" \
+            "$binary" --self-test-project "$repo_path")"
+        hot_json="$(CODEINSIGHT_INDEX_CACHE_ROOT="$cache_root" \
+            "$binary" --self-test-project "$repo_path")"
+        cold_ready[${#cold_ready[@]}]="$(printf '%s' "$cold_json" | json_field indexReadyMS)"
+        hot_ready[${#hot_ready[@]}]="$(printf '%s' "$hot_json" | json_field indexReadyMS)"
+        cold_extracted="$(printf '%s' "$cold_json" | json_field extracted)"
+        hot_reused="$(printf '%s' "$hot_json" | json_field reused)"
+        run=$((run + 1))
+    done
+
+    # --- exact fake path: fuzzy first answer + fuzzy->exact upgrade latency ---
+    # The exact self-test drives the built-in Tests/.../exact_fixture, so its
+    # root must be this repository (like ci.sh), not the indexing corpus.
+    exact_root="$PWD"
+    fuzzy_ms=(); upgrade_ms=(); real_provider="not-run"
+    run=1
+    while [[ $run -le $runs ]]; do
+        exact_json="$("$binary" --self-test-exact "$exact_root" 2>/dev/null || true)"
+        fuzzy_ms[${#fuzzy_ms[@]}]="$(printf '%s' "$exact_json" \
+            | python3 -c 'import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if o.get("step")=="fuzzy" and o.get("variant")=="fake":
+        print(o.get("fuzzyFirstAnswerMS","")); break')"
+        upgrade_ms[${#upgrade_ms[@]}]="$(printf '%s' "$exact_json" \
+            | python3 -c 'import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if o.get("step")=="exact" and o.get("variant")=="fake":
+        print(o.get("exactUpgradeMS","")); break')"
+        real_provider="$(printf '%s' "$exact_json" \
+            | python3 -c 'import json,sys
+v="not-run"
+for line in sys.stdin:
+    o=json.loads(line)
+    if o.get("step")=="summary": v=o.get("realProvider",v)
+print(v)')"
+        run=$((run + 1))
+    done
+
+    # --- cross-commit diff compute cost (DiffCore, best-of-5 per run) ---
+    diff_ms=(); diff_lines="?"
+    run=1
+    while [[ $run -le $runs ]]; do
+        diff_json="$("$binary" --self-test-diff "$diff_repo" 2>/dev/null || true)"
+        diff_ms[${#diff_ms[@]}]="$(printf '%s' "$diff_json" \
+            | python3 -c 'import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if o.get("step")=="gutter":
+        print(o.get("diffComputeMS","")); break')"
+        diff_lines="$(printf '%s' "$diff_json" \
+            | python3 -c 'import json,sys
+for line in sys.stdin:
+    o=json.loads(line)
+    if o.get("step")=="gutter":
+        print(str(o.get("leftLineCount"))+"->"+str(o.get("rightLineCount"))); break')"
+        run=$((run + 1))
+    done
+
+    repo_name="$(basename "$repo_path")"
+    diff_name="$(basename "$diff_repo")"
+    echo "### 持久化冷/热（\`--self-test-project $repo_name\`，隔离 cache root）"
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "${cold_ready[@]}" \
+        | percentile_row "indexReadyMS cold (extracted=$cold_extracted, reused=0)" "ms"
+    printf '%s\n' "${hot_ready[@]}" \
+        | percentile_row "indexReadyMS hot (extracted=0, reused=$hot_reused)" "ms"
+    echo
+    echo "### Exact 原位升级（\`--self-test-exact\` 内置 exact_fixture，fake provider；真实 RA=$real_provider）"
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "${fuzzy_ms[@]}" | percentile_row "fuzzy first answer" "ms"
+    printf '%s\n' "${upgrade_ms[@]}" | percentile_row "fuzzy->exact upgrade (fake 250ms inject)" "ms"
+    echo
+    echo "### 跨 commit diff 计算（\`--self-test-diff $diff_name\`，DiffCore，行数 $diff_lines）"
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "${diff_ms[@]}" | percentile_row "DiffCore compute" "ms"
     exit 0
 fi
 

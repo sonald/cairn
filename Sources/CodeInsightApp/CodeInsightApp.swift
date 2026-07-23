@@ -267,10 +267,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let actualGutterCounts = controller.selfTestGutterCounts
         let expectedGutterCounts = target.expected.gutterCounts
         let gutterCountsMatch = actualGutterCounts == expectedGutterCounts
+        var diffComputeMS = Double.greatestFiniteMagnitude
+        for _ in 0 ..< 5 {
+            let diffClock = ContinuousClock.now
+            _ = DiffCore().compare(left: target.worktreeBytes, right: target.commitBytes)
+            diffComputeMS = min(diffComputeMS, milliseconds(since: diffClock))
+        }
         emitDiffStep("gutter", controller: controller, extra: [
             "gutterCounts": Self.jsonGutterCounts(actualGutterCounts),
             "expectedGutterCounts": Self.jsonGutterCounts(expectedGutterCounts),
             "gutterCountsMatch": gutterCountsMatch,
+            "diffComputeMS": diffComputeMS,
+            "leftLineCount": target.expected.leftLineCount,
+            "rightLineCount": target.expected.rightLineCount,
         ])
 
         let navigation = controller.selfTestNavigateNextDiffHunk()
@@ -764,6 +773,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
         }
 
+        let clickedAt = ContinuousClock.now
         windowController.selfTestReaderClick(
             offset: target.clickOffset,
             commandClick: false
@@ -772,21 +782,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestContextCandidateCount >= 1
                 && windowController.selfTestContextProvenance?.contains("Exact") == false
         })
+        let fuzzyFirstAnswerMS = milliseconds(since: clickedAt)
         let fuzzyCount = windowController.selfTestContextCandidateCount
         emitExactStep(
             "fuzzy",
             variant: "fake",
-            controller: windowController
+            controller: windowController,
+            extra: ["fuzzyFirstAnswerMS": fuzzyFirstAnswerMS]
         )
 
         let exactVisible = waitUntil(timeout: 5, condition: {
             windowController.selfTestContextProvenance?.contains("Exact") == true
         })
+        let exactUpgradeMS = milliseconds(since: clickedAt)
         let fuzzyRetained = windowController.selfTestContextCandidateCount >= fuzzyCount
         emitExactStep(
             "exact",
             variant: "fake",
-            controller: windowController
+            controller: windowController,
+            extra: ["exactUpgradeMS": exactUpgradeMS]
         )
         let exactSummary = windowController.selfTestContextSummary
         let exactCount = windowController.selfTestContextCandidateCount

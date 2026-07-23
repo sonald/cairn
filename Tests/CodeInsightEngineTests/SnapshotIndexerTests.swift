@@ -216,6 +216,14 @@ func extractorVersionMismatchRebuildsTheWholeDatabase() throws {
     var cache: IndexCache? = try IndexCache(fileURL: cacheURL, extractorVersion: 40)
     cache?.storeSynchronously([("old", Data([1, 2, 3]), 1)])
     #expect(cache?.payload(for: "old") == Data([1, 2, 3]))
+    // payload(...) schedules an async LRU touch that retains the cache, so simply
+    // dropping the reference would not close the v40 SQLite connection yet. Drain
+    // the queue, then release, so the connection (and its -wal/-shm) is fully
+    // closed before we reopen the same file. This models an app upgrade — a new
+    // process opening the DB — which is the only situation the extractorVersion
+    // actually changes. Reopening while the v40 connection is still live races the
+    // rebuild's file removal against it and can surface SQLITE_IOERR under load.
+    cache?.flush()
     cache = nil
 
     let bumped = try IndexCache(fileURL: cacheURL, extractorVersion: 41)

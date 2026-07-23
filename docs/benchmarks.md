@@ -133,3 +133,76 @@ huge 使用同一 `/tmp/codeinsight-m1-100k.rs` 连续运行 3 次；M2 p50 为�
 既有三项 self-test 均保持在原预算内：空载 192.91ms < 500ms，
 regular 首屏 13.32ms < 100ms，tokio 项目索引 843.63ms < 2s 且文件树
 8.67ms < 1s，未见 M3 回退。
+
+## M4 正式版 自测
+
+日期：2026-07-23。Apple Silicon (arm64e) macOS，release 构建，活跃处理器 11 个。
+索引语料仍为 tokio 1.47.1（与 M0–M3 同一 tar 展开目录，无 Git 历史）。三组数据由
+`bash scripts/bench.sh --m4 <rust-repo> 5` 采集，p50/p95 用 nearest-rank。
+
+### 持久化冷/热（决定 6：SQLite ContentIndex 缓存）
+
+`--self-test-project` 连跑两次；用 `CODEINSIGHT_INDEX_CACHE_ROOT` 把缓存指向隔离
+临时目录（不碰用户真实 `~/Library/Application Support/CodeInsight`），每次冷跑前
+清空该目录。冷跑（空缓存）逐文件提取，热跑（暖缓存）走 remap 复用路径。
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `indexReadyMS cold (extracted=717, reused=0)` | 5 | 804.9ms | 817.4ms | 833.7ms |
+| `indexReadyMS hot (extracted=0, reused=717)` | 5 | 703.4ms | 763.7ms | 766.9ms |
+
+跨进程复用已证实：冷跑 `extracted=717 / reused=0`，热跑 `extracted=0 /
+reused=717`，两次为独立进程。热跑省去 717 个文件的提取，p50 由 817.4ms 降到
+763.7ms（约 −6.6%）。差幅有限是因为 tokio 的索引耗时以 tree-sitter 解析与树构建
+为主，提取只是其中一段——持久化省的是提取那一段，解析仍在冷热两侧发生。两次均
+远低于 `indexReadyMS < 2s` 硬预算，`extracted` 归零是可复现的核心信号。**毒化防线
+未动**：CLI 默认不落盘、读失败静默回退重提取；所有 canonical dump 与 gold set
+（nostrong=0）零 diff。
+
+### Exact 原位升级（决定 1–3：fuzzy→exact 就地升级）
+
+`--self-test-exact` 驱动内置 `Tests/CodeInsightExactTests/Fixtures/exact_fixture`，
+fake provider 注入固定 0.25s 升级延迟，作为 CI 无关的确定性口径；同一进程内的真实
+rust-analyzer 变体为 conditional，本机 `真实 RA=passed`。计时从读区点击到 Context
+出现对应 provenance。
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `fuzzy first answer` | 5 | 10.4ms | 10.5ms | 10.9ms |
+| `fuzzy->exact upgrade (fake 250ms inject)` | 5 | 261.2ms | 262.5ms | 266.7ms |
+
+首答（fuzzy）稳定在 ~10.5ms，升级 p50 262.5ms = 注入的 250ms + 协调层约 12ms
+开销。真实 RA 首次 exact 受 workspace 就绪时间支配（数秒级，见 m4-plan 风险 1），
+机会式设计保证 fuzzy 全程可用，故 bench 头条数字取确定性的 fake 口径。
+
+### 跨 commit diff 计算（决定 5：DiffCore 行级 + 函数级）
+
+`--self-test-diff` 在本仓库取一个 worktree 与 HEAD~1 blob 相异的真实文件，
+`DiffCore().compare` 单文件 best-of-5 计时（不含项目打开/git 读取，仅纯计算）。
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `DiffCore compute` (220→190 行) | 5 | 0.149ms | 0.153ms | 0.157ms |
+
+标准库 `CollectionDifference` 行级 diff 对典型源文件（数百行）纯计算 <0.2ms，
+预算门（>2 万行或 >5000 变更截断）在本样本未触发。
+
+### 八条 self-test 通道 + 回归全家福
+
+M4 总验收无头门：`ci.sh` 连跑两次通过（引擎/model 禁 AppKit 断言覆盖新增
+CodeInsightExact）；全量 `swift test`（≥208 测试）、fixture、双语料 gold set
+（`nostrong=0`）零回归；八条集成通道各自 exit 0 并断言真实 AppKit 控件状态：
+
+| 通道 | 断言要点 |
+|---|---|
+| `--self-test` | 冷启动/空载内存预算 |
+| `--self-test-open` | 首屏/语法可见时序 |
+| `--self-test-project` | 文件树+索引就绪；持久化冷热 |
+| `--self-test-switch` | 三级就绪、切 commit 复用率 |
+| `--self-test-history` | 前进/后退与树选中同步 |
+| `--self-test-pin` | Cmd+单击跳主区、底部保持钉住 |
+| `--self-test-exact` | 先 fuzzy 后 Exact 原位升级、fuzzy 全留、Exact 组非"(0)" |
+| `--self-test-diff` | 右 reader 字节==commit blob（≠worktree）、gutter 计数、hunk 导航 |
+
+stress-switch（`--self-test-switch` + `--self-test-history` 交替）连跑无 hang/error，
+持久化与 exact overlay 未破 M3 的切换量级。
