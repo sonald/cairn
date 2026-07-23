@@ -31,6 +31,9 @@ Safe/Trusted 双模式（design §8.4）+ diff 阅读（跨 commit，含 Compare
    显示周期里的 NSTableView 行生命周期，依赖可见窗口的 CA commit 节奏）。
    现有兜底：ci 静态禁令 grep `\.indices,\s*id:` + 人工 G4.4 复验（建议连做两次，
    原为 2/2 复现，二值信号强）。XCUITest 真窗口复现成本高且易 flaky，本轮不做。
+   **2026-07-23 结案：决策者重跑 30 分钟交互走查 = PASS**，G4.4 崩溃由人工实测背书
+   （此前 2/2 稳定复现，修后不再出现）。自动化侧仍只有静态禁令，未来若改动
+   TrustSettingsView 的列表身份写法，仍须人工复验一次——无头证明不了这条。
 6. **ci 禁令 regex 的同类形态盲区**：只拦 `.indices, id:`，不覆盖
    `0..<items.count, id: \.self` / `enumerated()` 等同类危险形态。作为 code review
    规则记录，暂不扩 grep（误报风险）。
