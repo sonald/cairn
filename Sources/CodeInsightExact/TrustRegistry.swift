@@ -1,6 +1,12 @@
 import CodeInsightCore
 import Foundation
 
+public struct TrustedRepository: Identifiable, Equatable, Sendable {
+    public var id: String { path }
+    public let path: String
+    public let grantedAt: Date
+}
+
 public actor TrustRegistry {
     private struct Entry: Codable {
         let mode: String
@@ -51,9 +57,11 @@ public actor TrustRegistry {
         }
     }
 
-    public func trustedRepositories() -> [(path: String, grantedAt: Date)] {
+    public func trustedRepositories() -> [TrustedRepository] {
         entries.compactMap { path, entry in
-            entry.mode == "trusted" ? (path, entry.grantedAt) : nil
+            entry.mode == "trusted"
+                ? TrustedRepository(path: path, grantedAt: entry.grantedAt)
+                : nil
         }.sorted { $0.path < $1.path }
     }
 

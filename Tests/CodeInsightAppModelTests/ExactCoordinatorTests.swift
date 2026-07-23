@@ -125,6 +125,51 @@ func appModelTrustActionsRebuildExactSessionImmediately() async throws {
 
 @MainActor
 @Test
+func appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe()
+    async throws
+{
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    let model = AppModel(exactCoordinator: coordinator)
+
+    model.openProject(root: fixture.root)
+    #expect(await exactWaitUntil {
+        guard case .ready = model.projectState else { return false }
+        return coordinator.readiness == .ready
+    })
+
+    try await model.grantCurrentRepositoryTrust()
+    #expect(await exactWaitUntil {
+        state.prepareCount == 2 && coordinator.readiness == .ready
+    })
+    let trustedRepository: TrustedRepository = try #require(
+        coordinator.trustedRepositories.first
+    )
+    #expect(trustedRepository.path == fixture.root.path)
+
+    try await model.revokeRepositoryTrust(fixture.root)
+    #expect(await exactWaitUntil {
+        state.prepareCount == 3
+            && coordinator.readiness == .ready
+            && state.closedSessions.contains(2)
+    })
+    #expect(coordinator.trustedRepositories.isEmpty)
+    #expect(state.trustModes == ["safe", "trusted", "safe"])
+    let trustObject = try #require(
+        try JSONSerialization.jsonObject(with: Data(contentsOf: fixture.trustFile))
+            as? [String: Any]
+    )
+    #expect(trustObject.isEmpty)
+
+    coordinator.shutdown()
+    #expect(state.closedSessions.contains(3))
+    #expect(coordinator.readiness == .off("application terminating"))
+}
+
+@MainActor
+@Test
 func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
@@ -453,6 +498,7 @@ private final class ExactProviderState: @unchecked Sendable {
     private var prepares = 0
     private var definitions = 0
     private var modes: [String] = []
+    private var closed: Set<Int> = []
 
     init(
         behavior: @escaping Behavior = { _, _, _ in
@@ -465,6 +511,7 @@ private final class ExactProviderState: @unchecked Sendable {
     var prepareCount: Int { locked { prepares } }
     var definitionCount: Int { locked { definitions } }
     var trustModes: [String] { locked { modes } }
+    var closedSessions: Set<Int> { locked { closed } }
 
     func makeSession(attribution: ExactAttribution) -> ExactStateSession {
         let ordinal = locked {
@@ -486,6 +533,10 @@ private final class ExactProviderState: @unchecked Sendable {
     func define(ordinal: Int, file: String, byteOffset: Int) throws -> ExactLocation? {
         locked { definitions += 1 }
         return try behavior(ordinal, file, byteOffset)
+    }
+
+    func close(ordinal: Int) {
+        _ = locked { closed.insert(ordinal) }
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -516,7 +567,7 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
     }
 
     func cancel() {}
-    func close() {}
+    func close() { state.close(ordinal: ordinal) }
 }
 
 private final class ExactVersionBox: @unchecked Sendable {
@@ -667,12 +718,12 @@ private struct ExactTestFixture {
     let root: URL
     let files = ["main.rs": "fn target() {}\nfn main() { target(); }\n"]
     let trustRegistry: TrustRegistry
+    let trustFile: URL
 
     init() throws {
         root = try exactTemporaryProject(files)
-        trustRegistry = TrustRegistry(
-            fileURL: root.appendingPathComponent("trust.json")
-        )
+        trustFile = root.appendingPathComponent("trust.json")
+        trustRegistry = TrustRegistry(fileURL: trustFile)
     }
 
     @MainActor

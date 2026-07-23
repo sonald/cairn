@@ -227,6 +227,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestExactGroupRowCount: Int {
         relationController.selfTestExactGroupRowCount
     }
+    var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
         let left = readerController.diffMarkerCounts
@@ -1475,8 +1476,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             displayedDocument = nil
             label.stringValue = "Open a project to begin"
             label.isHidden = false
-            textView.view.string = ""
-            textView.setDiffMarkers([:])
+            textView.clear()
             return
         }
 
@@ -1510,6 +1510,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             displayedDocument = nil
             label.stringValue = "Could not open \(file.lastPathComponent)"
             label.isHidden = false
+            textView.clear()
         }
     }
 

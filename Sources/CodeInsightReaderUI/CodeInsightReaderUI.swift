@@ -53,6 +53,12 @@ public final class RenderingAttributesCoordinator {
         styledFragmentCount = 0
     }
 
+    func clear() {
+        spans = []
+        map = nil
+        styledFragmentCount = 0
+    }
+
     public func style(
         fragment: NSTextLayoutFragment,
         in manager: NSTextLayoutManager
@@ -191,10 +197,25 @@ public final class ReaderTextView {
         }
     }
 
+    public func clear() {
+        view.textLayoutManager?.renderingAttributesValidator = nil
+        displayedDocument = nil
+        byteUTF16Map = nil
+        diffMarkers = [:]
+        renderingCoordinator.clear()
+        backingTextStorage.setAttributedString(NSAttributedString(string: ""))
+        diffRuler?.needsDisplay = true
+        view.needsDisplay = true
+    }
+
     public func updateSyntax(document: ReaderDocument) {
         guard
             let layoutManager = view.textLayoutManager
         else { return }
+        guard documentMatchesStorage(document) else {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
 
         byteUTF16Map = document.byteUTF16Map
         displayedDocument = document
@@ -228,6 +249,10 @@ public final class ReaderTextView {
         guard let document = displayedDocument,
               let layoutManager = view.textLayoutManager
         else { return }
+        guard documentMatchesStorage(document) else {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
 
         renderingCoordinator.update(document: document, theme: theme)
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
@@ -376,6 +401,18 @@ public final class ReaderTextView {
         view.backgroundColor = theme.backgroundColor
     }
 
+    // Defense-in-depth fuse only; clear() is the root fix for document/storage splits.
+    private func documentMatchesStorage(_ document: ReaderDocument) -> Bool {
+        let matches = document.byteUTF16Map.utf16Count == backingTextStorage.length
+#if DEBUG
+        // Unit tests have no app delegate so they can exercise the release fallback.
+        if !matches, NSApp?.delegate != nil {
+            assertionFailure("Reader document and text storage lengths diverged")
+        }
+#endif
+        return matches
+    }
+
     private func applyTypography(
         _ spans: [HighlightSpan],
         map: ByteUTF16Map,
@@ -386,6 +423,14 @@ public final class ReaderTextView {
                 byteLowerBound: Int(span.range.lowerBound),
                 byteUpperBound: Int(span.range.upperBound)
             ) else { continue }
+            guard range.location >= 0, range.location < attributed.length else {
+                continue
+            }
+            let safeRange = NSRange(
+                location: range.location,
+                length: min(range.length, attributed.length - range.location)
+            )
+            guard safeRange.length > 0 else { continue }
             switch span.kind {
             case .functionName:
                 attributed.addAttributes([
@@ -394,12 +439,12 @@ public final class ReaderTextView {
                         weight: .semibold
                     ),
                     .kern: 0.15,
-                ], range: range)
+                ], range: safeRange)
             case .comment where theme.humanistComments:
                 attributed.addAttribute(
                     .font,
                     value: NSFont.systemFont(ofSize: theme.fontSize),
-                    range: range
+                    range: safeRange
                 )
             default:
                 break

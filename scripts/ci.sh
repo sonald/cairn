@@ -30,4 +30,10 @@ if grep -rnE 'import AppKit|import SwiftUI' \
     exit 1
 fi
 
+if grep -rnE '\.indices,[[:space:]]*id:' Sources; then
+    echo "SwiftUI ForEach/List must not use collection.indices as identity; index identity can crash after mutation." >&2
+    exit 1
+fi
+
 .build/debug/codeinsight-app --self-test-exact .
+.build/debug/codeinsight-app --self-test-diff .

@@ -8,6 +8,7 @@ import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
 import Observation
+import SwiftUI
 
 private enum SelfTestBudgets {
     static let coldStartMS = 500.0
@@ -136,6 +137,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     func applicationDidFinishLaunching(_ notification: Notification) {
         launch(offscreen: false)
         NSApplication.shared.activate(ignoringOtherApps: true)
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        model.exactCoordinator.shutdown()
     }
 
     func runSelfTest() {
@@ -302,6 +307,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "rightReaderCollapsed": readingPresetCollapsedRight,
         ])
 
+        let leftReaderBytesBeforeClear = controller.selfTestLeftReaderBytes
+        model.clearCompare()
+        pumpRunLoop()
+        var siClassicSettings = readerSettings
+        siClassicSettings.theme = .siClassic
+        controller.applyReaderSettings(siClassicSettings)
+        pumpRunLoop()
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.window?.displayIfNeeded()
+        let themeSwitchPreservedLeftReader = controller.selfTestLeftReaderBytes
+            == leftReaderBytesBeforeClear
+        let themeSwitchClearedRightReader = controller.selfTestRightReaderBytes == nil
+        emitDiffStep("clearCompareAndApplySIClassic", controller: controller, extra: [
+            "themeSwitchPreservedLeftReader": themeSwitchPreservedLeftReader,
+            "themeSwitchClearedRightReader": themeSwitchClearedRightReader,
+        ])
+
         finishDiffSelfTest(
             controller: controller,
             checks: [
@@ -310,6 +332,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "gutterCountsMatch": gutterCountsMatch,
                 "hunkNavMoved": hunkNavMoved,
                 "readingPresetCollapsedRight": readingPresetCollapsedRight,
+                "themeSwitchPreservedLeftReader": themeSwitchPreservedLeftReader,
+                "themeSwitchClearedRightReader": themeSwitchClearedRightReader,
             ],
             gutterCounts: actualGutterCounts
         )
@@ -841,27 +865,160 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController
         )
 
+        let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
         let historical = runHistoricalExactVariant()
+        var checks = [
+            "fuzzyVisible": fuzzyVisible,
+            "exactVisible": exactVisible,
+            "fuzzyRetained": fuzzyRetained,
+            "pinnedTargetStable": pinnedStable,
+            "exactGroupVisible": exactGroupVisible,
+            "exactGroupHeaderHonest": exactGroupHeaderHonest,
+            "exactStatusVisible": exactStatusVisible,
+            "relationFileVisible": relationFileVisible,
+            "realProviderPassedOrSkipped": real.passed,
+            "historicalExactVisible": historical.exactVisible,
+            "providerRootIsMaterialized": historical.providerRootIsMaterialized,
+            "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
+        ]
+        for (key, value) in trustRevoke { checks[key] = value }
         finishExactSelfTest(
             controller: windowController,
-            checks: [
-                "fuzzyVisible": fuzzyVisible,
-                "exactVisible": exactVisible,
-                "fuzzyRetained": fuzzyRetained,
-                "pinnedTargetStable": pinnedStable,
-                "exactGroupVisible": exactGroupVisible,
-                "exactGroupHeaderHonest": exactGroupHeaderHonest,
-                "exactStatusVisible": exactStatusVisible,
-                "relationFileVisible": relationFileVisible,
-                "realProviderPassedOrSkipped": real.passed,
-                "historicalExactVisible": historical.exactVisible,
-                "providerRootIsMaterialized": historical.providerRootIsMaterialized,
-                "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
-            ],
+            checks: checks,
             realProvider: real.status,
             error: nil
         )
+    }
+
+    private func runTrustRevokeExactVariant() -> [String: Bool] {
+        guard let fixture = try? makeHistoricalExactSelfTestRepository() else {
+            emitExactStep(
+                "trust-revoke",
+                variant: "fake",
+                controller: nil,
+                extra: ["reason": "fixture unavailable"]
+            )
+            return ["trustRevokeFixtureReady": false]
+        }
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightExactTrustRevokeSelfTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let trustFile = cache.appendingPathComponent("trust.json")
+        let providerState = ExactSelfTestProviderState()
+        let coordinator = ExactCoordinator(
+            providerFactory: { _ in
+                InProcessExactProvider(location: nil, state: providerState)
+            },
+            snapshotFactory: { root, _ in
+                try ExactSelfTestDirectorySnapshot(root: root)
+            },
+            sandboxAvailable: { true },
+            trustRegistry: TrustRegistry(fileURL: trustFile)
+        )
+        let trustModel = AppModel(
+            indexService: ExactSelfTestIndexService(),
+            exactCoordinator: coordinator
+        )
+        let controller = MainWindowController(
+            model: trustModel,
+            settings: readerSettings,
+            offscreen: true
+        )
+        controller.showWindow(nil)
+        defer { controller.close() }
+        controller.openProject(root: fixture)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = trustModel.projectState { return true }
+            return coordinator.readiness == .ready
+                && providerState.trustModes == ["safe"]
+        }), case .ready = trustModel.projectState else {
+            emitExactStep(
+                "trust-revoke",
+                variant: "fake",
+                controller: controller,
+                extra: ["reason": "safe session unavailable"]
+            )
+            return ["trustRevokeSafeSessionReady": false]
+        }
+
+        Task { try? await trustModel.grantCurrentRepositoryTrust() }
+        let trustedReady = waitUntil(timeout: 5, condition: {
+            coordinator.readiness == .ready
+                && coordinator.trustedRepositories.count == 1
+                && providerState.trustModes == ["safe", "trusted"]
+        })
+
+        let settingsController = ReaderSettingsWindowController(
+            settings: readerSettings,
+            exactCoordinator: coordinator,
+            onRevoke: { repositoryURL in
+                try? await trustModel.revokeRepositoryTrust(repositoryURL)
+            },
+            onChange: { _ in }
+        )
+        settingsController.window?.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        settingsController.showWindow(nil)
+        defer { settingsController.close() }
+
+        let trustView = NSHostingView(rootView: TrustSettingsView(
+            coordinator: coordinator,
+            onRevoke: { repositoryURL in
+                try? await trustModel.revokeRepositoryTrust(repositoryURL)
+            }
+        ))
+        let layoutWindow = NSWindow(
+            contentRect: NSRect(x: -20_000, y: -20_000, width: 560, height: 360),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        layoutWindow.contentView = trustView
+        layoutWindow.orderFront(nil)
+        defer { layoutWindow.close() }
+        trustView.layoutSubtreeIfNeeded()
+        settingsController.window?.displayIfNeeded()
+        layoutWindow.displayIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+        let listRowCount = selfTestListRowCount(in: trustView)
+
+        Task { try? await trustModel.revokeRepositoryTrust(fixture) }
+        let rebuiltSafe = waitUntil(timeout: 5, condition: {
+            coordinator.readiness == .ready
+                && providerState.trustModes == ["safe", "trusted", "safe"]
+        })
+        trustView.layoutSubtreeIfNeeded()
+        settingsController.window?.displayIfNeeded()
+        layoutWindow.displayIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
+
+        let trustedRepositoriesEmpty = coordinator.trustedRepositories.isEmpty
+        let trustJSONEmpty = (
+            (try? JSONSerialization.jsonObject(with: Data(contentsOf: trustFile)))
+                as? [String: Any]
+        )?.isEmpty == true
+        let trustedSessionClosed = providerState.closedSessions.contains(2)
+        let statusIsSafe = !controller.selfTestExactStatusText
+            .localizedCaseInsensitiveContains("Trusted")
+        let checks = [
+            "trustRevokeTrustedReady": trustedReady,
+            "trustRevokeListRowLaidOut": listRowCount == 1,
+            "trustRevokeRepositoriesEmpty": trustedRepositoriesEmpty,
+            "trustRevokeJSONEmpty": trustJSONEmpty,
+            "trustRevokePreparedSafe": rebuiltSafe,
+            "trustRevokeClosedTrustedSession": trustedSessionClosed,
+            "trustRevokeStatusIsSafe": statusIsSafe,
+        ]
+        emitExactStep(
+            "trust-revoke",
+            variant: "fake",
+            controller: controller,
+            extra: checks
+        )
+        return checks
     }
 
     private func runHistoricalExactVariant() -> (
@@ -2086,15 +2243,23 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
     let capabilities: ExactCapabilities = [.definition]
     let toolVersion = "in-process-fake-1"
     private let location: ExactLocation?
+    private let state: ExactSelfTestProviderState?
 
-    init(location: ExactLocation?) { self.location = location }
+    init(
+        location: ExactLocation?,
+        state: ExactSelfTestProviderState? = nil
+    ) {
+        self.location = location
+        self.state = state
+    }
 
     func prepare(
         snapshot: any Snapshot,
         profile: ExactProfileKey,
         trustMode: TrustMode
     ) throws -> any ExactSession {
-        InProcessExactSession(
+        let ordinal = state?.recordPrepare(trustMode: trustMode)
+        return InProcessExactSession(
             location: location,
             attribution: ExactAttribution(
                 provider: "fake-exact",
@@ -2104,7 +2269,9 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
                 trustMode: trustMode,
                 generatedAt: Date(timeIntervalSince1970: 0),
                 coverage: trustMode == .safe ? .partial : .full
-            )
+            ),
+            ordinal: ordinal,
+            state: state
         )
     }
 }
@@ -2113,10 +2280,19 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     let readiness: ExactReadiness = .ready
     let attribution: ExactAttribution
     private let location: ExactLocation?
+    private let ordinal: Int?
+    private let state: ExactSelfTestProviderState?
 
-    init(location: ExactLocation?, attribution: ExactAttribution) {
+    init(
+        location: ExactLocation?,
+        attribution: ExactAttribution,
+        ordinal: Int?,
+        state: ExactSelfTestProviderState?
+    ) {
         self.location = location
         self.attribution = attribution
+        self.ordinal = ordinal
+        self.state = state
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
@@ -2125,12 +2301,16 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     }
 
     func cancel() {}
-    func close() {}
+    func close() {
+        if let ordinal { state?.recordClose(ordinal: ordinal) }
+    }
 }
 
 private final class ExactSelfTestProviderState: @unchecked Sendable {
     private let lock = NSLock()
     private var storedRoot: URL?
+    private var storedTrustModes: [String] = []
+    private var storedClosedSessions: Set<Int> = []
 
     var root: URL? {
         get {
@@ -2143,6 +2323,35 @@ private final class ExactSelfTestProviderState: @unchecked Sendable {
             storedRoot = newValue
             lock.unlock()
         }
+    }
+
+    var trustModes: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedTrustModes
+    }
+
+    var closedSessions: Set<Int> {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedClosedSessions
+    }
+
+    func recordPrepare(trustMode: TrustMode) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        let mode = switch trustMode {
+        case .safe: "safe"
+        case .trusted: "trusted"
+        }
+        storedTrustModes.append(mode)
+        return storedTrustModes.count
+    }
+
+    func recordClose(ordinal: Int) {
+        lock.lock()
+        storedClosedSessions.insert(ordinal)
+        lock.unlock()
     }
 }
 
@@ -2300,6 +2509,14 @@ private func waitUntil(
 @MainActor
 private func pumpRunLoop() {
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+}
+
+@MainActor
+private func selfTestListRowCount(in view: NSView) -> Int {
+    max(
+        (view as? NSTableView)?.numberOfRows ?? 0,
+        view.subviews.map(selfTestListRowCount(in:)).max() ?? 0
+    )
 }
 
 private func rustFiles(in nodes: [FileTreeNode]) -> [URL] {

@@ -94,9 +94,7 @@ public final class ExactCoordinator {
 
     public private(set) var readiness: Readiness = .off("no project")
     public private(set) var coverage: ExactCoverage?
-    public private(set) var trustedRepositories: [
-        (path: String, grantedAt: Date)
-    ] = []
+    public private(set) var trustedRepositories: [TrustedRepository] = []
 
     @ObservationIgnored private let providerFactory: ProviderFactory
     @ObservationIgnored private let snapshotFactory: SnapshotFactory
@@ -152,6 +150,18 @@ public final class ExactCoordinator {
             Task.detached { oldSession.close() }
         }
         readiness = .preparing
+        coverage = nil
+    }
+
+    public func shutdown() {
+        epoch &+= 1
+        prepareTask?.cancel()
+        prepareTask = nil
+        let oldSession = active?.session
+        active = nil
+        oldSession?.cancel()
+        oldSession?.close()
+        readiness = .off("application terminating")
         coverage = nil
     }
 

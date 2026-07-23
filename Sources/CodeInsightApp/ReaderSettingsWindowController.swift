@@ -126,7 +126,7 @@ private struct ReaderSettingsView: View {
     }
 }
 
-private struct TrustSettingsView: View {
+struct TrustSettingsView: View {
     @Bindable var coordinator: ExactCoordinator
     let onRevoke: @MainActor (URL) async -> Void
 
@@ -144,8 +144,7 @@ private struct TrustSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(coordinator.trustedRepositories.indices, id: \.self) { index in
-                    let repository = coordinator.trustedRepositories[index]
+                List(coordinator.trustedRepositories) { repository in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(repository.path)
