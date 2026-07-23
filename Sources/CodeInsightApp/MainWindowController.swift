@@ -30,10 +30,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let secondaryReaderItem: NSSplitViewItem
     private let contextItem: NSSplitViewItem
     private let relationItem: NSSplitViewItem
-    private let projectLabel = NSTextField(labelWithString: "CodeInsight")
+    private let projectLabel = NSTextField(labelWithString: "Cairn")
     private let commitButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let recentProjectsStore: RecentProjectsStore
+    private let recordsRecentProjects: Bool
+    private let onChooseProject: () -> Void
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
@@ -42,9 +45,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var commitPickerPopover: CommitPickerPopover?
     private var compareCommitPickerPopover: CommitPickerPopover?
     private var panelPreset = PanelPresetModel.reading
+    private var lastOpenedProjectRoot: URL?
+    private var pendingRecentProjectRoot: URL?
 
-    init(model: AppModel, settings: ReaderSettings, offscreen: Bool) {
+    init(
+        model: AppModel,
+        settings: ReaderSettings,
+        offscreen: Bool,
+        recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
+        recordsRecentProjects: Bool = false,
+        onChooseProject: @escaping () -> Void = {}
+    ) {
         self.model = model
+        self.recentProjectsStore = recentProjectsStore
+        self.recordsRecentProjects = recordsRecentProjects
+        self.onChooseProject = onChooseProject
         contextController = ContextWindowViewController(model: model.contextWindow)
         relationController = RelationWindowController(model: model.relationTree)
         relationController.view.frame.size.width = 300
@@ -100,7 +115,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             backing: .buffered,
             defer: false
         )
-        window.title = "CodeInsight"
+        window.title = "Cairn"
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentSplitController
         let toolbar = NSToolbar(identifier: "MainToolbar")
@@ -170,8 +185,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func openProject(root: URL) {
+        let root = root.standardizedFileURL
+        lastOpenedProjectRoot = root
+        pendingRecentProjectRoot = root
         model.openProject(root: root)
         render()
+    }
+
+    func refreshRecentProjects() {
+        renderEmptyState()
     }
 
     func selectFileInSidebar(_ file: URL) -> Bool {
@@ -255,6 +277,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderController.selectedDiffLine ?? readerController.selectedDiffLine
     }
     var selfTestSecondaryReaderCollapsed: Bool { secondaryReaderItem.isCollapsed }
+    var selfTestEmptyStateExists: Bool { readerController.selfTestEmptyStateExists }
+    var selfTestEmptyStateTexts: [String] { readerController.selfTestEmptyStateTexts }
+    var selfTestEmptyStateButtonTitles: [String] {
+        readerController.selfTestEmptyStateButtonTitles
+    }
 
     func selfTestNavigateNextDiffHunk() -> (before: Int?, after: Int?) {
         guard let hunk = model.compare.diff?.hunks.first else { return (nil, nil) }
@@ -567,7 +594,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
             displayedNavigationGeneration = model.navigationGeneration
         }
-        projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "CodeInsight"
+        projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "Cairn"
+        renderEmptyState()
         renderCommitButton()
         renderExactStatus()
 
@@ -592,6 +620,46 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+    }
+
+    private func renderEmptyState() {
+        if case .ready = model.projectState, let root = pendingRecentProjectRoot {
+            if recordsRecentProjects {
+                recentProjectsStore.record(root)
+            }
+            pendingRecentProjectRoot = nil
+        }
+
+        let retry = { [weak self] in
+            guard let self else { return }
+            if let root = lastOpenedProjectRoot {
+                openProject(root: root)
+            } else {
+                onChooseProject()
+            }
+        }
+        switch model.projectState {
+        case .empty:
+            readerController.showEmptyState(
+                recentPaths: recentProjectsStore.paths,
+                failed: false,
+                onChooseProject: onChooseProject,
+                onOpenProject: { [weak self] in self?.openProject(root: $0) },
+                onRetry: retry
+            )
+        case .failed:
+            readerController.showEmptyState(
+                recentPaths: recentProjectsStore.paths,
+                failed: true,
+                onChooseProject: onChooseProject,
+                onOpenProject: { [weak self] in self?.openProject(root: $0) },
+                onRetry: retry
+            )
+        case .indexing:
+            readerController.removeEmptyState(placeholder: "Indexing project…")
+        case .ready:
+            readerController.removeEmptyState(placeholder: "Select a file to read")
+        }
     }
 
     private var compareVersionTitle: String {
@@ -1256,7 +1324,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
     var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
-    private let label = NSTextField(labelWithString: "Open a project to begin")
+    private let label = NSTextField(labelWithString: "")
     private let textView = ReaderTextView()
     private let loader = DocumentLoader()
     private let showsCompareControls: Bool
@@ -1272,6 +1340,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private var loadGeneration: UInt64 = 0
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
+    private var emptyStateView: EmptyStateView?
 
     init(showsCompareControls: Bool = false) {
         self.showsCompareControls = showsCompareControls
@@ -1447,6 +1516,55 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         textView.apply(settings: settings)
     }
 
+    func showEmptyState(
+        recentPaths: [String],
+        failed: Bool,
+        onChooseProject: @escaping () -> Void,
+        onOpenProject: @escaping (URL) -> Void,
+        onRetry: @escaping () -> Void
+    ) {
+        loadViewIfNeeded()
+        label.isHidden = true
+        if let emptyStateView {
+            emptyStateView.update(recentPaths: recentPaths, failed: failed)
+            return
+        }
+        guard let scrollView else { return }
+        let emptyStateView = EmptyStateView(
+            recentPaths: recentPaths,
+            failed: failed,
+            onChooseProject: onChooseProject,
+            onOpenProject: onOpenProject,
+            onRetry: onRetry
+        )
+        emptyStateView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(emptyStateView)
+        NSLayoutConstraint.activate([
+            emptyStateView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            emptyStateView.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            emptyStateView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+        ])
+        self.emptyStateView = emptyStateView
+    }
+
+    func removeEmptyState(placeholder: String) {
+        emptyStateView?.removeFromSuperview()
+        emptyStateView = nil
+        if displayedFile == nil {
+            label.stringValue = placeholder
+            label.isHidden = false
+        }
+    }
+
+    var selfTestEmptyStateExists: Bool { emptyStateView != nil }
+    var selfTestEmptyStateTexts: [String] {
+        emptyStateView?.selfTestTextValues ?? []
+    }
+    var selfTestEmptyStateButtonTitles: [String] {
+        emptyStateView?.selfTestButtonTitles ?? []
+    }
+
     func configureCompareControls(
         versionTitle: String,
         functionChanges: [DiffCore.FunctionChange],
@@ -1542,7 +1660,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
         guard let file else {
             displayedDocument = nil
-            label.stringValue = "Open a project to begin"
+            label.stringValue = "Select a file to read"
             label.isHidden = false
             textView.clear()
             return

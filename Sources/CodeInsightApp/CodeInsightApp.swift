@@ -130,9 +130,12 @@ private struct CodeInsightApplication {
 }
 
 @MainActor
-private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation {
+private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
+    NSMenuDelegate
+{
     private let startedAt: ContinuousClock.Instant
     private let model: AppModel
+    private let recentProjectsStore = RecentProjectsStore()
     private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
     private var settingsWindowController: ReaderSettingsWindowController?
@@ -154,11 +157,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     func runSelfTest() {
         launch(offscreen: true)
         let coldStartMS = milliseconds(since: startedAt)
-        guard windowController?.window?.isVisible == true else {
+        guard let windowController, windowController.window?.isVisible == true else {
             Darwin.exit(1)
         }
+        let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
+        let checks = [
+            "emptyStateExists": windowController.selfTestEmptyStateExists,
+            "emptyStateHasCairn": windowController.selfTestEmptyStateTexts
+                .contains("Cairn"),
+            "emptyStateHasOpenProjectButton": windowController
+                .selfTestEmptyStateButtonTitles.contains("Open Project…"),
+            "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
+            "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
+            "windowTitleIsCairn": windowController.window?.title == "Cairn",
+        ]
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
-        Self.finishSelfTest(coldStartMS: coldStartMS)
+        Self.finishSelfTest(coldStartMS: coldStartMS, checks: checks)
     }
 
     func runProjectSelfTest(root: URL) {
@@ -1954,7 +1968,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let windowController = MainWindowController(
             model: model,
             settings: readerSettings,
-            offscreen: offscreen
+            offscreen: offscreen,
+            recentProjectsStore: recentProjectsStore,
+            recordsRecentProjects: !offscreen,
+            onChooseProject: { [weak self] in self?.openProject(nil) }
         )
         self.windowController = windowController
         windowController.showWindow(nil)
@@ -1975,6 +1992,73 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if panel.runModal() == .OK, let root = panel.url {
             windowController?.openProject(root: root)
         }
+    }
+
+    @objc private func openRecentProject(_ sender: NSMenuItem) {
+        guard let path = sender.representedObject as? String else { return }
+        windowController?.openProject(root: URL(
+            fileURLWithPath: path,
+            isDirectory: true
+        ))
+    }
+
+    @objc private func clearRecentProjects(_ sender: Any?) {
+        recentProjectsStore.clear()
+        windowController?.refreshRecentProjects()
+    }
+
+    @objc private func showAbout(_ sender: Any?) {
+        let version = Bundle.main.object(
+            forInfoDictionaryKey: "CFBundleShortVersionString"
+        ) as? String ?? "dev"
+        NSApplication.shared.orderFrontStandardAboutPanel(options: [
+            .applicationName: "Cairn",
+            .applicationVersion: version,
+            .credits: NSAttributedString(
+                string: "A read-only code reader for macOS."
+            ),
+        ])
+    }
+
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        rebuildOpenRecentMenu(menu)
+    }
+
+    private func rebuildOpenRecentMenu(_ menu: NSMenu) {
+        menu.removeAllItems()
+        menu.autoenablesItems = false
+        let paths = recentProjectsStore.paths
+        if paths.isEmpty {
+            let emptyItem = NSMenuItem(
+                title: "No Recent Projects",
+                action: nil,
+                keyEquivalent: ""
+            )
+            emptyItem.isEnabled = false
+            menu.addItem(emptyItem)
+        } else {
+            for path in paths {
+                let item = NSMenuItem(
+                    title: URL(fileURLWithPath: path).lastPathComponent,
+                    action: #selector(openRecentProject(_:)),
+                    keyEquivalent: ""
+                )
+                item.target = self
+                item.representedObject = path
+                item.toolTip = path
+                item.isEnabled = true
+                menu.addItem(item)
+            }
+        }
+        menu.addItem(.separator())
+        let clearItem = NSMenuItem(
+            title: "Clear Menu",
+            action: #selector(clearRecentProjects(_:)),
+            keyEquivalent: ""
+        )
+        clearItem.target = self
+        clearItem.isEnabled = !paths.isEmpty
+        menu.addItem(clearItem)
     }
 
     @objc private func showSettings(_ sender: Any?) {
@@ -2112,7 +2196,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let mainMenu = NSMenu()
 
         let appItem = NSMenuItem()
-        let appMenu = NSMenu(title: "CodeInsight")
+        let appMenu = NSMenu(title: "Cairn")
+        let aboutItem = NSMenuItem(
+            title: "About Cairn",
+            action: #selector(showAbout(_:)),
+            keyEquivalent: ""
+        )
+        aboutItem.target = self
+        appMenu.addItem(aboutItem)
+        appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(
             title: "Settings…",
             action: #selector(showSettings(_:)),
@@ -2122,7 +2214,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
         let quitItem = NSMenuItem(
-            title: "Quit CodeInsight",
+            title: "Quit Cairn",
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -2140,6 +2232,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openItem.target = self
         fileMenu.addItem(openItem)
+        let recentItem = NSMenuItem(
+            title: "Open Recent",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let recentMenu = NSMenu(title: "Open Recent")
+        recentMenu.delegate = self
+        rebuildOpenRecentMenu(recentMenu)
+        recentItem.submenu = recentMenu
+        fileMenu.addItem(recentItem)
         fileMenu.addItem(.separator())
         let trustItem = NSMenuItem(
             title: "Trust This Repository…",
@@ -2342,24 +2444,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         return mainMenu
     }
 
-    private static func finishSelfTest(coldStartMS: Double) {
+    private static func finishSelfTest(
+        coldStartMS: Double,
+        checks: [String: Bool]
+    ) {
         do {
             guard let footprint = physicalFootprintBytes() else { Darwin.exit(1) }
             let idleFootprintMB = Double(footprint) / 1_048_576
+            let passed = coldStartMS < SelfTestBudgets.coldStartMS
+                && idleFootprintMB < SelfTestBudgets.idleFootprintMB
+                && checks.values.allSatisfy { $0 }
+            var object: [String: Any] = checks
+            object["coldStartMS"] = coldStartMS
+            object["idleFootprintMB"] = idleFootprintMB
+            object["passed"] = passed
             let data = try JSONSerialization.data(
-                withJSONObject: [
-                    "coldStartMS": coldStartMS,
-                    "idleFootprintMB": idleFootprintMB,
-                ],
+                withJSONObject: object,
                 options: [.sortedKeys]
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(
-                coldStartMS < SelfTestBudgets.coldStartMS
-                    && idleFootprintMB < SelfTestBudgets.idleFootprintMB
-                    ? 0 : 1
-            )
+            Darwin.exit(passed ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)
