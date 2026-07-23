@@ -261,8 +261,9 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
 
     model.goBack(from: commitB)
     #expect(model.currentSnapshotID == commit.snapshotID)
-    #expect(model.selectedFile == a)
-    #expect(model.selectedByteOffset == 8)
+    #expect(await snapshotWaitUntil {
+        model.selectedFile == a && model.selectedByteOffset == 8
+    })
     #expect(model.navigationHistory.records.count == 2)
 
     model.goBack(from: commitA)
@@ -283,8 +284,9 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
 
     model.goForward()
     #expect(model.currentSnapshotID == commit.snapshotID)
-    #expect(model.selectedFile == b)
-    #expect(model.selectedByteOffset == 9)
+    #expect(await snapshotWaitUntil {
+        model.selectedFile == b && model.selectedByteOffset == 9
+    })
     #expect(model.navigationHistory.records.count == 2)
 }
 
@@ -471,8 +473,9 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
 
     #expect(model.generation == generation)
     #expect(model.snapshotPhase == .fullReady)
-    #expect(model.selectedFile == a)
-    #expect(model.selectedByteOffset == 3)
+    #expect(await snapshotWaitUntil {
+        model.selectedFile == a && model.selectedByteOffset == 3
+    })
 }
 
 @MainActor

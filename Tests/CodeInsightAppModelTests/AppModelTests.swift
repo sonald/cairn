@@ -90,7 +90,7 @@ func navigationHistoryBackAndForwardDoNotPush() {
 
 @MainActor
 @Test
-func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() throws {
+func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
     let root = try temporaryProject([
         "a.rs": "first line\nsecond line is initially long\n",
         "b.rs": "fn b() {}\n",
@@ -101,6 +101,7 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() throws {
         opened.append((file.lastPathComponent, offset))
     }
     model.openProject(root: root)
+    #expect(await waitUntil { model.fileTree != nil })
     let a = root.appendingPathComponent("a.rs")
     let b = root.appendingPathComponent("b.rs")
     let oldA = jumpRecord("a.rs", offset: 100, line: 2, column: 2)
@@ -110,13 +111,13 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() throws {
     try write("x\ny", to: a)
     model.goBack(from: jumpRecord("b.rs", offset: 0))
 
-    #expect(opened.last?.0 == "a.rs")
-    #expect(opened.last?.1 == 3)
+    #expect(opened.last?.0 == "b.rs")
+    #expect(await waitUntil { opened.last?.0 == "a.rs" && opened.last?.1 == 3 })
 }
 
 @MainActor
 @Test
-func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() throws {
+func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async throws {
     let source = String(repeating: "0123456789", count: 10)
     let root = try temporaryProject([
         "a.rs": source,
@@ -129,6 +130,7 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() throws {
         opened.append((file.lastPathComponent, offset))
     }
     model.openProject(root: root)
+    #expect(await waitUntil { model.fileTree != nil })
 
     model.navigate(to: root.appendingPathComponent("a.rs"), byteOffset: 10)
     model.navigate(
@@ -142,8 +144,11 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() throws {
         leaving: jumpRecord("b.rs", offset: 20)
     )
     model.goBack(from: jumpRecord("c.rs", offset: 30))
+    #expect(await waitUntil { opened.count == 4 })
     model.goBack(from: jumpRecord("b.rs", offset: 20))
+    #expect(await waitUntil { opened.count == 5 })
     model.goForward()
+    #expect(await waitUntil { opened.count == 6 })
 
     #expect(opened.map { "\($0.0):\($0.1 ?? 0)" } == [
         "a.rs:10", "b.rs:20", "c.rs:30", "b.rs:20", "a.rs:10", "b.rs:20",
@@ -217,6 +222,19 @@ func fileTreeSortsSkipsAndKeepsOnlyRustBranches() throws {
 
 @MainActor
 @Test
+func projectOpenPublishesFileTreeAsynchronously() async throws {
+    let root = try temporaryProject(["main.rs": "fn main() {}"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: FailingIndexService())
+
+    model.openProject(root: root)
+
+    #expect(model.fileTree == nil)
+    #expect(await waitUntil { model.fileTree?.fileCount == 1 })
+}
+
+@MainActor
+@Test
 func openingAnotherProjectDiscardsLateSession() async throws {
     let rootA = try temporaryProject(["a.rs": "fn a() {}"])
     let rootB = try temporaryProject(["b.rs": "fn b() {}"])
@@ -230,15 +248,23 @@ func openingAnotherProjectDiscardsLateSession() async throws {
     let model = AppModel(indexService: service)
 
     model.openProject(root: rootA)
+    #expect(model.fileTree == nil)
+    #expect(await waitUntil {
+        model.fileTree?.root == rootA.standardizedFileURL
+    })
+    #expect(await service.waitUntilRequested(root: rootA))
     model.openProject(root: rootB)
 
     #expect(model.generation == 2)
-    #expect(model.fileTree?.root == rootB.standardizedFileURL)
+    #expect(model.fileTree == nil)
     guard case let .indexing(root, _) = model.projectState else {
         Issue.record("expected indexing")
         return
     }
     #expect(root == rootB.standardizedFileURL)
+    #expect(await waitUntil {
+        model.fileTree?.root == rootB.standardizedFileURL
+    })
 
     await service.complete(root: rootB, result: .success(sessionB))
     #expect(await waitUntil {
@@ -732,6 +758,15 @@ private actor ControlledIndexService: IndexService {
         let key = root.standardizedFileURL.path
         for _ in 0..<100 {
             if delivered.contains(key) { return true }
+            await Task.yield()
+        }
+        return false
+    }
+
+    func waitUntilRequested(root: URL) async -> Bool {
+        let key = root.standardizedFileURL.path
+        for _ in 0..<100 {
+            if pending[key] != nil { return true }
             await Task.yield()
         }
         return false

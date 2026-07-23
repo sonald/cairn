@@ -896,7 +896,10 @@ private func runDefinition(
         executableURL: executable,
         cacheURL: cache,
         requestTimeout: 30,
-        closeGrace: 30
+        // The test only needs the definition + marker; force-kill promptly on
+        // close instead of waiting up to 30s for a busy rust-analyzer to exit
+        // gracefully (that wait dominated the runtime — two sessions x 30s).
+        closeGrace: 2
     )
     let session = try provider.prepare(
         snapshot: snapshot,

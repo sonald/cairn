@@ -152,9 +152,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         launch(offscreen: true)
         let projectStartedAt = ContinuousClock.now
         windowController?.openProject(root: root)
+        let deadline = Date(timeIntervalSinceNow: 30)
+        while model.fileTree == nil, Date() < deadline {
+            if case .failed = model.projectState { break }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
         let treeVisibleMS = milliseconds(since: projectStartedAt)
         let fileCount = model.fileTree?.fileCount ?? 0
-        let deadline = Date(timeIntervalSinceNow: 30)
         var ready = false
         var reused = 0
         var extracted = 0
@@ -587,7 +591,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
         }
 
-        guard windowController.selectFileInSidebar(fileB),
+        guard waitUntil(timeout: 5, condition: {
+                  windowController.selectFileInSidebar(fileB)
+              }),
               waitUntil(timeout: 5, condition: {
                   windowController.displayedReaderFile?.standardizedFileURL
                       == fileB.standardizedFileURL

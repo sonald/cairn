@@ -308,6 +308,7 @@ public final class AppModel {
     private let navigationSink: @MainActor (URL, UInt32?) -> Void
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var compareSnapshotTask: Task<Void, Never>?
+    @ObservationIgnored private var replayTask: Task<Void, Never>?
     private var projectRoot: URL?
     @ObservationIgnored private var snapshotDestinations: [
         SnapshotID: SnapshotDestination
@@ -352,6 +353,7 @@ public final class AppModel {
         }
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
+        replayTask?.cancel()
         compare.clear()
         generation &+= 1
         let openGeneration = generation
@@ -371,24 +373,23 @@ public final class AppModel {
         navigationGeneration &+= 1
         navigationHistory.reset()
 
-        do {
-            fileTree = try FileTreeModel(root: root)
-            coverage = SnapshotCoverage(
-                filesIndexed: 0,
-                filesTotal: fileTree?.fileCount ?? 0
-            )
-        } catch {
-            guard transition(to: .failed) else {
-                assertionFailure("Illegal project state transition to failed")
-                return
-            }
-            return
-        }
-
-        Task { [weak self, indexService] in
+        snapshotTask = Task { [weak self, indexService] in
             do {
+                let fileTree = try await detachedValue {
+                    try FileTreeModel(root: root)
+                }
+                try Task.checkCancellation()
+                guard let self, generation == openGeneration else { return }
+                self.fileTree = fileTree
+                coverage = SnapshotCoverage(
+                    filesIndexed: 0,
+                    filesTotal: fileTree.fileCount
+                )
                 let session = try await indexService.index(root: root)
-                self?.finishIndexing(session, generation: openGeneration)
+                try Task.checkCancellation()
+                finishIndexing(session, generation: openGeneration)
+            } catch is CancellationError {
+                return
             } catch {
                 self?.failIndexing(generation: openGeneration)
             }
@@ -475,6 +476,7 @@ public final class AppModel {
         byteOffset: UInt32? = nil,
         leaving current: JumpRecord? = nil
     ) {
+        replayTask?.cancel()
         if let current { navigationHistory.push(current) }
         selectedFile = url.standardizedFileURL
         selectedByteOffset = byteOffset
@@ -564,6 +566,7 @@ public final class AppModel {
         guard let root = projectRoot else { return }
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
+        replayTask?.cancel()
         compare.clear()
         generation &+= 1
         let switchGeneration = generation
@@ -760,23 +763,51 @@ public final class AppModel {
         guard let root = fileTree?.root else { return }
         let file = root.appendingPathComponent(record.path).standardizedFileURL
         guard file.pathComponents.starts(with: root.pathComponents) else { return }
-        let loader = if let documentSource {
-            DocumentLoader(source: documentSource)
+        let source = documentSource
+        let replayGeneration = generation
+        let replayNavigationGeneration = navigationGeneration
+        let replaySnapshotID = currentSnapshotID
+        replayTask?.cancel()
+        replayTask = Task { [weak self] in
+            let offset: UInt32
+            do {
+                offset = try await detachedValue {
+                    try Self.replayOffset(record, file: file, source: source)
+                }
+                try Task.checkCancellation()
+            } catch {
+                return
+            }
+            guard let self,
+                  generation == replayGeneration,
+                  navigationGeneration == replayNavigationGeneration,
+                  currentSnapshotID == replaySnapshotID
+            else { return }
+            navigate(to: file, byteOffset: offset)
+        }
+    }
+
+    nonisolated private static func replayOffset(
+        _ record: JumpRecord,
+        file: URL,
+        source: DocumentLoader.ContentSource?
+    ) throws -> UInt32 {
+        let loader = if let source {
+            DocumentLoader(source: source)
         } else {
             DocumentLoader()
         }
-        guard let loaded = try? loader.load(file: file) else { return }
+        let loaded = try loader.load(file: file)
         let document = loaded.document
-        let offset: UInt32
         // 1. Preserve the exact byte position whenever it still fits this version.
         if Int(record.byteOffset) <= document.bytes.count {
-            offset = record.byteOffset
+            return record.byteOffset
         // 2. A shorter file invalidates the byte; retry its recorded line/column.
         } else if let lineOffset = document.lineTable.byteOffset(
             line: record.line,
             column: record.column
         ) {
-            offset = lineOffset
+            return lineOffset
         // 3. Invalid coordinates fall back to the same named symbol's declaration.
         } else if let symbolAnchor = record.symbolAnchor {
             let facets = if loaded.tier == .regular {
@@ -786,15 +817,14 @@ public final class AppModel {
                     .outlineFacets ?? []
             }
             if let facet = facets.first(where: { $0.name == symbolAnchor }) {
-                offset = facet.nameRange.lowerBound
+                return facet.nameRange.lowerBound
             } else {
                 // 4. A missing symbol leaves the file head as the last safe target.
-                offset = 0
+                return 0
             }
         } else {
             // 4. No valid coordinate or anchor remains, so open the file head.
-            offset = 0
+            return 0
         }
-        navigate(to: file, byteOffset: offset)
     }
 }

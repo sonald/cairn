@@ -1,6 +1,40 @@
 // swift-tools-version: 6.0
 
 import PackageDescription
+import Foundation
+
+let libgit2Mode = ProcessInfo.processInfo.environment["CAIRN_LIBGIT2"] ?? "brew"
+if libgit2Mode != "brew" && libgit2Mode != "vendored" {
+    fatalError("CAIRN_LIBGIT2 must be 'brew' or 'vendored'")
+}
+
+let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+let vendoredLibGit2 = packageRoot.appendingPathComponent("Vendor/libgit2")
+if libgit2Mode == "vendored",
+   !FileManager.default.fileExists(
+       atPath: vendoredLibGit2.appendingPathComponent("lib/libgit2.a").path
+   ) {
+    fatalError("Run scripts/vendor-libgit2.sh before using CAIRN_LIBGIT2=vendored")
+}
+
+let libgit2SwiftSettings: [SwiftSetting] = [
+    .unsafeFlags([
+        "-Xcc", "-I" + (libgit2Mode == "vendored"
+            ? vendoredLibGit2.appendingPathComponent("include").path
+            : "/opt/homebrew/opt/libgit2/include"),
+    ]),
+]
+let libgit2LinkerSettings: [LinkerSetting] = if libgit2Mode == "vendored" {
+    [
+        .unsafeFlags(["-L" + vendoredLibGit2.appendingPathComponent("lib").path]),
+        .linkedFramework("CoreFoundation"),
+        .linkedFramework("Security"),
+        .linkedLibrary("iconv"),
+        .linkedLibrary("z"),
+    ]
+} else {
+    [.unsafeFlags(["-L/opt/homebrew/opt/libgit2/lib"])]
+}
 
 let package = Package(
     name: "CodeInsight",
@@ -29,8 +63,8 @@ let package = Package(
     targets: [
         .systemLibrary(
             name: "CLibGit2",
-            pkgConfig: "libgit2",
-            providers: [.brew(["libgit2"])]
+            pkgConfig: libgit2Mode == "brew" ? "libgit2" : nil,
+            providers: libgit2Mode == "brew" ? [.brew(["libgit2"])] : []
         ),
         .target(
             name: "CTreeSitter",
@@ -56,12 +90,8 @@ let package = Package(
         .target(
             name: "CodeInsightGit",
             dependencies: ["CLibGit2", "CodeInsightCore"],
-            swiftSettings: [
-                .unsafeFlags(["-Xcc", "-I/opt/homebrew/opt/libgit2/include"]),
-            ],
-            linkerSettings: [
-                .unsafeFlags(["-L/opt/homebrew/opt/libgit2/lib"]),
-            ]
+            swiftSettings: libgit2SwiftSettings,
+            linkerSettings: libgit2LinkerSettings
         ),
         .target(
             name: "CodeInsightRustExtractor",
