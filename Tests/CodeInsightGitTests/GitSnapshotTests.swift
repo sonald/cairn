@@ -123,6 +123,46 @@ func commitLogReadsHeadFirstWithBranchLabels() throws {
 }
 
 @Test
+func currentBranchNameReadsTheCheckedOutBranch() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    try Data("fn main() {}\n".utf8).write(
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    try fixture.git("add", "main.rs")
+    try fixture.commit("base")
+    try fixture.git("branch", "-M", "feature/toolbar")
+
+    #expect(currentBranchName(repositoryURL: fixture.root) == "feature/toolbar")
+}
+
+@Test
+func currentBranchNameReportsDetachedHead() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    try Data("fn main() {}\n".utf8).write(
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    try fixture.git("add", "main.rs")
+    try fixture.commit("base")
+    try fixture.git("checkout", "--detach", "-q")
+
+    #expect(currentBranchName(repositoryURL: fixture.root) == "detached")
+}
+
+@Test
+func currentBranchNameReturnsNilOutsideARepository() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightGitNonRepository-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    #expect(currentBranchName(repositoryURL: root) == nil)
+}
+
+@Test
 func commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() throws {
     let head = try CommitSnapshot(repositoryURL: repositoryRoot)
     let previous = try CommitSnapshot(repositoryURL: repositoryRoot, revision: "HEAD~1")

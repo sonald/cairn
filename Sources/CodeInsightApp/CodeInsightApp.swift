@@ -169,7 +169,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "emptyStateHasCairn": windowController.selfTestEmptyStateTexts
                 .contains("Cairn"),
             "emptyStateHasOpenProjectButton": windowController
-                .selfTestEmptyStateButtonTitles.contains("Open Project…"),
+                .selfTestEmptyStateButtonTitles.contains {
+                    $0.contains("Open Project…")
+                },
+            "emptyStateOpenProjectButtonShowsCommandO": windowController
+                .selfTestEmptyStateButtonVisibleInWindow
+                && windowController.selfTestEmptyStateButtonTitles.contains {
+                    $0.contains("⌘O")
+                },
+            "emptyStateOpenProjectButtonIsVisibleDefaultAction": windowController
+                .selfTestEmptyStateOpenButtonIsVisibleDefaultAction,
             "emptyStateAttachedToWindow": windowController
                 .selfTestEmptyStateAttachedToWindow,
             "emptyStateUnhidden": windowController.selfTestEmptyStateUnhidden,
@@ -181,6 +190,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 .selfTestEmptyStateTitleVisibleInWindow,
             "emptyStateOpenProjectButtonVisibleInWindow": windowController
                 .selfTestEmptyStateButtonVisibleInWindow,
+            "symbolsToolbarItemExistsAndVisible": windowController
+                .selfTestSymbolsToolbarItemExistsAndVisible,
+            "settingsToolbarItemExistsAndVisible": windowController
+                .selfTestSettingsToolbarItemExistsAndVisible,
             "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
@@ -225,10 +238,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             if ready { break }
         }
         let indexReadyMS = milliseconds(since: projectStartedAt)
+        _ = waitUntil(timeout: 5) { !self.model.commitPicker.isLoading }
         windowController?.window?.contentView?.layoutSubtreeIfNeeded()
         let emptyStateRemoved = windowController?.selfTestEmptyStateExists == false
         let readerDocumentVisible = windowController?
             .selfTestReaderDocumentVisibleInWindow == true
+        let branchName = currentBranchName(repositoryURL: root)
+        let commitTitle = windowController?.selfTestCommitButtonTitle ?? ""
+        let commitTitleMatchesRepository: Bool
+        if (try? GitRepository(url: root)) != nil {
+            commitTitleMatchesRepository = branchName.map {
+                commitTitle.hasPrefix("⎇ ") && commitTitle.contains($0)
+            } == true
+        } else {
+            commitTitleMatchesRepository = commitTitle == "Working Tree"
+                && !commitTitle.contains("⎇")
+        }
+        let commitPickerShowsCurrentBranch = commitTitleMatchesRepository
+            && windowController?.selfTestCommitToolbarItemExistsAndVisible == true
         model.flushPersistentIndexCache()
         Self.finishProjectSelfTest(
             treeVisibleMS: treeVisibleMS,
@@ -238,7 +265,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extracted: extracted,
             ready: ready,
             emptyStateRemoved: emptyStateRemoved,
-            readerDocumentVisible: readerDocumentVisible
+            readerDocumentVisible: readerDocumentVisible,
+            branchName: branchName,
+            commitTitle: commitTitle,
+            commitPickerShowsCurrentBranch: commitPickerShowsCurrentBranch
         )
     }
 
@@ -2034,7 +2064,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             offscreen: offscreen,
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
-            onChooseProject: { [weak self] in self?.openProject(nil) }
+            onChooseProject: { [weak self] in self?.openProject(nil) },
+            onShowSettings: { [weak self] in self?.showSettings(nil) }
         )
         self.windowController = windowController
         windowController.showWindow(nil)
@@ -2542,7 +2573,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         extracted: Int,
         ready: Bool,
         emptyStateRemoved: Bool,
-        readerDocumentVisible: Bool
+        readerDocumentVisible: Bool,
+        branchName: String? = nil,
+        commitTitle: String = "",
+        commitPickerShowsCurrentBranch: Bool = false
     ) -> Never {
         do {
             let data = try JSONSerialization.data(
@@ -2554,6 +2588,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "extracted": extracted,
                     "emptyStateRemoved": emptyStateRemoved,
                     "readerDocumentVisible": readerDocumentVisible,
+                    "branchName": branchName ?? "",
+                    "commitTitle": commitTitle,
+                    "commitPickerShowsCurrentBranch": commitPickerShowsCurrentBranch,
                 ],
                 options: [.sortedKeys]
             )
@@ -2563,6 +2600,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ready
                     && emptyStateRemoved
                     && readerDocumentVisible
+                    && commitPickerShowsCurrentBranch
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
                     && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
                     ? 0 : 1

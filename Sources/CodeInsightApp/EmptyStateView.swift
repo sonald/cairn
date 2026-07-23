@@ -107,9 +107,9 @@ final class EmptyStateView: NSView {
     func update(recentPaths: [String], failed: Bool) {
         isFailure = failed
         titleLabel.stringValue = failed ? "Couldn't open this folder." : "Cairn"
-        openButton.title = failed ? "Try Again" : "Open Project…"
-        openButton.keyEquivalent = failed ? "\r" : "o"
-        openButton.keyEquivalentModifierMask = failed ? [] : .command
+        openButton.title = failed ? "Try Again" : "Open Project…  ⌘O"
+        openButton.keyEquivalent = "\r"
+        openButton.keyEquivalentModifierMask = []
 
         let visiblePaths = Array(recentPaths.prefix(5))
         guard visiblePaths != self.recentPaths else { return }
@@ -130,6 +130,11 @@ final class EmptyStateView: NSView {
     var selfTestFrameVisibleInWindow: Bool { selfTestIsVisibleInWindow }
     var selfTestTitleVisibleInWindow: Bool { titleLabel.selfTestIsVisibleInWindow }
     var selfTestButtonVisibleInWindow: Bool { openButton.selfTestIsVisibleInWindow }
+    var selfTestOpenButtonIsVisibleDefaultAction: Bool {
+        openButton.selfTestIsVisibleInWindow
+            && openButton.keyEquivalent == "\r"
+            && window?.defaultButtonCell === openButton.cell
+    }
 
     override func draggingEntered(_ sender: any NSDraggingInfo) -> NSDragOperation {
         updateDropHighlight(for: sender)

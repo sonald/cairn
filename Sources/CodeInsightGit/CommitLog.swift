@@ -29,6 +29,27 @@ public struct CommitInfo: Equatable, Hashable, Sendable {
     }
 }
 
+public func currentBranchName(repositoryURL: URL) -> String? {
+    try? LibGit2Executor.sync {
+        let repository = try GitRepository(url: repositoryURL)
+        var head: OpaquePointer?
+        let code = git_repository_head(&head, repository.raw)
+        if code == GIT_ENOTFOUND.rawValue || code == GIT_EUNBORNBRANCH.rawValue {
+            return nil
+        }
+        try check(code, "git_repository_head")
+        guard let head else { return nil }
+        defer { git_reference_free(head) }
+
+        let detached = git_repository_head_detached(repository.raw)
+        if detached < 0 {
+            try check(detached, "git_repository_head_detached")
+        }
+        if detached == 1 { return "detached" }
+        return git_reference_shorthand(head).map(String.init(cString:))
+    }
+}
+
 public struct CommitLog: Sendable {
     public let commits: [CommitInfo]
 

@@ -12,6 +12,7 @@ public final class CommitPickerModel {
     public private(set) var query = ""
     public private(set) var currentRevision: String?
     public private(set) var currentCommit: CommitInfo?
+    public private(set) var currentBranchName: String?
     public private(set) var isLoading = false
     public private(set) var errorMessage: String?
 
@@ -38,16 +39,21 @@ public final class CommitPickerModel {
         isLoading = true
         errorMessage = nil
         commits = []
+        currentBranchName = nil
         applyFilter()
         let loader = loader
         loadTask = Task { [weak self] in
             do {
                 let commits = try await loader(repositoryURL)
+                let branchName = await Task.detached {
+                    CodeInsightGit.currentBranchName(repositoryURL: repositoryURL)
+                }.value
                 guard let self,
                       !Task.isCancelled,
                       loadGeneration == generation
                 else { return }
                 self.commits = commits
+                currentBranchName = branchName
                 isLoading = false
                 applyFilter()
                 updateCurrentCommit()

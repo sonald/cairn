@@ -13,6 +13,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private static let forwardItemIdentifier = NSToolbarItem.Identifier("Forward")
     private static let projectItemIdentifier = NSToolbarItem.Identifier("Project")
     private static let commitItemIdentifier = NSToolbarItem.Identifier("Commit")
+    private static let symbolsItemIdentifier = NSToolbarItem.Identifier("Symbols")
+    private static let settingsItemIdentifier = NSToolbarItem.Identifier("Settings")
     private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
     private static let exactItemIdentifier = NSToolbarItem.Identifier("ExactStatus")
 
@@ -32,11 +34,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let relationItem: NSSplitViewItem
     private let projectLabel = NSTextField(labelWithString: "Cairn")
     private let commitButton = NSButton()
+    private let symbolsButton = NSButton()
+    private let settingsButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
     private let onChooseProject: () -> Void
+    private let onShowSettings: () -> Void
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
@@ -54,12 +59,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         offscreen: Bool,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
-        onChooseProject: @escaping () -> Void = {}
+        onChooseProject: @escaping () -> Void = {},
+        onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
         self.onChooseProject = onChooseProject
+        self.onShowSettings = onShowSettings
         contextController = ContextWindowViewController(model: model.contextWindow)
         relationController = RelationWindowController(model: model.relationTree)
         relationController.view.frame.size.width = 300
@@ -109,9 +116,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1280, height: 820)
         let window = NSWindow(
             contentRect: frame,
-            styleMask: offscreen
-                ? [.borderless]
-                : [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -300,6 +305,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestEmptyStateButtonVisibleInWindow: Bool {
         readerController.selfTestEmptyStateButtonVisibleInWindow
     }
+    var selfTestEmptyStateOpenButtonIsVisibleDefaultAction: Bool {
+        readerController.selfTestEmptyStateOpenButtonIsVisibleDefaultAction
+    }
+    var selfTestCommitButtonTitle: String { commitButton.title }
+    var selfTestCommitToolbarItemExistsAndVisible: Bool {
+        selfTestToolbarItemExistsAndVisible(identifier: Self.commitItemIdentifier)
+    }
+    var selfTestSymbolsToolbarItemExistsAndVisible: Bool {
+        selfTestToolbarItemExistsAndVisible(identifier: Self.symbolsItemIdentifier)
+    }
+    var selfTestSettingsToolbarItemExistsAndVisible: Bool {
+        selfTestToolbarItemExistsAndVisible(identifier: Self.settingsItemIdentifier)
+    }
     var selfTestReaderDocumentVisibleInWindow: Bool {
         readerController.selfTestReaderDocumentVisibleInWindow
     }
@@ -361,6 +379,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func selfTestOpenRelationSelection() {
         relationController.selfTestOpenSelection()
+    }
+
+    private func selfTestToolbarItemExistsAndVisible(
+        identifier: NSToolbarItem.Identifier
+    ) -> Bool {
+        window?.toolbar?.visibleItems?.contains {
+            $0.itemIdentifier == identifier
+        } == true
     }
 
     func showSymbolSearch() {
@@ -458,7 +484,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.projectItemIdentifier,
             Self.commitItemIdentifier,
             .flexibleSpace,
+            Self.symbolsItemIdentifier,
+            .flexibleSpace,
             Self.exactItemIdentifier,
+            Self.settingsItemIdentifier,
         ]
     }
 
@@ -468,6 +497,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.forwardItemIdentifier,
             Self.projectItemIdentifier,
             Self.commitItemIdentifier,
+            Self.symbolsItemIdentifier,
+            Self.settingsItemIdentifier,
             Self.indexItemIdentifier,
             Self.exactItemIdentifier,
             .flexibleSpace,
@@ -489,6 +520,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
             item.target = self
             item.action = #selector(goBack(_:))
+            item.isNavigational = true
+            item.visibilityPriority = .high
         case Self.forwardItemIdentifier:
             item.label = "Forward"
             item.image = NSImage(
@@ -497,9 +530,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
             item.target = self
             item.action = #selector(goForward(_:))
+            item.isNavigational = true
+            item.visibilityPriority = .high
         case Self.projectItemIdentifier:
             item.label = "Project"
             item.view = projectLabel
+            projectLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+            projectLabel.cell?.lineBreakMode = .byTruncatingTail
+            projectLabel.frame.size = NSSize(width: 120, height: 22)
+            item.menuFormRepresentation = NSMenuItem(
+                title: projectLabel.stringValue,
+                action: nil,
+                keyEquivalent: ""
+            )
         case Self.commitItemIdentifier:
             item.label = "Version"
             item.view = commitButton
@@ -511,14 +554,77 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             commitButton.cell?.lineBreakMode = .byTruncatingTail
             commitButton.frame.size = NSSize(width: 260, height: 28)
             commitButton.setAccessibilityLabel("Current version")
+            let menuItem = NSMenuItem(
+                title: commitButton.title,
+                action: #selector(showCommitPickerFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            menuItem.target = self
+            item.menuFormRepresentation = menuItem
+        case Self.symbolsItemIdentifier:
+            item.label = "Symbols"
+            item.view = symbolsButton
+            item.visibilityPriority = .standard
+            symbolsButton.title = "Symbols  ⌘T"
+            symbolsButton.image = NSImage(
+                systemSymbolName: "magnifyingglass",
+                accessibilityDescription: "Symbols"
+            )
+            symbolsButton.imagePosition = .imageLeading
+            symbolsButton.bezelStyle = .rounded
+            symbolsButton.font = .systemFont(ofSize: 12)
+            symbolsButton.target = self
+            symbolsButton.action = #selector(showSymbolSearchFromToolbar(_:))
+            symbolsButton.frame.size = NSSize(width: 150, height: 28)
+            symbolsButton.setAccessibilityLabel("Open Symbol Search")
+            let menuItem = NSMenuItem(
+                title: "Symbols",
+                action: #selector(showSymbolSearchFromToolbar(_:)),
+                keyEquivalent: "t"
+            )
+            menuItem.keyEquivalentModifierMask = .command
+            menuItem.target = self
+            item.menuFormRepresentation = menuItem
+        case Self.settingsItemIdentifier:
+            item.label = "Settings"
+            item.view = settingsButton
+            item.visibilityPriority = .low
+            settingsButton.title = ""
+            settingsButton.image = NSImage(
+                systemSymbolName: "gearshape",
+                accessibilityDescription: "Settings"
+            )
+            settingsButton.bezelStyle = .texturedRounded
+            settingsButton.target = self
+            settingsButton.action = #selector(showSettingsFromToolbar(_:))
+            settingsButton.frame.size = NSSize(width: 32, height: 28)
+            settingsButton.setAccessibilityLabel("Settings")
+            let menuItem = NSMenuItem(
+                title: "Settings…",
+                action: #selector(showSettingsFromToolbar(_:)),
+                keyEquivalent: ","
+            )
+            menuItem.keyEquivalentModifierMask = .command
+            menuItem.target = self
+            item.menuFormRepresentation = menuItem
         case Self.indexItemIdentifier:
             item.label = "Index Status"
             item.view = indexLabel
+            item.menuFormRepresentation = NSMenuItem(
+                title: indexLabel.stringValue,
+                action: nil,
+                keyEquivalent: ""
+            )
         case Self.exactItemIdentifier:
             item.label = "Exact Status"
             item.view = exactLabel
             exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
             exactLabel.setAccessibilityLabel("Exact provider status")
+            item.menuFormRepresentation = NSMenuItem(
+                title: exactLabel.stringValue,
+                action: nil,
+                keyEquivalent: ""
+            )
         default:
             return nil
         }
@@ -548,6 +654,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.selectedFile
             _ = model.navigationGeneration
             _ = model.commitPicker.currentCommit
+            _ = model.commitPicker.currentBranchName
             _ = model.commitPicker.isLoading
             _ = model.compare.rightRevision
             _ = model.compare.rightSnapshotID
@@ -614,7 +721,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
             displayedNavigationGeneration = model.navigationGeneration
         }
-        projectLabel.stringValue = model.fileTree?.root.lastPathComponent ?? "Cairn"
+        if let root = model.fileTree?.root {
+            projectLabel.stringValue = root.lastPathComponent
+            projectLabel.textColor = .labelColor
+        } else {
+            projectLabel.stringValue = "Cairn"
+            projectLabel.textColor = .secondaryLabelColor
+        }
+        window?.toolbar?.items.first {
+            $0.itemIdentifier == Self.projectItemIdentifier
+        }?.menuFormRepresentation?.title = projectLabel.stringValue
         renderEmptyState()
         renderCommitButton()
         renderExactStatus()
@@ -776,11 +892,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func renderCommitButton() {
         guard let revision = model.currentRevision else {
-            commitButton.title = "Working Tree"
+            commitButton.title = switch model.commitPicker.currentBranchName {
+            case "detached": "⎇ detached"
+            case let branch?: "⎇ \(branch) · Working Tree"
+            case nil: "Working Tree"
+            }
             commitButton.bezelColor = nil
             commitButton.contentTintColor = .controlTextColor
-            commitButton.toolTip = "Working Tree"
+            commitButton.toolTip = commitButton.title
             commitButton.isEnabled = model.fileTree != nil
+            updateCommitMenuTitle()
             return
         }
 
@@ -795,6 +916,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         commitButton.toolTip = commit.map { "\($0.fullSHA) — \($0.summary)" }
             ?? revision
         commitButton.isEnabled = model.fileTree != nil
+        updateCommitMenuTitle()
+    }
+
+    private func updateCommitMenuTitle() {
+        let menuItem = window?.toolbar?.items.first {
+            $0.itemIdentifier == Self.commitItemIdentifier
+        }?.menuFormRepresentation
+        menuItem?.title = commitButton.title
+        menuItem?.isEnabled = commitButton.isEnabled
     }
 
     private static func truncated(_ value: String, limit: Int) -> String {
@@ -802,7 +932,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return String(value.prefix(limit - 1)) + "…"
     }
 
-    @objc private func showCommitPicker(_ sender: NSButton) {
+    @objc private func showCommitPicker(_ sender: Any?) {
+        guard let anchor = (sender as? NSView) ?? window?.contentView else { return }
         if commitPickerPopover == nil {
             commitPickerPopover = CommitPickerPopover(
                 appModel: model,
@@ -819,7 +950,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 }
             )
         }
-        commitPickerPopover?.show(relativeTo: sender)
+        commitPickerPopover?.show(relativeTo: anchor)
+    }
+
+    @objc private func showCommitPickerFromMenu(_ sender: Any?) {
+        showCommitPicker(nil)
+    }
+
+    @objc private func showSymbolSearchFromToolbar(_ sender: Any?) {
+        showSymbolSearch()
+    }
+
+    @objc private func showSettingsFromToolbar(_ sender: Any?) {
+        onShowSettings()
     }
 
     private func showCompareCommitPicker() {
@@ -1609,6 +1752,9 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     }
     var selfTestEmptyStateButtonVisibleInWindow: Bool {
         emptyStateView?.selfTestButtonVisibleInWindow == true
+    }
+    var selfTestEmptyStateOpenButtonIsVisibleDefaultAction: Bool {
+        emptyStateView?.selfTestOpenButtonIsVisibleDefaultAction == true
     }
     var selfTestReaderDocumentVisibleInWindow: Bool {
         guard let scrollView else { return false }
