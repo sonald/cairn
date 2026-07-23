@@ -874,6 +874,96 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController
         )
 
+        let selectedForDirection = windowController.selfTestSelectRelationEdge(
+            titled: "relation_root"
+        )
+        let directionGeneration = model.relationTree.generation
+        if selectedForDirection {
+            windowController.selfTestChangeRelationDirection(.calls)
+        }
+        let selectedEdgeDrivesRoot = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "relation_root"
+                && model.relationTree.direction == .calls
+        })
+        let directionGenerationIncremented =
+            model.relationTree.generation > directionGeneration
+        emitExactStep(
+            "relation-direction-root",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "selectedEdge": selectedForDirection,
+                "rootTitle": model.relationTree.root?.title ?? "",
+                "generationIncremented": directionGenerationIncremented,
+            ]
+        )
+
+        windowController.selfTestReaderRelation(
+            offset: target.relationCallOffset,
+            direction: .callers
+        )
+        let answerCallersReady = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "answer"
+                && model.relationTree.direction == .callers
+                && windowController.selfTestExactGroupRowCount > 0
+        })
+        let selectedForOpen = answerCallersReady
+            && windowController.selfTestSelectRelationEdge(titled: "main")
+        let openGeneration = model.relationTree.generation
+        if selectedForOpen {
+            windowController.selfTestOpenRelationSelection()
+        }
+        let doubleClickNavigatesAndSetsRoot = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.file.standardizedFileURL
+                && model.relationTree.root?.title == "main"
+                && model.relationTree.generation > openGeneration
+        })
+        emitExactStep(
+            "relation-double-click",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "selectedEdge": selectedForOpen,
+                "rootTitle": model.relationTree.root?.title ?? "",
+                "navigated": windowController.displayedReaderFile?.standardizedFileURL
+                    == target.file.standardizedFileURL,
+            ]
+        )
+
+        let signatureTraitFileVisible = target.signatureTraitOffset != nil
+            && waitUntil(timeout: 5, condition: {
+                windowController.selectFileInSidebar(target.relationFile)
+            }) && waitUntil(timeout: 5, condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            })
+        if signatureTraitFileVisible, let signatureTraitOffset =
+            target.signatureTraitOffset
+        {
+            windowController.selfTestReaderRelation(
+                offset: signatureTraitOffset,
+                direction: .calls
+            )
+        }
+        let externalGroupVisible = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "Backend"
+                && windowController.selfTestExternalGroupTitle != nil
+        })
+        let externalGroupHeaderHonest =
+            windowController.selfTestExternalGroupTitle
+                == "EXTERNAL / UNRESOLVED (0)"
+        emitExactStep(
+            "relation-empty-external",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "externalGroupTitle":
+                    windowController.selfTestExternalGroupTitle ?? "",
+                "rootTitle": model.relationTree.root?.title ?? "",
+            ]
+        )
+
         let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
         let realOffline = runRealOfflineCoverageVariant(root: root)
@@ -888,6 +978,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
             "relationFileVisible": relationFileVisible,
+            "selectedForDirection": selectedForDirection,
+            "selectedEdgeDrivesRoot": selectedEdgeDrivesRoot,
+            "directionGenerationIncremented": directionGenerationIncremented,
+            "answerCallersReady": answerCallersReady,
+            "selectedForOpen": selectedForOpen,
+            "doubleClickNavigatesAndSetsRoot": doubleClickNavigatesAndSetsRoot,
+            "signatureTraitFileVisible": signatureTraitFileVisible,
+            "externalGroupVisible": externalGroupVisible,
+            "externalGroupHeaderHonest": externalGroupHeaderHonest,
             "realProviderPassedOrSkipped": real.passed,
             "realOfflineCoveragePassedOrSkipped": realOffline.passed,
             "historicalExactVisible": historical.exactVisible,
@@ -2372,6 +2471,7 @@ private struct ExactSelfTestTarget {
     let definition: ExactLocation
     let relationFile: URL
     let relationCallOffset: UInt32
+    let signatureTraitOffset: UInt32?
 }
 
 private struct ExactSelfTestIndexService: IndexService {
@@ -2556,6 +2656,9 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
           let coordinate = LineTable(bytes: Array(definitionSource.utf8))
               .lineColumn(at: definitionOffset)
     else { return nil }
+    let signatureTraitOffset = definitionSource.range(of: "Backend").flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
     return ExactSelfTestTarget(
         file: file,
         clickOffset: clickOffset,
@@ -2566,7 +2669,8 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
             column: Int(coordinate.column)
         ),
         relationFile: relationFile,
-        relationCallOffset: relationCallOffset
+        relationCallOffset: relationCallOffset,
+        signatureTraitOffset: signatureTraitOffset
     )
 }
 

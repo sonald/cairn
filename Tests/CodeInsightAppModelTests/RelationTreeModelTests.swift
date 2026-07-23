@@ -102,9 +102,13 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
 func relationTreeShowsExternalCallsAsUnresolved() async throws {
     let root = try relationTemporaryProject([
         "main.rs": """
-            fn root() {
-                let _ = std::mem::size_of::<u8>();
-                let _ = Box::pin(async {});
+            struct Client;
+            struct Service { client: Client }
+            impl Service {
+                fn root(&self) {
+                    self.client.post();
+                    tokio::spawn(async {});
+                }
             }
             """,
     ])
@@ -121,8 +125,96 @@ func relationTreeShowsExternalCallsAsUnresolved() async throws {
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let external = try relationGroup("External / Unresolved", in: model.root)
-    #expect(external.children?.map(\.title) == ["size_of", "pin"])
+    #expect(external.children?.map(\.title) == ["post", "spawn"])
     #expect(external.children?.allSatisfy { $0.subtitle == "Unresolved" } == true)
+}
+
+@MainActor
+@Test
+func relationTreeShowsEmptyExternalCallsGroupForSignatureOnlyTrait() async throws {
+    let root = try relationTemporaryProject([
+        "main.rs": """
+            trait Backend {
+                fn get_completion(&self) -> String;
+            }
+            """,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let symbol = try #require(
+        session.definitions(of: "Backend", context: context).first?.0
+    )
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    model.setRoot(symbol: symbol, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let external = try relationGroup("External / Unresolved (0)", in: model.root)
+    #expect(external.children?.isEmpty == true)
+}
+
+@MainActor
+@Test
+func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edges = [
+        RelationTreeModel.LoadedEdge(
+            title: "b",
+            certainty: .strong,
+            dispatch: .direct,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: 15,
+            line: 1,
+            evidence: []
+        ),
+        RelationTreeModel.LoadedEdge(
+            title: "external",
+            certainty: .unresolved,
+            dispatch: .direct,
+            symbol: nil,
+            path: "main.rs",
+            byteOffset: 10,
+            line: 1,
+            evidence: []
+        ),
+    ]
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: edges, isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let strong = try relationGroup("Strong", in: model.root)
+    let symbolEdge = try #require(strong.children?.first)
+    model.select(symbolEdge)
+    let generation = model.generation
+
+    model.setRoot(
+        symbol: model.selectedRelationSymbol ?? fixture.a,
+        direction: .callers
+    )
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(model.root?.title == "b")
+    #expect(model.generation > generation)
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let external = try relationGroup("External / Unresolved", in: model.root)
+    let unresolvedEdge = try #require(external.children?.first)
+    model.select(unresolvedEdge)
+    #expect(model.selectedRelationSymbol == nil)
+
+    model.setRoot(
+        symbol: model.selectedRelationSymbol ?? fixture.a,
+        direction: .callers
+    )
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(model.root?.title == "a")
 }
 
 @MainActor

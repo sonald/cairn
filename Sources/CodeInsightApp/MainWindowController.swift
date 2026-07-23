@@ -227,6 +227,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestExactGroupRowCount: Int {
         relationController.selfTestExactGroupRowCount
     }
+    var selfTestExternalGroupTitle: String? {
+        relationController.selfTestExternalGroupTitle
+    }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
@@ -283,6 +286,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         direction: RelationTreeModel.Direction
     ) {
         handleReaderRelation(offset: offset, direction: direction)
+    }
+
+    func selfTestSelectRelationEdge(titled title: String) -> Bool {
+        relationController.selfTestSelectEdge(titled: title)
+    }
+
+    func selfTestChangeRelationDirection(_ direction: RelationTreeModel.Direction) {
+        relationController.selfTestChangeDirection(direction)
+    }
+
+    func selfTestOpenRelationSelection() {
+        relationController.selfTestOpenSelection()
     }
 
     func showSymbolSearch() {

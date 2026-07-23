@@ -29,11 +29,11 @@ public final class RelationTreeModel {
         public let badge: String?
         public let target: (path: String, byteOffset: UInt32)?
         public let line: UInt32?
+        public let symbol: SymbolOccurrenceID?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
         fileprivate weak var parent: Node?
-        fileprivate let symbol: SymbolOccurrenceID?
         fileprivate let evidence: [ResolutionEvidence]
         fileprivate let cycleKey: CycleKey?
         fileprivate var loadRequestID: UInt64?
@@ -128,6 +128,7 @@ public final class RelationTreeModel {
     public private(set) var direction: Direction = .callers
     public private(set) var generation: UInt64 = 0
     public private(set) var requestID: UInt64 = 0
+    public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
     public var onSelect: @MainActor (Node) -> Void = { _ in }
 
     private let loader: Loader
@@ -169,6 +170,7 @@ public final class RelationTreeModel {
         generation &+= 1
         requestID &+= 1
         root = nil
+        selectedRelationSymbol = nil
         switch state {
         case let .ready(session, context):
             self.session = session
@@ -190,6 +192,7 @@ public final class RelationTreeModel {
     ) -> Task<Void, Never>? {
         generation &+= 1
         self.direction = direction
+        selectedRelationSymbol = nil
         guard let session, let location = Self.location(for: symbol, in: session),
               let title = Self.symbolTitle(symbol, in: session)
         else {
@@ -224,6 +227,10 @@ public final class RelationTreeModel {
     }
 
     public func select(_ node: Node) {
+        selectedRelationSymbol = node.kind == .edge
+            && node.symbol?.localKind == .declarationFacet
+            ? node.symbol
+            : nil
         onSelect(node)
     }
 
@@ -346,9 +353,11 @@ public final class RelationTreeModel {
             ),
         ]
         let external = capped.filter { $0.certainty == .unresolved }
-        if direction == .calls, !external.isEmpty {
+        if direction == .calls {
             children.append(makeGroup(
-                "External / Unresolved",
+                external.isEmpty
+                    ? "External / Unresolved (0)"
+                    : "External / Unresolved",
                 edges: external,
                 under: parent,
                 direction: direction,

@@ -28,16 +28,55 @@ final class RelationWindowController: NSViewController,
         return group.children?.filter { outlineView.row(forItem: $0) >= 0 }.count ?? 0
     }
 
-    private var selfTestExactGroupItem: RelationTreeModel.Node? {
-        guard isViewLoaded else { return nil }
+    var selfTestExternalGroupTitle: String? {
+        guard let row = selfTestGroupRow(titlePrefix: "External / Unresolved"),
+              let cell = outlineView.view(
+                  atColumn: 0,
+                  row: row,
+                  makeIfNecessary: true
+              ) as? NSTableCellView
+        else { return nil }
+        return cell.textField?.stringValue
+    }
+
+    func selfTestSelectEdge(titled title: String) -> Bool {
+        guard isViewLoaded else { return false }
         for row in 0..<outlineView.numberOfRows {
             guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
-                  node.kind == .group,
-                  node.title.hasPrefix("Exact")
+                  node.kind == .edge,
+                  node.title == title
             else { continue }
-            return node
+            outlineView.selectRowIndexes(
+                IndexSet(integer: row),
+                byExtendingSelection: false
+            )
+            selectSelection(outlineView)
+            return true
         }
-        return nil
+        return false
+    }
+
+    func selfTestChangeDirection(_ direction: RelationTreeModel.Direction) {
+        directionControl.selectedSegment = segment(for: direction)
+        directionChanged(directionControl)
+    }
+
+    func selfTestOpenSelection() {
+        openSelection(outlineView)
+    }
+
+    private var selfTestExactGroupItem: RelationTreeModel.Node? {
+        guard let row = selfTestGroupRow(titlePrefix: "Exact") else { return nil }
+        return outlineView.item(atRow: row) as? RelationTreeModel.Node
+    }
+
+    private func selfTestGroupRow(titlePrefix: String) -> Int? {
+        guard isViewLoaded else { return nil }
+        return (0..<outlineView.numberOfRows).first { row in
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node
+            else { return false }
+            return node.kind == .group && node.title.hasPrefix(titlePrefix)
+        }
     }
 
     init(model: RelationTreeModel) {
@@ -206,8 +245,8 @@ final class RelationWindowController: NSViewController,
     }
 
     @objc private func directionChanged(_ sender: NSSegmentedControl) {
-        guard let currentSymbol else { return }
-        setRoot(symbol: currentSymbol, direction: direction(for: sender.selectedSegment))
+        guard let symbol = model.selectedRelationSymbol ?? currentSymbol else { return }
+        setRoot(symbol: symbol, direction: direction(for: sender.selectedSegment))
     }
 
     @objc private func openSelection(_ sender: Any?) {
@@ -218,6 +257,10 @@ final class RelationWindowController: NSViewController,
               let target = node.target
         else { return }
         onOpen?(target.path, target.byteOffset)
+        guard let symbol = node.symbol,
+              symbol.localKind == .declarationFacet
+        else { return }
+        setRoot(symbol: symbol, direction: model.direction)
     }
 
     private func observe() {
