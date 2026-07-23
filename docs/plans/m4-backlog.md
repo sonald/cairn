@@ -20,6 +20,31 @@ Safe/Trusted 双模式（design §8.4）+ diff 阅读（跨 commit，含 Compare
    `posix_spawn` + `POSIX_SPAWN_SETPGROUP` 后按进程组清理，或引入 kqueue
    看护进程。
 
+## M4-Fix 终审产出（Fable 5, 2026-07-23，`1239b70..bdf299e`）
+
+**必须留档的 caveat：**
+
+5. **C1(G4.4) Revoke 崩溃"无头不可证"**：修复是**按构造消除**（`List(trustedRepositories)`
+   行闭包持 `TrustedRepository` 值拷贝，源码已无任何 index 回查，SwiftUI 重估过期行
+   最坏只渲染一帧陈旧数据）。但**无头测不出原崩溃**——把 List 改回
+   `indices + 行内回查` 旧写法，新增的 trust-revoke 通道 5/5 仍 exit 0（触发需真实
+   显示周期里的 NSTableView 行生命周期，依赖可见窗口的 CA commit 节奏）。
+   现有兜底：ci 静态禁令 grep `\.indices,\s*id:` + 人工 G4.4 复验（建议连做两次，
+   原为 2/2 复现，二值信号强）。XCUITest 真窗口复现成本高且易 flaky，本轮不做。
+6. **ci 禁令 regex 的同类形态盲区**：只拦 `.indices, id:`，不覆盖
+   `0..<items.count, id: \.self` / `enumerated()` 等同类危险形态。作为 code review
+   规则记录，暂不扩 grep（误报风险）。
+7. **`methodNameOnly` 吸收外部方法调用成 Possible 的语义复审**：G8.1 只解决了空组的
+   诚实性（恒显 "(0)"），**没解决吸收语义**——真实代码上 External 组仍可能偏少。
+8. **`selectedRelationSymbol` 取消选中不清空**：`selectSelection` 在 `selectedRow < 0`
+   或选中组行时早退、不清该字段；用户点空白取消选中后再点方向段控，会换根到"看上去
+   已取消选中"的上一个 edge。非阻塞。
+9. **设置窗口缓存导致 stale settings 展示**（可能）。
+10. **LSPClient `serverDiagnostics` 64KB 截断**理论上可使 offline→partial 回翻
+    （修前同义，非回归，下一事件自愈）；coverage 并发送达乱序窗口同理自愈。
+11. **`ExactCoordinator.attribution` 是计算属性**、不参与 Observation 追踪，tooltip
+    刷新搭 readiness/coverage/trustMode 的便车；若未来 attribution 独立变化需补发布。
+
 ## M3 期间挂起延续
 
 - ~~**K5 Pin 语义裁决**~~：**2026-07-21 已裁决并实现**（design §2.2 F2.3）——
