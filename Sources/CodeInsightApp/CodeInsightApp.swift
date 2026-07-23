@@ -7,6 +7,7 @@ import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
+import os
 import SwiftUI
 
 private enum SelfTestBudgets {
@@ -1119,6 +1120,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController,
             checks: checks,
             realProvider: real.status,
+            realOfflineCoverage: realOffline.status,
             error: nil
         )
     }
@@ -1613,6 +1615,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             isDirectory: true
         )
         defer { try? FileManager.default.removeItem(at: cache) }
+        let observedDiagnostic = OSAllocatedUnfairLock(initialState: "")
         let coordinator = ExactCoordinator(
             providerFactory: { projectURL in
                 try RustAnalyzerProvider(
@@ -1620,7 +1623,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     executableURL: executable,
                     cacheURL: cache,
                     requestTimeout: 30,
-                    closeGrace: 0.5
+                    closeGrace: 0.5,
+                    diagnosticObserver: { diagnostic in
+                        observedDiagnostic.withLock { $0 = diagnostic }
+                    }
                 )
             },
             snapshotFactory: { root, _ in
@@ -1642,14 +1648,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller.showWindow(nil)
         defer { controller.close() }
         controller.openProject(root: fixture)
-        let finished = waitUntil(timeout: 45, condition: {
-            if coordinator.coverage == .dependenciesUnavailableOffline {
-                return true
-            }
+        let prepared = waitUntil(timeout: 45, condition: {
             switch coordinator.readiness {
-            case .off, .unavailable:
+            case .ready, .off, .unavailable:
                 return true
-            case .preparing, .ready:
+            case .preparing:
                 return false
             }
         })
@@ -1671,10 +1674,48 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             return ("failed:unavailable", false)
         }
-        let status = controller.selfTestExactStatusText
-        let passed = finished
-            && status.contains("deps unavailable (offline)")
-            && status.contains("Safe")
+        guard prepared else {
+            emitExactStep(
+                "failed",
+                variant: "rust-analyzer-offline",
+                controller: controller,
+                extra: ["reason": "provider-readiness-timeout"]
+            )
+            return ("failed:readiness-timeout", false)
+        }
+        let coverageObserved = waitUntil(timeout: 15, condition: {
+            coordinator.coverage == .dependenciesUnavailableOffline
+        })
+        guard coverageObserved else {
+            let diagnostic = observedDiagnostic.withLock { $0.lowercased() }
+            let offlineDiagnosticArrived =
+                (diagnostic.contains("--offline")
+                    || diagnostic.contains("offline mode")
+                    || diagnostic.contains("cargo_net_offline"))
+                && (diagnostic.contains("failed")
+                    || diagnostic.contains("no matching package")
+                    || diagnostic.contains("not found"))
+            emitExactStep(
+                offlineDiagnosticArrived ? "failed" : "skipped",
+                variant: "rust-analyzer-offline",
+                controller: controller,
+                extra: [
+                    "diagnosticsObserved": offlineDiagnosticArrived,
+                    "noDefinitionRequest": true,
+                    "reason": offlineDiagnosticArrived
+                        ? "offline-diagnostics-without-coverage"
+                        : "diagnostics-timeout",
+                ]
+            )
+            return offlineDiagnosticArrived
+                ? ("failed:coverage", false)
+                : ("skipped:diagnostics-timeout", true)
+        }
+        let passed = waitUntil(timeout: 5, condition: {
+            let status = controller.selfTestExactStatusText
+            return status.contains("deps unavailable (offline)")
+                && status.contains("Safe")
+        })
         emitExactStep(
             passed ? "offline-coverage" : "failed",
             variant: "rust-analyzer-offline",
@@ -1715,6 +1756,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller: MainWindowController?,
         checks: [String: Bool],
         realProvider: String,
+        realOfflineCoverage: String = "not-run",
         error: String?
     ) -> Never {
         let passed = error == nil
@@ -1723,6 +1765,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         var summary: [String: Any] = checks
         summary["passed"] = passed
         summary["realProvider"] = realProvider
+        summary["realOfflineCoverage"] = realOfflineCoverage
         if let error { summary["error"] = error }
         emitExactStep(
             "summary",

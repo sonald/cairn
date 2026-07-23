@@ -11,19 +11,39 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
     private let cacheURL: URL
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
+    private let diagnosticObserver: (@Sendable (String) -> Void)?
 
-    public init(
+    public convenience init(
         projectURL: URL,
         executableURL: URL,
         cacheURL: URL? = nil,
         requestTimeout: TimeInterval = 30,
         closeGrace: TimeInterval = 1
     ) throws {
+        try self.init(
+            projectURL: projectURL,
+            executableURL: executableURL,
+            cacheURL: cacheURL,
+            requestTimeout: requestTimeout,
+            closeGrace: closeGrace,
+            diagnosticObserver: nil
+        )
+    }
+
+    public init(
+        projectURL: URL,
+        executableURL: URL,
+        cacheURL: URL?,
+        requestTimeout: TimeInterval,
+        closeGrace: TimeInterval,
+        diagnosticObserver: (@Sendable (String) -> Void)?
+    ) throws {
         self.projectURL = projectURL.standardizedFileURL
         self.executableURL = executableURL.standardizedFileURL
         self.cacheURL = cacheURL ?? Self.defaultCacheURL
         self.requestTimeout = requestTimeout
         self.closeGrace = closeGrace
+        self.diagnosticObserver = diagnosticObserver
         toolVersion = try Self.readToolVersion(
             executableURL: executableURL,
             projectURL: projectURL,
@@ -88,6 +108,7 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             initializationOptions: options,
             requestTimeout: requestTimeout,
             closeGrace: closeGrace,
+            diagnosticObserver: diagnosticObserver,
             attribution: ExactAttribution(
                 provider: "rust-analyzer",
                 toolVersion: toolVersion,
@@ -177,6 +198,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private let initializationOptions: [String: Any]
     private let requestTimeout: TimeInterval
     private let closeGrace: TimeInterval
+    private let diagnosticObserver: (@Sendable (String) -> Void)?
     private var client: LSPClient
     private var state: ExactReadiness = .preparing
     private var openedFiles: Set<String> = []
@@ -215,6 +237,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         initializationOptions: [String: Any],
         requestTimeout: TimeInterval,
         closeGrace: TimeInterval,
+        diagnosticObserver: (@Sendable (String) -> Void)?,
         attribution: ExactAttribution
     ) {
         self.client = client
@@ -224,6 +247,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         self.initializationOptions = initializationOptions
         self.requestTimeout = requestTimeout
         self.closeGrace = closeGrace
+        self.diagnosticObserver = diagnosticObserver
         baseAttribution = attribution
         currentCoverage = attribution.coverage
         observe(client)
@@ -422,6 +446,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         }
         observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
             guard let self, let observedClient else { return }
+            diagnosticObserver?(diagnostic)
             publishCoverage(
                 rustAnalyzerCoverage(
                     base: baseAttribution.coverage,
