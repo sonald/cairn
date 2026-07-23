@@ -52,6 +52,24 @@ func exactCoordinatorPreparesOpportunistically() async throws {
 
 @MainActor
 @Test
+func exactCoordinatorMarksWorktreeOrigin() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let coordinator = fixture.coordinator(state: ExactProviderState())
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+
+    let result = await coordinator.definition(
+        file: "main.rs",
+        byteOffset: 0,
+        generation: 1
+    )
+    #expect(result?.origin == .worktree)
+}
+
+@MainActor
+@Test
 func exactCoordinatorRefreshesCoverageWithoutAQuery() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
@@ -360,6 +378,9 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
         "materialized/\(snapshot.commitOID.hex)/"
     ))
     #expect(result?.location.file == "src/lib.rs")
+    #expect(result?.origin == .materialized(
+        commitOID: snapshot.commitOID.hex
+    ))
 }
 
 @MainActor
@@ -406,10 +427,28 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     #expect(model.selectedCandidate?.targetByteOffset == secondDefinition)
     #expect(model.selectedCandidate?.certainty == .exact)
     #expect(model.selectedCandidate?.exactAttribution?.coverage == .partial)
+    #expect(model.selectedCandidate?.exactOrigin == .worktree)
+    #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == false)
     guard case .lsp = model.selectedCandidate?.provenance else {
         Issue.record("exact candidate did not carry LSP provenance")
         return
     }
+
+    let commitOID = "0123456789abcdef"
+    model.setMode(.pinned)
+    #expect(await exactWaitUntil { gate.count == 2 })
+    gate.complete(1, with: exactEntry(
+        file: "main.rs",
+        byteOffset: secondDefinition,
+        origin: .materialized(commitOID: commitOID)
+    ))
+    #expect(await exactWaitUntil {
+        model.selectedCandidate?.provenanceBadge.contains("@0123456") == true
+    })
+    #expect(model.selectedCandidate?.exactOrigin == .materialized(
+        commitOID: commitOID
+    ))
+    #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == true)
 }
 
 @MainActor
@@ -842,7 +881,11 @@ private struct ExactTestFixture {
     func remove() { try? FileManager.default.removeItem(at: root) }
 }
 
-private func exactEntry(file: String, byteOffset: UInt32) -> ExactOverlay.Entry {
+private func exactEntry(
+    file: String,
+    byteOffset: UInt32,
+    origin: ExactOrigin = .worktree
+) -> ExactOverlay.Entry {
     ExactOverlay.Entry(
         location: ExactLocation(
             file: file,
@@ -850,7 +893,8 @@ private func exactEntry(file: String, byteOffset: UInt32) -> ExactOverlay.Entry 
             line: 1,
             column: Int(byteOffset) + 1
         ),
-        attribution: exactAttribution()
+        attribution: exactAttribution(),
+        origin: origin
     )
 }
 

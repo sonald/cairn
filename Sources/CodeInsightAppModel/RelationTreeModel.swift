@@ -78,6 +78,7 @@ public final class RelationTreeModel {
         let evidence: [ResolutionEvidence]
         let exactQuery: (file: String, byteOffset: UInt32)?
         let fuzzyTarget: (file: String, byteOffset: UInt32)?
+        var exactOrigin: ExactOrigin?
 
         init(
             title: String,
@@ -89,7 +90,8 @@ public final class RelationTreeModel {
             line: UInt32,
             evidence: [ResolutionEvidence],
             exactQuery: (file: String, byteOffset: UInt32)? = nil,
-            fuzzyTarget: (file: String, byteOffset: UInt32)? = nil
+            fuzzyTarget: (file: String, byteOffset: UInt32)? = nil,
+            exactOrigin: ExactOrigin? = nil
         ) {
             self.title = title
             self.certainty = certainty
@@ -101,6 +103,7 @@ public final class RelationTreeModel {
             self.evidence = evidence
             self.exactQuery = exactQuery
             self.fuzzyTarget = fuzzyTarget
+            self.exactOrigin = exactOrigin
         }
     }
 
@@ -281,7 +284,7 @@ public final class RelationTreeModel {
     ) async -> LoadResult {
         guard let exactResolver else { return loaded }
         var edges = loaded.edges
-        await withTaskGroup(of: (Int, Bool).self) { group in
+        await withTaskGroup(of: (Int, ExactOrigin?).self) { group in
             for (index, edge) in edges.prefix(500).enumerated() {
                 guard let query = edge.exactQuery,
                       let fuzzyTarget = edge.fuzzyTarget
@@ -292,16 +295,15 @@ public final class RelationTreeModel {
                         query.byteOffset,
                         generation
                     )
-                    return (
-                        index,
-                        exact?.location.file == fuzzyTarget.file
-                            && exact?.location.byteOffset
-                                == Int(fuzzyTarget.byteOffset)
-                    )
+                    let matches = exact?.location.file == fuzzyTarget.file
+                        && exact?.location.byteOffset == Int(fuzzyTarget.byteOffset)
+                    return (index, matches ? exact?.origin : nil)
                 }
             }
-            for await (index, matches) in group where matches {
+            for await (index, origin) in group {
+                guard let origin else { continue }
                 edges[index].certainty = .exact
+                edges[index].exactOrigin = origin
             }
         }
         return LoadResult(edges: edges, isTruncated: loaded.isTruncated)
@@ -396,15 +398,24 @@ public final class RelationTreeModel {
             let canExpand = !isCycle && edge.symbol.map {
                 Self.canExpand($0, direction: direction, session: session)
             } == true
+            let badge: String?
+            if edge.certainty == .exact {
+                var value = "Exact · lsp"
+                if case .some(.materialized) = edge.exactOrigin {
+                    value += " · hist"
+                }
+                if isCycle { value += " · ↻" }
+                badge = value
+            } else {
+                badge = isCycle ? "↻" : nil
+            }
             let node = Node(
                 kind: .edge,
                 title: edge.title,
                 subtitle: edge.certainty == .unresolved
                     ? "Unresolved"
                     : "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))",
-                badge: edge.certainty == .exact
-                    ? (isCycle ? "Exact · lsp · ↻" : "Exact · lsp")
-                    : (isCycle ? "↻" : nil),
+                badge: badge,
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,
                 children: canExpand ? nil : [],

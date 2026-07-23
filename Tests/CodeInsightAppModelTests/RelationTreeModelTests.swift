@@ -75,7 +75,11 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
         },
         exactResolver: { _, offset, _ in
             switch offset {
-            case 10: relationExactEntry(file: "main.rs", byteOffset: 20)
+            case 10: relationExactEntry(
+                file: "main.rs",
+                byteOffset: 20,
+                origin: .materialized(commitOID: "0123456789abcdef")
+            )
             case 11: relationExactEntry(file: "main.rs", byteOffset: 21)
             default: nil
             }
@@ -89,7 +93,7 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     let exact = try relationGroup("Exact", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     #expect(exact.children?.map(\.title) == ["matching"])
-    #expect(exact.children?.first?.badge == "Exact · lsp")
+    #expect(exact.children?.first?.badge == "Exact · lsp · hist")
     #expect(strong.children?.map(\.title) == ["mismatching", "no exact"])
 }
 
@@ -512,7 +516,8 @@ private func relationContentIndex(
 
 private func relationExactEntry(
     file: String,
-    byteOffset: UInt32
+    byteOffset: UInt32,
+    origin: ExactOrigin = .worktree
 ) -> ExactOverlay.Entry {
     ExactOverlay.Entry(
         location: ExactLocation(
@@ -529,6 +534,7 @@ private func relationExactEntry(
             trustMode: .safe,
             generatedAt: Date(timeIntervalSince1970: 0),
             coverage: .partial
-        )
+        ),
+        origin: origin
     )
 }

@@ -25,6 +25,7 @@ public final class ContextWindowModel {
         public let certainty: Certainty
         public let provenance: ResolutionProvenance
         public let exactAttribution: ExactAttribution?
+        public let exactOrigin: ExactOrigin?
         public let provenanceBadge: String
     }
 
@@ -390,6 +391,7 @@ public final class ContextWindowModel {
                 certainty: resolution.certainty,
                 provenance: resolution.provenance,
                 exactAttribution: nil,
+                exactOrigin: nil,
                 provenanceBadge: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))"
             ))
         }
@@ -448,7 +450,8 @@ public final class ContextWindowModel {
             var candidates = current
             let upgraded = exactCandidate(
                 upgrading: candidates[index],
-                attribution: exact.attribution
+                attribution: exact.attribution,
+                origin: exact.origin
             )
             if mode == .pinned {
                 guard index == selected else { return }
@@ -470,6 +473,7 @@ public final class ContextWindowModel {
                   at: targetPath,
                   offset: targetOffset,
                   attribution: exact.attribution,
+                  origin: exact.origin,
                   session: session
               )
         else { return }
@@ -478,7 +482,8 @@ public final class ContextWindowModel {
 
     private func exactCandidate(
         upgrading candidate: Candidate,
-        attribution: ExactAttribution
+        attribution: ExactAttribution,
+        origin: ExactOrigin
     ) -> Candidate {
         let label = "Exact·direct"
         return Candidate(
@@ -493,7 +498,12 @@ public final class ContextWindowModel {
             certainty: .exact,
             provenance: .lsp,
             exactAttribution: attribution,
-            provenanceBadge: exactBadge(label, attribution: attribution)
+            exactOrigin: origin,
+            provenanceBadge: exactBadge(
+                label,
+                attribution: attribution,
+                origin: origin
+            )
         )
     }
 
@@ -501,6 +511,7 @@ public final class ContextWindowModel {
         at path: String,
         offset: UInt32,
         attribution: ExactAttribution,
+        origin: ExactOrigin,
         session: EngineSession
     ) async -> Candidate? {
         guard let pathID = pathID(path, in: session),
@@ -531,7 +542,12 @@ public final class ContextWindowModel {
             certainty: .exact,
             provenance: .lsp,
             exactAttribution: attribution,
-            provenanceBadge: exactBadge(label, attribution: attribution)
+            exactOrigin: origin,
+            provenanceBadge: exactBadge(
+                label,
+                attribution: attribution,
+                origin: origin
+            )
         )
     }
 
@@ -547,13 +563,20 @@ public final class ContextWindowModel {
 
     private func exactBadge(
         _ label: String,
-        attribution: ExactAttribution
+        attribution: ExactAttribution,
+        origin: ExactOrigin
     ) -> String {
         let trust = switch attribution.trustMode {
         case .safe: "Safe"
         case .trusted: "Trusted"
         }
-        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)"
+        let source = switch origin {
+        case .worktree:
+            ""
+        case .materialized(let commitOID):
+            " · @\(commitOID.prefix(7)) (materialized)"
+        }
+        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {

@@ -894,6 +894,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "historicalInitialStatusSafe": historical.initialStatusSafe,
             "providerRootIsMaterialized": historical.providerRootIsMaterialized,
             "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
+            "historicalProvenanceAttributed": historical.provenanceAttributed,
         ]
         for (key, value) in trustRevoke { checks[key] = value }
         finishExactSelfTest(
@@ -1052,7 +1053,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         providerRootIsMaterialized: Bool,
         uiPathIsRepoRelative: Bool,
         exactVisible: Bool,
-        initialStatusSafe: Bool
+        initialStatusSafe: Bool,
+        provenanceAttributed: Bool
     ) {
         let fixture: URL
         do {
@@ -1064,7 +1066,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: nil,
                 extra: ["reason": error.localizedDescription]
             )
-            return (false, false, false, false)
+            return (false, false, false, false, false)
         }
         defer { try? FileManager.default.removeItem(at: fixture) }
 
@@ -1086,7 +1088,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: nil,
                 extra: ["reason": error.localizedDescription]
             )
-            return (false, false, false, false)
+            return (false, false, false, false, false)
         }
 
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1149,7 +1151,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: controller,
                 extra: ["reason": "HEAD~1 switch or file open failed"]
             )
-            return (false, false, false, false)
+            return (false, false, false, false, false)
         }
 
         let initialStatusSafe = waitUntil(timeout: 5, condition: {
@@ -1169,6 +1171,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let uiPath = historyModel.contextWindow.selectedCandidate?.path
         let uiPathIsRepoRelative = uiPath == "src/lib.rs"
             && uiPath?.hasPrefix("/") == false
+        let provenance = controller.selfTestContextProvenance
+        let provenanceAttributed = provenance?.contains(
+            String(snapshot.commitOID.hex.prefix(7))
+        ) == true && provenance?.contains("materialized") == true
         emitExactStep(
             "historicalExact",
             variant: "historical-fake",
@@ -1179,13 +1185,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "providerRootIsMaterialized": providerRootIsMaterialized,
                 "uiPath": (uiPath as Any?) ?? NSNull(),
                 "uiPathIsRepoRelative": uiPathIsRepoRelative,
+                "provenanceAttributed": provenanceAttributed,
             ]
         )
         return (
             providerRootIsMaterialized,
             uiPathIsRepoRelative,
             exactVisible,
-            initialStatusSafe
+            initialStatusSafe,
+            provenanceAttributed
         )
     }
 

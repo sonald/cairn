@@ -4,6 +4,11 @@ import CodeInsightGit
 import Foundation
 import Observation
 
+public enum ExactOrigin: Equatable, Sendable {
+    case worktree
+    case materialized(commitOID: String)
+}
+
 public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String
@@ -24,10 +29,16 @@ public struct ExactOverlay: Sendable {
     public struct Entry: Sendable {
         public let location: ExactLocation
         public let attribution: ExactAttribution
+        public let origin: ExactOrigin
 
-        public init(location: ExactLocation, attribution: ExactAttribution) {
+        public init(
+            location: ExactLocation,
+            attribution: ExactAttribution,
+            origin: ExactOrigin
+        ) {
             self.location = location
             self.attribution = attribution
+            self.origin = origin
         }
     }
 
@@ -451,7 +462,10 @@ public final class ExactCoordinator {
         let mappedLocation = mapped(location, from: source.materializedRoot)
         let entry = ExactOverlay.Entry(
             location: mappedLocation,
-            attribution: source.session.attribution
+            attribution: source.session.attribution,
+            origin: source.materializedRoot != nil
+                ? .materialized(commitOID: source.key.versionIdentity)
+                : .worktree
         )
         overlay.store(entry, for: source.key, file: file, byteOffset: byteOffset)
         return entry
