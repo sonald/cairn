@@ -94,7 +94,9 @@ public final class ExactCoordinator {
 
     public private(set) var readiness: Readiness = .off("no project")
     public private(set) var coverage: ExactCoverage?
+    public private(set) var trustMode: TrustMode?
     public private(set) var trustedRepositories: [TrustedRepository] = []
+    public var attribution: ExactAttribution? { active?.session.attribution }
 
     @ObservationIgnored private let providerFactory: ProviderFactory
     @ObservationIgnored private let snapshotFactory: SnapshotFactory
@@ -151,6 +153,7 @@ public final class ExactCoordinator {
         }
         readiness = .preparing
         coverage = nil
+        trustMode = nil
     }
 
     public func shutdown() {
@@ -163,6 +166,7 @@ public final class ExactCoordinator {
         oldSession?.close()
         readiness = .off("application terminating")
         coverage = nil
+        trustMode = nil
     }
 
     public func prepare(
@@ -187,6 +191,7 @@ public final class ExactCoordinator {
                   !Task.isCancelled
             else { return }
             self.trustedRepositories = trustedRepositories
+            self.trustMode = trustMode
             guard trustMode != .safe || sandboxAvailable() else {
                 readiness = .off("Safe exact disabled: sandbox-exec unavailable")
                 prepareTask = nil
@@ -246,6 +251,7 @@ public final class ExactCoordinator {
                     return
                 }
                 active = prepared.active
+                observeCoverage(from: prepared.active)
                 coverage = prepared.active.session.attribution.coverage
                 switch prepared.active.session.readiness {
                 case .unavailable(let reason):
@@ -299,6 +305,7 @@ public final class ExactCoordinator {
         oldSession?.cancel()
         readiness = .off("materialized cache cleared")
         coverage = nil
+        trustMode = nil
         let materializer = materializer
         try await Task.detached(priority: .utility) {
             oldSession?.close()
@@ -392,6 +399,7 @@ public final class ExactCoordinator {
                 materializedRoot: previous.materializedRoot
             )
             active = restarted
+            observeCoverage(from: restarted)
             Task.detached { previous.session.close() }
 
             do {
@@ -447,6 +455,22 @@ public final class ExactCoordinator {
         )
         overlay.store(entry, for: source.key, file: file, byteOffset: byteOffset)
         return entry
+    }
+
+    private func observeCoverage(from source: Active) {
+        let generation = source.generation
+        let sessionID = ObjectIdentifier(source.session)
+        source.session.onCoverageChange = { [weak self] coverage in
+            Task { @MainActor [weak self] in
+                guard let self,
+                      expectedGeneration == generation,
+                      let active,
+                      active.generation == generation,
+                      ObjectIdentifier(active.session) == sessionID
+                else { return }
+                self.coverage = coverage
+            }
+        }
     }
 
     private func mapped(

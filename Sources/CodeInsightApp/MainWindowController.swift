@@ -480,6 +480,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.compare.errorMessage
             _ = model.exactCoordinator.readiness
             _ = model.exactCoordinator.coverage
+            _ = model.exactCoordinator.trustMode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -575,36 +576,72 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func renderExactStatus() {
+        let coordinator = model.exactCoordinator
+        let trust: String? = switch coordinator.trustMode {
+        case .safe: "Safe"
+        case .trusted: "Trusted"
+        case nil: nil
+        }
+        let trustSuffix = trust.map { " · \($0)" } ?? ""
         let status: String
         let color: NSColor
-        let detail: String?
-        switch model.exactCoordinator.readiness {
+        let statusDetail: String?
+        switch coordinator.readiness {
         case .ready:
-            if model.exactCoordinator.coverage == .dependenciesUnavailableOffline {
-                status = "Exact: deps unavailable (offline)"
+            switch coordinator.coverage {
+            case .dependenciesUnavailableOffline:
+                status = "Exact: deps unavailable (offline)\(trustSuffix)"
                 color = .systemOrange
-                detail = "Dependency coverage is unavailable because network access is disabled."
-            } else {
-                status = "Exact: ready"
+            case .partial:
+                status = "Exact: ready\(trustSuffix) (partial)"
+                color = .systemOrange
+            case .full:
+                status = "Exact: ready\(trustSuffix)"
                 color = .systemGreen
-                detail = nil
+            case nil:
+                status = "Exact: ready\(trustSuffix) (coverage unknown)"
+                color = .systemOrange
             }
+            statusDetail = nil
         case .preparing:
-            status = "Exact: preparing"
+            status = "Exact: preparing\(trustSuffix)"
             color = .secondaryLabelColor
-            detail = nil
+            statusDetail = nil
         case .unavailable(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
                 ? "Exact: unavailable (sandbox)"
                 : "Exact: unavailable"
             color = .systemRed
-            detail = reason
+            statusDetail = reason
         case .off(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
                 ? "Exact: unavailable (sandbox)"
                 : "Exact: off (Safe)"
             color = .systemOrange
-            detail = reason
+            statusDetail = reason
+        }
+        let coverageMeaning = switch coordinator.coverage {
+        case .full:
+            "full — dependency, build-script, and proc-macro coverage is enabled."
+        case .partial:
+            "partial — Safe mode disables build scripts and proc macros."
+        case .dependenciesUnavailableOffline:
+            "deps unavailable (offline) — dependency analysis is incomplete because network access is disabled."
+        case nil:
+            "not available yet."
+        }
+        let detail: String?
+        if let attribution = coordinator.attribution {
+            var lines = [
+                "Provider: \(attribution.provider)",
+                "Tool version: \(attribution.toolVersion)",
+                "Trust: \(trust ?? "Unknown")",
+                "Coverage: \(coverageMeaning)",
+            ]
+            if let statusDetail { lines.append(statusDetail) }
+            detail = lines.joined(separator: "\n")
+        } else {
+            detail = statusDetail
         }
         exactLabel.stringValue = status
         exactLabel.textColor = color

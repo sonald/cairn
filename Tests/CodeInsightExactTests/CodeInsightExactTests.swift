@@ -319,6 +319,7 @@ func rustAnalyzerUsesEachMaterializedCommitWhenInstalled() throws {
 @Test
 func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
     let (exitEvents, exitContinuation) = AsyncStream<Void>.makeStream()
+    let (diagnostics, diagnosticContinuation) = AsyncStream<String>.makeStream()
 
     try await confirmation("fake LSP server received exit") { receivedExit in
         let clientToServer = Pipe()
@@ -336,11 +337,16 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
             readHandle: serverToClient.fileHandleForReading,
             writeHandle: clientToServer.fileHandleForWriting
         )
+        client.observeDiagnostics { [weak client] diagnostic in
+            _ = client?.diagnosticText
+            diagnosticContinuation.yield(diagnostic)
+        }
 
         _ = try client.initialize(
             rootURL: URL(fileURLWithPath: "/fixture", isDirectory: true),
             timeout: 30
         )
+        let diagnostic = await nextDiagnostic(diagnostics)
         let result = try client.request(
             "textDocument/definition",
             params: [
@@ -361,9 +367,31 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
         #expect(server.receivedInitialized)
         #expect(server.receivedExit)
         #expect(server.receivedRegisterCapabilityResponse)
+        #expect(diagnostic?.contains("failed to resolve dependency in offline mode") == true)
         let location = try #require(result as? [String: Any])
         #expect(location["uri"] as? String == "file:///fixture/src/lib.rs")
     }
+}
+
+@Test
+func diagnosticObserverFiresForStderrOutsideClientLock() async throws {
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: [
+            "-c",
+            "printf 'failed to resolve dependency; --offline was specified' >&2; sleep 5",
+        ]
+    )
+    defer { client.close(grace: 0.05) }
+    let (diagnostics, continuation) = AsyncStream<String>.makeStream()
+    client.observeDiagnostics { [weak client] diagnostic in
+        _ = client?.diagnosticText
+        continuation.yield(diagnostic)
+    }
+
+    let diagnostic = await nextDiagnostic(diagnostics)
+
+    #expect(diagnostic?.contains("--offline was specified") == true)
 }
 
 @Test
@@ -1094,6 +1122,14 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                 switch method {
                 case "initialize":
                     try write([
+                        "jsonrpc": "2.0",
+                        "method": "window/logMessage",
+                        "params": [
+                            "type": 2,
+                            "message": "failed to resolve dependency in offline mode",
+                        ],
+                    ])
+                    try write([
                         "jsonrpc": "2.0", "id": 900,
                         "method": "client/registerCapability",
                         "params": ["registrations": []],
@@ -1146,6 +1182,22 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return operation()
+    }
+}
+
+private func nextDiagnostic(_ diagnostics: AsyncStream<String>) async -> String? {
+    await withTaskGroup(of: String?.self) { group in
+        group.addTask {
+            var iterator = diagnostics.makeAsyncIterator()
+            return await iterator.next()
+        }
+        group.addTask {
+            try? await Task.sleep(for: .seconds(2))
+            return nil
+        }
+        let diagnostic = await group.next() ?? nil
+        group.cancelAll()
+        return diagnostic
     }
 }
 

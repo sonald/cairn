@@ -2,9 +2,39 @@ import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
+import Dispatch
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
+
+@MainActor
+@Test
+func exactCoordinatorPublishesTrustBeforeSessionReadyAndClearsOnInvalidate()
+    async throws
+{
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let prepareGate = DispatchSemaphore(value: 0)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in ExactTestProvider(state: state) },
+        snapshotFactory: { _, _ in
+            prepareGate.wait()
+            return ExactTestSnapshot(files: fixture.files)
+        },
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+
+    #expect(await exactWaitUntil { coordinator.trustMode == .safe })
+    #expect(coordinator.readiness == .preparing)
+    coordinator.invalidate(generation: 2)
+    #expect(coordinator.trustMode == nil)
+    prepareGate.signal()
+    #expect(await exactWaitUntil { state.prepareCount == 1 })
+}
 
 @MainActor
 @Test
@@ -18,6 +48,26 @@ func exactCoordinatorPreparesOpportunistically() async throws {
 
     #expect(await exactWaitUntil { coordinator.readiness == .ready })
     #expect(state.prepareCount == 1)
+}
+
+@MainActor
+@Test
+func exactCoordinatorRefreshesCoverageWithoutAQuery() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await exactWaitUntil {
+        coordinator.readiness == .ready && coordinator.coverage == .partial
+    })
+
+    state.publishCoverage(.dependenciesUnavailableOffline)
+
+    #expect(await exactWaitUntil {
+        coordinator.coverage == .dependenciesUnavailableOffline
+    })
+    #expect(state.definitionCount == 0)
 }
 
 @MainActor
@@ -86,12 +136,16 @@ func exactCoordinatorTrustUIStateFlowsGrantAndRevoke() async throws {
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
     #expect(await exactWaitUntil { coordinator.readiness == .ready })
     #expect(state.trustModes.last == "trusted")
+    #expect(coordinator.trustMode == .trusted)
 
+    coordinator.invalidate(generation: 2)
+    #expect(coordinator.trustMode == nil)
     try await coordinator.revokeTrust(fixture.root)
     #expect(coordinator.trustedRepositories.isEmpty)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
     #expect(await exactWaitUntil { coordinator.readiness == .ready })
     #expect(state.trustModes.last == "safe")
+    #expect(coordinator.trustMode == .safe)
 }
 
 @MainActor
@@ -499,6 +553,7 @@ private final class ExactProviderState: @unchecked Sendable {
     private var definitions = 0
     private var modes: [String] = []
     private var closed: Set<Int> = []
+    private weak var latestSession: ExactStateSession?
 
     init(
         behavior: @escaping Behavior = { _, _, _ in
@@ -523,11 +578,13 @@ private final class ExactProviderState: @unchecked Sendable {
             modes.append(mode)
             return prepares
         }
-        return ExactStateSession(
+        let session = ExactStateSession(
             attribution: attribution,
             ordinal: ordinal,
             state: self
         )
+        locked { latestSession = session }
+        return session
     }
 
     func define(ordinal: Int, file: String, byteOffset: Int) throws -> ExactLocation? {
@@ -539,6 +596,10 @@ private final class ExactProviderState: @unchecked Sendable {
         _ = locked { closed.insert(ordinal) }
     }
 
+    func publishCoverage(_ coverage: ExactCoverage) {
+        locked { latestSession }?.publishCoverage(coverage)
+    }
+
     private func locked<T>(_ body: () -> T) -> T {
         lock.lock()
         defer { lock.unlock() }
@@ -548,22 +609,61 @@ private final class ExactProviderState: @unchecked Sendable {
 
 private final class ExactStateSession: ExactSession, @unchecked Sendable {
     let readiness: ExactReadiness = .ready
-    let attribution: ExactAttribution
+    private let lock = NSLock()
+    private var storedAttribution: ExactAttribution
+    private var coverageObserver: (@Sendable (ExactCoverage) -> Void)?
     private let ordinal: Int
     private let state: ExactProviderState
+
+    var attribution: ExactAttribution {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedAttribution
+    }
+
+    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return coverageObserver
+        }
+        set {
+            lock.lock()
+            coverageObserver = newValue
+            let coverage = storedAttribution.coverage
+            lock.unlock()
+            newValue?(coverage)
+        }
+    }
 
     init(
         attribution: ExactAttribution,
         ordinal: Int,
         state: ExactProviderState
     ) {
-        self.attribution = attribution
+        storedAttribution = attribution
         self.ordinal = ordinal
         self.state = state
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
         try state.define(ordinal: ordinal, file: file, byteOffset: byteOffset)
+    }
+
+    func publishCoverage(_ coverage: ExactCoverage) {
+        lock.lock()
+        storedAttribution = ExactAttribution(
+            provider: storedAttribution.provider,
+            toolVersion: storedAttribution.toolVersion,
+            configFingerprint: storedAttribution.configFingerprint,
+            environmentFingerprint: storedAttribution.environmentFingerprint,
+            trustMode: storedAttribution.trustMode,
+            generatedAt: storedAttribution.generatedAt,
+            coverage: coverage
+        )
+        let observer = coverageObserver
+        lock.unlock()
+        observer?(coverage)
     }
 
     func cancel() {}

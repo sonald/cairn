@@ -116,6 +116,7 @@ public final class LSPClient: @unchecked Sendable {
     private var closing = false
     private var handlesReleased = false
     private var terminationObserver: (@Sendable (Int32) -> Void)?
+    private var diagnosticObserver: (@Sendable (String) -> Void)?
 
     public private(set) var didForceKill = false
     public private(set) var didReap = false
@@ -131,6 +132,10 @@ public final class LSPClient: @unchecked Sendable {
     var diagnosticText: String {
         condition.lock()
         defer { condition.unlock() }
+        return diagnosticTextLocked
+    }
+
+    private var diagnosticTextLocked: String {
         return (String(data: stderr, encoding: .utf8) ?? "")
             + serverDiagnostics
     }
@@ -186,6 +191,16 @@ public final class LSPClient: @unchecked Sendable {
         }
         terminationObserver = observer
         condition.unlock()
+    }
+
+    public func observeDiagnostics(
+        _ observer: @escaping @Sendable (String) -> Void
+    ) {
+        condition.lock()
+        diagnosticObserver = observer
+        let diagnostic = diagnosticTextLocked
+        condition.unlock()
+        if !diagnostic.isEmpty { observer(diagnostic) }
     }
 
     @discardableResult
@@ -358,7 +373,10 @@ public final class LSPClient: @unchecked Sendable {
             guard !data.isEmpty, let self else { return }
             condition.lock()
             stderr.append(data)
+            let observer = diagnosticObserver
+            let diagnostic = diagnosticTextLocked
             condition.unlock()
+            observer?(diagnostic)
         }
         process?.terminationHandler = { [weak self] process in
             guard let self else { return }
@@ -379,6 +397,7 @@ public final class LSPClient: @unchecked Sendable {
 
     private func receive(_ data: Data) {
         var serverRequests: [(id: Any, method: String, params: Any?)] = []
+        var diagnosticsChanged = false
         condition.lock()
         do {
             for message in try decoder.append(data) {
@@ -395,6 +414,7 @@ public final class LSPClient: @unchecked Sendable {
                     if serverDiagnostics.utf8.count > 65_536 {
                         serverDiagnostics = String(serverDiagnostics.suffix(32_768))
                     }
+                    diagnosticsChanged = true
                 } else if let id = (message["id"] as? NSNumber)?.intValue,
                           pendingRequestIDs.contains(id)
                 {
@@ -404,9 +424,12 @@ public final class LSPClient: @unchecked Sendable {
         } catch {
             readError = error
         }
+        let diagnosticObserver = diagnosticsChanged ? diagnosticObserver : nil
+        let diagnostic = diagnosticsChanged ? diagnosticTextLocked : ""
         condition.broadcast()
         condition.unlock()
 
+        diagnosticObserver?(diagnostic)
         for request in serverRequests {
             respondToServerRequest(
                 id: request.id,

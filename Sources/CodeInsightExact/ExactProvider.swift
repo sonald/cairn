@@ -128,10 +128,18 @@ public protocol ExactProvider: Sendable {
 public protocol ExactSession: AnyObject, Sendable {
     var readiness: ExactReadiness { get }
     var attribution: ExactAttribution { get }
+    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? { get set }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation?
     func cancel()
     func close()
+}
+
+public extension ExactSession {
+    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+        get { nil }
+        set {}
+    }
 }
 
 public enum ExactError: Error, LocalizedError {

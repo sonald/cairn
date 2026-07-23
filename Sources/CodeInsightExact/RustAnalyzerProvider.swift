@@ -155,9 +155,9 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
 
 private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     var attribution: ExactAttribution {
-        let coverage: ExactCoverage = offlineDependenciesUnavailable
-            ? .dependenciesUnavailableOffline
-            : baseAttribution.coverage
+        stateLock.lock()
+        let coverage = currentCoverage
+        stateLock.unlock()
         return ExactAttribution(
             provider: baseAttribution.provider,
             toolVersion: baseAttribution.toolVersion,
@@ -183,11 +183,28 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private var cancelled = false
     private var didRestart = false
     private let baseAttribution: ExactAttribution
+    private var currentCoverage: ExactCoverage
+    private var coverageObserver: (@Sendable (ExactCoverage) -> Void)?
 
     var readiness: ExactReadiness {
         stateLock.lock()
         defer { stateLock.unlock() }
         return state
+    }
+
+    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+        get {
+            stateLock.lock()
+            defer { stateLock.unlock() }
+            return coverageObserver
+        }
+        set {
+            stateLock.lock()
+            coverageObserver = newValue
+            let coverage = currentCoverage
+            stateLock.unlock()
+            newValue?(coverage)
+        }
     }
 
     init(
@@ -208,6 +225,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         self.requestTimeout = requestTimeout
         self.closeGrace = closeGrace
         baseAttribution = attribution
+        currentCoverage = attribution.coverage
         observe(client)
     }
 
@@ -402,6 +420,34 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             }
             stateLock.unlock()
         }
+        observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
+            guard let self, let observedClient else { return }
+            publishCoverage(
+                rustAnalyzerCoverage(
+                    base: baseAttribution.coverage,
+                    diagnostic: diagnostic
+                ),
+                from: observedClient
+            )
+        }
+    }
+
+    private func publishCoverage(
+        _ coverage: ExactCoverage,
+        from observedClient: LSPClient
+    ) {
+        stateLock.lock()
+        guard state != .closed,
+              client === observedClient,
+              currentCoverage != coverage
+        else {
+            stateLock.unlock()
+            return
+        }
+        currentCoverage = coverage
+        let observer = coverageObserver
+        stateLock.unlock()
+        observer?(coverage)
     }
 
     private func open(
@@ -509,12 +555,6 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         stateLock.unlock()
     }
 
-    private var offlineDependenciesUnavailable: Bool {
-        rustAnalyzerCoverage(
-            base: baseAttribution.coverage,
-            diagnostic: client.diagnosticText
-        ) == .dependenciesUnavailableOffline
-    }
 }
 
 func rustAnalyzerCoverage(

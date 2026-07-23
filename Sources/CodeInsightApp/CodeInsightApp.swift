@@ -779,6 +779,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 error: "project unavailable"
             )
         }
+        let initialStatusSafe = waitUntil(timeout: 5, condition: {
+            model.exactCoordinator.readiness == .ready
+                && windowController.selfTestExactStatusText.contains("Safe")
+        })
+        emitExactStep(
+            "initial-status",
+            variant: "fake",
+            controller: windowController
+        )
         guard waitUntil(timeout: 5, condition: {
                   windowController.selectFileInSidebar(target.file)
               }),
@@ -867,6 +876,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
         let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
+        let realOffline = runRealOfflineCoverageVariant(root: root)
         let historical = runHistoricalExactVariant()
         var checks = [
             "fuzzyVisible": fuzzyVisible,
@@ -876,9 +886,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactGroupVisible": exactGroupVisible,
             "exactGroupHeaderHonest": exactGroupHeaderHonest,
             "exactStatusVisible": exactStatusVisible,
+            "initialStatusSafeBeforeClick": initialStatusSafe,
             "relationFileVisible": relationFileVisible,
             "realProviderPassedOrSkipped": real.passed,
+            "realOfflineCoveragePassedOrSkipped": realOffline.passed,
             "historicalExactVisible": historical.exactVisible,
+            "historicalInitialStatusSafe": historical.initialStatusSafe,
             "providerRootIsMaterialized": historical.providerRootIsMaterialized,
             "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
         ]
@@ -944,6 +957,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             return ["trustRevokeSafeSessionReady": false]
         }
+        let initialStatusSafe = waitUntil(timeout: 5, condition: {
+            controller.selfTestExactStatusText.contains("Safe")
+        })
 
         Task { try? await trustModel.grantCurrentRepositoryTrust() }
         let trustedReady = waitUntil(timeout: 5, condition: {
@@ -951,6 +967,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && coordinator.trustedRepositories.count == 1
                 && providerState.trustModes == ["safe", "trusted"]
         })
+        let trustedStatusVisible = trustedReady && waitUntil(timeout: 5, condition: {
+            controller.selfTestExactStatusText.contains("Trusted")
+        })
+        emitExactStep(
+            "trusted-status",
+            variant: "fake",
+            controller: controller
+        )
 
         let settingsController = ReaderSettingsWindowController(
             settings: readerSettings,
@@ -1001,10 +1025,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 as? [String: Any]
         )?.isEmpty == true
         let trustedSessionClosed = providerState.closedSessions.contains(2)
-        let statusIsSafe = !controller.selfTestExactStatusText
-            .localizedCaseInsensitiveContains("Trusted")
+        let statusIsSafe = rebuiltSafe && waitUntil(timeout: 5, condition: {
+            controller.selfTestExactStatusText.contains("Safe")
+        })
         let checks = [
+            "trustInitialStatusSafe": initialStatusSafe,
             "trustRevokeTrustedReady": trustedReady,
+            "trustStatusTrusted": trustedStatusVisible,
             "trustRevokeListRowLaidOut": listRowCount == 1,
             "trustRevokeRepositoriesEmpty": trustedRepositoriesEmpty,
             "trustRevokeJSONEmpty": trustJSONEmpty,
@@ -1024,7 +1051,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private func runHistoricalExactVariant() -> (
         providerRootIsMaterialized: Bool,
         uiPathIsRepoRelative: Bool,
-        exactVisible: Bool
+        exactVisible: Bool,
+        initialStatusSafe: Bool
     ) {
         let fixture: URL
         do {
@@ -1036,7 +1064,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: nil,
                 extra: ["reason": error.localizedDescription]
             )
-            return (false, false, false)
+            return (false, false, false, false)
         }
         defer { try? FileManager.default.removeItem(at: fixture) }
 
@@ -1058,7 +1086,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: nil,
                 extra: ["reason": error.localizedDescription]
             )
-            return (false, false, false)
+            return (false, false, false, false)
         }
 
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1121,9 +1149,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: controller,
                 extra: ["reason": "HEAD~1 switch or file open failed"]
             )
-            return (false, false, false)
+            return (false, false, false, false)
         }
 
+        let initialStatusSafe = waitUntil(timeout: 5, condition: {
+            controller.selfTestExactStatusText.contains("Safe")
+        })
         controller.selfTestReaderClick(
             offset: target.clickOffset,
             commandClick: false
@@ -1153,7 +1184,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         return (
             providerRootIsMaterialized,
             uiPathIsRepoRelative,
-            exactVisible
+            exactVisible,
+            initialStatusSafe
         )
     }
 
@@ -1236,6 +1268,37 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return ("failed:project", false)
         }
 
+        if case .off(let reason) = coordinator.readiness {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("skipped:sandbox-unavailable", true)
+        }
+        let initialStatusSafe = waitUntil(timeout: 5, condition: {
+            coordinator.readiness == .ready
+                && controller.selfTestExactStatusText.contains("Safe")
+        })
+        emitExactStep(
+            "initial-status",
+            variant: "rust-analyzer",
+            controller: controller
+        )
+        if !initialStatusSafe, case .off(let reason) = coordinator.readiness {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("skipped:sandbox-unavailable", true)
+        }
+        guard initialStatusSafe else {
+            return ("failed:initial-status", false)
+        }
+
         controller.selfTestReaderClick(offset: target.clickOffset, commandClick: false)
         let fuzzyVisible = waitUntil(timeout: 5, condition: {
             controller.selfTestContextCandidateCount >= 1
@@ -1290,6 +1353,109 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             exactVisible && fuzzyRetained ? "passed" : "failed:exact",
             exactVisible && fuzzyRetained
         )
+    }
+
+    private func runRealOfflineCoverageVariant(
+        root: URL
+    ) -> (status: String, passed: Bool) {
+        guard let executable = RustAnalyzerProvider.findExecutable() else {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer-offline",
+                controller: nil,
+                extra: ["reason": "rust-analyzer not installed"]
+            )
+            return ("skipped:not-installed", true)
+        }
+        let fixture: URL
+        do {
+            fixture = try makeOfflineExactSelfTestFixture(
+                source: exactSelfTestFixtureRoot(root: root)
+            )
+        } catch {
+            emitExactStep(
+                "failed",
+                variant: "rust-analyzer-offline",
+                controller: nil,
+                extra: ["reason": error.localizedDescription]
+            )
+            return ("failed:fixture", false)
+        }
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightExactOfflineSelfTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let coordinator = ExactCoordinator(
+            providerFactory: { projectURL in
+                try RustAnalyzerProvider(
+                    projectURL: projectURL,
+                    executableURL: executable,
+                    cacheURL: cache,
+                    requestTimeout: 30,
+                    closeGrace: 0.5
+                )
+            },
+            snapshotFactory: { root, _ in
+                try ExactSelfTestDirectorySnapshot(root: root)
+            },
+            trustRegistry: TrustRegistry(
+                fileURL: cache.appendingPathComponent("trust.json")
+            )
+        )
+        let model = AppModel(
+            indexService: ExactSelfTestIndexService(),
+            exactCoordinator: coordinator
+        )
+        let controller = MainWindowController(
+            model: model,
+            settings: readerSettings,
+            offscreen: true
+        )
+        controller.showWindow(nil)
+        defer { controller.close() }
+        controller.openProject(root: fixture)
+        let finished = waitUntil(timeout: 45, condition: {
+            if coordinator.coverage == .dependenciesUnavailableOffline {
+                return true
+            }
+            switch coordinator.readiness {
+            case .off, .unavailable:
+                return true
+            case .preparing, .ready:
+                return false
+            }
+        })
+        if case .off(let reason) = coordinator.readiness {
+            emitExactStep(
+                "skipped",
+                variant: "rust-analyzer-offline",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("skipped:sandbox-unavailable", true)
+        }
+        if case .unavailable(let reason) = coordinator.readiness {
+            emitExactStep(
+                "failed",
+                variant: "rust-analyzer-offline",
+                controller: controller,
+                extra: ["reason": reason]
+            )
+            return ("failed:unavailable", false)
+        }
+        let status = controller.selfTestExactStatusText
+        let passed = finished
+            && status.contains("deps unavailable (offline)")
+            && status.contains("Safe")
+        emitExactStep(
+            passed ? "offline-coverage" : "failed",
+            variant: "rust-analyzer-offline",
+            controller: controller,
+            extra: ["noDefinitionRequest": true]
+        )
+        return (passed ? "passed" : "failed:coverage", passed)
     }
 
     private func emitExactStep(
@@ -2401,6 +2567,23 @@ private func exactSelfTestFixtureRoot(root: URL) -> URL {
         "Tests/CodeInsightExactTests/Fixtures/exact_fixture",
         isDirectory: true
     )
+}
+
+private func makeOfflineExactSelfTestFixture(source: URL) throws -> URL {
+    let destination = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactOfflineFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.copyItem(at: source, to: destination)
+    let manifestURL = destination.appendingPathComponent("Cargo.toml")
+    var manifest = try String(contentsOf: manifestURL, encoding: .utf8)
+    manifest += """
+
+        [dependencies]
+        codeinsight-definitely-missing-offline-dependency = "99.99.99"
+        """
+    try manifest.write(to: manifestURL, atomically: true, encoding: .utf8)
+    return destination
 }
 
 private func makeHistoricalExactSelfTestRepository() throws -> URL {
