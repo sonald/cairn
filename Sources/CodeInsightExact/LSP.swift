@@ -1,3 +1,4 @@
+import CProcessGuard
 import Darwin
 import Foundation
 
@@ -8,6 +9,7 @@ public enum LSPError: Error, LocalizedError {
     case timeout(String)
     case cancelled(String)
     case connectionClosed
+    case childProcessGuardUnavailable
     case processExited(Int32, String)
 
     public var errorDescription: String? {
@@ -19,6 +21,8 @@ public enum LSPError: Error, LocalizedError {
         case .timeout(let method): "LSP request timed out: \(method)"
         case .cancelled(let method): "LSP request cancelled: \(method)"
         case .connectionClosed: "LSP connection closed"
+        case .childProcessGuardUnavailable:
+            "LSP child process crash guard unavailable"
         case let .processExited(status, stderr):
             "LSP process exited (\(status)): \(stderr)"
         }
@@ -162,12 +166,25 @@ public final class LSPClient: @unchecked Sendable {
         inputHandle = input.fileHandleForWriting
         outputHandle = output.fileHandleForReading
         errorHandle = errors.fileHandleForReading
+        guard ci_process_guard_install() else {
+            releaseHandles()
+            throw LSPError.childProcessGuardUnavailable
+        }
         installHandlers()
         do {
             try process.run()
         } catch {
             releaseHandles()
             throw error
+        }
+        guard ci_process_guard_register(process.processIdentifier) else {
+            Darwin.kill(process.processIdentifier, SIGKILL)
+            process.waitUntilExit()
+            releaseHandles()
+            throw LSPError.childProcessGuardUnavailable
+        }
+        if !process.isRunning {
+            ci_process_guard_unregister(process.processIdentifier)
         }
     }
 
@@ -336,6 +353,7 @@ public final class LSPClient: @unchecked Sendable {
                     didReap = true
                 }
             }
+            ci_process_guard_unregister(process.processIdentifier)
         }
         finishClose()
     }
@@ -346,6 +364,9 @@ public final class LSPClient: @unchecked Sendable {
         if let process, process.isRunning {
             Darwin.kill(process.processIdentifier, SIGKILL)
             process.waitUntilExit()
+        }
+        if let process {
+            ci_process_guard_unregister(process.processIdentifier)
         }
         releaseHandles()
     }
@@ -379,6 +400,7 @@ public final class LSPClient: @unchecked Sendable {
             observer?(diagnostic)
         }
         process?.terminationHandler = { [weak self] process in
+            ci_process_guard_unregister(process.processIdentifier)
             guard let self else { return }
             condition.lock()
             let observer = terminationObserver

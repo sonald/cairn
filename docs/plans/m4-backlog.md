@@ -15,6 +15,10 @@ Safe/Trusted 双模式（design §8.4）+ diff 阅读（跨 commit，含 Compare
 2. **coverage.importsResolved 诚实性**：S4 允许 importsResolved 近似/占位——确认 UI
    显示的是如实数字或明确标"近似"，不造精确感。
 3. libgit2 正式分发：静态链接或随包 vendor（M4 发布必需）。
+4. **RA 孙进程崩溃清理**：当前 crash guard 只覆盖登记的 RA 直系 PID；若要覆盖
+   cargo / proc-macro-srv，需放弃 Foundation `Process`，改
+   `posix_spawn` + `POSIX_SPAWN_SETPGROUP` 后按进程组清理，或引入 kqueue
+   看护进程。
 
 ## M3 期间挂起延续
 

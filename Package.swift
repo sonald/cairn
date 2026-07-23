@@ -83,6 +83,11 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
+            name: "CProcessGuard",
+            path: "Sources/CProcessGuard",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "TreeSitterKit",
             dependencies: ["CTreeSitter"]
         ),
@@ -103,7 +108,11 @@ let package = Package(
         ),
         .target(
             name: "CodeInsightExact",
-            dependencies: ["CodeInsightCore", "CodeInsightGit"]
+            dependencies: [
+                "CProcessGuard",
+                "CodeInsightCore",
+                "CodeInsightGit",
+            ]
         ),
         .target(
             name: "CodeInsightEngine",
@@ -179,11 +188,19 @@ let package = Package(
         .testTarget(
             name: "CodeInsightExactTests",
             dependencies: [
+                "CProcessGuard",
+                "CProcessGuardTestSupport",
                 "CodeInsightCore",
                 "CodeInsightExact",
                 "CodeInsightGit",
             ],
             exclude: ["Fixtures"]
+        ),
+        .target(
+            name: "CProcessGuardTestSupport",
+            dependencies: ["CProcessGuard"],
+            path: "Tests/CProcessGuardTestSupport",
+            publicHeadersPath: "include"
         ),
         .testTarget(
             name: "RustExtractorTests",

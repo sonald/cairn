@@ -7,7 +7,6 @@ import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
-import Observation
 import SwiftUI
 
 private enum SelfTestBudgets {
@@ -1727,10 +1726,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
 
         let state = SwitchSelfTestState(startedAt: .now)
-        observeSwitch(state)
         model.switchToCommit("HEAD~1")
         let deadline = Date(timeIntervalSinceNow: 30)
         while Date() < deadline {
+            state.record(model.snapshotPhase)
             if model.snapshotPhase == .fullReady,
                case let .ready(session, _) = model.projectState
             {
@@ -1757,18 +1756,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extracted: 0,
             ready: false
         )
-    }
-
-    private func observeSwitch(_ state: SwitchSelfTestState) {
-        withObservationTracking {
-            _ = model.snapshotPhase
-        } onChange: { [weak self, weak state] in
-            Task { @MainActor [weak self, weak state] in
-                guard let self, let state else { return }
-                state.record(model.snapshotPhase)
-                observeSwitch(state)
-            }
-        }
     }
 
     func runOpenSelfTest(file: URL) {
@@ -2451,17 +2438,14 @@ private final class SwitchSelfTestState {
     }
 
     func record(_ phase: SnapshotPhase?) {
+        guard let phase else { return }
         let elapsed = milliseconds(since: startedAt)
-        switch phase {
-        case .firstPaint:
-            if firstPaintMS == nil { firstPaintMS = elapsed }
-        case .cachedReady:
-            if cachedReadyMS == nil { cachedReadyMS = elapsed }
-        case .fullReady:
-            if fullReadyMS == nil { fullReadyMS = elapsed }
-        case nil:
-            break
-        }
+        // Equal timestamps mark monotonic phases coalesced into one poll.
+        if firstPaintMS == nil { firstPaintMS = elapsed }
+        guard phase != .firstPaint else { return }
+        if cachedReadyMS == nil { cachedReadyMS = elapsed }
+        guard phase == .fullReady else { return }
+        if fullReadyMS == nil { fullReadyMS = elapsed }
     }
 }
 

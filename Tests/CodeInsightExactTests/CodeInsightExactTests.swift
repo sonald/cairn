@@ -1,3 +1,5 @@
+import CProcessGuard
+import CProcessGuardTestSupport
 import CodeInsightCore
 import CodeInsightGit
 import Darwin
@@ -413,6 +415,83 @@ func closeForceKillsAndReapsUnresponsiveProcess() throws {
     errno = 0
     #expect(waitpid(pid, nil, WNOHANG) == -1)
     #expect(errno == ECHILD)
+}
+
+@Test
+func childProcessRegistryRegistersAndUnregistersConcurrently() async {
+    let results = await withTaskGroup(
+        of: (pid_t, Bool).self,
+        returning: [(pid_t, Bool)].self
+    ) { group in
+        for worker in 0..<24 {
+            group.addTask {
+                let pid = pid_t(2_000_000 + worker)
+                for _ in 0..<500 {
+                    guard ci_process_guard_register(pid),
+                          ci_process_guard_contains(pid),
+                          ci_process_guard_unregister(pid)
+                    else {
+                        return (pid, false)
+                    }
+                }
+                return (pid, !ci_process_guard_contains(pid))
+            }
+        }
+        var results: [(pid_t, Bool)] = []
+        for await result in group {
+            results.append(result)
+        }
+        return results
+    }
+
+    let failures = results.filter { !$0.1 }.map(\.0).sorted()
+    print(
+        "process-guard concurrency workers=24 iterations=500"
+            + " failures=\(failures)"
+    )
+    #expect(failures.isEmpty)
+}
+
+@Test
+func crashGuardKillsRegisteredGrandchildAndReraisesAbort() throws {
+    var helperPID: pid_t = 0
+    var fakeChildPID: pid_t = 0
+    try #require(ci_test_spawn_abort_helper(
+        false,
+        &helperPID,
+        &fakeChildPID
+    ))
+    let unguardedStatus = try waitForProcess(helperPID)
+    let unguardedSignal = unguardedStatus & 0x7f
+    let orphanSurvived = processExists(fakeChildPID)
+    print(
+        "process-guard control handler=off"
+            + " helperSignal=\(unguardedSignal)"
+            + " orphanAlive=\(orphanSurvived)"
+    )
+    #expect(unguardedSignal == SIGABRT)
+    #expect(orphanSurvived)
+    Darwin.kill(fakeChildPID, SIGKILL)
+    #expect(waitForProcessToDisappear(fakeChildPID))
+
+    try #require(ci_test_spawn_abort_helper(
+        true,
+        &helperPID,
+        &fakeChildPID
+    ))
+    let guardedStatus = try waitForProcess(helperPID)
+    let guardedSignal = guardedStatus & 0x7f
+    let orphanDisappeared = waitForProcessToDisappear(fakeChildPID)
+    print(
+        "process-guard fixed handler=on"
+            + " helperSignal=\(guardedSignal)"
+            + " orphanAlive=\(!orphanDisappeared)"
+    )
+    #expect(guardedSignal == SIGABRT)
+    #expect(orphanDisappeared)
+    if !orphanDisappeared {
+        Darwin.kill(fakeChildPID, SIGKILL)
+    }
 }
 
 @Test
@@ -1199,6 +1278,30 @@ private func nextDiagnostic(_ diagnostics: AsyncStream<String>) async -> String?
         group.cancelAll()
         return diagnostic
     }
+}
+
+private func waitForProcess(_ pid: pid_t) throws -> Int32 {
+    var status: Int32 = 0
+    while waitpid(pid, &status, 0) == -1 {
+        if errno != EINTR {
+            throw CocoaError(.executableRuntimeMismatch)
+        }
+    }
+    return status
+}
+
+private func processExists(_ pid: pid_t) -> Bool {
+    errno = 0
+    return Darwin.kill(pid, 0) == 0 || errno != ESRCH
+}
+
+private func waitForProcessToDisappear(_ pid: pid_t) -> Bool {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+    while ContinuousClock.now < deadline {
+        if !processExists(pid) { return true }
+        usleep(1_000)
+    }
+    return !processExists(pid)
 }
 
 private struct DirectorySnapshot: Snapshot {
