@@ -161,6 +161,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         guard let windowController, windowController.window?.isVisible == true else {
             Darwin.exit(1)
         }
+        windowController.window?.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
         let checks = [
             "emptyStateExists": windowController.selfTestEmptyStateExists,
@@ -168,11 +170,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 .contains("Cairn"),
             "emptyStateHasOpenProjectButton": windowController
                 .selfTestEmptyStateButtonTitles.contains("Open Project…"),
+            "emptyStateAttachedToWindow": windowController
+                .selfTestEmptyStateAttachedToWindow,
+            "emptyStateUnhidden": windowController.selfTestEmptyStateUnhidden,
+            "emptyStateFrameVisibleInWindow": windowController
+                .selfTestEmptyStateFrameVisibleInWindow,
+            "emptyStateNotCoveredByReader": windowController
+                .selfTestEmptyStateNotCoveredByReader,
+            "emptyStateTitleVisibleInWindow": windowController
+                .selfTestEmptyStateTitleVisibleInWindow,
+            "emptyStateOpenProjectButtonVisibleInWindow": windowController
+                .selfTestEmptyStateButtonVisibleInWindow,
             "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
-        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
         Self.finishSelfTest(coldStartMS: coldStartMS, checks: checks)
     }
 
@@ -203,7 +215,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     fileCount: fileCount,
                     reused: reused,
                     extracted: extracted,
-                    ready: false
+                    ready: false,
+                    emptyStateRemoved: false,
+                    readerDocumentVisible: false
                 )
             default:
                 RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
@@ -211,6 +225,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             if ready { break }
         }
         let indexReadyMS = milliseconds(since: projectStartedAt)
+        windowController?.window?.contentView?.layoutSubtreeIfNeeded()
+        let emptyStateRemoved = windowController?.selfTestEmptyStateExists == false
+        let readerDocumentVisible = windowController?
+            .selfTestReaderDocumentVisibleInWindow == true
         model.flushPersistentIndexCache()
         Self.finishProjectSelfTest(
             treeVisibleMS: treeVisibleMS,
@@ -218,7 +236,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             fileCount: fileCount,
             reused: reused,
             extracted: extracted,
-            ready: ready
+            ready: ready,
+            emptyStateRemoved: emptyStateRemoved,
+            readerDocumentVisible: readerDocumentVisible
         )
     }
 
@@ -2520,7 +2540,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         fileCount: Int,
         reused: Int,
         extracted: Int,
-        ready: Bool
+        ready: Bool,
+        emptyStateRemoved: Bool,
+        readerDocumentVisible: Bool
     ) -> Never {
         do {
             let data = try JSONSerialization.data(
@@ -2530,6 +2552,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "fileCount": fileCount,
                     "reused": reused,
                     "extracted": extracted,
+                    "emptyStateRemoved": emptyStateRemoved,
+                    "readerDocumentVisible": readerDocumentVisible,
                 ],
                 options: [.sortedKeys]
             )
@@ -2537,6 +2561,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             FileHandle.standardOutput.write(Data([0x0A]))
             Darwin.exit(
                 ready
+                    && emptyStateRemoved
+                    && readerDocumentVisible
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
                     && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
                     ? 0 : 1

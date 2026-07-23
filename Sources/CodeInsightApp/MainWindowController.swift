@@ -282,7 +282,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestEmptyStateButtonTitles: [String] {
         readerController.selfTestEmptyStateButtonTitles
     }
-
+    var selfTestEmptyStateAttachedToWindow: Bool {
+        readerController.selfTestEmptyStateAttachedToWindow
+    }
+    var selfTestEmptyStateUnhidden: Bool {
+        readerController.selfTestEmptyStateUnhidden
+    }
+    var selfTestEmptyStateFrameVisibleInWindow: Bool {
+        readerController.selfTestEmptyStateFrameVisibleInWindow
+    }
+    var selfTestEmptyStateNotCoveredByReader: Bool {
+        readerController.selfTestEmptyStateNotCoveredByReader
+    }
+    var selfTestEmptyStateTitleVisibleInWindow: Bool {
+        readerController.selfTestEmptyStateTitleVisibleInWindow
+    }
+    var selfTestEmptyStateButtonVisibleInWindow: Bool {
+        readerController.selfTestEmptyStateButtonVisibleInWindow
+    }
+    var selfTestReaderDocumentVisibleInWindow: Bool {
+        readerController.selfTestReaderDocumentVisibleInWindow
+    }
     func selfTestNavigateNextDiffHunk() -> (before: Int?, after: Int?) {
         guard let hunk = model.compare.diff?.hunks.first else { return (nil, nil) }
         if let target = hunk.lines.first(where: {
@@ -1333,6 +1353,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private let nextHunkButton = NSButton()
     private let functionSummaryStack = NSStackView()
     private var displayedFunctionChanges: [DiffCore.FunctionChange] = []
+    private let readerArea = NSView()
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
@@ -1358,18 +1379,24 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         scrollView.hasHorizontalScroller = true
         scrollView.documentView = textView.view
         textView.view.frame = scrollView.contentView.bounds
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(label)
+        readerArea.addSubview(scrollView)
+        readerArea.addSubview(label)
         NSLayoutConstraint.activate([
-            label.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
-            label.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+            label.centerXAnchor.constraint(equalTo: readerArea.centerXAnchor),
+            label.centerYAnchor.constraint(equalTo: readerArea.centerYAnchor),
         ])
         if showsCompareControls {
-            view = compareContainer(scrollView: scrollView)
+            view = compareContainer(readerView: readerArea)
         } else {
-            view = scrollView
+            view = readerArea
         }
         textView.onClick = { [weak self] characterIndex, modifiers in
             guard let self,
@@ -1411,7 +1438,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         textView.view.menu = relationMenu
     }
 
-    private func compareContainer(scrollView: NSScrollView) -> NSView {
+    private func compareContainer(readerView: NSView) -> NSView {
         compareVersionButton.title = "Choose comparison version…"
         compareVersionButton.bezelStyle = .rounded
         compareVersionButton.target = self
@@ -1450,11 +1477,11 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         summaryScroll.borderType = .noBorder
         summaryScroll.translatesAutoresizingMaskIntoConstraints = false
 
-        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        readerView.translatesAutoresizingMaskIntoConstraints = false
         let container = NSView()
         container.addSubview(controls)
         container.addSubview(summaryScroll)
-        container.addSubview(scrollView)
+        container.addSubview(readerView)
         NSLayoutConstraint.activate([
             controls.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
             controls.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
@@ -1473,10 +1500,10 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             functionSummaryStack.bottomAnchor.constraint(
                 equalTo: summaryScroll.contentView.bottomAnchor
             ),
-            scrollView.topAnchor.constraint(equalTo: summaryScroll.bottomAnchor, constant: 2),
-            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            readerView.topAnchor.constraint(equalTo: summaryScroll.bottomAnchor, constant: 2),
+            readerView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            readerView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            readerView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
         ])
         return container
     }
@@ -1525,11 +1552,11 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     ) {
         loadViewIfNeeded()
         label.isHidden = true
+        scrollView?.isHidden = true
         if let emptyStateView {
             emptyStateView.update(recentPaths: recentPaths, failed: failed)
             return
         }
-        guard let scrollView else { return }
         let emptyStateView = EmptyStateView(
             recentPaths: recentPaths,
             failed: failed,
@@ -1538,12 +1565,12 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             onRetry: onRetry
         )
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
-        scrollView.addSubview(emptyStateView)
+        readerArea.addSubview(emptyStateView)
         NSLayoutConstraint.activate([
-            emptyStateView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
-            emptyStateView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            emptyStateView.topAnchor.constraint(equalTo: scrollView.topAnchor),
-            emptyStateView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor),
+            emptyStateView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            emptyStateView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            emptyStateView.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            emptyStateView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
         ])
         self.emptyStateView = emptyStateView
     }
@@ -1551,6 +1578,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     func removeEmptyState(placeholder: String) {
         emptyStateView?.removeFromSuperview()
         emptyStateView = nil
+        scrollView?.isHidden = false
         if displayedFile == nil {
             label.stringValue = placeholder
             label.isHidden = false
@@ -1563,6 +1591,37 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     }
     var selfTestEmptyStateButtonTitles: [String] {
         emptyStateView?.selfTestButtonTitles ?? []
+    }
+    var selfTestEmptyStateAttachedToWindow: Bool {
+        emptyStateView?.selfTestAttachedToWindow == true
+    }
+    var selfTestEmptyStateUnhidden: Bool {
+        emptyStateView?.selfTestUnhidden == true
+    }
+    var selfTestEmptyStateFrameVisibleInWindow: Bool {
+        emptyStateView?.selfTestFrameVisibleInWindow == true
+    }
+    var selfTestEmptyStateNotCoveredByReader: Bool {
+        emptyStateView?.superview === readerArea && scrollView?.isHidden == true
+    }
+    var selfTestEmptyStateTitleVisibleInWindow: Bool {
+        emptyStateView?.selfTestTitleVisibleInWindow == true
+    }
+    var selfTestEmptyStateButtonVisibleInWindow: Bool {
+        emptyStateView?.selfTestButtonVisibleInWindow == true
+    }
+    var selfTestReaderDocumentVisibleInWindow: Bool {
+        guard let scrollView else { return false }
+        return !scrollView.isHiddenOrHasHiddenAncestor
+            && scrollView.window != nil
+            && scrollView.bounds.width > 0
+            && scrollView.bounds.height > 0
+            && !textView.view.isHiddenOrHasHiddenAncestor
+            && textView.view.window != nil
+            && textView.view.bounds.width > 0
+            && textView.view.bounds.height > 0
+            && textView.view.visibleRect.width > 0
+            && textView.view.visibleRect.height > 0
     }
 
     func configureCompareControls(
