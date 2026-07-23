@@ -99,13 +99,20 @@ public final class SearchPanelModel {
     }
 
     public func openSelection() -> (path: String, byteOffset: UInt32)? {
-        guard var remaining = selectedIndex else { return nil }
+        guard let selectedIndex,
+              let selection = selection(at: selectedIndex)
+        else { return nil }
+        return (
+            selection.group.path,
+            selection.match.value.byteRange.lowerBound
+        )
+    }
+
+    private func selection(at flatIndex: Int) -> (group: Group, match: Match)? {
+        var remaining = flatIndex
         for group in groups {
             if remaining < group.matches.count {
-                return (
-                    group.path,
-                    group.matches[remaining].value.byteRange.lowerBound
-                )
+                return (group, group.matches[remaining])
             }
             remaining -= group.matches.count
         }
@@ -181,6 +188,10 @@ public final class SearchPanelModel {
     }
 
     private func apply(_ batch: SearchBatch, session: EngineSession) {
+        let previousSelectedIndex = selectedIndex
+        let selectedMatch = previousSelectedIndex.flatMap {
+            selection(at: $0)?.match
+        }
         for (pathID, matches) in batch.matchesByPath {
             let group = groupsByPath[pathID] ?? Group(
                 pathID: pathID,
@@ -197,14 +208,33 @@ public final class SearchPanelModel {
         totalMatches = groups.reduce(0) { $0 + $1.matches.count }
         fileCount = groups.count
         isTruncated = isTruncated || batch.completeness == .truncated
-        if selectedIndex == nil, totalMatches > 0 {
-            selectedIndex = 0
-        } else if let selectedIndex, selectedIndex >= totalMatches {
-            self.selectedIndex = totalMatches > 0 ? totalMatches - 1 : nil
-        }
+        reconcileSelection(
+            preserving: selectedMatch,
+            fallbackIndex: previousSelectedIndex
+        )
         if batch.isFinal {
             isSearching = false
             if totalMatches == 0 { placeholder = "No matches." }
+        }
+    }
+
+    func reconcileSelection(
+        preserving selectedMatch: Match?,
+        fallbackIndex: Int?
+    ) {
+        if let selectedMatch,
+           let index = groups
+               .flatMap(\.matches)
+               .firstIndex(where: { $0 === selectedMatch })
+        {
+            selectedIndex = index
+            return
+        }
+        selectedIndex = fallbackIndex
+        if fallbackIndex == nil, totalMatches > 0 {
+            selectedIndex = 0
+        } else if let fallbackIndex, fallbackIndex >= totalMatches {
+            self.selectedIndex = totalMatches > 0 ? totalMatches - 1 : nil
         }
     }
 

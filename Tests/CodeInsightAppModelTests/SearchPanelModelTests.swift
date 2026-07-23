@@ -57,6 +57,121 @@ func searchPanelDiscardsLateQueryResults() async throws {
 
 @MainActor
 @Test
+func searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let (batches, continuation) =
+        AsyncThrowingStream<SearchBatch, Error>.makeStream()
+    let model = SearchPanelModel { _, _, _ in batches }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.b: [
+            searchMatch(path: fixture.b, offset: 10),
+            searchMatch(path: fixture.b, offset: 20),
+        ]],
+        isFinal: false,
+        completeness: .complete
+    ))
+    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    model.select(1)
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.a: [
+            searchMatch(path: fixture.a, offset: 1),
+            searchMatch(path: fixture.a, offset: 2),
+            searchMatch(path: fixture.a, offset: 3),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    ))
+    continuation.finish()
+    #expect(await searchWaitUntil { model.totalMatches == 5 })
+
+    #expect(model.selectedIndex == 4)
+    #expect(model.openSelection()?.path == "b.rs")
+    #expect(model.openSelection()?.byteOffset == 20)
+}
+
+@MainActor
+@Test
+func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let (batches, continuation) =
+        AsyncThrowingStream<SearchBatch, Error>.makeStream()
+    let model = SearchPanelModel { _, _, _ in batches }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.b: [
+            searchMatch(path: fixture.b, offset: 20),
+            searchMatch(path: fixture.b, offset: 30),
+        ]],
+        isFinal: false,
+        completeness: .complete
+    ))
+    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    model.select(1)
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.b: [
+            searchMatch(path: fixture.b, offset: 10),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    ))
+    continuation.finish()
+    #expect(await searchWaitUntil { model.totalMatches == 3 })
+
+    #expect(model.selectedIndex == 2)
+    #expect(model.openSelection()?.path == "b.rs")
+    #expect(model.openSelection()?.byteOffset == 30)
+}
+
+@MainActor
+@Test
+func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = SearchPanelModel { _, query, _ in
+        let matches = query.pattern == "old"
+            ? [fixture.b: (1...5).map {
+                searchMatch(path: fixture.b, offset: UInt32($0))
+            }]
+            : [fixture.a: [
+                searchMatch(path: fixture.a, offset: 1),
+                searchMatch(path: fixture.a, offset: 2),
+            ]]
+        return stream(batches: [SearchBatch(
+            matchesByPath: matches,
+            isFinal: true,
+            completeness: query.pattern == "old" ? .complete : .truncated,
+            truncatedPathIDs: query.pattern == "old" ? [] : [fixture.b]
+        )])
+    }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("old")
+    #expect(await searchWaitUntil { model.totalMatches == 5 })
+    model.select(4)
+    let selectedMatch = model.groups[0].matches[4]
+
+    model.setQuery("new")
+    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    model.reconcileSelection(
+        preserving: selectedMatch,
+        fallbackIndex: 4
+    )
+
+    #expect(model.selectedIndex == 1)
+    #expect(model.openSelection()?.path == "a.rs")
+    #expect(model.openSelection()?.byteOffset == 2)
+}
+
+@MainActor
+@Test
 func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
     let fixture = try SearchPanelFixture()
     defer { fixture.remove() }
