@@ -418,6 +418,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestContextReaderVisible: Bool {
         contextController.selfTestReaderVisible
     }
+    var selfTestContextCandidateVisibleWithGeometry: Bool {
+        contextController.selfTestCandidateVisibleWithGeometry
+    }
+    var selfTestContextHasDoubleClickOpen: Bool {
+        contextController.selfTestHasDoubleClickOpen
+    }
     var selfTestRelationsPlaceholderText: String? {
         relationController.selfTestPlaceholderText
     }
@@ -483,6 +489,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
+    var selfTestLeftReaderIsEditable: Bool { readerController.isEditable }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
         let left = readerController.diffMarkerCounts
         let right = secondaryReaderController.diffMarkerCounts
@@ -620,6 +627,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func selfTestSetContextPinned(_ pinned: Bool) {
         contextController.selfTestSetPinned(pinned)
+    }
+
+    func selfTestOpenContextSelection() {
+        contextController.selfTestOpenSelection()
     }
 
     func selfTestReaderClick(offset: UInt32, commandClick: Bool) {
@@ -967,13 +978,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 _ = sidebarController.synchronizeFileSelection(to: model.selectedFile)
             }
         }
+        let selectedSource = readerSource(for: model.selectedFile)
         readerController.display(
             model.selectedFile,
             snapshotID: model.currentSnapshotID,
-            source: model.documentSource
+            source: selectedSource
         )
+        let compareFile = model.selectedFile.flatMap {
+            projectPath(for: $0) == nil ? nil : $0
+        }
         secondaryReaderController.display(
-            model.compare.rightSnapshotID == nil ? nil : model.selectedFile,
+            model.compare.rightSnapshotID == nil ? nil : compareFile,
             snapshotID: model.compare.rightSnapshotID,
             source: model.compare.rightSource
         )
@@ -995,7 +1010,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                     to: file,
                     byteOffset: offset,
                     snapshotID: model.currentSnapshotID,
-                    source: model.documentSource
+                    source: selectedSource
                 )
             }
             displayedNavigationGeneration = model.navigationGeneration
@@ -1503,9 +1518,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                   let candidate = await model.contextWindow.resolvedCandidate(
                       file: path,
                       offset: offset
-                  )
+                  ),
+                  let symbol = candidate.symbol
             else { return }
-            showRelations(symbol: candidate.symbol, direction: direction)
+            showRelations(symbol: symbol, direction: direction)
         }
     }
 
@@ -1515,8 +1531,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func open(path: String, byteOffset: UInt32) {
         guard let root = model.fileTree?.root else { return }
+        let file = exactLocationIsInDependency(path)
+            ? URL(fileURLWithPath: path)
+            : root.appendingPathComponent(path)
         navigate(
-            to: root.appendingPathComponent(path),
+            to: file,
             byteOffset: byteOffset
         )
     }
@@ -1544,9 +1563,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .indexing, .ready:
             break
         }
-        guard let selectedFile = model.selectedFile,
-              let path = projectPath(for: selectedFile)
-        else { return nil }
+        guard let selectedFile = model.selectedFile else { return nil }
+        let path = projectPath(for: selectedFile)
+            ?? (exactLocationIsInDependency(selectedFile.path)
+                ? selectedFile.path
+                : nil)
+        guard let path else { return nil }
         guard let position = readerController.currentReadingPosition(
             fallbackByteOffset: model.selectedByteOffset
         ), position.file.standardizedFileURL == selectedFile.standardizedFileURL
@@ -1578,6 +1600,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         else { return nil }
         return file.pathComponents.dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private func readerSource(
+        for file: URL?
+    ) -> DocumentLoader.ContentSource? {
+        guard let file, projectPath(for: file) != nil else { return nil }
+        return model.documentSource
     }
 }
 
@@ -2517,6 +2546,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     }
 
     var displayedBytes: [UInt8]? { textView.displayedBytes }
+    var isEditable: Bool { textView.view.isEditable }
     var diffMarkerCounts: [DiffCore.MarkerKind: Int] { textView.diffMarkerCounts }
     var selectedDiffLine: Int? { textView.selectedLineNumber }
     var compareVersionAnchor: NSView {
@@ -2755,6 +2785,22 @@ final class ContextWindowViewController: NSViewController {
         loadViewIfNeeded()
         return scrollView.selfTestIsVisibleInWindow
     }
+    var selfTestCandidateVisibleWithGeometry: Bool {
+        guard candidateBadge.window != nil,
+              view.window != nil,
+              !candidateBadge.isHiddenOrHasHiddenAncestor,
+              candidateBadge.bounds.width > 0,
+              candidateBadge.bounds.height > 0
+        else { return false }
+        let frame = candidateBadge.convert(candidateBadge.bounds, to: view)
+        return view.bounds.contains(frame)
+            && scrollView.selfTestIsVisibleInWindow
+    }
+    var selfTestHasDoubleClickOpen: Bool {
+        miniReader.view.gestureRecognizers.contains {
+            ($0 as? NSClickGestureRecognizer)?.numberOfClicksRequired == 2
+        }
+    }
 
     override func loadView() {
         modeControl.selectedSegment = 0
@@ -2850,13 +2896,31 @@ final class ContextWindowViewController: NSViewController {
         view = container
         miniReader.onClick = { [weak self] _, modifiers in
             guard modifiers.intersection([.command, .option, .control, .shift]) == .command,
-                  let self,
-                  let candidate = self.model.selectedCandidate
+                  let self
             else { return }
-            self.onOpen?(candidate)
+            self.openSelection()
         }
+        let doubleClick = NSClickGestureRecognizer(
+            target: self,
+            action: #selector(openSelectedCandidate(_:))
+        )
+        doubleClick.numberOfClicksRequired = 2
+        miniReader.view.addGestureRecognizer(doubleClick)
         render()
         observe()
+    }
+
+    func selfTestOpenSelection() {
+        openSelection()
+    }
+
+    @objc private func openSelectedCandidate(_ sender: Any?) {
+        openSelection()
+    }
+
+    private func openSelection() {
+        guard let candidate = model.selectedCandidate else { return }
+        onOpen?(candidate)
     }
 
     @objc private func modeChanged(_ sender: NSSegmentedControl) {

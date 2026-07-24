@@ -586,6 +586,54 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
 
 @MainActor
 @Test
+func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
+    let source = "fn target() {}\nfn main() { target(); }\n"
+    let root = try exactTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let dependency = exactDependencyFixture()
+    let dependencySource = try String(contentsOf: dependency, encoding: .utf8)
+    let dependencyExcerptBytes = Array(
+        dependencySource.trimmingCharacters(in: .newlines).utf8
+    )
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: exactByteOffset(of: "target();", in: source)
+    )
+    #expect(await exactWaitUntil { model.candidateCount == 1 && gate.count == 1 })
+    gate.complete(0, with: exactEntry(
+        file: dependency.path,
+        byteOffset: exactByteOffset(
+            of: "dependency_target",
+            in: dependencySource
+        )
+    ))
+    #expect(await exactWaitUntil {
+        model.selectedCandidate?.path == dependency.path
+    })
+    let candidate = try #require(model.selectedCandidate)
+
+    #expect(model.candidateCount == 2)
+    #expect(Array(candidate.excerpt.utf8) == dependencyExcerptBytes)
+    #expect(candidate.label == "External · in dependency")
+    #expect(candidate.provenanceBadge.contains("dependency-fixture"))
+    #expect(candidate.provenanceBadge.contains("fake-exact"))
+    #expect(candidate.provenanceBadge.contains("fake-1"))
+    #expect(candidate.provenanceBadge.contains("coverage: partial"))
+}
+
+@MainActor
+@Test
 func contextExactUpgradeRejectsStaleRequestAndGeneration() async throws {
     let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
     let root = try exactTemporaryProject(["main.rs": source])
@@ -648,7 +696,12 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
     model.updateProjectState(.ready(session, context), root: root)
     let alphaCall = exactByteOffset(of: "alpha();", in: source)
     let alphaDefinition = exactByteOffset(of: "alpha() {}", in: source)
-    let betaDefinition = exactByteOffset(of: "beta() {}", in: source)
+    let dependency = exactDependencyFixture()
+    let dependencySource = try String(contentsOf: dependency, encoding: .utf8)
+    let dependencyDefinition = exactByteOffset(
+        of: "dependency_target",
+        in: dependencySource
+    )
     model.tokenClicked(file: "main.rs", offset: alphaCall)
     #expect(await exactWaitUntil { model.candidateCount == 1 && gate.count == 1 })
     let original = try #require(model.selectedCandidate)
@@ -656,8 +709,8 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
     model.setMode(.pinned)
     #expect(await exactWaitUntil { gate.count == 2 })
     gate.complete(1, with: exactEntry(
-        file: "main.rs",
-        byteOffset: betaDefinition
+        file: dependency.path,
+        byteOffset: dependencyDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
     #expect(model.selectedCandidate?.symbol == original.symbol)
@@ -678,13 +731,60 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
     #expect(model.candidateCount == 1)
 
     gate.complete(0, with: exactEntry(
-        file: "main.rs",
-        byteOffset: betaDefinition
+        file: dependency.path,
+        byteOffset: dependencyDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
     #expect(model.selectedCandidate?.symbol == original.symbol)
     #expect(model.selectedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
+}
+
+@MainActor
+@Test
+func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
+    async throws
+{
+    let source = "fn target() {}\nfn main() { target(); }\n"
+    let root = try exactTemporaryProject(["main.rs": source])
+    let dependencyRoot = try exactTemporaryProject([
+        "release-1.2.3/src/lib.rs": "pub fn unknown_dependency() {}\n",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: dependencyRoot)
+    }
+    let dependency = dependencyRoot.appendingPathComponent(
+        "release-1.2.3/src/lib.rs"
+    )
+    let dependencySource = try String(contentsOf: dependency, encoding: .utf8)
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _ in
+            exactEntry(
+                file: dependency.path,
+                byteOffset: exactByteOffset(
+                    of: "unknown_dependency",
+                    in: dependencySource
+                )
+            )
+        }
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: exactByteOffset(of: "target();", in: source)
+    )
+    #expect(await exactWaitUntil {
+        model.selectedCandidate?.path == dependency.path
+    })
+
+    #expect(model.selectedCandidate?.provenanceBadge.contains(dependency.path) == true)
 }
 
 private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
@@ -1063,7 +1163,7 @@ private func exactReuseKey(
 @MainActor
 private func exactSymbols(_ model: ContextWindowModel) -> [SymbolOccurrenceID] {
     guard case let .candidates(candidates, _) = model.stage else { return [] }
-    return candidates.map(\.symbol)
+    return candidates.compactMap(\.symbol)
 }
 
 @MainActor
@@ -1098,6 +1198,18 @@ private func exactTemporaryProject(_ files: [String: String]) throws -> URL {
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
     return root
+}
+
+func exactDependencyFixture() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent(
+            "Tests/CodeInsightExactTests/Fixtures/fake-registry/registry/src/"
+                + "index.crates.io-1949cf8c6b5b557f/"
+                + "dependency-fixture-1.2.3/src/lib.rs"
+        )
 }
 
 private func exactGit(_ root: URL, _ arguments: String...) throws {

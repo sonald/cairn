@@ -14,7 +14,7 @@ public final class ContextWindowModel {
     }
 
     public struct Candidate: Sendable {
-        public let symbol: SymbolOccurrenceID
+        public let symbol: SymbolOccurrenceID?
         public let path: String
         public let line: UInt32
         public let column: UInt32
@@ -525,6 +525,14 @@ public final class ContextWindowModel {
         origin: ExactOrigin,
         session: EngineSession
     ) async -> Candidate? {
+        if exactLocationIsInDependency(path) {
+            return await dependencyExactCandidate(
+                at: path,
+                offset: offset,
+                attribution: attribution,
+                origin: origin
+            )
+        }
         guard let pathID = pathID(path, in: session),
               let index = contentIndex(at: pathID, in: session),
               let symbolIndex = index.symbols.firstIndex(where: {
@@ -562,6 +570,44 @@ public final class ContextWindowModel {
         )
     }
 
+    private func dependencyExactCandidate(
+        at path: String,
+        offset: UInt32,
+        attribution: ExactAttribution,
+        origin: ExactOrigin
+    ) async -> Candidate? {
+        guard let document = await dependencyDocument(path: path),
+              let byteCount = UInt32(exactly: document.bytes.count),
+              offset <= byteCount,
+              let coordinate = document.lineTable.lineColumn(at: offset)
+        else { return nil }
+        let targetRange = document.outlineFacets.first {
+            $0.nameRange.contains(offset) || $0.nameRange.lowerBound == offset
+        }?.range ?? ByteRange(lowerBound: offset, upperBound: offset)
+        let label = "External · in dependency"
+        let dependency = dependencyCrateName(path) ?? path
+        let exact = exactBadge(
+            "Exact·direct",
+            attribution: attribution,
+            origin: origin
+        )
+        return Candidate(
+            symbol: nil,
+            path: path,
+            line: coordinate.line,
+            column: coordinate.column,
+            label: label,
+            excerpt: excerpt(for: targetRange, in: document, binding: false),
+            bindingKind: nil,
+            targetByteOffset: offset,
+            certainty: .exact,
+            provenance: .lsp,
+            exactAttribution: attribution,
+            exactOrigin: origin,
+            provenanceBadge: "\(label) · \(dependency) · \(exact)"
+        )
+    }
+
     private func projectPath(_ path: String) -> String {
         guard path.hasPrefix("/"), let root else { return path }
         let file = URL(fileURLWithPath: path).standardizedFileURL
@@ -592,7 +638,7 @@ public final class ContextWindowModel {
         case .allFeatures: "all"
         case .noDefaultFeatures: "no-default"
         }
-        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source) · features: \(features)"
+        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source) · features: \(features)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {
@@ -635,12 +681,35 @@ public final class ContextWindowModel {
             loaded = await loader(file)
         }
         guard let loaded else { return nil }
-        documents[key] = loaded
+        return remember(loaded, path: path)
+    }
+
+    private func dependencyDocument(path: String) async -> ReaderDocument? {
+        if let key = documentRecency.last(where: { $0.path == path }),
+           let cached = documents[key]
+        {
+            documentRecency.removeAll { $0 == key }
+            documentRecency.append(key)
+            return cached
+        }
+        guard let loaded = await loader(URL(fileURLWithPath: path)) else {
+            return nil
+        }
+        return remember(loaded, path: path)
+    }
+
+    private func remember(
+        _ document: ReaderDocument,
+        path: String
+    ) -> ReaderDocument {
+        let key = DocumentKey(path: path, contentID: document.contentID)
+        documents[key] = document
+        documentRecency.removeAll { $0 == key }
         documentRecency.append(key)
         if documentRecency.count > 8 {
             documents.removeValue(forKey: documentRecency.removeFirst())
         }
-        return loaded
+        return document
     }
 
     private func lexicalBindingIndex(
@@ -663,6 +732,30 @@ public final class ContextWindowModel {
         case .nonlocalDecl: "nonlocalDecl"
         }
     }
+}
+
+private func dependencyCrateName(_ path: String) -> String? {
+    let ancestors = Array(
+        URL(fileURLWithPath: path).pathComponents.dropLast()
+    )
+    let isCargoRegistry = ancestors.indices.contains { index in
+        index + 1 < ancestors.count
+            && ancestors[index] == "registry"
+            && ancestors[index + 1] == "src"
+    }
+    // A semver-looking directory alone is not evidence of a crate name.
+    guard isCargoRegistry || ancestors.contains("materialized") else {
+        return nil
+    }
+    for component in ancestors.reversed() {
+        guard let version = component.range(
+            of: #"-\d+\.\d+\.\d+(?:[-+].*)?$"#,
+            options: .regularExpression
+        ), version.lowerBound != component.startIndex
+        else { continue }
+        return String(component[..<version.lowerBound])
+    }
+    return nil
 }
 
 private func loadReaderDocument(at file: URL) async -> ReaderDocument? {

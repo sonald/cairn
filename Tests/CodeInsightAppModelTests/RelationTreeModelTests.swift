@@ -250,6 +250,82 @@ func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
 
 @MainActor
 @Test
+func contextAndRelationsShareTheDependencyPathConvention() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let dependency = exactDependencyFixture()
+    let dependencySource = try String(contentsOf: dependency, encoding: .utf8)
+    let dependencyRange = try #require(
+        dependencySource.range(of: "dependency_target")
+    )
+    let dependencyOffset = UInt32(
+        dependencySource[..<dependencyRange.lowerBound].utf8.count
+    )
+    let contextModel = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _ in
+            relationExactEntry(
+                file: dependency.path,
+                byteOffset: dependencyOffset
+            )
+        }
+    )
+    contextModel.updateProjectState(
+        .ready(fixture.session, fixture.context),
+        root: fixture.root
+    )
+    contextModel.tokenClicked(file: "main.rs", offset: 9)
+    #expect(await relationWaitUntil {
+        contextModel.selectedCandidate?.path == dependency.path
+    })
+
+    let methodName = fixture.session.names.intern("method")
+    let relationModel = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [
+                RelationTreeModel.LoadedEdge(
+                    title: "external",
+                    certainty: .possible,
+                    dispatch: .dynamicDispatch,
+                    symbol: fixture.b,
+                    path: "main.rs",
+                    byteOffset: 9,
+                    line: 1,
+                    evidence: [.methodNameOnly(nameID: methodName)],
+                    exactQuery: ("main.rs", 9, 1),
+                    fuzzyTarget: ("main.rs", 20)
+                ),
+            ], isTruncated: false)
+        },
+        exactResolver: { _, _, _ in
+            relationExactEntry(
+                file: dependency.path,
+                byteOffset: dependencyOffset
+            )
+        }
+    )
+    relationModel.updateProjectState(.ready(fixture.session, fixture.context))
+    relationModel.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil {
+        relationTreeFinishedLoading(relationModel.root)
+    })
+    let external = try relationGroup(
+        "External / Unresolved",
+        in: relationModel.root
+    )
+
+    #expect(exactLocationIsInDependency(dependency.path))
+    #expect(contextModel.selectedCandidate?.label == "External · in dependency")
+    #expect(
+        external.children?.first?.subtitle
+            == "External · in dependency (rust-analyzer)"
+    )
+}
+
+@MainActor
+@Test
 func relationTreeShowsExternalCallsAsUnresolved() async throws {
     let root = try relationTemporaryProject([
         "main.rs": """

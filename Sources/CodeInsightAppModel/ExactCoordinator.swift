@@ -9,6 +9,13 @@ public enum ExactOrigin: Equatable, Sendable {
     case materialized(commitOID: String)
 }
 
+/// ExactCoordinator maps locations inside the project/materialized root to
+/// relative paths before models see them. RustAnalyzerProvider leaves
+/// dependency locations absolute. Review every caller if that convention changes.
+public func exactLocationIsInDependency(_ file: String) -> Bool {
+    file.hasPrefix("/")
+}
+
 public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String

@@ -57,12 +57,7 @@ private struct CodeInsightApplication {
                 location: target?.definition,
                 externalFile: "src/lib.rs",
                 externalOffset: target.flatMap(\.externalCallOffset).map(Int.init),
-                externalLocation: ExactLocation(
-                    file: "/dependency/src/slice.rs",
-                    byteOffset: 40,
-                    line: 4,
-                    column: 5
-                ),
+                externalLocation: target?.dependencyDefinition,
                 state: providerState
             )
             let coordinator = ExactCoordinator(
@@ -1443,6 +1438,91 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ]
         )
 
+        windowController.selfTestSetContextPinned(false)
+        let selectedDependencyEdge = providerProvenExternalDemoted
+            && windowController.selfTestSelectRelationEdge(titled: "len")
+        let dependencyContextVisible = selectedDependencyEdge
+            && waitUntil(timeout: 5, condition: {
+                windowController.selfTestContextSummary?.hasPrefix(
+                    target.dependencyFile.path + ":"
+                ) == true
+                    && windowController.selfTestContextProvenance?
+                        .contains("External · in dependency") == true
+            })
+        let dependencyCardVisibleWithGeometry = dependencyContextVisible
+            && windowController.selfTestContextCandidateVisibleWithGeometry
+        let dependencyDoubleClickOpenInstalled =
+            windowController.selfTestContextHasDoubleClickOpen
+        let dependencyCrateHonest = windowController.selfTestContextProvenance?
+            .contains("dependency-fixture") == true
+        let dependencyExactBadgeComplete = [
+            "fake-exact",
+            "in-process-fake-1",
+            "coverage: partial",
+        ].allSatisfy {
+            windowController.selfTestContextProvenance?.contains($0) == true
+        }
+        emitExactStep(
+            "dependency-context",
+            variant: "external-demotion-fake",
+            controller: windowController,
+            extra: [
+                "selectedDependencyEdge": selectedDependencyEdge,
+                "cardVisibleWithGeometry": dependencyCardVisibleWithGeometry,
+                "doubleClickOpenInstalled":
+                    dependencyDoubleClickOpenInstalled,
+                "crateHonest": dependencyCrateHonest,
+                "exactBadgeComplete": dependencyExactBadgeComplete,
+            ]
+        )
+
+        if dependencyContextVisible {
+            windowController.selfTestOpenContextSelection()
+        }
+        let dependencyOpenedReadOnly = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.dependencyFile.standardizedFileURL
+                && windowController.selfTestLeftReaderBytes
+                    == target.dependencyBytes
+                && !windowController.selfTestLeftReaderIsEditable
+        })
+        let dependencyFileTreeUnlinked =
+            windowController.selectedSidebarFile == nil
+        windowController.goBack(nil)
+        let dependencyHistoryBack = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.relationFile.standardizedFileURL
+        })
+        windowController.goForward(nil)
+        let dependencyHistoryForward = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.dependencyFile.standardizedFileURL
+                && windowController.selfTestLeftReaderBytes
+                    == target.dependencyBytes
+                && !windowController.selfTestLeftReaderIsEditable
+        })
+        emitExactStep(
+            "dependency-open",
+            variant: "external-demotion-fake",
+            controller: windowController,
+            extra: [
+                "bytesEqual": windowController.selfTestLeftReaderBytes
+                    == target.dependencyBytes,
+                "isEditable": windowController.selfTestLeftReaderIsEditable,
+                "fileTreeUnlinked": dependencyFileTreeUnlinked,
+                "historyBack": dependencyHistoryBack,
+                "historyForward": dependencyHistoryForward,
+            ]
+        )
+        windowController.goBack(nil)
+        let relationFileRestoredAfterDependency = waitUntil(
+            timeout: 5,
+            condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            }
+        )
+
         func receiverRelationCheck(
             offset: UInt32?,
             rootTitle: String,
@@ -1563,6 +1643,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "externalDemotionFileVisible": externalDemotionFileVisible,
             "providerProvenExternalDemoted": providerProvenExternalDemoted,
             "externalDemotionSubtitleHonest": externalDemotionSubtitleHonest,
+            "selectedDependencyEdge": selectedDependencyEdge,
+            "dependencyContextVisible": dependencyContextVisible,
+            "dependencyCardVisibleWithGeometry":
+                dependencyCardVisibleWithGeometry,
+            "dependencyDoubleClickOpenInstalled":
+                dependencyDoubleClickOpenInstalled,
+            "dependencyCrateHonest": dependencyCrateHonest,
+            "dependencyExactBadgeComplete": dependencyExactBadgeComplete,
+            "dependencyOpenedReadOnly": dependencyOpenedReadOnly,
+            "dependencyFileTreeUnlinked": dependencyFileTreeUnlinked,
+            "dependencyHistoryBack": dependencyHistoryBack,
+            "dependencyHistoryForward": dependencyHistoryForward,
+            "relationFileRestoredAfterDependency":
+                relationFileRestoredAfterDependency,
             "typedReceiverStrong": typedReceiver.present,
             "typedReceiverAbsentFromPossible": typedReceiver.absent,
             "typedReceiverNameMatchNoteAbsent": typedReceiver.subtitleHonest,
@@ -3319,6 +3413,9 @@ private struct ExactSelfTestTarget {
     let file: URL
     let clickOffset: UInt32
     let definition: ExactLocation
+    let dependencyFile: URL
+    let dependencyBytes: [UInt8]
+    let dependencyDefinition: ExactLocation
     let relationFile: URL
     let relationCallOffset: UInt32
     let signatureTraitOffset: UInt32?
@@ -3586,6 +3683,12 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
     let definitionPath = "src/lib.rs"
     let file = root.appendingPathComponent(path)
     let relationFile = root.appendingPathComponent(definitionPath)
+    let dependencyFile = root.deletingLastPathComponent()
+        .appendingPathComponent(
+            "fake-registry/registry/src/"
+                + "index.crates.io-1949cf8c6b5b557f/"
+                + "dependency-fixture-1.2.3/src/lib.rs"
+        )
     guard let source = try? String(contentsOf: file, encoding: .utf8),
           let click = source.range(of: "answer();", options: .backwards),
           let definitionSource = try? String(
@@ -3607,6 +3710,36 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
           let coordinate = LineTable(bytes: Array(definitionSource.utf8))
               .lineColumn(at: definitionOffset)
     else { return nil }
+    let dependencyBytes: [UInt8]
+    let dependencyDefinition: ExactLocation
+    let resolvedDependencyFile: URL
+    if let bytes = try? [UInt8](Data(contentsOf: dependencyFile)),
+       let dependencySource = String(bytes: bytes, encoding: .utf8),
+       let dependencyRange = dependencySource.range(of: "dependency_target"),
+       let dependencyOffset = UInt32(exactly: dependencySource[
+           ..<dependencyRange.lowerBound
+       ].utf8.count),
+       let dependencyCoordinate = LineTable(bytes: bytes)
+           .lineColumn(at: dependencyOffset)
+    {
+        dependencyBytes = bytes
+        resolvedDependencyFile = dependencyFile
+        dependencyDefinition = ExactLocation(
+            file: dependencyFile.path,
+            byteOffset: Int(dependencyOffset),
+            line: Int(dependencyCoordinate.line),
+            column: Int(dependencyCoordinate.column)
+        )
+    } else {
+        dependencyBytes = Array(definitionSource.utf8)
+        resolvedDependencyFile = relationFile
+        dependencyDefinition = ExactLocation(
+            file: definitionPath,
+            byteOffset: Int(definitionOffset),
+            line: Int(coordinate.line),
+            column: Int(coordinate.column)
+        )
+    }
     let signatureTraitOffset = definitionSource.range(of: "Backend").flatMap {
         UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
     }
@@ -3643,6 +3776,9 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
             line: Int(coordinate.line),
             column: Int(coordinate.column)
         ),
+        dependencyFile: resolvedDependencyFile,
+        dependencyBytes: dependencyBytes,
+        dependencyDefinition: dependencyDefinition,
         relationFile: relationFile,
         relationCallOffset: relationCallOffset,
         signatureTraitOffset: signatureTraitOffset,

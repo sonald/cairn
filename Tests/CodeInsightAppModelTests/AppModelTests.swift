@@ -157,6 +157,48 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async thr
 
 @MainActor
 @Test
+func navigationHistoryReplaysAnAbsoluteDependencyPath() async throws {
+    let root = try temporaryProject(["main.rs": "fn main() {}\n"])
+    let dependencyRoot = try temporaryProject([
+        "dependency.rs": "pub fn dependency() {}\n",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: dependencyRoot)
+    }
+    let dependency = dependencyRoot.appendingPathComponent("dependency.rs")
+    var opened: [URL] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, _ in
+        opened.append(file.standardizedFileURL)
+    }
+    model.openProject(root: root)
+    #expect(await waitUntil { model.fileTree != nil })
+
+    let projectFile = root.appendingPathComponent("main.rs")
+    model.navigate(to: projectFile)
+    model.navigate(
+        to: dependency,
+        leaving: jumpRecord("main.rs", offset: 0, snapshotID: nil)
+    )
+    model.goBack(from: jumpRecord(
+        dependency.path,
+        offset: 0,
+        snapshotID: nil
+    ))
+    #expect(await waitUntil { opened.count == 3 })
+    model.goForward()
+    #expect(await waitUntil { opened.count == 4 })
+
+    #expect(opened == [
+        projectFile.standardizedFileURL,
+        dependency.standardizedFileURL,
+        projectFile.standardizedFileURL,
+        dependency.standardizedFileURL,
+    ])
+}
+
+@MainActor
+@Test
 func projectStateAcceptsLegalTransitions() {
     let model = AppModel()
     let root = URL(fileURLWithPath: "/tmp/project", isDirectory: true)

@@ -120,6 +120,7 @@ swift run -c release codeinsight-app
 | G8.2 | 切多个 commit + 跨版本后退/前进 | 时间旅行 + 浏览器历史三者一致（阅读区/版本/文件树同步，M3 G4 回归） |
 | G8.3 | 设置改行距/字号/主题（SI Classic），退出重开 | 即时生效且保留（M3 G5 回归） |
 | G8.4 | 单击 use super::Bubble 的 Bubble | Context → bubble.rs strong（M2 回归） |
+| G8.5 | 真机 rust-analyzer 跳到 registry/std 依赖源码 | Context 保留诚实性 tokens `External · in dependency` / `in dependency`，crate 名可证时显示；不可证时显示绝对路径；阅读区只读，文件树不联动 |
 
 ## G9 稳定性
 

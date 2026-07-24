@@ -810,9 +810,13 @@ public final class AppModel {
 
     private func replayWithinCurrentSnapshot(_ record: JumpRecord) {
         guard let root = fileTree?.root else { return }
-        let file = root.appendingPathComponent(record.path).standardizedFileURL
-        guard file.pathComponents.starts(with: root.pathComponents) else { return }
-        let source = documentSource
+        let dependency = exactLocationIsInDependency(record.path)
+        let file = dependency
+            ? URL(fileURLWithPath: record.path).standardizedFileURL
+            : root.appendingPathComponent(record.path).standardizedFileURL
+        guard dependency || file.pathComponents.starts(with: root.pathComponents)
+        else { return }
+        let source = dependency ? nil : documentSource
         let replayGeneration = generation
         let replayNavigationGeneration = navigationGeneration
         let replaySnapshotID = currentSnapshotID
