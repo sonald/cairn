@@ -513,6 +513,58 @@ func contextWindowDiscardsOutOfOrderRequests() async throws {
 
 @MainActor
 @Test
+func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
+    async throws
+{
+    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let firstContext = queryContext(for: session)
+    let secondContext = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: firstContext.generation + 1
+    )
+    let path = try #require(pathID("main.rs", in: session))
+    let alpha = byteOffset(of: "alpha();", in: source)
+    let beta = byteOffset(of: "beta();", in: source)
+    let gate = ControlledContextResolver()
+    let model = ContextWindowModel(gate.resolve)
+    model.updateProjectState(.ready(session, firstContext), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: alpha)
+    #expect(await waitUntil { gate.isPending(alpha) })
+    model.updateProjectState(.ready(session, secondContext), root: root)
+    gate.complete(
+        alpha,
+        with: try session.resolve(
+            file: path,
+            offset: alpha,
+            context: firstContext
+        )
+    )
+    for _ in 0..<10 { await Task.yield() }
+    #expect(model.candidateCount == 0)
+
+    model.tokenClicked(file: "main.rs", offset: beta)
+    #expect(await waitUntil { gate.isPending(beta) })
+    gate.complete(
+        beta,
+        with: try session.resolve(
+            file: path,
+            offset: beta,
+            context: secondContext
+        )
+    )
+    #expect(await waitUntil {
+        model.selectedCandidate?.targetByteOffset
+            == byteOffset(of: "beta() {}", in: source)
+    })
+}
+
+@MainActor
+@Test
 func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
     let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
     let root = try temporaryProject(["main.rs": source])

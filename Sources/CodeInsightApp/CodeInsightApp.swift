@@ -52,6 +52,7 @@ private struct CodeInsightApplication {
         if let exactRoot {
             let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
             let target = exactSelfTestTarget(root: fixtureRoot)
+            let providerState = ExactSelfTestProviderState()
             let provider = InProcessExactProvider(
                 location: target?.definition,
                 externalFile: "src/lib.rs",
@@ -61,7 +62,8 @@ private struct CodeInsightApplication {
                     byteOffset: 40,
                     line: 4,
                     column: 5
-                )
+                ),
+                state: providerState
             )
             let coordinator = ExactCoordinator(
                 providerFactory: { _ in provider },
@@ -78,7 +80,8 @@ private struct CodeInsightApplication {
                 model: AppModel(
                     indexService: ExactSelfTestIndexService(),
                     exactCoordinator: coordinator
-                )
+                ),
+                exactSelfTestProviderState: providerState
             )
         } else {
             delegate = AppDelegate(startedAt: startedAt)
@@ -136,14 +139,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 {
     private let startedAt: ContinuousClock.Instant
     private let model: AppModel
+    private let exactSelfTestProviderState: ExactSelfTestProviderState?
     private let recentProjectsStore = RecentProjectsStore()
     private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
     private var settingsWindowController: ReaderSettingsWindowController?
 
-    init(startedAt: ContinuousClock.Instant, model: AppModel = AppModel()) {
+    init(
+        startedAt: ContinuousClock.Instant,
+        model: AppModel = AppModel(),
+        exactSelfTestProviderState: ExactSelfTestProviderState? = nil
+    ) {
         self.startedAt = startedAt
         self.model = model
+        self.exactSelfTestProviderState = exactSelfTestProviderState
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1033,6 +1042,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 error: "exact self-test target unavailable"
             )
         }
+        windowController.window?.setContentSize(
+            NSSize(width: 1_600, height: 1_000)
+        )
+        pumpRunLoop()
 
         windowController.openProject(root: projectRoot)
         guard waitUntil(timeout: 30, condition: {
@@ -1053,11 +1066,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && windowController.selfTestExactStatusText.contains("Safe")
         })
         let initialProfileTitle =
-            "Rust · \(projectRoot.lastPathComponent) · Safe"
+            "Rust · \(projectRoot.lastPathComponent) · default · Safe"
         let initialProfileVisible = waitUntil(timeout: 5, condition: {
             windowController.selfTestProfileToolbarItemExistsAndVisible
                 && windowController.selfTestProfileTitle == initialProfileTitle
         })
+        let initialProfileTitleSafe =
+            windowController.selfTestProfileTitle == initialProfileTitle
         emitExactStep(
             "initial-status",
             variant: "fake",
@@ -1114,8 +1129,102 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController,
             extra: ["exactUpgradeMS": exactUpgradeMS]
         )
-        let exactSummary = windowController.selfTestContextSummary
-        let exactCount = windowController.selfTestContextCandidateCount
+        var exactSummary = windowController.selfTestContextSummary
+        var exactCount = windowController.selfTestContextCandidateCount
+
+        exactSelfTestProviderState?.blockNextDefinition()
+        let featureProbeFileVisible = waitUntil(timeout: 5, condition: {
+            windowController.selectFileInSidebar(target.relationFile)
+        }) && waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.relationFile.standardizedFileURL
+        })
+        let oldGeneration = model.generation
+        if featureProbeFileVisible {
+            windowController.selfTestReaderClick(
+                offset: target.relationCallOffset,
+                commandClick: false
+            )
+        }
+        let oldGenerationRequestInFlight = waitUntil(timeout: 5, condition: {
+            exactSelfTestProviderState?.definitionIsBlocked == true
+                && windowController.selfTestContextCandidateCount >= 1
+                && windowController.selfTestContextProvenance?
+                    .contains("Exact") == false
+        })
+        let menuActionTriggered =
+            windowController.selfTestSwitchFeatureSelection(.allFeatures)
+        let featurePrepared = menuActionTriggered
+            && waitUntil(timeout: 5, condition: {
+                model.currentFeatureSelection == .allFeatures
+                    && model.generation == oldGeneration + 1
+                    && model.exactCoordinator.readiness == .ready
+                    && exactSelfTestProviderState?.featureSelections.last
+                        == .allFeatures
+            })
+        let fuzzyVisibleDuringSwitch =
+            windowController.selfTestContextCandidateCount >= 1
+            && windowController.selfTestContextProvenance?
+                .contains("Exact") == false
+        exactSelfTestProviderState?.releaseBlockedDefinition()
+        let oldGenerationResultReturned = waitUntil(timeout: 5, condition: {
+            exactSelfTestProviderState?.blockedDefinitionReturned == true
+        })
+        let oldGenerationResultDiscarded = oldGenerationResultReturned
+            && model.generation == oldGeneration + 1
+            && windowController.selfTestContextProvenance?
+                .contains("Exact") == false
+        if featureProbeFileVisible {
+            windowController.selfTestReaderClick(
+                offset: target.relationCallOffset,
+                commandClick: false
+            )
+        }
+        let fuzzyAfterSwitch = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextCandidateCount >= 1
+                && windowController.selfTestContextProvenance?
+                    .contains("Exact") == false
+        })
+        let switchedExactVisible = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextProvenance?
+                .contains("features: all") == true
+        })
+        if switchedExactVisible {
+            exactSummary = windowController.selfTestContextSummary
+            exactCount = windowController.selfTestContextCandidateCount
+        }
+        let switchedProfileTitle =
+            "Rust · \(projectRoot.lastPathComponent) · all · Safe"
+        let profileButtonVisibleWithGeometry = waitUntil(timeout: 5, condition: {
+            windowController.selfTestProfileButtonVisibleWithGeometry
+                && windowController.selfTestProfileTitle == switchedProfileTitle
+        })
+        emitExactStep(
+            "feature-switch",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "menuActionTriggered": menuActionTriggered,
+                "featurePrepared": featurePrepared,
+                "fakePrepareFeatures": exactSelfTestProviderState?
+                    .featureSelections.map(\.rawValue) ?? [],
+                "fuzzyVisibleDuringSwitch": fuzzyVisibleDuringSwitch,
+                "fuzzyAfterSwitch": fuzzyAfterSwitch,
+                "oldGenerationRequestInFlight": oldGenerationRequestInFlight,
+                "oldGenerationResultReturned": oldGenerationResultReturned,
+                "oldGenerationResultDiscarded": oldGenerationResultDiscarded,
+                "switchedExactVisible": switchedExactVisible,
+                "profileButtonVisibleWithGeometry":
+                    profileButtonVisibleWithGeometry,
+                "profileButtonFrame": NSStringFromRect(
+                    windowController.selfTestProfileButtonFrame
+                ),
+                "profileContainerBounds": NSStringFromRect(
+                    windowController.selfTestProfileContainerBounds
+                ),
+                "profileTitle": windowController.selfTestProfileTitle,
+            ]
+        )
 
         let relationFileVisible = waitUntil(timeout: 5, condition: {
             windowController.selectFileInSidebar(target.relationFile)
@@ -1348,8 +1457,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
             "initialProfileVisible": initialProfileVisible,
-            "initialProfileTitleSafe":
-                windowController.selfTestProfileTitle == initialProfileTitle,
+            "initialProfileTitleSafe": initialProfileTitleSafe,
+            "featureProbeFileVisible": featureProbeFileVisible,
+            "featureMenuActionTriggered": menuActionTriggered,
+            "featurePrepared": featurePrepared,
+            "featureFuzzyVisibleDuringSwitch": fuzzyVisibleDuringSwitch,
+            "featureFuzzyAfterSwitch": fuzzyAfterSwitch,
+            "featureOldGenerationRequestInFlight":
+                oldGenerationRequestInFlight,
+            "featureOldGenerationResultReturned":
+                oldGenerationResultReturned,
+            "featureOldGenerationResultDiscarded":
+                oldGenerationResultDiscarded,
+            "featureSwitchedExactVisible": switchedExactVisible,
+            "featureProfileButtonVisibleWithGeometry":
+                profileButtonVisibleWithGeometry,
             "relationFileVisible": relationFileVisible,
             "selectedForDirection": selectedForDirection,
             "selectedEdgeDrivesRoot": selectedEdgeDrivesRoot,
@@ -1442,7 +1564,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller.selfTestExactStatusVisible
                 && controller.selfTestExactStatusText.contains("Safe")
         })
-        let safeProfileTitle = "Rust · \(fixture.lastPathComponent) · Safe"
+        let unit = trustModel.activeAnalysisProfileDisplay?
+            .projectUnitName ?? fixture.lastPathComponent
+        let safeProfileTitle = "Rust · \(unit) · default · Safe"
         let initialProfileVisible = waitUntil(timeout: 5, condition: {
             controller.selfTestProfileToolbarItemExistsAndVisible
                 && controller.selfTestProfileTitle == safeProfileTitle
@@ -1461,7 +1585,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && controller.selfTestExactStatusText.contains("Trusted")
         })
         let trustedProfileTitle =
-            "Rust · \(fixture.lastPathComponent) · Trusted"
+            "Rust · \(unit) · default · Trusted"
         let trustedProfileVisible = trustedReady && waitUntil(timeout: 5, condition: {
             controller.selfTestProfileToolbarItemExistsAndVisible
                 && controller.selfTestProfileTitle == trustedProfileTitle
@@ -3184,7 +3308,10 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         profile: ExactProfileKey,
         trustMode: TrustMode
     ) throws -> any ExactSession {
-        let ordinal = state?.recordPrepare(trustMode: trustMode)
+        let ordinal = state?.recordPrepare(
+            trustMode: trustMode,
+            featureSelection: profile.featureSelection
+        )
         return InProcessExactSession(
             location: location,
             externalFile: externalFile,
@@ -3195,6 +3322,7 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
                 toolVersion: toolVersion,
                 configFingerprint: profile.configFingerprint,
                 environmentFingerprint: profile.environmentFingerprint,
+                featureSelection: profile.featureSelection,
                 trustMode: trustMode,
                 generatedAt: Date(timeIntervalSince1970: 0),
                 coverage: trustMode == .safe ? .partial : .full
@@ -3234,6 +3362,10 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+        let wasBlocked = state?.waitIfDefinitionIsBlocked() == true
+        defer {
+            if wasBlocked { state?.recordBlockedDefinitionReturned() }
+        }
         Thread.sleep(forTimeInterval: 0.25)
         if file == externalFile, byteOffset == externalOffset {
             return externalLocation
@@ -3251,7 +3383,12 @@ private final class ExactSelfTestProviderState: @unchecked Sendable {
     private let lock = NSLock()
     private var storedRoot: URL?
     private var storedTrustModes: [String] = []
+    private var storedFeatureSelections: [FeatureSelection] = []
     private var storedClosedSessions: Set<Int> = []
+    private let definitionCondition = NSCondition()
+    private var shouldBlockNextDefinition = false
+    private var blockedDefinition = false
+    private var didReturnBlockedDefinition = false
 
     var root: URL? {
         get {
@@ -3278,7 +3415,28 @@ private final class ExactSelfTestProviderState: @unchecked Sendable {
         return storedClosedSessions
     }
 
-    func recordPrepare(trustMode: TrustMode) -> Int {
+    var featureSelections: [FeatureSelection] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedFeatureSelections
+    }
+
+    var definitionIsBlocked: Bool {
+        definitionCondition.lock()
+        defer { definitionCondition.unlock() }
+        return blockedDefinition
+    }
+
+    var blockedDefinitionReturned: Bool {
+        definitionCondition.lock()
+        defer { definitionCondition.unlock() }
+        return didReturnBlockedDefinition
+    }
+
+    func recordPrepare(
+        trustMode: TrustMode,
+        featureSelection: FeatureSelection
+    ) -> Int {
         lock.lock()
         defer { lock.unlock() }
         let mode = switch trustMode {
@@ -3286,7 +3444,45 @@ private final class ExactSelfTestProviderState: @unchecked Sendable {
         case .trusted: "trusted"
         }
         storedTrustModes.append(mode)
+        storedFeatureSelections.append(featureSelection)
         return storedTrustModes.count
+    }
+
+    func blockNextDefinition() {
+        definitionCondition.lock()
+        shouldBlockNextDefinition = true
+        blockedDefinition = false
+        didReturnBlockedDefinition = false
+        definitionCondition.unlock()
+    }
+
+    func waitIfDefinitionIsBlocked() -> Bool {
+        definitionCondition.lock()
+        guard shouldBlockNextDefinition else {
+            definitionCondition.unlock()
+            return false
+        }
+        shouldBlockNextDefinition = false
+        blockedDefinition = true
+        definitionCondition.broadcast()
+        while blockedDefinition { definitionCondition.wait() }
+        definitionCondition.unlock()
+        return true
+    }
+
+    func releaseBlockedDefinition() {
+        definitionCondition.lock()
+        shouldBlockNextDefinition = false
+        blockedDefinition = false
+        definitionCondition.broadcast()
+        definitionCondition.unlock()
+    }
+
+    func recordBlockedDefinitionReturned() {
+        definitionCondition.lock()
+        didReturnBlockedDefinition = true
+        definitionCondition.broadcast()
+        definitionCondition.unlock()
     }
 
     func recordClose(ordinal: Int) {

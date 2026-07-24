@@ -29,6 +29,8 @@ public final class Materializer: @unchecked Sendable {
 
         let commit = try Self.safeComponent(snapshot.commitOID.hex)
         let config = try Self.safeComponent(configFingerprint)
+        // Feature selection changes rust-analyzer results, not source bytes.
+        // Keep materialization keyed only by commit × Cargo configuration.
         let destination = rootURL
             .appendingPathComponent(commit, isDirectory: true)
             .appendingPathComponent(config, isDirectory: true)

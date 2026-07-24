@@ -73,18 +73,15 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
         profile: ExactProfileKey,
         trustMode: TrustMode
     ) throws -> any ExactSession {
-        let options: [String: Any]
+        let options = Self.initializationOptions(
+            trustMode: trustMode,
+            featureSelection: profile.featureSelection
+        )
         let coverage: ExactCoverage
         switch trustMode {
         case .safe:
-            options = [
-                "cargo": ["buildScripts": ["enable": false]],
-                "procMacro": ["enable": false],
-                "checkOnSave": false,
-            ]
             coverage = .partial
         case .trusted:
-            options = [:]
             coverage = .full
         }
 
@@ -114,6 +111,7 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
                 toolVersion: toolVersion,
                 configFingerprint: profile.configFingerprint,
                 environmentFingerprint: profile.environmentFingerprint,
+                featureSelection: profile.featureSelection,
                 trustMode: trustMode,
                 generatedAt: Date(),
                 coverage: coverage
@@ -126,6 +124,35 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             client.close(grace: closeGrace)
             throw error
         }
+    }
+
+    static func initializationOptions(
+        trustMode: TrustMode,
+        featureSelection: FeatureSelection
+    ) -> [String: Any] {
+        var options: [String: Any]
+        var cargo: [String: Any]
+        switch trustMode {
+        case .safe:
+            cargo = ["buildScripts": ["enable": false]]
+            options = [
+                "procMacro": ["enable": false],
+                "checkOnSave": false,
+            ]
+        case .trusted:
+            cargo = [:]
+            options = [:]
+        }
+        switch featureSelection {
+        case .defaultFeatures:
+            break
+        case .allFeatures:
+            cargo["features"] = "all"
+        case .noDefaultFeatures:
+            cargo["noDefaultFeatures"] = true
+        }
+        if !cargo.isEmpty { options["cargo"] = cargo }
+        return options
     }
 
     private static var defaultCacheURL: URL {
@@ -184,6 +211,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             toolVersion: baseAttribution.toolVersion,
             configFingerprint: baseAttribution.configFingerprint,
             environmentFingerprint: baseAttribution.environmentFingerprint,
+            featureSelection: baseAttribution.featureSelection,
             trustMode: baseAttribution.trustMode,
             generatedAt: baseAttribution.generatedAt,
             coverage: coverage

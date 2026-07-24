@@ -242,6 +242,65 @@ func appModelTrustActionsRebuildExactSessionImmediately() async throws {
 
 @MainActor
 @Test
+func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
+    async throws
+{
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    let model = AppModel(exactCoordinator: coordinator)
+
+    model.openProject(root: fixture.root)
+    #expect(await exactWaitUntil {
+        guard case .ready = model.projectState else { return false }
+        return coordinator.readiness == .ready
+    })
+    guard case let .ready(original, _) = model.projectState else {
+        Issue.record("expected original ready session")
+        return
+    }
+    let originalGeneration = model.generation
+    let relationGeneration = model.relationTree.generation
+    let main = try #require(
+        original.definitions(
+            of: "main",
+            context: exactQueryContext(
+                for: original,
+                generation: originalGeneration
+            )
+        ).first?.0
+    )
+    _ = model.relationTree.setRoot(symbol: main, direction: .calls)
+    #expect(model.relationTree.root != nil)
+
+    model.switchFeatureSelection(.allFeatures)
+
+    #expect(await exactWaitUntil {
+        state.prepareCount == 2 && coordinator.readiness == .ready
+    })
+    guard case let .ready(reprofiled, context) = model.projectState else {
+        Issue.record("expected reprofiled ready session")
+        return
+    }
+    #expect(model.generation == originalGeneration + 1)
+    #expect(reprofiled.snapshotID == original.snapshotID)
+    #expect(reprofiled.stats.extractedCount == 0)
+    #expect(reprofiled.analysisProfile.featureSelection == .allFeatures)
+    #expect(context.analysisProfileID == reprofiled.analysisProfile.id)
+    #expect(context.generation == model.generation)
+    #expect(model.relationTree.generation > relationGeneration)
+    #expect(model.relationTree.root == nil)
+    #expect(model.currentFeatureSelection == .allFeatures)
+    #expect(model.availableFeatureSelections == [
+        .defaultFeatures, .allFeatures, .noDefaultFeatures,
+    ])
+    #expect(state.featureSelections == [.defaultFeatures, .allFeatures])
+    #expect(coordinator.attribution?.featureSelection == .allFeatures)
+}
+
+@MainActor
+@Test
 func appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe()
     async throws
 {
@@ -335,6 +394,32 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         file: "main.rs", byteOffset: 0, generation: 4
     ) != nil)
     #expect(state.definitionCount == 3)
+}
+
+@Test
+func exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() {
+    var overlay = ExactOverlay()
+    var providerCallCount = 0
+    let defaultKey = exactReuseKey(featureSelection: .defaultFeatures)
+    let allKey = exactReuseKey(featureSelection: .allFeatures)
+
+    func resolve(_ key: ExactOverlay.ReuseKey) -> ExactOverlay.Entry? {
+        if let cached = overlay.definition(
+            for: key,
+            file: "main.rs",
+            byteOffset: 0
+        ) {
+            return cached
+        }
+        providerCallCount += 1
+        let entry = exactEntry(file: "main.rs", byteOffset: 0)
+        overlay.store(entry, for: key, file: "main.rs", byteOffset: 0)
+        return entry
+    }
+
+    #expect(resolve(defaultKey) != nil)
+    #expect(resolve(allKey) != nil)
+    #expect(providerCallCount == 2)
 }
 
 @MainActor
@@ -474,6 +559,9 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     #expect(model.selectedCandidate?.exactAttribution?.coverage == .partial)
     #expect(model.selectedCandidate?.exactOrigin == .worktree)
     #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == false)
+    #expect(model.selectedCandidate?.provenanceBadge.contains(
+        "features: default"
+    ) == true)
     guard case .lsp = model.selectedCandidate?.provenance else {
         Issue.record("exact candidate did not carry LSP provenance")
         return
@@ -620,6 +708,7 @@ private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
                 toolVersion: toolVersion,
                 configFingerprint: profile.configFingerprint,
                 environmentFingerprint: profile.environmentFingerprint,
+                featureSelection: profile.featureSelection,
                 trustMode: trustMode,
                 generatedAt: Date(timeIntervalSince1970: 0),
                 coverage: trustMode == .safe ? .partial : .full
@@ -636,6 +725,7 @@ private final class ExactProviderState: @unchecked Sendable {
     private var prepares = 0
     private var definitions = 0
     private var modes: [String] = []
+    private var features: [FeatureSelection] = []
     private var closed: Set<Int> = []
     private weak var latestSession: ExactStateSession?
 
@@ -650,6 +740,7 @@ private final class ExactProviderState: @unchecked Sendable {
     var prepareCount: Int { locked { prepares } }
     var definitionCount: Int { locked { definitions } }
     var trustModes: [String] { locked { modes } }
+    var featureSelections: [FeatureSelection] { locked { features } }
     var closedSessions: Set<Int> { locked { closed } }
 
     func makeSession(attribution: ExactAttribution) -> ExactStateSession {
@@ -660,6 +751,7 @@ private final class ExactProviderState: @unchecked Sendable {
             case .trusted: "trusted"
             }
             modes.append(mode)
+            features.append(attribution.featureSelection)
             return prepares
         }
         let session = ExactStateSession(
@@ -741,6 +833,7 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
             toolVersion: storedAttribution.toolVersion,
             configFingerprint: storedAttribution.configFingerprint,
             environmentFingerprint: storedAttribution.environmentFingerprint,
+            featureSelection: storedAttribution.featureSelection,
             trustMode: storedAttribution.trustMode,
             generatedAt: storedAttribution.generatedAt,
             coverage: coverage
@@ -835,6 +928,7 @@ private final class BlockingExactProvider: ExactProvider, @unchecked Sendable {
             toolVersion: toolVersion,
             configFingerprint: profile.configFingerprint,
             environmentFingerprint: profile.environmentFingerprint,
+            featureSelection: profile.featureSelection,
             trustMode: trustMode,
             generatedAt: Date(timeIntervalSince1970: 0),
             coverage: .partial
@@ -952,6 +1046,17 @@ private func exactAttribution() -> ExactAttribution {
         trustMode: .safe,
         generatedAt: Date(timeIntervalSince1970: 0),
         coverage: .partial
+    )
+}
+
+private func exactReuseKey(
+    featureSelection: FeatureSelection
+) -> ExactOverlay.ReuseKey {
+    return ExactOverlay.ReuseKey(
+        versionIdentity: "worktree:/fixture",
+        configFingerprint: "config",
+        featureSelection: featureSelection,
+        toolVersion: "fake-1"
     )
 }
 

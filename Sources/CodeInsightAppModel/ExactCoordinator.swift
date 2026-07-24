@@ -13,15 +13,18 @@ public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String
         public let configFingerprint: String
+        public let featureSelection: FeatureSelection
         public let toolVersion: String
 
         public init(
             versionIdentity: String,
             configFingerprint: String,
+            featureSelection: FeatureSelection,
             toolVersion: String
         ) {
             self.versionIdentity = versionIdentity
             self.configFingerprint = configFingerprint
+            self.featureSelection = featureSelection
             self.toolVersion = toolVersion
         }
     }
@@ -183,6 +186,7 @@ public final class ExactCoordinator {
     public func prepare(
         projectURL: URL,
         revision: String?,
+        featureSelection: FeatureSelection = .defaultFeatures,
         generation: UInt64
     ) {
         let root = projectURL.standardizedFileURL
@@ -217,7 +221,10 @@ public final class ExactCoordinator {
                     let materializedRoot: URL?
                     let versionIdentity: String
                     if let commit = snapshot as? CommitSnapshot {
-                        profile = try ExactProfileKey(snapshot: commit)
+                        profile = try ExactProfileKey(
+                            snapshot: commit,
+                            featureSelection: featureSelection
+                        )
                         let resolvedRoot = try materializer.materialize(
                             commit,
                             configFingerprint: profile.configFingerprint
@@ -226,7 +233,10 @@ public final class ExactCoordinator {
                         providerRoot = resolvedRoot
                         versionIdentity = commit.commitOID.hex
                     } else {
-                        profile = try ExactProfileKey(projectURL: root)
+                        profile = try ExactProfileKey(
+                            projectURL: root,
+                            featureSelection: featureSelection
+                        )
                         providerRoot = root
                         materializedRoot = nil
                         versionIdentity =
@@ -236,6 +246,7 @@ public final class ExactCoordinator {
                     let key = ExactOverlay.ReuseKey(
                         versionIdentity: versionIdentity,
                         configFingerprint: profile.configFingerprint,
+                        featureSelection: profile.featureSelection,
                         toolVersion: provider.toolVersion
                     )
                     let session = try provider.prepare(

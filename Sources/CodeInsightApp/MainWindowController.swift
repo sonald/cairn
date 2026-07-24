@@ -549,6 +549,33 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             && !selfTestProfileToolbarItemExistsAndVisible
     }
     var selfTestProfileTitle: String { profileButton.title }
+    var selfTestProfileButtonVisibleWithGeometry: Bool {
+        guard window != nil,
+              selfTestProfileToolbarItemExistsAndVisible,
+              !profileButton.isHiddenOrHasHiddenAncestor,
+              profileButton.frame.width > 0,
+              profileButton.frame.height > 0,
+              let container = profileButton.superview
+        else { return false }
+        return container.bounds.contains(profileButton.frame)
+    }
+    var selfTestProfileButtonFrame: NSRect { profileButton.frame }
+    var selfTestProfileContainerBounds: NSRect {
+        profileButton.superview?.bounds ?? .zero
+    }
+    func selfTestSwitchFeatureSelection(
+        _ featureSelection: FeatureSelection
+    ) -> Bool {
+        guard let item = makeProfileMenu().items.first(where: {
+            $0.representedObject as? String == featureSelection.rawValue
+        }), let action = item.action
+        else { return false }
+        return NSApplication.shared.sendAction(
+            action,
+            to: item.target,
+            from: item
+        )
+    }
     func prepareTitledWindowForSelfTest() {
         guard let window else { return }
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
@@ -1004,7 +1031,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .trusted: "Trusted"
         }
         return "\(Self.displayName(for: profile.language))"
-            + " · \(profile.projectRootName) · \(trust)"
+            + " · \(profile.projectUnitName)"
+            + " · \(Self.displayName(for: profile.featureSelection))"
+            + " · \(trust)"
     }
 
     private static func displayName(for language: LanguageID) -> String {
@@ -1013,6 +1042,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .python: "Python"
         case .typescript: "TypeScript"
         case .javascript: "JavaScript"
+        }
+    }
+
+    private static func displayName(
+        for featureSelection: FeatureSelection
+    ) -> String {
+        switch featureSelection {
+        case .defaultFeatures: "default"
+        case .allFeatures: "all"
+        case .noDefaultFeatures: "no-default"
         }
     }
 
@@ -1055,25 +1094,55 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func makeProfileMenu() -> NSMenu {
         let menu = NSMenu(title: "Profile")
+        guard let profile = model.activeAnalysisProfileDisplay,
+              let trustMode = model.exactCoordinator.trustMode
+        else { return menu }
+        let trust = switch trustMode {
+        case .safe: "Safe"
+        case .trusted: "Trusted"
+        }
+        let edition = profile.edition.map { "edition \($0)" }
+            ?? "edition unknown"
         let current = NSMenuItem(
-            title: profileButton.title,
+            title: "Current unit: \(profile.projectUnitName)"
+                + " · features: \(Self.displayName(for: profile.featureSelection))"
+                + " · \(edition) · \(trust)",
             action: nil,
             keyEquivalent: ""
         )
-        current.state = .on
         current.isEnabled = false
         menu.addItem(current)
         menu.addItem(.separator())
-        let trust = NSMenuItem(
+        for featureSelection in model.availableFeatureSelections {
+            let title = switch featureSelection {
+            case .defaultFeatures: "Default features"
+            case .allFeatures: "All features"
+            case .noDefaultFeatures: "No default features"
+            }
+            let feature = NSMenuItem(
+                title: title,
+                action: #selector(switchFeatureSelectionFromMenu(_:)),
+                keyEquivalent: ""
+            )
+            feature.target = self
+            feature.representedObject = featureSelection.rawValue
+            feature.state = featureSelection == profile.featureSelection
+                ? .on
+                : .off
+            feature.isEnabled = model.snapshotPhase == .fullReady
+            menu.addItem(feature)
+        }
+        menu.addItem(.separator())
+        let trustItem = NSMenuItem(
             title: "Trust This Repository…",
             action: NSSelectorFromString("trustThisRepository:"),
             keyEquivalent: ""
         )
-        trust.target = NSApplication.shared.delegate
-        menu.addItem(trust)
+        trustItem.target = NSApplication.shared.delegate
+        menu.addItem(trustItem)
         menu.addItem(.separator())
         let explanation = NSMenuItem(
-            title: "Profiles are detected from project configuration",
+            title: "Switch features here; the current unit is detected",
             action: nil,
             keyEquivalent: ""
         )
@@ -1196,6 +1265,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 "Tool version: \(attribution.toolVersion)",
                 "Trust: \(trust ?? "Unknown")",
                 "Coverage: \(coverageMeaning)",
+                "Features: \(Self.displayName(for: attribution.featureSelection))",
             ]
             if let statusDetail { lines.append(statusDetail) }
             detail = lines.joined(separator: "\n")
@@ -1313,6 +1383,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             at: .zero,
             in: profileButton
         )
+    }
+
+    @objc private func switchFeatureSelectionFromMenu(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let featureSelection = FeatureSelection(rawValue: rawValue)
+        else { return }
+        model.switchFeatureSelection(featureSelection)
+        render()
     }
 
     private func showCompareCommitPicker() {

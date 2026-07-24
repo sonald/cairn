@@ -306,20 +306,26 @@ public final class AppModel {
 
     public var activeAnalysisProfileDisplay: (
         language: LanguageID,
-        projectRootName: String
+        projectUnitName: String,
+        featureSelection: FeatureSelection,
+        edition: String?
     )? {
-        guard case let .ready(session, _) = projectState,
-              let projectRoot
-        else { return nil }
+        guard case let .ready(session, _) = projectState else { return nil }
         let profile = session.analysisProfile
-        let relativeRoot = session.paths.resolve(profile.projectRoot)
         return (
             profile.language,
-            projectRoot.appendingPathComponent(
-                relativeRoot,
-                isDirectory: true
-            ).standardizedFileURL.lastPathComponent
+            profile.projectUnitName,
+            profile.featureSelection,
+            profile.edition
         )
+    }
+
+    public var currentFeatureSelection: FeatureSelection? {
+        activeAnalysisProfileDisplay?.featureSelection
+    }
+
+    public var availableFeatureSelections: [FeatureSelection] {
+        FeatureSelection.allCases
     }
 
     private let indexService: any IndexService
@@ -438,6 +444,28 @@ public final class AppModel {
               case .ready = projectState
         else { return }
         prepareExact(generation: trustGeneration)
+    }
+
+    public func switchFeatureSelection(_ featureSelection: FeatureSelection) {
+        guard snapshotPhase == .fullReady,
+              case let .ready(session, _) = projectState,
+              session.analysisProfile.featureSelection != featureSelection
+        else { return }
+        generation &+= 1
+        let profileGeneration = generation
+        let reprofiled = session.reprofiled(featureSelection: featureSelection)
+        guard transition(to: .ready(
+            reprofiled,
+            QueryContext(
+                snapshotID: reprofiled.snapshotID,
+                analysisProfileID: reprofiled.analysisProfile.id,
+                generation: profileGeneration
+            )
+        )) else {
+            assertionFailure("Illegal project state transition while reprofiling")
+            return
+        }
+        prepareExact(generation: profileGeneration)
     }
 
     public func switchToCommit(
@@ -708,10 +736,13 @@ public final class AppModel {
     }
 
     private func prepareExact(generation: UInt64) {
-        guard let projectRoot else { return }
+        guard let projectRoot,
+              case let .ready(session, _) = projectState
+        else { return }
         exactCoordinator.prepare(
             projectURL: projectRoot,
             revision: currentRevision,
+            featureSelection: session.analysisProfile.featureSelection,
             generation: generation
         )
     }

@@ -43,8 +43,12 @@ public struct ExactLocation: Equatable, Sendable {
 public struct ExactProfileKey: Hashable, Sendable {
     public let configFingerprint: String
     public let environmentFingerprint: String
+    public let featureSelection: FeatureSelection
 
-    public init(projectURL: URL) throws {
+    public init(
+        projectURL: URL,
+        featureSelection: FeatureSelection = .defaultFeatures
+    ) throws {
         let root = projectURL.standardizedFileURL
         let cargo = root.appendingPathComponent("Cargo.toml")
         guard FileManager.default.isReadableFile(atPath: cargo.path) else {
@@ -56,9 +60,13 @@ public struct ExactProfileKey: Hashable, Sendable {
         environmentFingerprint = FileManager.default.isReadableFile(
             atPath: lock.path
         ) ? try Self.sha256(contentsOf: lock) : ""
+        self.featureSelection = featureSelection
     }
 
-    public init(snapshot: any Snapshot) throws {
+    public init(
+        snapshot: any Snapshot,
+        featureSelection: FeatureSelection = .defaultFeatures
+    ) throws {
         let cargo: [UInt8]
         do {
             cargo = try snapshot.readBytes(path: "Cargo.toml")
@@ -68,11 +76,17 @@ public struct ExactProfileKey: Hashable, Sendable {
         configFingerprint = Self.sha256(bytes: cargo)
         environmentFingerprint = (try? snapshot.readBytes(path: "Cargo.lock"))
             .map(Self.sha256(bytes:)) ?? ""
+        self.featureSelection = featureSelection
     }
 
-    public init(configFingerprint: String, environmentFingerprint: String) {
+    public init(
+        configFingerprint: String,
+        environmentFingerprint: String,
+        featureSelection: FeatureSelection = .defaultFeatures
+    ) {
         self.configFingerprint = configFingerprint
         self.environmentFingerprint = environmentFingerprint
+        self.featureSelection = featureSelection
     }
 
     private static func sha256(contentsOf url: URL) throws -> String {
@@ -91,6 +105,7 @@ public struct ExactAttribution: Sendable {
     public let toolVersion: String
     public let configFingerprint: String
     public let environmentFingerprint: String
+    public let featureSelection: FeatureSelection
     public let trustMode: TrustMode
     public let generatedAt: Date
     public let coverage: ExactCoverage
@@ -100,6 +115,7 @@ public struct ExactAttribution: Sendable {
         toolVersion: String,
         configFingerprint: String,
         environmentFingerprint: String,
+        featureSelection: FeatureSelection = .defaultFeatures,
         trustMode: TrustMode,
         generatedAt: Date,
         coverage: ExactCoverage
@@ -108,6 +124,7 @@ public struct ExactAttribution: Sendable {
         self.toolVersion = toolVersion
         self.configFingerprint = configFingerprint
         self.environmentFingerprint = environmentFingerprint
+        self.featureSelection = featureSelection
         self.trustMode = trustMode
         self.generatedAt = generatedAt
         self.coverage = coverage

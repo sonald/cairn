@@ -103,6 +103,39 @@ func exactProfileKeyHashesCargoFileBytes() throws {
         profile.environmentFingerprint
             == "7f33dae8274d15e6219fcb8705a73a5f5e952fe8404d815ac8cb68685605e3e4"
     )
+    #expect(profile.featureSelection == .defaultFeatures)
+    #expect(
+        try ExactProfileKey(
+            projectURL: root,
+            featureSelection: .allFeatures
+        ).featureSelection == .allFeatures
+    )
+}
+
+@Test
+func rustAnalyzerMapsFeatureSelectionsToInitializationOptions() {
+    let defaultOptions = RustAnalyzerProvider.initializationOptions(
+        trustMode: .safe,
+        featureSelection: .defaultFeatures
+    )
+    let allOptions = RustAnalyzerProvider.initializationOptions(
+        trustMode: .safe,
+        featureSelection: .allFeatures
+    )
+    let noDefaultOptions = RustAnalyzerProvider.initializationOptions(
+        trustMode: .trusted,
+        featureSelection: .noDefaultFeatures
+    )
+    let defaultCargo = defaultOptions["cargo"] as? [String: Any]
+    let allCargo = allOptions["cargo"] as? [String: Any]
+    let noDefaultCargo = noDefaultOptions["cargo"] as? [String: Any]
+
+    #expect(defaultCargo?["features"] == nil)
+    #expect(defaultCargo?["noDefaultFeatures"] == nil)
+    #expect(allCargo?["features"] as? String == "all")
+    #expect(allCargo?["noDefaultFeatures"] == nil)
+    #expect(noDefaultCargo?["features"] == nil)
+    #expect(noDefaultCargo?["noDefaultFeatures"] as? Bool == true)
 }
 
 @Test

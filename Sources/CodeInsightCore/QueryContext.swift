@@ -49,7 +49,7 @@ public enum TrustMode: Sendable {
     case trusted
 }
 
-public enum FeatureSelection: String, Hashable, Sendable {
+public enum FeatureSelection: String, CaseIterable, Hashable, Sendable {
     case defaultFeatures
     case allFeatures
     case noDefaultFeatures

@@ -158,6 +158,11 @@ public final class ContextWindowModel {
         root: URL?,
         contentSource: DocumentLoader.ContentSource? = nil
     ) {
+        let previousGeneration = if case let .ready(_, context) = projectState {
+            context.generation
+        } else {
+            nil as UInt64?
+        }
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
             pendingToken = nil
@@ -173,7 +178,13 @@ public final class ContextWindowModel {
             locatedToken = nil
             displayedToken = nil
             stage = .indexBuilding
-        case .ready:
+        case let .ready(_, context):
+            if let previousGeneration,
+               previousGeneration != context.generation
+            {
+                requestID &+= 1
+                locatedToken = nil
+            }
             if let pendingToken {
                 self.pendingToken = nil
                 Task { [weak self] in
@@ -576,7 +587,12 @@ public final class ContextWindowModel {
         case .materialized(let commitOID):
             " · @\(commitOID.prefix(7)) (materialized)"
         }
-        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source)"
+        let features = switch attribution.featureSelection {
+        case .defaultFeatures: "default"
+        case .allFeatures: "all"
+        case .noDefaultFeatures: "no-default"
+        }
+        return "\(label) · \(attribution.provider) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source) · features: \(features)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {
