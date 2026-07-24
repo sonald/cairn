@@ -69,6 +69,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var panelPreset = PanelPresetModel.reading
     private var lastOpenedProjectRoot: URL?
     private var pendingRecentProjectRoot: URL?
+    private var pendingTabRestore: TabStripModel.Tab?
 
     init(
         model: AppModel,
@@ -256,6 +257,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.onOpenFileInSecondary = { [weak self] url in
             self?.openInSecondaryReader(url)
         }
+        sidebarController.onOpenFileInNewTab = { [weak self] url in
+            self?.openInNewTab(url)
+        }
         sidebarController.onOpenOutline = { [weak self] offset in
             guard let self, let file = model.selectedFile else { return }
             navigate(to: file, byteOffset: offset)
@@ -271,7 +275,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
         }
         readerController.onReadingPositionChange = { [weak self] offset in
-            self?.sidebarController.highlightOutline(at: offset)
+            guard let self else { return }
+            sidebarController.highlightOutline(at: offset)
+            model.tabStrip.updateActiveScroll(offset)
+        }
+        readerController.onSelectionChange = { [weak self] offset in
+            guard let self else { return }
+            sidebarController.highlightOutline(at: offset)
+            model.tabStrip.updateActiveSelection(offset)
+        }
+        readerController.onDocumentChange = { [weak model] file, document in
+            model?.tabStrip.setActiveDocument(document, for: file)
         }
         readerController.onShowRelation = { [weak self] offset, direction in
             self?.handleReaderRelation(offset: offset, direction: direction)
@@ -303,6 +317,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             profileButton.heightAnchor.constraint(equalToConstant: 28),
         ])
         applyReaderSettings(settings)
+        readerController.configureTabs(
+            model.tabStrip,
+            onActivate: { [weak self] in self?.activateTab($0) },
+            onClose: { [weak self] in self?.closeTab($0) }
+        )
         render()
         applyPanelPreset(.reading)
         observe()
@@ -332,6 +351,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         navigate(to: file)
     }
 
+    func openFileInNewTabForSelfTest(_ file: URL) {
+        openInNewTab(file)
+    }
+
+    func setReadingPositionForSelfTest(
+        scrollByteOffset: UInt32,
+        selectionByteOffset: UInt32
+    ) {
+        readerController.restoreReadingPosition(
+            scrollByteOffset: scrollByteOffset,
+            selectionByteOffset: selectionByteOffset
+        )
+        model.tabStrip.updateActiveAnchors(
+            scrollByteOffset: scrollByteOffset,
+            selectionByteOffset: selectionByteOffset
+        )
+    }
+
     func selectCommit(_ revision: String) -> Bool {
         if commitPickerPopover == nil {
             commitPickerPopover = CommitPickerPopover(
@@ -358,6 +395,42 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var displayedReaderFile: URL? { readerController.displayedFile }
+    var selfTestTabCount: Int { model.tabStrip.tabs.count }
+    var selfTestActiveTabIndex: Int? { model.tabStrip.activeIndex }
+    var selfTestActiveTabFile: URL? { model.tabStrip.activeTab?.fileURL }
+    var selfTestActiveTabSelectionByteOffset: UInt32? {
+        model.tabStrip.activeTab?.selectionByteOffset
+    }
+    var selfTestReaderPlaceholderText: String? {
+        readerController.selfTestPlaceholderText
+    }
+    var selfTestReaderPlaceholderVisible: Bool {
+        readerController.selfTestPlaceholderVisible
+    }
+    var selfTestReadingByteOffset: UInt32? {
+        readerController.currentReadingPosition()?.byteOffset
+    }
+    var selfTestTabGeometry: (
+        stripFrame: NSRect,
+        readerFrame: NSRect,
+        containerFrame: NSRect,
+        contentFrame: NSRect,
+        stripHidden: Bool,
+        stripHiddenOrHasHiddenAncestor: Bool
+    ) {
+        let geometry = readerController.selfTestTabGeometry
+        let contentFrame = window?.contentView.map {
+            $0.convert($0.bounds, to: nil)
+        } ?? .zero
+        return (
+            geometry.stripFrame,
+            geometry.readerFrame,
+            geometry.containerFrame,
+            contentFrame,
+            geometry.stripHidden,
+            geometry.stripHiddenOrHasHiddenAncestor
+        )
+    }
     var selectedSidebarFile: URL? { sidebarController.selectedFile }
     var readerHasReadingPosition: Bool {
         readerController.currentReadingPosition() != nil
@@ -387,6 +460,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestFilesContentVisible: Bool {
         sidebarController.selfTestFilesContentVisible
+    }
+    var selfTestFileContextMenuHasOpenInNewTab: Bool {
+        sidebarController.selfTestFileContextMenuHasOpenInNewTab
     }
     var selfTestOutlinePlaceholderText: String? {
         sidebarController.selfTestOutlinePlaceholderText
@@ -699,6 +775,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         searchPanel?.show(relativeTo: window)
     }
 
+    func openSelectedFileInNewTab() {
+        guard let file = sidebarController.selectedFile else { return }
+        openInNewTab(file)
+    }
+
+    func closeActiveTab() {
+        guard let index = model.tabStrip.activeIndex else { return }
+        closeTab(index)
+    }
+
+    func selectPreviousTab() {
+        selectRelativeTab(-1)
+    }
+
+    func selectNextTab() {
+        selectRelativeTab(1)
+    }
+
     func toggleRelations() {
         relationItem.isCollapsed.toggle()
     }
@@ -978,12 +1072,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 _ = sidebarController.synchronizeFileSelection(to: model.selectedFile)
             }
         }
-        let selectedSource = readerSource(for: model.selectedFile)
+        let readerFile = model.tabStrip.activeTab?.fileURL ?? model.selectedFile
+        let selectedSource = readerSource(for: readerFile)
         readerController.display(
-            model.selectedFile,
+            readerFile,
             snapshotID: model.currentSnapshotID,
             source: selectedSource
         )
+        readerController.refreshTabs()
         let compareFile = model.selectedFile.flatMap {
             projectPath(for: $0) == nil ? nil : $0
         }
@@ -1005,13 +1101,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             errorMessage: model.compare.errorMessage
         )
         if displayedNavigationGeneration != model.navigationGeneration {
-            if let file = model.selectedFile, let offset = model.selectedByteOffset {
-                readerController.navigate(
-                    to: file,
-                    byteOffset: offset,
-                    snapshotID: model.currentSnapshotID,
-                    source: selectedSource
+            if let restore = pendingTabRestore,
+               restore.fileURL.standardizedFileURL
+                    == readerFile?.standardizedFileURL
+            {
+                readerController.restoreReadingPosition(
+                    scrollByteOffset: restore.scrollByteOffset,
+                    selectionByteOffset: restore.selectionByteOffset
                 )
+                pendingTabRestore = nil
+            } else {
+                pendingTabRestore = nil
+                if let file = model.selectedFile,
+                   let offset = model.selectedByteOffset
+                {
+                    readerController.navigate(
+                        to: file,
+                        byteOffset: offset,
+                        snapshotID: model.currentSnapshotID,
+                        source: selectedSource
+                    )
+                }
             }
             displayedNavigationGeneration = model.navigationGeneration
         }
@@ -1549,11 +1659,62 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func navigate(to file: URL, byteOffset: UInt32? = nil) {
+        let current = currentJumpRecord()
+        captureActiveTabState()
+        let existingTab = model.tabStrip.tabs.firstIndex(where: {
+            $0.fileURL.standardizedFileURL == file.standardizedFileURL
+        })
+        let focusesExistingTab = byteOffset == nil
+            && existingTab != nil
+            && existingTab != model.tabStrip.activeIndex
         model.navigate(
             to: file,
             byteOffset: byteOffset,
-            leaving: currentJumpRecord()
+            leaving: current
         )
+        if focusesExistingTab { pendingTabRestore = model.tabStrip.activeTab }
+        render()
+    }
+
+    private func openInNewTab(_ file: URL) {
+        captureActiveTabState()
+        model.openInNewTab(file)
+        pendingTabRestore = model.tabStrip.activeTab
+        render()
+    }
+
+    private func activateTab(_ index: Int) {
+        guard model.tabStrip.activeIndex != index,
+              model.tabStrip.tabs.indices.contains(index)
+        else { return }
+        captureActiveTabState()
+        model.activateTab(index)
+        pendingTabRestore = model.tabStrip.activeTab
+        render()
+    }
+
+    private func closeTab(_ index: Int) {
+        let closesActive = model.tabStrip.activeIndex == index
+        if closesActive { captureActiveTabState() }
+        model.closeTab(index)
+        pendingTabRestore = closesActive ? model.tabStrip.activeTab : nil
+        render()
+    }
+
+    private func selectRelativeTab(_ delta: Int) {
+        guard model.tabStrip.tabs.count > 1 else { return }
+        captureActiveTabState()
+        model.selectRelativeTab(delta)
+        pendingTabRestore = model.tabStrip.activeTab
+        render()
+    }
+
+    private func captureActiveTabState() {
+        if let position = readerController.currentReadingPosition(
+            fallbackByteOffset: model.selectedByteOffset
+        ) {
+            model.tabStrip.updateActiveScroll(position.byteOffset)
+        }
     }
 
     private func currentJumpRecord() -> JumpRecord? {
@@ -1616,6 +1777,7 @@ final class SidebarViewController: NSViewController,
 {
     var onOpenFile: ((URL) -> Void)?
     var onOpenFileInSecondary: ((URL) -> Void)?
+    var onOpenFileInNewTab: ((URL) -> Void)?
     var onOpenOutline: ((UInt32) -> Void)?
     var onChooseProject: (() -> Void)?
     private let fileOutlineView = NSOutlineView()
@@ -1658,6 +1820,13 @@ final class SidebarViewController: NSViewController,
     var selfTestFilesContentVisible: Bool {
         loadViewIfNeeded()
         return fileScrollView.selfTestIsVisibleInWindow
+    }
+    var selfTestFileContextMenuHasOpenInNewTab: Bool {
+        loadViewIfNeeded()
+        return fileOutlineView.menu?.items.contains {
+            $0.title == "Open in New Tab"
+                && $0.action == #selector(openFileInNewTab(_:))
+        } == true
     }
     var selfTestOutlinePlaceholderText: String? {
         loadViewIfNeeded()
@@ -1723,6 +1892,13 @@ final class SidebarViewController: NSViewController,
         )
         openLeft.target = self
         fileMenu.addItem(openLeft)
+        let openInNewTab = NSMenuItem(
+            title: "Open in New Tab",
+            action: #selector(openFileInNewTab(_:)),
+            keyEquivalent: ""
+        )
+        openInNewTab.target = self
+        fileMenu.addItem(openInNewTab)
         let openRight = NSMenuItem(
             title: "Open in Right Reader (Compare)",
             action: #selector(openFileInRightReader(_:)),
@@ -1973,6 +2149,11 @@ final class SidebarViewController: NSViewController,
         onOpenFileInSecondary?(file)
     }
 
+    @objc private func openFileInNewTab(_ sender: Any?) {
+        guard let file = contextMenuFile() else { return }
+        onOpenFileInNewTab?(file)
+    }
+
     private func contextMenuFile() -> URL? {
         let row = fileOutlineView.clickedRow >= 0
             ? fileOutlineView.clickedRow
@@ -2180,11 +2361,142 @@ final class SidebarViewController: NSViewController,
 }
 
 @MainActor
+private final class TabStripView: NSView {
+    private weak var model: TabStripModel?
+    private var onActivate: ((Int) -> Void)?
+    private var onClose: ((Int) -> Void)?
+    private var theme = ReaderTheme(settings: ReaderSettings())
+
+    override var isFlipped: Bool { true }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        setAccessibilityElement(true)
+        setAccessibilityRole(.tabGroup)
+        setAccessibilityLabel("Open files")
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func configure(
+        _ model: TabStripModel,
+        onActivate: @escaping (Int) -> Void,
+        onClose: @escaping (Int) -> Void
+    ) {
+        self.model = model
+        self.onActivate = onActivate
+        self.onClose = onClose
+        refresh()
+    }
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        needsDisplay = true
+    }
+
+    func refresh() {
+        isHidden = (model?.tabs.count ?? 0) <= 1
+        setAccessibilityValue(model?.activeTab?.fileURL.lastPathComponent ?? "")
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        theme.backgroundColor.setFill()
+        bounds.fill()
+        guard let model else { return }
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingMiddle
+        for index in model.tabs.indices {
+            let rect = tabRect(index: index, count: model.tabs.count)
+            if index == model.activeIndex {
+                NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
+                rect.fill()
+                NSColor.controlAccentColor.setFill()
+                NSRect(x: rect.minX, y: rect.maxY - 2, width: rect.width, height: 2)
+                    .fill()
+            }
+            let titleRect = rect.insetBy(dx: 10, dy: 7)
+            let closeWidth: CGFloat = 18
+            let textRect = NSRect(
+                x: titleRect.minX,
+                y: titleRect.minY,
+                width: max(0, titleRect.width - closeWidth),
+                height: titleRect.height
+            )
+            (model.tabs[index].fileURL.lastPathComponent as NSString).draw(
+                in: textRect,
+                withAttributes: [
+                    .font: NSFont.systemFont(
+                        ofSize: 11,
+                        weight: index == model.activeIndex ? .semibold : .regular
+                    ),
+                    .foregroundColor: theme.foregroundColor,
+                    .paragraphStyle: paragraph,
+                ]
+            )
+            ("×" as NSString).draw(
+                in: closeRect(for: rect),
+                withAttributes: [
+                    .font: NSFont.systemFont(ofSize: 12),
+                    .foregroundColor: theme.foregroundColor.withAlphaComponent(0.65),
+                ]
+            )
+            NSColor.separatorColor.setFill()
+            NSRect(x: rect.maxX - 1, y: 5, width: 1, height: rect.height - 10)
+                .fill()
+        }
+        NSColor.separatorColor.setFill()
+        NSRect(x: bounds.minX, y: bounds.maxY - 1, width: bounds.width, height: 1)
+            .fill()
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let model else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        guard let index = model.tabs.indices.first(where: {
+            tabRect(index: $0, count: model.tabs.count).contains(point)
+        }) else { return }
+        if closeRect(
+            for: tabRect(index: index, count: model.tabs.count)
+        ).contains(point) {
+            onClose?(index)
+        } else {
+            onActivate?(index)
+        }
+    }
+
+    private func tabRect(index: Int, count: Int) -> NSRect {
+        guard count > 0 else { return .zero }
+        let width = min(180, bounds.width / CGFloat(count))
+        return NSRect(
+            x: CGFloat(index) * width,
+            y: 0,
+            width: width,
+            height: bounds.height
+        )
+    }
+
+    private func closeRect(for tabRect: NSRect) -> NSRect {
+        NSRect(
+            x: tabRect.maxX - 24,
+            y: tabRect.minY + 6,
+            width: 18,
+            height: tabRect.height - 12
+        )
+    }
+}
+
+@MainActor
 final class ReaderViewController: NSViewController, NSMenuDelegate {
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
     var onReadingPositionChange: ((UInt32) -> Void)?
+    var onSelectionChange: ((UInt32) -> Void)?
+    var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
@@ -2199,6 +2511,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private let functionSummaryStack = NSStackView()
     private var displayedFunctionChanges: [DiffCore.FunctionChange] = []
     private let readerArea = NSView()
+    private let tabStripView = TabStripView()
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
@@ -2241,7 +2554,16 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         if showsCompareControls {
             view = compareContainer(readerView: readerArea)
         } else {
-            view = readerArea
+            tabStripView.isHidden = true
+            let stack = NSStackView(views: [tabStripView, readerArea])
+            stack.orientation = .vertical
+            stack.alignment = .width
+            stack.distribution = .fill
+            stack.spacing = 0
+            NSLayoutConstraint.activate([
+                tabStripView.heightAnchor.constraint(equalToConstant: 30),
+            ])
+            view = stack
         }
         textView.onClick = { [weak self] characterIndex, modifiers in
             guard let self,
@@ -2249,7 +2571,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
                     forCharacterIndex: characterIndex
                   )
             else { return }
-            self.onReadingPositionChange?(offset)
+            self.onSelectionChange?(offset)
             let meaningful = modifiers.intersection([.command, .option, .control, .shift])
             if meaningful.isEmpty {
                 self.onTokenClick?(offset, false)
@@ -2386,6 +2708,27 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
     func apply(settings: ReaderSettings) {
         textView.apply(settings: settings)
+        if !showsCompareControls { tabStripView.apply(settings: settings) }
+    }
+
+    func configureTabs(
+        _ model: TabStripModel,
+        onActivate: @escaping (Int) -> Void,
+        onClose: @escaping (Int) -> Void
+    ) {
+        guard !showsCompareControls else { return }
+        loadViewIfNeeded()
+        tabStripView.configure(
+            model,
+            onActivate: onActivate,
+            onClose: onClose
+        )
+    }
+
+    func refreshTabs() {
+        guard !showsCompareControls else { return }
+        loadViewIfNeeded()
+        tabStripView.refresh()
     }
 
     func showEmptyState(
@@ -2479,6 +2822,30 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             && textView.view.bounds.height > 0
             && textView.view.visibleRect.width > 0
             && textView.view.visibleRect.height > 0
+    }
+    var selfTestPlaceholderText: String? {
+        label.isHidden ? nil : label.stringValue
+    }
+    var selfTestPlaceholderVisible: Bool {
+        !label.isHiddenOrHasHiddenAncestor
+            && label.window != nil
+            && label.frame.width > 0
+            && label.frame.height > 0
+    }
+    var selfTestTabGeometry: (
+        stripFrame: NSRect,
+        readerFrame: NSRect,
+        containerFrame: NSRect,
+        stripHidden: Bool,
+        stripHiddenOrHasHiddenAncestor: Bool
+    ) {
+        (
+            tabStripView.convert(tabStripView.bounds, to: nil),
+            readerArea.convert(readerArea.bounds, to: nil),
+            view.convert(view.bounds, to: nil),
+            tabStripView.isHidden,
+            tabStripView.isHiddenOrHasHiddenAncestor
+        )
     }
 
     func configureCompareControls(
@@ -2587,6 +2954,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             let activeLoader = source.map { DocumentLoader(source: $0) } ?? loader
             let loaded = try activeLoader.load(file: file)
             displayedDocument = loaded.document
+            onDocumentChange?(file, loaded.document)
             label.isHidden = true
             layoutTextViewFrame()
             textView.display(document: loaded.document)
@@ -2600,6 +2968,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
                         switch result {
                         case let .success(document):
                             self.displayedDocument = document
+                            self.onDocumentChange?(file, document)
                             self.textView.updateSyntax(document: document)
                             self.onOutlineChange?(document.outlineFacets)
                         case .failure:
@@ -2611,6 +2980,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             }
         } catch {
             displayedDocument = nil
+            onDocumentChange?(file, nil)
             label.stringValue = "Could not open \(file.lastPathComponent)"
             label.isHidden = false
             textView.clear()
@@ -2626,6 +2996,20 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         display(file, snapshotID: snapshotID, source: source)
         textView.reveal(byteOffset: byteOffset)
         onReadingPositionChange?(byteOffset)
+    }
+
+    func restoreReadingPosition(
+        scrollByteOffset: UInt32?,
+        selectionByteOffset: UInt32?
+    ) {
+        let generation = loadGeneration
+        DispatchQueue.main.async { [weak self] in
+            guard let self, loadGeneration == generation else { return }
+            textView.restore(
+                scrollByteOffset: scrollByteOffset,
+                selectionByteOffset: selectionByteOffset
+            )
+        }
     }
 
     func currentReadingPosition(fallbackByteOffset: UInt32? = nil) -> (
@@ -2659,7 +3043,10 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private func layoutTextViewFrame() {
         view.layoutSubtreeIfNeeded()
         if let scrollView {
-            textView.view.frame = scrollView.contentView.bounds
+            textView.view.frame = NSRect(
+                origin: .zero,
+                size: scrollView.contentView.bounds.size
+            )
         }
     }
 

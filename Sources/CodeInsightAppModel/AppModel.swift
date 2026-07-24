@@ -298,6 +298,7 @@ public final class AppModel {
     public let compare: CompareModel
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
+    public let tabStrip = TabStripModel()
 
     public var canTrustCurrentRepository: Bool {
         guard case .ready = projectState, let projectRoot else { return false }
@@ -396,6 +397,7 @@ public final class AppModel {
         selectedByteOffset = nil
         navigationGeneration &+= 1
         navigationHistory.reset()
+        tabStrip.reset()
 
         snapshotTask = Task { [weak self, indexService] in
             do {
@@ -524,11 +526,53 @@ public final class AppModel {
     ) {
         replayTask?.cancel()
         if let current { navigationHistory.push(current) }
-        selectedFile = url.standardizedFileURL
-        selectedByteOffset = byteOffset
-        navigationGeneration &+= 1
-        navigationSink(url.standardizedFileURL, byteOffset)
-        updateCompareFile()
+        tabStrip.open(
+            url,
+            inNewTab: false,
+            selectionByteOffset: byteOffset
+        )
+        selectFile(url, byteOffset: byteOffset)
+    }
+
+    public func openInNewTab(
+        _ url: URL,
+        selectionByteOffset: UInt32? = nil
+    ) {
+        replayTask?.cancel()
+        tabStrip.open(
+            url,
+            inNewTab: true,
+            selectionByteOffset: selectionByteOffset
+        )
+        selectFile(url, byteOffset: selectionByteOffset)
+    }
+
+    public func activateTab(_ index: Int) {
+        guard tabStrip.tabs.indices.contains(index) else { return }
+        tabStrip.activate(index)
+        guard let tab = tabStrip.activeTab else { return }
+        selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+    }
+
+    public func selectRelativeTab(_ delta: Int) {
+        guard tabStrip.tabs.count > 1 else { return }
+        tabStrip.selectRelative(delta)
+        guard let tab = tabStrip.activeTab else { return }
+        selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+    }
+
+    public func closeTab(_ index: Int) {
+        let closesActive = tabStrip.activeIndex == index
+        _ = tabStrip.close(index)
+        guard closesActive else { return }
+        if let tab = tabStrip.activeTab {
+            selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+        } else {
+            selectedFile = nil
+            selectedByteOffset = nil
+            navigationGeneration &+= 1
+            updateCompareFile()
+        }
     }
 
     public func goBack(from current: JumpRecord) {
@@ -749,6 +793,15 @@ public final class AppModel {
 
     private func updateCompareFile() {
         compare.update(file: selectedFile, leftSource: documentSource)
+    }
+
+    private func selectFile(_ file: URL, byteOffset: UInt32?) {
+        let file = file.standardizedFileURL
+        selectedFile = file
+        selectedByteOffset = byteOffset
+        navigationGeneration &+= 1
+        navigationSink(file, byteOffset)
+        updateCompareFile()
     }
 
     private func publishProjectState(_ state: ProjectState, root: URL?) {

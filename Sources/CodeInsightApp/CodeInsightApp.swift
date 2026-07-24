@@ -85,6 +85,8 @@ private struct CodeInsightApplication {
         withExtendedLifetime(delegate) {
             if let exactRoot {
                 delegate.runExactSelfTest(root: exactRoot)
+            } else if arguments.contains("--self-test-tabs") {
+                delegate.runTabsSelfTest()
             } else if let index = arguments.firstIndex(of: "--self-test-diff"),
                       arguments.indices.contains(index + 1)
             {
@@ -445,6 +447,320 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady,
             layoutChecks: projectChecks,
             enlargedWindowGeometry: layout?.geometry ?? [:]
+        )
+    }
+
+    func runTabsSelfTest() -> Never {
+        let root: URL
+        do {
+            root = try makeTabsSelfTestRepository()
+        } catch {
+            Self.finishTabsSelfTest(
+                checks: [:],
+                geometry: [:],
+                error: error.localizedDescription
+            )
+        }
+
+        func finish(
+            checks: [String: Bool],
+            geometry: [String: Double],
+            error: String? = nil
+        ) -> Never {
+            try? FileManager.default.removeItem(at: root)
+            Self.finishTabsSelfTest(
+                checks: checks,
+                geometry: geometry,
+                error: error
+            )
+        }
+
+        // Exclude the titled-window WindowServer cache from the tab footprint measurement.
+        launch(offscreen: true, measuresIdleFootprint: true)
+        guard let controller = windowController else {
+            finish(checks: [:], geometry: [:], error: "window unavailable")
+        }
+        let contentSize = NSSize(width: 1_600, height: 1_000)
+        controller.window?.setContentSize(contentSize)
+        controller.window?.contentView?.setFrameSize(contentSize)
+        pumpRunLoop()
+
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState {
+                return !self.model.commitPicker.isLoading
+            }
+            return false
+        }),
+        case .ready = model.projectState,
+        model.commitPicker.errorMessage == nil,
+        model.commitPicker.commits.indices.contains(1)
+        else {
+            finish(
+                checks: [:],
+                geometry: [:],
+                error: "project or HEAD~1 unavailable"
+            )
+        }
+
+        let fileA = root.appendingPathComponent("src/a.rs").standardizedFileURL
+        let fileB = root.appendingPathComponent("src/b.rs").standardizedFileURL
+        let menus = NSApplication.shared.mainMenu?.items.compactMap(\.submenu)
+        let fileMenu = menus?.first { $0.title == "File" }
+        let goMenu = menus?.first { $0.title == "Go" }
+        let openInNewTabItem = fileMenu?.item(withTitle: "Open in New Tab")
+        let closeTabItem = fileMenu?.item(withTitle: "Close Tab")
+        let previousTabItem = goMenu?.item(withTitle: "Previous Tab")
+        let nextTabItem = goMenu?.item(withTitle: "Next Tab")
+        let menuChecks = [
+            "sidebarHasOpenInNewTab":
+                controller.selfTestFileContextMenuHasOpenInNewTab,
+            "commandShiftReturnOpensNewTab":
+                openInNewTabItem?.keyEquivalent == "\r"
+                && openInNewTabItem?.keyEquivalentModifierMask
+                    == [.command, .shift]
+                && openInNewTabItem?.action
+                    == #selector(openSelectedFileInNewTab(_:))
+                && openInNewTabItem?.target === self,
+            "commandWClosesTab":
+                closeTabItem?.keyEquivalent == "w"
+                && closeTabItem?.keyEquivalentModifierMask == .command
+                && closeTabItem?.action == #selector(closeActiveTab(_:))
+                && closeTabItem?.target === self,
+            "commandShiftBracketSwitchesTabs":
+                previousTabItem?.keyEquivalent == "["
+                && previousTabItem?.keyEquivalentModifierMask
+                    == [.command, .shift]
+                && previousTabItem?.action == #selector(selectPreviousTab(_:))
+                && previousTabItem?.target === self
+                && nextTabItem?.keyEquivalent == "]"
+                && nextTabItem?.keyEquivalentModifierMask
+                    == [.command, .shift]
+                && nextTabItem?.action == #selector(selectNextTab(_:))
+                && nextTabItem?.target === self,
+        ]
+        guard let bytesA = try? [UInt8](Data(contentsOf: fileA)),
+              let bytesB = try? [UInt8](Data(contentsOf: fileB)),
+              let scrollTarget = Data(bytesA).range(
+                  of: Data("let anchor_180".utf8)
+              )?.lowerBound,
+              let scrollByteOffset = UInt32(exactly: scrollTarget),
+              let selectionByteOffset = UInt32(exactly: scrollTarget + 4),
+              waitUntil(timeout: 5, condition: {
+                  controller.selectFileInSidebar(fileA)
+              }),
+              waitUntil(timeout: 5, condition: {
+                  controller.displayedReaderFile?.standardizedFileURL == fileA
+                      && controller.selfTestLeftReaderBytes == bytesA
+              })
+        else {
+            finish(
+                checks: [:],
+                geometry: [:],
+                error: "could not open tab fixture A"
+            )
+        }
+
+        controller.setReadingPositionForSelfTest(
+            scrollByteOffset: scrollByteOffset,
+            selectionByteOffset: selectionByteOffset
+        )
+        pumpRunLoop()
+        guard let recordedScroll = controller.selfTestReadingByteOffset else {
+            finish(
+                checks: [:],
+                geometry: [:],
+                error: "could not record A reading position"
+            )
+        }
+        let oneTabGeometry = Self.tabGeometryChecks(
+            controller.selfTestTabGeometry,
+            prefix: "oneTab",
+            expectsVisibleStrip: false
+        )
+        let openedA = controller.selfTestTabCount == 1
+            && controller.selfTestActiveTabIndex == 0
+            && controller.selfTestLeftReaderBytes == bytesA
+        Self.writeJSON([
+            "step": "openA",
+            "tabs": controller.selfTestTabCount,
+            "active": controller.selfTestActiveTabIndex ?? -1,
+            "stripHidden": controller.selfTestTabGeometry.stripHidden,
+            "recordedScroll": recordedScroll,
+        ])
+
+        controller.openFileInNewTabForSelfTest(fileB)
+        guard waitUntil(timeout: 5, condition: {
+            controller.displayedReaderFile?.standardizedFileURL == fileB
+                && controller.selfTestLeftReaderBytes == bytesB
+        }) else {
+            finish(
+                checks: oneTabGeometry,
+                geometry: [:],
+                error: "could not open tab fixture B"
+            )
+        }
+        pumpRunLoop()
+        let twoTabGeometry = Self.tabGeometryChecks(
+            controller.selfTestTabGeometry,
+            prefix: "twoTabs",
+            expectsVisibleStrip: true
+        )
+        let openedB = controller.selfTestTabCount == 2
+            && controller.selfTestActiveTabIndex == 1
+            && controller.selfTestActiveTabFile?.standardizedFileURL == fileB
+            && controller.selfTestLeftReaderBytes == bytesB
+        let dualTabFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        let dualTabFootprintUnderBudget = dualTabFootprintMB >= 0
+            && dualTabFootprintMB < SelfTestBudgets.idleFootprintMB
+        Self.writeJSON([
+            "step": "openB",
+            "tabs": controller.selfTestTabCount,
+            "active": controller.selfTestActiveTabIndex ?? -1,
+            "bytesEqual": controller.selfTestLeftReaderBytes == bytesB,
+            "footprintMB": dualTabFootprintMB,
+            "geometry": Self.tabGeometryJSON(controller.selfTestTabGeometry),
+        ])
+
+        let previousTabActionSent = previousTabItem.flatMap { item in
+            item.action.map {
+                NSApplication.shared.sendAction(
+                    $0,
+                    to: item.target,
+                    from: item
+                )
+            }
+        } ?? false
+        let restoredA = previousTabActionSent
+            && waitUntil(timeout: 5, condition: {
+                controller.displayedReaderFile?.standardizedFileURL == fileA
+                    && controller.selfTestLeftReaderBytes == bytesA
+            })
+        pumpRunLoop()
+        let restoredScroll = controller.selfTestReadingByteOffset
+        let scrollRestored = restoredScroll.map {
+            abs(Int64($0) - Int64(recordedScroll)) <= 4
+        } == true
+        let selectionRestored =
+            controller.selfTestActiveTabSelectionByteOffset == selectionByteOffset
+        Self.writeJSON([
+            "step": "switchA",
+            "bytesEqual": controller.selfTestLeftReaderBytes == bytesA,
+            "recordedScroll": recordedScroll,
+            "restoredScroll": restoredScroll.map(Int.init) ?? -1,
+            "scrollRestored": scrollRestored,
+            "selectionRestored": selectionRestored,
+        ])
+
+        let nextTabActionSent = nextTabItem.flatMap { item in
+            item.action.map {
+                NSApplication.shared.sendAction(
+                    $0,
+                    to: item.target,
+                    from: item
+                )
+            }
+        } ?? false
+        let selectedBByCommand = nextTabActionSent
+            && waitUntil(timeout: 5, condition: {
+                controller.displayedReaderFile?.standardizedFileURL == fileB
+                    && controller.selfTestLeftReaderBytes == bytesB
+            })
+        let closeTabActionSent = closeTabItem.flatMap { item in
+            item.action.map {
+                NSApplication.shared.sendAction(
+                    $0,
+                    to: item.target,
+                    from: item
+                )
+            }
+        } ?? false
+        let closedBByCommand = closeTabActionSent
+            && waitUntil(timeout: 5, condition: {
+                controller.selfTestTabCount == 1
+                    && controller.displayedReaderFile?
+                        .standardizedFileURL == fileA
+                    && controller.selfTestLeftReaderBytes == bytesA
+            })
+        pumpRunLoop()
+        let closedB = selectedBByCommand
+            && closedBByCommand
+            && controller.selfTestTabCount == 1
+            && controller.selfTestActiveTabIndex == 0
+            && controller.displayedReaderFile?.standardizedFileURL == fileA
+            && controller.selfTestLeftReaderBytes == bytesA
+        let hiddenAfterCloseGeometry = Self.tabGeometryChecks(
+            controller.selfTestTabGeometry,
+            prefix: "oneTabAfterClose",
+            expectsVisibleStrip: false
+        )
+        Self.writeJSON([
+            "step": "closeB",
+            "tabs": controller.selfTestTabCount,
+            "active": controller.selfTestActiveTabIndex ?? -1,
+            "readerStillA": controller.displayedReaderFile?
+                .standardizedFileURL == fileA,
+            "stripHidden": controller.selfTestTabGeometry.stripHidden,
+            "geometry": Self.tabGeometryJSON(controller.selfTestTabGeometry),
+        ])
+
+        controller.openFileInNewTabForSelfTest(fileB)
+        controller.selectPreviousTab()
+        let previousRevision = model.commitPicker.commits[1].fullSHA
+        guard controller.selectCommit(previousRevision),
+              waitUntil(timeout: 30, condition: {
+                  self.model.currentRevision == previousRevision
+                      && self.model.snapshotPhase == .fullReady
+              })
+        else {
+            var checks = oneTabGeometry
+            checks.merge(twoTabGeometry) { _, new in new }
+            checks.merge(hiddenAfterCloseGeometry) { _, new in new }
+            finish(
+                checks: checks,
+                geometry: Self.tabGeometryJSON(controller.selfTestTabGeometry),
+                error: "snapshot switch did not complete"
+            )
+        }
+        controller.selectNextTab()
+        let missingFilePlaceholder = waitUntil(timeout: 5, condition: {
+            controller.displayedReaderFile?.standardizedFileURL == fileB
+                && controller.selfTestLeftReaderBytes == nil
+                && controller.selfTestReaderPlaceholderVisible
+                && controller.selfTestReaderPlaceholderText
+                    == "Could not open b.rs"
+        })
+        Self.writeJSON([
+            "step": "missingSnapshotFile",
+            "revision": previousRevision,
+            "file": controller.displayedReaderFile?.path ?? "",
+            "placeholder": controller.selfTestReaderPlaceholderText ?? "",
+            "bytesAreNil": controller.selfTestLeftReaderBytes == nil,
+            "honestPlaceholder": missingFilePlaceholder,
+        ])
+
+        var checks = oneTabGeometry
+        checks.merge(twoTabGeometry) { _, new in new }
+        checks.merge(hiddenAfterCloseGeometry) { _, new in new }
+        checks.merge(menuChecks) { _, new in new }
+        checks.merge([
+            "oneTabOpened": openedA,
+            "openedBInNewTab": openedB,
+            "dualTabFootprintUnderBudget": dualTabFootprintUnderBudget,
+            "switchedBackToA": restoredA,
+            "aBytesRestored": restoredA,
+            "scrollRestored": scrollRestored,
+            "selectionAnchorRestored": selectionRestored,
+            "closedBWhileReaderStayedOnA": closedB,
+            "missingSnapshotFileShowsHonestPlaceholder":
+                missingFilePlaceholder,
+        ]) { _, new in new }
+        finish(
+            checks: checks,
+            geometry: Self.tabGeometryJSON(controller.selfTestTabGeometry)
         )
     }
 
@@ -2839,6 +3155,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showProjectSearch()
     }
 
+    @objc private func openSelectedFileInNewTab(_ sender: Any?) {
+        windowController?.openSelectedFileInNewTab()
+    }
+
+    @objc private func closeActiveTab(_ sender: Any?) {
+        windowController?.closeActiveTab()
+    }
+
+    @objc private func selectPreviousTab(_ sender: Any?) {
+        windowController?.selectPreviousTab()
+    }
+
+    @objc private func selectNextTab(_ sender: Any?) {
+        windowController?.selectNextTab()
+    }
+
     @objc private func previousContextCandidate(_ sender: Any?) {
         windowController?.selectPreviousContextCandidate(sender)
     }
@@ -2900,6 +3232,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             model.contextWindow.selectedCandidate != nil
         case #selector(trustThisRepository(_:)):
             model.canTrustCurrentRepository
+        case #selector(openSelectedFileInNewTab(_:)):
+            windowController?.selectedSidebarFile != nil
+        case #selector(closeActiveTab(_:)):
+            !model.tabStrip.tabs.isEmpty
+        case #selector(selectPreviousTab(_:)), #selector(selectNextTab(_:)):
+            model.tabStrip.tabs.count > 1
         default:
             true
         }
@@ -2955,6 +3293,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         rebuildOpenRecentMenu(recentMenu)
         recentItem.submenu = recentMenu
         fileMenu.addItem(recentItem)
+        let openInNewTabItem = NSMenuItem(
+            title: "Open in New Tab",
+            action: #selector(openSelectedFileInNewTab(_:)),
+            keyEquivalent: "\r"
+        )
+        openInNewTabItem.keyEquivalentModifierMask = [.command, .shift]
+        openInNewTabItem.target = self
+        fileMenu.addItem(openInNewTabItem)
+        let closeTabItem = NSMenuItem(
+            title: "Close Tab",
+            action: #selector(closeActiveTab(_:)),
+            keyEquivalent: "w"
+        )
+        closeTabItem.target = self
+        fileMenu.addItem(closeTabItem)
         fileMenu.addItem(.separator())
         let trustItem = NSMenuItem(
             title: "Trust This Repository…",
@@ -3055,6 +3408,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         alternateForwardItem.isHidden = true
         alternateForwardItem.allowsKeyEquivalentWhenHidden = true
         goMenu.addItem(alternateForwardItem)
+        let previousTabItem = NSMenuItem(
+            title: "Previous Tab",
+            action: #selector(selectPreviousTab(_:)),
+            keyEquivalent: "["
+        )
+        previousTabItem.keyEquivalentModifierMask = [.command, .shift]
+        previousTabItem.target = self
+        goMenu.addItem(previousTabItem)
+        let nextTabItem = NSMenuItem(
+            title: "Next Tab",
+            action: #selector(selectNextTab(_:)),
+            keyEquivalent: "]"
+        )
+        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
+        nextTabItem.target = self
+        goMenu.addItem(nextTabItem)
         goMenu.addItem(.separator())
         let previousCandidate = NSMenuItem(
             title: "Previous Context Candidate",
@@ -3185,6 +3554,126 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             Darwin.exit(1)
         }
+    }
+
+    private static func tabGeometryChecks(
+        _ geometry: (
+            stripFrame: NSRect,
+            readerFrame: NSRect,
+            containerFrame: NSRect,
+            contentFrame: NSRect,
+            stripHidden: Bool,
+            stripHiddenOrHasHiddenAncestor: Bool
+        ),
+        prefix: String,
+        expectsVisibleStrip: Bool
+    ) -> [String: Bool] {
+        let tolerance: CGFloat = 1
+        let contentBounds = geometry.contentFrame.insetBy(
+            dx: -tolerance,
+            dy: -tolerance
+        )
+        if expectsVisibleStrip {
+            return [
+                "\(prefix)StripVisible":
+                    !geometry.stripHidden
+                    && !geometry.stripHiddenOrHasHiddenAncestor
+                    && geometry.stripFrame.width > 0
+                    && geometry.stripFrame.height > 0,
+                "\(prefix)StripInsideWindowContent":
+                    contentBounds.contains(geometry.stripFrame),
+                "\(prefix)StripDoesNotOverlapReader":
+                    geometry.readerFrame.maxY
+                        <= geometry.stripFrame.minY + tolerance,
+                "\(prefix)StripTouchesReader":
+                    abs(geometry.readerFrame.maxY - geometry.stripFrame.minY)
+                        <= tolerance,
+                "\(prefix)ReaderAndStripFillContainerHeight":
+                    abs(
+                        geometry.readerFrame.height
+                            + geometry.stripFrame.height
+                            - geometry.containerFrame.height
+                    ) <= tolerance,
+                "\(prefix)ReaderFillsContainerWidth":
+                    abs(
+                        geometry.readerFrame.width
+                            - geometry.containerFrame.width
+                    ) <= tolerance,
+                "\(prefix)StripFillsContainerWidth":
+                    abs(
+                        geometry.stripFrame.width
+                            - geometry.containerFrame.width
+                    ) <= tolerance,
+            ]
+        }
+        return [
+            "\(prefix)StripHidden":
+                geometry.stripHidden
+                && geometry.stripHiddenOrHasHiddenAncestor,
+            "\(prefix)ReaderRestoresFullHeight":
+                abs(
+                    geometry.readerFrame.height
+                        - geometry.containerFrame.height
+                ) <= tolerance,
+            "\(prefix)ReaderRestoresFullWidth":
+                abs(
+                    geometry.readerFrame.width
+                        - geometry.containerFrame.width
+                ) <= tolerance,
+            "\(prefix)ReaderRestoresContainerTop":
+                abs(
+                    geometry.readerFrame.maxY
+                        - geometry.containerFrame.maxY
+                ) <= tolerance,
+            "\(prefix)ReaderRestoresContainerBottom":
+                abs(
+                    geometry.readerFrame.minY
+                        - geometry.containerFrame.minY
+                ) <= tolerance,
+        ]
+    }
+
+    private static func tabGeometryJSON(
+        _ geometry: (
+            stripFrame: NSRect,
+            readerFrame: NSRect,
+            containerFrame: NSRect,
+            contentFrame: NSRect,
+            stripHidden: Bool,
+            stripHiddenOrHasHiddenAncestor: Bool
+        )
+    ) -> [String: Double] {
+        [
+            "stripMinY": geometry.stripFrame.minY,
+            "stripMaxY": geometry.stripFrame.maxY,
+            "stripWidth": geometry.stripFrame.width,
+            "stripHeight": geometry.stripFrame.height,
+            "readerMinY": geometry.readerFrame.minY,
+            "readerMaxY": geometry.readerFrame.maxY,
+            "readerWidth": geometry.readerFrame.width,
+            "readerHeight": geometry.readerFrame.height,
+            "containerWidth": geometry.containerFrame.width,
+            "containerHeight": geometry.containerFrame.height,
+            "contentWidth": geometry.contentFrame.width,
+            "contentHeight": geometry.contentFrame.height,
+        ]
+    }
+
+    private static func finishTabsSelfTest(
+        checks: [String: Bool],
+        geometry: [String: Double],
+        error: String?
+    ) -> Never {
+        let passed = error == nil
+            && !checks.isEmpty
+            && checks.values.allSatisfy { $0 }
+        var summary: [String: Any] = checks
+        summary["step"] = "summary"
+        summary["geometry"] = geometry
+        summary["passed"] = passed
+        if let error { summary["error"] = error }
+        writeJSON(summary)
+        Darwin.exit(passed ? 0 : 1)
     }
 
     private static func finishProjectSelfTest(
@@ -3846,6 +4335,48 @@ private func makeHistoricalExactSelfTestRepository() throws -> URL {
             .write(to: root.appendingPathComponent("src/lib.rs"))
         try exactSelfTestGit(root, "add", "-A")
         try exactSelfTestGit(root, "commit", "-q", "-m", "definition line 3")
+        return root
+    } catch {
+        try? FileManager.default.removeItem(at: root)
+        throw error
+    }
+}
+
+private func makeTabsSelfTestRepository() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightTabsFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    do {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("src"),
+            withIntermediateDirectories: true
+        )
+        try Data(
+            "[package]\nname='tabs'\nversion='0.1.0'\nedition='2021'\n".utf8
+        ).write(to: root.appendingPathComponent("Cargo.toml"))
+        let lines = (0..<240).map {
+            String(format: "    let anchor_%03d = %d;", $0, $0)
+        }
+        let sourceA = (["pub fn a() {"] + lines + ["}"]).joined(separator: "\n")
+        try Data(sourceA.utf8).write(
+            to: root.appendingPathComponent("src/a.rs")
+        )
+        try exactSelfTestGit(root, "init", "-q")
+        try exactSelfTestGit(root, "config", "user.name", "CodeInsight Tests")
+        try exactSelfTestGit(
+            root,
+            "config",
+            "user.email",
+            "tests@codeinsight.invalid"
+        )
+        try exactSelfTestGit(root, "add", "-A")
+        try exactSelfTestGit(root, "commit", "-q", "-m", "A only")
+        try Data("pub fn b() -> &'static str { \"tab B\" }\n".utf8).write(
+            to: root.appendingPathComponent("src/b.rs")
+        )
+        try exactSelfTestGit(root, "add", "-A")
+        try exactSelfTestGit(root, "commit", "-q", "-m", "add B")
         return root
     } catch {
         try? FileManager.default.removeItem(at: root)

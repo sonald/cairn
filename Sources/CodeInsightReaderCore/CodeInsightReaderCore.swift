@@ -57,7 +57,7 @@ public struct OutlineFacet: Equatable, Sendable {
     }
 }
 
-public struct ReaderDocument: Sendable {
+public final class ReaderDocument: Sendable {
     public let bytes: [UInt8]
     public let contentID: ContentID
     public let lineTable: LineTable
@@ -81,7 +81,7 @@ public struct ReaderDocument: Sendable {
         self.outlineFacets = outlineFacets
     }
 
-    public init(
+    public convenience init(
         bytes: [UInt8],
         highlightSpans: [HighlightSpan] = [],
         outlineFacets: [OutlineFacet] = []

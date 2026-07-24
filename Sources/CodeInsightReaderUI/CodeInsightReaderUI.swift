@@ -292,6 +292,68 @@ public final class ReaderTextView {
         view.showFindIndicator(for: lineRange)
     }
 
+    public func restore(
+        scrollByteOffset: UInt32?,
+        selectionByteOffset: UInt32?
+    ) {
+        if let selectionByteOffset,
+           let location = byteUTF16Map?.utf16Offset(
+               forByte: Int(selectionByteOffset)
+           ),
+           location <= backingTextStorage.length
+        {
+            view.setSelectedRange(NSRange(location: location, length: 0))
+        }
+        guard let scrollByteOffset,
+              let document = displayedDocument,
+              let desired = document.lineTable.lineColumn(
+                  at: scrollByteOffset
+              ),
+              let scrollView = view.enclosingScrollView,
+              let window = view.window
+        else { return }
+        var candidateLine = Int(desired.line)
+        for _ in 0..<3 {
+            guard candidateLine > 0,
+                  document.lineTable.lineStarts.indices.contains(candidateLine - 1),
+                  let location = byteUTF16Map?.utf16Offset(
+                      forByte: Int(
+                          document.lineTable.lineStarts[candidateLine - 1]
+                      )
+                  )
+            else { return }
+            let range = NSRange(location: location, length: 0)
+            view.scrollRangeToVisible(range)
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+            let screenRect = view.firstRect(
+                forCharacterRange: range,
+                actualRange: nil
+            )
+            let lineRect = view.convert(
+                window.convertFromScreen(screenRect),
+                from: nil
+            )
+            let clipView = scrollView.contentView
+            clipView.scroll(to: NSPoint(
+                x: clipView.bounds.origin.x,
+                y: lineRect.minY
+            ))
+            scrollView.reflectScrolledClipView(clipView)
+            guard let actualOffset = firstVisibleByteOffset(),
+                  let actual = document.lineTable.lineColumn(at: actualOffset)
+            else { return }
+            let lineDelta = Int(actual.line) - Int(desired.line)
+            if lineDelta == 0 { return }
+            candidateLine = max(
+                1,
+                min(
+                    document.lineTable.lineStarts.count,
+                    candidateLine - lineDelta
+                )
+            )
+        }
+    }
+
     public func installDiffGutter(in scrollView: NSScrollView) {
         let ruler = DiffGutterRulerView(scrollView: scrollView, reader: self)
         scrollView.verticalRulerView = ruler
