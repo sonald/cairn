@@ -165,6 +165,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
+        contentStack.alignment = .width
+        contentStack.distribution = .fill
         contentStack.spacing = 0
         contentView.addSubview(contentStack)
         statusBar.addSubview(separator)
@@ -182,6 +184,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             contentStack.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor
             ),
+            contentSplitController.view.widthAnchor.constraint(
+                equalTo: contentStack.widthAnchor
+            ),
+            statusBar.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 24),
             separator.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor),
@@ -347,6 +353,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
     var selfTestExactStatusText: String { exactLabel.stringValue }
+    var selfTestContentSplitFrameInContentView: NSRect {
+        guard let contentView = window?.contentView else { return .zero }
+        return contentSplitController.view.convert(
+            contentSplitController.view.bounds,
+            to: contentView
+        )
+    }
+    var selfTestStatusBarFrameInContentView: NSRect {
+        guard let contentView = window?.contentView else { return .zero }
+        return statusBar.convert(statusBar.bounds, to: contentView)
+    }
     var selfTestStatusBarVisible: Bool {
         guard selfTestViewIsVisibleInWindow(statusBar) else { return false }
         let statusFrame = statusBar.convert(statusBar.bounds, to: nil)

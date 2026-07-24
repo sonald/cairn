@@ -167,8 +167,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let idleFootprintMB = Double(footprint) / 1_048_576
         windowController.prepareTitledWindowForSelfTest()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        let layout = enlargedWindowLayout(
+            controller: windowController,
+            statusBarOccupancyHeight: 0
+        )
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
-        let checks = [
+        var checks = [
             "emptyStateExists": windowController.selfTestEmptyStateExists,
             "emptyStateHasCairn": windowController.selfTestEmptyStateTexts
                 .contains("Cairn"),
@@ -206,10 +210,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
+        checks.merge(layout.checks) { _, new in new }
         Self.finishSelfTest(
             coldStartMS: coldStartMS,
             idleFootprintMB: idleFootprintMB,
-            checks: checks
+            checks: checks,
+            enlargedWindowGeometry: layout.geometry
         )
     }
 
@@ -274,6 +280,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let indexStatusHiddenAfterFullReady = waitUntil(timeout: 5) {
             self.windowController?.selfTestIndexStatusVisible == false
         }
+        let layout = windowController.map {
+            enlargedWindowLayout(controller: $0, statusBarOccupancyHeight: 24)
+        }
         let branchName = currentBranchName(repositoryURL: root)
         let commitTitle = windowController?.selfTestCommitButtonTitle ?? ""
         let commitTitleMatchesRepository: Bool
@@ -303,7 +312,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             indexStatusVisibleDuringIndexing: indexStatusVisibleDuringIndexing,
             indexStatusTextDuringIndexing: indexStatusTextDuringIndexing,
             statusBarVisibleAfterReady: statusBarVisibleAfterReady,
-            indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady
+            indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady,
+            layoutChecks: layout?.checks ?? [:],
+            enlargedWindowGeometry: layout?.geometry ?? [:]
         )
     }
 
@@ -2150,6 +2161,53 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController.showWindow(nil)
     }
 
+    private func enlargedWindowLayout(
+        controller: MainWindowController,
+        statusBarOccupancyHeight: CGFloat
+    ) -> (checks: [String: Bool], geometry: [String: Double]) {
+        let contentSize = NSSize(width: 1_600, height: 1_000)
+        controller.window?.setContentSize(contentSize)
+        // Keep the offscreen self-test deterministic when AppKit clamps to the screen.
+        controller.window?.contentView?.setFrameSize(contentSize)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.window?.displayIfNeeded()
+        let contentFrame = controller.window?.contentView?.bounds ?? .zero
+        let splitFrame = controller.selfTestContentSplitFrameInContentView
+        let statusFrame = controller.selfTestStatusBarFrameInContentView
+        let tolerance: CGFloat = 1
+        var checks = [
+            "contentSplitWidthFillsContentView":
+                abs(splitFrame.width - contentFrame.width) <= tolerance,
+            "contentSplitHeightFillsAvailableContent":
+                abs(
+                    splitFrame.height
+                        - (contentFrame.height - statusBarOccupancyHeight)
+                ) <= tolerance,
+        ]
+        if statusBarOccupancyHeight > 0 {
+            checks["statusBarPinnedToContentBottom"] =
+                abs(statusFrame.minY - contentFrame.minY) <= tolerance
+            checks["statusBarWidthFillsContentView"] =
+                abs(statusFrame.width - contentFrame.width) <= tolerance
+            checks["statusBarHeightIs24"] =
+                abs(statusFrame.height - statusBarOccupancyHeight) <= tolerance
+        }
+        return (
+            checks,
+            [
+                "contentHeight": Double(contentFrame.height),
+                "contentWidth": Double(contentFrame.width),
+                "splitHeight": Double(splitFrame.height),
+                "splitMinY": Double(splitFrame.minY),
+                "splitWidth": Double(splitFrame.width),
+                "statusBarHeight": Double(statusFrame.height),
+                "statusBarMinY": Double(statusFrame.minY),
+                "statusBarOccupancyHeight": Double(statusBarOccupancyHeight),
+                "statusBarWidth": Double(statusFrame.width),
+            ]
+        )
+    }
+
     func applicationShouldTerminateAfterLastWindowClosed(
         _ sender: NSApplication
     ) -> Bool {
@@ -2620,7 +2678,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private static func finishSelfTest(
         coldStartMS: Double,
         idleFootprintMB: Double,
-        checks: [String: Bool]
+        checks: [String: Bool],
+        enlargedWindowGeometry: [String: Double]
     ) {
         do {
             let passed = coldStartMS < SelfTestBudgets.coldStartMS
@@ -2631,6 +2690,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             object["idleFootprintMB"] = idleFootprintMB
             object["idleFootprintWindowStyle"] = "borderless"
             object["toolbarAssertionsWindowStyle"] = "titled"
+            object["enlargedWindowGeometry"] = enlargedWindowGeometry
             object["passed"] = passed
             let data = try JSONSerialization.data(
                 withJSONObject: object,
@@ -2660,29 +2720,34 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         indexStatusVisibleDuringIndexing: Bool = false,
         indexStatusTextDuringIndexing: String = "",
         statusBarVisibleAfterReady: Bool = false,
-        indexStatusHiddenAfterFullReady: Bool = false
+        indexStatusHiddenAfterFullReady: Bool = false,
+        layoutChecks: [String: Bool] = [:],
+        enlargedWindowGeometry: [String: Double] = [:]
     ) -> Never {
         do {
+            var object: [String: Any] = [
+                "treeVisibleMS": treeVisibleMS,
+                "indexReadyMS": indexReadyMS,
+                "fileCount": fileCount,
+                "reused": reused,
+                "extracted": extracted,
+                "emptyStateRemoved": emptyStateRemoved,
+                "readerDocumentVisible": readerDocumentVisible,
+                "branchName": branchName ?? "",
+                "commitTitle": commitTitle,
+                "commitPickerShowsCurrentBranch": commitPickerShowsCurrentBranch,
+                "indexStatusVisibleDuringIndexing":
+                    indexStatusVisibleDuringIndexing,
+                "indexStatusTextDuringIndexing":
+                    indexStatusTextDuringIndexing,
+                "statusBarVisibleAfterReady": statusBarVisibleAfterReady,
+                "indexStatusHiddenAfterFullReady":
+                    indexStatusHiddenAfterFullReady,
+                "enlargedWindowGeometry": enlargedWindowGeometry,
+            ]
+            object.merge(layoutChecks) { _, new in new }
             let data = try JSONSerialization.data(
-                withJSONObject: [
-                    "treeVisibleMS": treeVisibleMS,
-                    "indexReadyMS": indexReadyMS,
-                    "fileCount": fileCount,
-                    "reused": reused,
-                    "extracted": extracted,
-                    "emptyStateRemoved": emptyStateRemoved,
-                    "readerDocumentVisible": readerDocumentVisible,
-                    "branchName": branchName ?? "",
-                    "commitTitle": commitTitle,
-                    "commitPickerShowsCurrentBranch": commitPickerShowsCurrentBranch,
-                    "indexStatusVisibleDuringIndexing":
-                        indexStatusVisibleDuringIndexing,
-                    "indexStatusTextDuringIndexing":
-                        indexStatusTextDuringIndexing,
-                    "statusBarVisibleAfterReady": statusBarVisibleAfterReady,
-                    "indexStatusHiddenAfterFullReady":
-                        indexStatusHiddenAfterFullReady,
-                ],
+                withJSONObject: object,
                 options: [.sortedKeys]
             )
             FileHandle.standardOutput.write(data)
@@ -2695,6 +2760,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     && indexStatusVisibleDuringIndexing
                     && statusBarVisibleAfterReady
                     && indexStatusHiddenAfterFullReady
+                    && layoutChecks.values.allSatisfy { $0 }
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
                     && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
                     ? 0 : 1
