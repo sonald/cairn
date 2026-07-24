@@ -200,6 +200,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 .selfTestSettingsToolbarItemExistsAndVisible,
             "profileToolbarItemRegisteredAndHiddenWithoutProject":
                 windowController.selfTestProfileToolbarItemRegisteredAndHidden,
+            "statusBarHiddenWithoutProject":
+                !windowController.selfTestStatusBarVisible,
             "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
@@ -215,10 +217,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         launch(offscreen: true)
         let projectStartedAt = ContinuousClock.now
         windowController?.openProject(root: root)
+        var indexStatusVisibleDuringIndexing = false
+        var indexStatusTextDuringIndexing = ""
+        func recordIndexStatus() {
+            guard let windowController,
+                  windowController.selfTestIndexStatusVisible,
+                  windowController.selfTestIndexStatusText.contains("Files")
+            else { return }
+            indexStatusVisibleDuringIndexing = true
+            indexStatusTextDuringIndexing = windowController.selfTestIndexStatusText
+        }
+        recordIndexStatus()
         let deadline = Date(timeIntervalSinceNow: 30)
         while model.fileTree == nil, Date() < deadline {
             if case .failed = model.projectState { break }
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+            recordIndexStatus()
         }
         let treeVisibleMS = milliseconds(since: projectStartedAt)
         let fileCount = model.fileTree?.fileCount ?? 0
@@ -244,6 +258,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 )
             default:
                 RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+                recordIndexStatus()
             }
             if ready { break }
         }
@@ -253,6 +268,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let emptyStateRemoved = windowController?.selfTestEmptyStateExists == false
         let readerDocumentVisible = windowController?
             .selfTestReaderDocumentVisibleInWindow == true
+        let statusBarVisibleAfterReady = waitUntil(timeout: 5) {
+            self.windowController?.selfTestStatusBarVisible == true
+        }
+        let indexStatusHiddenAfterFullReady = waitUntil(timeout: 5) {
+            self.windowController?.selfTestIndexStatusVisible == false
+        }
         let branchName = currentBranchName(repositoryURL: root)
         let commitTitle = windowController?.selfTestCommitButtonTitle ?? ""
         let commitTitleMatchesRepository: Bool
@@ -278,7 +299,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             readerDocumentVisible: readerDocumentVisible,
             branchName: branchName,
             commitTitle: commitTitle,
-            commitPickerShowsCurrentBranch: commitPickerShowsCurrentBranch
+            commitPickerShowsCurrentBranch: commitPickerShowsCurrentBranch,
+            indexStatusVisibleDuringIndexing: indexStatusVisibleDuringIndexing,
+            indexStatusTextDuringIndexing: indexStatusTextDuringIndexing,
+            statusBarVisibleAfterReady: statusBarVisibleAfterReady,
+            indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady
         )
     }
 
@@ -864,6 +889,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let initialStatusSafe = waitUntil(timeout: 5, condition: {
             model.exactCoordinator.readiness == .ready
+                && windowController.selfTestExactStatusVisible
                 && windowController.selfTestExactStatusText.contains("Safe")
         })
         let initialProfileTitle =
@@ -949,6 +975,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactGroupHeaderHonest = windowController.selfTestExactGroupTitle == "Exact"
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
+            && windowController.selfTestExactStatusVisible
         emitExactStep(
             "relations",
             variant: "fake",
@@ -1252,7 +1279,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return ["trustRevokeSafeSessionReady": false]
         }
         let initialStatusSafe = waitUntil(timeout: 5, condition: {
-            controller.selfTestExactStatusText.contains("Safe")
+            controller.selfTestExactStatusVisible
+                && controller.selfTestExactStatusText.contains("Safe")
         })
         let safeProfileTitle = "Rust · \(fixture.lastPathComponent) · Safe"
         let initialProfileVisible = waitUntil(timeout: 5, condition: {
@@ -1269,7 +1297,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && providerState.trustModes == ["safe", "trusted"]
         })
         let trustedStatusVisible = trustedReady && waitUntil(timeout: 5, condition: {
-            controller.selfTestExactStatusText.contains("Trusted")
+            controller.selfTestExactStatusVisible
+                && controller.selfTestExactStatusText.contains("Trusted")
         })
         let trustedProfileTitle =
             "Rust · \(fixture.lastPathComponent) · Trusted"
@@ -1334,7 +1363,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )?.isEmpty == true
         let trustedSessionClosed = providerState.closedSessions.contains(2)
         let statusIsSafe = rebuiltSafe && waitUntil(timeout: 5, condition: {
-            controller.selfTestExactStatusText.contains("Safe")
+            controller.selfTestExactStatusVisible
+                && controller.selfTestExactStatusText.contains("Safe")
         })
         let safeProfileRestored = rebuiltSafe && waitUntil(timeout: 5, condition: {
             controller.selfTestProfileToolbarItemExistsAndVisible
@@ -2626,7 +2656,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         readerDocumentVisible: Bool,
         branchName: String? = nil,
         commitTitle: String = "",
-        commitPickerShowsCurrentBranch: Bool = false
+        commitPickerShowsCurrentBranch: Bool = false,
+        indexStatusVisibleDuringIndexing: Bool = false,
+        indexStatusTextDuringIndexing: String = "",
+        statusBarVisibleAfterReady: Bool = false,
+        indexStatusHiddenAfterFullReady: Bool = false
     ) -> Never {
         do {
             let data = try JSONSerialization.data(
@@ -2641,6 +2675,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "branchName": branchName ?? "",
                     "commitTitle": commitTitle,
                     "commitPickerShowsCurrentBranch": commitPickerShowsCurrentBranch,
+                    "indexStatusVisibleDuringIndexing":
+                        indexStatusVisibleDuringIndexing,
+                    "indexStatusTextDuringIndexing":
+                        indexStatusTextDuringIndexing,
+                    "statusBarVisibleAfterReady": statusBarVisibleAfterReady,
+                    "indexStatusHiddenAfterFullReady":
+                        indexStatusHiddenAfterFullReady,
                 ],
                 options: [.sortedKeys]
             )
@@ -2651,6 +2692,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     && emptyStateRemoved
                     && readerDocumentVisible
                     && commitPickerShowsCurrentBranch
+                    && indexStatusVisibleDuringIndexing
+                    && statusBarVisibleAfterReady
+                    && indexStatusHiddenAfterFullReady
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
                     && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
                     ? 0 : 1

@@ -16,8 +16,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private static let symbolsItemIdentifier = NSToolbarItem.Identifier("Symbols")
     private static let settingsItemIdentifier = NSToolbarItem.Identifier("Settings")
     private static let profileItemIdentifier = NSToolbarItem.Identifier("Profile")
-    private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
-    private static let exactItemIdentifier = NSToolbarItem.Identifier("ExactStatus")
 
     let model: AppModel
     private let sidebarController = SidebarViewController()
@@ -40,6 +38,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let statusBar = NSView()
+    private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
     private let toolbar = NSToolbar(identifier: "MainToolbar")
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
@@ -117,6 +117,90 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contentSplitController.addSplitViewItem(upperItem)
         contentSplitController.addSplitViewItem(contextItem)
 
+        let contentView = NSView()
+        let contentViewController = NSViewController()
+        contentViewController.view = contentView
+        contentViewController.addChild(contentSplitController)
+        contentSplitController.view.translatesAutoresizingMaskIntoConstraints = false
+
+        statusBar.translatesAutoresizingMaskIntoConstraints = false
+        statusBar.isHidden = true
+        let separator = NSView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.wantsLayer = true
+        separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
+
+        indexLabel.font = .systemFont(ofSize: 11)
+        indexLabel.textColor = .secondaryLabelColor
+        indexLabel.setAccessibilityLabel("Index status")
+        indexLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        truncatedLabel.textColor = .systemOrange
+        truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
+        truncatedLabel.drawsBackground = true
+        truncatedLabel.backgroundColor = .systemOrange.withAlphaComponent(0.12)
+        truncatedLabel.alignment = .center
+        truncatedLabel.wantsLayer = true
+        truncatedLabel.layer?.cornerRadius = 4
+        truncatedLabel.setAccessibilityLabel("Query completeness")
+        NSLayoutConstraint.activate([
+            truncatedLabel.widthAnchor.constraint(
+                equalToConstant: truncatedLabel.intrinsicContentSize.width + 12
+            ),
+            truncatedLabel.heightAnchor.constraint(equalToConstant: 18),
+        ])
+        exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        exactLabel.setAccessibilityLabel("Exact provider status")
+
+        let statusStack = NSStackView()
+        statusStack.setViews([indexLabel], in: .leading)
+        statusStack.setViews([truncatedLabel], in: .center)
+        statusStack.setViews([exactLabel], in: .trailing)
+        statusStack.translatesAutoresizingMaskIntoConstraints = false
+        statusStack.orientation = .horizontal
+        statusStack.alignment = .centerY
+        statusStack.spacing = 12
+        let contentStack = NSStackView(
+            views: [contentSplitController.view, statusBar]
+        )
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.orientation = .vertical
+        contentStack.spacing = 0
+        contentView.addSubview(contentStack)
+        statusBar.addSubview(separator)
+        statusBar.addSubview(statusStack)
+        NSLayoutConstraint.activate([
+            contentStack.leadingAnchor.constraint(
+                equalTo: contentView.leadingAnchor
+            ),
+            contentStack.trailingAnchor.constraint(
+                equalTo: contentView.trailingAnchor
+            ),
+            contentStack.topAnchor.constraint(
+                equalTo: contentView.topAnchor
+            ),
+            contentStack.bottomAnchor.constraint(
+                equalTo: contentView.bottomAnchor
+            ),
+            statusBar.heightAnchor.constraint(equalToConstant: 24),
+            separator.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: statusBar.trailingAnchor),
+            separator.topAnchor.constraint(equalTo: statusBar.topAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+            statusStack.leadingAnchor.constraint(
+                equalTo: statusBar.leadingAnchor,
+                constant: 12
+            ),
+            statusStack.trailingAnchor.constraint(
+                equalTo: statusBar.trailingAnchor,
+                constant: -12
+            ),
+            statusStack.centerYAnchor.constraint(
+                equalTo: statusBar.centerYAnchor,
+                constant: 0.5
+            ),
+        ])
+
         let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1280, height: 820)
         let window = NSWindow(
             contentRect: frame,
@@ -128,7 +212,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         window.title = "Cairn"
         window.minSize = NSSize(width: 900, height: 600)
-        window.contentViewController = contentSplitController
+        window.contentViewController = contentViewController
         super.init(window: window)
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -185,6 +269,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         relationController.onOpen = { [weak self] path, offset in
             self?.open(path: path, byteOffset: offset)
+        }
+        relationController.onTreeChange = { [weak self] in
+            self?.renderStatusBar()
         }
         profileButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -260,6 +347,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
     var selfTestExactStatusText: String { exactLabel.stringValue }
+    var selfTestStatusBarVisible: Bool {
+        guard selfTestViewIsVisibleInWindow(statusBar) else { return false }
+        let statusFrame = statusBar.convert(statusBar.bounds, to: nil)
+        let contentFrame = contentSplitController.view.convert(
+            contentSplitController.view.bounds,
+            to: nil
+        )
+        return abs(statusFrame.height - 24) < 0.5
+            && statusFrame.maxY <= contentFrame.minY + 0.5
+    }
+    var selfTestIndexStatusText: String { indexLabel.stringValue }
+    var selfTestIndexStatusVisible: Bool {
+        selfTestStatusBarVisible
+            && indexLabel.isDescendant(of: statusBar)
+            && selfTestViewIsVisibleInWindow(indexLabel)
+    }
+    var selfTestExactStatusVisible: Bool {
+        selfTestStatusBarVisible
+            && exactLabel.isDescendant(of: statusBar)
+            && selfTestViewIsVisibleInWindow(exactLabel)
+    }
     var selfTestExactGroupTitle: String? {
         relationController.selfTestExactGroupTitle
     }
@@ -421,6 +529,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         } == true
     }
 
+    private func selfTestViewIsVisibleInWindow(_ view: NSView) -> Bool {
+        guard let window = view.window,
+              let contentView = window.contentView,
+              !view.isHiddenOrHasHiddenAncestor,
+              view.bounds.width > 0,
+              view.bounds.height > 0
+        else { return false }
+        let frameInWindow = view.convert(view.bounds, to: nil)
+        let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
+        let visibleFrame = frameInWindow.intersection(contentFrameInWindow)
+        return visibleFrame.width > 0 && visibleFrame.height > 0
+    }
+
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
@@ -518,7 +639,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             .flexibleSpace,
             Self.symbolsItemIdentifier,
             .flexibleSpace,
-            Self.exactItemIdentifier,
             Self.settingsItemIdentifier,
         ]
     }
@@ -532,8 +652,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.symbolsItemIdentifier,
             Self.settingsItemIdentifier,
             Self.profileItemIdentifier,
-            Self.indexItemIdentifier,
-            Self.exactItemIdentifier,
             .flexibleSpace,
         ]
     }
@@ -651,24 +769,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             profileButton.action = #selector(showProfileMenu(_:))
             profileButton.setAccessibilityLabel("Analysis profile")
             item.menuFormRepresentation = profileMenuItem()
-        case Self.indexItemIdentifier:
-            item.label = "Index Status"
-            item.view = indexLabel
-            item.menuFormRepresentation = NSMenuItem(
-                title: indexLabel.stringValue,
-                action: nil,
-                keyEquivalent: ""
-            )
-        case Self.exactItemIdentifier:
-            item.label = "Exact Status"
-            item.view = exactLabel
-            exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
-            exactLabel.setAccessibilityLabel("Exact provider status")
-            item.menuFormRepresentation = NSMenuItem(
-                title: exactLabel.stringValue,
-                action: nil,
-                keyEquivalent: ""
-            )
         default:
             return nil
         }
@@ -778,26 +878,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderEmptyState()
         renderCommitButton()
         renderExactStatus()
+        renderStatusBar()
 
         guard let toolbar = window?.toolbar else { return }
         renderProfileItem(in: toolbar)
-        let statusText = model.coverage.statusText(for: model.snapshotPhase)
-            ?? initialIndexStatus
-        if let statusText {
-            indexLabel.stringValue = statusText
-            if toolbar.items.allSatisfy({ $0.itemIdentifier != Self.indexItemIdentifier }) {
-                toolbar.insertItem(
-                    withItemIdentifier: Self.indexItemIdentifier,
-                    at: toolbar.items.count
-                )
-            }
-        } else {
-            if let index = toolbar.items.firstIndex(where: {
-                $0.itemIdentifier == Self.indexItemIdentifier
-            }) {
-                toolbar.removeItem(at: index)
-            }
-        }
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
@@ -1020,6 +1104,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               case .indexing = model.projectState
         else { return nil }
         return "Indexing \(model.fileTree?.fileCount ?? 0) files…"
+    }
+
+    private func renderStatusBar() {
+        let hasProject = switch model.projectState {
+        case .indexing, .ready: true
+        case .empty, .failed: false
+        }
+        statusBar.isHidden = !hasProject
+        let coverageStatus = model.coverage.statusText(
+            for: model.snapshotPhase ?? .firstPaint
+        )
+        let indexStatus = [initialIndexStatus, coverageStatus]
+            .compactMap { $0 }
+            .joined(separator: " · ")
+        indexLabel.stringValue = indexStatus
+        indexLabel.isHidden = indexStatus.isEmpty
+        truncatedLabel.isHidden = !model.relationTree.hasTruncatedResults
     }
 
     private func renderCommitButton() {

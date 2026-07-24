@@ -8,6 +8,7 @@ final class RelationWindowController: NSViewController,
     NSOutlineViewDataSource, NSOutlineViewDelegate
 {
     var onOpen: ((String, UInt32) -> Void)?
+    var onTreeChange: (() -> Void)?
 
     private let model: RelationTreeModel
     private let directionControl = NSSegmentedControl(
@@ -177,6 +178,7 @@ final class RelationWindowController: NSViewController,
         let loadTask = model.setRoot(symbol: symbol, direction: direction)
         if model.root == nil { currentSymbol = nil }
         reloadWholeTree()
+        onTreeChange?()
 
         guard let root = model.root else { return }
         outlineView.expandItem(root)
@@ -189,6 +191,7 @@ final class RelationWindowController: NSViewController,
             else { return }
             reloadWholeTree()
             expandLoadedGroups(under: root)
+            onTreeChange?()
         }
     }
 
@@ -271,10 +274,12 @@ final class RelationWindowController: NSViewController,
             guard model.generation == generation else { return }
             outlineView.reloadItem(node, reloadChildren: true)
             outlineView.expandItem(node)
+            onTreeChange?()
             await expansion.value
             guard model.generation == generation else { return }
             outlineView.reloadItem(node, reloadChildren: true)
             expandLoadedGroups(under: node)
+            onTreeChange?()
         }
     }
 

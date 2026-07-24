@@ -130,6 +130,9 @@ public final class RelationTreeModel {
     public private(set) var requestID: UInt64 = 0
     public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
     public var onSelect: @MainActor (Node) -> Void = { _ in }
+    public var hasTruncatedResults: Bool {
+        root.map(Self.containsTruncatedNode) ?? false
+    }
 
     private let loader: Loader
     private var exactResolver: ExactResolver?
@@ -781,6 +784,11 @@ public final class RelationTreeModel {
     private nonisolated static func isTruncated(_ completeness: Completeness) -> Bool {
         if case .truncated = completeness { return true }
         return false
+    }
+
+    private static func containsTruncatedNode(_ node: Node) -> Bool {
+        node.kind == .truncated
+            || node.children?.contains(where: containsTruncatedNode) == true
     }
 
     private nonisolated static func evidenceLabel(

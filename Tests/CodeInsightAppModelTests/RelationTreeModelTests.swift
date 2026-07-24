@@ -600,6 +600,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     let strong = try relationGroup("Strong", in: model.root)
     #expect(strong.children?.count == 500)
     #expect(model.root?.children?.last?.kind == .truncated)
+    #expect(model.hasTruncatedResults)
 }
 
 @MainActor
