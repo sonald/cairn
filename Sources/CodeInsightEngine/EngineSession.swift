@@ -160,6 +160,29 @@ public final class EngineSession: Sendable {
         }
     }
 
+    public func reprofiled(
+        featureSelection: FeatureSelection
+    ) -> EngineSession {
+        let profile = AnalysisProfile(
+            language: analysisProfile.language,
+            projectRoot: analysisProfile.projectRoot,
+            projectUnitName: analysisProfile.projectUnitName,
+            configFingerprint: analysisProfile.configFingerprint,
+            environmentFingerprint: analysisProfile.environmentFingerprint,
+            featureSelection: featureSelection,
+            featureNames: analysisProfile.featureNames,
+            edition: analysisProfile.edition,
+            trustMode: analysisProfile.trustMode
+        )
+        return EngineSession(
+            store: store,
+            snapshotView: SnapshotView(
+                reprofiling: snapshotView,
+                analysisProfile: profile
+            )
+        )
+    }
+
     public func definitions(
         of name: String,
         context: QueryContext

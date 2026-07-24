@@ -347,6 +347,16 @@ func indexingIsDeterministicAcrossRuns() throws {
 }
 
 @Test
+func analysisProfileIDIsDeterministicAcrossIndexes() throws {
+    try withProjectRoot(determinismFixture) { root in
+        let first = try ProjectIndexer().index(root: root)
+        let second = try ProjectIndexer().index(root: root)
+
+        #expect(first.analysisProfile.id == second.analysisProfile.id)
+    }
+}
+
+@Test
 func parallelIndexMatchesSerialIndex() throws {
     try withProjectRoot(determinismFixture) { root in
         let serial = try ProjectIndexer(parallelism: 1).index(root: root)

@@ -69,9 +69,14 @@ public protocol Snapshot: Sendable {
     var snapshotID: SnapshotID { get }
     var objectFormat: GitObjectFormat { get }
     var sourceKind: SourceKind { get }
+    var projectRootName: String { get }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)]
     func readBytes(path: String) throws -> [UInt8]
+}
+
+public extension Snapshot {
+    var projectRootName: String { "." }
 }
 
 public final class GitRepository {
@@ -142,6 +147,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let sourceKind: SourceKind = .tracked
     public let revision: String
     public let commitOID: GitOID
+    public let projectRootName: String
 
     public init(repositoryURL: URL, revision: String = "HEAD") throws {
         let loaded: ([String: CapturedFile], GitObjectFormat, GitOID) =
@@ -216,6 +222,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
         objectFormat = loaded.1
         self.revision = revision
         commitOID = loaded.2
+        projectRootName = repositoryURL.standardizedFileURL.lastPathComponent
         files = loaded.0
     }
 
@@ -247,9 +254,11 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     ]
 
     private let files: [String: CapturedFile]
+    private let configurationFiles: [String: CapturedFile]
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
+    public let projectRootName: String
     // A directory import has no per-file Git status in the M1 model, so all
     // captured worktree files retain the existing .untracked convention.
     public let sourceKind: SourceKind = .untracked
@@ -280,9 +289,23 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
             )
         }
 
+        var configurationFiles: [String: CapturedFile] = [:]
+        for file in (try? Self.configurationFiles(under: root)) ?? [] {
+            guard let data = try? Data(contentsOf: file, options: .mappedIfSafe)
+            else { continue }
+            let bytes = [UInt8](data)
+            configurationFiles[Self.relativePath(of: file, under: root)] = CapturedFile(
+                bytes: bytes,
+                contentID: ContentID.sha256(of: bytes),
+                fileMode: .regular
+            )
+        }
+
         snapshotID = SnapshotID(rawValue: UUID())
         objectFormat = repositoryInfo.1
+        projectRootName = root.lastPathComponent
         files = captured
+        self.configurationFiles = configurationFiles
     }
 
     public func listFiles() -> [(
@@ -300,7 +323,9 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     }
 
     public func readBytes(path: String) throws -> [UInt8] {
-        guard let file = files[path] else { throw GitError.missingPath(path) }
+        guard let file = files[path] ?? configurationFiles[path] else {
+            throw GitError.missingPath(path)
+        }
         return file.bytes
     }
 
@@ -322,6 +347,32 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 else { continue }
                 result += try rustFiles(under: url)
             } else if values.isRegularFile == true && url.pathExtension == "rs" {
+                result.append(url)
+            }
+        }
+        return result.sorted { $0.path < $1.path }
+    }
+
+    private static func configurationFiles(under root: URL) throws -> [URL] {
+        var result: [URL] = []
+        for url in try FileManager.default.contentsOfDirectory(
+            at: root,
+            includingPropertiesForKeys: [
+                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
+            ]
+        ) {
+            let values = try url.resourceValues(forKeys: [
+                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
+            ])
+            if values.isDirectory == true {
+                guard values.isSymbolicLink != true,
+                      !skippedDirectories.contains(url.lastPathComponent)
+                else { continue }
+                result += try configurationFiles(under: url)
+            } else if values.isRegularFile == true,
+                      url.lastPathComponent == "Cargo.toml"
+                        || url.lastPathComponent == "Cargo.lock"
+            {
                 result.append(url)
             }
         }

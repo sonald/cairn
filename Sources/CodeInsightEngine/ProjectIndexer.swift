@@ -166,9 +166,9 @@ public struct ProjectIndexer: Sendable {
             reusedCount: cachedDrafts.count,
             extractedCount: extractedDrafts.count
         )
-        let profile = AnalysisProfile.placeholder(
-            language: .rust,
-            root: store.paths.intern(".")
+        let profile = ProfileDetector.detect(
+            root: root,
+            projectRoot: store.paths.intern(".")
         )
         let snapshotView = SnapshotView(
             store: store,
@@ -258,9 +258,9 @@ public struct ProjectIndexer: Sendable {
             snapshotID: snapshot.snapshotID,
             files: occurrences
         )
-        let analysisProfile = AnalysisProfile.placeholder(
-            language: .rust,
-            root: store.paths.intern(".")
+        let analysisProfile = ProfileDetector.detect(
+            snapshot: snapshot,
+            projectRoot: store.paths.intern(".")
         )
         let stats = snapshotStats(
             manifest: manifest,

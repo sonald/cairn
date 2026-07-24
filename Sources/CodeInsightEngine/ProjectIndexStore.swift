@@ -102,4 +102,28 @@ struct SnapshotView: Sendable {
             paths: store.paths
         )
     }
+
+    init(
+        reprofiling view: SnapshotView,
+        analysisProfile: AnalysisProfile
+    ) {
+        store = view.store
+        manifest = view.manifest
+        stats = IndexStats(
+            fileCount: view.stats.fileCount,
+            uniqueContentCount: view.stats.uniqueContentCount,
+            scopeCount: view.stats.scopeCount,
+            bindingCount: view.stats.bindingCount,
+            symbolCount: view.stats.symbolCount,
+            callCount: view.stats.callCount,
+            importCount: view.stats.importCount,
+            elapsedMilliseconds: 0,
+            filesWithErrorNodes: view.stats.filesWithErrorNodes,
+            reusedCount: view.stats.uniqueContentCount,
+            extractedCount: 0
+        )
+        self.analysisProfile = analysisProfile
+        moduleMap = view.moduleMap
+        storeState = view.storeState
+    }
 }

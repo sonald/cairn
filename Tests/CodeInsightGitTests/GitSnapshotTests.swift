@@ -194,10 +194,17 @@ func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
     let file = fixture.root.appendingPathComponent("sample.rs")
     let captured = Array("captured bytes".utf8)
     try Data(captured).write(to: file)
+    let cargo = fixture.root.appendingPathComponent("Cargo.toml")
+    let capturedCargo = Array("[package]\nname = \"sample\"\n".utf8)
+    try Data(capturedCargo).write(to: cargo)
     let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
 
     try Data("changed later".utf8).write(to: file)
+    try Data("[package]\nname = \"changed\"\n".utf8).write(to: cargo)
     #expect(try snapshot.readBytes(path: "sample.rs") == captured)
+    #expect(try snapshot.readBytes(path: "Cargo.toml") == capturedCargo)
+    #expect(!snapshot.listFiles().contains { $0.path == "Cargo.toml" })
+    #expect(snapshot.projectRootName == fixture.root.lastPathComponent)
 }
 
 @Test
