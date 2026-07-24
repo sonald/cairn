@@ -156,13 +156,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
 
     func runSelfTest() {
-        launch(offscreen: true)
+        launch(offscreen: true, measuresIdleFootprint: true)
         let coldStartMS = milliseconds(since: startedAt)
         guard let windowController, windowController.window?.isVisible == true else {
             Darwin.exit(1)
         }
         windowController.window?.contentView?.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
+        guard let footprint = physicalFootprintBytes() else { Darwin.exit(1) }
+        let idleFootprintMB = Double(footprint) / 1_048_576
+        windowController.prepareTitledWindowForSelfTest()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
         let checks = [
             "emptyStateExists": windowController.selfTestEmptyStateExists,
@@ -194,11 +198,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 .selfTestSymbolsToolbarItemExistsAndVisible,
             "settingsToolbarItemExistsAndVisible": windowController
                 .selfTestSettingsToolbarItemExistsAndVisible,
+            "profileToolbarItemRegisteredAndHiddenWithoutProject":
+                windowController.selfTestProfileToolbarItemRegisteredAndHidden,
             "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
-        Self.finishSelfTest(coldStartMS: coldStartMS, checks: checks)
+        Self.finishSelfTest(
+            coldStartMS: coldStartMS,
+            idleFootprintMB: idleFootprintMB,
+            checks: checks
+        )
     }
 
     func runProjectSelfTest(root: URL) {
@@ -856,10 +866,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             model.exactCoordinator.readiness == .ready
                 && windowController.selfTestExactStatusText.contains("Safe")
         })
+        let initialProfileTitle =
+            "Rust · \(projectRoot.lastPathComponent) · Safe"
+        let initialProfileVisible = waitUntil(timeout: 5, condition: {
+            windowController.selfTestProfileToolbarItemExistsAndVisible
+                && windowController.selfTestProfileTitle == initialProfileTitle
+        })
         emitExactStep(
             "initial-status",
             variant: "fake",
-            controller: windowController
+            controller: windowController,
+            extra: [
+                "profileVisible": initialProfileVisible,
+                "profileTitle": windowController.selfTestProfileTitle,
+            ]
         )
         guard waitUntil(timeout: 5, condition: {
                   windowController.selectFileInSidebar(target.file)
@@ -1140,6 +1160,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactGroupHeaderHonest": exactGroupHeaderHonest,
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
+            "initialProfileVisible": initialProfileVisible,
+            "initialProfileTitleSafe":
+                windowController.selfTestProfileTitle == initialProfileTitle,
             "relationFileVisible": relationFileVisible,
             "selectedForDirection": selectedForDirection,
             "selectedEdgeDrivesRoot": selectedEdgeDrivesRoot,
@@ -1231,6 +1254,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let initialStatusSafe = waitUntil(timeout: 5, condition: {
             controller.selfTestExactStatusText.contains("Safe")
         })
+        let safeProfileTitle = "Rust · \(fixture.lastPathComponent) · Safe"
+        let initialProfileVisible = waitUntil(timeout: 5, condition: {
+            controller.selfTestProfileToolbarItemExistsAndVisible
+                && controller.selfTestProfileTitle == safeProfileTitle
+        })
+        let initialProfileTitleSafe =
+            controller.selfTestProfileTitle == safeProfileTitle
 
         Task { try? await trustModel.grantCurrentRepositoryTrust() }
         let trustedReady = waitUntil(timeout: 5, condition: {
@@ -1241,10 +1271,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let trustedStatusVisible = trustedReady && waitUntil(timeout: 5, condition: {
             controller.selfTestExactStatusText.contains("Trusted")
         })
+        let trustedProfileTitle =
+            "Rust · \(fixture.lastPathComponent) · Trusted"
+        let trustedProfileVisible = trustedReady && waitUntil(timeout: 5, condition: {
+            controller.selfTestProfileToolbarItemExistsAndVisible
+                && controller.selfTestProfileTitle == trustedProfileTitle
+        })
         emitExactStep(
             "trusted-status",
             variant: "fake",
-            controller: controller
+            controller: controller,
+            extra: ["profileTitle": controller.selfTestProfileTitle]
         )
 
         let settingsController = ReaderSettingsWindowController(
@@ -1299,16 +1336,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let statusIsSafe = rebuiltSafe && waitUntil(timeout: 5, condition: {
             controller.selfTestExactStatusText.contains("Safe")
         })
+        let safeProfileRestored = rebuiltSafe && waitUntil(timeout: 5, condition: {
+            controller.selfTestProfileToolbarItemExistsAndVisible
+                && controller.selfTestProfileTitle == safeProfileTitle
+        })
         let checks = [
             "trustInitialStatusSafe": initialStatusSafe,
+            "trustInitialProfileVisible": initialProfileVisible,
+            "trustInitialProfileTitleSafe": initialProfileTitleSafe,
             "trustRevokeTrustedReady": trustedReady,
             "trustStatusTrusted": trustedStatusVisible,
+            "trustProfileTitleTrusted": trustedProfileVisible,
             "trustRevokeListRowLaidOut": listRowCount == 1,
             "trustRevokeRepositoriesEmpty": trustedRepositoriesEmpty,
             "trustRevokeJSONEmpty": trustJSONEmpty,
             "trustRevokePreparedSafe": rebuiltSafe,
             "trustRevokeClosedTrustedSession": trustedSessionClosed,
             "trustRevokeStatusIsSafe": statusIsSafe,
+            "trustRevokeProfileTitleIsSafe": safeProfileRestored,
         ]
         emitExactStep(
             "trust-revoke",
@@ -2056,12 +2101,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
-    private func launch(offscreen: Bool) {
+    private func launch(
+        offscreen: Bool,
+        measuresIdleFootprint: Bool = false
+    ) {
         NSApplication.shared.mainMenu = makeMainMenu()
         let windowController = MainWindowController(
             model: model,
             settings: readerSettings,
             offscreen: offscreen,
+            measuresIdleFootprint: measuresIdleFootprint,
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
             onChooseProject: { [weak self] in self?.openProject(nil) },
@@ -2540,17 +2589,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     private static func finishSelfTest(
         coldStartMS: Double,
+        idleFootprintMB: Double,
         checks: [String: Bool]
     ) {
         do {
-            guard let footprint = physicalFootprintBytes() else { Darwin.exit(1) }
-            let idleFootprintMB = Double(footprint) / 1_048_576
             let passed = coldStartMS < SelfTestBudgets.coldStartMS
                 && idleFootprintMB < SelfTestBudgets.idleFootprintMB
                 && checks.values.allSatisfy { $0 }
             var object: [String: Any] = checks
             object["coldStartMS"] = coldStartMS
             object["idleFootprintMB"] = idleFootprintMB
+            object["idleFootprintWindowStyle"] = "borderless"
+            object["toolbarAssertionsWindowStyle"] = "titled"
             object["passed"] = passed
             let data = try JSONSerialization.data(
                 withJSONObject: object,

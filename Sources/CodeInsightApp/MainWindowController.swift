@@ -15,6 +15,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private static let commitItemIdentifier = NSToolbarItem.Identifier("Commit")
     private static let symbolsItemIdentifier = NSToolbarItem.Identifier("Symbols")
     private static let settingsItemIdentifier = NSToolbarItem.Identifier("Settings")
+    private static let profileItemIdentifier = NSToolbarItem.Identifier("Profile")
     private static let indexItemIdentifier = NSToolbarItem.Identifier("IndexStatus")
     private static let exactItemIdentifier = NSToolbarItem.Identifier("ExactStatus")
 
@@ -36,8 +37,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let commitButton = NSButton()
     private let symbolsButton = NSButton()
     private let settingsButton = NSButton()
+    private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let toolbar = NSToolbar(identifier: "MainToolbar")
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
     private let onChooseProject: () -> Void
@@ -57,6 +60,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         model: AppModel,
         settings: ReaderSettings,
         offscreen: Bool,
+        measuresIdleFootprint: Bool = false,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
         onChooseProject: @escaping () -> Void = {},
@@ -116,21 +120,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let frame = NSRect(x: offscreen ? -10_000 : 0, y: 0, width: 1280, height: 820)
         let window = NSWindow(
             contentRect: frame,
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: measuresIdleFootprint
+                ? [.borderless]
+                : [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Cairn"
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentSplitController
-        let toolbar = NSToolbar(identifier: "MainToolbar")
         super.init(window: window)
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
-        window.toolbarStyle = .unified
-        window.titleVisibility = .hidden
-        window.toolbar = toolbar
+        if !measuresIdleFootprint {
+            window.toolbarStyle = .unified
+            window.titleVisibility = .hidden
+            window.toolbar = toolbar
+        }
         if !offscreen {
             window.center()
             window.setFrameAutosaveName("CodeInsightMainWindow")
@@ -179,6 +186,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.onOpen = { [weak self] path, offset in
             self?.open(path: path, byteOffset: offset)
         }
+        profileButton.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            profileButton.widthAnchor.constraint(equalToConstant: 240),
+            profileButton.heightAnchor.constraint(equalToConstant: 28),
+        ])
         applyReaderSettings(settings)
         render()
         applyPanelPreset(.reading)
@@ -318,6 +330,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestSettingsToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.settingsItemIdentifier)
     }
+    var selfTestProfileToolbarItemExistsAndVisible: Bool {
+        selfTestToolbarItemExistsAndVisible(identifier: Self.profileItemIdentifier)
+    }
+    var selfTestProfileToolbarItemRegisteredAndHidden: Bool {
+        guard let toolbar = window?.toolbar else { return false }
+        return toolbarAllowedItemIdentifiers(toolbar)
+            .contains(Self.profileItemIdentifier)
+            && !selfTestProfileToolbarItemExistsAndVisible
+    }
+    var selfTestProfileTitle: String { profileButton.title }
+    func prepareTitledWindowForSelfTest() {
+        guard let window else { return }
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
+        window.toolbar = toolbar
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        toolbar.validateVisibleItems()
+    }
     var selfTestReaderDocumentVisibleInWindow: Bool {
         readerController.selfTestReaderDocumentVisibleInWindow
     }
@@ -384,7 +416,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func selfTestToolbarItemExistsAndVisible(
         identifier: NSToolbarItem.Identifier
     ) -> Bool {
-        window?.toolbar?.visibleItems?.contains {
+        return window?.toolbar?.visibleItems?.contains {
             $0.itemIdentifier == identifier
         } == true
     }
@@ -499,6 +531,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             Self.commitItemIdentifier,
             Self.symbolsItemIdentifier,
             Self.settingsItemIdentifier,
+            Self.profileItemIdentifier,
             Self.indexItemIdentifier,
             Self.exactItemIdentifier,
             .flexibleSpace,
@@ -607,6 +640,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menuItem.keyEquivalentModifierMask = .command
             menuItem.target = self
             item.menuFormRepresentation = menuItem
+        case Self.profileItemIdentifier:
+            item.label = "Profile"
+            item.view = profileButton
+            item.visibilityPriority = .high
+            profileButton.bezelStyle = .rounded
+            profileButton.font = .systemFont(ofSize: 11, weight: .semibold)
+            profileButton.cell?.lineBreakMode = .byTruncatingTail
+            profileButton.target = self
+            profileButton.action = #selector(showProfileMenu(_:))
+            profileButton.setAccessibilityLabel("Analysis profile")
+            item.menuFormRepresentation = profileMenuItem()
         case Self.indexItemIdentifier:
             item.label = "Index Status"
             item.view = indexLabel
@@ -736,6 +780,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderExactStatus()
 
         guard let toolbar = window?.toolbar else { return }
+        renderProfileItem(in: toolbar)
         let statusText = model.coverage.statusText(for: model.snapshotPhase)
             ?? initialIndexStatus
         if let statusText {
@@ -756,6 +801,93 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         symbolSearchPanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+    }
+
+    private var profileTitle: String? {
+        guard let profile = model.activeAnalysisProfileDisplay,
+              let trustMode = model.exactCoordinator.trustMode
+        else { return nil }
+        let trust = switch trustMode {
+        case .safe: "Safe"
+        case .trusted: "Trusted"
+        }
+        return "\(Self.displayName(for: profile.language))"
+            + " · \(profile.projectRootName) · \(trust)"
+    }
+
+    private static func displayName(for language: LanguageID) -> String {
+        switch language {
+        case .rust: "Rust"
+        case .python: "Python"
+        case .typescript: "TypeScript"
+        case .javascript: "JavaScript"
+        }
+    }
+
+    private func renderProfileItem(in toolbar: NSToolbar) {
+        guard let profileTitle else {
+            if let index = toolbar.items.firstIndex(where: {
+                $0.itemIdentifier == Self.profileItemIdentifier
+            }) {
+                toolbar.removeItem(at: index)
+            }
+            return
+        }
+        profileButton.title = profileTitle
+        if toolbar.items.allSatisfy({
+            $0.itemIdentifier != Self.profileItemIdentifier
+        }) {
+            let settingsIndex = toolbar.items.firstIndex {
+                $0.itemIdentifier == Self.settingsItemIdentifier
+            } ?? toolbar.items.count
+            toolbar.insertItem(
+                withItemIdentifier: Self.profileItemIdentifier,
+                at: settingsIndex
+            )
+        }
+        guard let item = toolbar.items.first(where: {
+            $0.itemIdentifier == Self.profileItemIdentifier
+        }) else { return }
+        item.menuFormRepresentation = profileMenuItem()
+    }
+
+    private func profileMenuItem() -> NSMenuItem {
+        let item = NSMenuItem(
+            title: profileButton.title,
+            action: nil,
+            keyEquivalent: ""
+        )
+        item.submenu = makeProfileMenu()
+        return item
+    }
+
+    private func makeProfileMenu() -> NSMenu {
+        let menu = NSMenu(title: "Profile")
+        let current = NSMenuItem(
+            title: profileButton.title,
+            action: nil,
+            keyEquivalent: ""
+        )
+        current.state = .on
+        current.isEnabled = false
+        menu.addItem(current)
+        menu.addItem(.separator())
+        let trust = NSMenuItem(
+            title: "Trust This Repository…",
+            action: NSSelectorFromString("trustThisRepository:"),
+            keyEquivalent: ""
+        )
+        trust.target = NSApplication.shared.delegate
+        menu.addItem(trust)
+        menu.addItem(.separator())
+        let explanation = NSMenuItem(
+            title: "Profiles are detected from project configuration",
+            action: nil,
+            keyEquivalent: ""
+        )
+        explanation.isEnabled = false
+        menu.addItem(explanation)
+        return menu
     }
 
     private func renderEmptyState() {
@@ -963,6 +1095,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     @objc private func showSettingsFromToolbar(_ sender: Any?) {
         onShowSettings()
+    }
+
+    @objc private func showProfileMenu(_ sender: Any?) {
+        guard profileTitle != nil else { return }
+        makeProfileMenu().popUp(
+            positioning: nil,
+            at: .zero,
+            in: profileButton
+        )
     }
 
     private func showCompareCommitPicker() {

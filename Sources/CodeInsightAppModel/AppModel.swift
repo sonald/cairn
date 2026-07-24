@@ -304,6 +304,24 @@ public final class AppModel {
         return !exactCoordinator.isTrusted(projectRoot)
     }
 
+    public var activeAnalysisProfileDisplay: (
+        language: LanguageID,
+        projectRootName: String
+    )? {
+        guard case let .ready(session, _) = projectState,
+              let projectRoot
+        else { return nil }
+        let profile = session.analysisProfile
+        let relativeRoot = session.paths.resolve(profile.projectRoot)
+        return (
+            profile.language,
+            projectRoot.appendingPathComponent(
+                relativeRoot,
+                isDirectory: true
+            ).standardizedFileURL.lastPathComponent
+        )
+    }
+
     private let indexService: any IndexService
     private let navigationSink: @MainActor (URL, UInt32?) -> Void
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
