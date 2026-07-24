@@ -240,5 +240,9 @@ let package = Package(
                 "CodeInsightReaderUI",
             ]
         ),
+        .testTarget(
+            name: "CodeInsightAppTests",
+            dependencies: ["CodeInsightApp"]
+        ),
     ]
 )

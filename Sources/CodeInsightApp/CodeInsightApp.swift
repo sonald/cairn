@@ -171,8 +171,51 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController,
             statusBarOccupancyHeight: 0
         )
+        var themeSettings = readerSettings
+        themeSettings.theme = .dark
+        windowController.applyReaderSettings(themeSettings)
+        let darkChromeMatchesTheme = windowController.window?
+            .effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        themeSettings.theme = .light
+        windowController.applyReaderSettings(themeSettings)
+        let lightChromeMatchesTheme = windowController.window?
+            .effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+        themeSettings.theme = .siClassic
+        windowController.applyReaderSettings(themeSettings)
+        let siClassicChromeStaysLight = windowController.window?
+            .effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .aqua
+        themeSettings.theme = .auto
+        windowController.applyReaderSettings(themeSettings)
+        let autoChromeFollowsSystem = windowController.window?.appearance == nil
+
+        windowController.applyPanelPreset(.reading)
+        pumpRunLoop()
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
         var checks = [
+            "darkChromeMatchesTheme": darkChromeMatchesTheme,
+            "lightChromeMatchesTheme": lightChromeMatchesTheme,
+            "siClassicChromeStaysLight": siClassicChromeStaysLight,
+            "autoChromeFollowsSystem": autoChromeFollowsSystem,
+            "filesPlaceholderVisibleWithoutProject":
+                windowController.selfTestFilesPlaceholderVisible,
+            "filesPlaceholderTextWithoutProject":
+                windowController.selfTestFilesPlaceholderText == "No project open",
+            "filesOpenProjectButtonVisibleWithoutProject":
+                windowController.selfTestFilesOpenProjectButtonVisible,
+            "filesOpenProjectButtonTitle":
+                windowController.selfTestFilesOpenProjectButtonTitle
+                == "Open Project…",
+            "outlinePlaceholderVisibleWithoutFile":
+                windowController.selfTestOutlinePlaceholderVisible,
+            "outlinePlaceholderTextWithoutFile":
+                windowController.selfTestOutlinePlaceholderText == "No file open",
+            "contextPlaceholderVisibleWithoutCandidate":
+                windowController.selfTestContextPlaceholderVisible,
+            "contextPlaceholderTextWithoutCandidate":
+                windowController.selfTestContextPlaceholderText
+                == "Click a symbol to see its definition here. ⌘-click jumps to it.",
+            "contextReaderHiddenWithoutCandidate":
+                !windowController.selfTestContextReaderVisible,
             "emptyStateExists": windowController.selfTestEmptyStateExists,
             "emptyStateHasCairn": windowController.selfTestEmptyStateTexts
                 .contains("Cairn"),
@@ -210,6 +253,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
+        windowController.applyPanelPreset(.relations)
+        pumpRunLoop()
+        checks["relationsPlaceholderVisibleWithoutRoot"] =
+            windowController.selfTestRelationsPlaceholderVisible
+        checks["relationsPlaceholderTextWithoutRoot"] =
+            windowController.selfTestRelationsPlaceholderText
+            == "Right-click a symbol → Show Callers / Calls / Implements"
         checks.merge(layout.checks) { _, new in new }
         Self.finishSelfTest(
             coldStartMS: coldStartMS,
@@ -223,6 +273,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         launch(offscreen: true)
         let projectStartedAt = ContinuousClock.now
         windowController?.openProject(root: root)
+        let filesLoadingPlaceholderVisibleDuringIndexing =
+            windowController?.selfTestFilesPlaceholderVisible == true
+            && windowController?.selfTestFilesPlaceholderText == "Loading files…"
+        let filesSpinnerVisibleDuringIndexing =
+            windowController?.selfTestFilesLoadingIndicatorVisible == true
         var indexStatusVisibleDuringIndexing = false
         var indexStatusTextDuringIndexing = ""
         func recordIndexStatus() {
@@ -280,6 +335,54 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let indexStatusHiddenAfterFullReady = waitUntil(timeout: 5) {
             self.windowController?.selfTestIndexStatusVisible == false
         }
+        let filesPlaceholderHiddenAfterReady =
+            windowController?.selfTestFilesPlaceholderVisible == false
+            && windowController?.selfTestFilesContentVisible == true
+        let outlinePlaceholderVisibleWithoutFile =
+            windowController?.selfTestOutlinePlaceholderVisible == true
+            && windowController?.selfTestOutlinePlaceholderText == "No file open"
+
+        let loader = DocumentLoader()
+        let outlineEmptyFile = rustFiles(in: model.fileTree?.children ?? []).first {
+            guard let loaded = try? loader.load(file: $0) else { return false }
+            return loaded.tier == .regular
+                && loaded.document.outlineFacets.isEmpty
+        }
+        let outlineNoSymbolsPlaceholderVisible: Bool?
+        if let outlineEmptyFile,
+           windowController?.selectFileInSidebar(outlineEmptyFile) == true,
+           waitUntil(timeout: 5, condition: {
+               self.windowController?.displayedReaderFile?.standardizedFileURL
+                   == outlineEmptyFile.standardizedFileURL
+           })
+        {
+            outlineNoSymbolsPlaceholderVisible = waitUntil(timeout: 5) {
+                self.windowController?.selfTestOutlinePlaceholderVisible == true
+                    && self.windowController?.selfTestOutlinePlaceholderText
+                        == "No symbols in this file"
+            }
+        } else {
+            outlineNoSymbolsPlaceholderVisible = nil
+        }
+        let outlineFile = rustFiles(in: model.fileTree?.children ?? []).first {
+            guard let loaded = try? loader.load(file: $0) else { return false }
+            return !loaded.document.outlineFacets.isEmpty
+        }
+        let outlinePlaceholderHiddenWithContent: Bool
+        if let outlineFile,
+           windowController?.selectFileInSidebar(outlineFile) == true,
+           waitUntil(timeout: 5, condition: {
+               self.windowController?.displayedReaderFile?.standardizedFileURL
+                   == outlineFile.standardizedFileURL
+           })
+        {
+            outlinePlaceholderHiddenWithContent = waitUntil(timeout: 5) {
+                self.windowController?.selfTestOutlinePlaceholderVisible == false
+                    && self.windowController?.selfTestOutlineContentVisible == true
+            }
+        } else {
+            outlinePlaceholderHiddenWithContent = false
+        }
         let layout = windowController.map {
             enlargedWindowLayout(controller: $0, statusBarOccupancyHeight: 24)
         }
@@ -296,6 +399,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let commitPickerShowsCurrentBranch = commitTitleMatchesRepository
             && windowController?.selfTestCommitToolbarItemExistsAndVisible == true
+        var projectChecks = layout?.checks ?? [:]
+        projectChecks.merge([
+            "filesLoadingPlaceholderVisibleDuringIndexing":
+                filesLoadingPlaceholderVisibleDuringIndexing,
+            "filesSpinnerVisibleDuringIndexing":
+                filesSpinnerVisibleDuringIndexing,
+            "filesPlaceholderHiddenAfterReady":
+                filesPlaceholderHiddenAfterReady,
+            "outlinePlaceholderVisibleWithoutFile":
+                outlinePlaceholderVisibleWithoutFile,
+            "outlinePlaceholderHiddenWithContent":
+                outlinePlaceholderHiddenWithContent,
+        ]) { _, new in new }
+        if let outlineNoSymbolsPlaceholderVisible {
+            projectChecks["outlineNoSymbolsPlaceholderVisible"] =
+                outlineNoSymbolsPlaceholderVisible
+        }
         model.flushPersistentIndexCache()
         Self.finishProjectSelfTest(
             treeVisibleMS: treeVisibleMS,
@@ -313,7 +433,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             indexStatusTextDuringIndexing: indexStatusTextDuringIndexing,
             statusBarVisibleAfterReady: statusBarVisibleAfterReady,
             indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady,
-            layoutChecks: layout?.checks ?? [:],
+            layoutChecks: projectChecks,
             enlargedWindowGeometry: layout?.geometry ?? [:]
         )
     }
@@ -768,7 +888,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 error: "initial context did not load"
             )
         }
-        emitPinStep("contextLoaded", controller: windowController)
+        let contextPlaceholderHiddenWithContent =
+            !windowController.selfTestContextPlaceholderVisible
+            && windowController.selfTestContextReaderVisible
+        emitPinStep(
+            "contextLoaded",
+            controller: windowController,
+            extra: [
+                "contextPlaceholderHiddenWithContent":
+                    contextPlaceholderHiddenWithContent,
+            ]
+        )
 
         let relationBeforeFollow = pinRelationRootSummary
         windowController.selfTestReaderRelation(
@@ -780,6 +910,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && self.pinRelationRootSummary != nil
         })
         pumpRunLoop()
+        windowController.applyPanelPreset(.relations)
+        pumpRunLoop()
+        let relationsPlaceholderHiddenWithRoot =
+            !windowController.selfTestRelationsPlaceholderVisible
+            && windowController.selfTestRelationsTreeVisible
+        windowController.applyPanelPreset(.reading)
+        pumpRunLoop()
         let followRelationPreservedContext = pinContextSummary == initialContext
         emitPinStep(
             "followShowCallers",
@@ -787,6 +924,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extra: [
                 "relationRootSet": followRelationSet,
                 "contextPreserved": followRelationPreservedContext,
+                "relationsPlaceholderHiddenWithRoot":
+                    relationsPlaceholderHiddenWithRoot,
             ]
         )
 
@@ -860,6 +999,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: windowController,
             checks: [
                 "initialContextLoaded": true,
+                "contextPlaceholderHiddenWithContent":
+                    contextPlaceholderHiddenWithContent,
+                "relationsPlaceholderHiddenWithRoot":
+                    relationsPlaceholderHiddenWithRoot,
                 "followRelationSet": followRelationSet,
                 "followRelationPreservedContext": followRelationPreservedContext,
                 "commandClickNavigated": commandClickNavigated,
@@ -2174,6 +2317,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let contentFrame = controller.window?.contentView?.bounds ?? .zero
         let splitFrame = controller.selfTestContentSplitFrameInContentView
         let statusFrame = controller.selfTestStatusBarFrameInContentView
+        let sidebar = controller.selfTestSidebarGeometry
+        let sidebarAvailableHeight =
+            sidebar.filesPaneHeight + sidebar.outlinePaneHeight
+        let expectedFilesPaneHeight = sidebarAvailableHeight * 0.65
+        let expectedOutlinePaneHeight = sidebarAvailableHeight * 0.35
         let tolerance: CGFloat = 1
         var checks = [
             "contentSplitWidthFillsContentView":
@@ -2183,6 +2331,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     splitFrame.height
                         - (contentFrame.height - statusBarOccupancyHeight)
                 ) <= tolerance,
+            "sidebarFilesPaneIs65Percent":
+                sidebarAvailableHeight > 0
+                && abs(sidebar.filesPaneHeight - expectedFilesPaneHeight)
+                    <= sidebarAvailableHeight * 0.05,
+            "sidebarOutlinePaneIs35Percent":
+                sidebarAvailableHeight > 0
+                && abs(sidebar.outlinePaneHeight - expectedOutlinePaneHeight)
+                    <= sidebarAvailableHeight * 0.05,
+            "sidebarFilesPaneNotCollapsedByPlaceholder":
+                sidebar.filesPaneHeight > sidebar.filePlaceholderHeight * 3,
+            "sidebarFilesPlaceholderCentered":
+                sidebar.filePlaceholderCenterOffset <= tolerance,
+            "sidebarOutlinePlaceholderCentered":
+                sidebar.outlinePlaceholderCenterOffset <= tolerance,
+            "sidebarManualDividerSurvivesPlaceholderRefresh":
+                controller.selfTestSidebarDividerSurvivesPlaceholderRefresh,
         ]
         if statusBarOccupancyHeight > 0 {
             checks["statusBarPinnedToContentBottom"] =
@@ -2197,6 +2361,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             [
                 "contentHeight": Double(contentFrame.height),
                 "contentWidth": Double(contentFrame.width),
+                "sidebarAvailablePaneHeight": Double(sidebarAvailableHeight),
+                "sidebarExpectedFilesPaneHeight":
+                    Double(expectedFilesPaneHeight),
+                "sidebarExpectedOutlinePaneHeight":
+                    Double(expectedOutlinePaneHeight),
+                "sidebarFilePlaceholderHeight":
+                    Double(sidebar.filePlaceholderHeight),
+                "sidebarFilesPaneHeight": Double(sidebar.filesPaneHeight),
+                "sidebarOutlinePaneHeight": Double(sidebar.outlinePaneHeight),
                 "splitHeight": Double(splitFrame.height),
                 "splitMinY": Double(splitFrame.minY),
                 "splitWidth": Double(splitFrame.width),

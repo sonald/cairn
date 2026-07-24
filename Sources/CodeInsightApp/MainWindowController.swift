@@ -5,6 +5,20 @@ import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
 
+enum ProvenanceBadgeStyle: Equatable {
+    case exact
+    case strong
+    case possible
+    case fallback
+}
+
+func provenanceBadgeStyle(for text: String) -> ProvenanceBadgeStyle {
+    if text.contains("Exact") { return .exact }
+    if text.contains("Strong") { return .strong }
+    if text.contains("Possible") { return .possible }
+    return .fallback
+}
+
 @MainActor
 final class MainWindowController: NSWindowController, NSToolbarDelegate,
     NSToolbarItemValidation
@@ -88,6 +102,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contentSplitController.splitView.isVertical = false
         upperSplitController.splitView.isVertical = true
         readerSplitController.splitView.isVertical = true
+        contentSplitController.splitView.dividerStyle = .thin
+        upperSplitController.splitView.dividerStyle = .thin
+        readerSplitController.splitView.dividerStyle = .thin
 
         primaryReaderItem.minimumThickness = 300
         primaryReaderItem.canCollapse = false
@@ -235,6 +252,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.onOpenFile = { [weak self] url in
             self?.navigate(to: url)
         }
+        sidebarController.onChooseProject = onChooseProject
         sidebarController.onOpenFileInSecondary = { [weak self] url in
             self?.openInSecondaryReader(url)
         }
@@ -352,6 +370,63 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.selfTestCandidateCount
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
+    var selfTestFilesPlaceholderText: String? {
+        sidebarController.selfTestFilesPlaceholderText
+    }
+    var selfTestFilesPlaceholderVisible: Bool {
+        sidebarController.selfTestFilesPlaceholderVisible
+    }
+    var selfTestFilesLoadingIndicatorVisible: Bool {
+        sidebarController.selfTestFilesLoadingIndicatorVisible
+    }
+    var selfTestFilesOpenProjectButtonTitle: String {
+        sidebarController.selfTestFilesOpenProjectButtonTitle
+    }
+    var selfTestFilesOpenProjectButtonVisible: Bool {
+        sidebarController.selfTestFilesOpenProjectButtonVisible
+    }
+    var selfTestFilesContentVisible: Bool {
+        sidebarController.selfTestFilesContentVisible
+    }
+    var selfTestOutlinePlaceholderText: String? {
+        sidebarController.selfTestOutlinePlaceholderText
+    }
+    var selfTestOutlinePlaceholderVisible: Bool {
+        sidebarController.selfTestOutlinePlaceholderVisible
+    }
+    var selfTestOutlineContentVisible: Bool {
+        sidebarController.selfTestOutlineContentVisible
+    }
+    var selfTestSidebarGeometry: (
+        filesPaneHeight: CGFloat,
+        outlinePaneHeight: CGFloat,
+        filePlaceholderHeight: CGFloat,
+        filePlaceholderCenterOffset: CGFloat,
+        outlinePlaceholderCenterOffset: CGFloat
+    ) {
+        sidebarController.selfTestGeometry
+    }
+    var selfTestSidebarDividerSurvivesPlaceholderRefresh: Bool {
+        sidebarController.selfTestDividerSurvivesPlaceholderRefresh()
+    }
+    var selfTestContextPlaceholderText: String? {
+        contextController.selfTestPlaceholderText
+    }
+    var selfTestContextPlaceholderVisible: Bool {
+        contextController.selfTestPlaceholderVisible
+    }
+    var selfTestContextReaderVisible: Bool {
+        contextController.selfTestReaderVisible
+    }
+    var selfTestRelationsPlaceholderText: String? {
+        relationController.selfTestPlaceholderText
+    }
+    var selfTestRelationsPlaceholderVisible: Bool {
+        relationController.selfTestPlaceholderVisible
+    }
+    var selfTestRelationsTreeVisible: Bool {
+        relationController.selfTestTreeVisible
+    }
     var selfTestExactStatusText: String { exactLabel.stringValue }
     var selfTestContentSplitFrameInContentView: NSRect {
         guard let contentView = window?.contentView else { return .zero }
@@ -600,6 +675,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func applyReaderSettings(_ settings: ReaderSettings) {
+        window?.appearance = switch settings.theme {
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light, .siClassic: NSAppearance(named: .aqua)
+        case .auto: nil
+        }
         readerController.apply(settings: settings)
         secondaryReaderController.apply(settings: settings)
         contextController.apply(settings: settings)
@@ -843,6 +923,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             displayedGeneration = model.generation
             displayedSnapshotID = model.currentSnapshotID
         }
+        sidebarController.setProjectState(model.projectState)
+        sidebarController.setSelectedFile(model.selectedFile)
         if !sidebarController.synchronizeFileSelection(to: model.selectedFile) {
             DispatchQueue.main.async { [weak self] in
                 guard let self else { return }
@@ -1419,14 +1501,96 @@ final class SidebarViewController: NSViewController,
     var onOpenFile: ((URL) -> Void)?
     var onOpenFileInSecondary: ((URL) -> Void)?
     var onOpenOutline: ((UInt32) -> Void)?
+    var onChooseProject: (() -> Void)?
     private let fileOutlineView = NSOutlineView()
     private let symbolOutlineView = NSOutlineView()
     private let splitView = NSSplitView()
+    private let fileScrollView = NSScrollView()
+    private let symbolScrollView = NSScrollView()
+    private let filePlaceholder = NSStackView()
+    private let filePlaceholderLabel = NSTextField(labelWithString: "No project open")
+    private let filePlaceholderButton = NSButton()
+    private let fileLoadingIndicator = NSProgressIndicator()
+    private let outlinePlaceholder = NSTextField(labelWithString: "No file open")
     private let outlineModel = OutlinePanelModel()
     private var tree: FileTreeModel?
     private var facetRows: [NSNumber] = []
     private var setInitialDivider = false
     private var isSynchronizingFileSelection = false
+    private var hasSelectedFile = false
+
+    var selfTestFilesPlaceholderText: String? {
+        loadViewIfNeeded()
+        return filePlaceholderLabel.stringValue
+    }
+    var selfTestFilesPlaceholderVisible: Bool {
+        loadViewIfNeeded()
+        return filePlaceholder.selfTestIsVisibleInWindow
+    }
+    var selfTestFilesLoadingIndicatorVisible: Bool {
+        loadViewIfNeeded()
+        return fileLoadingIndicator.selfTestIsVisibleInWindow
+    }
+    var selfTestFilesOpenProjectButtonTitle: String {
+        loadViewIfNeeded()
+        return filePlaceholderButton.title
+    }
+    var selfTestFilesOpenProjectButtonVisible: Bool {
+        loadViewIfNeeded()
+        return filePlaceholderButton.selfTestIsVisibleInWindow
+    }
+    var selfTestFilesContentVisible: Bool {
+        loadViewIfNeeded()
+        return fileScrollView.selfTestIsVisibleInWindow
+    }
+    var selfTestOutlinePlaceholderText: String? {
+        loadViewIfNeeded()
+        return outlinePlaceholder.stringValue
+    }
+    var selfTestOutlinePlaceholderVisible: Bool {
+        loadViewIfNeeded()
+        return outlinePlaceholder.selfTestIsVisibleInWindow
+    }
+    var selfTestOutlineContentVisible: Bool {
+        loadViewIfNeeded()
+        return symbolScrollView.selfTestIsVisibleInWindow
+    }
+    var selfTestGeometry: (
+        filesPaneHeight: CGFloat,
+        outlinePaneHeight: CGFloat,
+        filePlaceholderHeight: CGFloat,
+        filePlaceholderCenterOffset: CGFloat,
+        outlinePlaceholderCenterOffset: CGFloat
+    ) {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        guard splitView.arrangedSubviews.count == 2 else {
+            return (0, 0, 0, .infinity, .infinity)
+        }
+        return (
+            splitView.arrangedSubviews[0].frame.height,
+            splitView.arrangedSubviews[1].frame.height,
+            filePlaceholder.frame.height,
+            abs(filePlaceholder.frame.midY - fileScrollView.frame.midY),
+            abs(outlinePlaceholder.frame.midY - symbolScrollView.frame.midY)
+        )
+    }
+
+    func selfTestDividerSurvivesPlaceholderRefresh() -> Bool {
+        loadViewIfNeeded()
+        guard splitView.arrangedSubviews.count == 2 else { return false }
+        let originalPosition = splitView.arrangedSubviews[0].frame.height
+        splitView.setPosition(splitView.bounds.height * 0.55, ofDividerAt: 0)
+        updateFilePlaceholder(isIndexing: false)
+        updateOutlinePlaceholder()
+        splitView.layoutSubtreeIfNeeded()
+        let panes = splitView.arrangedSubviews
+        let availableHeight = panes[0].frame.height + panes[1].frame.height
+        let survived = availableHeight > 0
+            && abs(panes[0].frame.height / availableHeight - 0.55) <= 0.02
+        splitView.setPosition(originalPosition, ofDividerAt: 0)
+        return survived
+    }
 
     override func loadView() {
         configure(fileOutlineView, column: "File")
@@ -1452,17 +1616,46 @@ final class SidebarViewController: NSViewController,
         fileMenu.addItem(openRight)
         fileOutlineView.menu = fileMenu
 
+        configurePlaceholders()
         splitView.isVertical = false
         splitView.dividerStyle = .thin
         splitView.delegate = self
-        splitView.addArrangedSubview(pane(title: "Files", outlineView: fileOutlineView))
-        splitView.addArrangedSubview(pane(title: "Outline", outlineView: symbolOutlineView))
-        view = splitView
+        splitView.addArrangedSubview(pane(
+            title: "Files",
+            outlineView: fileOutlineView,
+            scrollView: fileScrollView,
+            placeholder: filePlaceholder
+        ))
+        splitView.addArrangedSubview(pane(
+            title: "Outline",
+            outlineView: symbolOutlineView,
+            scrollView: symbolScrollView,
+            placeholder: outlinePlaceholder
+        ))
+        splitView.translatesAutoresizingMaskIntoConstraints = false
+
+        let sidebar = NSVisualEffectView()
+        sidebar.material = .sidebar
+        sidebar.blendingMode = .behindWindow
+        sidebar.state = .followsWindowActiveState
+        sidebar.addSubview(splitView)
+        NSLayoutConstraint.activate([
+            splitView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
+            splitView.topAnchor.constraint(equalTo: sidebar.topAnchor),
+            splitView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+        ])
+        view = sidebar
+        updateFilePlaceholder(isIndexing: false)
+        updateOutlinePlaceholder()
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard !setInitialDivider, splitView.bounds.height > 0 else { return }
+        guard !setInitialDivider,
+              splitView.bounds.height > 0,
+              splitView.arrangedSubviews.allSatisfy({ $0.frame.height > 0 })
+        else { return }
         splitView.setPosition(splitView.bounds.height * 0.65, ofDividerAt: 0)
         setInitialDivider = true
     }
@@ -1471,6 +1664,26 @@ final class SidebarViewController: NSViewController,
         self.tree = tree
         loadViewIfNeeded()
         fileOutlineView.reloadData()
+    }
+
+    func setProjectState(_ state: ProjectState) {
+        loadViewIfNeeded()
+        if case .indexing = state {
+            updateFilePlaceholder(isIndexing: true)
+        } else {
+            updateFilePlaceholder(isIndexing: false)
+        }
+    }
+
+    func setSelectedFile(_ file: URL?) {
+        loadViewIfNeeded()
+        hasSelectedFile = file != nil
+        if file == nil, !facetRows.isEmpty {
+            outlineModel.setDocument([])
+            facetRows = []
+            symbolOutlineView.reloadData()
+        }
+        updateOutlinePlaceholder()
     }
 
     @discardableResult
@@ -1527,6 +1740,7 @@ final class SidebarViewController: NSViewController,
         facetRows = outlineModel.facets.indices.map { NSNumber(value: $0) }
         symbolOutlineView.reloadData()
         symbolOutlineView.deselectAll(nil)
+        updateOutlinePlaceholder()
     }
 
     func highlightOutline(at byteOffset: UInt32) {
@@ -1582,16 +1796,28 @@ final class SidebarViewController: NSViewController,
             as? NSTableCellView
         {
             cell.textField?.stringValue = node.name
+            cell.imageView?.image = fileIcon(isDirectory: node.isDirectory)
             return cell
         }
         let cell = NSTableCellView()
         cell.identifier = identifier
+        let image = NSImageView()
+        image.image = fileIcon(isDirectory: node.isDirectory)
+        image.contentTintColor = .secondaryLabelColor
+        image.translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: node.name)
+        label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
+        cell.imageView = image
         cell.textField = label
+        cell.addSubview(image)
         cell.addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+            image.widthAnchor.constraint(equalToConstant: 16),
+            image.heightAnchor.constraint(equalToConstant: 16),
+            label.leadingAnchor.constraint(equalTo: image.trailingAnchor, constant: 5),
             label.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -4),
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
@@ -1654,32 +1880,126 @@ final class SidebarViewController: NSViewController,
         outlineView.headerView = nil
         outlineView.dataSource = self
         outlineView.delegate = self
+        outlineView.rowSizeStyle = .default
+        outlineView.rowHeight = 24
+        outlineView.selectionHighlightStyle = .regular
+        outlineView.backgroundColor = .clear
+        outlineView.usesAlternatingRowBackgroundColors = false
     }
 
-    private func pane(title: String, outlineView: NSOutlineView) -> NSView {
+    private func pane(
+        title: String,
+        outlineView: NSOutlineView,
+        scrollView: NSScrollView,
+        placeholder: NSView
+    ) -> NSView {
         let label = NSTextField(labelWithString: title.uppercased())
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = .secondaryLabelColor
+        label.attributedStringValue = NSAttributedString(
+            string: title.uppercased(),
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor.secondaryLabelColor,
+                .kern: 0.6,
+            ]
+        )
         label.translatesAutoresizingMaskIntoConstraints = false
+        let separator = NSBox()
+        separator.boxType = .separator
+        separator.translatesAutoresizingMaskIntoConstraints = false
 
-        let scrollView = NSScrollView()
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        placeholder.translatesAutoresizingMaskIntoConstraints = false
 
         let pane = NSView()
         pane.addSubview(label)
+        pane.addSubview(separator)
         pane.addSubview(scrollView)
+        pane.addSubview(placeholder)
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: pane.topAnchor, constant: 6),
+            label.topAnchor.constraint(equalTo: pane.topAnchor, constant: 10),
             label.leadingAnchor.constraint(equalTo: pane.leadingAnchor, constant: 8),
             label.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -8),
-            scrollView.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 4),
+            separator.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 6),
+            separator.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1),
+            scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            placeholder.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            placeholder.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            placeholder.leadingAnchor.constraint(
+                greaterThanOrEqualTo: pane.leadingAnchor,
+                constant: 8
+            ),
+            placeholder.trailingAnchor.constraint(
+                lessThanOrEqualTo: pane.trailingAnchor,
+                constant: -8
+            ),
         ])
         return pane
+    }
+
+    private func configurePlaceholders() {
+        filePlaceholderLabel.font = .systemFont(ofSize: 11)
+        filePlaceholderLabel.textColor = .secondaryLabelColor
+        filePlaceholderLabel.alignment = .center
+        filePlaceholderButton.title = "Open Project…"
+        filePlaceholderButton.font = .systemFont(ofSize: 11)
+        filePlaceholderButton.isBordered = false
+        filePlaceholderButton.contentTintColor = .linkColor
+        filePlaceholderButton.target = self
+        filePlaceholderButton.action = #selector(chooseProject(_:))
+        fileLoadingIndicator.style = .spinning
+        fileLoadingIndicator.controlSize = .small
+        fileLoadingIndicator.isDisplayedWhenStopped = false
+        filePlaceholder.orientation = .vertical
+        filePlaceholder.alignment = .centerX
+        filePlaceholder.spacing = 4
+        filePlaceholder.addArrangedSubview(fileLoadingIndicator)
+        filePlaceholder.addArrangedSubview(filePlaceholderLabel)
+        filePlaceholder.addArrangedSubview(filePlaceholderButton)
+
+        outlinePlaceholder.font = .systemFont(ofSize: 11)
+        outlinePlaceholder.textColor = .secondaryLabelColor
+        outlinePlaceholder.alignment = .center
+    }
+
+    private func updateFilePlaceholder(isIndexing: Bool) {
+        let showsPlaceholder = isIndexing || tree == nil
+        filePlaceholder.isHidden = !showsPlaceholder
+        fileScrollView.isHidden = showsPlaceholder
+        if isIndexing {
+            filePlaceholderLabel.stringValue = "Loading files…"
+            filePlaceholderButton.isHidden = true
+            fileLoadingIndicator.isHidden = false
+            fileLoadingIndicator.startAnimation(nil)
+        } else {
+            filePlaceholderLabel.stringValue = "No project open"
+            filePlaceholderButton.isHidden = false
+            fileLoadingIndicator.stopAnimation(nil)
+            fileLoadingIndicator.isHidden = true
+        }
+    }
+
+    private func updateOutlinePlaceholder() {
+        outlinePlaceholder.stringValue = hasSelectedFile
+            ? "No symbols in this file"
+            : "No file open"
+        let showsPlaceholder = !hasSelectedFile || facetRows.isEmpty
+        outlinePlaceholder.isHidden = !showsPlaceholder
+        symbolScrollView.isHidden = showsPlaceholder
+    }
+
+    @objc private func chooseProject(_ sender: Any?) {
+        onChooseProject?()
     }
 
     private func outlineCell(for facet: OutlineFacet) -> NSView {
@@ -1733,6 +2053,13 @@ final class SidebarViewController: NSViewController,
         case .static: "s.square"
         case .typeAlias: "t.square"
         }
+    }
+
+    private func fileIcon(isDirectory: Bool) -> NSImage? {
+        NSImage(
+            systemSymbolName: isDirectory ? "folder" : "doc",
+            accessibilityDescription: isDirectory ? "Folder" : "File"
+        )?.withSymbolConfiguration(.init(hierarchicalColor: .secondaryLabelColor))
     }
 }
 
@@ -2271,6 +2598,12 @@ final class ContextWindowViewController: NSViewController {
     private let nextButton = NSButton(title: "›", target: nil, action: nil)
     private let pathLabel = NSTextField(labelWithString: "")
     private let candidateLabel = NSTextField(labelWithString: "")
+    private let candidateBadge = NSView()
+    private let placeholderLabel = NSTextField(
+        labelWithString:
+            "Click a symbol to see its definition here. ⌘-click jumps to it."
+    )
+    private let scrollView = NSScrollView()
     private let miniReader = ReaderTextView()
 
     init(model: ContextWindowModel) {
@@ -2284,6 +2617,7 @@ final class ContextWindowViewController: NSViewController {
 
     func apply(settings: ReaderSettings) {
         miniReader.apply(settings: settings)
+        applyBadgeStyle()
     }
 
     func selfTestSetPinned(_ pinned: Bool) {
@@ -2313,6 +2647,19 @@ final class ContextWindowViewController: NSViewController {
         return modeControl.selectedSegment == 1
     }
 
+    var selfTestPlaceholderText: String? {
+        loadViewIfNeeded()
+        return placeholderLabel.stringValue
+    }
+    var selfTestPlaceholderVisible: Bool {
+        loadViewIfNeeded()
+        return placeholderLabel.selfTestIsVisibleInWindow
+    }
+    var selfTestReaderVisible: Bool {
+        loadViewIfNeeded()
+        return scrollView.selfTestIsVisibleInWindow
+    }
+
     override func loadView() {
         modeControl.selectedSegment = 0
         modeControl.target = self
@@ -2322,9 +2669,34 @@ final class ContextWindowViewController: NSViewController {
         nextButton.target = self
         nextButton.action = #selector(selectNext(_:))
         pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.font = .systemFont(ofSize: 12)
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        candidateLabel.textColor = .secondaryLabelColor
-        candidateLabel.font = .systemFont(ofSize: 11)
+        countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
+
+        candidateBadge.wantsLayer = true
+        candidateBadge.layer?.cornerRadius = 4
+        candidateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        candidateLabel.lineBreakMode = .byTruncatingTail
+        candidateLabel.translatesAutoresizingMaskIntoConstraints = false
+        candidateBadge.addSubview(candidateLabel)
+        NSLayoutConstraint.activate([
+            candidateLabel.leadingAnchor.constraint(
+                equalTo: candidateBadge.leadingAnchor,
+                constant: 6
+            ),
+            candidateLabel.trailingAnchor.constraint(
+                equalTo: candidateBadge.trailingAnchor,
+                constant: -6
+            ),
+            candidateLabel.topAnchor.constraint(
+                equalTo: candidateBadge.topAnchor,
+                constant: 2
+            ),
+            candidateLabel.bottomAnchor.constraint(
+                equalTo: candidateBadge.bottomAnchor,
+                constant: -2
+            ),
+        ])
 
         let header = NSStackView(views: [
             modeControl,
@@ -2332,30 +2704,52 @@ final class ContextWindowViewController: NSViewController {
             countLabel,
             nextButton,
             pathLabel,
-            candidateLabel,
+            candidateBadge,
         ])
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 8
         header.translatesAutoresizingMaskIntoConstraints = false
 
-        let scrollView = NSScrollView()
         scrollView.documentView = miniReader.view
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = true
+        scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        placeholderLabel.font = .systemFont(ofSize: 12)
+        placeholderLabel.textColor = .secondaryLabelColor
+        placeholderLabel.alignment = .center
+        placeholderLabel.lineBreakMode = .byWordWrapping
+        placeholderLabel.maximumNumberOfLines = 2
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSVisualEffectView()
+        container.material = .windowBackground
+        container.blendingMode = .withinWindow
+        container.state = .followsWindowActiveState
         container.addSubview(header)
         container.addSubview(scrollView)
+        container.addSubview(placeholderLabel)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            header.topAnchor.constraint(equalTo: container.topAnchor),
             header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 4),
+            header.heightAnchor.constraint(equalToConstant: 30),
+            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            placeholderLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            placeholderLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor,
+                constant: 16
+            ),
+            placeholderLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor,
+                constant: -16
+            ),
         ])
         view = container
         miniReader.onClick = { [weak self] _, modifiers in
@@ -2408,18 +2802,39 @@ final class ContextWindowViewController: NSViewController {
             countLabel.stringValue = "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"
             text = candidate.excerpt
             highlightsSyntax = true
+            candidateBadge.isHidden = false
+            placeholderLabel.isHidden = true
+            scrollView.isHidden = false
+            applyBadgeStyle()
         } else {
             pathLabel.stringValue = ""
             candidateLabel.stringValue = ""
             countLabel.stringValue = ""
-            text = model.isIndexBuilding
-                ? "Indexing…"
-                : "Select a symbol to see context"
+            text = ""
             highlightsSyntax = false
+            candidateBadge.isHidden = true
+            scrollView.isHidden = true
+            placeholderLabel.isHidden = false
         }
         previousButton.isEnabled = model.candidateCount > 1
         nextButton.isEnabled = model.candidateCount > 1
         miniReader.display(document: readerDocument(text, highlightsSyntax: highlightsSyntax))
+    }
+
+    private func applyBadgeStyle() {
+        let colors: (background: NSColor, foreground: NSColor) =
+            switch provenanceBadgeStyle(for: candidateLabel.stringValue) {
+            case .exact:
+                (.systemGreen.withAlphaComponent(0.12), .systemGreen)
+            case .strong:
+                (.systemBlue.withAlphaComponent(0.12), .systemBlue)
+            case .possible:
+                (.systemOrange.withAlphaComponent(0.12), .systemOrange)
+            case .fallback:
+                (.quaternaryLabelColor, .secondaryLabelColor)
+            }
+        candidateBadge.layer?.backgroundColor = colors.background.cgColor
+        candidateLabel.textColor = colors.foreground
     }
 
     private func readerDocument(
@@ -2435,5 +2850,18 @@ final class ContextWindowViewController: NSViewController {
             highlightSpans: highlighted?.spans ?? [],
             outlineFacets: highlighted?.outlineFacets ?? []
         )
+    }
+}
+
+private extension NSView {
+    var selfTestIsVisibleInWindow: Bool {
+        guard let window, let contentView = window.contentView,
+              !isHiddenOrHasHiddenAncestor,
+              bounds.width > 0, bounds.height > 0
+        else { return false }
+        let frameInWindow = convert(bounds, to: nil)
+        let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
+        let visibleFrame = frameInWindow.intersection(contentFrameInWindow)
+        return visibleFrame.width > 0 && visibleFrame.height > 0
     }
 }

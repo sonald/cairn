@@ -18,7 +18,25 @@ final class RelationWindowController: NSViewController,
         action: nil
     )
     private let outlineView = RelationOutlineView()
+    private let scrollView = NSScrollView()
+    private let placeholderLabel = NSTextField(
+        labelWithString:
+            "Right-click a symbol → Show Callers / Calls / Implements"
+    )
     private var currentSymbol: SymbolOccurrenceID?
+
+    var selfTestPlaceholderText: String? {
+        loadViewIfNeeded()
+        return placeholderLabel.stringValue
+    }
+    var selfTestPlaceholderVisible: Bool {
+        loadViewIfNeeded()
+        return placeholderLabel.selfTestIsVisibleInWindow
+    }
+    var selfTestTreeVisible: Bool {
+        loadViewIfNeeded()
+        return scrollView.selfTestIsVisibleInWindow
+    }
 
     var selfTestExactGroupTitle: String? {
         selfTestExactGroupItem?.title
@@ -136,15 +154,33 @@ final class RelationWindowController: NSViewController,
         outlineView.action = #selector(selectSelection(_:))
         outlineView.doubleAction = #selector(openSelection(_:))
         outlineView.openSelection = { [weak self] in self?.openSelection(nil) }
+        outlineView.rowSizeStyle = .default
+        outlineView.selectionHighlightStyle = .regular
+        outlineView.backgroundColor = .clear
+        outlineView.usesAlternatingRowBackgroundColors = false
 
-        let scrollView = NSScrollView()
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSView()
+        placeholderLabel.font = .systemFont(ofSize: 11)
+        placeholderLabel.textColor = .secondaryLabelColor
+        placeholderLabel.alignment = .center
+        placeholderLabel.lineBreakMode = .byWordWrapping
+        placeholderLabel.maximumNumberOfLines = 2
+        placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSVisualEffectView()
+        container.material = .windowBackground
+        container.blendingMode = .withinWindow
+        container.state = .followsWindowActiveState
         container.addSubview(directionControl)
         container.addSubview(scrollView)
+        container.addSubview(placeholderLabel)
         NSLayoutConstraint.activate([
             directionControl.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
             directionControl.leadingAnchor.constraint(
@@ -162,6 +198,16 @@ final class RelationWindowController: NSViewController,
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            placeholderLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            placeholderLabel.leadingAnchor.constraint(
+                greaterThanOrEqualTo: container.leadingAnchor,
+                constant: 16
+            ),
+            placeholderLabel.trailingAnchor.constraint(
+                lessThanOrEqualTo: container.trailingAnchor,
+                constant: -16
+            ),
         ])
         view = container
         render()
@@ -326,6 +372,9 @@ final class RelationWindowController: NSViewController,
         guard isViewLoaded else { return }
         outlineView.reloadData()
         if let root = model.root { outlineView.expandItem(root) }
+        let isEmpty = model.root == nil
+        placeholderLabel.isHidden = !isEmpty
+        scrollView.isHidden = isEmpty
     }
 
     private func expandLoadedGroups(under node: RelationTreeModel.Node) {
@@ -349,6 +398,19 @@ final class RelationWindowController: NSViewController,
         case 2: .implementations
         default: .callers
         }
+    }
+}
+
+private extension NSView {
+    var selfTestIsVisibleInWindow: Bool {
+        guard let window, let contentView = window.contentView,
+              !isHiddenOrHasHiddenAncestor,
+              bounds.width > 0, bounds.height > 0
+        else { return false }
+        let frameInWindow = convert(bounds, to: nil)
+        let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
+        let visibleFrame = frameInWindow.intersection(contentFrameInWindow)
+        return visibleFrame.width > 0 && visibleFrame.height > 0
     }
 }
 
