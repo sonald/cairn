@@ -206,13 +206,19 @@ private func evaluate(
             message: "\(assertion), got \(actual)"
         )
 
-    case "unresolved", "nostrong":
+    case "unresolved", "nostrong", "strong":
         let source = try parsePosition(body)
         let candidates = try resolve(source, session: session, context: context)
         let violation = operation == "nostrong" && candidates.contains { $0.certainty > .possible }
-        let passed = operation == "unresolved"
-            ? candidates.isEmpty || candidates.allSatisfy { $0.certainty == .unresolved }
-            : !violation
+        let passed = switch operation {
+        case "unresolved":
+            candidates.isEmpty
+                || candidates.allSatisfy { $0.certainty == .unresolved }
+        case "strong":
+            candidates.first?.certainty == .strong
+        default:
+            !violation
+        }
         return AssertionResult(
             operation: operation,
             passed: passed,

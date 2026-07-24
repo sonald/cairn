@@ -37,6 +37,17 @@ struct Resolver {
             )
         }
         if case .methodCall? = kind {
+            if let call = located.call,
+               let candidates = receiverMethodCandidates(
+                   call: call,
+                   methodNameID: located.nameID,
+                   from: file,
+                   index: index,
+                   context: context
+               )
+            {
+                return candidates
+            }
             return globalCandidates(
                 nameID: located.nameID,
                 from: file,
@@ -401,6 +412,69 @@ struct Resolver {
             }
         }
         return nil
+    }
+
+    private func receiverMethodCandidates(
+        call: UnresolvedCall,
+        methodNameID: NameID,
+        from source: PathID,
+        index: ContentIndex,
+        context: QueryContext
+    ) -> [ResolutionCandidate]? {
+        guard let receiverRange = call.receiverRange,
+              let bytes = session.sourceBytes(at: source),
+              Int(receiverRange.upperBound) <= bytes.count
+        else { return nil }
+        let receiverBytes = bytes[
+            Int(receiverRange.lowerBound)..<Int(receiverRange.upperBound)
+        ]
+        guard !receiverBytes.isEmpty,
+              receiverBytes.allSatisfy(isIdentifierByte)
+        else { return nil }
+        let receiverNameID = session.names.intern(
+            String(decoding: receiverBytes, as: UTF8.self)
+        )
+        let scopes = scopeChain(at: receiverRange.lowerBound, in: index)
+        guard let binding = lexicalBinding(
+            named: receiverNameID,
+            at: receiverRange.lowerBound,
+            scopes: scopes,
+            in: index
+        ), let targetHint = binding.binding.targetHint,
+           targetHint.hintKind == .unqualified
+            || targetHint.hintKind == .member
+        else { return nil }
+
+        let certainty: Certainty = targetHint.hintKind == .unqualified
+            ? .strong : .probable
+        var candidates: [ResolutionCandidate] = []
+        for (key, implFacetIndex) in session.byTypeName[targetHint.nameID] ?? [] {
+            guard let targetIndex = session.contentIndexes[key],
+                  let relation = targetIndex.implRelations.first(where: {
+                      $0.implFacetIndex == implFacetIndex
+                  })
+            else { continue }
+            let dispatch: DispatchKind = relation.traitNameID == nil
+                ? .direct : .traitDispatch
+            for (facetIndex, facet) in targetIndex.symbols.enumerated()
+                where facet.kind == .rustMethod
+                    && facet.parentFacetIndex == implFacetIndex
+                    && facet.nameID == methodNameID
+            {
+                guard let facetIndex = UInt32(exactly: facetIndex) else { continue }
+                for file in session.occurrences(of: key) {
+                    candidates.append(candidate(
+                        pathID: file.pathID,
+                        localIndex: facetIndex,
+                        certainty: certainty,
+                        dispatch: dispatch,
+                        evidence: [.receiverType(nameID: targetHint.nameID)],
+                        context: context
+                    ))
+                }
+            }
+        }
+        return sorted(candidates, from: source)
     }
 
     private func globalCandidates(

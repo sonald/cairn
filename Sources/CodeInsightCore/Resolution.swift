@@ -40,6 +40,7 @@ public enum ResolutionEvidence: Sendable {
     case sameFile(pathID: PathID)
     case nameOnly(nameID: NameID)
     case methodNameOnly(nameID: NameID)
+    case receiverType(nameID: NameID)
 }
 
 public enum LocalOccurrenceKind: Hashable, Sendable {

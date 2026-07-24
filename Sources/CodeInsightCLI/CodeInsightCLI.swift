@@ -1118,6 +1118,7 @@ private func evidenceSummary(_ evidence: ResolutionEvidence) -> String {
     case let .sameFile(pathID): "sameFile#\(pathID.rawValue)"
     case let .nameOnly(nameID): "nameOnly#\(nameID.rawValue)"
     case let .methodNameOnly(nameID): "methodNameOnly#\(nameID.rawValue)"
+    case let .receiverType(nameID): "receiverType#\(nameID.rawValue)"
     }
 }
 

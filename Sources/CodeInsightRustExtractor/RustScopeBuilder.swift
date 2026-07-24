@@ -5,12 +5,15 @@ struct RustScopeBuilder {
     private struct ActiveScope {
         let owner: RustNodeKey
         let id: ScopeID
+        let genericTypeNames: Set<NameID>
+        let implTypeNameID: NameID?
     }
 
     private struct PatternPlan {
         let root: RustNodeKey
         let scopeID: ScopeID
         let bindingKind: BindingKind
+        let targetHint: UnresolvedSymbolRef?
     }
 
     private struct ActiveRegion {
@@ -48,6 +51,7 @@ struct RustScopeBuilder {
                 range: bindingBody(in: node)?.coreByteRange(
                     byteOffset: byteOffset
                 ) ?? node.coreByteRange(byteOffset: byteOffset),
+                implTypeNameID: declaration.implTypeNameID,
                 byteOffset: byteOffset
             )
         }
@@ -71,7 +75,7 @@ struct RustScopeBuilder {
                 space: .value,
                 kind: plan.bindingKind,
                 declarationRange: node.coreByteRange(byteOffset: byteOffset),
-                targetHint: nil
+                targetHint: plan.targetHint
             ))
         }
 
@@ -118,6 +122,7 @@ struct RustScopeBuilder {
         owner: Node,
         kind: ScopeKind,
         range: CodeInsightCore.ByteRange,
+        implTypeNameID: NameID?,
         byteOffset: UInt32
     ) {
         guard let rawID = UInt32(exactly: scopes.count) else {
@@ -130,9 +135,17 @@ struct RustScopeBuilder {
             kind: kind,
             range: range
         ))
+        var genericTypeNames = activeScopes.last?.genericTypeNames ?? []
+        genericTypeNames.formUnion(genericTypeParameterNames(
+            in: owner,
+            byteOffset: byteOffset
+        ))
         activeScopes.append(ActiveScope(
             owner: RustNodeKey(owner, byteOffset: byteOffset),
-            id: id
+            id: id,
+            genericTypeNames: genericTypeNames,
+            implTypeNameID: implTypeNameID
+                ?? activeScopes.last?.implTypeNameID
         ))
     }
 
@@ -190,6 +203,10 @@ struct RustScopeBuilder {
                 node.namedChildren.first,
                 scopeID: scopeID,
                 kind: .param,
+                targetHint: annotatedTargetHint(
+                    in: node,
+                    byteOffset: byteOffset
+                ),
                 byteOffset: byteOffset
             )
         case "self_parameter":
@@ -197,6 +214,9 @@ struct RustScopeBuilder {
                 node.directNamedChild { $0.kind == "self" },
                 scopeID: scopeID,
                 kind: .param,
+                targetHint: activeScopes.last?.implTypeNameID.map {
+                    UnresolvedSymbolRef(nameID: $0, hintKind: .unqualified)
+                },
                 byteOffset: byteOffset
             )
         case "closure_parameters":
@@ -208,6 +228,7 @@ struct RustScopeBuilder {
                     child,
                     scopeID: scopeID,
                     kind: .param,
+                    targetHint: nil,
                     byteOffset: byteOffset
                 )
             }
@@ -216,6 +237,13 @@ struct RustScopeBuilder {
                 node.directNamedChild { $0.kind != "mutable_specifier" },
                 scopeID: scopeID,
                 kind: .letBinding,
+                targetHint: annotatedTargetHint(
+                    in: node,
+                    byteOffset: byteOffset
+                ) ?? constructedTargetHint(
+                    in: node,
+                    byteOffset: byteOffset
+                ),
                 byteOffset: byteOffset
             )
         case "match_arm":
@@ -226,6 +254,7 @@ struct RustScopeBuilder {
                 matchPattern?.namedChildren.first,
                 scopeID: scopeID,
                 kind: .patternBinding,
+                targetHint: nil,
                 byteOffset: byteOffset
             )
         case "let_condition":
@@ -233,6 +262,7 @@ struct RustScopeBuilder {
                 node.namedChildren.first,
                 scopeID: scopeID,
                 kind: .patternBinding,
+                targetHint: nil,
                 byteOffset: byteOffset
             )
         case "for_expression":
@@ -240,6 +270,7 @@ struct RustScopeBuilder {
                 node.directNamedChild { $0.kind != "label" },
                 scopeID: scopeID,
                 kind: .patternBinding,
+                targetHint: nil,
                 byteOffset: byteOffset
             )
         default:
@@ -251,6 +282,7 @@ struct RustScopeBuilder {
         _ node: Node?,
         scopeID: ScopeID,
         kind: BindingKind,
+        targetHint: UnresolvedSymbolRef?,
         byteOffset: UInt32
     ) {
         guard let node else { return }
@@ -258,8 +290,131 @@ struct RustScopeBuilder {
         pendingPatterns[key] = PatternPlan(
             root: key,
             scopeID: scopeID,
-            bindingKind: kind
+            bindingKind: kind,
+            targetHint: isSimpleBindingPattern(node) ? targetHint : nil
         )
+    }
+
+    private func isSimpleBindingPattern(_ node: Node) -> Bool {
+        node.kind == "identifier" || node.kind == "self"
+    }
+
+    private func annotatedTargetHint(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> UnresolvedSymbolRef? {
+        guard let type = annotatedType(in: node),
+              !contains(nodeKind: "dynamic_type", in: type),
+              let name = supportedTypeName(in: type),
+              let text = name.text(in: bytes, byteOffset: byteOffset)
+        else { return nil }
+        let nameID = names.intern(text)
+        guard activeScopes.last?.genericTypeNames.contains(nameID) != true else {
+            return nil
+        }
+        return UnresolvedSymbolRef(nameID: nameID, hintKind: .unqualified)
+    }
+
+    private func constructedTargetHint(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> UnresolvedSymbolRef? {
+        guard let value = initializer(in: node) else { return nil }
+        let name: Node?
+        switch value.kind {
+        case "call_expression":
+            guard let callee = value.namedChildren.first,
+                  callee.kind == "scoped_identifier",
+                  callee.namedChildren.last?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  ) == "new"
+            else { return nil }
+            name = callee.namedChildren.first.flatMap(supportedTypeName)
+        case "struct_expression":
+            name = value.namedChildren.first.flatMap(supportedTypeName)
+        default:
+            return nil
+        }
+        guard let name,
+              let text = name.text(in: bytes, byteOffset: byteOffset)
+        else { return nil }
+        let nameID = names.intern(text)
+        guard activeScopes.last?.genericTypeNames.contains(nameID) != true else {
+            return nil
+        }
+        return UnresolvedSymbolRef(nameID: nameID, hintKind: .member)
+    }
+
+    private func annotatedType(in node: Node) -> Node? {
+        var followsColon = false
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            if child.kind == ":" {
+                followsColon = true
+            } else if followsColon && child.isNamed {
+                return child
+            }
+        }
+        return nil
+    }
+
+    private func initializer(in node: Node) -> Node? {
+        var followsEquals = false
+        for index in 0..<node.childCount {
+            guard let child = node.child(at: index) else { continue }
+            if child.kind == "=" {
+                followsEquals = true
+            } else if followsEquals && child.isNamed {
+                return child
+            }
+        }
+        return nil
+    }
+
+    private func supportedTypeName(in node: Node) -> Node? {
+        switch node.kind {
+        case "identifier", "type_identifier", "primitive_type":
+            return node
+        case "generic_type":
+            return node.namedChildren.first.flatMap(supportedTypeName)
+        case "reference_type":
+            for child in node.namedChildren.reversed() {
+                if let name = supportedTypeName(in: child) { return name }
+            }
+            return nil
+        case "scoped_type_identifier":
+            for child in node.namedChildren.reversed() {
+                if let name = supportedTypeName(in: child) { return name }
+            }
+            return nil
+        default:
+            return nil
+        }
+    }
+
+    private func contains(nodeKind: String, in node: Node) -> Bool {
+        if node.kind == nodeKind { return true }
+        return node.namedChildren.contains {
+            contains(nodeKind: nodeKind, in: $0)
+        }
+    }
+
+    private func genericTypeParameterNames(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> Set<NameID> {
+        guard let parameters = node.directNamedChild(where: {
+            $0.kind == "type_parameters"
+        }) else { return [] }
+        return Set(parameters.namedChildren.compactMap { parameter in
+            guard parameter.kind == "type_parameter",
+                  let name = parameter.directNamedChild(where: {
+                      $0.kind == "type_identifier"
+                  })?.text(in: bytes, byteOffset: byteOffset)
+            else { return nil }
+            return names.intern(name)
+        })
     }
 
     private func isBindingIdentifier(

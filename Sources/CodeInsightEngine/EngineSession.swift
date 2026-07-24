@@ -91,6 +91,9 @@ public final class EngineSession: Sendable {
     public var moduleChildren: [PathID: [NameID: PathID]] {
         moduleMap.moduleChildren
     }
+    var byTypeName: [NameID: [(ContentIndexKey, UInt32)]] {
+        implIndex.byTypeName
+    }
 
     let namePosting: NamePosting
     var moduleMap: ModuleMap { snapshotView.moduleMap }
@@ -245,8 +248,7 @@ public final class EngineSession: Sendable {
                             index.symbols.indices.contains(Int($0))
                                 ? index.symbols[Int($0)] : nil
                         },
-                        certainty: call.syntacticKind == .methodCall
-                            ? .possible : certainty,
+                        certainty: certainty,
                         dispatch: matched?.dispatch ?? dispatch(for: call.syntacticKind),
                         provenance: .fuzzyResolver,
                         completeness: .complete,
@@ -560,7 +562,7 @@ public final class EngineSession: Sendable {
         filesByPath[pathID].flatMap { sourceBytesByContent[$0.contentID] }
     }
 
-    private func occurrences(of key: ContentIndexKey) -> [FileOccurrence] {
+    func occurrences(of key: ContentIndexKey) -> [FileOccurrence] {
         occurrencesByContentKey[key] ?? []
     }
 
@@ -609,7 +611,8 @@ public final class EngineSession: Sendable {
     private func isDefinitionEvidence(_ evidence: [ResolutionEvidence]) -> Bool {
         evidence.contains {
             switch $0 {
-            case .sameFile, .uniqueImport, .nameOnly, .methodNameOnly:
+            case .sameFile, .uniqueImport, .nameOnly, .methodNameOnly,
+                 .receiverType:
                 true
             case .lexicalBinding:
                 false
@@ -621,9 +624,16 @@ public final class EngineSession: Sendable {
         from candidate: ResolutionCandidate?,
         definitionNameID: NameID
     ) -> Certainty {
-        guard let candidate, candidate.certainty == .strong else {
+        guard let candidate, candidate.certainty >= .probable else {
             return .possible
         }
+        if candidate.evidence.contains(where: {
+            if case .receiverType = $0 { return true }
+            return false
+        }) {
+            return min(candidate.certainty, .strong)
+        }
+        guard candidate.certainty == .strong else { return .possible }
         for evidence in candidate.evidence {
             switch evidence {
             case .uniqueImport:
@@ -634,7 +644,7 @@ public final class EngineSession: Sendable {
                     $0.parentFacetIndex == nil && $0.nameID == definitionNameID
                 }
                 if matches.count == 1 { return .strong }
-            case .lexicalBinding, .nameOnly, .methodNameOnly:
+            case .lexicalBinding, .nameOnly, .methodNameOnly, .receiverType:
                 continue
             }
         }

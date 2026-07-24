@@ -86,6 +86,53 @@ func associatesImplMethodFacetAndRegion() throws {
 }
 
 @Test
+func extractsReceiverTypeHintsWithoutGuessingGenericsOrTraitObjects() throws {
+    let source = """
+        trait Close { fn close(&self); }
+        struct A;
+        impl A {
+            fn new() -> Self { A }
+            fn f<T>(
+                &self,
+                direct: A,
+                shared: &A,
+                mutable: &mut A,
+                generic: T,
+                object: &dyn Close,
+                boxed: Box<dyn Close>
+            ) {
+                let annotated: A = A;
+                let constructed = A::new();
+                let literal = A {};
+            }
+        }
+        """
+    let result = try extract(source)
+    func hint(_ bindingName: String) -> (String, UnresolvedSymbolHintKind)? {
+        result.index.bindings.lazy.compactMap { binding in
+            guard result.names.resolve(binding.localNameID) == bindingName,
+                  let hint = binding.targetHint
+            else { return nil }
+            return (result.names.resolve(hint.nameID), hint.hintKind)
+        }.first
+    }
+
+    #expect(hint("self")?.0 == "A")
+    #expect(hint("self")?.1 == .unqualified)
+    for name in ["direct", "shared", "mutable", "annotated"] {
+        #expect(hint(name)?.0 == "A")
+        #expect(hint(name)?.1 == .unqualified)
+    }
+    for name in ["constructed", "literal"] {
+        #expect(hint(name)?.0 == "A")
+        #expect(hint(name)?.1 == .member)
+    }
+    for name in ["generic", "object", "boxed"] {
+        #expect(hint(name) == nil)
+    }
+}
+
+@Test
 func extractsImplRelationsWithGenericScopedAndInherentTypes() throws {
     let source = """
         struct Plain;

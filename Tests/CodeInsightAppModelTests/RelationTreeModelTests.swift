@@ -35,10 +35,11 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
 
     let exact = try relationGroup("Exact (0)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
+    let probable = try relationGroup("Probable", in: model.root)
     let possible = try relationGroup("Possible", in: model.root)
     #expect(exact.children?.isEmpty == true)
     #expect(strong.children?.map(\.title) == ["strong_target"])
-    #expect(possible.children?.contains {
+    #expect(probable.children?.contains {
         $0.title == "probable_target" && $0.subtitle == "Probable · direct"
     } == true)
     #expect(possible.children?.filter {
@@ -109,15 +110,23 @@ func relationTreeLabelsNameOnlyCallsHonestly() async throws {
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let possible = try relationGroup("Possible", in: model.root)
-    let subtitles = Dictionary(
+    let probable = try relationGroup("Probable", in: model.root)
+    let possibleSubtitles = Dictionary(
         uniqueKeysWithValues: possible.children?.compactMap { node in
             node.subtitle.map { (node.title, $0) }
         } ?? []
     )
-    #expect(subtitles == [
+    let probableSubtitles = Dictionary(
+        uniqueKeysWithValues: probable.children?.compactMap { node in
+            node.subtitle.map { (node.title, $0) }
+        } ?? []
+    )
+    #expect(possibleSubtitles == [
         "possible-name-only": "Possible · dynamic · name match only",
-        "probable-name-only": "Probable · dynamic · name match only",
         "same-file": "Possible · dynamic",
+    ])
+    #expect(probableSubtitles == [
+        "probable-name-only": "Probable · dynamic · name match only",
         "unique-import": "Probable · dynamic",
     ])
 }
@@ -223,10 +232,10 @@ func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
 
     let exact = try relationGroup("Exact", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
-    let possible = try relationGroup("Possible", in: model.root)
+    let probable = try relationGroup("Probable", in: model.root)
     #expect(exact.children?.map(\.title) == ["matching"])
     #expect(strong.children?.map(\.title) == ["strong"])
-    #expect(possible.children?.map(\.title) == ["no exact"])
+    #expect(probable.children?.map(\.title) == ["no exact"])
     let external = model.root?.children?.first {
         $0.kind == .group && $0.title == "External / Unresolved"
     }
@@ -622,6 +631,7 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
             .lexicalBinding(bindingIndex: 4),
             .nameOnly(nameID: fixture.session.names.intern("b")),
             .methodNameOnly(nameID: fixture.session.names.intern("method")),
+            .receiverType(nameID: fixture.session.names.intern("Receiver")),
         ]
     )
     let fake = FakeRelationLoader(responses: [
@@ -646,8 +656,9 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
         lexical binding
         name match
         method name match
+        receiver type
         """)
-    #expect(child.children?.suffix(5).allSatisfy { $0.kind == .evidenceLine } == true)
+    #expect(child.children?.suffix(6).allSatisfy { $0.kind == .evidenceLine } == true)
 
     var selected: RelationTreeModel.Node?
     model.onSelect = { selected = $0 }

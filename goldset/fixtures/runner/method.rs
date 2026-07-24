@@ -6,4 +6,5 @@ struct B;
 impl B {
     fn tick(&self) {}
 }
-fn probe(a: A) { a.tick(); }
+fn probe<T>(a: T) { a.tick(); }
+fn typed(a: A) { a.tick(); }

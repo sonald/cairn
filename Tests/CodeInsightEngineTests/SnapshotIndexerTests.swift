@@ -1,6 +1,7 @@
 import CodeInsightCore
 @testable import CodeInsightEngine
 import CodeInsightGit
+import CodeInsightRustExtractor
 import Foundation
 import Testing
 
@@ -173,6 +174,67 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
     #expect(reloaded.stats.extractedCount == 0)
     #expect(reloaded.stats.reusedCount == 2)
     try expectEquivalentContent(direct, reloaded)
+}
+
+@Test
+func extractorVersionBumpRemapsAndPersistsReceiverHintsAcrossFiles() throws {
+    let fixture = snapshotIndexerRepositoryRoot.appendingPathComponent(
+        "Tests/RustExtractorTests/Fixtures/receiver_type",
+        isDirectory: true
+    )
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+
+    var oldCache: IndexCache? = try IndexCache(
+        fileURL: cacheURL,
+        extractorVersion: 5
+    )
+    oldCache?.storeSynchronously([("v5-payload", Data([1, 2, 3]), 1)])
+    oldCache?.flush()
+    oldCache = nil
+
+    let cache = try IndexCache(fileURL: cacheURL)
+    #expect(cache.metadata.extractorVersion == RustExtractorInfo.extractorVersion)
+    #expect(cache.payload(for: "v5-payload") == nil)
+    let writer = ProjectIndexer(parallelism: 2, cache: cache)
+    let first = try writer.index(root: fixture)
+    writer.flushPersistentWrites()
+    let reloaded = try ProjectIndexer(
+        parallelism: 2,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: fixture)
+
+    #expect(first.stats.extractedCount == 2)
+    #expect(reloaded.stats.extractedCount == 0)
+    #expect(reloaded.stats.reusedCount == 2)
+    try expectEquivalentContent(first, reloaded)
+
+    let mainPath = try #require(reloaded.manifest.files.first {
+        reloaded.paths.resolve($0.pathID) == "main.rs"
+    }?.pathID)
+    let mainIndex = try #require(reloaded.content(at: mainPath)?.1)
+    let receiver = try #require(mainIndex.bindings.first {
+        reloaded.names.resolve($0.localNameID) == "receiver"
+            && $0.kind == .param
+    })
+    let targetHint = try #require(receiver.targetHint)
+    #expect(reloaded.names.resolve(targetHint.nameID) == "T")
+    #expect(targetHint.hintKind == .unqualified)
+
+    let callOffset = try #require(mainIndex.lineTable.byteOffset(line: 5, column: 14))
+    let candidate = try #require(try reloaded.resolve(
+        file: mainPath,
+        offset: callOffset,
+        context: snapshotQueryContext(for: reloaded)
+    ).first)
+    #expect(candidate.certainty == .strong)
+    #expect(reloaded.paths.resolve(candidate.target.pathID) == "a.rs")
+    #expect(candidate.evidence.contains {
+        if case let .receiverType(nameID) = $0 {
+            return reloaded.names.resolve(nameID) == "T"
+        }
+        return false
+    })
 }
 
 @Test

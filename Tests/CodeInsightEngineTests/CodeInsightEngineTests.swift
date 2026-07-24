@@ -111,7 +111,7 @@ func methodCallsStayPossibleAcrossImpls() throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
         struct B; impl B { fn close(&self) {} }
-        fn f(c: A) { c.close(); }
+        fn f<T>(c: T) { c.close(); }
         """
     try withProject(["main.rs": source]) { session in
         let path = try #require(pathID("main.rs", in: session))
@@ -125,6 +125,181 @@ func methodCallsStayPossibleAcrossImpls() throws {
         #expect(resolved.allSatisfy { $0.certainty == .possible })
         #expect(resolved.allSatisfy { $0.dispatch == .dynamicDispatch })
         #expect(resolved.allSatisfy { hasMethodNameOnly($0.evidence) })
+    }
+}
+
+@Test
+func annotatedReceiverResolvesOnlyItsImplStrongly() throws {
+    let source = """
+        struct A; impl A { fn close(&self) {} }
+        struct B; impl B { fn close(&self) {} }
+        fn f(receiver: A) { receiver.close(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source),
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.count == 1)
+        #expect(resolved.first?.certainty == .strong)
+        #expect(resolved.first?.dispatch == .direct)
+        #expect(resolved.first.map { resolvedImplType(of: $0, in: session) } == "A")
+        #expect(resolved.allSatisfy {
+            hasReceiverType($0.evidence, named: "A", in: session)
+        })
+    }
+}
+
+@Test
+func selfReceiverUsesItsEnclosingImplType() throws {
+    let source = """
+        struct A;
+        impl A {
+            fn close(&self) {}
+            fn f(&self) { self.close(); }
+        }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source, options: .backwards),
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.count == 1)
+        #expect(resolved.first?.certainty == .strong)
+        #expect(resolved.first.map { resolvedImplType(of: $0, in: session) } == "A")
+        #expect(resolved.allSatisfy {
+            hasReceiverType($0.evidence, named: "A", in: session)
+        })
+    }
+}
+
+@Test
+func constructedReceiverResolvesItsImplProbably() throws {
+    let source = """
+        struct A;
+        impl A {
+            fn new() -> Self { A }
+            fn close(&self) {}
+        }
+        fn f() { let receiver = A::new(); receiver.close(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source, options: .backwards),
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.count == 1)
+        #expect(resolved.first?.certainty == .probable)
+        #expect(resolved.first.map { resolvedImplType(of: $0, in: session) } == "A")
+        #expect(resolved.allSatisfy {
+            hasReceiverType($0.evidence, named: "A", in: session)
+        })
+    }
+}
+
+@Test
+func shadowedReceiverUsesTheNearestTypedBinding() throws {
+    let source = """
+        struct A; impl A { fn close(&self) {} }
+        struct B; impl B { fn close(&self) {} }
+        fn f(receiver: A) {
+            {
+                let receiver: B = B;
+                receiver.close();
+            }
+        }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source, options: .backwards),
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.count == 1)
+        #expect(resolved.first?.certainty == .strong)
+        #expect(resolved.first.map { resolvedImplType(of: $0, in: session) } == "B")
+        #expect(resolved.allSatisfy {
+            hasReceiverType($0.evidence, named: "B", in: session)
+        })
+    }
+}
+
+@Test
+func traitObjectReceiverStaysPossibleByMethodName() throws {
+    let source = """
+        trait Close { fn close(&self); }
+        fn f(receiver: &dyn Close) { receiver.close(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source),
+            context: queryContext(for: session)
+        )
+
+        #expect(!resolved.isEmpty)
+        #expect(resolved.allSatisfy { $0.certainty == .possible })
+        #expect(resolved.allSatisfy { $0.dispatch == .dynamicDispatch })
+        #expect(resolved.allSatisfy { hasMethodNameOnly($0.evidence) })
+    }
+}
+
+@Test
+func annotatedTraitImplReceiverUsesTraitDispatch() throws {
+    let source = """
+        trait Close { fn close(&self); }
+        struct A;
+        impl Close for A { fn close(&self) {} }
+        fn f(receiver: A) { receiver.close(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "close();", in: source, options: .backwards),
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.count == 1)
+        #expect(resolved.first?.certainty == .strong)
+        #expect(resolved.first?.dispatch == .traitDispatch)
+        #expect(resolved.first.map { resolvedImplType(of: $0, in: session) } == "A")
+    }
+}
+
+@Test
+func receiverTypedCallersPreserveStrongAndProbableCertainty() throws {
+    let source = """
+        struct A;
+        impl A {
+            fn new() -> Self { A }
+            fn close(&self) {}
+        }
+        fn annotated(receiver: A) { receiver.close(); }
+        fn inferred() { let receiver = A::new(); receiver.close(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let callers = try session.callers(
+            of: "close",
+            context: queryContext(for: session)
+        )
+
+        #expect(callers.map(\.certainty) == [.strong, .probable])
+        #expect(callers.allSatisfy {
+            hasReceiverType($0.evidence, named: "A", in: session)
+        })
     }
 }
 
@@ -170,10 +345,11 @@ func outgoingCallsResolveEveryRustCallKind() throws {
         #expect(qualified.completeness == .complete)
 
         let method = try #require(result.calls[2].candidates.first)
-        #expect(method.certainty == .possible)
-        #expect(method.dispatch == .dynamicDispatch)
+        #expect(method.certainty == .strong)
+        #expect(method.dispatch == .direct)
         #expect(method.provenance == .fuzzyResolver)
         #expect(method.completeness == .complete)
+        #expect(hasReceiverType(method.evidence, named: "Receiver", in: session))
         #expect(result.calls[3].candidates.isEmpty)
     }
 }
@@ -554,7 +730,7 @@ func evaluatesGoldSetMetricsAndKnownFailures() throws {
         corpus: fixture
     )
 
-    #expect(report.total == 8)
+    #expect(report.total == 9)
     #expect(report.defTop1Passed == 1)
     #expect(report.defTop1Total == 2)
     #expect(report.def5Top5Passed == 1)
@@ -780,4 +956,33 @@ private func hasMethodNameOnly(_ evidence: [ResolutionEvidence]) -> Bool {
         if case .methodNameOnly = $0 { return true }
         return false
     }
+}
+
+private func hasReceiverType(
+    _ evidence: [ResolutionEvidence],
+    named name: String,
+    in session: EngineSession
+) -> Bool {
+    evidence.contains {
+        if case let .receiverType(nameID) = $0 {
+            return session.names.resolve(nameID) == name
+        }
+        return false
+    }
+}
+
+private func resolvedImplType(
+    of candidate: ResolutionCandidate,
+    in session: EngineSession
+) -> String? {
+    guard candidate.target.localKind == .declarationFacet,
+          let (_, index) = session.content(at: candidate.target.pathID),
+          index.symbols.indices.contains(Int(candidate.target.localIndex)),
+          let implFacetIndex =
+            index.symbols[Int(candidate.target.localIndex)].parentFacetIndex,
+          let relation = index.implRelations.first(where: {
+              $0.implFacetIndex == implFacetIndex
+          })
+    else { return nil }
+    return session.names.resolve(relation.typeNameID)
 }

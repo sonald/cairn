@@ -22,8 +22,8 @@ def5 crates/core/main.rs:112:10 -> crates/ignore/src/walk.rs:542:12
 nostrong crates/core/main.rs:112:10
 # Method call on HiArgs; manual type tracing selects HiArgs::sort over regex literal's sort.
 def5 crates/core/main.rs:114:26 -> crates/core/flags/hiargs.rs:752:19
-# Receiver typing is not proven, so the two sort candidates must remain Possible.
-nostrong crates/core/main.rs:114:26
+# The &HiArgs parameter annotation proves the receiver type.
+strong crates/core/main.rs:114:26
 # eprintln_locked is defined by macro_rules and macro expansion is outside M0.
 unresolved crates/core/main.rs:62:13
 # err_message is defined by macro_rules and macro expansion is outside M0.

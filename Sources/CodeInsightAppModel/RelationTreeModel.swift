@@ -380,11 +380,15 @@ public final class RelationTreeModel {
                 session: session
             ),
             makeGroup(
+                "Probable",
+                edges: capped.filter { $0.certainty == .probable },
+                under: parent,
+                direction: direction,
+                session: session
+            ),
+            makeGroup(
                 "Possible",
-                edges: capped.filter {
-                    $0.certainty == .probable
-                        || $0.certainty == .possible
-                },
+                edges: capped.filter { $0.certainty == .possible },
                 under: parent,
                 direction: direction,
                 session: session
@@ -800,6 +804,7 @@ public final class RelationTreeModel {
         case .lexicalBinding: "lexical binding"
         case .nameOnly: "name match"
         case .methodNameOnly: "method name match"
+        case .receiverType: "receiver type"
         }
     }
 

@@ -4,10 +4,12 @@ import TreeSitterKit
 struct RustDeclarationSite {
     let facetIndex: UInt32?
     let initializerRange: CodeInsightCore.ByteRange?
+    let implTypeNameID: NameID?
 
     static let none = RustDeclarationSite(
         facetIndex: nil,
-        initializerRange: nil
+        initializerRange: nil,
+        implTypeNameID: nil
     )
 }
 
@@ -101,6 +103,7 @@ struct RustDeclarations {
             bodyFingerprint: fingerprints.body
         ))
 
+        var implTypeNameID: NameID?
         if kind == .rustImpl,
            let implementation = implementationNames(in: node),
            let typeName = implementation.type.text(
@@ -112,14 +115,16 @@ struct RustDeclarations {
                 $0.text(in: bytes, byteOffset: byteOffset)
             }
             if implementation.trait == nil || traitName != nil {
+                let typeNameID = names.intern(typeName)
                 implRelations.append(ImplRelation(
                     implFacetIndex: facetIndex,
                     traitNameID: traitName.map(names.intern),
                     traitNameRange: implementation.trait?.coreByteRange(
                         byteOffset: byteOffset
                     ),
-                    typeNameID: names.intern(typeName)
+                    typeNameID: typeNameID
                 ))
+                implTypeNameID = typeNameID
             }
         }
 
@@ -135,7 +140,8 @@ struct RustDeclarations {
             facetIndex: facetIndex,
             initializerRange: initializer(in: node)?.coreByteRange(
                 byteOffset: byteOffset
-            )
+            ),
+            implTypeNameID: implTypeNameID
         )
     }
 

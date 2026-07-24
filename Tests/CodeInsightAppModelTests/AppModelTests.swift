@@ -671,7 +671,7 @@ func contextCandidateSelectionWraps() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
         struct B; impl B { fn close(&self) {} }
-        fn f(value: A) { value.close(); }
+        fn f<T>(value: T) { value.close(); }
         """
     let root = try temporaryProject(["main.rs": source])
     defer { try? FileManager.default.removeItem(at: root) }

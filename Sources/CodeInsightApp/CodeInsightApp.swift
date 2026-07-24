@@ -1443,6 +1443,80 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ]
         )
 
+        func receiverRelationCheck(
+            offset: UInt32?,
+            rootTitle: String,
+            edgeTitle: String,
+            expectedGroup: String,
+            expectedSubtitle: String,
+            absentGroups: [String]
+        ) -> (present: Bool, absent: Bool, subtitleHonest: Bool, subtitle: String) {
+            guard relationFileVisible, let offset else {
+                return (false, false, false, "")
+            }
+            windowController.selfTestReaderRelation(
+                offset: offset,
+                direction: .calls
+            )
+            let present = waitUntil(timeout: 5, condition: {
+                model.relationTree.root?.title == rootTitle
+                    && windowController.selfTestVisibleRelationEdgeTitles(
+                        inGroup: expectedGroup
+                    ).contains(edgeTitle)
+            })
+            let absent = absentGroups.allSatisfy {
+                !windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: $0
+                ).contains(edgeTitle)
+            }
+            let subtitle =
+                windowController.selfTestVisibleRelationEdgeSubtitle(
+                    titled: edgeTitle,
+                    inGroup: expectedGroup
+                ) ?? ""
+            return (present, absent, subtitle == expectedSubtitle, subtitle)
+        }
+
+        let typedReceiver = receiverRelationCheck(
+            offset: target.typedReceiverRootOffset,
+            rootTitle: "typed_receiver_call",
+            edgeTitle: "typed_edge",
+            expectedGroup: "Strong",
+            expectedSubtitle: "Strong · direct",
+            absentGroups: ["Probable", "Possible"]
+        )
+        let inferredReceiver = receiverRelationCheck(
+            offset: target.inferredReceiverRootOffset,
+            rootTitle: "inferred_receiver_call",
+            edgeTitle: "inferred_edge",
+            expectedGroup: "Probable",
+            expectedSubtitle: "Probable · direct",
+            absentGroups: ["Strong", "Possible"]
+        )
+        let traitObjectReceiver = receiverRelationCheck(
+            offset: target.traitObjectReceiverRootOffset,
+            rootTitle: "trait_object_receiver_call",
+            edgeTitle: "trait_object_edge",
+            expectedGroup: "Possible",
+            expectedSubtitle: "Possible · dynamic · name match only",
+            absentGroups: ["Strong", "Probable"]
+        )
+        emitExactStep(
+            "relation-receiver-types",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "typedStrong": typedReceiver.present,
+                "typedPossible": !typedReceiver.absent,
+                "typedSubtitle": typedReceiver.subtitle,
+                "inferredProbable": inferredReceiver.present,
+                "inferredPossible": !inferredReceiver.absent,
+                "inferredSubtitle": inferredReceiver.subtitle,
+                "traitObjectPossible": traitObjectReceiver.present,
+                "traitObjectSubtitle": traitObjectReceiver.subtitle,
+            ]
+        )
+
         let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
         let realOffline = runRealOfflineCoverageVariant(root: root)
@@ -1489,6 +1563,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "externalDemotionFileVisible": externalDemotionFileVisible,
             "providerProvenExternalDemoted": providerProvenExternalDemoted,
             "externalDemotionSubtitleHonest": externalDemotionSubtitleHonest,
+            "typedReceiverStrong": typedReceiver.present,
+            "typedReceiverAbsentFromPossible": typedReceiver.absent,
+            "typedReceiverNameMatchNoteAbsent": typedReceiver.subtitleHonest,
+            "inferredReceiverProbable": inferredReceiver.present,
+            "inferredReceiverAbsentFromPossible": inferredReceiver.absent,
+            "inferredReceiverNameMatchNoteAbsent":
+                inferredReceiver.subtitleHonest,
+            "traitObjectStaysPossible": traitObjectReceiver.present,
+            "traitObjectAbsentFromStrongAndProbable":
+                traitObjectReceiver.absent,
+            "traitObjectSubtitleHonest": traitObjectReceiver.subtitleHonest,
             "realProviderPassedOrSkipped": real.passed,
             "realOfflineCoveragePassedOrSkipped": realOffline.passed,
             "historicalExactVisible": historical.exactVisible,
@@ -3239,6 +3324,9 @@ private struct ExactSelfTestTarget {
     let signatureTraitOffset: UInt32?
     let externalRootOffset: UInt32?
     let externalCallOffset: UInt32?
+    let typedReceiverRootOffset: UInt32?
+    let inferredReceiverRootOffset: UInt32?
+    let traitObjectReceiverRootOffset: UInt32?
 }
 
 private struct ExactSelfTestIndexService: IndexService {
@@ -3531,6 +3619,21 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
     ).flatMap {
         UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
     }
+    let typedReceiverRootOffset = definitionSource.range(
+        of: "typed_receiver_call"
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
+    let inferredReceiverRootOffset = definitionSource.range(
+        of: "inferred_receiver_call"
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
+    let traitObjectReceiverRootOffset = definitionSource.range(
+        of: "trait_object_receiver_call"
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
     return ExactSelfTestTarget(
         file: file,
         clickOffset: clickOffset,
@@ -3544,7 +3647,10 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
         relationCallOffset: relationCallOffset,
         signatureTraitOffset: signatureTraitOffset,
         externalRootOffset: externalRootOffset,
-        externalCallOffset: externalCallOffset
+        externalCallOffset: externalCallOffset,
+        typedReceiverRootOffset: typedReceiverRootOffset,
+        inferredReceiverRootOffset: inferredReceiverRootOffset,
+        traitObjectReceiverRootOffset: traitObjectReceiverRootOffset
     )
 }
 
