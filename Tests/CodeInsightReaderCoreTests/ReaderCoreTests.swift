@@ -85,6 +85,84 @@ func rustHighlighterProducesOutlineSnapshot() throws {
 }
 
 @Test
+func commentContentClassifierProtectsFiguresAndAllowsProse() {
+    #expect(CommentContentKind.classify("""
+        +-----+
+        | API |
+        +-----+
+        """) == .figure)
+    #expect(CommentContentKind.classify("""
+        | name | value |
+        | foo  | 1     |
+        """) == .figure)
+    #expect(CommentContentKind.classify(
+        "This comment explains why the fallback is safe."
+    ) == .prose)
+    #expect(CommentContentKind.classify(
+        "这里解释为什么回退路径是安全的。"
+    ) == .prose)
+    #expect(CommentContentKind.classify("""
+        Explanation before the diagram.
+        +---+
+        | A |
+        +---+
+        """) == .figure)
+}
+
+@Test
+func rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() throws {
+    let source = """
+        mod outer {
+            struct Widget;
+            enum State { Ready }
+            trait Work {
+                fn required(&self);
+            }
+            impl Work for Widget {
+                fn run(&self) {}
+            }
+            const LIMIT: usize = 3;
+            static FLAG: bool = true;
+            type Alias = Widget;
+            fn call_site() { run(); }
+        }
+        fn top() {}
+        """
+    let result = try RustHighlighter().highlight(bytes: Array(source.utf8))
+    let declarationKinds: Set<HighlightKind> = [
+        .functionName, .declarationTitle, .declarationEmphasis,
+    ]
+
+    for facet in result.outlineFacets {
+        let matching = result.spans.filter {
+            $0.range == facet.nameRange && declarationKinds.contains($0.kind)
+        }
+        switch facet.kind {
+        case .fn, .method:
+            #expect(matching.map(\.kind) == [.functionName])
+        case .struct, .enum, .trait, .typeAlias:
+            #expect(matching.map(\.kind) == [.declarationTitle])
+        case .mod, .const, .static:
+            #expect(matching.map(\.kind) == [.declarationEmphasis])
+        case .impl:
+            #expect(matching.isEmpty)
+        }
+    }
+
+    for kind in [
+        OutlineKind.fn, .method, .struct, .enum, .trait, .impl, .mod,
+        .const, .static, .typeAlias,
+    ] {
+        #expect(result.outlineFacets.contains { $0.kind == kind })
+    }
+    let callRange = try #require(source.range(of: "run();", options: .backwards))
+    let callOffset = UInt32(source[..<callRange.lowerBound].utf8.count)
+    #expect(!result.spans.contains {
+        declarationKinds.contains($0.kind) && $0.range.contains(callOffset)
+    })
+}
+
+@Test
 func rustHighlighterMatchesFixtureSnapshot() throws {
     let fixture = repositoryRoot
         .appendingPathComponent("Tests/RustExtractorTests/Fixtures/use_alias/main.rs")
@@ -95,6 +173,7 @@ func rustHighlighterMatchesFixtureSnapshot() throws {
 
     #expect(spans == [
         "0..<3:keyword",
+        "4..<6:declarationEmphasis",
         "8..<11:keyword",
         "24..<26:keyword",
         "36..<38:keyword",
@@ -201,6 +280,25 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     #expect(document.contentID == loaded.document.contentID)
     #expect(!document.highlightSpans.isEmpty)
     #expect(document.outlineFacets.count == 10_001)
+}
+
+@Test
+func hugeDocumentDeclarationSpanProbe() throws {
+    var lines: [String] = []
+    lines.reserveCapacity(100_000)
+    for index in 0..<10_000 {
+        lines.append("const ITEM_\(index): usize = \(index);")
+        for proseLine in 0..<9 {
+            lines.append("// prose comment \(proseLine)")
+        }
+    }
+    let result = try RustHighlighter().highlight(
+        bytes: Array(lines.joined(separator: "\n").utf8)
+    )
+
+    print("S6 huge span probe: spans=\(result.spans.count) declarations=\(result.outlineFacets.count)")
+    #expect(result.spans.count == 130_000)
+    #expect(result.outlineFacets.count == 10_000)
 }
 
 @Test

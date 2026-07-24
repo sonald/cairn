@@ -26,6 +26,7 @@ public struct ReaderSettings: Equatable, Sendable {
         }
     }
     public var theme: Theme
+    public var syntaxFormatting: Bool
     public var humanistComments: Bool
 
     public init(
@@ -33,6 +34,7 @@ public struct ReaderSettings: Equatable, Sendable {
         fontSize: Double = 13,
         functionNameDelta: Double = 1,
         theme: Theme = .auto,
+        syntaxFormatting: Bool = true,
         humanistComments: Bool = false
     ) {
         self.lineHeightMultiple = lineHeightMultiple.clamped(to: Self.lineHeightRange)
@@ -41,6 +43,7 @@ public struct ReaderSettings: Equatable, Sendable {
             to: Self.functionNameDeltaRange
         )
         self.theme = theme
+        self.syntaxFormatting = syntaxFormatting
         self.humanistComments = humanistComments
     }
 
@@ -56,6 +59,9 @@ public struct ReaderSettings: Equatable, Sendable {
                 ?? 1,
             theme: defaults.string(forKey: Keys.theme).flatMap(Theme.init(rawValue:))
                 ?? .auto,
+            syntaxFormatting: (defaults.object(forKey: Keys.syntaxFormatting) as? NSNumber)?
+                .boolValue
+                ?? true,
             humanistComments: (defaults.object(forKey: Keys.humanistComments) as? NSNumber)?
                 .boolValue
                 ?? false
@@ -68,12 +74,14 @@ public struct ReaderSettings: Equatable, Sendable {
             fontSize: fontSize,
             functionNameDelta: functionNameDelta,
             theme: theme,
+            syntaxFormatting: syntaxFormatting,
             humanistComments: humanistComments
         )
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
         defaults.set(validated.theme.rawValue, forKey: Keys.theme)
+        defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
     }
 
@@ -82,6 +90,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let fontSize = "reader.fontSize"
         static let functionNameDelta = "reader.functionNameDelta"
         static let theme = "reader.theme"
+        static let syntaxFormatting = "reader.syntaxFormatting"
         static let humanistComments = "reader.humanistComments"
     }
 }
@@ -91,6 +100,7 @@ public struct ReaderTheme: Equatable, Sendable {
     public let lineHeightMultiple: Double
     public let fontSize: Double
     public let functionNameFontSize: Double
+    public let syntaxFormatting: Bool
     public let humanistComments: Bool
 
     public init(settings: ReaderSettings) {
@@ -98,6 +108,7 @@ public struct ReaderTheme: Equatable, Sendable {
         lineHeightMultiple = settings.lineHeightMultiple
         fontSize = settings.fontSize
         functionNameFontSize = settings.fontSize + settings.functionNameDelta
+        syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
     }
 
@@ -128,28 +139,28 @@ public struct ReaderTheme: Equatable, Sendable {
         case .dark:
             switch kind {
             case .keyword: 0xE879F9
-            case .comment: 0xA3E635
+            case .comment, .commentFigure: 0xA3E635
             case .string: 0xFDA29B
             case .number: 0xC4B5FD
-            case .functionName: 0x84ADFF
+            case .functionName, .declarationTitle, .declarationEmphasis: 0x84ADFF
             case .typeName: 0x67E8F9
             }
         case .siClassic:
             switch kind {
             case .keyword: 0x7A1F1F
-            case .comment: 0x526B45
+            case .comment, .commentFigure: 0x526B45
             case .string: 0x8A3C2E
             case .number: 0x6E3B6F
-            case .functionName: 0x163A5F
+            case .functionName, .declarationTitle, .declarationEmphasis: 0x163A5F
             case .typeName: 0x245B78
             }
         case .auto, .light:
             switch kind {
             case .keyword: 0x9C36B5
-            case .comment: 0x4D7C0F
+            case .comment, .commentFigure: 0x4D7C0F
             case .string: 0xB42318
             case .number: 0x7F56D9
-            case .functionName: 0x175CD3
+            case .functionName, .declarationTitle, .declarationEmphasis: 0x175CD3
             case .typeName: 0x087E8B
             }
         }

@@ -179,10 +179,11 @@ public final class ReaderTextView {
             string: source,
             attributes: baseAttributes
         )
-        applyTypography(
+        Self.applyTypography(
             document.highlightSpans,
             map: document.byteUTF16Map,
-            to: attributed
+            to: attributed,
+            theme: theme
         )
         if document.highlightSpans.isEmpty {
             layoutManager.renderingAttributesValidator = nil
@@ -223,10 +224,11 @@ public final class ReaderTextView {
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
         backingTextStorage.beginEditing()
-        applyTypography(
+        Self.applyTypography(
             document.highlightSpans,
             map: document.byteUTF16Map,
-            to: backingTextStorage
+            to: backingTextStorage,
+            theme: theme
         )
         backingTextStorage.endEditing()
         layoutManager.renderingAttributesValidator = { [weak renderingCoordinator] manager, fragment in
@@ -262,10 +264,11 @@ public final class ReaderTextView {
             baseAttributes,
             range: NSRange(location: 0, length: backingTextStorage.length)
         )
-        applyTypography(
+        Self.applyTypography(
             document.highlightSpans,
             map: document.byteUTF16Map,
-            to: backingTextStorage
+            to: backingTextStorage,
+            theme: theme
         )
         backingTextStorage.endEditing()
         if !document.highlightSpans.isEmpty {
@@ -475,11 +478,13 @@ public final class ReaderTextView {
         return matches
     }
 
-    private func applyTypography(
+    static func applyTypography(
         _ spans: [HighlightSpan],
         map: ByteUTF16Map,
-        to attributed: NSMutableAttributedString
+        to attributed: NSMutableAttributedString,
+        theme: ReaderTheme
     ) {
+        guard theme.syntaxFormatting else { return }
         for span in spans {
             guard let range = map.nsRange(
                 byteLowerBound: Int(span.range.lowerBound),
@@ -494,7 +499,7 @@ public final class ReaderTextView {
             )
             guard safeRange.length > 0 else { continue }
             switch span.kind {
-            case .functionName:
+            case .functionName, .declarationTitle:
                 attributed.addAttributes([
                     .font: NSFont.monospacedSystemFont(
                         ofSize: theme.functionNameFontSize,
@@ -502,6 +507,15 @@ public final class ReaderTextView {
                     ),
                     .kern: 0.15,
                 ], range: safeRange)
+            case .declarationEmphasis:
+                attributed.addAttribute(
+                    .font,
+                    value: NSFont.monospacedSystemFont(
+                        ofSize: theme.fontSize,
+                        weight: .semibold
+                    ),
+                    range: safeRange
+                )
             case .comment where theme.humanistComments:
                 attributed.addAttribute(
                     .font,

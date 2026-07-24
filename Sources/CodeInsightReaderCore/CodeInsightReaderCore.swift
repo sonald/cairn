@@ -10,6 +10,71 @@ public enum HighlightKind: UInt8, Sendable {
     case number
     case functionName
     case typeName
+    case declarationTitle
+    case declarationEmphasis
+    case commentFigure
+}
+
+public enum CommentContentKind: Sendable {
+    case prose
+    case figure
+
+    public static func classify(_ text: String) -> Self {
+        if text.unicodeScalars.contains(where: {
+            (0x2500...0x259F).contains($0.value)
+        }) {
+            return .figure
+        }
+
+        let lines = text.split(
+            separator: "\n",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        if lines.contains(where: isFigureLine) {
+            return .figure
+        }
+
+        var alignedColumnCounts: [Int: Int] = [:]
+        for line in lines {
+            for column in alignedColumnStarts(in: line) {
+                alignedColumnCounts[column, default: 0] += 1
+            }
+        }
+        return alignedColumnCounts.values.contains(where: { $0 >= 2 })
+            ? .figure
+            : .prose
+    }
+
+    private static func isFigureLine(_ line: String) -> Bool {
+        if line.contains("---") || line.contains("===") {
+            return true
+        }
+        let plusCount = line.lazy.filter { $0 == "+" }.count
+        if plusCount >= 2 && (line.contains("--") || line.contains("==")) {
+            return true
+        }
+        return line.lazy.filter { $0 == "|" }.count >= 2
+    }
+
+    private static func alignedColumnStarts(in line: String) -> Set<Int> {
+        let characters = Array(line)
+        var result: Set<Int> = []
+        var index = 0
+        while index < characters.count {
+            guard characters[index].isWhitespace else {
+                index += 1
+                continue
+            }
+            let start = index
+            while index < characters.count, characters[index].isWhitespace {
+                index += 1
+            }
+            if start > 0, index < characters.count, index - start >= 2 {
+                result.insert(start)
+            }
+        }
+        return result
+    }
 }
 
 public struct HighlightSpan: Equatable, Sendable {
@@ -165,7 +230,12 @@ public struct RustHighlighter: Sendable {
             let kind = node.kind
             let highlight: HighlightKind?
             if Self.comments.contains(kind) {
-                highlight = .comment
+                let range = coreRange(node)
+                highlight = text(in: bytes, range: range).map {
+                    CommentContentKind.classify($0) == .figure
+                        ? .commentFigure
+                        : .comment
+                } ?? .comment
             } else if Self.strings.contains(kind) {
                 highlight = .string
             } else if Self.numbers.contains(kind) {
@@ -189,10 +259,12 @@ public struct RustHighlighter: Sendable {
                 parentKind: current.parentKind,
                 member: current.member
             )
+            var declarationNameRange: CodeInsightCore.ByteRange?
             if let outline {
                 let nameRange = coreRange(outline.nameNode)
-                if kind == "function_item" || kind == "function_signature_item" {
-                    spans.append(HighlightSpan(range: nameRange, kind: .functionName))
+                if let highlight = declarationHighlightKind(for: outline.kind) {
+                    spans.append(HighlightSpan(range: nameRange, kind: highlight))
+                    declarationNameRange = nameRange
                 }
                 // Outline data belongs to this existing highlighter walk. Parsing
                 // again through RustExtractor would duplicate the large-file cost.
@@ -226,6 +298,11 @@ public struct RustHighlighter: Sendable {
             }
             for index in (0..<node.childCount).reversed() {
                 if let child = node.child(at: index) {
+                    if let declarationNameRange,
+                       coreRange(child) == declarationNameRange
+                    {
+                        continue
+                    }
                     stack.append((child, childDepth, kind, childMember))
                 }
             }
@@ -235,6 +312,21 @@ public struct RustHighlighter: Sendable {
                 < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
         }
         return (spans, facets)
+    }
+
+    private func declarationHighlightKind(
+        for kind: OutlineKind
+    ) -> HighlightKind? {
+        switch kind {
+        case .fn, .method:
+            .functionName
+        case .struct, .enum, .trait, .typeAlias:
+            .declarationTitle
+        case .mod, .const, .static:
+            .declarationEmphasis
+        case .impl:
+            nil
+        }
     }
 
     private func outlineItem(

@@ -9,6 +9,7 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
         fontSize: 13,
         functionNameDelta: 1,
         theme: .auto,
+        syntaxFormatting: true,
         humanistComments: false
     ))
 
@@ -44,11 +45,13 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
     let suite = "ReaderSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
+    #expect(ReaderSettings(defaults: defaults).syntaxFormatting)
     let expected = ReaderSettings(
         lineHeightMultiple: 1.6,
         fontSize: 17,
         functionNameDelta: 2,
         theme: .siClassic,
+        syntaxFormatting: false,
         humanistComments: true
     )
 
@@ -64,12 +67,14 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
         fontSize: 16,
         functionNameDelta: 2,
         theme: .siClassic,
+        syntaxFormatting: false,
         humanistComments: true
     ))
 
     #expect(theme.lineHeightMultiple == 1.5)
     #expect(theme.fontSize == 16)
     #expect(theme.functionNameFontSize == 18)
+    #expect(!theme.syntaxFormatting)
     #expect(theme.humanistComments)
     #expect(theme.backgroundRGB(isDark: false) == 0xF5F0E6)
     #expect(theme.backgroundRGB(isDark: true) == 0xF5F0E6)

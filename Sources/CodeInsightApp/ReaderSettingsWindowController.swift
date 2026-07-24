@@ -116,6 +116,7 @@ private struct ReaderSettingsView: View {
                 in: ReaderSettings.functionNameDeltaRange,
                 step: 1
             )
+            Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
             Toggle("Use humanist font for comments", isOn: $settings.humanistComments)
         }
         .formStyle(.grouped)
