@@ -7,6 +7,7 @@ final class EmptyStateView: NSView {
     private let taglineLabel = NSTextField(
         labelWithString: "Read code without touching it."
     )
+    private let markView = NSImageView()
     private let openButton = NSButton()
     private let recentStack = NSStackView()
     private var recentPaths: [String] = []
@@ -31,18 +32,10 @@ final class EmptyStateView: NSView {
         registerForDraggedTypes([.fileURL])
         wantsLayer = true
 
-        let symbolConfiguration = NSImage.SymbolConfiguration(
-            pointSize: 48,
-            weight: .regular
-        ).applying(.init(hierarchicalColor: .secondaryLabelColor))
-        let symbol = NSImage(
-            systemSymbolName: "square.stack.3d.up",
-            accessibilityDescription: "Cairn"
-        )?.withSymbolConfiguration(symbolConfiguration)
-        let symbolView = NSImageView(image: symbol ?? NSImage())
-        symbolView.contentTintColor = .secondaryLabelColor
-        symbolView.imageScaling = .scaleProportionallyDown
-        symbolView.translatesAutoresizingMaskIntoConstraints = false
+        markView.image = cairnMarkImage(size: CGSize(width: 48, height: 48))
+        markView.imageScaling = .scaleNone
+        markView.setAccessibilityIdentifier("CairnMark")
+        markView.translatesAutoresizingMaskIntoConstraints = false
 
         titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
         titleLabel.textColor = .labelColor
@@ -66,7 +59,7 @@ final class EmptyStateView: NSView {
         recentStack.spacing = 4
 
         let stack = NSStackView(views: [
-            symbolView,
+            markView,
             titleLabel,
             taglineLabel,
             openButton,
@@ -76,7 +69,7 @@ final class EmptyStateView: NSView {
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 0
-        stack.setCustomSpacing(12, after: symbolView)
+        stack.setCustomSpacing(12, after: markView)
         stack.setCustomSpacing(4, after: titleLabel)
         stack.setCustomSpacing(24, after: taglineLabel)
         stack.setCustomSpacing(8, after: openButton)
@@ -85,8 +78,8 @@ final class EmptyStateView: NSView {
         addSubview(stack)
 
         NSLayoutConstraint.activate([
-            symbolView.widthAnchor.constraint(equalToConstant: 48),
-            symbolView.heightAnchor.constraint(equalToConstant: 48),
+            markView.widthAnchor.constraint(equalToConstant: 48),
+            markView.heightAnchor.constraint(equalToConstant: 48),
             openButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
             recentStack.widthAnchor.constraint(equalToConstant: 440),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -128,6 +121,16 @@ final class EmptyStateView: NSView {
     var selfTestAttachedToWindow: Bool { window != nil }
     var selfTestUnhidden: Bool { !isHiddenOrHasHiddenAncestor }
     var selfTestFrameVisibleInWindow: Bool { selfTestIsVisibleInWindow }
+    var selfTestMarkVisibleInWindow: Bool {
+        markView.selfTestIsVisibleInWindow
+    }
+    var selfTestMarkIs48Square: Bool {
+        abs(markView.frame.width - 48) < 0.01
+            && abs(markView.frame.height - 48) < 0.01
+    }
+    var selfTestMarkUsesCairnDrawing: Bool {
+        markView.accessibilityIdentifier() == "CairnMark"
+    }
     var selfTestTitleVisibleInWindow: Bool { titleLabel.selfTestIsVisibleInWindow }
     var selfTestButtonVisibleInWindow: Bool { openButton.selfTestIsVisibleInWindow }
     var selfTestOpenButtonIsVisibleDefaultAction: Bool {

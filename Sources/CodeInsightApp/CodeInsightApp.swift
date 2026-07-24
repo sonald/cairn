@@ -235,6 +235,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "emptyStateUnhidden": windowController.selfTestEmptyStateUnhidden,
             "emptyStateFrameVisibleInWindow": windowController
                 .selfTestEmptyStateFrameVisibleInWindow,
+            "emptyStateMarkVisibleInWindow": windowController
+                .selfTestEmptyStateMarkVisibleInWindow,
+            "emptyStateMarkIs48Square": windowController
+                .selfTestEmptyStateMarkIs48Square,
+            "emptyStateMarkUsesCairnDrawing": windowController
+                .selfTestEmptyStateMarkUsesCairnDrawing,
             "emptyStateNotCoveredByReader": windowController
                 .selfTestEmptyStateNotCoveredByReader,
             "emptyStateTitleVisibleInWindow": windowController

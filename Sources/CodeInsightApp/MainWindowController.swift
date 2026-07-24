@@ -508,6 +508,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestEmptyStateFrameVisibleInWindow: Bool {
         readerController.selfTestEmptyStateFrameVisibleInWindow
     }
+    var selfTestEmptyStateMarkVisibleInWindow: Bool {
+        readerController.selfTestEmptyStateMarkVisibleInWindow
+    }
+    var selfTestEmptyStateMarkIs48Square: Bool {
+        readerController.selfTestEmptyStateMarkIs48Square
+    }
+    var selfTestEmptyStateMarkUsesCairnDrawing: Bool {
+        readerController.selfTestEmptyStateMarkUsesCairnDrawing
+    }
     var selfTestEmptyStateNotCoveredByReader: Bool {
         readerController.selfTestEmptyStateNotCoveredByReader
     }
@@ -2329,6 +2338,15 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     }
     var selfTestEmptyStateFrameVisibleInWindow: Bool {
         emptyStateView?.selfTestFrameVisibleInWindow == true
+    }
+    var selfTestEmptyStateMarkVisibleInWindow: Bool {
+        emptyStateView?.selfTestMarkVisibleInWindow == true
+    }
+    var selfTestEmptyStateMarkIs48Square: Bool {
+        emptyStateView?.selfTestMarkIs48Square == true
+    }
+    var selfTestEmptyStateMarkUsesCairnDrawing: Bool {
+        emptyStateView?.selfTestMarkUsesCairnDrawing == true
     }
     var selfTestEmptyStateNotCoveredByReader: Bool {
         emptyStateView?.superview === readerArea && scrollView?.isHidden == true

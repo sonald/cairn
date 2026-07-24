@@ -70,6 +70,11 @@ if [[ -n "${CODEX_SANDBOX:-}" ]]; then
     )
 fi
 
+xcrun swiftc -parse-as-library \
+    Sources/CodeInsightApp/CairnMark.swift scripts/make-icon.swift \
+    -o .build/make-icon
+.build/make-icon
+
 swift build -c release --product codeinsight-app \
     ${swift_options[@]+"${swift_options[@]}"}
 BIN_DIR="$(swift build -c release --show-bin-path \
@@ -84,6 +89,7 @@ rm -f "$ZIP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$SOURCE_BINARY" "$APP/Contents/MacOS/codeinsight-app"
 chmod 755 "$APP/Contents/MacOS/codeinsight-app"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 
 bundle_homebrew_dylibs() {
     local main_binary="$1"
@@ -129,6 +135,8 @@ cat > "$APP/Contents/Info.plist" <<EOF
     <string>Cairn</string>
     <key>CFBundleExecutable</key>
     <string>codeinsight-app</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <!-- Placeholder: replace with the final reverse-DNS identifier before release. -->
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_IDENTIFIER</string>
