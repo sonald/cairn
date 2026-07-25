@@ -45,6 +45,35 @@ func rustHighlighterProducesStableSpans() throws {
 }
 
 @Test
+func identifierOccurrencesMatchWholeTokensAndSkipCommentsStringsAndKeywords() throws {
+    let source = """
+        let value = 1;
+        let value2 = value;
+        println!("value");
+        // value
+        value
+        """
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let clicked = try #require(source.range(of: "value"))
+    let byteOffset = UInt32(source[..<clicked.lowerBound].utf8.count)
+
+    #expect(document.identifierOccurrences(at: byteOffset).count == 3)
+    #expect(document.identifierOccurrences(at: 0).isEmpty)
+
+    let unicode = "let 值 = 1;\n值"
+    let unicodeDocument = ReaderDocument(bytes: Array(unicode.utf8))
+    let unicodeRange = try #require(unicode.range(of: "值"))
+    let unicodeOffset = UInt32(unicode[..<unicodeRange.lowerBound].utf8.count)
+    #expect(unicodeDocument.identifierOccurrences(at: unicodeOffset).count == 2)
+}
+
+@Test
 func rustHighlighterProducesOutlineSnapshot() throws {
     let source = [
         "mod outer {",

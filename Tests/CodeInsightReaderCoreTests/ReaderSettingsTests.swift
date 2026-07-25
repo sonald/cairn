@@ -10,7 +10,8 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
         functionNameDelta: 1,
         theme: .auto,
         syntaxFormatting: true,
-        humanistComments: false
+        humanistComments: false,
+        lineNumbers: true
     ))
 
     let low = ReaderSettings(
@@ -46,13 +47,15 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     #expect(ReaderSettings(defaults: defaults).syntaxFormatting)
+    #expect(ReaderSettings(defaults: defaults).lineNumbers)
     let expected = ReaderSettings(
         lineHeightMultiple: 1.6,
         fontSize: 17,
         functionNameDelta: 2,
         theme: .siClassic,
         syntaxFormatting: false,
-        humanistComments: true
+        humanistComments: true,
+        lineNumbers: false
     )
 
     expected.save(to: defaults)
@@ -68,7 +71,8 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
         functionNameDelta: 2,
         theme: .siClassic,
         syntaxFormatting: false,
-        humanistComments: true
+        humanistComments: true,
+        lineNumbers: false
     ))
 
     #expect(theme.lineHeightMultiple == 1.5)
@@ -92,11 +96,15 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
 func readerThemeProvidesDistinctDiffColorsForEveryTheme() {
     for selection in ReaderSettings.Theme.allCases {
         let theme = ReaderTheme(settings: ReaderSettings(theme: selection))
+        let isDark = selection == .dark
         let colors = Set([
-            theme.diffRGB(for: .added, isDark: selection == .dark),
-            theme.diffRGB(for: .removed, isDark: selection == .dark),
-            theme.diffRGB(for: .changed, isDark: selection == .dark),
+            theme.diffRGB(for: .added, isDark: isDark),
+            theme.diffRGB(for: .removed, isDark: isDark),
+            theme.diffRGB(for: .changed, isDark: isDark),
         ])
         #expect(colors.count == 3)
+        #expect(theme.lineNumberRGB(isDark: isDark) != theme.foregroundRGB(isDark: isDark))
+        #expect(theme.currentLineRGB(isDark: isDark) != theme.backgroundRGB(isDark: isDark))
+        #expect(theme.occurrenceRGB(isDark: isDark) != theme.backgroundRGB(isDark: isDark))
     }
 }

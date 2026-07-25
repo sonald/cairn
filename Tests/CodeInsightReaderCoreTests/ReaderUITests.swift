@@ -43,7 +43,7 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
     let lastKeyword = NSRange(location: lastLine.location, length: 3)
 
     reader.view.setFrameSize(NSSize(width: reader.view.frame.width, height: 10_000))
-    scrollView.contentView.scroll(to: NSPoint(x: 0, y: 9_000))
+    reader.view.scrollRangeToVisible(lastKeyword)
     scrollView.reflectScrolledClipView(scrollView.contentView)
     reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     window.displayIfNeeded()
@@ -64,11 +64,219 @@ func diffGutterStoresMarkersAndHunkRevealSelectsTheLine() {
     scrollView.documentView = reader.view
     reader.installDiffGutter(in: scrollView)
     reader.display(document: document)
+    let lineNumberThickness = reader.rulerThickness
     reader.setDiffMarkers([2: .changed, 3: .added])
 
     #expect(reader.diffMarkerCounts == [.changed: 1, .added: 1])
+    #expect(reader.gutterShowsLineNumbersAndDiff)
+    #expect(reader.rulerThickness == lineNumberThickness + 7)
     #expect(reader.revealDiffLine(3))
     #expect(reader.selectedLineNumber == 3)
+    reader.reveal(byteOffset: document.lineTable.lineStarts[1])
+    #expect(reader.currentLineNumber == 2)
+}
+
+@MainActor
+@Test
+func readerInstallsLineNumberRulerByDefault() {
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.documentView = reader.view
+
+    reader.apply(settings: ReaderSettings())
+
+    #expect(scrollView.hasVerticalRuler)
+    #expect((scrollView.verticalRulerView?.ruleThickness ?? 0) > 0)
+}
+
+@MainActor
+@Test
+func readingGeometryUsesClipWidthWithLegacyScroller() {
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(
+        frame: NSRect(x: 0, y: 0, width: 480, height: 180)
+    )
+    scrollView.scrollerStyle = .legacy
+    scrollView.hasVerticalScroller = true
+    scrollView.autohidesScrollers = false
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    reader.apply(settings: ReaderSettings())
+    scrollView.tile()
+    window.displayIfNeeded()
+
+    let rulerWidth = scrollView.verticalRulerView?.frame.width ?? 0
+    let clipWidth = scrollView.contentView.frame.width
+    let readerWidth = reader.view.visibleRect.width - rulerWidth
+    let availableWidth = clipWidth - rulerWidth
+    let oldEquationWidth = scrollView.bounds.width - rulerWidth
+
+    #expect(abs(readerWidth - availableWidth) <= 1)
+    #expect(abs(readerWidth - oldEquationWidth) > 1)
+
+    reader.apply(settings: ReaderSettings(lineNumbers: false))
+    scrollView.tile()
+    window.displayIfNeeded()
+
+    let disabledAvailableWidth = scrollView.contentView.frame.width
+    let disabledReaderWidth = reader.view.visibleRect.width
+    #expect(abs(disabledReaderWidth - disabledAvailableWidth) <= 1)
+    #expect(abs(disabledReaderWidth - readerWidth - rulerWidth) <= 1)
+    #expect(abs(disabledAvailableWidth - availableWidth - rulerWidth) <= 1)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func lineNumberRulerDrawsOnlyVisibleKnownLinesAndCanBeDisabled() throws {
+    let source = "fn one() {}\nfn two() {}\nfn three() {}"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, scrollView, window) = renderOffscreen(document)
+    withExtendedLifetime(window) {
+        #expect(scrollView.hasVerticalRuler)
+        #expect(reader.visibleLineNumbers.contains(1))
+        #expect(reader.visibleLineNumbers.allSatisfy { (1...3).contains($0) })
+        #expect(reader.visibleDeclarationMarkerLines == [1, 2, 3])
+
+        reader.apply(settings: ReaderSettings(lineNumbers: false))
+        window.displayIfNeeded()
+
+        #expect(!scrollView.hasVerticalRuler)
+        #expect(scrollView.verticalRulerView == nil)
+    }
+}
+
+@MainActor
+@Test
+func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() throws {
+    let source = """
+        fn alpha() {}
+        fn beta() { alpha(); }
+        fn gamma() { alpha(); beta(); }
+        """
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    let alpha = try #require(source.range(of: "alpha"))
+    let alphaOffset = UInt32(source[..<alpha.lowerBound].utf8.count)
+    let beta = try #require(source.range(of: "beta"))
+    let betaOffset = UInt32(source[..<beta.lowerBound].utf8.count)
+
+    #expect(reader.activate(atByteOffset: alphaOffset) == 3)
+    window.displayIfNeeded()
+    #expect(reader.currentLineNumber == 1)
+    #expect(reader.visibleCurrentLineNumbers == [1])
+    #expect(reader.view.textStorage?.attribute(
+        .backgroundColor,
+        at: Int(alphaOffset),
+        effectiveRange: nil
+    ) == nil)
+    #expect(renderedBackgroundColors(in: reader).contains { colorsEqual(
+        $0,
+        ReaderTheme(settings: ReaderSettings()).occurrenceColor
+    ) })
+    let alphaCharacterOffset = try #require(
+        document.byteUTF16Map.utf16Offset(forByte: Int(alphaOffset))
+    )
+    let alphaCharacterRange = NSRange(
+        location: alphaCharacterOffset,
+        length: "alpha".utf16.count
+    )
+    #expect(renderedColors(
+        in: reader,
+        intersecting: alphaCharacterRange
+    ).contains { colorsEqual(
+        $0,
+        ReaderTheme(settings: ReaderSettings()).color(for: .functionName)
+    ) })
+
+    #expect(reader.activate(atByteOffset: betaOffset) == 2)
+    #expect(reader.currentLineNumber == 2)
+    #expect(reader.occurrenceCount == 2)
+    #expect(!renderedBackgroundRanges(in: reader).contains {
+        $0.contains(Int(alphaOffset))
+    })
+
+    reader.view.cancelOperation(nil)
+    #expect(reader.occurrenceCount == 0)
+    #expect(reader.currentLineNumber == 2)
+
+    #expect(reader.activate(atByteOffset: 2) == 0)
+    #expect(reader.currentLineNumber == 1)
+}
+
+@MainActor
+@Test
+func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
+    let source = "struct Widget;\nfn make(value: Widget) -> Widget { value }\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    let theme = ReaderTheme(settings: ReaderSettings())
+
+    func range(for kind: HighlightKind) throws -> NSRange {
+        let span = try #require(highlighted.spans.first {
+            $0.kind == kind
+                && String(
+                    bytes: bytes[Int($0.range.lowerBound)..<Int($0.range.upperBound)],
+                    encoding: .utf8
+                ) == (kind == .functionName ? "make" : "Widget")
+        })
+        return try #require(document.byteUTF16Map.nsRange(
+            byteLowerBound: Int(span.range.lowerBound),
+            byteUpperBound: Int(span.range.upperBound)
+        ))
+    }
+
+    let declaration = try range(for: .declarationTitle)
+    let typeReference = try range(for: .typeName)
+    let untouchedFunction = try range(for: .functionName)
+    #expect(reader.activate(atByteOffset: UInt32(declaration.location)) == 3)
+    window.displayIfNeeded()
+
+    for (range, kind) in [
+        (declaration, HighlightKind.declarationTitle),
+        (typeReference, HighlightKind.typeName),
+    ] {
+        #expect(renderedColors(in: reader, intersecting: range).contains {
+            colorsEqual($0, theme.color(for: kind))
+        })
+        #expect(renderedBackgroundColors(
+            in: reader,
+            intersecting: range
+        ).contains { colorsEqual($0, theme.occurrenceColor) })
+    }
+    #expect(renderedColors(
+        in: reader,
+        intersecting: untouchedFunction
+    ).contains { colorsEqual($0, theme.color(for: .functionName)) })
+    #expect(renderedBackgroundColors(
+        in: reader,
+        intersecting: untouchedFunction
+    ).isEmpty)
 }
 
 @MainActor
@@ -87,8 +295,12 @@ private func renderOffscreen(
         defer: false
     )
     window.contentView = scrollView
+    reader.apply(settings: ReaderSettings())
     reader.display(document: document)
     reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    reader.captureVisibleDecorationState()
+    window.displayIfNeeded()
+    scrollView.verticalRulerView?.needsDisplay = true
     window.displayIfNeeded()
     return (reader, scrollView, window)
 }
@@ -126,6 +338,66 @@ private func renderedColors(
         return true
     }
     return colors
+}
+
+@MainActor
+private func renderedBackgroundColors(
+    in reader: ReaderTextView,
+    intersecting expectedRange: NSRange? = nil
+) -> [NSColor] {
+    guard let manager = reader.view.textLayoutManager,
+          let content = manager.textContentManager
+    else { return [] }
+    var colors: [NSColor] = []
+    manager.enumerateRenderingAttributes(
+        from: content.documentRange.location,
+        reverse: false
+    ) { _, attributes, textRange in
+        let lower = content.offset(
+            from: content.documentRange.location,
+            to: textRange.location
+        )
+        let upper = content.offset(
+            from: content.documentRange.location,
+            to: textRange.endLocation
+        )
+        let range = NSRange(location: lower, length: upper - lower)
+        let intersects = expectedRange.map {
+            NSIntersectionRange($0, range).length > 0
+        } ?? true
+        if intersects,
+           let color = attributes[.backgroundColor] as? NSColor
+        {
+            colors.append(color)
+        }
+        return true
+    }
+    return colors
+}
+
+@MainActor
+private func renderedBackgroundRanges(in reader: ReaderTextView) -> [NSRange] {
+    guard let manager = reader.view.textLayoutManager,
+          let content = manager.textContentManager
+    else { return [] }
+    var ranges: [NSRange] = []
+    manager.enumerateRenderingAttributes(
+        from: content.documentRange.location,
+        reverse: false
+    ) { _, attributes, textRange in
+        guard attributes[.backgroundColor] != nil else { return true }
+        let lower = content.offset(
+            from: content.documentRange.location,
+            to: textRange.location
+        )
+        let upper = content.offset(
+            from: content.documentRange.location,
+            to: textRange.endLocation
+        )
+        ranges.append(NSRange(location: lower, length: upper - lower))
+        return true
+    }
+    return ranges
 }
 
 @MainActor

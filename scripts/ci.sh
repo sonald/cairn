@@ -52,3 +52,4 @@ fi
 
 .build/debug/codeinsight-app --self-test-exact .
 .build/debug/codeinsight-app --self-test-diff .
+.build/debug/codeinsight-app --self-test-reading

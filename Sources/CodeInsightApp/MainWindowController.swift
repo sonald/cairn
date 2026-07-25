@@ -410,6 +410,45 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestReadingByteOffset: UInt32? {
         readerController.currentReadingPosition()?.byteOffset
     }
+    var selfTestReadingGeometry: (
+        scrollFrame: NSRect,
+        clipFrame: NSRect,
+        contentFrame: NSRect,
+        rulerFrame: NSRect,
+        windowContentFrame: NSRect,
+        hasRuler: Bool,
+        rulerThickness: CGFloat
+    ) {
+        let geometry = readerController.selfTestReadingGeometry
+        let contentFrame = window?.contentView.map {
+            $0.convert($0.bounds, to: nil)
+        } ?? .zero
+        return (
+            geometry.scrollFrame,
+            geometry.clipFrame,
+            geometry.contentFrame,
+            geometry.rulerFrame,
+            contentFrame,
+            geometry.hasRuler,
+            geometry.rulerThickness
+        )
+    }
+    var selfTestOccurrenceCount: Int { readerController.selfTestOccurrenceCount }
+    var selfTestCurrentLineNumber: Int? {
+        readerController.selfTestCurrentLineNumber
+    }
+    var selfTestVisibleLineNumbers: [Int] {
+        readerController.selfTestVisibleLineNumbers
+    }
+    var selfTestVisibleCurrentLineNumbers: [Int] {
+        readerController.selfTestVisibleCurrentLineNumbers
+    }
+    var selfTestStyledFragmentCount: Int {
+        readerController.selfTestStyledFragmentCount
+    }
+    func selfTestActivateReading(at byteOffset: UInt32) -> Int {
+        readerController.selfTestActivate(at: byteOffset)
+    }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
         readerFrame: NSRect,
@@ -572,6 +611,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         var counts = left
         for (kind, count) in right { counts[kind, default: 0] += count }
         return counts
+    }
+    var selfTestGutterCoexistsWithLineNumbers: Bool {
+        let leftHasDiff = !readerController.diffMarkerCounts.isEmpty
+        let rightHasDiff = !secondaryReaderController.diffMarkerCounts.isEmpty
+        return (leftHasDiff || rightHasDiff)
+            && (!leftHasDiff || readerController.gutterShowsLineNumbersAndDiff)
+            && (!rightHasDiff
+                || secondaryReaderController.gutterShowsLineNumbersAndDiff)
     }
     var selfTestSelectedDiffLine: Int? {
         secondaryReaderController.selectedDiffLine ?? readerController.selectedDiffLine
@@ -2537,6 +2584,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         scrollView.hasHorizontalScroller = true
         scrollView.documentView = textView.view
         textView.view.frame = scrollView.contentView.bounds
+        textView.configureGutter(in: scrollView, lineNumbers: true)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         label.textColor = .secondaryLabelColor
@@ -2707,6 +2755,7 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     }
 
     func apply(settings: ReaderSettings) {
+        loadViewIfNeeded()
         textView.apply(settings: settings)
         if !showsCompareControls { tabStripView.apply(settings: settings) }
     }
@@ -2915,7 +2964,55 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     var displayedBytes: [UInt8]? { textView.displayedBytes }
     var isEditable: Bool { textView.view.isEditable }
     var diffMarkerCounts: [DiffCore.MarkerKind: Int] { textView.diffMarkerCounts }
+    var gutterShowsLineNumbersAndDiff: Bool {
+        textView.gutterShowsLineNumbersAndDiff
+    }
     var selectedDiffLine: Int? { textView.selectedLineNumber }
+    var selfTestOccurrenceCount: Int { textView.occurrenceCount }
+    var selfTestCurrentLineNumber: Int? { textView.currentLineNumber }
+    var selfTestStyledFragmentCount: Int {
+        textView.renderingCoordinator.styledFragmentCount
+    }
+    var selfTestVisibleLineNumbers: [Int] {
+        textView.captureVisibleDecorationState()
+        return textView.visibleLineNumbers
+    }
+    var selfTestVisibleCurrentLineNumbers: [Int] {
+        textView.captureVisibleDecorationState()
+        return textView.visibleCurrentLineNumbers
+    }
+    func selfTestActivate(at byteOffset: UInt32) -> Int {
+        textView.activate(atByteOffset: byteOffset)
+    }
+    var selfTestReadingGeometry: (
+        scrollFrame: NSRect,
+        clipFrame: NSRect,
+        contentFrame: NSRect,
+        rulerFrame: NSRect,
+        hasRuler: Bool,
+        rulerThickness: CGFloat
+    ) {
+        loadViewIfNeeded()
+        guard let scrollView else {
+            return (.zero, .zero, .zero, .zero, false, 0)
+        }
+        let ruler = scrollView.verticalRulerView
+        let visible = textView.view.convert(textView.view.visibleRect, to: nil)
+        let gutterWidth = max(0, textView.view.textContainerInset.width - 12)
+        return (
+            scrollView.convert(scrollView.bounds, to: nil),
+            scrollView.contentView.convert(scrollView.contentView.bounds, to: nil),
+            NSRect(
+                x: visible.minX + gutterWidth,
+                y: visible.minY,
+                width: max(0, visible.width - gutterWidth),
+                height: visible.height
+            ),
+            ruler?.convert(ruler?.bounds ?? .zero, to: nil) ?? .zero,
+            scrollView.hasVerticalRuler,
+            ruler?.ruleThickness ?? 0
+        )
+    }
     var compareVersionAnchor: NSView {
         loadViewIfNeeded()
         return compareVersionButton

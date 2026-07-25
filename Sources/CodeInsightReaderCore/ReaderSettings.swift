@@ -28,6 +28,7 @@ public struct ReaderSettings: Equatable, Sendable {
     public var theme: Theme
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
+    public var lineNumbers: Bool
 
     public init(
         lineHeightMultiple: Double = 1.25,
@@ -35,7 +36,8 @@ public struct ReaderSettings: Equatable, Sendable {
         functionNameDelta: Double = 1,
         theme: Theme = .auto,
         syntaxFormatting: Bool = true,
-        humanistComments: Bool = false
+        humanistComments: Bool = false,
+        lineNumbers: Bool = true
     ) {
         self.lineHeightMultiple = lineHeightMultiple.clamped(to: Self.lineHeightRange)
         self.fontSize = fontSize.clamped(to: Self.fontSizeRange)
@@ -45,6 +47,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.theme = theme
         self.syntaxFormatting = syntaxFormatting
         self.humanistComments = humanistComments
+        self.lineNumbers = lineNumbers
     }
 
     public init(defaults: UserDefaults) {
@@ -64,7 +67,10 @@ public struct ReaderSettings: Equatable, Sendable {
                 ?? true,
             humanistComments: (defaults.object(forKey: Keys.humanistComments) as? NSNumber)?
                 .boolValue
-                ?? false
+                ?? false,
+            lineNumbers: (defaults.object(forKey: Keys.lineNumbers) as? NSNumber)?
+                .boolValue
+                ?? true
         )
     }
 
@@ -75,7 +81,8 @@ public struct ReaderSettings: Equatable, Sendable {
             functionNameDelta: functionNameDelta,
             theme: theme,
             syntaxFormatting: syntaxFormatting,
-            humanistComments: humanistComments
+            humanistComments: humanistComments,
+            lineNumbers: lineNumbers
         )
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
@@ -83,6 +90,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.theme.rawValue, forKey: Keys.theme)
         defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
+        defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
     }
 
     private enum Keys {
@@ -92,6 +100,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let theme = "reader.theme"
         static let syntaxFormatting = "reader.syntaxFormatting"
         static let humanistComments = "reader.humanistComments"
+        static let lineNumbers = "reader.lineNumbers"
     }
 }
 
@@ -186,6 +195,30 @@ public struct ReaderTheme: Equatable, Sendable {
             case .removed: 0xCF222E
             case .changed: 0xBF8700
             }
+        }
+    }
+
+    public func lineNumberRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x858585
+        case .siClassic: 0x8B8272
+        case .auto, .light: 0x8C959F
+        }
+    }
+
+    public func currentLineRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x2A2D2E
+        case .siClassic: 0xEDE6D8
+        case .auto, .light: 0xF3F6FA
+        }
+    }
+
+    public func occurrenceRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x4A4424
+        case .siClassic: 0xE2D3A6
+        case .auto, .light: 0xFFF1A8
         }
     }
 

@@ -19,6 +19,18 @@ public extension ReaderTheme {
         dynamicColor(foregroundRGB(isDark:))
     }
 
+    var lineNumberColor: NSColor {
+        dynamicColor(lineNumberRGB(isDark:))
+    }
+
+    var currentLineColor: NSColor {
+        dynamicColor(currentLineRGB(isDark:))
+    }
+
+    var occurrenceColor: NSColor {
+        dynamicColor(occurrenceRGB(isDark:))
+    }
+
     private func dynamicColor(
         _ value: @escaping @Sendable (Bool) -> UInt32
     ) -> NSColor {
@@ -41,6 +53,7 @@ public final class RenderingAttributesCoordinator {
     public private(set) var styledFragmentCount = 0
 
     private var spans: [HighlightSpan] = []
+    private var occurrenceRanges: [NSRange] = []
     private var map: ByteUTF16Map?
     private var theme = ReaderTheme(settings: ReaderSettings())
 
@@ -53,8 +66,18 @@ public final class RenderingAttributesCoordinator {
         styledFragmentCount = 0
     }
 
+    var hasRenderingAttributes: Bool {
+        !spans.isEmpty || !occurrenceRanges.isEmpty
+    }
+
+    func setOccurrences(_ ranges: [NSRange]) {
+        occurrenceRanges = ranges
+        styledFragmentCount = 0
+    }
+
     func clear() {
         spans = []
+        occurrenceRanges = []
         map = nil
         styledFragmentCount = 0
     }
@@ -92,24 +115,104 @@ public final class RenderingAttributesCoordinator {
             buffer: 0
         )
         let fragmentNSRange = NSRange(location: start, length: end - start)
-        var wroteAttributes = false
+        var syntaxRanges: [(range: NSRange, kind: HighlightKind)] = []
+        syntaxRanges.reserveCapacity(visibleSpans.count)
         for span in visibleSpans {
             guard let globalRange = map.nsRange(
                 byteLowerBound: Int(span.range.lowerBound),
                 byteUpperBound: Int(span.range.upperBound)
             ) else { continue }
             let intersection = NSIntersectionRange(globalRange, fragmentNSRange)
-            guard
-                intersection.length > 0,
-                let textRange = textRange(
-                    intersection,
-                    in: content
-                )
-            else { continue }
-            manager.setRenderingAttributes(
-                [.foregroundColor: theme.color(for: span.kind)],
-                for: textRange
-            )
+            guard intersection.length > 0 else { continue }
+            syntaxRanges.append((intersection, span.kind))
+        }
+        var low = 0
+        var high = occurrenceRanges.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if NSMaxRange(occurrenceRanges[middle]) <= fragmentNSRange.location {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        var visibleOccurrences: [NSRange] = []
+        for range in occurrenceRanges[low...] {
+            guard range.location < NSMaxRange(fragmentNSRange) else { break }
+            let intersection = NSIntersectionRange(range, fragmentNSRange)
+            guard intersection.length > 0 else { continue }
+            visibleOccurrences.append(intersection)
+        }
+
+        var styledRanges: [
+            (range: NSRange, kind: HighlightKind?, occurrence: Bool)
+        ] = []
+        styledRanges.reserveCapacity(
+            syntaxRanges.count + visibleOccurrences.count
+        )
+        var spanIndex = 0
+        var occurrenceIndex = 0
+        var location = min(
+            syntaxRanges.first?.range.location ?? Int.max,
+            visibleOccurrences.first?.location ?? Int.max
+        )
+        while location != Int.max {
+            while spanIndex < syntaxRanges.count,
+                  NSMaxRange(syntaxRanges[spanIndex].range) <= location
+            {
+                spanIndex += 1
+            }
+            while occurrenceIndex < visibleOccurrences.count,
+                  NSMaxRange(visibleOccurrences[occurrenceIndex]) <= location
+            {
+                occurrenceIndex += 1
+            }
+
+            let syntax = syntaxRanges.indices.contains(spanIndex)
+                ? syntaxRanges[spanIndex]
+                : nil
+            let occurrence = visibleOccurrences.indices.contains(occurrenceIndex)
+                ? visibleOccurrences[occurrenceIndex]
+                : nil
+            let kind = syntax.flatMap {
+                $0.range.location <= location ? $0.kind : nil
+            }
+            let isOccurrence = occurrence.map {
+                $0.location <= location
+            } ?? false
+            let nextSyntaxBoundary = syntax.map {
+                kind == nil ? $0.range.location : NSMaxRange($0.range)
+            } ?? Int.max
+            let nextOccurrenceBoundary = occurrence.map {
+                isOccurrence ? NSMaxRange($0) : $0.location
+            } ?? Int.max
+            let next = min(nextSyntaxBoundary, nextOccurrenceBoundary)
+            guard next > location else { break }
+            if kind != nil || isOccurrence {
+                styledRanges.append((
+                    NSRange(location: location, length: next - location),
+                    kind,
+                    isOccurrence
+                ))
+            }
+            location = next
+        }
+
+        var wroteAttributes = false
+        for styled in styledRanges {
+            guard let textRange = textRange(styled.range, in: content) else {
+                continue
+            }
+            let foregroundColor = styled.kind.map {
+                theme.color(for: $0)
+            } ?? theme.foregroundColor
+            var attributes: [NSAttributedString.Key: Any] = [
+                .foregroundColor: foregroundColor,
+            ]
+            if styled.occurrence {
+                attributes[.backgroundColor] = theme.occurrenceColor
+            }
+            manager.setRenderingAttributes(attributes, for: textRange)
             wroteAttributes = true
         }
         if wroteAttributes { styledFragmentCount += 1 }
@@ -141,10 +244,20 @@ public final class ReaderTextView {
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
-    private weak var diffRuler: NSRulerView?
+    private var declarationKindsByLine: [Int: OutlineKind] = [:]
+    private weak var scrollView: NSScrollView?
+    private weak var ruler: NSRulerView?
+    private var lineNumbers = true
+    private var occurrenceSelectionByteOffset: UInt32?
+    public private(set) var currentLineNumber: Int?
+    public private(set) var occurrenceCount = 0
+    public private(set) var visibleLineNumbers: [Int] = []
+    public private(set) var visibleCurrentLineNumbers: [Int] = []
+    public private(set) var visibleDeclarationMarkerLines: [Int] = []
 
     public init(settings: ReaderSettings = ReaderSettings()) {
         theme = ReaderTheme(settings: settings)
+        lineNumbers = settings.lineNumbers
         let textView = ClickTextView(usingTextLayoutManager: true)
         view = textView
         backingTextStorage = NSTextStorage()
@@ -152,14 +265,30 @@ public final class ReaderTextView {
         configure()
         applyThemeColors()
         textView.clickHandler = { [weak self] index, modifiers in
+            self?.activate(atCharacterIndex: index)
             self?.onClick?(index, modifiers)
+        }
+        textView.selectionHandler = { [weak self] index in
+            guard let byteOffset = self?.byteOffset(forCharacterIndex: index) else {
+                return
+            }
+            self?.updateCurrentLine(byteOffset: byteOffset)
+        }
+        textView.escapeHandler = { [weak self] in
+            guard let self, occurrenceCount > 0 else { return false }
+            clearOccurrences()
+            return true
+        }
+        textView.backgroundHandler = { [weak self, weak textView] rect in
+            guard let self, let textView else { return }
+            self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
         }
         textView.viewportChanged = { [weak self] in
             guard let self,
                   let layoutManager = self.view.textLayoutManager
             else { return }
             self.validateVisibleRenderingAttributes(in: layoutManager)
-            self.diffRuler?.needsDisplay = true
+            self.ruler?.needsDisplay = true
             self.onViewportChange?()
         }
     }
@@ -173,8 +302,17 @@ public final class ReaderTextView {
         byteUTF16Map = document.byteUTF16Map
         displayedDocument = document
         diffMarkers = [:]
-        diffRuler?.needsDisplay = true
+        declarationKindsByLine = Self.declarationKindsByLine(in: document)
+        occurrenceSelectionByteOffset = nil
+        currentLineNumber = nil
+        occurrenceCount = 0
+        visibleLineNumbers = []
+        visibleCurrentLineNumbers = []
+        visibleDeclarationMarkerLines = []
+        renderingCoordinator.setOccurrences([])
+        ruler?.needsDisplay = true
         renderingCoordinator.update(document: document, theme: theme)
+        updateRulerThickness()
         let attributed = NSMutableAttributedString(
             string: source,
             attributes: baseAttributes
@@ -185,15 +323,9 @@ public final class ReaderTextView {
             to: attributed,
             theme: theme
         )
-        if document.highlightSpans.isEmpty {
-            layoutManager.renderingAttributesValidator = nil
-        } else {
-            layoutManager.renderingAttributesValidator = { [weak renderingCoordinator] manager, fragment in
-                renderingCoordinator?.style(fragment: fragment, in: manager)
-            }
-        }
+        installRenderingValidator(in: layoutManager)
         backingTextStorage.setAttributedString(attributed)
-        if !document.highlightSpans.isEmpty {
+        if renderingCoordinator.hasRenderingAttributes {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
     }
@@ -203,9 +335,17 @@ public final class ReaderTextView {
         displayedDocument = nil
         byteUTF16Map = nil
         diffMarkers = [:]
+        declarationKindsByLine = [:]
+        occurrenceSelectionByteOffset = nil
+        currentLineNumber = nil
+        occurrenceCount = 0
+        visibleLineNumbers = []
+        visibleCurrentLineNumbers = []
+        visibleDeclarationMarkerLines = []
         renderingCoordinator.clear()
         backingTextStorage.setAttributedString(NSAttributedString(string: ""))
-        diffRuler?.needsDisplay = true
+        updateRulerThickness()
+        ruler?.needsDisplay = true
         view.needsDisplay = true
     }
 
@@ -220,7 +360,19 @@ public final class ReaderTextView {
 
         byteUTF16Map = document.byteUTF16Map
         displayedDocument = document
+        declarationKindsByLine = Self.declarationKindsByLine(in: document)
         renderingCoordinator.update(document: document, theme: theme)
+        if let occurrenceSelectionByteOffset {
+            let ranges = occurrenceNSRanges(
+                in: document,
+                at: occurrenceSelectionByteOffset
+            )
+            if ranges.isEmpty { self.occurrenceSelectionByteOffset = nil }
+            occurrenceCount = ranges.count
+            renderingCoordinator.setOccurrences(ranges)
+        }
+        updateRulerThickness()
+        ruler?.needsDisplay = true
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
         backingTextStorage.beginEditing()
@@ -231,9 +383,7 @@ public final class ReaderTextView {
             theme: theme
         )
         backingTextStorage.endEditing()
-        layoutManager.renderingAttributesValidator = { [weak renderingCoordinator] manager, fragment in
-            renderingCoordinator?.style(fragment: fragment, in: manager)
-        }
+        installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
         }
@@ -246,8 +396,12 @@ public final class ReaderTextView {
 
     public func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
+        lineNumbers = settings.lineNumbers
         applyThemeColors()
-        diffRuler?.needsDisplay = true
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: settings.lineNumbers)
+        }
+        ruler?.needsDisplay = true
         guard let document = displayedDocument,
               let layoutManager = view.textLayoutManager
         else { return }
@@ -271,12 +425,7 @@ public final class ReaderTextView {
             theme: theme
         )
         backingTextStorage.endEditing()
-        if !document.highlightSpans.isEmpty {
-            layoutManager.renderingAttributesValidator = {
-                [weak renderingCoordinator] manager, fragment in
-                renderingCoordinator?.style(fragment: fragment, in: manager)
-            }
-        }
+        installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
             validateVisibleRenderingAttributes(in: layoutManager)
@@ -291,6 +440,7 @@ public final class ReaderTextView {
         let lineRange = (backingTextStorage.string as NSString).lineRange(
             for: NSRange(location: location, length: 0)
         )
+        updateCurrentLine(byteOffset: byteOffset)
         view.scrollRangeToVisible(lineRange)
         view.showFindIndicator(for: lineRange)
     }
@@ -306,6 +456,7 @@ public final class ReaderTextView {
            location <= backingTextStorage.length
         {
             view.setSelectedRange(NSRange(location: location, length: 0))
+            updateCurrentLine(byteOffset: selectionByteOffset)
         }
         guard let scrollByteOffset,
               let document = displayedDocument,
@@ -357,21 +508,92 @@ public final class ReaderTextView {
         }
     }
 
-    public func installDiffGutter(in scrollView: NSScrollView) {
-        let ruler = DiffGutterRulerView(scrollView: scrollView, reader: self)
-        scrollView.verticalRulerView = ruler
+    public func configureGutter(
+        in scrollView: NSScrollView,
+        lineNumbers: Bool
+    ) {
+        self.scrollView = scrollView
+        self.lineNumbers = lineNumbers
+        let needsRuler = lineNumbers || !diffMarkers.isEmpty
+        guard needsRuler else {
+            scrollView.hasVerticalRuler = false
+            scrollView.rulersVisible = false
+            scrollView.verticalRulerView = nil
+            ruler = nil
+            view.textContainerInset.width = 12
+            scrollView.tile()
+            return
+        }
+        let activeRuler: ReaderRulerView
+        if let existing = scrollView.verticalRulerView as? ReaderRulerView {
+            activeRuler = existing
+        } else {
+            activeRuler = ReaderRulerView(scrollView: scrollView, reader: self)
+            scrollView.verticalRulerView = activeRuler
+        }
         scrollView.hasVerticalRuler = true
         scrollView.rulersVisible = true
-        diffRuler = ruler
+        ruler = activeRuler
+        updateRulerThickness()
+        scrollView.tile()
+        activeRuler.needsDisplay = true
+    }
+
+    public func installDiffGutter(in scrollView: NSScrollView) {
+        configureGutter(in: scrollView, lineNumbers: lineNumbers)
     }
 
     public func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
         diffMarkers = markers
-        diffRuler?.needsDisplay = true
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
+        updateRulerThickness()
+        ruler?.needsDisplay = true
     }
 
     public var diffMarkerCounts: [DiffCore.MarkerKind: Int] {
         Dictionary(grouping: diffMarkers.values, by: { $0 }).mapValues(\.count)
+    }
+
+    public var rulerThickness: CGFloat {
+        ruler?.ruleThickness ?? 0
+    }
+
+    public var gutterShowsLineNumbersAndDiff: Bool {
+        lineNumbers && !diffMarkers.isEmpty && rulerThickness > diffColumnWidth
+    }
+
+    @discardableResult
+    public func activate(atByteOffset byteOffset: UInt32) -> Int {
+        updateCurrentLine(byteOffset: byteOffset)
+        guard let document = displayedDocument else {
+            clearOccurrences()
+            return 0
+        }
+        let ranges = occurrenceNSRanges(in: document, at: byteOffset)
+        occurrenceSelectionByteOffset = ranges.isEmpty ? nil : byteOffset
+        setOccurrences(ranges)
+        return ranges.count
+    }
+
+    public func clearOccurrences() {
+        occurrenceSelectionByteOffset = nil
+        setOccurrences([])
+    }
+
+    public func captureVisibleDecorationState() {
+        var lines: [Int] = []
+        enumerateVisibleLayoutFragments { _, line in
+            lines.append(line)
+        }
+        visibleLineNumbers = lineNumbers ? lines : []
+        visibleCurrentLineNumbers = currentLineNumber.map {
+            lines.contains($0) ? [$0] : []
+        } ?? []
+        visibleDeclarationMarkerLines = lineNumbers
+            ? lines.filter { declarationKindsByLine[$0] != nil }
+            : []
     }
 
     @discardableResult
@@ -387,6 +609,7 @@ public final class ReaderTextView {
             for: NSRange(location: location, length: 0)
         )
         view.setSelectedRange(range)
+        updateCurrentLine(line: line)
         view.scrollRangeToVisible(range)
         view.showFindIndicator(for: range)
         return true
@@ -427,6 +650,257 @@ public final class ReaderTextView {
         ).location
         return byteUTF16Map?.byteOffset(forUTF16: lineStart)
             .flatMap(UInt32.init(exactly:))
+    }
+
+    private func activate(atCharacterIndex index: Int) {
+        guard let byteOffset = byteOffset(forCharacterIndex: index) else {
+            clearOccurrences()
+            return
+        }
+        activate(atByteOffset: byteOffset)
+    }
+
+    private func setOccurrences(_ ranges: [NSRange]) {
+        occurrenceCount = ranges.count
+        renderingCoordinator.setOccurrences(ranges)
+        guard let layoutManager = view.textLayoutManager else { return }
+        installRenderingValidator(in: layoutManager)
+        if let viewportRange =
+            layoutManager.textViewportLayoutController.viewportRange
+        {
+            layoutManager.invalidateRenderingAttributes(for: viewportRange)
+            validateVisibleRenderingAttributes(in: layoutManager)
+        }
+        view.needsDisplay = true
+    }
+
+    private func occurrenceNSRanges(
+        in document: ReaderDocument,
+        at byteOffset: UInt32
+    ) -> [NSRange] {
+        document.identifierOccurrences(at: byteOffset).compactMap {
+            document.byteUTF16Map.nsRange(
+                byteLowerBound: Int($0.lowerBound),
+                byteUpperBound: Int($0.upperBound)
+            )
+        }
+    }
+
+    private func installRenderingValidator(
+        in layoutManager: NSTextLayoutManager
+    ) {
+        guard renderingCoordinator.hasRenderingAttributes else {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
+        layoutManager.renderingAttributesValidator = {
+            [weak renderingCoordinator] manager, fragment in
+            renderingCoordinator?.style(fragment: fragment, in: manager)
+        }
+    }
+
+    private func updateCurrentLine(byteOffset: UInt32) {
+        guard let line = displayedDocument?.lineTable.lineColumn(at: byteOffset)?.line
+        else {
+            updateCurrentLine(line: nil)
+            return
+        }
+        updateCurrentLine(line: Int(line))
+    }
+
+    private func updateCurrentLine(line: Int?) {
+        guard currentLineNumber != line else { return }
+        currentLineNumber = line
+        view.needsDisplay = true
+    }
+
+    private func updateRulerThickness() {
+        guard let ruler else { return }
+        ruler.ruleThickness = lineNumberColumnWidth
+            + declarationColumnWidth
+            + diffColumnWidth
+        view.textContainerInset.width = 12 + ruler.ruleThickness
+        scrollView?.tile()
+    }
+
+    private var lineNumberColumnWidth: CGFloat {
+        guard lineNumbers else { return 0 }
+        let lineCount = displayedDocument?.lineTable.lineStarts.count ?? 1
+        return max(34, CGFloat(String(lineCount).count * 7 + 12))
+    }
+
+    private var declarationColumnWidth: CGFloat {
+        lineNumbers ? 7 : 0
+    }
+
+    private var diffColumnWidth: CGFloat {
+        diffMarkers.isEmpty ? 0 : 7
+    }
+
+    private static func declarationKindsByLine(
+        in document: ReaderDocument
+    ) -> [Int: OutlineKind] {
+        var result: [Int: OutlineKind] = [:]
+        for facet in document.outlineFacets {
+            guard let position = document.lineTable.lineColumn(
+                at: facet.nameRange.lowerBound
+            ) else { continue }
+            result[Int(position.line)] = facet.kind
+        }
+        return result
+    }
+
+    private func enumerateVisibleLayoutFragments(
+        _ body: (NSTextLayoutFragment, Int) -> Void
+    ) {
+        guard let document = displayedDocument,
+              let manager = view.textLayoutManager,
+              let content = manager.textContentManager,
+              let viewportRange =
+                manager.textViewportLayoutController.viewportRange
+        else { return }
+        let viewport = manager.textViewportLayoutController.viewportBounds
+        manager.enumerateTextLayoutFragments(
+            from: viewportRange.location,
+            options: []
+        ) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            guard frame.minY <= viewport.maxY else { return false }
+            guard frame.intersects(viewport) else { return true }
+            let utf16Offset = content.offset(
+                from: content.documentRange.location,
+                to: fragment.rangeInElement.location
+            )
+            guard utf16Offset != NSNotFound,
+                  let byteOffset = self.byteUTF16Map?.byteOffset(
+                      forUTF16: utf16Offset
+                  ),
+                  let byteOffset = UInt32(exactly: byteOffset),
+                  let line = document.lineTable.lineColumn(at: byteOffset)?.line
+            else { return true }
+            body(fragment, Int(line))
+            return true
+        }
+    }
+
+    private func fragmentRectInTextView(
+        _ fragment: NSTextLayoutFragment
+    ) -> NSRect {
+        fragment.layoutFragmentFrame.offsetBy(
+            dx: view.textContainerInset.width,
+            dy: view.textContainerInset.height
+        )
+    }
+
+    private func drawCurrentLineBackground(
+        in textView: NSTextView,
+        dirtyRect: NSRect
+    ) {
+        guard let currentLineNumber else { return }
+        enumerateVisibleLayoutFragments { fragment, line in
+            guard line == currentLineNumber else { return }
+            let fragmentRect = fragmentRectInTextView(fragment)
+            let rect = NSRect(
+                x: textView.visibleRect.minX + rulerThickness,
+                y: fragmentRect.minY,
+                width: max(0, textView.visibleRect.width - rulerThickness),
+                height: fragmentRect.height
+            ).intersection(dirtyRect)
+            guard !rect.isNull else { return }
+            theme.currentLineColor.setFill()
+            rect.fill()
+        }
+    }
+
+    fileprivate func drawRuler(
+        in ruler: NSRulerView,
+        dirtyRect: NSRect
+    ) {
+        var lines: [Int] = []
+        let font = NSFont.monospacedDigitSystemFont(
+            ofSize: 10,
+            weight: .regular
+        )
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = .right
+        enumerateVisibleLayoutFragments { fragment, line in
+            let textRect = fragmentRectInTextView(fragment)
+            let rulerRect = ruler.convert(textRect, from: view)
+            guard rulerRect.intersects(dirtyRect) else { return }
+            if lineNumbers {
+                let labelRect = NSRect(
+                    x: 2,
+                    y: rulerRect.minY,
+                    width: max(0, lineNumberColumnWidth - 6),
+                    height: rulerRect.height
+                )
+                ("\(line)" as NSString).draw(
+                    in: labelRect,
+                    withAttributes: [
+                        .font: font,
+                        .foregroundColor: theme.lineNumberColor,
+                        .paragraphStyle: paragraph,
+                    ]
+                )
+                lines.append(line)
+                if let kind = declarationKindsByLine[line] {
+                    drawDeclarationMarker(
+                        kind,
+                        in: NSRect(
+                            x: lineNumberColumnWidth + 1,
+                            y: rulerRect.midY - 2,
+                            width: 4,
+                            height: 4
+                        )
+                    )
+                }
+            }
+            if let kind = diffMarkers[line] {
+                theme.color(for: kind).setFill()
+                NSRect(
+                    x: lineNumberColumnWidth + declarationColumnWidth + 1,
+                    y: rulerRect.minY,
+                    width: max(2, diffColumnWidth - 2),
+                    height: max(2, rulerRect.height)
+                ).fill()
+            }
+        }
+        visibleLineNumbers = lineNumbers ? lines : []
+    }
+
+    private func drawDeclarationMarker(
+        _ kind: OutlineKind,
+        in rect: NSRect
+    ) {
+        let color: NSColor
+        switch kind {
+        case .fn, .method:
+            color = theme.color(for: .functionName)
+        case .struct, .enum, .trait, .typeAlias:
+            color = theme.color(for: .declarationTitle)
+        case .impl:
+            color = theme.color(for: .typeName)
+        case .mod, .const, .static:
+            color = theme.color(for: .declarationEmphasis)
+        }
+        color.withAlphaComponent(0.7).setFill()
+        switch kind {
+        case .fn, .method:
+            NSBezierPath(ovalIn: rect).fill()
+        case .impl:
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: rect.midX, y: rect.maxY))
+            path.line(to: NSPoint(x: rect.maxX, y: rect.midY))
+            path.line(to: NSPoint(x: rect.midX, y: rect.minY))
+            path.line(to: NSPoint(x: rect.minX, y: rect.midY))
+            path.close()
+            path.fill()
+        case .mod, .const, .static:
+            NSRect(x: rect.minX, y: rect.midY - 0.5, width: rect.width, height: 1)
+                .fill()
+        case .struct, .enum, .trait, .typeAlias:
+            rect.fill()
+        }
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
@@ -547,38 +1021,14 @@ public final class ReaderTextView {
             layoutManager.renderingAttributesValidator?(layoutManager, fragment)
             return true
         }
+        captureVisibleDecorationState()
         view.needsDisplay = true
     }
 
-    fileprivate func drawDiffMarkers(in ruler: NSRulerView) {
-        guard let document = displayedDocument, let window = view.window else { return }
-        for (line, kind) in diffMarkers {
-            guard line > 0,
-                  document.lineTable.lineStarts.indices.contains(line - 1),
-                  let location = byteUTF16Map?.utf16Offset(
-                      forByte: Int(document.lineTable.lineStarts[line - 1])
-                  )
-            else { continue }
-            let screenRect = view.firstRect(
-                forCharacterRange: NSRange(location: location, length: 0),
-                actualRange: nil
-            )
-            let markerRect = ruler.convert(window.convertFromScreen(screenRect), from: nil)
-            let bar = NSRect(
-                x: 1,
-                y: markerRect.minY,
-                width: max(2, ruler.ruleThickness - 2),
-                height: max(2, markerRect.height)
-            )
-            guard bar.intersects(ruler.bounds) else { continue }
-            theme.color(for: kind).setFill()
-            bar.fill()
-        }
-    }
 }
 
 @MainActor
-private final class DiffGutterRulerView: NSRulerView {
+private final class ReaderRulerView: NSRulerView {
     private weak var reader: ReaderTextView?
 
     init(scrollView: NSScrollView, reader: ReaderTextView) {
@@ -593,14 +1043,17 @@ private final class DiffGutterRulerView: NSRulerView {
     }
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
-        reader?.drawDiffMarkers(in: self)
+        reader?.drawRuler(in: self, dirtyRect: rect)
     }
 }
 
 @MainActor
 private final class ClickTextView: NSTextView {
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+    var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
+    var escapeHandler: (() -> Bool)?
+    var backgroundHandler: ((NSRect) -> Void)?
     private var viewportOrigin: NSPoint?
 
     override func viewDidMoveToSuperview() {
@@ -625,6 +1078,22 @@ private final class ClickTextView: NSTextView {
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
         clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+    }
+
+    override func keyDown(with event: NSEvent) {
+        super.keyDown(with: event)
+        selectionHandler?(selectedRange().location)
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        if escapeHandler?() != true {
+            super.cancelOperation(sender)
+        }
+    }
+
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        backgroundHandler?(rect)
     }
 
     @objc private func viewportDidChange(_ notification: Notification) {

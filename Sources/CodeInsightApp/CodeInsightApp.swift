@@ -85,6 +85,8 @@ private struct CodeInsightApplication {
         withExtendedLifetime(delegate) {
             if let exactRoot {
                 delegate.runExactSelfTest(root: exactRoot)
+            } else if arguments.contains("--self-test-reading") {
+                delegate.runReadingSelfTest()
             } else if arguments.contains("--self-test-tabs") {
                 delegate.runTabsSelfTest()
             } else if let index = arguments.firstIndex(of: "--self-test-diff"),
@@ -764,6 +766,234 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runReadingSelfTest() -> Never {
+        let root: URL
+        do {
+            root = try makeReadingSelfTestDirectory()
+        } catch {
+            Self.finishReadingSelfTest(
+                checks: [:],
+                metrics: [:],
+                error: error.localizedDescription
+            )
+        }
+
+        func finish(
+            checks: [String: Bool],
+            metrics: [String: Double],
+            error: String? = nil
+        ) -> Never {
+            try? FileManager.default.removeItem(at: root)
+            Self.finishReadingSelfTest(
+                checks: checks,
+                metrics: metrics,
+                error: error
+            )
+        }
+
+        launch(offscreen: true, measuresIdleFootprint: true)
+        guard let controller = windowController else {
+            finish(checks: [:], metrics: [:], error: "window unavailable")
+        }
+        let contentSize = NSSize(width: 1_600, height: 1_000)
+        controller.window?.setContentSize(contentSize)
+        controller.window?.contentView?.setFrameSize(contentSize)
+        controller.window?.contentView?.layoutSubtreeIfNeeded()
+        controller.window?.displayIfNeeded()
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 10, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState { return true }
+            return false
+        }), case .ready = model.projectState
+        else {
+            finish(checks: [:], metrics: [:], error: "fixture project unavailable")
+        }
+
+        let regular = root.appendingPathComponent("regular.rs")
+        guard let regularBytes = try? [UInt8](Data(contentsOf: regular)),
+              let alphaOffset = Data(regularBytes).range(
+                  of: Data("alpha".utf8)
+              )?.lowerBound,
+              let betaOffset = Data(regularBytes).range(
+                  of: Data("beta".utf8)
+              )?.lowerBound
+        else {
+            finish(checks: [:], metrics: [:], error: "regular fixture unavailable")
+        }
+        controller.openFileForSelfTest(regular)
+        guard waitUntil(timeout: 5, condition: {
+            controller.selfTestLeftReaderBytes == regularBytes
+        }) else {
+            finish(checks: [:], metrics: [:], error: "regular reader did not open")
+        }
+        pumpRunLoop()
+
+        let geometryOn = controller.selfTestReadingGeometry
+        let alphaCount = controller.selfTestActivateReading(
+            at: UInt32(alphaOffset)
+        )
+        let betaCount = controller.selfTestActivateReading(
+            at: UInt32(betaOffset)
+        )
+        let currentLine = controller.selfTestCurrentLineNumber
+        let currentLineState = controller.selfTestVisibleCurrentLineNumbers
+        let visibleLineNumbers = controller.selfTestVisibleLineNumbers
+        let regularFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        let blankCount = controller.selfTestActivateReading(at: 2)
+
+        var disabledSettings = readerSettings
+        disabledSettings.lineNumbers = false
+        controller.applyReaderSettings(disabledSettings)
+        pumpRunLoop()
+        let geometryOff = controller.selfTestReadingGeometry
+
+        let tolerance: CGFloat = 1
+        let rulerInsideWindow = geometryOn.windowContentFrame
+            .insetBy(dx: -tolerance, dy: -tolerance)
+            .contains(geometryOn.rulerFrame)
+        let rulerWidthEquation = abs(
+            geometryOn.contentFrame.width
+                - (
+                    geometryOn.clipFrame.width
+                        - geometryOn.rulerFrame.width
+                )
+        ) <= tolerance
+        let disabledWidthEquation = abs(
+            geometryOff.contentFrame.width
+                - geometryOff.clipFrame.width
+        ) <= tolerance
+        let disabledWidthGainEquation = abs(
+            geometryOff.contentFrame.width
+                - geometryOn.contentFrame.width
+                - geometryOn.rulerFrame.width
+        ) <= tolerance
+        var checks: [String: Bool] = [
+            "rulerExistsByDefault":
+                geometryOn.hasRuler && geometryOn.rulerThickness > 0,
+            "rulerInsideWindowContent": rulerInsideWindow,
+            "readerWidthEqualsContainerMinusRuler": rulerWidthEquation,
+            "disabledRulerRestoresFullWidth":
+                !geometryOff.hasRuler
+                && geometryOff.rulerThickness == 0
+                && disabledWidthEquation,
+            "disabledRulerExpandsReaderByRulerWidth":
+                disabledWidthGainEquation,
+            "visibleLineNumbersMatchFixture":
+                visibleLineNumbers.contains(1)
+                && visibleLineNumbers.allSatisfy { (1...3).contains($0) },
+            "alphaOccurrenceCountMatches": alphaCount == 3,
+            "switchingToBetaReplacesOccurrences": betaCount == 2,
+            "currentLineIsExclusive":
+                currentLine == 2 && currentLineState == [2],
+            "blankClickClearsOccurrences":
+                blankCount == 0 && controller.selfTestOccurrenceCount == 0,
+            "regularFootprintUnderBudget":
+                regularFootprintMB >= 0
+                && regularFootprintMB < SelfTestBudgets.idleFootprintMB,
+        ]
+        Self.writeJSON([
+            "step": "regular",
+            "alphaOccurrences": alphaCount,
+            "betaOccurrences": betaCount,
+            "currentLine": currentLine ?? -1,
+            "visibleLineNumbers": visibleLineNumbers,
+            "footprintMB": regularFootprintMB,
+            "rulerWidth": Double(geometryOn.rulerFrame.width),
+            "rulerMinX": Double(geometryOn.rulerFrame.minX),
+            "rulerMaxX": Double(geometryOn.rulerFrame.maxX),
+            "readerWidth": Double(geometryOn.contentFrame.width),
+            "readerMinX": Double(geometryOn.contentFrame.minX),
+            "readerMaxX": Double(geometryOn.contentFrame.maxX),
+            "containerWidth": Double(geometryOn.scrollFrame.width),
+            "containerMinX": Double(geometryOn.scrollFrame.minX),
+            "containerMaxX": Double(geometryOn.scrollFrame.maxX),
+            "availableContentWidth":
+                Double(
+                    geometryOn.clipFrame.width
+                        - geometryOn.rulerFrame.width
+                ),
+            "availableContentMinX":
+                Double(geometryOn.contentFrame.minX),
+            "availableContentMaxX":
+                Double(geometryOn.clipFrame.maxX),
+        ])
+
+        controller.applyReaderSettings(readerSettings)
+        let huge = root.appendingPathComponent("huge.txt")
+        guard let hugeBytes = try? [UInt8](Data(contentsOf: huge)),
+              let needleOffset = Data(hugeBytes).range(
+                  of: Data("needle".utf8)
+              )?.lowerBound
+        else {
+            finish(checks: checks, metrics: [:], error: "huge fixture unavailable")
+        }
+        controller.openFileForSelfTest(huge)
+        guard waitUntil(timeout: 10, condition: {
+            controller.selfTestLeftReaderBytes?.count == hugeBytes.count
+        }) else {
+            finish(checks: checks, metrics: [:], error: "huge reader did not open")
+        }
+        pumpRunLoop()
+        let hugeBaselineFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        let hugeOccurrenceCount = controller.selfTestActivateReading(
+            at: UInt32(needleOffset)
+        )
+        let styledFragments = controller.selfTestStyledFragmentCount
+        let hugeVisibleLines = controller.selfTestVisibleLineNumbers.count
+        let hugeFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        let hugeIncrementalFootprintMB =
+            hugeFootprintMB - hugeBaselineFootprintMB
+        let hugeLineCount = 100_000
+        let expectedHugeOccurrences = 200
+        checks.merge([
+            "hugeOccurrenceCountMatches":
+                hugeOccurrenceCount == expectedHugeOccurrences,
+            "styledFragmentsTrackViewport":
+                styledFragments > 0
+                && styledFragments < SelfTestBudgets.hugeStyledFragments,
+            "rulerLinesTrackViewport":
+                hugeVisibleLines > 0
+                && hugeVisibleLines < SelfTestBudgets.hugeStyledFragments,
+            "styledFragmentsDoNotTrackFile":
+                styledFragments * 100 < hugeLineCount,
+        ]) { _, new in new }
+        // phys_footprint is a process-wide net metric. TextKit rendering-cache
+        // reclamation can dominate this interval, so it cannot gate S7 cost.
+        // The >100 MB absolute baseline predates S7 and remains S9 backlog.
+        let metrics = [
+            "regularFootprintMB": regularFootprintMB,
+            "hugeFootprintMB": hugeFootprintMB,
+            "hugeBaselineFootprintMB": hugeBaselineFootprintMB,
+            "hugeIncrementalFootprintMB": hugeIncrementalFootprintMB,
+            "hugeLineCount": Double(hugeLineCount),
+            "hugeOccurrenceCount": Double(hugeOccurrenceCount),
+            "styledFragmentCount": Double(styledFragments),
+            "visibleLineCount": Double(hugeVisibleLines),
+        ]
+        Self.writeJSON([
+            "step": "huge",
+            "totalLines": hugeLineCount,
+            "occurrences": hugeOccurrenceCount,
+            "styledFragments": styledFragments,
+            "visibleLines": hugeVisibleLines,
+            "baselineFootprintMB": hugeBaselineFootprintMB,
+            "incrementalFootprintMB": hugeIncrementalFootprintMB,
+            "footprintMB": hugeFootprintMB,
+            "memoryAssessment":
+                "metric-only: TextKit cache reclamation makes the S7 delta "
+                + "non-attributable; >100 MB absolute baseline predates S7 "
+                + "and remains S9 backlog",
+        ])
+        finish(checks: checks, metrics: metrics)
+    }
+
     func runDiffSelfTest(root: URL) -> Never {
         launch(offscreen: true)
         guard let controller = windowController else {
@@ -837,6 +1067,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let actualGutterCounts = controller.selfTestGutterCounts
         let expectedGutterCounts = target.expected.gutterCounts
         let gutterCountsMatch = actualGutterCounts == expectedGutterCounts
+        let gutterCoexistsWithLineNumbers =
+            controller.selfTestGutterCoexistsWithLineNumbers
         var diffComputeMS = Double.greatestFiniteMagnitude
         for _ in 0 ..< 5 {
             let diffClock = ContinuousClock.now
@@ -847,6 +1079,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "gutterCounts": Self.jsonGutterCounts(actualGutterCounts),
             "expectedGutterCounts": Self.jsonGutterCounts(expectedGutterCounts),
             "gutterCountsMatch": gutterCountsMatch,
+            "gutterCoexistsWithLineNumbers": gutterCoexistsWithLineNumbers,
             "diffComputeMS": diffComputeMS,
             "leftLineCount": target.expected.leftLineCount,
             "rightLineCount": target.expected.rightLineCount,
@@ -895,6 +1128,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "rightReaderMatchesCommitBlob": rightReaderMatchesCommitBlob,
                 "rightReaderDiffersFromWorktree": rightReaderDiffersFromWorktree,
                 "gutterCountsMatch": gutterCountsMatch,
+                "gutterCoexistsWithLineNumbers":
+                    gutterCoexistsWithLineNumbers,
                 "hunkNavMoved": hunkNavMoved,
                 "readingPresetCollapsedRight": readingPresetCollapsedRight,
                 "themeSwitchPreservedLeftReader": themeSwitchPreservedLeftReader,
@@ -3676,6 +3911,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         Darwin.exit(passed ? 0 : 1)
     }
 
+    private static func finishReadingSelfTest(
+        checks: [String: Bool],
+        metrics: [String: Double],
+        error: String?
+    ) -> Never {
+        let passed = error == nil
+            && !checks.isEmpty
+            && checks.values.allSatisfy { $0 }
+        var summary: [String: Any] = checks
+        summary["step"] = "summary"
+        summary["metrics"] = metrics
+        summary["passed"] = passed
+        if let error { summary["error"] = error }
+        writeJSON(summary)
+        Darwin.exit(passed ? 0 : 1)
+    }
+
     private static func finishProjectSelfTest(
         treeVisibleMS: Double,
         indexReadyMS: Double,
@@ -4377,6 +4629,37 @@ private func makeTabsSelfTestRepository() throws -> URL {
         )
         try exactSelfTestGit(root, "add", "-A")
         try exactSelfTestGit(root, "commit", "-q", "-m", "add B")
+        return root
+    } catch {
+        try? FileManager.default.removeItem(at: root)
+        throw error
+    }
+}
+
+private func makeReadingSelfTestDirectory() throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightReadingFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    do {
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        try Data("""
+            [package]
+            name = "reading-self-test"
+            version = "0.1.0"
+            edition = "2021"
+            """.utf8).write(to: root.appendingPathComponent("Cargo.toml"))
+        try Data("""
+            fn alpha() {}
+            fn beta() { alpha(); }
+            fn gamma() { alpha(); beta(); }
+            """.utf8).write(to: root.appendingPathComponent("regular.rs"))
+        let huge = String(repeating: "needle\n", count: 200)
+            + String(repeating: "\n", count: 99_799)
+        try Data(huge.utf8).write(to: root.appendingPathComponent("huge.txt"))
         return root
     } catch {
         try? FileManager.default.removeItem(at: root)

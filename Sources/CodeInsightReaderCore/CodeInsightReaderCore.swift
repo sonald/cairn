@@ -166,6 +166,103 @@ public final class ReaderDocument: Sendable {
             .min { $0.range.length < $1.range.length }?
             .name
     }
+
+    public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
+        guard byteOffset < bytes.count,
+              let source = String(bytes: bytes, encoding: .utf8),
+              let selectedIndex = source.utf8.index(
+                  source.utf8.startIndex,
+                  offsetBy: Int(byteOffset),
+                  limitedBy: source.utf8.endIndex
+              )?.samePosition(in: source.unicodeScalars),
+              selectedIndex < source.unicodeScalars.endIndex,
+              Self.isIdentifierContinue(source.unicodeScalars[selectedIndex])
+        else { return [] }
+
+        let scalars = source.unicodeScalars
+        var lower = selectedIndex
+        while lower > scalars.startIndex {
+            let previous = scalars.index(before: lower)
+            guard Self.isIdentifierContinue(scalars[previous]) else { break }
+            lower = previous
+        }
+        guard Self.isIdentifierStart(scalars[lower]) else { return [] }
+
+        var upper = selectedIndex
+        while upper < scalars.endIndex,
+              Self.isIdentifierContinue(scalars[upper])
+        {
+            upper = scalars.index(after: upper)
+        }
+        let selected = String(scalars[lower..<upper])
+        guard !RustHighlighter.isKeyword(selected) else { return [] }
+
+        var spanIndex = 0
+        var result: [CodeInsightCore.ByteRange] = []
+        var index = scalars.startIndex
+        var bytePosition: UInt32 = 0
+        while index < scalars.endIndex {
+            let scalar = scalars[index]
+            guard Self.isIdentifierStart(scalar) else {
+                bytePosition += UInt32(scalar.utf8.count)
+                index = scalars.index(after: index)
+                continue
+            }
+
+            let tokenStart = index
+            let lowerByte = bytePosition
+            while index < scalars.endIndex,
+                  Self.isIdentifierContinue(scalars[index])
+            {
+                bytePosition += UInt32(scalars[index].utf8.count)
+                index = scalars.index(after: index)
+            }
+            guard String(scalars[tokenStart..<index]) == selected else { continue }
+            let range = CodeInsightCore.ByteRange(
+                lowerBound: lowerByte,
+                upperBound: bytePosition
+            )
+            while highlightSpans.indices.contains(spanIndex),
+                  highlightSpans[spanIndex].range.upperBound <= range.lowerBound
+            {
+                spanIndex += 1
+            }
+            var probe = spanIndex
+            var excluded = false
+            while highlightSpans.indices.contains(probe),
+                  highlightSpans[probe].range.lowerBound < range.upperBound
+            {
+                if Self.excludesOccurrences(highlightSpans[probe].kind),
+                   highlightSpans[probe].range.overlaps(range)
+                {
+                    excluded = true
+                    break
+                }
+                probe += 1
+            }
+            if !excluded {
+                result.append(range)
+            }
+        }
+        return result
+    }
+
+    private static func isIdentifierStart(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "_" || scalar.properties.isXIDStart
+    }
+
+    private static func isIdentifierContinue(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "_" || scalar.properties.isXIDContinue
+    }
+
+    private static func excludesOccurrences(_ kind: HighlightKind) -> Bool {
+        switch kind {
+        case .keyword, .comment, .commentFigure, .string, .number:
+            true
+        case .functionName, .typeName, .declarationTitle, .declarationEmphasis:
+            false
+        }
+    }
 }
 
 public enum FileTier: String, Sendable {
@@ -208,6 +305,10 @@ public struct RustHighlighter: Sendable {
     ]
 
     public init() {}
+
+    public static func isKeyword(_ value: String) -> Bool {
+        keywords.contains(value)
+    }
 
     public func highlight(
         bytes: [UInt8]

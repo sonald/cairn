@@ -118,6 +118,7 @@ private struct ReaderSettingsView: View {
             )
             Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
             Toggle("Use humanist font for comments", isOn: $settings.humanistComments)
+            Toggle("Show line numbers", isOn: $settings.lineNumbers)
         }
         .formStyle(.grouped)
         .padding()
