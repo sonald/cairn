@@ -133,6 +133,178 @@ func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws 
 
 @MainActor
 @Test
+func searchPanelCapsDisplayedMatchesAndReportsTrueTotal() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = await searchPanelModel(
+        fixture: fixture,
+        matchCount: 5_001
+    )
+
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
+    #expect(model.totalMatches == 5_001)
+    #expect(
+        model.displayTruncationMessage
+            == "Showing first 2000 of 5001 matches (truncated)"
+    )
+    #expect(model.displayedMatchCount + 1 == SearchPanelModel.displayLimit + 1)
+}
+
+@MainActor
+@Test
+func searchPanelDoesNotBuildGroupsPastDisplayLimit() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let batches = [
+        SearchBatch(
+            matchesByPath: [fixture.a: (0..<SearchPanelModel.displayLimit).map {
+                searchMatch(path: fixture.a, offset: UInt32($0))
+            }],
+            isFinal: false,
+            completeness: .complete
+        ),
+        SearchBatch(
+            matchesByPath: [fixture.b: (0..<3).map {
+                searchMatch(path: fixture.b, offset: UInt32($0))
+            }],
+            isFinal: true,
+            completeness: .complete
+        ),
+    ]
+    let model = SearchPanelModel { _, _, _ in stream(batches: batches) }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+    #expect(await searchWaitUntil {
+        model.totalMatches == SearchPanelModel.displayLimit + 3
+    })
+
+    #expect(model.groups.map(\.path) == ["a.rs"])
+    #expect(model.fileCount == 2)
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
+}
+
+@MainActor
+@Test
+func searchPanelDoesNotTruncateBelowDisplayLimit() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = await searchPanelModel(
+        fixture: fixture,
+        matchCount: SearchPanelModel.displayLimit - 1
+    )
+
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit - 1)
+    #expect(model.displayTruncationMessage == nil)
+}
+
+@MainActor
+@Test
+func searchPanelDoesNotTruncateAtDisplayLimit() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = await searchPanelModel(
+        fixture: fixture,
+        matchCount: SearchPanelModel.displayLimit
+    )
+
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
+    #expect(model.displayTruncationMessage == nil)
+}
+
+@MainActor
+@Test
+func searchPanelTruncatesAboveDisplayLimit() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let model = await searchPanelModel(
+        fixture: fixture,
+        matchCount: SearchPanelModel.displayLimit + 1
+    )
+
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
+    #expect(
+        model.displayTruncationMessage
+            == "Showing first 2000 of 2001 matches (truncated)"
+    )
+}
+
+@MainActor
+@Test
+func searchPanelDistinguishesUpstreamAndDisplayTruncation() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let upstream = await searchPanelModel(
+        fixture: fixture,
+        matchCount: 10,
+        completeness: .truncated
+    )
+    let display = await searchPanelModel(
+        fixture: fixture,
+        matchCount: SearchPanelModel.displayLimit + 1
+    )
+
+    #expect(upstream.isTruncated)
+    #expect(upstream.displayTruncationMessage == nil)
+    #expect(!display.isTruncated)
+    #expect(display.displayTruncationMessage?.contains("truncated") == true)
+}
+
+@MainActor
+@Test
+func searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() async throws {
+    let fixture = try SearchPanelFixture()
+    defer { fixture.remove() }
+    let (batches, continuation) =
+        AsyncThrowingStream<SearchBatch, Error>.makeStream()
+    let model = SearchPanelModel { _, _, _ in batches }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.a: (0..<SearchPanelModel.displayLimit).map {
+            searchMatch(path: fixture.a, offset: UInt32($0))
+        }],
+        isFinal: false,
+        completeness: .complete
+    ))
+    #expect(await searchWaitUntil {
+        model.totalMatches == SearchPanelModel.displayLimit
+    })
+    model.select(1_234)
+    let selectedMatch = model.groups[0].matches[1_234]
+
+    continuation.yield(SearchBatch(
+        matchesByPath: [fixture.a: (
+            SearchPanelModel.displayLimit..<(SearchPanelModel.displayLimit + 1_000)
+        ).map {
+            searchMatch(path: fixture.a, offset: UInt32($0))
+        }],
+        isFinal: true,
+        completeness: .complete
+    ))
+    continuation.finish()
+    #expect(await searchWaitUntil {
+        model.totalMatches == SearchPanelModel.displayLimit + 1_000
+    })
+
+    #expect(model.selectedIndex == 1_234)
+    #expect(model.groups[0].matches[1_234] === selectedMatch)
+    #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
+
+    let boundaryIndex = SearchPanelModel.displayLimit - 1
+    model.select(boundaryIndex)
+    let boundaryMatch = model.groups[0].matches[boundaryIndex]
+    model.selectNext()
+    #expect(model.selectedIndex == 0)
+    model.selectPrevious()
+    #expect(model.selectedIndex == boundaryIndex)
+    #expect(model.groups[0].matches[boundaryIndex] === boundaryMatch)
+    model.select(SearchPanelModel.displayLimit)
+    #expect(model.selectedIndex == boundaryIndex)
+}
+
+@MainActor
+@Test
 func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
     let fixture = try SearchPanelFixture()
     defer { fixture.remove() }
@@ -336,6 +508,31 @@ private func stream(
         for batch in batches { continuation.yield(batch) }
         continuation.finish()
     }
+}
+
+@MainActor
+private func searchPanelModel(
+    fixture: SearchPanelFixture,
+    matchCount: Int,
+    completeness: Completeness = .complete
+) async -> SearchPanelModel {
+    let matches = (0..<matchCount).map {
+        searchMatch(path: fixture.a, offset: UInt32($0))
+    }
+    let model = SearchPanelModel { _, _, _ in stream(batches: [SearchBatch(
+        matchesByPath: [fixture.a: matches],
+        isFinal: true,
+        completeness: completeness
+    )]) }
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setQuery("needle")
+    #expect(await searchWaitUntil { model.totalMatches == matchCount })
+    return model
+}
+
+@MainActor
+private func displayedMatches(in model: SearchPanelModel) -> Int {
+    model.groups.reduce(0) { $0 + $1.matches.count }
 }
 
 @MainActor

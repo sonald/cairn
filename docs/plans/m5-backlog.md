@@ -1,4 +1,40 @@
-# M5 Backlog（S7 阶段记录，S9 收尾时汇总）
+# M5 Backlog（S7/S8 阶段记录，S9 收尾时汇总）
+
+## 阻塞 S9 的 self-test 宿主缺陷（S8 验收时发现，优先级最高）
+
+S9 要做「10 条通道双语料全家福连跑」，下面两条会让那件事无法自动化，**S9 开工前先解决**。
+
+### ① 通道拿到不存在的文件时挂起，不报错退出
+
+**复现**：`--self-test-open <不存在的文件>` → 进程打印 `NSCocoaErrorDomain Code=260`
+后**不退出**，停在 `NSApplication.run()` 事件循环，CPU 0%，需外部 kill。
+
+**危害（真实发生过）**：S8 验收时 orchestrator 一直用 `--self-test-open README.md`
+跑通道，而**本仓库根目录没有 README.md**。表现时而"静默 exit 0"、时而挂起 30 分钟。
+**S7 验收报告里那条 `--self-test-open → exit=0` 因此是无效的**（用真实文件
+`Sources/CodeInsightAppModel/SearchPanelModel.swift` 重跑确认 exit 0、首屏 45.8ms，
+S7 代码本身没问题，但当时那次验收没真正覆盖该通道）。
+
+**修法方向**：fixture/输入不可用时走 `finish(checks:metrics:error:)` 那条已有的
+错误退出路径，**绝不能落进事件循环**。所有通道的入口参数校验都该复查一遍。
+
+### ② 通道在 shell 循环里间歇挂起，逐条单发正常（根因未明）
+
+**现象**：把多条通道写进 `for ch in ...; do ... done` 循环连跑，会间歇卡在某一条
+（观察到 exact / open / project / switch 各卡过一次），栈里**没有** self-test 逻辑，
+纯粹停在 `NSApplication.run()`，CPU 0%、无子进程。**同一条命令单独发出去则必定正常退出。**
+
+**已排除的假设（都做了对照实验）**：
+- stdin 非 tty（`< /dev/null` 单跑 → 正常退出）
+- 输出重定向到 /dev/null（单跑 → 正常退出）
+- 连续运行状态污染（project 连跑 3 次 → 3 次都 exit 0）
+
+**诚实标注：根因未明，orchestrator 复现不出稳定触发条件**（按 §6 铁律⑧，复现不了
+就不假装知道）。当前 workaround 是**逐条单发**，11 次执行全部 exit 0。
+
+**为什么必须查**：S9 的全家福连跑正是"循环里跑多条"这个形态，不解决就只能手工逐条发。
+建议方向：查 self-test 结束时的退出路径（是否所有分支都调到了 `exit`/`finish`），
+以及前一个进程的 WindowServer 连接释放是否影响下一个进程启动。
 
 ## 已确认的既有缺陷（非本轮引入，结转）
 

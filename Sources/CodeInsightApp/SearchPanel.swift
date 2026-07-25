@@ -75,10 +75,12 @@ final class SearchPanel: NSWindowController,
         _ outlineView: NSOutlineView,
         numberOfChildrenOfItem item: Any?
     ) -> Int {
-        guard let group = item as? SearchPanelModel.Group else {
-            return panelModel.groups.count
+        if let group = item as? SearchPanelModel.Group {
+            return group.matches.count
         }
-        return group.matches.count
+        guard item == nil else { return 0 }
+        return panelModel.groups.count
+            + (panelModel.displayTruncationMessage == nil ? 0 : 1)
     }
 
     func outlineView(
@@ -86,10 +88,13 @@ final class SearchPanel: NSWindowController,
         child index: Int,
         ofItem item: Any?
     ) -> Any {
-        guard let group = item as? SearchPanelModel.Group else {
+        if let group = item as? SearchPanelModel.Group {
+            return group.matches[index]
+        }
+        if panelModel.groups.indices.contains(index) {
             return panelModel.groups[index]
         }
-        return group.matches[index]
+        return panelModel.displayTruncationMessage!
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
@@ -136,6 +141,13 @@ final class SearchPanel: NSWindowController,
                 ]
             ))
             cell.textField?.attributedStringValue = text
+            return cell
+        }
+        if let message = item as? String {
+            let cell = reusableCell(identifier: "SearchTruncation", in: outlineView)
+            cell.textField?.stringValue = message
+            cell.textField?.font = .systemFont(ofSize: 11, weight: .semibold)
+            cell.textField?.textColor = .systemOrange
             return cell
         }
         guard let match = item as? SearchPanelModel.Match else { return nil }
@@ -347,6 +359,7 @@ final class SearchPanel: NSWindowController,
             _ = panelModel.totalMatches
             _ = panelModel.fileCount
             _ = panelModel.isTruncated
+            _ = panelModel.displayTruncationMessage
             _ = panelModel.selectedIndex
             _ = panelModel.isCaseSensitive
             _ = panelModel.isRegex

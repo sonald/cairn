@@ -6,6 +6,8 @@ import Observation
 @MainActor
 @Observable
 public final class SearchPanelModel {
+    public static let displayLimit = 2_000
+
     public final class Match: Sendable {
         public let value: SearchMatch
 
@@ -38,16 +40,23 @@ public final class SearchPanelModel {
     public private(set) var isSearching = false
     public private(set) var totalMatches = 0
     public private(set) var fileCount = 0
+    /// Whether the search service itself returned incomplete results.
     public private(set) var isTruncated = false
+    public private(set) var displayTruncationMessage: String?
     public private(set) var selectedIndex: Int?
     public private(set) var requestID: UInt64 = 0
     public private(set) var isCaseSensitive = false
     public private(set) var isRegex = false
 
+    public var displayedMatchCount: Int {
+        min(totalMatches, Self.displayLimit)
+    }
+
     private let searcher: Searcher
     @ObservationIgnored private var searchTask: Task<Void, Never>?
     @ObservationIgnored private var projectState = ProjectState.empty
     @ObservationIgnored private var groupsByPath: [PathID: Group] = [:]
+    @ObservationIgnored private var matchedPathIDs: Set<PathID> = []
 
     public init() {
         searcher = { session, query, context in
@@ -94,7 +103,7 @@ public final class SearchPanelModel {
     }
 
     public func select(_ flatIndex: Int) {
-        guard flatIndex >= 0, flatIndex < totalMatches else { return }
+        guard flatIndex >= 0, flatIndex < displayedMatchCount else { return }
         selectedIndex = flatIndex
     }
 
@@ -184,7 +193,9 @@ public final class SearchPanelModel {
         totalMatches = 0
         fileCount = 0
         isTruncated = false
+        displayTruncationMessage = nil
         selectedIndex = nil
+        matchedPathIDs = []
     }
 
     private func apply(_ batch: SearchBatch, session: EngineSession) {
@@ -192,22 +203,36 @@ public final class SearchPanelModel {
         let selectedMatch = previousSelectedIndex.flatMap {
             selection(at: $0)?.match
         }
-        for (pathID, matches) in batch.matchesByPath {
+        var remainingDisplayCapacity = Self.displayLimit - displayedMatchCount
+        for (pathID, matches) in batch.matchesByPath.sorted(by: {
+            session.paths.resolve($0.key) < session.paths.resolve($1.key)
+        }) where !matches.isEmpty {
+            totalMatches += matches.count
+            matchedPathIDs.insert(pathID)
+            guard remainingDisplayCapacity > 0 else { continue }
             let group = groupsByPath[pathID] ?? Group(
                 pathID: pathID,
                 path: session.paths.resolve(pathID),
                 matches: []
             )
             groupsByPath[pathID] = group
-            group.matches.append(contentsOf: matches.map(Match.init))
+            let displayedMatches = matches
+                .sorted {
+                    $0.byteRange.lowerBound < $1.byteRange.lowerBound
+                }
+                .prefix(remainingDisplayCapacity)
+            group.matches.append(contentsOf: displayedMatches.map(Match.init))
+            remainingDisplayCapacity -= displayedMatches.count
             group.matches.sort {
                 $0.value.byteRange.lowerBound < $1.value.byteRange.lowerBound
             }
         }
         groups = groupsByPath.values.sorted { $0.path < $1.path }
-        totalMatches = groups.reduce(0) { $0 + $1.matches.count }
-        fileCount = groups.count
+        fileCount = matchedPathIDs.count
         isTruncated = isTruncated || batch.completeness == .truncated
+        displayTruncationMessage = totalMatches > Self.displayLimit
+            ? "Showing first \(Self.displayLimit) of \(totalMatches) matches (truncated)"
+            : nil
         reconcileSelection(
             preserving: selectedMatch,
             fallbackIndex: previousSelectedIndex
@@ -231,24 +256,26 @@ public final class SearchPanelModel {
             return
         }
         selectedIndex = fallbackIndex
-        if fallbackIndex == nil, totalMatches > 0 {
+        if fallbackIndex == nil, displayedMatchCount > 0 {
             selectedIndex = 0
-        } else if let fallbackIndex, fallbackIndex >= totalMatches {
-            self.selectedIndex = totalMatches > 0 ? totalMatches - 1 : nil
+        } else if let fallbackIndex, fallbackIndex >= displayedMatchCount {
+            self.selectedIndex = displayedMatchCount > 0
+                ? displayedMatchCount - 1
+                : nil
         }
     }
 
     private func moveSelection(by delta: Int) {
-        guard totalMatches > 0 else {
+        guard displayedMatchCount > 0 else {
             selectedIndex = nil
             return
         }
         guard let selectedIndex else {
-            self.selectedIndex = delta < 0 ? totalMatches - 1 : 0
+            self.selectedIndex = delta < 0 ? displayedMatchCount - 1 : 0
             return
         }
         self.selectedIndex = (
-            selectedIndex + delta + totalMatches
-        ) % totalMatches
+            selectedIndex + delta + displayedMatchCount
+        ) % displayedMatchCount
     }
 }
