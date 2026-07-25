@@ -930,6 +930,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         else {
             finish(checks: checks, metrics: [:], error: "huge fixture unavailable")
         }
+        let hugeOpenedAt = ContinuousClock.now
         controller.openFileForSelfTest(huge)
         guard waitUntil(timeout: 10, condition: {
             controller.selfTestLeftReaderBytes?.count == hugeBytes.count
@@ -937,6 +938,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             finish(checks: checks, metrics: [:], error: "huge reader did not open")
         }
         pumpRunLoop()
+        let hugeFirstVisibleMS = milliseconds(since: hugeOpenedAt)
         let hugeBaselineFootprintMB = physicalFootprintBytes().map {
             Double($0) / 1_048_576
         } ?? -1
@@ -976,6 +978,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "hugeOccurrenceCount": Double(hugeOccurrenceCount),
             "styledFragmentCount": Double(styledFragments),
             "visibleLineCount": Double(hugeVisibleLines),
+            "firstVisibleMS": hugeFirstVisibleMS,
         ]
         Self.writeJSON([
             "step": "huge",
@@ -983,6 +986,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "occurrences": hugeOccurrenceCount,
             "styledFragments": styledFragments,
             "visibleLines": hugeVisibleLines,
+            "firstVisibleMS": hugeFirstVisibleMS,
             "baselineFootprintMB": hugeBaselineFootprintMB,
             "incrementalFootprintMB": hugeIncrementalFootprintMB,
             "footprintMB": hugeFootprintMB,
@@ -1700,6 +1704,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         })
         let menuActionTriggered =
             windowController.selfTestSwitchFeatureSelection(.allFeatures)
+        let reprofiledAt = ContinuousClock.now
         let featurePrepared = menuActionTriggered
             && waitUntil(timeout: 5, condition: {
                 model.currentFeatureSelection == .allFeatures
@@ -1735,6 +1740,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestContextProvenance?
                 .contains("features: all") == true
         })
+        let contextReadyMS = milliseconds(since: reprofiledAt)
+        let reprofileExtracted = if case let .ready(session, _) = model.projectState {
+            session.stats.extractedCount
+        } else {
+            -1
+        }
         if switchedExactVisible {
             exactSummary = windowController.selfTestContextSummary
             exactCount = windowController.selfTestContextCandidateCount
@@ -1760,6 +1771,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "oldGenerationResultReturned": oldGenerationResultReturned,
                 "oldGenerationResultDiscarded": oldGenerationResultDiscarded,
                 "switchedExactVisible": switchedExactVisible,
+                "contextReadyMS": contextReadyMS,
+                "extracted": reprofileExtracted,
                 "profileButtonVisibleWithGeometry":
                     profileButtonVisibleWithGeometry,
                 "profileButtonFrame": NSStringFromRect(
@@ -1787,6 +1800,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactGroupVisible = waitUntil(timeout: 5, condition: {
             windowController.selfTestExactGroupRowCount > 0
         })
+        let contextAndRelationsReadyMS = milliseconds(since: reprofiledAt)
         let exactGroupHeaderHonest = windowController.selfTestExactGroupTitle == "Exact"
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
@@ -1794,7 +1808,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         emitExactStep(
             "relations",
             variant: "fake",
-            controller: windowController
+            controller: windowController,
+            extra: [
+                "contextAndRelationsReadyMS": contextAndRelationsReadyMS,
+                "extracted": reprofileExtracted,
+            ]
         )
 
         windowController.selfTestSetContextPinned(true)

@@ -148,6 +148,10 @@ func searchPanelCapsDisplayedMatchesAndReportsTrueTotal() async throws {
             == "Showing first 2000 of 5001 matches (truncated)"
     )
     #expect(model.displayedMatchCount + 1 == SearchPanelModel.displayLimit + 1)
+    print(
+        "M5_SEARCH_CAP "
+            + #"{"displayedMatches":\#(model.displayedMatchCount),"displayedRows":\#(model.displayedMatchCount + 1),"totalMatches":\#(model.totalMatches)}"#
+    )
 }
 
 @MainActor

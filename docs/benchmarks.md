@@ -206,3 +206,65 @@ CodeInsightExact）；全量 `swift test`（≥208 测试）、fixture、双语�
 
 stress-switch（`--self-test-switch` + `--self-test-history` 交替）连跑无 hang/error，
 持久化与 exact overlay 未破 M3 的切换量级。
+
+## M5 Rust 深化 + UIUX 精修 自测
+
+日期：2026-07-25。Apple Silicon (arm64e) macOS，release 构建。主数据由
+`bash scripts/bench.sh --m5 <tokio-1.47.1> 5` 采集。已知 AppKit self-test 批量连跑
+会间歇挂起，因此 profile 与 reading 各只启动一次独立进程；`runs=5` 只用于无 AppKit
+的 tokio CLI 全量索引。下列数据只陈述耗时与计数，不评价帧率或手感。
+
+### Profile 切换（S2，fake provider）
+
+计时从 `reprofiled` 同步完成后开始，到切换后的 Context exact 可用、再到 Relations
+Exact 组可用；两处都从真实 `MainWindowController` 状态取样。新 session 的
+`extracted=0`，证明切换复用 ContentIndex、没有重提取。
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `reprofile -> Context ready (extracted=0)` | 1 | 554.654ms | 554.654ms | 554.654ms |
+| `reprofile -> Context + Relations ready (extracted=0)` | 1 | 870.838ms | 870.838ms | 870.838ms |
+
+### receiver targetHint 解析开销（S3）
+
+当前工作树对 tokio 1.47.1 全量索引 5 次：
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `tokio index with targetHint` | 5 | 797.000ms | 818.000ms | 902.000ms |
+
+与本文件保留的 M0 并行索引 p50 `704ms` 相比为 **+16.2%**；该值跨日期、跨多个切片，
+只能作为历史总回归口径，当前仍低于 2s 预算。为隔离 S3，在同一机器、同一语料上把
+S2 commit `bdf10d8` 与当前 release 二进制交替各跑 5 次：
+
+| 二进制 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| S2 `bdf10d8`（targetHint 接线前） | 5 | 746.000ms | 750.000ms | 815.000ms |
+| M5 当前（targetHint 接线后） | 5 | 764.000ms | 766.000ms | 773.000ms |
+
+同机 A/B 的 p50 相对变化为 **+2.1%**，没有观察到显著提取回退；历史 +16.2% 不归因于
+targetHint。
+
+### 10 万行行号 + 同名高亮渲染路径（S7）
+
+`--self-test-reading` 使用 100,000 行 fixture（200 个 `needle`，其余空行）。核心口径是
+TextKit 2 实际写过属性的 fragment 数，而不是是否调用 lazy API。
+
+| 场景 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `first visible` | 1 | 1491.312ms | 1491.312ms | 1491.312ms |
+| `styledFragmentCount` | 1 | 185.000 | 185.000 | 185.000 |
+| `visible lines` | 1 | 37.000 | 37.000 | 37.000 |
+
+`185` 个 styled fragments 相对 100,000 行仍是 viewport 量级；首屏低于 2.5s 预算。
+滚动帧率、配色层级与卡顿手感保留为 `m5-interactive-test-plan.md` 人工项。
+
+### SearchPanel 5000+ 命中 cap（S8）
+
+数据来自真实 `SearchPanelModel` 的 5,001 命中测试；显示行计数包含一条截断提示。
+
+| cap 前匹配行 | cap 后匹配行 | 含截断提示的显示行 | totalMatches |
+|---:|---:|---:|---:|
+| 5001 | 2000 | 2001 | 5001 |
+
+cap 限制了模型持有的匹配行，同时 `totalMatches` 仍诚实保留 5,001。

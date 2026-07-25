@@ -97,3 +97,19 @@ TextKit 缓存回收/替换主导，`phys_footprint` 的进程净变化无法归
 - 声明 gutter 标记密度是否干扰阅读
 - 同名高亮与 diff / 查找闪烁同屏时的视觉层级
 - 点击、空白清除、Esc 清除的真实窗口手感
+
+## M6 候选结转（S9 汇总，只挂账不预实现）
+
+- **Exact 能力面**：references / implementations / callHierarchy。
+- **SI Reference Styles**：与 exact references 共用语义引用数据后再做，不先造半套索引。
+- **F5.7 书签**：需先裁决快照保留与历史回放语义。
+- **Relation Window 随光标自动跟踪**。
+- **RA 进程组化**：从直接子进程守卫扩到孙进程/进程组的生命周期治理。
+- **AX 值变更防御**。
+- **huge `syntaxVisible` 属性重排**：先建立可归因探针，再动 TextKit 热路径。
+- **分支图**。
+- **F4.8 lineage**：重命名/跨 commit 谱系，不用启发式冒充确定关系。
+- **依赖全量浏览/搜索**：M5 只交付依赖落点与只读打开。
+- **`sandbox-exec` 迁移**：保留 Safe 的 deny-network/只读边界。
+- **Cmd+± 字号**：先拆 `settingsWindowController` 缓存地雷再接快捷键。
+- **TS/Python 整语言面**：作为完整语言支持切片规划，不零散铺面。

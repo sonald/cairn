@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
-    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5] | --m4 <rust-repo> [runs=5]" >&2
+    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5] | --m4 <rust-repo> [runs=5] | --m5 <tokio-dir> [runs=5]" >&2
     exit 2
 fi
 
@@ -30,6 +30,14 @@ elif [[ "$1" == "--m4" ]]; then
         exit 2
     fi
     mode="m4"
+    repo_path="$(cd "$2" && pwd -P)"
+    runs="${3:-5}"
+elif [[ "$1" == "--m5" ]]; then
+    if [[ $# -lt 2 || $# -gt 3 || ! -d "$2" ]]; then
+        echo "usage: bash scripts/bench.sh --m5 <tokio-dir> [runs=5]" >&2
+        exit 2
+    fi
+    mode="m5"
     repo_path="$(cd "$2" && pwd -P)"
     runs="${3:-5}"
 else
@@ -266,6 +274,132 @@ for line in sys.stdin:
     echo '| 场景 | runs | min | p50 | p95 |'
     echo '|---|---:|---:|---:|---:|'
     printf '%s\n' "${diff_ms[@]}" | percentile_row "DiffCore compute" "ms"
+    exit 0
+fi
+
+if [[ "$mode" == "m5" ]]; then
+    binary="$bin_path/codeinsight-app"
+    cli="$bin_path/codeinsight"
+
+    percentile_row() {
+        python3 -c 'import math, sys
+label, unit = sys.argv[1], sys.argv[2]
+vals = sorted(float(x) for x in sys.stdin if x.strip())
+if not vals:
+    raise SystemExit(f"no values for {label}")
+rank = lambda p: vals[math.ceil(len(vals) * p) - 1]
+print(f"| `{label}` | {len(vals)} | {vals[0]:.3f}{unit} | {rank(0.5):.3f}{unit} | {rank(0.95):.3f}{unit} |")
+' "$1" "$2"
+    }
+
+    json_line_field() {
+        python3 -c 'import json, sys
+step, key = sys.argv[1:3]
+for line in sys.stdin:
+    value = json.loads(line)
+    if value.get("step") == step:
+        print(value[key])
+        raise SystemExit
+raise SystemExit(f"missing {step}.{key}")
+' "$1" "$2"
+    }
+
+    # AppKit channels are each launched once, independently. Repeating them in
+    # a shell loop is a known intermittent hang shape; see m5-backlog.md.
+    exact_json="$("$binary" --self-test-exact "$PWD")"
+    context_ready_ms="$(printf '%s\n' "$exact_json" \
+        | json_line_field feature-switch contextReadyMS)"
+    context_relations_ready_ms="$(printf '%s\n' "$exact_json" \
+        | json_line_field relations contextAndRelationsReadyMS)"
+    reprofile_extracted="$(printf '%s\n' "$exact_json" \
+        | json_line_field relations extracted)"
+
+    reading_json="$("$binary" --self-test-reading)"
+    huge_first_visible_ms="$(printf '%s\n' "$reading_json" \
+        | json_line_field huge firstVisibleMS)"
+    styled_fragments="$(printf '%s\n' "$reading_json" \
+        | json_line_field huge styledFragments)"
+    visible_lines="$(printf '%s\n' "$reading_json" \
+        | json_line_field huge visibleLines)"
+
+    receiver_values=()
+    run=1
+    while [[ $run -le $runs ]]; do
+        output="$("$cli" index "$repo_path" --stats)"
+        elapsed="$(printf '%s\n' "$output" \
+            | awk -F': *' '$1 == "elapsedMilliseconds" { print $2; exit }')"
+        case "$elapsed" in
+            ''|*[!0-9]*) echo "could not parse elapsedMilliseconds" >&2; exit 1 ;;
+        esac
+        receiver_values[${#receiver_values[@]}]="$elapsed"
+        run=$((run + 1))
+    done
+    receiver_p50="$(printf '%s\n' "${receiver_values[@]}" | python3 -c '
+import math, sys
+values = sorted(float(line) for line in sys.stdin if line.strip())
+print(values[math.ceil(len(values) * 0.5) - 1])
+')"
+    # Historical M0 parallel-index p50, preserved in docs/benchmarks.md.
+    receiver_baseline_ms=704
+    receiver_delta_percent="$(python3 -c '
+baseline, current = map(float, __import__("sys").argv[1:3])
+print(f"{(current - baseline) / baseline * 100:+.1f}%")
+' "$receiver_baseline_ms" "$receiver_p50")"
+
+    search_test_output="$(swift test -c release \
+        ${swift_options[@]+"${swift_options[@]}"} \
+        --filter searchPanelCapsDisplayedMatchesAndReportsTrueTotal 2>&1)"
+    search_json="$(printf '%s\n' "$search_test_output" \
+        | sed -n 's/^.*M5_SEARCH_CAP //p' | sed -n '$p')"
+    if [[ -z "$search_json" ]]; then
+        echo "could not parse SearchPanel cap benchmark" >&2
+        exit 1
+    fi
+    search_displayed="$(printf '%s' "$search_json" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["displayedMatches"])')"
+    search_rows="$(printf '%s' "$search_json" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["displayedRows"])')"
+    search_total="$(printf '%s' "$search_json" \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin)["totalMatches"])')"
+
+    echo '### Profile 切换（`--self-test-exact` fake provider，单次独立进程）'
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "$context_ready_ms" \
+        | percentile_row "reprofile -> Context ready (extracted=$reprofile_extracted)" "ms"
+    printf '%s\n' "$context_relations_ready_ms" \
+        | percentile_row "reprofile -> Context + Relations ready (extracted=$reprofile_extracted)" "ms"
+    echo
+    echo '### receiver 解析开销（tokio 全量索引）'
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "${receiver_values[@]}" \
+        | percentile_row "tokio index with targetHint" "ms"
+    echo
+    echo '| 既有并行索引 p50 基线 | 当前 p50 | 相对变化 |'
+    echo '|---:|---:|---:|'
+    printf '| %.1fms | %.1fms | %s |\n' \
+        "$receiver_baseline_ms" "$receiver_p50" "$receiver_delta_percent"
+    echo
+    echo '### 10 万行行号 + 同名高亮（`--self-test-reading`，单次独立进程）'
+    echo
+    echo '| 场景 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    printf '%s\n' "$huge_first_visible_ms" \
+        | percentile_row "first visible" "ms"
+    printf '%s\n' "$styled_fragments" \
+        | percentile_row "styledFragmentCount" ""
+    printf '%s\n' "$visible_lines" \
+        | percentile_row "visible lines" ""
+    echo
+    echo '### SearchPanel 5000+ 命中 cap'
+    echo
+    echo '| cap 前匹配行 | cap 后匹配行 | 含截断提示的显示行 | totalMatches |'
+    echo '|---:|---:|---:|---:|'
+    printf '| %s | %s | %s | %s |\n' \
+        "$search_total" "$search_displayed" "$search_rows" "$search_total"
     exit 0
 fi
 
