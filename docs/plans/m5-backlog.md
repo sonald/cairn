@@ -1,40 +1,49 @@
 # M5 Backlog（S7/S8 阶段记录，S9 收尾时汇总）
 
-## 阻塞 S9 的 self-test 宿主缺陷（S8 验收时发现，优先级最高）
+## self-test 通道在批量连跑时间歇挂起（S8 验收观察到，根因未明）
 
-S9 要做「10 条通道双语料全家福连跑」，下面两条会让那件事无法自动化，**S9 开工前先解决**。
+**现象**：把多条通道写进 shell `for` 循环连跑时，会间歇卡在某一条（观察到
+exact 26min / open 30min / project 31min / switch 各卡过一次）。挂起进程的
+`sample` 栈里**没有** self-test 逻辑，纯粹停在 `NSApplication.run()` 事件循环，
+CPU 0%、无子进程——即 self-test 逻辑已跑完但进程未退出。
 
-### ① 通道拿到不存在的文件时挂起，不报错退出
+**同一条命令逐条单独发出去则正常退出**：S8 验收最终用逐条单发的方式，
+10 条通道 + project 双语料共 11 次执行全部 exit 0。
 
-**复现**：`--self-test-open <不存在的文件>` → 进程打印 `NSCocoaErrorDomain Code=260`
-后**不退出**，停在 `NSApplication.run()` 事件循环，CPU 0%，需外部 kill。
+**已做的对照实验（全部未能复现挂起）**：
 
-**危害（真实发生过）**：S8 验收时 orchestrator 一直用 `--self-test-open README.md`
-跑通道，而**本仓库根目录没有 README.md**。表现时而"静默 exit 0"、时而挂起 30 分钟。
-**S7 验收报告里那条 `--self-test-open → exit=0` 因此是无效的**（用真实文件
-`Sources/CodeInsightAppModel/SearchPanelModel.swift` 重跑确认 exit 0、首屏 45.8ms，
-S7 代码本身没问题，但当时那次验收没真正覆盖该通道）。
+| 假设 | 实验 | 结果 |
+|---|---|---|
+| 输入文件不存在导致不退出 | `--self-test-open /nonexistent-xyz.md` | **exit=1 立即退出**（catch 分支有 `Darwin.exit(1)`） |
+| 同上（相对路径） | `--self-test-open README.md`（本仓库无此文件） | **exit=1 立即退出** |
+| stdin 非 tty | `< /dev/null` 单跑 | 正常退出 |
+| 输出重定向到 /dev/null | 单跑 | 正常退出 |
+| 连续运行状态污染 | project 连跑 3 次 | 3 次全 exit 0 |
+| 背靠背启动 | reading 跑完立刻跑 open | 两条都 exit 0 |
 
-**修法方向**：fixture/输入不可用时走 `finish(checks:metrics:error:)` 那条已有的
-错误退出路径，**绝不能落进事件循环**。所有通道的入口参数校验都该复查一遍。
+**诚实标注：根因未明。orchestrator 复现不出稳定触发条件**（§6 铁律⑧：复现不了
+就如实报告，不假装知道）。**不要基于猜测的根因去改代码**——先要有稳定复现。
 
-### ② 通道在 shell 循环里间歇挂起，逐条单发正常（根因未明）
+**一个尚未证实的观察**：`runSelfTest` / `runProjectSelfTest` / `runOpenSelfTest`
+的签名是 `-> ()`，其余通道（tabs/reading/diff/history/pin/exact/switch）都是
+`-> Never`。但上面的实验显示 open 在错误路径上能正常退出，**所以简单归因于签名
+是不成立的**，仅作为起点记录。
 
-**现象**：把多条通道写进 `for ch in ...; do ... done` 循环连跑，会间歇卡在某一条
-（观察到 exact / open / project / switch 各卡过一次），栈里**没有** self-test 逻辑，
-纯粹停在 `NSApplication.run()`，CPU 0%、无子进程。**同一条命令单独发出去则必定正常退出。**
+**对 S9 的影响**：S9 的「10 条通道双语料全家福连跑」正是"循环里跑多条"这个形态。
+在根因查明前，S9 应**以逐条单发为准**产出结果，并把这个限制在交互测试计划里如实标注。
 
-**已排除的假设（都做了对照实验）**：
-- stdin 非 tty（`< /dev/null` 单跑 → 正常退出）
-- 输出重定向到 /dev/null（单跑 → 正常退出）
-- 连续运行状态污染（project 连跑 3 次 → 3 次都 exit 0）
+## 一次无效验收的纠正（流程教训）
 
-**诚实标注：根因未明，orchestrator 复现不出稳定触发条件**（按 §6 铁律⑧，复现不了
-就不假装知道）。当前 workaround 是**逐条单发**，11 次执行全部 exit 0。
+S7 验收报告中的 `--self-test-open → exit=0` **是无效数据**：当时喂的是
+`README.md`，而本仓库根目录没有该文件。用真实文件
+（`Sources/CodeInsightAppModel/SearchPanelModel.swift`）重跑确认 **exit 0、
+首屏 45.8ms、styledFragments=87**——S7 代码本身没问题，但那次验收没有真正覆盖该通道。
 
-**为什么必须查**：S9 的全家福连跑正是"循环里跑多条"这个形态，不解决就只能手工逐条发。
-建议方向：查 self-test 结束时的退出路径（是否所有分支都调到了 `exit`/`finish`），
-以及前一个进程的 WindowServer 连接释放是否影响下一个进程启动。
+**教训**：验收工具本身也要验。跑通道前先确认参数指向的文件/目录真实存在，
+否则"绿"可能来自没跑到被测路径。
+
+**注**：最初把这个现象写成"通道拿到不存在的文件会挂起"，后经实验证伪——
+文件不存在时 open 是 `exit=1` 立即退出的。挂起是另一回事（见上一节）。
 
 ## 已确认的既有缺陷（非本轮引入，结转）
 
