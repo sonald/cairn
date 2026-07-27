@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import Foundation
 import Observation
 
@@ -13,6 +14,11 @@ public final class RelationTreeModel {
     }
 
     public final class Node {
+        public enum ExpansionIdentity: Sendable {
+            case engine(SymbolOccurrenceID)
+            case exact(ExactCallHierarchyItem)
+        }
+
         public enum Kind: Hashable, Sendable {
             case root
             case group
@@ -27,15 +33,19 @@ public final class RelationTreeModel {
         public let title: String
         public let subtitle: String?
         public let badge: String?
-        public let target: (path: String, byteOffset: UInt32)?
-        public let line: UInt32?
+        public fileprivate(set) var target: (path: String, byteOffset: UInt32)?
+        public fileprivate(set) var line: UInt32?
         public let symbol: SymbolOccurrenceID?
+        public let expansionIdentity: ExpansionIdentity?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
         fileprivate weak var parent: Node?
         fileprivate let evidence: [ResolutionEvidence]
         fileprivate let cycleKey: CycleKey?
+        fileprivate let queryTarget: (path: String, byteOffset: UInt32)?
+        fileprivate let callSites: [ExactLocation]
+        fileprivate var nextCallSiteIndex = 0
         fileprivate var loadRequestID: UInt64?
 
         fileprivate init(
@@ -49,8 +59,11 @@ public final class RelationTreeModel {
             isExpandable: Bool = false,
             parent: Node? = nil,
             symbol: SymbolOccurrenceID? = nil,
+            expansionIdentity: ExpansionIdentity? = nil,
             evidence: [ResolutionEvidence] = [],
-            cycleKey: CycleKey? = nil
+            cycleKey: CycleKey? = nil,
+            queryTarget: (path: String, byteOffset: UInt32)? = nil,
+            callSites: [ExactLocation] = []
         ) {
             self.kind = kind
             self.title = title
@@ -62,8 +75,11 @@ public final class RelationTreeModel {
             self.isExpandable = isExpandable
             self.parent = parent
             self.symbol = symbol
+            self.expansionIdentity = expansionIdentity
             self.evidence = evidence
             self.cycleKey = cycleKey
+            self.queryTarget = queryTarget
+            self.callSites = callSites
         }
     }
 
@@ -78,6 +94,10 @@ public final class RelationTreeModel {
         let evidence: [ResolutionEvidence]
         let exactQuery: (file: String, byteOffset: UInt32, line: UInt32)?
         let fuzzyTarget: (file: String, byteOffset: UInt32)?
+        let identityTarget: (file: String, byteOffset: UInt32)?
+        let exactItem: ExactCallHierarchyItem?
+        var callSites: [ExactLocation]
+        var alsoHeuristic: Bool
         var exactOrigin: ExactOrigin?
 
         init(
@@ -91,6 +111,10 @@ public final class RelationTreeModel {
             evidence: [ResolutionEvidence],
             exactQuery: (file: String, byteOffset: UInt32, line: UInt32)? = nil,
             fuzzyTarget: (file: String, byteOffset: UInt32)? = nil,
+            identityTarget: (file: String, byteOffset: UInt32)? = nil,
+            exactItem: ExactCallHierarchyItem? = nil,
+            callSites: [ExactLocation] = [],
+            alsoHeuristic: Bool = false,
             exactOrigin: ExactOrigin? = nil
         ) {
             self.title = title
@@ -103,13 +127,25 @@ public final class RelationTreeModel {
             self.evidence = evidence
             self.exactQuery = exactQuery
             self.fuzzyTarget = fuzzyTarget
+            self.identityTarget = identityTarget
+            self.exactItem = exactItem
+            self.callSites = callSites
+            self.alsoHeuristic = alsoHeuristic
             self.exactOrigin = exactOrigin
         }
+    }
+
+    enum ExactState: Sendable {
+        case legacy
+        case unsupported
+        case notApplicable
+        case queried
     }
 
     struct LoadResult: Sendable {
         let edges: [LoadedEdge]
         let isTruncated: Bool
+        var exactState: ExactState = .legacy
     }
 
     typealias Loader = @Sendable (
@@ -123,6 +159,13 @@ public final class RelationTreeModel {
         UInt32,
         UInt64
     ) async -> ExactOverlay.Entry?
+    typealias ExactRelationsResolver = @MainActor @Sendable (
+        String,
+        UInt32,
+        ExactCallHierarchyItem?,
+        Direction,
+        UInt64
+    ) async -> ExactCoordinator.RelationQueryResult?
 
     public private(set) var root: Node?
     public private(set) var direction: Direction = .callers
@@ -136,6 +179,7 @@ public final class RelationTreeModel {
 
     private let loader: Loader
     private var exactResolver: ExactResolver?
+    private var exactRelationsResolver: ExactRelationsResolver?
     private var session: EngineSession?
     private var context: QueryContext?
 
@@ -149,14 +193,17 @@ public final class RelationTreeModel {
             )
         }
         exactResolver = nil
+        exactRelationsResolver = nil
     }
 
     init(
         loader: @escaping Loader,
-        exactResolver: ExactResolver? = nil
+        exactResolver: ExactResolver? = nil,
+        exactRelationsResolver: ExactRelationsResolver? = nil
     ) {
         self.loader = loader
         self.exactResolver = exactResolver
+        self.exactRelationsResolver = exactRelationsResolver
     }
 
     func attachExactCoordinator(_ coordinator: ExactCoordinator) {
@@ -164,6 +211,16 @@ public final class RelationTreeModel {
             await coordinator?.definition(
                 file: file,
                 byteOffset: offset,
+                generation: generation
+            )
+        }
+        exactRelationsResolver = {
+            [weak coordinator] file, offset, item, direction, generation in
+            await coordinator?.relations(
+                file: file,
+                byteOffset: offset,
+                item: item,
+                direction: direction,
                 generation: generation
             )
         }
@@ -215,10 +272,12 @@ public final class RelationTreeModel {
                 session: session
             ),
             symbol: symbol,
-            cycleKey: CycleKey(
+            expansionIdentity: .engine(symbol),
+            cycleKey: Self.cycleKey(
                 path: location.path,
-                identity: "facet:\(symbol.localIndex)"
-            )
+                byteOffset: location.byteOffset
+            ),
+            queryTarget: (location.path, location.byteOffset)
         )
         if !node.isExpandable { node.children = [] }
         root = node
@@ -230,6 +289,17 @@ public final class RelationTreeModel {
     }
 
     public func select(_ node: Node) {
+        if !node.callSites.isEmpty {
+            let callSite = node.callSites[node.nextCallSiteIndex % node.callSites.count]
+            if let offset = UInt32(exactly: callSite.byteOffset),
+               let line = UInt32(exactly: callSite.line)
+            {
+                node.target = (callSite.file, offset)
+                node.line = line
+            }
+            node.nextCallSiteIndex = (node.nextCallSiteIndex + 1)
+                % node.callSites.count
+        }
         selectedRelationSymbol = node.kind == .edge
             && node.symbol?.localKind == .declarationFacet
             ? node.symbol
@@ -243,7 +313,7 @@ public final class RelationTreeModel {
 
     private func expansionTask(for node: Node) -> Task<Void, Never>? {
         guard node.isExpandable, node.children == nil,
-              let symbol = node.symbol, let session, let context
+              let identity = node.expansionIdentity, let session, let context
         else { return nil }
 
         requestID &+= 1
@@ -253,35 +323,70 @@ public final class RelationTreeModel {
         node.children = [Node(kind: .loading, title: "Loading…", parent: node)]
 
         let loader = self.loader
+        let exactRelationsResolver = self.exactRelationsResolver
         let direction = self.direction
         return Task { [weak self, weak node] in
-            let result = await Task.detached(priority: .userInitiated) {
-                try await loader(session, context, symbol, direction)
-            }.result
+            var loaded = LoadResult(edges: [], isTruncated: false)
+            var engineLoadFailed = false
+            if case let .engine(symbol) = identity {
+                let result = await Task.detached(priority: .userInitiated) {
+                    try await loader(session, context, symbol, direction)
+                }.result
+                switch result {
+                case .success(let value):
+                    loaded = value
+                case .failure:
+                    engineLoadFailed = true
+                }
+            }
             guard let self, let node,
                   generation == currentGeneration,
                   node.loadRequestID == currentRequestID,
                   self.session === session
             else { return }
 
-            switch result {
-            case let .success(loaded):
-                let loaded = await promoteExactEdges(
+            if case .engine = identity, !engineLoadFailed {
+                loaded = await promoteExactEdges(
                     loaded,
                     direction: direction,
                     generation: context.generation
                 )
-                guard generation == currentGeneration,
-                      node.loadRequestID == currentRequestID,
-                      self.session === session
-                else { return }
-                node.children = makeChildren(
-                    from: loaded,
-                    under: node,
+            }
+            let exactItem: ExactCallHierarchyItem? = if case let .exact(item) = identity {
+                item
+            } else {
+                nil
+            }
+            let exactResult: ExactCoordinator.RelationQueryResult?
+            if let exactRelationsResolver,
+               let query = node.queryTarget ?? node.target
+            {
+                exactResult = await exactRelationsResolver(
+                    query.path,
+                    query.byteOffset,
+                    exactItem,
+                    direction,
+                    context.generation
+                )
+            } else {
+                exactResult = nil
+            }
+            guard generation == currentGeneration,
+                  node.loadRequestID == currentRequestID,
+                  self.session === session
+            else { return }
+
+            if let exactResult {
+                loaded = mergeExact(
+                    exactResult,
+                    into: loaded,
                     direction: direction,
                     session: session
                 )
-            case .failure:
+            }
+            if (engineLoadFailed && exactResult == nil)
+                || (exactItem != nil && exactResult == nil)
+            {
                 node.children = [
                     Node(
                         kind: .error,
@@ -289,7 +394,14 @@ public final class RelationTreeModel {
                         parent: node
                     ),
                 ] + evidenceNodes(node.evidence, parent: node)
+                return
             }
+            node.children = makeChildren(
+                from: loaded,
+                under: node,
+                direction: direction,
+                session: session
+            )
         }
     }
 
@@ -350,6 +462,81 @@ public final class RelationTreeModel {
         return LoadResult(edges: edges, isTruncated: loaded.isTruncated)
     }
 
+    private func mergeExact(
+        _ result: ExactCoordinator.RelationQueryResult,
+        into loaded: LoadResult,
+        direction: Direction,
+        session: EngineSession
+    ) -> LoadResult {
+        switch result {
+        case .unsupported:
+            return LoadResult(
+                edges: loaded.edges,
+                isTruncated: loaded.isTruncated,
+                exactState: .unsupported
+            )
+        case .notApplicable:
+            return LoadResult(
+                edges: loaded.edges,
+                isTruncated: loaded.isTruncated,
+                exactState: .notApplicable
+            )
+        case let .relations(relations, origin):
+            var exactEdges = relations.compactMap { relation -> LoadedEdge? in
+                guard let byteOffset = UInt32(exactly: relation.location.byteOffset),
+                      let line = UInt32(exactly: relation.location.line),
+                      line > 0
+                else { return nil }
+                let symbol = Self.symbol(
+                    at: relation.location,
+                    in: session
+                )
+                return LoadedEdge(
+                    title: relation.name
+                        ?? symbol.flatMap { Self.symbolTitle($0, in: session) }
+                        ?? Self.locationTitle(relation.location),
+                    certainty: .exact,
+                    dispatch: direction == .implementations
+                        ? .traitDispatch
+                        : .direct,
+                    symbol: symbol,
+                    path: relation.location.file,
+                    byteOffset: byteOffset,
+                    line: line,
+                    evidence: [],
+                    identityTarget: (
+                        relation.location.file,
+                        byteOffset
+                    ),
+                    exactItem: relation.item,
+                    callSites: relation.callSites.filter {
+                        UInt32(exactly: $0.byteOffset) != nil
+                            && UInt32(exactly: $0.line).map { $0 > 0 } == true
+                    },
+                    exactOrigin: origin
+                )
+            }
+            exactEdges = Self.deduplicateExact(exactEdges)
+            let exactKeys = Set(exactEdges.compactMap(Self.relationKey))
+            let heuristicKeys = Set(loaded.edges.compactMap(Self.relationKey))
+            for index in exactEdges.indices {
+                if let key = Self.relationKey(exactEdges[index]),
+                   heuristicKeys.contains(key)
+                {
+                    exactEdges[index].alsoHeuristic = true
+                }
+            }
+            return LoadResult(
+                edges: exactEdges + loaded.edges.filter {
+                    guard let key = Self.relationKey($0) else { return true }
+                    return !exactKeys.contains(key)
+                },
+                isTruncated: loaded.isTruncated,
+                exactState: .queried
+            )
+        }
+    }
+
     private func makeChildren(
         from loaded: LoadResult,
         under parent: Node,
@@ -360,9 +547,11 @@ public final class RelationTreeModel {
         let exact = capped.filter { $0.certainty == .exact }
         var children = [
             makeGroup(
-                // Keep the empty group visible: it teaches that no exact provider
-                // contributed evidence instead of implying exact coverage.
-                exact.isEmpty ? "Exact (0)" : "Exact",
+                exactGroupTitle(
+                    state: loaded.exactState,
+                    count: exact.count,
+                    direction: direction
+                ),
                 edges: exact,
                 under: parent,
                 direction: direction,
@@ -405,12 +594,40 @@ public final class RelationTreeModel {
         if loaded.isTruncated || loaded.edges.count > 500 {
             children.append(Node(
                 kind: .truncated,
-                title: "Truncated after 500 edges",
+                title: loaded.edges.count > 500
+                    ? "Showing first 500 of \(loaded.edges.count) relations"
+                    : "Results truncated upstream",
                 parent: parent
             ))
         }
         children += evidenceNodes(parent.evidence, parent: parent)
         return children
+    }
+
+    private func exactGroupTitle(
+        state: ExactState,
+        count: Int,
+        direction: Direction
+    ) -> String {
+        guard count == 0 else { return "Exact" }
+        return switch (state, direction) {
+        case (.unsupported, .callers), (.unsupported, .calls):
+            "Exact unavailable: server does not support call hierarchy"
+        case (.notApplicable, .callers), (.notApplicable, .calls):
+            "Exact unavailable here: not a callable symbol"
+        case (.queried, .callers):
+            "Exact (0): no callers"
+        case (.queried, .calls):
+            "Exact (0): no calls"
+        case (.unsupported, .implementations):
+            "Exact unavailable: server does not support implementations"
+        case (.queried, .implementations):
+            "Exact (0): no implementations"
+        case (.notApplicable, .implementations):
+            "Exact (0): no implementations"
+        case (.legacy, _):
+            "Exact (0)"
+        }
     }
 
     private func makeGroup(
@@ -429,22 +646,32 @@ public final class RelationTreeModel {
         )
         let ancestorKeys = cycleKeys(from: parent)
         group.children = edges.map { edge in
-            let identity: String
-            if let symbol = edge.symbol,
-               symbol.localKind == .declarationFacet
-            {
-                identity = "facet:\(symbol.localIndex)"
+            let identity: Node.ExpansionIdentity? = if let item = edge.exactItem {
+                .exact(item)
+            } else if let symbol = edge.symbol {
+                .engine(symbol)
             } else {
-                identity = "byte:\(edge.byteOffset)"
+                nil
             }
-            let cycleKey = CycleKey(
-                path: edge.path,
-                identity: identity
+            let cycleKey = Self.cycleKey(
+                path: edge.identityTarget?.file ?? edge.path,
+                byteOffset: edge.identityTarget?.byteOffset ?? edge.byteOffset
             )
             let isCycle = ancestorKeys.contains(cycleKey)
-            let canExpand = !isCycle && edge.symbol.map {
-                Self.canExpand($0, direction: direction, session: session)
-            } == true
+            let canExpand = !isCycle && {
+                switch identity {
+                case .exact:
+                    return direction != .implementations
+                case .engine(let symbol):
+                    return Self.canExpand(
+                        symbol,
+                        direction: direction,
+                        session: session
+                    )
+                case nil:
+                    return false
+                }
+            }()
             let badge: String?
             if edge.certainty == .exact {
                 var value = "Exact · lsp"
@@ -456,7 +683,9 @@ public final class RelationTreeModel {
             } else {
                 badge = isCycle ? "↻" : nil
             }
-            var subtitle = if edge.certainty == .unresolved {
+            var subtitle = if edge.certainty == .exact {
+                "Exact"
+            } else if edge.certainty == .unresolved {
                 edge.exactOrigin == nil
                     ? "Unresolved"
                     : "External · in dependency (rust-analyzer)"
@@ -473,6 +702,16 @@ public final class RelationTreeModel {
             {
                 subtitle += " · name match only"
             }
+            if edge.alsoHeuristic {
+                subtitle += " · heuristic also matched"
+            }
+            if !edge.callSites.isEmpty {
+                subtitle += " · \(edge.callSites.count) call "
+                    + (edge.callSites.count == 1 ? "site" : "sites")
+            }
+            if isCycle {
+                subtitle += " · Already expanded"
+            }
             let node = Node(
                 kind: .edge,
                 title: edge.title,
@@ -484,8 +723,14 @@ public final class RelationTreeModel {
                 isExpandable: canExpand,
                 parent: group,
                 symbol: edge.symbol,
+                expansionIdentity: identity,
                 evidence: edge.evidence,
-                cycleKey: cycleKey
+                cycleKey: cycleKey,
+                queryTarget: (
+                    edge.identityTarget?.file ?? edge.path,
+                    edge.identityTarget?.byteOffset ?? edge.byteOffset
+                ),
+                callSites: edge.callSites
             )
             if !canExpand {
                 node.children = evidenceNodes(edge.evidence, parent: node)
@@ -503,6 +748,89 @@ public final class RelationTreeModel {
             current = item.parent
         }
         return result
+    }
+
+    private nonisolated static func cycleKey(
+        path: String,
+        byteOffset: UInt32
+    ) -> CycleKey {
+        CycleKey(
+            path: normalizedPath(path),
+            identity: "selection:\(byteOffset)"
+        )
+    }
+
+    private nonisolated static func relationKey(_ edge: LoadedEdge) -> CycleKey? {
+        let target = edge.identityTarget ?? (
+            file: edge.path,
+            byteOffset: edge.byteOffset
+        )
+        return cycleKey(path: target.file, byteOffset: target.byteOffset)
+    }
+
+    private nonisolated static func deduplicateExact(
+        _ edges: [LoadedEdge]
+    ) -> [LoadedEdge] {
+        var result: [LoadedEdge] = []
+        var indexes: [CycleKey: Int] = [:]
+        for edge in edges {
+            guard let key = relationKey(edge) else {
+                result.append(edge)
+                continue
+            }
+            if let index = indexes[key] {
+                var existingCallSites = Set(result[index].callSites.map {
+                    CycleKey(
+                        path: normalizedPath($0.file),
+                        identity: "selection:\($0.byteOffset)"
+                    )
+                })
+                result[index].callSites += edge.callSites.filter {
+                    existingCallSites.insert(CycleKey(
+                        path: normalizedPath($0.file),
+                        identity: "selection:\($0.byteOffset)"
+                    )).inserted
+                }
+            } else {
+                indexes[key] = result.count
+                result.append(edge)
+            }
+        }
+        return result
+    }
+
+    private nonisolated static func normalizedPath(_ path: String) -> String {
+        if path.hasPrefix("/") {
+            return URL(fileURLWithPath: path).standardizedFileURL.path
+        }
+        return NSString(string: path).standardizingPath
+    }
+
+    private nonisolated static func locationTitle(_ location: ExactLocation) -> String {
+        "\(URL(fileURLWithPath: location.file).lastPathComponent):\(location.line)"
+    }
+
+    private nonisolated static func symbol(
+        at location: ExactLocation,
+        in session: EngineSession
+    ) -> SymbolOccurrenceID? {
+        guard let offset = UInt32(exactly: location.byteOffset),
+              let file = session.manifest.files.first(where: {
+                  normalizedPath(session.paths.resolve($0.pathID))
+                      == normalizedPath(location.file)
+              }),
+              let index = contentIndex(at: file.pathID, in: session),
+              let facetIndex = index.symbols.firstIndex(where: {
+                  $0.nameRange.lowerBound == offset
+                      || $0.nameRange.contains(offset)
+              })
+        else { return nil }
+        return SymbolOccurrenceID(
+            snapshotID: session.snapshotID,
+            pathID: file.pathID,
+            localKind: .declarationFacet,
+            localIndex: UInt32(facetIndex)
+        )
     }
 
     private func evidenceNodes(
@@ -532,7 +860,7 @@ public final class RelationTreeModel {
             let fuzzyTarget = location(for: symbol, in: session)
             let callers = try session.callers(of: name, context: context)
             return LoadResult(
-                edges: callers.compactMap { caller in
+                edges: callers.compactMap { caller -> LoadedEdge? in
                     guard let location = location(for: caller.callSite, in: session)
                     else { return nil }
                     let callerSymbol = caller.region.associatedFacetIndex.map {
@@ -542,6 +870,9 @@ public final class RelationTreeModel {
                             localKind: .declarationFacet,
                             localIndex: $0
                         )
+                    }
+                    let callerTarget = callerSymbol.flatMap {
+                        Self.location(for: $0, in: session)
                     }
                     return LoadedEdge(
                         title: caller.associatedFacet.map {
@@ -559,7 +890,10 @@ public final class RelationTreeModel {
                             location.byteOffset,
                             location.line
                         ),
-                        fuzzyTarget: fuzzyTarget.map { ($0.path, $0.byteOffset) }
+                        fuzzyTarget: fuzzyTarget.map { ($0.path, $0.byteOffset) },
+                        identityTarget: callerTarget.map {
+                            ($0.path, $0.byteOffset)
+                        }
                     )
                 },
                 isTruncated: callers.contains { isTruncated($0.completeness) }

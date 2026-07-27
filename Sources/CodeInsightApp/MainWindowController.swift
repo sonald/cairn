@@ -587,6 +587,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestExactGroupRowCount: Int {
         relationController.selfTestExactGroupRowCount
     }
+    var selfTestExactGroupFrame: NSRect {
+        relationController.selfTestExactGroupFrame
+    }
+    var selfTestHeuristicGroupFrame: NSRect {
+        relationController.selfTestHeuristicGroupFrame
+    }
+    var selfTestRelationsVisibleRect: NSRect {
+        relationController.selfTestRelationsVisibleRect
+    }
+    var selfTestExactGroupVisibleWithGeometry: Bool {
+        relationController.selfTestExactGroupVisibleWithGeometry
+    }
+    var selfTestExactAndHeuristicGroupsDoNotOverlap: Bool {
+        relationController.selfTestExactAndHeuristicGroupsDoNotOverlap
+    }
     var selfTestExternalGroupTitle: String? {
         relationController.selfTestExternalGroupTitle
     }
@@ -601,6 +616,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             titled: title,
             inGroup: titlePrefix
         )
+    }
+    func selfTestExpandRelationEdge(titled title: String) -> Bool {
+        relationController.selfTestExpandEdge(titled: title)
+    }
+    func selfTestVisibleRelationChildEdgeTitles(ofEdge title: String) -> [String] {
+        relationController.selfTestVisibleChildEdgeTitles(ofEdge: title)
     }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }

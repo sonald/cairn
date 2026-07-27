@@ -53,8 +53,47 @@ private struct CodeInsightApplication {
             let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
             let target = exactSelfTestTarget(root: fixtureRoot)
             let providerState = ExactSelfTestProviderState()
+            let rootItem = target.map {
+                exactSelfTestCallItem(
+                    name: "answer",
+                    uri: $0.relationFile,
+                    location: $0.definition
+                )
+            }
+            let callerItem = target.map {
+                exactSelfTestCallItem(
+                    name: "exact_dependency_caller",
+                    uri: $0.dependencyFile,
+                    location: $0.dependencyDefinition
+                )
+            }
             let provider = InProcessExactProvider(
                 location: target?.definition,
+                capabilities: [.definition, .implementations, .callHierarchy],
+                implementationLocations: target.map { [$0.dependencyDefinition] },
+                callHierarchyItems: rootItem.map { [$0] },
+                incomingRelations: callerItem.map {
+                    [ExactCallRelation(
+                        item: $0,
+                        callSites: [
+                            ExactLocation(
+                                file: "src/lib.rs",
+                                byteOffset: Int(target?.relationCallOffset ?? 0),
+                                line: 1,
+                                column: 1
+                            ),
+                            ExactLocation(
+                                file: "src/lib.rs",
+                                byteOffset: Int(target?.relationCallOffset ?? 0) + 1,
+                                line: 1,
+                                column: 2
+                            ),
+                        ]
+                    )]
+                },
+                outgoingRelations: callerItem.map {
+                    [ExactCallRelation(item: $0, callSites: [])]
+                },
                 externalFile: "src/lib.rs",
                 externalOffset: target.flatMap(\.externalCallOffset).map(Int.init),
                 externalLocation: target?.dependencyDefinition,
@@ -1854,7 +1893,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 } == false
         })
         exactSelfTestProviderState?.blockNextDefinition()
+        exactSelfTestProviderState?.blockNextRelation()
         let oldGeneration = model.generation
+        if featureProbeFileVisible,
+           let signatureTraitOffset = target.signatureTraitOffset
+        {
+            windowController.selfTestReaderRelation(
+                offset: signatureTraitOffset,
+                direction: .calls
+            )
+        }
         if featureProbeFileVisible {
             windowController.selfTestReaderClick(
                 offset: target.relationCallOffset,
@@ -1863,6 +1911,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let oldGenerationRequestInFlight = waitUntil(timeout: 5, condition: {
             exactSelfTestProviderState?.definitionIsBlocked == true
+                && exactSelfTestProviderState?.relationIsBlocked == true
                 && windowController.selfTestContextCandidateCount >= 1
                 && windowController.selfTestContextProvenance?
                     .contains("Exact") == false
@@ -1883,10 +1932,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             && windowController.selfTestContextProvenance?
                 .contains("Exact") == false
         exactSelfTestProviderState?.releaseBlockedDefinition()
+        exactSelfTestProviderState?.releaseBlockedRelation()
         let oldGenerationResultReturned = waitUntil(timeout: 5, condition: {
             exactSelfTestProviderState?.blockedDefinitionReturned == true
         })
+        let oldGenerationRelationResultReturned = waitUntil(
+            timeout: 5,
+            condition: {
+                exactSelfTestProviderState?.blockedRelationReturned == true
+            }
+        )
         let oldGenerationResultDiscarded = oldGenerationResultReturned
+            && oldGenerationRelationResultReturned
             && model.generation == oldGeneration + 1
             && windowController.selfTestContextProvenance?
                 .contains("Exact") == false
@@ -1941,6 +1998,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "fuzzyAfterSwitch": fuzzyAfterSwitch,
                 "oldGenerationRequestInFlight": oldGenerationRequestInFlight,
                 "oldGenerationResultReturned": oldGenerationResultReturned,
+                "oldGenerationRelationResultReturned":
+                    oldGenerationRelationResultReturned,
                 "oldGenerationResultDiscarded": oldGenerationResultDiscarded,
                 "relationActiveBeforeSwitch": featureRelationActiveBeforeSwitch,
                 "relationRestoredAfterSwitch":
@@ -1980,6 +2039,35 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
             && windowController.selfTestExactStatusVisible
+        let exactCallerVisible = windowController.selfTestVisibleRelationEdgeTitles(
+            inGroup: "Exact"
+        ).contains("exact_dependency_caller")
+        let exactCallerCallSitesHonest =
+            windowController.selfTestVisibleRelationEdgeSubtitle(
+                titled: "exact_dependency_caller",
+                inGroup: "Exact"
+            )?.contains("2 call sites") == true
+        let exactOnlyExpansionStarted = exactCallerVisible
+            && windowController.selfTestExpandRelationEdge(
+                titled: "exact_dependency_caller"
+            )
+        let exactOnlySecondLevelVisible = exactOnlyExpansionStarted
+            && waitUntil(timeout: 5, condition: {
+                windowController.selfTestVisibleRelationChildEdgeTitles(
+                    ofEdge: "exact_dependency_caller"
+                ).contains("exact_dependency_caller")
+            })
+        let exactGroupVisibleWithGeometry =
+            windowController.selfTestExactGroupVisibleWithGeometry
+        let exactAndHeuristicGroupsDoNotOverlap =
+            windowController.selfTestExactAndHeuristicGroupsDoNotOverlap
+        let exactRelationsFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        }
+        let exactRelationsFootprintBelowBudget =
+            exactRelationsFootprintMB.map {
+                $0 < SelfTestBudgets.idleFootprintMB
+            } == true
         emitExactStep(
             "relations",
             variant: "fake",
@@ -1987,8 +2075,48 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extra: [
                 "contextAndRelationsReadyMS": contextAndRelationsReadyMS,
                 "extracted": reprofileExtracted,
+                "exactCallerVisible": exactCallerVisible,
+                "exactCallerCallSitesHonest": exactCallerCallSitesHonest,
+                "exactOnlyExpansionStarted": exactOnlyExpansionStarted,
+                "exactOnlySecondLevelVisible": exactOnlySecondLevelVisible,
+                "exactGroupFrame": NSStringFromRect(
+                    windowController.selfTestExactGroupFrame
+                ),
+                "heuristicGroupFrame": NSStringFromRect(
+                    windowController.selfTestHeuristicGroupFrame
+                ),
+                "relationsVisibleRect": NSStringFromRect(
+                    windowController.selfTestRelationsVisibleRect
+                ),
+                "footprintMB": exactRelationsFootprintMB.map { $0 as Any }
+                    ?? NSNull(),
             ]
         )
+
+        if relationFileVisible, let signatureTraitOffset = target.signatureTraitOffset {
+            windowController.selfTestReaderRelation(
+                offset: signatureTraitOffset,
+                direction: .implementations
+            )
+        }
+        let exactImplementationsVisible = waitUntil(timeout: 5, condition: {
+            model.relationTree.direction == .implementations
+                && windowController.selfTestExactGroupRowCount > 0
+        })
+        emitExactStep(
+            "relation-exact-implementations",
+            variant: "fake",
+            controller: windowController
+        )
+        windowController.selfTestReaderRelation(
+            offset: target.relationCallOffset,
+            direction: .callers
+        )
+        let exactCallersRestored = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "answer"
+                && model.relationTree.direction == .callers
+                && windowController.selfTestExactGroupRowCount > 0
+        })
 
         windowController.selfTestSetContextPinned(true)
         let pinnedStable = waitUntil(timeout: 5, condition: {
@@ -2352,6 +2480,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "pinnedTargetStable": pinnedStable,
             "exactGroupVisible": exactGroupVisible,
             "exactGroupHeaderHonest": exactGroupHeaderHonest,
+            "exactCallerVisible": exactCallerVisible,
+            "exactCallerCallSitesHonest": exactCallerCallSitesHonest,
+            "exactOnlyExpansionStarted": exactOnlyExpansionStarted,
+            "exactOnlySecondLevelVisible": exactOnlySecondLevelVisible,
+            "exactImplementationsVisible": exactImplementationsVisible,
+            "exactCallersRestored": exactCallersRestored,
+            "exactGroupVisibleWithGeometry": exactGroupVisibleWithGeometry,
+            "exactAndHeuristicGroupsDoNotOverlap":
+                exactAndHeuristicGroupsDoNotOverlap,
+            "exactRelationsFootprintBelowBudget":
+                exactRelationsFootprintBelowBudget,
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
             "initialProfileVisible": initialProfileVisible,
@@ -2365,6 +2504,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 oldGenerationRequestInFlight,
             "featureOldGenerationResultReturned":
                 oldGenerationResultReturned,
+            "featureOldGenerationRelationResultReturned":
+                oldGenerationRelationResultReturned,
             "featureOldGenerationResultDiscarded":
                 oldGenerationResultDiscarded,
             "featureRelationActiveBeforeSwitch":
@@ -4573,6 +4714,10 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         guard negotiatedCapabilities.contains(.callHierarchy) else {
             return nil
         }
+        let wasBlocked = state?.waitIfRelationIsBlocked() == true
+        defer {
+            if wasBlocked { state?.recordBlockedRelationReturned() }
+        }
         return incomingRelations
     }
 
@@ -4581,6 +4726,10 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     ) throws -> [ExactCallRelation]? {
         guard negotiatedCapabilities.contains(.callHierarchy) else {
             return nil
+        }
+        let wasBlocked = state?.waitIfRelationIsBlocked() == true
+        defer {
+            if wasBlocked { state?.recordBlockedRelationReturned() }
         }
         return outgoingRelations
     }
@@ -4601,6 +4750,10 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
     private var shouldBlockNextDefinition = false
     private var blockedDefinition = false
     private var didReturnBlockedDefinition = false
+    private let relationCondition = NSCondition()
+    private var shouldBlockNextRelation = false
+    private var blockedRelation = false
+    private var didReturnBlockedRelation = false
 
     var root: URL? {
         get {
@@ -4643,6 +4796,18 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
         definitionCondition.lock()
         defer { definitionCondition.unlock() }
         return didReturnBlockedDefinition
+    }
+
+    var relationIsBlocked: Bool {
+        relationCondition.lock()
+        defer { relationCondition.unlock() }
+        return blockedRelation
+    }
+
+    var blockedRelationReturned: Bool {
+        relationCondition.lock()
+        defer { relationCondition.unlock() }
+        return didReturnBlockedRelation
     }
 
     func recordPrepare(
@@ -4695,6 +4860,43 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
         didReturnBlockedDefinition = true
         definitionCondition.broadcast()
         definitionCondition.unlock()
+    }
+
+    func blockNextRelation() {
+        relationCondition.lock()
+        shouldBlockNextRelation = true
+        blockedRelation = false
+        didReturnBlockedRelation = false
+        relationCondition.unlock()
+    }
+
+    func waitIfRelationIsBlocked() -> Bool {
+        relationCondition.lock()
+        guard shouldBlockNextRelation else {
+            relationCondition.unlock()
+            return false
+        }
+        shouldBlockNextRelation = false
+        blockedRelation = true
+        relationCondition.broadcast()
+        while blockedRelation { relationCondition.wait() }
+        relationCondition.unlock()
+        return true
+    }
+
+    func releaseBlockedRelation() {
+        relationCondition.lock()
+        shouldBlockNextRelation = false
+        blockedRelation = false
+        relationCondition.broadcast()
+        relationCondition.unlock()
+    }
+
+    func recordBlockedRelationReturned() {
+        relationCondition.lock()
+        didReturnBlockedRelation = true
+        relationCondition.broadcast()
+        relationCondition.unlock()
     }
 
     func recordClose(ordinal: Int) {
@@ -4814,6 +5016,21 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
         typedReceiverRootOffset: typedReceiverRootOffset,
         inferredReceiverRootOffset: inferredReceiverRootOffset,
         traitObjectReceiverRootOffset: traitObjectReceiverRootOffset
+    )
+}
+
+private func exactSelfTestCallItem(
+    name: String,
+    uri: URL,
+    location: ExactLocation
+) -> ExactCallHierarchyItem {
+    ExactCallHierarchyItem(
+        name: name,
+        kind: 12,
+        uri: uri.absoluteString,
+        range: location,
+        selectionRange: location,
+        data: nil
     )
 }
 

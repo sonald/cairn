@@ -47,6 +47,35 @@ final class RelationWindowController: NSViewController,
         return group.children?.filter { outlineView.row(forItem: $0) >= 0 }.count ?? 0
     }
 
+    var selfTestExactGroupFrame: NSRect {
+        selfTestGroupFrame(titlePrefix: "Exact")
+    }
+
+    var selfTestHeuristicGroupFrame: NSRect {
+        selfTestGroupFrame(titlePrefix: "Strong")
+    }
+
+    var selfTestRelationsVisibleRect: NSRect {
+        guard isViewLoaded else { return .zero }
+        return scrollView.contentView.documentVisibleRect
+    }
+
+    var selfTestExactGroupVisibleWithGeometry: Bool {
+        let frame = selfTestExactGroupFrame
+        return !scrollView.isHidden
+            && frame.width > 0
+            && frame.height > 0
+            && selfTestRelationsVisibleRect.contains(frame)
+    }
+
+    var selfTestExactAndHeuristicGroupsDoNotOverlap: Bool {
+        let exact = selfTestExactGroupFrame
+        let heuristic = selfTestHeuristicGroupFrame
+        return exact.width > 0
+            && heuristic.width > 0
+            && exact.intersection(heuristic).isEmpty
+    }
+
     var selfTestExternalGroupTitle: String? {
         guard let row = selfTestGroupRow(titlePrefix: "External / Unresolved"),
               let cell = outlineView.view(
@@ -100,6 +129,41 @@ final class RelationWindowController: NSViewController,
         return false
     }
 
+    func selfTestExpandEdge(titled title: String) -> Bool {
+        guard isViewLoaded else { return false }
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
+                  node.kind == .edge,
+                  node.title == title,
+                  node.isExpandable
+            else { continue }
+            outlineView.expandItem(node)
+            return true
+        }
+        return false
+    }
+
+    func selfTestVisibleChildEdgeTitles(ofEdge title: String) -> [String] {
+        guard isViewLoaded else { return [] }
+        for row in 0..<outlineView.numberOfRows {
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
+                  node.kind == .edge,
+                  node.title == title
+            else { continue }
+            var result: [String] = []
+            for group in node.children ?? [] where group.kind == .group {
+                for child in group.children ?? []
+                    where child.kind == .edge
+                        && outlineView.row(forItem: child) >= 0
+                {
+                    result.append(child.title)
+                }
+            }
+            return result
+        }
+        return []
+    }
+
     func selfTestDeselect() {
         guard isViewLoaded else { return }
         outlineView.selectRowIndexes([], byExtendingSelection: false)
@@ -127,6 +191,13 @@ final class RelationWindowController: NSViewController,
             else { return false }
             return node.kind == .group && node.title.hasPrefix(titlePrefix)
         }
+    }
+
+    private func selfTestGroupFrame(titlePrefix: String) -> NSRect {
+        guard let row = selfTestGroupRow(titlePrefix: titlePrefix) else {
+            return .zero
+        }
+        return outlineView.rect(ofRow: row)
     }
 
     init(model: RelationTreeModel) {
@@ -212,6 +283,11 @@ final class RelationWindowController: NSViewController,
         view = container
         render()
         observe()
+    }
+
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        fitOutlineWidthToVisibleRect()
     }
 
     func setRoot(
@@ -371,6 +447,7 @@ final class RelationWindowController: NSViewController,
     private func reloadWholeTree() {
         guard isViewLoaded else { return }
         outlineView.reloadData()
+        fitOutlineWidthToVisibleRect()
         if let root = model.root { outlineView.expandItem(root) }
         let isEmpty = model.root == nil
         placeholderLabel.isHidden = !isEmpty
@@ -382,6 +459,16 @@ final class RelationWindowController: NSViewController,
         for child in node.children ?? [] where child.kind == .group {
             outlineView.expandItem(child)
         }
+        fitOutlineWidthToVisibleRect()
+    }
+
+    private func fitOutlineWidthToVisibleRect() {
+        let width = scrollView.contentView.documentVisibleRect.width
+        guard width > 0, outlineView.frame.width != width else { return }
+        outlineView.setFrameSize(NSSize(
+            width: width,
+            height: outlineView.frame.height
+        ))
     }
 
     private func segment(for direction: RelationTreeModel.Direction) -> Int {

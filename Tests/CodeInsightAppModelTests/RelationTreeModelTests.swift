@@ -1,9 +1,372 @@
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
+import CodeInsightGit
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
+
+@MainActor
+@Test
+func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    try "[package]\nname='relation-test'\nversion='0.1.0'\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let session = RelationHierarchyExactSession()
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in RelationHierarchyExactProvider(session: session) },
+        snapshotFactory: { _, _ in
+            RelationExactSnapshot(files: [
+                "Cargo.toml": "[package]\nname='relation-test'\nversion='0.1.0'\n",
+                "main.rs": "fn a() {}\nfn b() {}\n",
+            ])
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: fixture.root.appendingPathComponent("trust.json")
+        )
+    )
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        generation: fixture.context.generation
+    )
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    let model = RelationTreeModel()
+    model.attachExactCoordinator(coordinator)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .callers)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let exact = try relationGroup("Exact", in: model.root)
+    let dependencyCaller = try #require(exact.children?.first)
+
+    #expect(dependencyCaller.symbol == nil)
+    #expect(dependencyCaller.isExpandable)
+    await model.expand(dependencyCaller)
+    let secondLevel = try relationGroup("Exact", in: dependencyCaller)
+    #expect(secondLevel.children?.map(\.title) == ["top_level_caller"])
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsAStaleCallHierarchyResult() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    try "[package]\nname='relation-test'\nversion='0.1.0'\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let session = RelationHierarchyExactSession(blockIncoming: true)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in RelationHierarchyExactProvider(session: session) },
+        snapshotFactory: { _, _ in
+            RelationExactSnapshot(files: [
+                "Cargo.toml": "[package]\nname='relation-test'\nversion='0.1.0'\n",
+                "main.rs": "fn a() {}\nfn b() {}\n",
+            ])
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: fixture.root.appendingPathComponent("trust.json")
+        )
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .callers,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { session.incomingStarted })
+    coordinator.invalidate(generation: 2)
+    session.releaseIncoming()
+
+    #expect(await request.value == nil)
+    #expect(coordinator.readiness == .preparing)
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    try "[package]\nname='relation-test'\nversion='0.1.0'\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let blocked = RelationHierarchyExactSession(blockIncoming: true)
+    let replacement = RelationHierarchyExactSession()
+    let provider = RelationRotatingExactProvider(
+        sessions: [blocked, replacement]
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in provider },
+        snapshotFactory: { _, _ in
+            RelationExactSnapshot(files: [
+                "Cargo.toml": "[package]\nname='relation-test'\nversion='0.1.0'\n",
+                "main.rs": "fn a() {}\nfn b() {}\n",
+            ])
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: fixture.root.appendingPathComponent("trust.json")
+        )
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && provider.prepareCount == 1
+    })
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .callers,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { blocked.incomingStarted })
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && provider.prepareCount == 2
+    })
+    blocked.releaseIncoming()
+
+    #expect(await request.value == nil)
+    #expect(coordinator.readiness == .ready)
+}
+
+@MainActor
+@Test
+func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let index = try #require(relationContentIndex(at: fixture.b.pathID, in: fixture.session))
+    let bFacet = index.symbols[Int(fixture.b.localIndex)]
+    let targetOffset = bFacet.nameRange.lowerBound
+    let item = relationCallItem(name: "b", file: "main.rs", offset: Int(targetOffset))
+    let callSites = [
+        relationExactLocation(file: "main.rs", offset: 4),
+        relationExactLocation(file: "main.rs", offset: 8),
+    ]
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [
+                .init(
+                    title: "b",
+                    certainty: .strong,
+                    dispatch: .direct,
+                    symbol: fixture.b,
+                    path: "main.rs",
+                    byteOffset: targetOffset,
+                    line: 1,
+                    evidence: [],
+                    identityTarget: ("main.rs", targetOffset)
+                ),
+            ], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in
+            .relations([
+                .init(
+                    name: "b",
+                    location: item.selectionRange,
+                    item: item,
+                    callSites: callSites
+                ),
+            ], origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .calls)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let exact = try relationGroup("Exact", in: model.root)
+    let strong = try relationGroup("Strong", in: model.root)
+    let edge = try #require(exact.children?.first)
+
+    #expect(exact.children?.count == 1)
+    #expect(strong.children?.isEmpty == true)
+    #expect(edge.subtitle == "Exact · heuristic also matched · 2 call sites")
+    var selectedOffsets: [UInt32] = []
+    model.onSelect = { selectedOffsets.append($0.target?.byteOffset ?? .max) }
+    model.select(edge)
+    model.select(edge)
+    model.select(edge)
+    #expect(selectedOffsets == [4, 8, 4])
+}
+
+@MainActor
+@Test
+func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let index = try #require(relationContentIndex(at: fixture.a.pathID, in: fixture.session))
+    let aOffset = index.symbols[Int(fixture.a.localIndex)].nameRange.lowerBound
+    let bOffset = index.symbols[Int(fixture.b.localIndex)].nameRange.lowerBound
+    let a = relationCallItem(name: "a", file: "main.rs", offset: Int(aOffset))
+    let b = relationCallItem(name: "b", file: "main.rs", offset: Int(bOffset))
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, item, _, _ in
+            let relation = item?.name == "b"
+                ? ExactCoordinator.Relation(
+                    name: "a",
+                    location: a.selectionRange,
+                    item: a,
+                    callSites: []
+                )
+                : ExactCoordinator.Relation(
+                    name: "b",
+                    location: b.selectionRange,
+                    item: b,
+                    callSites: []
+                )
+            return .relations([relation], origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .callers)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let first = try #require(
+        try relationGroup("Exact", in: model.root).children?.first
+    )
+    await model.expand(first)
+    let cycle = try #require(
+        try relationGroup("Exact", in: first).children?.first
+    )
+
+    #expect(cycle.title == "a")
+    #expect(cycle.subtitle == "Exact · Already expanded")
+    #expect(!cycle.isExpandable)
+}
+
+@MainActor
+@Test
+func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let callersUnsupported = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .callers,
+        result: .unsupported
+    )
+    let callersNotApplicable = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .callers,
+        result: .notApplicable
+    )
+    let callersEmpty = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .callers,
+        result: .relations([], origin: .worktree)
+    )
+
+    let traitRoot = try relationTemporaryProject([
+        "main.rs": "trait Render { fn render(&self); }",
+    ])
+    defer { try? FileManager.default.removeItem(at: traitRoot) }
+    let traitSession = try ProjectIndexer().index(root: traitRoot)
+    let traitContext = relationQueryContext(for: traitSession)
+    let trait = try #require(
+        traitSession.definitions(of: "Render", context: traitContext).first?.0
+    )
+    let implementationsUnsupported = try await relationExactEmptyTitle(
+        session: traitSession,
+        context: traitContext,
+        symbol: trait,
+        direction: .implementations,
+        result: .unsupported
+    )
+    let implementationsEmpty = try await relationExactEmptyTitle(
+        session: traitSession,
+        context: traitContext,
+        symbol: trait,
+        direction: .implementations,
+        result: .relations([], origin: .worktree)
+    )
+
+    #expect(callersUnsupported
+        == "Exact unavailable: server does not support call hierarchy")
+    #expect(callersNotApplicable
+        == "Exact unavailable here: not a callable symbol")
+    #expect(callersEmpty == "Exact (0): no callers")
+    #expect(implementationsUnsupported
+        == "Exact unavailable: server does not support implementations")
+    #expect(implementationsEmpty == "Exact (0): no implementations")
+    #expect(Set([
+        callersUnsupported,
+        callersNotApplicable,
+        callersEmpty,
+        implementationsUnsupported,
+        implementationsEmpty,
+    ]).count == 5)
+}
+
+@MainActor
+@Test
+func relationTreeShowsExactOnlyImplementations() async throws {
+    let root = try relationTemporaryProject([
+        "main.rs": "trait Render { fn render(&self); }",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let trait = try #require(
+        session.definitions(of: "Render", context: context).first?.0
+    )
+    let dependency = relationExactLocation(
+        file: "/dependency/src/view.rs",
+        offset: 40
+    )
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in
+            .relations([
+                .init(
+                    name: nil,
+                    location: dependency,
+                    item: nil,
+                    callSites: []
+                ),
+            ], origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(session, context))
+
+    model.setRoot(symbol: trait, direction: .implementations)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    let exact = try relationGroup("Exact", in: model.root)
+
+    #expect(exact.children?.map(\.title) == ["view.rs:1"])
+    #expect(exact.children?.first?.target?.path == dependency.file)
+    #expect(exact.children?.first?.symbol == nil)
+}
 
 @MainActor
 @Test
@@ -685,7 +1048,42 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     let strong = try relationGroup("Strong", in: model.root)
     #expect(strong.children?.count == 500)
     #expect(model.root?.children?.last?.kind == .truncated)
+    #expect(model.root?.children?.last?.title
+        == "Showing first 500 of 501 relations")
     #expect(model.hasTruncatedResults)
+}
+
+@MainActor
+@Test
+func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let relations = (0...500).map {
+        ExactCoordinator.Relation(
+            name: "exact-\($0)",
+            location: relationExactLocation(file: "dependency.rs", offset: $0),
+            item: nil,
+            callSites: []
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in
+            .relations(relations, origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(symbol: fixture.a, direction: .callers)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+
+    let exact = try relationGroup("Exact", in: model.root)
+    #expect(exact.children?.count == 500)
+    #expect(model.root?.children?.last?.kind == .truncated)
+    #expect(model.root?.children?.last?.title
+        == "Showing first 500 of 501 relations")
 }
 
 @MainActor
@@ -744,6 +1142,189 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
 
 private enum RelationTestError: Error {
     case expected
+}
+
+private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Sendable {
+    let capabilities: ExactCapabilities = [.callHierarchy]
+    let toolVersion = "relation-hierarchy-fake-1"
+    private let session: RelationHierarchyExactSession
+
+    init(session: RelationHierarchyExactSession) {
+        self.session = session
+    }
+
+    func prepare(
+        snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        trustMode: TrustMode
+    ) throws -> any ExactSession {
+        session.attribution = ExactAttribution(
+            provider: "relation-hierarchy-fake",
+            toolVersion: toolVersion,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint,
+            featureSelection: profile.featureSelection,
+            trustMode: trustMode,
+            generatedAt: Date(timeIntervalSince1970: 0),
+            coverage: .full
+        )
+        return session
+    }
+}
+
+private final class RelationRotatingExactProvider: ExactProvider, @unchecked Sendable {
+    let capabilities: ExactCapabilities = [.callHierarchy]
+    let toolVersion = "relation-rotating-fake-1"
+    private let lock = NSLock()
+    private let sessions: [RelationHierarchyExactSession]
+    private var nextSession = 0
+
+    init(sessions: [RelationHierarchyExactSession]) {
+        self.sessions = sessions
+    }
+
+    var prepareCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return nextSession
+    }
+
+    func prepare(
+        snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        trustMode: TrustMode
+    ) throws -> any ExactSession {
+        lock.lock()
+        let index = min(nextSession, sessions.count - 1)
+        nextSession += 1
+        let session = sessions[index]
+        lock.unlock()
+        session.attribution = ExactAttribution(
+            provider: "relation-rotating-fake",
+            toolVersion: toolVersion,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint,
+            featureSelection: profile.featureSelection,
+            trustMode: trustMode,
+            generatedAt: Date(timeIntervalSince1970: 0),
+            coverage: .full
+        )
+        return session
+    }
+}
+
+private final class RelationHierarchyExactSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities = [.callHierarchy]
+    let readiness: ExactReadiness = .ready
+    var attribution = relationExactAttribution()
+    private let condition = NSCondition()
+    private var blockIncoming: Bool
+    private var didStartIncoming = false
+
+    private let root = relationCallItem(name: "a", file: "main.rs", offset: 3)
+    private let dependency = relationCallItem(
+        name: "dependency_caller",
+        file: "/dependency/src/lib.rs",
+        offset: 10
+    )
+    private let top = relationCallItem(
+        name: "top_level_caller",
+        file: "/dependency/src/top.rs",
+        offset: 20
+    )
+
+    init(blockIncoming: Bool = false) {
+        self.blockIncoming = blockIncoming
+    }
+
+    var incomingStarted: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return didStartIncoming
+    }
+
+    func definition(file: String, byteOffset: Int) throws -> ExactLocation? { nil }
+
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        [root]
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        condition.lock()
+        if blockIncoming {
+            didStartIncoming = true
+            condition.broadcast()
+            while blockIncoming { condition.wait() }
+        }
+        condition.unlock()
+        return switch item.name {
+        case root.name:
+            [ExactCallRelation(
+                item: dependency,
+                callSites: [relationExactLocation(file: "main.rs", offset: 5)]
+            )]
+        case dependency.name:
+            [ExactCallRelation(
+                item: top,
+                callSites: [relationExactLocation(
+                    file: "/dependency/src/lib.rs",
+                    offset: 30
+                )]
+            )]
+        default:
+            []
+        }
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        []
+    }
+
+    func cancel() {}
+    func close() {}
+
+    func releaseIncoming() {
+        condition.lock()
+        blockIncoming = false
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
+private final class RelationExactSnapshot: Snapshot, @unchecked Sendable {
+    let snapshotID = SnapshotID(rawValue: UUID())
+    let objectFormat = GitObjectFormat.sha1
+    let sourceKind = SourceKind.untracked
+    private let files: [String: [UInt8]]
+
+    init(files: [String: String]) {
+        self.files = files.mapValues { Array($0.utf8) }
+    }
+
+    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+        files.keys.sorted().map { path in
+            (path, ContentID.sha256(of: files[path]!), .regular)
+        }
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        guard let bytes = files[path] else { throw RelationTestError.expected }
+        return bytes
+    }
 }
 
 private actor FakeRelationLoader {
@@ -823,6 +1404,17 @@ private func relationWaitUntil(
 }
 
 @MainActor
+private func relationWaitUntilSlow(
+    _ condition: @escaping @MainActor () async -> Bool
+) async -> Bool {
+    for _ in 0..<200 {
+        if await condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return false
+}
+
+@MainActor
 private func relationTreeFinishedLoading(_ root: RelationTreeModel.Node?) -> Bool {
     guard let children = root?.children else { return false }
     return !children.contains { $0.kind == .loading }
@@ -836,6 +1428,28 @@ private func relationGroup(
     try #require(parent?.children?.first {
         $0.kind == .group && $0.title == title
     })
+}
+
+@MainActor
+private func relationExactEmptyTitle(
+    session: EngineSession,
+    context: QueryContext,
+    symbol: SymbolOccurrenceID,
+    direction: RelationTreeModel.Direction,
+    result: ExactCoordinator.RelationQueryResult
+) async throws -> String {
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in result }
+    )
+    model.updateProjectState(.ready(session, context))
+    model.setRoot(symbol: symbol, direction: direction)
+    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    return try #require(model.root?.children?.first {
+        $0.kind == .group && $0.title.hasPrefix("Exact")
+    }?.title)
 }
 
 private func relationTemporaryProject(_ files: [String: String]) throws -> URL {
@@ -895,5 +1509,39 @@ private func relationExactEntry(
             coverage: .partial
         ),
         origin: origin
+    )
+}
+
+private func relationCallItem(
+    name: String,
+    file: String,
+    offset: Int
+) -> ExactCallHierarchyItem {
+    let location = relationExactLocation(file: file, offset: offset)
+    return ExactCallHierarchyItem(
+        name: name,
+        kind: 12,
+        uri: file.hasPrefix("/")
+            ? URL(fileURLWithPath: file).absoluteString
+            : URL(fileURLWithPath: "/project/\(file)").absoluteString,
+        range: location,
+        selectionRange: location,
+        data: nil
+    )
+}
+
+private func relationExactLocation(file: String, offset: Int) -> ExactLocation {
+    ExactLocation(file: file, byteOffset: offset, line: 1, column: offset + 1)
+}
+
+private func relationExactAttribution() -> ExactAttribution {
+    ExactAttribution(
+        provider: "relation-hierarchy-fake",
+        toolVersion: "relation-hierarchy-fake-1",
+        configFingerprint: "config",
+        environmentFingerprint: "environment",
+        trustMode: .safe,
+        generatedAt: Date(timeIntervalSince1970: 0),
+        coverage: .full
     )
 }

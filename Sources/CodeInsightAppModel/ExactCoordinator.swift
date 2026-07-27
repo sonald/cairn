@@ -98,6 +98,26 @@ public final class ExactCoordinator {
         String?
     ) throws -> any Snapshot
 
+    enum RelationQueryResult: Sendable {
+        case unsupported
+        case notApplicable
+        case relations([Relation], origin: ExactOrigin)
+    }
+
+    struct Relation: Sendable {
+        let name: String?
+        let location: ExactLocation
+        let item: ExactCallHierarchyItem?
+        let callSites: [ExactLocation]
+    }
+
+    private enum RawRelationQueryResult: Sendable {
+        case unsupported
+        case notApplicable
+        case calls([ExactCallRelation])
+        case implementations([ExactLocation])
+    }
+
     private struct Active: Sendable {
         let generation: UInt64
         let key: ExactOverlay.ReuseKey
@@ -395,6 +415,47 @@ public final class ExactCoordinator {
         }
     }
 
+    func relations(
+        file: String,
+        byteOffset: UInt32,
+        item: ExactCallHierarchyItem?,
+        direction: RelationTreeModel.Direction,
+        generation: UInt64
+    ) async -> RelationQueryResult? {
+        if let prepareTask { await prepareTask.value }
+        guard expectedGeneration == generation,
+              let current = active,
+              current.generation == generation
+        else { return nil }
+
+        do {
+            let result = try await requestRelations(
+                session: current.session,
+                file: file,
+                byteOffset: Int(byteOffset),
+                item: item,
+                direction: direction
+            )
+            return publish(result, from: current)
+        } catch where isHelperCrash(error)
+            && !isUnavailable(current.session.readiness)
+        {
+            return await restartRelationsOnce(
+                current,
+                file: file,
+                byteOffset: Int(byteOffset),
+                item: item,
+                direction: direction
+            )
+        } catch {
+            guard isCurrent(current) else { return nil }
+            if isUnavailable(current.session.readiness) {
+                readiness = .unavailable(String(describing: error))
+            }
+            return nil
+        }
+    }
+
     private func restartOnce(
         _ previous: Active,
         file: String,
@@ -467,6 +528,115 @@ public final class ExactCoordinator {
         }.value
     }
 
+    private func requestRelations(
+        session: any ExactSession,
+        file: String,
+        byteOffset: Int,
+        item: ExactCallHierarchyItem?,
+        direction: RelationTreeModel.Direction
+    ) async throws -> RawRelationQueryResult {
+        try await Task.detached(priority: .userInitiated) {
+            switch direction {
+            case .implementations:
+                guard session.negotiatedCapabilities.contains(.implementations)
+                else { return .unsupported }
+                return .implementations(
+                    try session.implementations(
+                        file: file,
+                        byteOffset: byteOffset
+                    ) ?? []
+                )
+            case .callers, .calls:
+                guard session.negotiatedCapabilities.contains(.callHierarchy)
+                else { return .unsupported }
+                let items: [ExactCallHierarchyItem]
+                if let item {
+                    items = [item]
+                } else {
+                    guard let prepared = try session.prepareCallHierarchy(
+                        file: file,
+                        byteOffset: byteOffset
+                    ), !prepared.isEmpty
+                    else { return .notApplicable }
+                    items = prepared
+                }
+                var relations: [ExactCallRelation] = []
+                for item in items {
+                    switch direction {
+                    case .callers:
+                        relations += try session.incomingCalls(item: item) ?? []
+                    case .calls:
+                        relations += try session.outgoingCalls(item: item) ?? []
+                    case .implementations:
+                        break
+                    }
+                }
+                return .calls(relations)
+            }
+        }.value
+    }
+
+    private func restartRelationsOnce(
+        _ previous: Active,
+        file: String,
+        byteOffset: Int,
+        item: ExactCallHierarchyItem?,
+        direction: RelationTreeModel.Direction
+    ) async -> RelationQueryResult? {
+        guard isCurrent(previous) else { return nil }
+        readiness = .preparing
+        try? await Task.sleep(for: .milliseconds(100))
+        guard isCurrent(previous) else { return nil }
+
+        do {
+            let newSession = try await Task.detached(priority: .utility) {
+                try previous.provider.prepare(
+                    snapshot: previous.snapshot,
+                    profile: previous.profile,
+                    trustMode: previous.trustMode
+                )
+            }.value
+            guard isCurrent(previous) else {
+                Task.detached { newSession.close() }
+                return nil
+            }
+            let restarted = Active(
+                generation: previous.generation,
+                key: previous.key,
+                provider: previous.provider,
+                session: newSession,
+                snapshot: previous.snapshot,
+                profile: previous.profile,
+                trustMode: previous.trustMode,
+                materializedRoot: previous.materializedRoot
+            )
+            active = restarted
+            observeCoverage(from: restarted)
+            Task.detached { previous.session.close() }
+
+            do {
+                let result = try await requestRelations(
+                    session: newSession,
+                    file: file,
+                    byteOffset: byteOffset,
+                    item: item,
+                    direction: direction
+                )
+                return publish(result, from: restarted)
+            } catch {
+                guard isCurrent(restarted) else { return nil }
+                readiness = .unavailable(
+                    "exact helper restart exhausted: \(error)"
+                )
+                return nil
+            }
+        } catch {
+            guard isCurrent(previous) else { return nil }
+            readiness = .unavailable("exact helper restart failed: \(error)")
+            return nil
+        }
+    }
+
     private func publish(
         _ location: ExactLocation?,
         from source: Active,
@@ -487,6 +657,47 @@ public final class ExactCoordinator {
         )
         overlay.store(entry, for: source.key, file: file, byteOffset: byteOffset)
         return entry
+    }
+
+    private func publish(
+        _ result: RawRelationQueryResult,
+        from source: Active
+    ) -> RelationQueryResult? {
+        guard isCurrent(source) else { return nil }
+        readiness = .ready
+        coverage = source.session.attribution.coverage
+        let origin: ExactOrigin = source.materializedRoot != nil
+            ? .materialized(commitOID: source.key.versionIdentity)
+            : .worktree
+        return switch result {
+        case .unsupported:
+            .unsupported
+        case .notApplicable:
+            .notApplicable
+        case .calls(let relations):
+            .relations(relations.map {
+                Relation(
+                    name: $0.item.name,
+                    location: mapped(
+                        $0.item.selectionRange,
+                        from: source.materializedRoot
+                    ),
+                    item: $0.item,
+                    callSites: $0.callSites.map {
+                        mapped($0, from: source.materializedRoot)
+                    }
+                )
+            }, origin: origin)
+        case .implementations(let locations):
+            .relations(locations.map {
+                Relation(
+                    name: nil,
+                    location: mapped($0, from: source.materializedRoot),
+                    item: nil,
+                    callSites: []
+                )
+            }, origin: origin)
+        }
     }
 
     private func observeCoverage(from source: Active) {
