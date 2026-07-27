@@ -3,6 +3,10 @@ import CTreeSitterRust
 import TreeSitterKit
 
 public struct RustExtractor: LanguageExtractor, Sendable {
+    #if DEBUG
+    @TaskLocal public static var parseObserver: (@Sendable () -> Void)?
+    #endif
+
     public init() {}
 
     public func extract(
@@ -28,10 +32,26 @@ public struct RustExtractor: LanguageExtractor, Sendable {
         else {
             throw RustExtractionError.parserUnavailable
         }
-        guard let tree = parser.parse(bytes) else {
+        guard let tree = observedParse(parser, bytes: bytes) else {
             throw RustExtractionError.parseFailed
         }
 
+        return extractWithDiagnostics(
+            tree: tree,
+            parser: parser,
+            bytes: bytes,
+            key: key,
+            interner: interner
+        )
+    }
+
+    public func extractWithDiagnostics(
+        tree: Tree,
+        parser: Parser,
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner: ExtractionInterners
+    ) -> (index: ContentIndex, containsErrorNodes: Bool) {
         var scopes = RustScopeBuilder(bytes: bytes, names: interner.names)
         var declarations = RustDeclarations(bytes: bytes, names: interner.names)
         var calls = RustCalls(bytes: bytes, names: interner.names)
@@ -64,13 +84,55 @@ public struct RustExtractor: LanguageExtractor, Sendable {
         ), tree.rootNode.hasError)
     }
 
+    public func localReferences(
+        tree: Tree,
+        bytes: [UInt8]
+    ) -> (
+        bindings: [BindingRecord],
+        referencesByBinding: [[CodeInsightCore.ByteRange]]
+    ) {
+        let names = Interner<NameID>()
+        var scopes = RustScopeBuilder(
+            bytes: bytes,
+            names: names,
+            collectReferences: true
+        )
+        var declarations = RustDeclarations(bytes: bytes, names: names)
+        var calls = RustCalls(bytes: bytes, names: names)
+        var imports = RustImports(
+            bytes: bytes,
+            names: names,
+            strings: Interner<StringID>()
+        )
+        traverse(
+            root: tree.rootNode,
+            parser: nil,
+            bytes: bytes,
+            bindingsOnly: true,
+            scopes: &scopes,
+            declarations: &declarations,
+            calls: &calls,
+            imports: &imports
+        )
+
+        let localIndices = scopes.bindings.indices.filter {
+            let kind = scopes.bindings[$0].kind
+            return kind == .param || kind == .letBinding
+        }
+        return (
+            localIndices.map { scopes.bindings[$0] },
+            localIndices.map { scopes.referencesByBinding[$0] }
+        )
+    }
+
     private func traverse(
         root: Node,
-        parser: Parser,
+        parser: Parser?,
         bytes: [UInt8],
         byteOffset: UInt32 = 0,
         macroDepth: Int = 0,
         baseAncestors: [Node] = [],
+        bindingsOnly: Bool = false,
         scopes: inout RustScopeBuilder,
         declarations: inout RustDeclarations,
         calls: inout RustCalls,
@@ -83,12 +145,14 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             switch event {
             case let .enter(node):
                 let parent = ancestors.last
-                let site = declarations.enter(
-                    node,
-                    parent: parent,
-                    ancestors: ancestors,
-                    byteOffset: byteOffset
-                )
+                let site = bindingsOnly
+                    ? RustDeclarationSite.none
+                    : declarations.enter(
+                        node,
+                        parent: parent,
+                        ancestors: ancestors,
+                        byteOffset: byteOffset
+                    )
                 scopes.enter(
                     node,
                     parent: parent,
@@ -96,20 +160,24 @@ public struct RustExtractor: LanguageExtractor, Sendable {
                     declaration: site,
                     byteOffset: byteOffset
                 )
-                calls.enter(
-                    node,
-                    regionID: scopes.currentRegionID,
-                    byteOffset: byteOffset
-                )
-                imports.enter(
-                    node,
-                    scopeID: scopes.currentImportScopeID,
-                    byteOffset: byteOffset
-                )
+                if !bindingsOnly {
+                    calls.enter(
+                        node,
+                        regionID: scopes.currentRegionID,
+                        byteOffset: byteOffset
+                    )
+                    imports.enter(
+                        node,
+                        scopeID: scopes.currentImportScopeID,
+                        byteOffset: byteOffset
+                    )
+                }
                 ancestors.append(node)
 
                 if node.kind == "macro_invocation" {
-                    if macroDepth < 3,
+                    if !bindingsOnly,
+                       macroDepth < 3,
+                       let parser,
                        isItemMacroPosition(parent),
                        let body = macroBody(
                            of: node,
@@ -126,6 +194,7 @@ public struct RustExtractor: LanguageExtractor, Sendable {
                                 byteOffset: body.byteOffset,
                                 macroDepth: macroDepth + 1,
                                 baseAncestors: Array(ancestors.dropLast()),
+                                bindingsOnly: false,
                                 scopes: &scopes,
                                 declarations: &declarations,
                                 calls: &calls,
@@ -146,7 +215,9 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             case let .exit(node):
                 _ = ancestors.popLast()
                 scopes.exit(node, byteOffset: byteOffset)
-                declarations.exit(node, byteOffset: byteOffset)
+                if !bindingsOnly {
+                    declarations.exit(node, byteOffset: byteOffset)
+                }
             }
         }
     }
@@ -177,7 +248,10 @@ public struct RustExtractor: LanguageExtractor, Sendable {
               bytes[lower] == 0x7B,
               bytes[upper - 1] == 0x7D,
               let bodyOffset = UInt32(exactly: lower + 1),
-              let tree = parser.parse(Array(bytes[(lower + 1)..<(upper - 1)])),
+              let tree = observedParse(
+                  parser,
+                  bytes: Array(bytes[(lower + 1)..<(upper - 1)])
+              ),
               tree.rootNode.kind == "source_file",
               !tree.rootNode.hasError
         else { return nil }
@@ -192,6 +266,16 @@ public struct RustExtractor: LanguageExtractor, Sendable {
             namedChildren.filter { isAcceptedMacroItem($0.kind) },
             bodyOffset
         )
+    }
+
+    private func observedParse(
+        _ parser: Parser,
+        bytes: [UInt8]
+    ) -> Tree? {
+        #if DEBUG
+        Self.parseObserver?()
+        #endif
+        return parser.parse(bytes)
     }
 
     private func isAcceptedMacroItem(_ kind: String) -> Bool {

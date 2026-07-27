@@ -1,5 +1,7 @@
 import CodeInsightCore
+import CodeInsightRustExtractor
 import Foundation
+import os
 import Testing
 @testable import CodeInsightReaderCore
 
@@ -71,6 +73,141 @@ func identifierOccurrencesMatchWholeTokensAndSkipCommentsStringsAndKeywords() th
     let unicodeRange = try #require(unicode.range(of: "值"))
     let unicodeOffset = UInt32(unicode[..<unicodeRange.lowerBound].utf8.count)
     #expect(unicodeDocument.identifierOccurrences(at: unicodeOffset).count == 2)
+}
+
+@Test
+func localReferenceIndexFindsKnownParameterAndLocalUses() throws {
+    let source = """
+        fn f(param: i32) {
+            param;
+            let local = param;
+            local;
+        }
+        """
+    let paramRanges = tokenRanges(of: "param", in: source)
+    let localRanges = tokenRanges(of: "local", in: source)
+    let document = try localReferenceDocument(source)
+
+    let parameter = try #require(document.localBinding(
+        at: paramRanges[0].lowerBound
+    ))
+    let local = try #require(document.localBinding(
+        at: localRanges[0].lowerBound
+    ))
+
+    #expect(parameter.binding.kind == .param)
+    #expect(parameter.references == Array(paramRanges.dropFirst()))
+    #expect(local.binding.kind == .letBinding)
+    #expect(local.references == Array(localRanges.dropFirst()))
+    #expect(!parameter.references.contains(parameter.binding.declarationRange))
+    #expect(!local.references.contains(local.binding.declarationRange))
+}
+
+@Test
+func localReferenceIndexSeparatesNestedShadowing() throws {
+    let source = """
+        fn f() {
+            let x = 0;
+            x;
+            {
+                let x = x + 1;
+                x;
+            }
+            x;
+        }
+        """
+    let ranges = tokenRanges(of: "x", in: source)
+    let document = try localReferenceDocument(source)
+    let outer = try #require(document.localBinding(at: ranges[0].lowerBound))
+    let inner = try #require(document.localBinding(at: ranges[2].lowerBound))
+
+    #expect(outer.references == [ranges[1], ranges[3], ranges[5]])
+    #expect(inner.references == [ranges[4]])
+}
+
+@Test
+func localReferenceIndexSeparatesSiblingScopes() throws {
+    let source = """
+        fn first() {
+            let x = 0;
+            x;
+        }
+        fn second() {
+            let x = 1;
+            x;
+        }
+        """
+    let ranges = tokenRanges(of: "x", in: source)
+    let document = try localReferenceDocument(source)
+    let first = try #require(document.localBinding(at: ranges[0].lowerBound))
+    let second = try #require(document.localBinding(at: ranges[2].lowerBound))
+
+    #expect(first.references == [ranges[1]])
+    #expect(second.references == [ranges[3]])
+}
+
+@Test
+func localReferenceIndexExcludesTokensBeforeAndAtDeclaration() throws {
+    let source = """
+        fn f() {
+            x();
+            let x = || {};
+            x();
+        }
+        """
+    let ranges = tokenRanges(of: "x", in: source)
+    let document = try localReferenceDocument(source)
+    let local = try #require(document.localBinding(at: ranges[1].lowerBound))
+
+    #expect(local.references == [ranges[2]])
+    #expect(!local.references.contains(ranges[0]))
+    #expect(!local.references.contains(local.binding.declarationRange))
+}
+
+@Test
+func localReferenceIndexDistinguishesShadowedParameterFromLocal() throws {
+    let source = """
+        fn f(x: i32) {
+            x;
+            let x = x + 1;
+            x;
+        }
+        """
+    let ranges = tokenRanges(of: "x", in: source)
+    let document = try localReferenceDocument(source)
+    let parameter = try #require(document.localBinding(at: ranges[0].lowerBound))
+    let local = try #require(document.localBinding(at: ranges[2].lowerBound))
+
+    #expect(parameter.binding.kind == .param)
+    #expect(parameter.references == [ranges[1], ranges[3]])
+    #expect(local.binding.kind == .letBinding)
+    #expect(local.references == [ranges[4]])
+}
+
+@Test
+func rustHighlighterBuildsMacroPartialLocalIndexWithOneParse() throws {
+    let source = """
+        item_wrapper! {
+            fn generated(hidden: i32) {
+                hidden;
+            }
+        }
+        fn visible(visible: i32) {
+            visible;
+        }
+        """
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let highlighted = try RustExtractor.$parseObserver.withValue({
+        parseCount.withLock { $0 += 1 }
+    }) {
+        try RustHighlighter().highlight(bytes: Array(source.utf8))
+    }
+    let visibleRanges = tokenRanges(of: "visible", in: source)
+
+    #expect(parseCount.withLock { $0 } == 1)
+    #expect(highlighted.bindings.count == 1)
+    #expect(highlighted.bindings[0].declarationRange == visibleRanges[1])
+    #expect(highlighted.referencesByBinding == [[visibleRanges[2]]])
 }
 
 @Test
@@ -287,6 +424,46 @@ func viewportGatingMatchesLinearScanForLargeSortedInput() {
 }
 
 @Test
+func m6FixtureLocalReferencesConvertOnlyViewportTokens() throws {
+    let fixture = repositoryRoot.appendingPathComponent(
+        "Tests/Fixtures/m6_reference_density.rust"
+    )
+    let bytes = [UInt8](try Data(contentsOf: fixture))
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let marker = Array("}\n// f0 deterministic padding 0".utf8)
+    let viewportUpper = try #require(bytes.firstRange(of: marker)?.upperBound)
+    let visible = document.localReferences(
+        intersectingBytes: 0..<UInt32(viewportUpper)
+    )
+    let converted = visible.compactMap {
+        document.byteUTF16Map.nsRange(
+            byteLowerBound: Int($0.range.lowerBound),
+            byteUpperBound: Int($0.range.upperBound)
+        )
+    }
+    let totalReferences = document.referencesByBinding.lazy
+        .map(\.count)
+        .reduce(0, +)
+
+    #expect(document.localBindings.count == 20_000)
+    #expect(totalReferences == 35_000)
+    #expect(visible.count == 35)
+    #expect(converted.count == 35)
+    print(
+        "M6_LOCAL_REFERENCE_VIEWPORT totalReferences=\(totalReferences) "
+            + "viewportBytes=\(viewportUpper) queriedTokens=\(visible.count) "
+            + "convertedTokens=\(converted.count)"
+    )
+}
+
+@Test
 func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     let file = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightReaderCoreTests-\(UUID().uuidString).rs")
@@ -398,4 +575,36 @@ private func readerDocument(_ source: String) -> ReaderDocument {
         highlightSpans: [],
         outlineFacets: []
     )
+}
+
+private func localReferenceDocument(_ source: String) throws -> ReaderDocument {
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    return ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+}
+
+private func tokenRanges(
+    of token: String,
+    in source: String
+) -> [ByteRange] {
+    var ranges: [ByteRange] = []
+    var searchStart = source.startIndex
+    while let range = source.range(
+        of: token,
+        range: searchStart..<source.endIndex
+    ) {
+        let lower = UInt32(source[..<range.lowerBound].utf8.count)
+        ranges.append(ByteRange(
+            lowerBound: lower,
+            upperBound: lower + UInt32(token.utf8.count)
+        ))
+        searchStart = range.upperBound
+    }
+    return ranges
 }

@@ -1,5 +1,6 @@
 import CTreeSitterRust
 import CodeInsightCore
+import CodeInsightRustExtractor
 import Foundation
 import TreeSitterKit
 
@@ -129,6 +130,11 @@ public final class ReaderDocument: Sendable {
     public let byteUTF16Map: ByteUTF16Map
     public let highlightSpans: [HighlightSpan]
     public let outlineFacets: [OutlineFacet]
+    public let localBindings: [BindingRecord]
+    public let referencesByBinding: [[CodeInsightCore.ByteRange]]
+
+    private let localReferenceRanges: [CodeInsightCore.ByteRange]
+    private let localReferenceBindingIndices: [Int]
 
     public init(
         bytes: [UInt8],
@@ -136,27 +142,45 @@ public final class ReaderDocument: Sendable {
         lineTable: LineTable,
         byteUTF16Map: ByteUTF16Map,
         highlightSpans: [HighlightSpan],
-        outlineFacets: [OutlineFacet]
+        outlineFacets: [OutlineFacet],
+        localBindings: [BindingRecord] = [],
+        referencesByBinding: [[CodeInsightCore.ByteRange]] = []
     ) {
+        precondition(localBindings.count == referencesByBinding.count)
         self.bytes = bytes
         self.contentID = contentID ?? ContentID.sha256(of: bytes)
         self.lineTable = lineTable
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans
         self.outlineFacets = outlineFacets
+        self.localBindings = localBindings
+        self.referencesByBinding = referencesByBinding
+        let references = referencesByBinding.enumerated().flatMap {
+            bindingIndex, ranges in
+            ranges.map { (range: $0, bindingIndex: bindingIndex) }
+        }.sorted {
+            ($0.range.lowerBound, $0.range.upperBound)
+                < ($1.range.lowerBound, $1.range.upperBound)
+        }
+        localReferenceRanges = references.map(\.range)
+        localReferenceBindingIndices = references.map(\.bindingIndex)
     }
 
     public convenience init(
         bytes: [UInt8],
         highlightSpans: [HighlightSpan] = [],
-        outlineFacets: [OutlineFacet] = []
+        outlineFacets: [OutlineFacet] = [],
+        localBindings: [BindingRecord] = [],
+        referencesByBinding: [[CodeInsightCore.ByteRange]] = []
     ) {
         self.init(
             bytes: bytes,
             lineTable: LineTable(bytes: bytes),
             byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
             highlightSpans: highlightSpans,
-            outlineFacets: outlineFacets
+            outlineFacets: outlineFacets,
+            localBindings: localBindings,
+            referencesByBinding: referencesByBinding
         )
     }
 
@@ -165,6 +189,93 @@ public final class ReaderDocument: Sendable {
             .filter { $0.range.contains(byteOffset) }
             .min { $0.range.length < $1.range.length }?
             .name
+    }
+
+    public func localBinding(
+        at byteOffset: UInt32
+    ) -> (
+        bindingIndex: Int,
+        binding: BindingRecord,
+        references: [CodeInsightCore.ByteRange]
+    )? {
+        var low = 0
+        var high = localBindings.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if localBindings[middle].declarationRange.lowerBound <= byteOffset {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        if low > 0,
+           localBindings[low - 1].declarationRange.contains(byteOffset)
+        {
+            let index = low - 1
+            return (index, localBindings[index], referencesByBinding[index])
+        }
+
+        low = 0
+        high = localReferenceRanges.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if localReferenceRanges[middle].lowerBound <= byteOffset {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+        guard low > 0,
+              localReferenceRanges[low - 1].contains(byteOffset)
+        else { return nil }
+        let index = localReferenceBindingIndices[low - 1]
+        return (index, localBindings[index], referencesByBinding[index])
+    }
+
+    public func localReferences(
+        intersectingBytes viewport: Range<UInt32>,
+        buffer: UInt32 = 0
+    ) -> [(
+        range: CodeInsightCore.ByteRange,
+        bindingIndex: Int,
+        kind: BindingKind
+    )] {
+        let lower = viewport.lowerBound > buffer
+            ? viewport.lowerBound - buffer
+            : 0
+        let upper = UInt32(min(
+            UInt64(UInt32.max),
+            UInt64(viewport.upperBound) + UInt64(buffer)
+        ))
+        guard lower < upper else { return [] }
+
+        var low = 0
+        var high = localReferenceRanges.count
+        while low < high {
+            let middle = low + (high - low) / 2
+            if localReferenceRanges[middle].upperBound <= lower {
+                low = middle + 1
+            } else {
+                high = middle
+            }
+        }
+
+        var result: [(
+            range: CodeInsightCore.ByteRange,
+            bindingIndex: Int,
+            kind: BindingKind
+        )] = []
+        for referenceIndex in low..<localReferenceRanges.count {
+            let range = localReferenceRanges[referenceIndex]
+            guard range.lowerBound < upper else { break }
+            let bindingIndex = localReferenceBindingIndices[referenceIndex]
+            result.append((
+                range,
+                bindingIndex,
+                localBindings[bindingIndex].kind
+            ))
+        }
+        return result
     }
 
     public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
@@ -312,11 +423,19 @@ public struct RustHighlighter: Sendable {
 
     public func highlight(
         bytes: [UInt8]
-    ) throws -> (spans: [HighlightSpan], outlineFacets: [OutlineFacet]) {
+    ) throws -> (
+        spans: [HighlightSpan],
+        outlineFacets: [OutlineFacet],
+        bindings: [BindingRecord],
+        referencesByBinding: [[CodeInsightCore.ByteRange]]
+    ) {
         guard
             let language = tree_sitter_rust(),
             let parser = Parser(language: language)
         else { throw RustHighlighterError.parserUnavailable }
+        #if DEBUG
+        RustExtractor.parseObserver?()
+        #endif
         guard let tree = parser.parse(bytes) else {
             throw RustHighlighterError.parseFailed
         }
@@ -412,7 +531,16 @@ public struct RustHighlighter: Sendable {
             ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
                 < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
         }
-        return (spans, facets)
+        let references = RustExtractor().localReferences(
+            tree: tree,
+            bytes: bytes
+        )
+        return (
+            spans,
+            facets,
+            references.bindings,
+            references.referencesByBinding
+        )
     }
 
     private func declarationHighlightKind(
@@ -605,7 +733,9 @@ public struct DocumentLoader: Sendable {
                 lineTable: lineTable,
                 byteUTF16Map: map,
                 highlightSpans: highlighted.spans,
-                outlineFacets: highlighted.outlineFacets
+                outlineFacets: highlighted.outlineFacets,
+                localBindings: highlighted.bindings,
+                referencesByBinding: highlighted.referencesByBinding
             ), tier)
         }
 
@@ -627,7 +757,9 @@ public struct DocumentLoader: Sendable {
                     lineTable: document.lineTable,
                     byteUTF16Map: document.byteUTF16Map,
                     highlightSpans: highlighted.spans,
-                    outlineFacets: highlighted.outlineFacets
+                    outlineFacets: highlighted.outlineFacets,
+                    localBindings: highlighted.bindings,
+                    referencesByBinding: highlighted.referencesByBinding
                 )))
             } catch let error as RustHighlighterError {
                 completion(.failure(error))

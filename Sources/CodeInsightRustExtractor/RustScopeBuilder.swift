@@ -7,6 +7,7 @@ struct RustScopeBuilder {
         let id: ScopeID
         let genericTypeNames: Set<NameID>
         let implTypeNameID: NameID?
+        var bindingsByName: [NameID: Int]
     }
 
     private struct PatternPlan {
@@ -14,6 +15,7 @@ struct RustScopeBuilder {
         let scopeID: ScopeID
         let bindingKind: BindingKind
         let targetHint: UnresolvedSymbolRef?
+        let activationOwner: RustNodeKey?
     }
 
     private struct ActiveRegion {
@@ -25,16 +27,24 @@ struct RustScopeBuilder {
     let names: Interner<NameID>
     private(set) var scopes: [ScopeRecord] = []
     private(set) var bindings: [BindingRecord] = []
+    private(set) var referencesByBinding: [[CodeInsightCore.ByteRange]] = []
     private(set) var executableRegions: [ExecutableRegionRecord] = []
 
+    private let collectReferences: Bool
     private var activeScopes: [ActiveScope] = []
     private var pendingPatterns: [RustNodeKey: PatternPlan] = [:]
     private var activePatterns: [PatternPlan] = []
+    private var pendingBindingActivations: [RustNodeKey: [Int]] = [:]
     private var activeRegions: [ActiveRegion] = []
 
-    init(bytes: [UInt8], names: Interner<NameID>) {
+    init(
+        bytes: [UInt8],
+        names: Interner<NameID>,
+        collectReferences: Bool = false
+    ) {
         self.bytes = bytes
         self.names = names
+        self.collectReferences = collectReferences
     }
 
     mutating func enter(
@@ -60,6 +70,7 @@ struct RustScopeBuilder {
         if let plan = pendingPatterns.removeValue(forKey: key) {
             activePatterns.append(plan)
         }
+        var declaredBinding = false
         if let plan = activePatterns.last,
            isBindingIdentifier(
                node,
@@ -69,28 +80,58 @@ struct RustScopeBuilder {
            ),
            let name = node.text(in: bytes, byteOffset: byteOffset)
         {
+            let nameID = names.intern(name)
+            let bindingIndex = bindings.count
             bindings.append(BindingRecord(
                 scopeID: plan.scopeID,
-                localNameID: names.intern(name),
+                localNameID: nameID,
                 space: .value,
                 kind: plan.bindingKind,
                 declarationRange: node.coreByteRange(byteOffset: byteOffset),
                 targetHint: plan.targetHint
             ))
+            declaredBinding = true
+            if collectReferences {
+                referencesByBinding.append([])
+                if let owner = plan.activationOwner {
+                    pendingBindingActivations[owner, default: []].append(
+                        bindingIndex
+                    )
+                } else {
+                    activate(bindingAt: bindingIndex)
+                }
+            }
+        }
+        if collectReferences, !declaredBinding, activePatterns.isEmpty {
+            recordReference(
+                node,
+                parent: parent,
+                ancestors: ancestors,
+                byteOffset: byteOffset
+            )
         }
 
         registerPatterns(from: node, byteOffset: byteOffset)
-        pushRegionIfNeeded(
-            for: node,
-            parent: parent,
-            ancestors: ancestors,
-            declaration: declaration,
-            byteOffset: byteOffset
-        )
+        if !collectReferences {
+            pushRegionIfNeeded(
+                for: node,
+                parent: parent,
+                ancestors: ancestors,
+                declaration: declaration,
+                byteOffset: byteOffset
+            )
+        }
     }
 
     mutating func exit(_ node: Node, byteOffset: UInt32) {
         let key = RustNodeKey(node, byteOffset: byteOffset)
+        if let bindingIndices = pendingBindingActivations.removeValue(
+            forKey: key
+        ) {
+            for bindingIndex in bindingIndices {
+                activate(bindingAt: bindingIndex)
+            }
+        }
         if activePatterns.last?.root == key {
             activePatterns.removeLast()
         }
@@ -136,16 +177,19 @@ struct RustScopeBuilder {
             range: range
         ))
         var genericTypeNames = activeScopes.last?.genericTypeNames ?? []
-        genericTypeNames.formUnion(genericTypeParameterNames(
-            in: owner,
-            byteOffset: byteOffset
-        ))
+        if !collectReferences {
+            genericTypeNames.formUnion(genericTypeParameterNames(
+                in: owner,
+                byteOffset: byteOffset
+            ))
+        }
         activeScopes.append(ActiveScope(
             owner: RustNodeKey(owner, byteOffset: byteOffset),
             id: id,
             genericTypeNames: genericTypeNames,
             implTypeNameID: implTypeNameID
-                ?? activeScopes.last?.implTypeNameID
+                ?? activeScopes.last?.implTypeNameID,
+            bindingsByName: [:]
         ))
     }
 
@@ -203,9 +247,8 @@ struct RustScopeBuilder {
                 node.namedChildren.first,
                 scopeID: scopeID,
                 kind: .param,
-                targetHint: annotatedTargetHint(
-                    in: node,
-                    byteOffset: byteOffset
+                targetHint: collectReferences ? nil : annotatedTargetHint(
+                    in: node, byteOffset: byteOffset
                 ),
                 byteOffset: byteOffset
             )
@@ -214,9 +257,14 @@ struct RustScopeBuilder {
                 node.directNamedChild { $0.kind == "self" },
                 scopeID: scopeID,
                 kind: .param,
-                targetHint: activeScopes.last?.implTypeNameID.map {
-                    UnresolvedSymbolRef(nameID: $0, hintKind: .unqualified)
-                },
+                targetHint: collectReferences
+                    ? nil
+                    : activeScopes.last?.implTypeNameID.map {
+                        UnresolvedSymbolRef(
+                            nameID: $0,
+                            hintKind: .unqualified
+                        )
+                    },
                 byteOffset: byteOffset
             )
         case "closure_parameters":
@@ -237,13 +285,11 @@ struct RustScopeBuilder {
                 node.directNamedChild { $0.kind != "mutable_specifier" },
                 scopeID: scopeID,
                 kind: .letBinding,
-                targetHint: annotatedTargetHint(
-                    in: node,
-                    byteOffset: byteOffset
-                ) ?? constructedTargetHint(
-                    in: node,
-                    byteOffset: byteOffset
+                targetHint: collectReferences ? nil : (
+                    annotatedTargetHint(in: node, byteOffset: byteOffset)
+                        ?? constructedTargetHint(in: node, byteOffset: byteOffset)
                 ),
+                activationOwner: RustNodeKey(node, byteOffset: byteOffset),
                 byteOffset: byteOffset
             )
         case "match_arm":
@@ -283,6 +329,7 @@ struct RustScopeBuilder {
         scopeID: ScopeID,
         kind: BindingKind,
         targetHint: UnresolvedSymbolRef?,
+        activationOwner: RustNodeKey? = nil,
         byteOffset: UInt32
     ) {
         guard let node else { return }
@@ -291,8 +338,73 @@ struct RustScopeBuilder {
             root: key,
             scopeID: scopeID,
             bindingKind: kind,
-            targetHint: isSimpleBindingPattern(node) ? targetHint : nil
+            targetHint: isSimpleBindingPattern(node) ? targetHint : nil,
+            activationOwner: activationOwner
         )
+    }
+
+    private mutating func activate(bindingAt bindingIndex: Int) {
+        let binding = bindings[bindingIndex]
+        guard binding.kind == .param || binding.kind == .letBinding,
+              let scopeIndex = activeScopes.lastIndex(where: {
+                  $0.id == binding.scopeID
+              })
+        else { return }
+        activeScopes[scopeIndex].bindingsByName[binding.localNameID] =
+            bindingIndex
+    }
+
+    private mutating func recordReference(
+        _ node: Node,
+        parent: Node?,
+        ancestors: [Node],
+        byteOffset: UInt32
+    ) {
+        guard isReferenceIdentifier(
+            node,
+            parent: parent,
+            ancestors: ancestors,
+            byteOffset: byteOffset
+        ), let name = node.text(in: bytes, byteOffset: byteOffset)
+        else { return }
+
+        let nameID = names.intern(name)
+        guard let bindingIndex = activeScopes.reversed().lazy.compactMap({
+            $0.bindingsByName[nameID]
+        }).first else { return }
+        referencesByBinding[bindingIndex].append(
+            node.coreByteRange(byteOffset: byteOffset)
+        )
+    }
+
+    private func isReferenceIdentifier(
+        _ node: Node,
+        parent: Node?,
+        ancestors: [Node],
+        byteOffset: UInt32
+    ) -> Bool {
+        guard node.kind == "identifier"
+                || node.kind == "self"
+                || node.kind == "shorthand_field_identifier",
+              !ancestors.contains(where: {
+                  $0.kind == "attribute_item"
+                      || $0.kind == "macro_definition"
+                      || $0.kind == "macro_invocation"
+                      || $0.kind == "use_declaration"
+              })
+        else { return false }
+
+        switch parent?.kind {
+        case "scoped_identifier":
+            return false
+        case "function_item", "function_signature_item", "mod_item",
+             "const_item", "static_item":
+            return parent?.namedChildren.first.map {
+                RustNodeKey($0, byteOffset: byteOffset)
+            } != RustNodeKey(node, byteOffset: byteOffset)
+        default:
+            return true
+        }
     }
 
     private func isSimpleBindingPattern(_ node: Node) -> Bool {
