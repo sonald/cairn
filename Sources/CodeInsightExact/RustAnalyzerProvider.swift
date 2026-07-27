@@ -202,6 +202,8 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
 }
 
 private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities = [.definition]
+
     var attribution: ExactAttribution {
         stateLock.lock()
         let coverage = currentCoverage
@@ -360,6 +362,32 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 retriedAfterCrash = true
             }
         }
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        nil
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
     }
 
     func cancel() {

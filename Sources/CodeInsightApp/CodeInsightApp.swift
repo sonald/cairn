@@ -4385,7 +4385,7 @@ private struct ExactSelfTestIndexService: IndexService {
     }
 }
 
-private struct ExactSelfTestDirectorySnapshot: Snapshot {
+struct ExactSelfTestDirectorySnapshot: Snapshot {
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.untracked
@@ -4416,10 +4416,15 @@ private struct ExactSelfTestDirectorySnapshot: Snapshot {
 
 }
 
-private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
-    let capabilities: ExactCapabilities = [.definition]
+final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
+    let capabilities: ExactCapabilities
     let toolVersion = "in-process-fake-1"
+    private let negotiatedCapabilities: ExactCapabilities
     private let location: ExactLocation?
+    private let implementationLocations: [ExactLocation]?
+    private let callHierarchyItems: [ExactCallHierarchyItem]?
+    private let incomingRelations: [ExactCallRelation]?
+    private let outgoingRelations: [ExactCallRelation]?
     private let externalFile: String?
     private let externalOffset: Int?
     private let externalLocation: ExactLocation?
@@ -4427,12 +4432,24 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
 
     init(
         location: ExactLocation?,
+        capabilities: ExactCapabilities = [.definition],
+        negotiatedCapabilities: ExactCapabilities? = nil,
+        implementationLocations: [ExactLocation]? = nil,
+        callHierarchyItems: [ExactCallHierarchyItem]? = nil,
+        incomingRelations: [ExactCallRelation]? = nil,
+        outgoingRelations: [ExactCallRelation]? = nil,
         externalFile: String? = nil,
         externalOffset: Int? = nil,
         externalLocation: ExactLocation? = nil,
         state: ExactSelfTestProviderState? = nil
     ) {
         self.location = location
+        self.capabilities = capabilities
+        self.negotiatedCapabilities = negotiatedCapabilities ?? capabilities
+        self.implementationLocations = implementationLocations
+        self.callHierarchyItems = callHierarchyItems
+        self.incomingRelations = incomingRelations
+        self.outgoingRelations = outgoingRelations
         self.externalFile = externalFile
         self.externalOffset = externalOffset
         self.externalLocation = externalLocation
@@ -4449,7 +4466,12 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
             featureSelection: profile.featureSelection
         )
         return InProcessExactSession(
+            negotiatedCapabilities: negotiatedCapabilities,
             location: location,
+            implementationLocations: implementationLocations,
+            callHierarchyItems: callHierarchyItems,
+            incomingRelations: incomingRelations,
+            outgoingRelations: outgoingRelations,
             externalFile: externalFile,
             externalOffset: externalOffset,
             externalLocation: externalLocation,
@@ -4470,9 +4492,14 @@ private final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
 }
 
 private final class InProcessExactSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities
     let readiness: ExactReadiness = .ready
     let attribution: ExactAttribution
     private let location: ExactLocation?
+    private let implementationLocations: [ExactLocation]?
+    private let callHierarchyItems: [ExactCallHierarchyItem]?
+    private let incomingRelations: [ExactCallRelation]?
+    private let outgoingRelations: [ExactCallRelation]?
     private let externalFile: String?
     private let externalOffset: Int?
     private let externalLocation: ExactLocation?
@@ -4480,7 +4507,12 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     private let state: ExactSelfTestProviderState?
 
     init(
+        negotiatedCapabilities: ExactCapabilities,
         location: ExactLocation?,
+        implementationLocations: [ExactLocation]?,
+        callHierarchyItems: [ExactCallHierarchyItem]?,
+        incomingRelations: [ExactCallRelation]?,
+        outgoingRelations: [ExactCallRelation]?,
         externalFile: String?,
         externalOffset: Int?,
         externalLocation: ExactLocation?,
@@ -4488,7 +4520,12 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         ordinal: Int?,
         state: ExactSelfTestProviderState?
     ) {
+        self.negotiatedCapabilities = negotiatedCapabilities
         self.location = location
+        self.implementationLocations = implementationLocations
+        self.callHierarchyItems = callHierarchyItems
+        self.incomingRelations = incomingRelations
+        self.outgoingRelations = outgoingRelations
         self.externalFile = externalFile
         self.externalOffset = externalOffset
         self.externalLocation = externalLocation
@@ -4498,6 +4535,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+        guard negotiatedCapabilities.contains(.definition) else { return nil }
         let wasBlocked = state?.waitIfDefinitionIsBlocked() == true
         defer {
             if wasBlocked { state?.recordBlockedDefinitionReturned() }
@@ -4509,13 +4547,51 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         return location
     }
 
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.implementations) else {
+            return nil
+        }
+        return implementationLocations
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return callHierarchyItems
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return incomingRelations
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return outgoingRelations
+    }
+
     func cancel() {}
     func close() {
         if let ordinal { state?.recordClose(ordinal: ordinal) }
     }
 }
 
-private final class ExactSelfTestProviderState: @unchecked Sendable {
+final class ExactSelfTestProviderState: @unchecked Sendable {
     private let lock = NSLock()
     private var storedRoot: URL?
     private var storedTrustModes: [String] = []

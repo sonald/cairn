@@ -11,6 +11,8 @@ public struct ExactCapabilities: OptionSet, Sendable {
     }
 
     public static let definition = ExactCapabilities(rawValue: 1 << 0)
+    public static let implementations = ExactCapabilities(rawValue: 1 << 1)
+    public static let callHierarchy = ExactCapabilities(rawValue: 1 << 2)
 }
 
 public enum ExactCoverage: String, Equatable, Sendable {
@@ -37,6 +39,46 @@ public struct ExactLocation: Equatable, Sendable {
         self.byteOffset = byteOffset
         self.line = line
         self.column = column
+    }
+}
+
+public struct ExactCallHierarchyItem: Sendable {
+    public let name: String
+    public let kind: Int
+    public let uri: String
+    public let range: ExactLocation
+    public let selectionRange: ExactLocation
+    public let data: Data?
+
+    public init(
+        name: String,
+        kind: Int,
+        uri: String,
+        range: ExactLocation,
+        selectionRange: ExactLocation,
+        data: Data?
+    ) {
+        self.name = name
+        self.kind = kind
+        self.uri = uri
+        self.range = range
+        self.selectionRange = selectionRange
+        self.data = data
+    }
+}
+
+public struct ExactCallRelation: Sendable {
+    /// The caller for incoming calls and the callee for outgoing calls.
+    public let item: ExactCallHierarchyItem
+    /// Call sites with their file identities already materialized.
+    public let callSites: [ExactLocation]
+
+    public init(
+        item: ExactCallHierarchyItem,
+        callSites: [ExactLocation]
+    ) {
+        self.item = item
+        self.callSites = callSites
     }
 }
 
@@ -143,11 +185,26 @@ public protocol ExactProvider: Sendable {
 }
 
 public protocol ExactSession: AnyObject, Sendable {
+    var negotiatedCapabilities: ExactCapabilities { get }
     var readiness: ExactReadiness { get }
     var attribution: ExactAttribution { get }
     var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? { get set }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation?
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]?
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]?
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]?
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]?
     func cancel()
     func close()
 }

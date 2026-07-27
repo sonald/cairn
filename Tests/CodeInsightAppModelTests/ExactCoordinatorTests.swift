@@ -895,6 +895,7 @@ private final class ExactProviderState: @unchecked Sendable {
 }
 
 private final class ExactStateSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities = [.definition]
     let readiness: ExactReadiness = .ready
     private let lock = NSLock()
     private var storedAttribution: ExactAttribution
@@ -935,6 +936,32 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
         try state.define(ordinal: ordinal, file: file, byteOffset: byteOffset)
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        nil
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
     }
 
     func publishCoverage(_ coverage: ExactCoverage) {
@@ -1049,6 +1076,7 @@ private final class BlockingExactProvider: ExactProvider, @unchecked Sendable {
 }
 
 private final class BlockingExactSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities = [.definition]
     private let condition = NSCondition()
     private var didStart = false
     private var released = false
@@ -1068,6 +1096,32 @@ private final class BlockingExactSession: ExactSession, @unchecked Sendable {
         while !released { condition.wait() }
         condition.unlock()
         return ExactLocation(file: file, byteOffset: 0, line: 1, column: 1)
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        nil
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? {
+        nil
     }
 
     func release() {
