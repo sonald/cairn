@@ -235,7 +235,10 @@ public final class LSPClient: @unchecked Sendable {
                 "name": rootURL.lastPathComponent,
             ]],
             "capabilities": [
-                "textDocument": ["definition": ["linkSupport": true]],
+                "textDocument": [
+                    "definition": ["linkSupport": true],
+                    "implementation": ["linkSupport": true],
+                ],
                 "window": ["workDoneProgress": true],
                 "workspace": ["configuration": true],
             ],

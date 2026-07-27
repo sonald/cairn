@@ -3,7 +3,7 @@ import CodeInsightGit
 import Foundation
 
 public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
-    public let capabilities: ExactCapabilities = [.definition]
+    public let capabilities: ExactCapabilities = [.definition, .implementations]
     public let toolVersion: String
 
     private let projectURL: URL
@@ -97,29 +97,34 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             workingDirectory: launch.workingDirectoryURL,
             environment: launch.environment
         )
-        let session = RustAnalyzerSession(
-            client: client,
-            launch: launch,
-            projectURL: projectURL,
-            snapshot: snapshot,
-            initializationOptions: options,
-            requestTimeout: requestTimeout,
-            closeGrace: closeGrace,
-            diagnosticObserver: diagnosticObserver,
-            attribution: ExactAttribution(
-                provider: "rust-analyzer",
-                toolVersion: toolVersion,
-                configFingerprint: profile.configFingerprint,
-                environmentFingerprint: profile.environmentFingerprint,
-                featureSelection: profile.featureSelection,
-                trustMode: trustMode,
-                generatedAt: Date(),
-                coverage: coverage
-            )
-        )
         do {
-            try session.start()
-            return session
+            return try RustAnalyzerSession.start(
+                client: client,
+                restartClient: {
+                    try LSPClient(
+                        executableURL: launch.executableURL,
+                        arguments: launch.arguments,
+                        workingDirectory: launch.workingDirectoryURL,
+                        environment: launch.environment
+                    )
+                },
+                projectURL: projectURL,
+                snapshot: snapshot,
+                initializationOptions: options,
+                requestTimeout: requestTimeout,
+                closeGrace: closeGrace,
+                diagnosticObserver: diagnosticObserver,
+                attribution: ExactAttribution(
+                    provider: "rust-analyzer",
+                    toolVersion: toolVersion,
+                    configFingerprint: profile.configFingerprint,
+                    environmentFingerprint: profile.environmentFingerprint,
+                    featureSelection: profile.featureSelection,
+                    trustMode: trustMode,
+                    generatedAt: Date(),
+                    coverage: coverage
+                )
+            )
         } catch {
             client.close(grace: closeGrace)
             throw error
@@ -201,8 +206,8 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
     }
 }
 
-private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
-    let negotiatedCapabilities: ExactCapabilities = [.definition]
+final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities
 
     var attribution: ExactAttribution {
         stateLock.lock()
@@ -222,7 +227,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
     private let stateLock = NSLock()
     private let operationLock = NSLock()
-    private let launch: Sandbox
+    private let restartClient: @Sendable () throws -> LSPClient
     private let projectURL: URL
     private let snapshot: any Snapshot
     private let initializationOptions: [String: Any]
@@ -259,9 +264,42 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         }
     }
 
-    init(
+    static func start(
         client: LSPClient,
-        launch: Sandbox,
+        restartClient: @escaping @Sendable () throws -> LSPClient,
+        projectURL: URL,
+        snapshot: any Snapshot,
+        initializationOptions: [String: Any],
+        requestTimeout: TimeInterval,
+        closeGrace: TimeInterval,
+        diagnosticObserver: (@Sendable (String) -> Void)?,
+        attribution: ExactAttribution
+    ) throws -> RustAnalyzerSession {
+        let initializeResult = try client.initialize(
+            rootURL: projectURL,
+            initializationOptions: initializationOptions,
+            timeout: requestTimeout
+        )
+        return RustAnalyzerSession(
+            client: client,
+            restartClient: restartClient,
+            negotiatedCapabilities: negotiatedCapabilities(
+                from: initializeResult
+            ),
+            projectURL: projectURL,
+            snapshot: snapshot,
+            initializationOptions: initializationOptions,
+            requestTimeout: requestTimeout,
+            closeGrace: closeGrace,
+            diagnosticObserver: diagnosticObserver,
+            attribution: attribution
+        )
+    }
+
+    private init(
+        client: LSPClient,
+        restartClient: @escaping @Sendable () throws -> LSPClient,
+        negotiatedCapabilities: ExactCapabilities,
         projectURL: URL,
         snapshot: any Snapshot,
         initializationOptions: [String: Any],
@@ -271,7 +309,8 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         attribution: ExactAttribution
     ) {
         self.client = client
-        self.launch = launch
+        self.restartClient = restartClient
+        self.negotiatedCapabilities = negotiatedCapabilities
         self.projectURL = projectURL
         self.snapshot = snapshot
         self.initializationOptions = initializationOptions
@@ -283,15 +322,52 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         observe(client)
     }
 
-    func start() throws {
-        _ = try client.initialize(
-            rootURL: projectURL,
-            initializationOptions: initializationOptions,
-            timeout: requestTimeout
-        )
+    private static func negotiatedCapabilities(
+        from initializeResult: Any
+    ) -> ExactCapabilities {
+        var negotiated: ExactCapabilities = [.definition]
+        guard let result = initializeResult as? [String: Any],
+              let capabilities = result["capabilities"] as? [String: Any],
+              let provider = capabilities["implementationProvider"]
+        else { return negotiated }
+        if (provider as? Bool) == true
+            || provider is [String: Any]
+        {
+            negotiated.insert(.implementations)
+        }
+        return negotiated
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/definition",
+            parse: parseDefinition
+        )
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.implementations) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/implementation",
+            parse: parseImplementations
+        )
+    }
+
+    private func requestLocations<Result>(
+        file: String,
+        byteOffset: Int,
+        method: String,
+        parse: (Any) throws -> Result?
+    ) throws -> Result? {
         operationLock.lock()
         defer { operationLock.unlock() }
 
@@ -317,10 +393,10 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                     client: activeClient
                 )
                 for attempt in 0..<3 {
-                    try throwIfCancelled()
+                    try throwIfCancelled(method)
                     do {
                         let response = try activeClient.request(
-                            "textDocument/definition",
+                            method,
                             params: [
                                 "textDocument": [
                                     "uri": projectURL.appendingPathComponent(path)
@@ -333,9 +409,9 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                             ],
                             timeout: requestTimeout
                         )
-                        if let location = try parseDefinition(response) {
+                        if let result = try parse(response) {
                             markReady()
-                            return location
+                            return result
                         }
                         markPreparing()
                     } catch LSPError.requestFailed(let code, _)
@@ -362,13 +438,6 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 retriedAfterCrash = true
             }
         }
-    }
-
-    func implementations(
-        file: String,
-        byteOffset: Int
-    ) throws -> [ExactLocation]? {
-        nil
     }
 
     func prepareCallHierarchy(
@@ -449,12 +518,7 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
         oldClient.close(grace: closeGrace)
         Thread.sleep(forTimeInterval: 0.1)
-        let newClient = try LSPClient(
-            executableURL: launch.executableURL,
-            arguments: launch.arguments,
-            workingDirectory: launch.workingDirectoryURL,
-            environment: launch.environment
-        )
+        let newClient = try restartClient()
         stateLock.lock()
         guard state != .closed else {
             stateLock.unlock()
@@ -562,7 +626,23 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         } else {
             throw ExactError.invalidDefinitionResponse(String(describing: value))
         }
+        return try parseLocation(object)
+    }
 
+    private func parseImplementations(_ value: Any) throws -> [ExactLocation]? {
+        if value is NSNull { return nil }
+        let objects: [[String: Any]]
+        if let dictionary = value as? [String: Any] {
+            objects = [dictionary]
+        } else if let array = value as? [[String: Any]] {
+            objects = array
+        } else {
+            throw ExactError.invalidDefinitionResponse(String(describing: value))
+        }
+        return try objects.map(parseLocation)
+    }
+
+    private func parseLocation(_ object: [String: Any]) throws -> ExactLocation {
         guard let uri = (object["targetUri"] ?? object["uri"]) as? String,
               let range = (object["targetSelectionRange"] ?? object["range"])
                 as? [String: Any],
@@ -617,11 +697,11 @@ private final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         return components.dropFirst(rootComponents.count).joined(separator: "/")
     }
 
-    private func throwIfCancelled() throws {
+    private func throwIfCancelled(_ method: String) throws {
         stateLock.lock()
         let wasCancelled = cancelled
         stateLock.unlock()
-        if wasCancelled { throw LSPError.cancelled("textDocument/definition") }
+        if wasCancelled { throw LSPError.cancelled(method) }
     }
 
     private func markPreparing() {

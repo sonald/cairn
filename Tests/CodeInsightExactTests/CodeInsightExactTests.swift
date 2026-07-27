@@ -408,9 +408,146 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
         #expect(server.receivedInitialized)
         #expect(server.receivedExit)
         #expect(server.receivedRegisterCapabilityResponse)
+        #expect(server.receivedImplementationCapability)
         #expect(diagnostic?.contains("failed to resolve dependency in offline mode") == true)
         let location = try #require(result as? [String: Any])
         #expect(location["uri"] as? String == "file:///fixture/src/lib.rs")
+    }
+}
+
+@Test
+func rustAnalyzerParsesEveryLocationLinkImplementation() throws {
+    let targetURI = exactFixtureURL()
+        .appendingPathComponent("src/lib.rs")
+        .absoluteString
+    let links: [[String: Any]] = [
+        [
+            "targetUri": targetURI,
+            "targetRange": lspRange(line: 0, character: 0),
+            "targetSelectionRange": lspRange(line: 0, character: 7),
+        ],
+        [
+            "targetUri": targetURI,
+            "targetRange": lspRange(line: 2, character: 0),
+            "targetSelectionRange": lspRange(line: 2, character: 7),
+        ],
+    ]
+
+    try withFakeRustAnalyzerSession(implementationResult: links) { session in
+        let locations = try #require(try session.implementations(
+            file: "src/lib.rs",
+            byteOffset: 7
+        ))
+
+        #expect(locations.count == 2)
+        #expect(locations.map(\.line) == [1, 3])
+        #expect(locations.map(\.column) == [8, 8])
+    }
+}
+
+@Test
+func rustAnalyzerParsesSingleLocationImplementation() throws {
+    let location: [String: Any] = [
+        "uri": exactFixtureURL()
+            .appendingPathComponent("src/lib.rs")
+            .absoluteString,
+        "range": lspRange(line: 0, character: 7),
+    ]
+
+    try withFakeRustAnalyzerSession(implementationResult: location) { session in
+        let locations = try #require(try session.implementations(
+            file: "src/lib.rs",
+            byteOffset: 7
+        ))
+
+        #expect(locations.count == 1)
+        #expect(locations[0].file == "src/lib.rs")
+        #expect(locations[0].line == 1)
+        #expect(locations[0].column == 8)
+    }
+}
+
+@Test
+func rustAnalyzerParsesEveryLocationImplementation() throws {
+    let dependencyRoot = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: dependencyRoot) }
+    let dependency = dependencyRoot.appendingPathComponent("dependency.rs")
+    try Data("pub fn external() {}\n".utf8).write(to: dependency)
+    let locations: [[String: Any]] = [
+        [
+            "uri": exactFixtureURL()
+                .appendingPathComponent("src/lib.rs")
+                .absoluteString,
+            "range": lspRange(line: 0, character: 7),
+        ],
+        [
+            "uri": dependency.absoluteString,
+            "range": lspRange(line: 0, character: 7),
+        ],
+    ]
+
+    try withFakeRustAnalyzerSession(implementationResult: locations) { session in
+        let parsed = try #require(try session.implementations(
+            file: "src/lib.rs",
+            byteOffset: 7
+        ))
+
+        #expect(parsed.count == 2)
+        #expect(parsed.map(\.file) == ["src/lib.rs", dependency.path])
+        #expect(parsed.map(\.column) == [8, 8])
+    }
+}
+
+@Test
+func rustAnalyzerTreatsNullImplementationAsNoResult() throws {
+    try withFakeRustAnalyzerSession(
+        implementationResult: NSNull()
+    ) { session in
+        let result = try session.implementations(
+            file: "src/lib.rs",
+            byteOffset: 7
+        )
+        #expect(result == nil)
+    }
+}
+
+@Test
+func rustAnalyzerNegotiatesImplementationBooleanProvider() throws {
+    try withFakeRustAnalyzerSession(
+        implementationProvider: true,
+        implementationResult: NSNull()
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.implementations))
+    }
+}
+
+@Test
+func rustAnalyzerNegotiatesImplementationObjectProvider() throws {
+    try withFakeRustAnalyzerSession(
+        implementationProvider: [String: Any](),
+        implementationResult: NSNull()
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.implementations))
+    }
+}
+
+@Test
+func rustAnalyzerDoesNotNegotiateMissingImplementationProvider() throws {
+    try withFakeRustAnalyzerSession(
+        implementationProvider: nil,
+        implementationResult: NSNull()
+    ) { session in
+        #expect(!session.negotiatedCapabilities.contains(.implementations))
+    }
+}
+
+@Test
+func rustAnalyzerDoesNotNegotiateFalseImplementationProvider() throws {
+    try withFakeRustAnalyzerSession(
+        implementationProvider: false,
+        implementationResult: NSNull()
+    ) { session in
+        #expect(!session.negotiatedCapabilities.contains(.implementations))
     }
 }
 
@@ -1199,6 +1336,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedInitialized = false
     private var _receivedExit = false
     private var _receivedRegisterCapabilityResponse = false
+    private var _receivedImplementationCapability = false
+    private let implementationProvider: Any?
+    private let implementationResult: Any
     private var _error: Error?
 
     var requestMethods: [String] { locked { _requestMethods } }
@@ -1208,16 +1348,27 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     var receivedRegisterCapabilityResponse: Bool {
         locked { _receivedRegisterCapabilityResponse }
     }
+    var receivedImplementationCapability: Bool {
+        locked { _receivedImplementationCapability }
+    }
     var error: Error? { locked { _error } }
 
-    init(input: FileHandle, output: FileHandle, done: @escaping () -> Void) {
+    init(
+        input: FileHandle,
+        output: FileHandle,
+        implementationProvider: Any? = true,
+        implementationResult: Any = NSNull(),
+        done: @escaping () -> Void
+    ) {
         self.input = input
         self.output = output
+        self.implementationProvider = implementationProvider
+        self.implementationResult = implementationResult
         self.done = done
     }
 
     func start() {
-        DispatchQueue.global().async { self.run() }
+        Thread.detachNewThread { self.run() }
     }
 
     private func run() {
@@ -1245,6 +1396,14 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                 }
                 switch method {
                 case "initialize":
+                    let params = message["params"] as? [String: Any]
+                    let capabilities = params?["capabilities"] as? [String: Any]
+                    let textDocument = capabilities?["textDocument"]
+                        as? [String: Any]
+                    locked {
+                        _receivedImplementationCapability =
+                            textDocument?["implementation"] != nil
+                    }
                     try write([
                         "jsonrpc": "2.0",
                         "method": "window/logMessage",
@@ -1258,9 +1417,16 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                         "method": "client/registerCapability",
                         "params": ["registrations": []],
                     ])
+                    var serverCapabilities: [String: Any] = [:]
+                    if let implementationProvider {
+                        serverCapabilities["implementationProvider"] =
+                            implementationProvider
+                    }
                     try write([
                         "jsonrpc": "2.0", "id": id,
-                        "result": ["capabilities": [:]],
+                        "result": [
+                            "capabilities": serverCapabilities,
+                        ],
                     ])
                 case "textDocument/definition":
                     try write([
@@ -1272,6 +1438,11 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                                 "end": ["line": 0, "character": 13],
                             ],
                         ],
+                    ])
+                case "textDocument/implementation":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": implementationResult,
                     ])
                 case "shutdown":
                     try write([
@@ -1307,6 +1478,69 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         defer { lock.unlock() }
         return operation()
     }
+}
+
+private func withFakeRustAnalyzerSession<T>(
+    implementationProvider: Any? = true,
+    implementationResult: Any,
+    body: (any ExactSession) throws -> T
+) throws -> T {
+    let root = exactFixtureURL()
+    let snapshot = try DirectorySnapshot(root: root)
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: implementationProvider,
+        implementationResult: implementationResult,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try RustAnalyzerSession.start(
+        client: client,
+        restartClient: {
+            throw ExactError.unavailable("fake restart unavailable")
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 5,
+        closeGrace: 5,
+        diagnosticObserver: nil,
+        attribution: ExactAttribution(
+            provider: "fake-rust-analyzer",
+            toolVersion: "fake",
+            configFingerprint: "config",
+            environmentFingerprint: "",
+            trustMode: .safe,
+            generatedAt: Date(timeIntervalSince1970: 0),
+            coverage: .partial
+        )
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    return try body(session)
+}
+
+private func exactFixtureURL() -> URL {
+    URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
+}
+
+private func lspRange(line: Int, character: Int) -> [String: Any] {
+    [
+        "start": ["line": line, "character": character],
+        "end": ["line": line, "character": character + 1],
+    ]
 }
 
 private func nextDiagnostic(_ diagnostics: AsyncStream<String>) async -> String? {
