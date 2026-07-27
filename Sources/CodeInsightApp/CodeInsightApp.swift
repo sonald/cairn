@@ -85,6 +85,8 @@ private struct CodeInsightApplication {
         withExtendedLifetime(delegate) {
             if let exactRoot {
                 delegate.runExactSelfTest(root: exactRoot)
+            } else if arguments.contains("--self-test-search") {
+                delegate.runSearchSelfTest()
             } else if arguments.contains("--self-test-reading") {
                 delegate.runReadingSelfTest()
             } else if arguments.contains("--self-test-tabs") {
@@ -766,6 +768,90 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runSearchSelfTest() -> Never {
+        let root: URL
+        do {
+            root = try makeSearchSelfTestDirectory()
+        } catch {
+            Self.writeJSON([
+                "error": error.localizedDescription,
+                "selfTest": "search",
+            ])
+            Darwin.exit(1)
+        }
+
+        func finish(
+            state: (
+                totalRows: Int,
+                groupRows: Int,
+                matchRows: Int,
+                truncationRows: Int,
+                truncationVisible: Bool,
+                status: String,
+                searching: Bool
+            )?,
+            error: String? = nil
+        ) -> Never {
+            try? FileManager.default.removeItem(at: root)
+            let checks = [
+                "matchRowsCappedAt2000": state?.matchRows == 2_000,
+                "statusContainsTrueTotal": state?.status.contains("2001") == true,
+                "truncationRowExists": state?.truncationRows == 1,
+                "truncationRowVisible": state?.truncationVisible == true,
+            ]
+            Self.writeJSON([
+                "checks": checks,
+                "error": error as Any,
+                "groupRows": state?.groupRows as Any,
+                "matchRows": state?.matchRows as Any,
+                "searching": state?.searching as Any,
+                "selfTest": "search",
+                "status": state?.status as Any,
+                "totalRows": state?.totalRows as Any,
+                "truncationRows": state?.truncationRows as Any,
+            ])
+            Darwin.exit(
+                error == nil && checks.values.allSatisfy { $0 } ? 0 : 1
+            )
+        }
+
+        launch(offscreen: true)
+        guard let controller = windowController else {
+            finish(state: nil, error: "window unavailable")
+        }
+        let contentSize = NSSize(width: 1_600, height: 1_000)
+        controller.window?.setContentSize(contentSize)
+        controller.window?.contentView?.setFrameSize(contentSize)
+        pumpRunLoop()
+
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if case .ready = self.model.projectState { return true }
+            return false
+        }), case .ready = model.projectState else {
+            finish(state: nil, error: "fixture indexing failed")
+        }
+
+        controller.showProjectSearch()
+        controller.selfTestSetProjectSearchQuery("zzqqmarker")
+        guard waitUntil(timeout: 30, condition: {
+            guard let state = controller.selfTestProjectSearchOutlineState else {
+                return false
+            }
+            return !state.searching && state.status.contains("2001")
+        }) else {
+            finish(
+                state: controller.selfTestProjectSearchOutlineState,
+                error: "search did not finish"
+            )
+        }
+
+        controller.selfTestRevealProjectSearchTruncationRow()
+        pumpRunLoop()
+        finish(state: controller.selfTestProjectSearchOutlineState)
+    }
+
     func runReadingSelfTest() -> Never {
         let root: URL
         do {
@@ -1003,6 +1089,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         guard let controller = windowController else {
             finishDiffSelfTest(error: "window unavailable")
         }
+        let contentSize = NSSize(width: 1_600, height: 1_000)
+        controller.window?.setContentSize(contentSize)
+        controller.window?.contentView?.setFrameSize(contentSize)
+        controller.window?.appearance = NSAppearance(named: .darkAqua)
+        pumpRunLoop()
         controller.openProject(root: root)
         guard waitUntil(timeout: 30, condition: {
             if case .failed = self.model.projectState { return true }
@@ -1018,6 +1109,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             finishDiffSelfTest(error: "project or HEAD~1 unavailable")
         }
         emitDiffStep("openProject", controller: controller)
+
+        controller.selfTestShowCommitPicker(compare: false)
+        pumpRunLoop()
+        let versionPickerGeometry = controller.selfTestCommitPickerGeometry(
+            compare: false
+        )
+        controller.selfTestCloseCommitPicker(compare: false)
+        let versionPickerGeometryValid =
+            versionPickerGeometry?.shown == true
+            && (versionPickerGeometry?.contentHeight ?? 0) >= 202
+            && (versionPickerGeometry?.viewportHeight ?? 0) >= 116
+            && versionPickerGeometry?.visibleCommitRows == 2
+            && versionPickerGeometry?.commitRowFrames.allSatisfy {
+                $0.width > 0 && $0.height > 0
+            } == true
+        emitDiffStep("darkVersionPickerGeometry", controller: controller, extra: [
+            "contentHeight": versionPickerGeometry?.contentHeight ?? 0,
+            "viewportHeight": versionPickerGeometry?.viewportHeight ?? 0,
+            "commitRowFrames": versionPickerGeometry?.commitRowFrames.map(
+                NSStringFromRect
+            ) ?? [],
+            "visibleCommitRows": versionPickerGeometry?.visibleCommitRows ?? 0,
+            "valid": versionPickerGeometryValid,
+        ])
 
         let revision = model.commitPicker.commits[1].fullSHA
         let snapshot: CommitSnapshot
@@ -1045,6 +1160,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ])
 
         controller.applyPanelPreset(.compare)
+        pumpRunLoop()
+        controller.selfTestShowCommitPicker(compare: true)
+        pumpRunLoop()
+        let comparePickerGeometry = controller.selfTestCommitPickerGeometry(
+            compare: true
+        )
+        controller.selfTestCloseCommitPicker(compare: true)
+        let comparePickerGeometryValid =
+            comparePickerGeometry?.shown == true
+            && (comparePickerGeometry?.contentHeight ?? 0) >= 202
+            && (comparePickerGeometry?.viewportHeight ?? 0) >= 116
+            && comparePickerGeometry?.visibleCommitRows == 2
+            && comparePickerGeometry?.commitRowFrames.allSatisfy {
+                $0.width > 0 && $0.height > 0
+            } == true
+        emitDiffStep("darkComparePickerGeometry", controller: controller, extra: [
+            "contentHeight": comparePickerGeometry?.contentHeight ?? 0,
+            "viewportHeight": comparePickerGeometry?.viewportHeight ?? 0,
+            "commitRowFrames": comparePickerGeometry?.commitRowFrames.map(
+                NSStringFromRect
+            ) ?? [],
+            "visibleCommitRows": comparePickerGeometry?.visibleCommitRows ?? 0,
+            "valid": comparePickerGeometryValid,
+        ])
         guard controller.selectCompareCommit(revision),
               waitUntil(timeout: 30, condition: {
                   self.model.compare.rightRevision == revision
@@ -1129,6 +1268,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         finishDiffSelfTest(
             controller: controller,
             checks: [
+                "darkVersionPickerGeometryValid": versionPickerGeometryValid,
+                "darkComparePickerGeometryValid": comparePickerGeometryValid,
                 "rightReaderMatchesCommitBlob": rightReaderMatchesCommitBlob,
                 "rightReaderDiffersFromWorktree": rightReaderDiffersFromWorktree,
                 "gutterCountsMatch": gutterCountsMatch,
@@ -1682,13 +1823,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         var exactSummary = windowController.selfTestContextSummary
         var exactCount = windowController.selfTestContextCandidateCount
 
-        exactSelfTestProviderState?.blockNextDefinition()
         let featureProbeFileVisible = waitUntil(timeout: 5, condition: {
             windowController.selectFileInSidebar(target.relationFile)
         }) && waitUntil(timeout: 5, condition: {
             windowController.displayedReaderFile?.standardizedFileURL
                 == target.relationFile.standardizedFileURL
         })
+        if featureProbeFileVisible,
+           let signatureTraitOffset = target.signatureTraitOffset
+        {
+            windowController.selfTestReaderRelation(
+                offset: signatureTraitOffset,
+                direction: .calls
+            )
+        }
+        let featureRelationActiveBeforeSwitch = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "Backend"
+                && model.relationTree.root?.children?.contains {
+                    $0.kind == .loading
+                } == false
+        })
+        exactSelfTestProviderState?.blockNextDefinition()
         let oldGeneration = model.generation
         if featureProbeFileVisible {
             windowController.selfTestReaderClick(
@@ -1725,6 +1880,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             && model.generation == oldGeneration + 1
             && windowController.selfTestContextProvenance?
                 .contains("Exact") == false
+        let featureRelationRestoredAfterSwitch = waitUntil(timeout: 5, condition: {
+            model.relationTree.root?.title == "Backend"
+                && model.relationTree.root?.children?.isEmpty == false
+                && model.relationTree.root?.children?.contains {
+                    $0.kind == .loading
+                } == false
+        })
         if featureProbeFileVisible {
             windowController.selfTestReaderClick(
                 offset: target.relationCallOffset,
@@ -1770,6 +1932,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "oldGenerationRequestInFlight": oldGenerationRequestInFlight,
                 "oldGenerationResultReturned": oldGenerationResultReturned,
                 "oldGenerationResultDiscarded": oldGenerationResultDiscarded,
+                "relationActiveBeforeSwitch": featureRelationActiveBeforeSwitch,
+                "relationRestoredAfterSwitch":
+                    featureRelationRestoredAfterSwitch,
                 "switchedExactVisible": switchedExactVisible,
                 "contextReadyMS": contextReadyMS,
                 "extracted": reprofileExtracted,
@@ -2192,6 +2357,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 oldGenerationResultReturned,
             "featureOldGenerationResultDiscarded":
                 oldGenerationResultDiscarded,
+            "featureRelationActiveBeforeSwitch":
+                featureRelationActiveBeforeSwitch,
+            "featureRelationRestoredAfterSwitch":
+                featureRelationRestoredAfterSwitch,
             "featureSwitchedExactVisible": switchedExactVisible,
             "featureProfileButtonVisibleWithGeometry":
                 profileButtonVisibleWithGeometry,
@@ -4652,6 +4821,29 @@ private func makeTabsSelfTestRepository() throws -> URL {
         try? FileManager.default.removeItem(at: root)
         throw error
     }
+}
+
+private func makeSearchSelfTestDirectory() throws -> URL {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightSearchSelfTest-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    var nextMatch = 0
+    for fileIndex in 0..<11 {
+        let matchCount = fileIndex < 10 ? 182 : 181
+        var source = ""
+        for _ in 0..<matchCount {
+            source += "fn item_\(nextMatch)() { let zzqqmarker = \(nextMatch); }\n"
+            nextMatch += 1
+        }
+        try Data(source.utf8).write(
+            to: root.appendingPathComponent("fixture_\(fileIndex).rs")
+        )
+    }
+    precondition(nextMatch == 2_001)
+    return root
 }
 
 private func makeReadingSelfTestDirectory() throws -> URL {

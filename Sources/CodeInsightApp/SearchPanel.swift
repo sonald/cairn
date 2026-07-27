@@ -71,6 +71,70 @@ final class SearchPanel: NSWindowController,
         panelModel.updateProjectState(appModel.projectState)
     }
 
+    func selfTestSetQuery(_ query: String) {
+        input.stringValue = query
+        controlTextDidChange(Notification(
+            name: NSControl.textDidChangeNotification,
+            object: input
+        ))
+    }
+
+    func selfTestRevealTruncationRow() {
+        for group in panelModel.groups {
+            outlineView.expandItem(group)
+        }
+        guard let message = panelModel.displayTruncationMessage else { return }
+        for row in 0..<outlineView.numberOfRows
+        where outlineView.item(atRow: row) as? String == message {
+            outlineView.scrollRowToVisible(row)
+            return
+        }
+    }
+
+    var selfTestOutlineState: (
+        totalRows: Int,
+        groupRows: Int,
+        matchRows: Int,
+        truncationRows: Int,
+        truncationVisible: Bool,
+        status: String,
+        searching: Bool
+    ) {
+        let totalRows = outlineView.numberOfRows
+        var groupRows = 0
+        var matchRows = 0
+        var truncationRows = 0
+        var truncationVisible = false
+        for row in 0..<totalRows {
+            switch outlineView.item(atRow: row) {
+            case is SearchPanelModel.Group:
+                groupRows += 1
+            case is SearchPanelModel.Match:
+                matchRows += 1
+            case let message as String
+                where message == panelModel.displayTruncationMessage:
+                truncationRows += 1
+                let frame = outlineView.rect(ofRow: row)
+                let intersection = frame.intersection(outlineView.visibleRect)
+                truncationVisible = window?.isVisible == true
+                    && !intersection.isNull
+                    && intersection.width > 0
+                    && intersection.height > 0
+            default:
+                break
+            }
+        }
+        return (
+            totalRows,
+            groupRows,
+            matchRows,
+            truncationRows,
+            truncationVisible,
+            statusLabel.stringValue,
+            panelModel.isSearching
+        )
+    }
+
     func outlineView(
         _ outlineView: NSOutlineView,
         numberOfChildrenOfItem item: Any?

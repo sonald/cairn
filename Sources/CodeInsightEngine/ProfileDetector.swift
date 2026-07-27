@@ -47,6 +47,14 @@ enum ProfileDetector {
 
         var features = Set(rootManifest.featureNames)
         var fingerprintBytes = rootBytes
+        var selectedEdition = rootManifest.packageName == nil
+            ? nil
+            : rootManifest.resolvedEdition(
+                workspaceEdition: rootManifest.workspacePackageEdition
+            )
+        let selectedMemberPath = rootManifest.packageName == nil
+            ? rootManifest.workspaceMembers.first.flatMap(normalizedMemberPath)
+            : nil
         if let lockBytes = readBytes("Cargo.lock") {
             fingerprintBytes += lockBytes
         }
@@ -70,6 +78,11 @@ enum ProfileDetector {
             }
             fingerprintBytes += bytes
             features.formUnion(manifest.featureNames)
+            if member == selectedMemberPath {
+                selectedEdition = manifest.resolvedEdition(
+                    workspaceEdition: rootManifest.workspacePackageEdition
+                )
+            }
         }
 
         guard rootManifest.packageName != nil || rootManifest.hasWorkspace else {
@@ -99,8 +112,7 @@ enum ProfileDetector {
             environmentFingerprint: "",
             featureSelection: .defaultFeatures,
             featureNames: Array(features),
-            edition: rootManifest.hasWorkspace
-                ? nil : rootManifest.edition,
+            edition: selectedEdition,
             trustMode: .safe
         )
     }
@@ -143,6 +155,8 @@ private struct CargoManifestSubset {
     let workspaceMembers: [String]
     let featureNames: [String]
     let edition: String?
+    let editionInheritsWorkspace: Bool
+    let workspacePackageEdition: String?
     let hasWorkspace: Bool
 
     init?(bytes: [UInt8]) {
@@ -158,6 +172,8 @@ private struct CargoManifestSubset {
         var workspaceMembers: [String]?
         var featureNames: Set<String> = []
         var edition: String?
+        var editionInheritsWorkspace = false
+        var workspacePackageEdition: String?
         var hasPackage = false
         var hasWorkspace = false
         var seenKeys: Set<String> = []
@@ -195,6 +211,16 @@ private struct CargoManifestSubset {
                       let value = Self.string(rawValue)
                 else { return nil }
                 edition = value
+            case ("package", "edition.workspace"):
+                guard seenKeys.insert("package.edition").inserted,
+                      rawValue == "true"
+                else { return nil }
+                editionInheritsWorkspace = true
+            case ("workspace.package", "edition"):
+                guard seenKeys.insert("workspace.package.edition").inserted,
+                      let value = Self.string(rawValue)
+                else { return nil }
+                workspacePackageEdition = value
             case ("workspace", "members"):
                 guard seenKeys.insert("workspace.members").inserted
                 else { return nil }
@@ -230,7 +256,13 @@ private struct CargoManifestSubset {
         self.workspaceMembers = workspaceMembers ?? []
         self.featureNames = featureNames.sorted()
         self.edition = edition
+        self.editionInheritsWorkspace = editionInheritsWorkspace
+        self.workspacePackageEdition = workspacePackageEdition
         self.hasWorkspace = hasWorkspace
+    }
+
+    func resolvedEdition(workspaceEdition: String?) -> String? {
+        editionInheritsWorkspace ? workspaceEdition : edition
     }
 
     private static func sectionName(_ line: String) -> String? {

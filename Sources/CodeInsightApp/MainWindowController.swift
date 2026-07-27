@@ -663,6 +663,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestCommitToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.commitItemIdentifier)
     }
+    func selfTestShowCommitPicker(compare: Bool) {
+        if compare {
+            showCompareCommitPicker()
+        } else {
+            showCommitPicker(commitButton)
+        }
+    }
+    func selfTestCloseCommitPicker(compare: Bool) {
+        (compare ? compareCommitPickerPopover : commitPickerPopover)?.selfTestClose()
+    }
+    func selfTestCommitPickerGeometry(compare: Bool) -> (
+        contentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        commitRowFrames: [NSRect],
+        visibleCommitRows: Int,
+        shown: Bool
+    )? {
+        (compare ? compareCommitPickerPopover : commitPickerPopover)?
+            .selfTestGeometry
+    }
     var selfTestSymbolsToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.symbolsItemIdentifier)
     }
@@ -820,6 +840,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
         }
         searchPanel?.show(relativeTo: window)
+    }
+
+    func selfTestSetProjectSearchQuery(_ query: String) {
+        searchPanel?.selfTestSetQuery(query)
+    }
+
+    func selfTestRevealProjectSearchTruncationRow() {
+        searchPanel?.selfTestRevealTruncationRow()
+    }
+
+    var selfTestProjectSearchOutlineState: (
+        totalRows: Int,
+        groupRows: Int,
+        matchRows: Int,
+        truncationRows: Int,
+        truncationVisible: Bool,
+        status: String,
+        searching: Bool
+    )? {
+        searchPanel?.selfTestOutlineState
     }
 
     func openSelectedFileInNewTab() {

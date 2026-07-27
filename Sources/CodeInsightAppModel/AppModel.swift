@@ -453,6 +453,9 @@ public final class AppModel {
               case let .ready(session, _) = projectState,
               session.analysisProfile.featureSelection != featureSelection
         else { return }
+        let activeRelation = relationTree.root?.symbol.map {
+            ($0, relationTree.direction)
+        }
         generation &+= 1
         let profileGeneration = generation
         let reprofiled = session.reprofiled(featureSelection: featureSelection)
@@ -466,6 +469,12 @@ public final class AppModel {
         )) else {
             assertionFailure("Illegal project state transition while reprofiling")
             return
+        }
+        if let activeRelation {
+            relationTree.setRoot(
+                symbol: activeRelation.0,
+                direction: activeRelation.1
+            )
         }
         prepareExact(generation: profileGeneration)
     }

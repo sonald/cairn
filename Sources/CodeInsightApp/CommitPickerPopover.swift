@@ -71,7 +71,7 @@ final class CommitPickerPopover: NSViewController,
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSView()
+        let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
         content.addSubview(input)
         content.addSubview(scrollView)
         content.addSubview(statusLabel)
@@ -188,6 +188,37 @@ final class CommitPickerPopover: NSViewController,
         }) else { return false }
         choose(commit)
         return true
+    }
+
+    func selfTestClose() {
+        popover.performClose(nil)
+    }
+
+    var selfTestGeometry: (
+        contentHeight: CGFloat,
+        viewportHeight: CGFloat,
+        commitRowFrames: [NSRect],
+        visibleCommitRows: Int,
+        shown: Bool
+    ) {
+        let firstCommitRow = allowsWorktree ? 1 : 0
+        let commitRowCount = min(2, appModel.commitPicker.filteredCommits.count)
+        let rows = (firstCommitRow..<(firstCommitRow + commitRowCount))
+        let viewport = tableView.visibleRect
+        let frames = rows.map(tableView.rect(ofRow:))
+        let visibleRows = frames.filter {
+            let intersection = $0.intersection(viewport)
+            return !$0.isEmpty
+                && intersection.width > 0
+                && intersection.height > 0
+        }.count
+        return (
+            view.bounds.height,
+            tableView.enclosingScrollView?.contentView.bounds.height ?? 0,
+            frames,
+            visibleRows,
+            popover.isShown
+        )
     }
 
     private func choose(_ commit: CommitInfo?) {

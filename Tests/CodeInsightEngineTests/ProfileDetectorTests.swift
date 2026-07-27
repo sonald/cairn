@@ -97,6 +97,68 @@ func profileDetectorReadsWorkspaceMemberManifests() throws {
         #expect(profile.environmentFingerprint == "")
         #expect(profile.featureSelection == .defaultFeatures)
         #expect(profile.featureNames == ["cli", "serde"])
+        #expect(profile.edition == "2021")
+    }
+}
+
+@Test
+func profileDetectorReadsSelectedWorkspaceMemberEdition() throws {
+    try withProfileProject([
+        "Cargo.toml": """
+            [workspace]
+            members = ["crates/selected"]
+            """,
+        "crates/selected/Cargo.toml": """
+            [package]
+            name = "selected"
+            edition = "2021"
+            """,
+        "src/main.rs": "fn main() {}\n",
+    ]) { root in
+        let profile = try ProjectIndexer().index(root: root).analysisProfile
+
+        #expect(profile.edition == "2021")
+    }
+}
+
+@Test
+func profileDetectorResolvesInheritedWorkspaceEdition() throws {
+    try withProfileProject([
+        "Cargo.toml": """
+            [workspace]
+            members = ["crates/selected"]
+
+            [workspace.package]
+            edition = "2024"
+            """,
+        "crates/selected/Cargo.toml": """
+            [package]
+            name = "selected"
+            edition.workspace = true
+            """,
+        "src/main.rs": "fn main() {}\n",
+    ]) { root in
+        let profile = try ProjectIndexer().index(root: root).analysisProfile
+
+        #expect(profile.edition == "2024")
+    }
+}
+
+@Test
+func profileDetectorLeavesMissingWorkspaceEditionUnknown() throws {
+    try withProfileProject([
+        "Cargo.toml": """
+            [workspace]
+            members = ["crates/selected"]
+            """,
+        "crates/selected/Cargo.toml": """
+            [package]
+            name = "selected"
+            """,
+        "src/main.rs": "fn main() {}\n",
+    ]) { root in
+        let profile = try ProjectIndexer().index(root: root).analysisProfile
+
         #expect(profile.edition == nil)
     }
 }

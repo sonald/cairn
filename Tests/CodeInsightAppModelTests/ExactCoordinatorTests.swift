@@ -272,7 +272,12 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
         ).first?.0
     )
     _ = model.relationTree.setRoot(symbol: main, direction: .calls)
-    #expect(model.relationTree.root != nil)
+    #expect(await exactWaitUntil {
+        model.relationTree.root?.title == "main"
+            && model.relationTree.root?.children?.contains {
+                $0.kind == .loading
+            } == false
+    })
 
     model.switchFeatureSelection(.allFeatures)
 
@@ -290,7 +295,13 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
     #expect(context.analysisProfileID == reprofiled.analysisProfile.id)
     #expect(context.generation == model.generation)
     #expect(model.relationTree.generation > relationGeneration)
-    #expect(model.relationTree.root == nil)
+    #expect(await exactWaitUntil {
+        model.relationTree.root?.title == "main"
+            && model.relationTree.root?.children?.isEmpty == false
+            && model.relationTree.root?.children?.contains {
+                $0.kind == .loading
+            } == false
+    })
     #expect(model.currentFeatureSelection == .allFeatures)
     #expect(model.availableFeatureSelections == [
         .defaultFeatures, .allFeatures, .noDefaultFeatures,
