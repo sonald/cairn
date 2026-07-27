@@ -139,17 +139,23 @@ func rustAnalyzerMapsFeatureSelectionsToInitializationOptions() {
 }
 
 @Test
-func offlineDependencyFailureDowngradesCoverageWithoutBecomingUnavailable() {
+func dependencyFreeProjectIgnoresGenericOfflineFailure() {
+    let diagnostic = "workspace loading failed; --offline was specified"
+
+    #expect(rustAnalyzerCoverage(
+        base: .partial,
+        diagnostic: diagnostic
+    ) == .partial)
+}
+
+@Test
+func explicitOfflineDependencyFailureDowngradesCoverage() {
     let diagnostic = "failed to download crate; --offline was specified"
 
     #expect(rustAnalyzerCoverage(
         base: .partial,
         diagnostic: diagnostic
     ) == .dependenciesUnavailableOffline)
-    #expect(rustAnalyzerCoverage(
-        base: .partial,
-        diagnostic: "unrelated warning"
-    ) == .partial)
     #expect(ExactCoverage.dependenciesUnavailableOffline.rawValue
         == "deps unavailable (offline)")
 }
@@ -582,7 +588,13 @@ func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
     #expect(location.file == "src/lib.rs")
     #expect(location.line == 1)
     #expect(location.column == 8)
-    #expect(session.attribution.coverage == .partial)
+    // This fixture's build.rs makes Cargo load its cc toolchain dependency.
+    // Safe mode is offline: cached cc is partial; a missing cache is honest
+    // dependenciesUnavailableOffline coverage.
+    #expect(
+        session.attribution.coverage == .partial
+            || session.attribution.coverage == .dependenciesUnavailableOffline
+    )
     #expect(session.attribution.configFingerprint.count == 64)
     #expect(session.attribution.environmentFingerprint.count == 64)
 }

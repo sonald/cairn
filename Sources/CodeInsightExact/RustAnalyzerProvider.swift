@@ -618,10 +618,12 @@ func rustAnalyzerCoverage(
     let offline = diagnostic.contains("--offline")
         || diagnostic.contains("offline mode")
         || diagnostic.contains("cargo_net_offline")
+    let dependencyFailure = diagnostic.contains("failed to download")
+        || diagnostic.contains("no matching package named")
+        || diagnostic.contains("attempting to make an http request")
+        || diagnostic.contains("can't check for updates in offline mode")
     guard offline,
-          diagnostic.contains("failed")
-            || diagnostic.contains("no matching package")
-            || diagnostic.contains("not found")
+          dependencyFailure
     else { return base }
     return .dependenciesUnavailableOffline
 }
