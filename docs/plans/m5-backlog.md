@@ -32,6 +32,14 @@ CPU 0%、无子进程——即 self-test 逻辑已跑完但进程未退出。
 **对 S9 的影响**：S9 的「10 条通道双语料全家福连跑」正是"循环里跑多条"这个形态。
 在根因查明前，S9 应**以逐条单发为准**产出结果，并把这个限制在交互测试计划里如实标注。
 
+**M6-S0 workaround（根因仍未明）**：所有 self-test 退出路径现在先向 stderr 写
+`SELF_TEST_FINISH timestamp=… pid=… channel=… exit=…`，再保持原有
+`Darwin.exit` 行为；若再次挂起，可区分"未到 finish"与"finish 后进程未退"。
+`scripts/run-self-tests.sh` 用显式列出的独立进程、每条 90 秒超时、挂起时 `sample`
+和结果聚合替代 shell `for` 循环。M6-S0 验收的 11 个通道（project 分 git /
+非 git 两次，共 12 个独立进程）为 **12 PASS / 0 FAIL / 0 HANG**；这只证明
+workaround 可用，不把一次未挂起误报成根因已解。
+
 ## 一次无效验收的纠正（流程教训）
 
 S7 验收报告中的 `--self-test-open → exit=0` **是无效数据**：当时喂的是
@@ -75,6 +83,12 @@ S7 验收报告中的 `--self-test-open → exit=0` **是无效数据**：当时
 `expected a.rs, b.rs, and main.rs fixture symbols`（20/20 假失败）。正确做法是
 **用旧版本的二进制在真仓库里跑**。
 
+**M6-S0 已清算**：未加干预的 S6 `137a0bf` 本轮 0/30 红，不能作为修复证据；
+在临时 S6 构建中仅给 Context candidate render 加 100ms 调度延迟后，原条件
+稳定为 **30/30 红**，且均为 `contextPlaceholderHiddenWithContent=false`。
+只把 wait 条件补成"模型数据已到 × placeholder 隐藏 × reader 可见"，同一延迟下
+变为 **0/30 红（30/30 绿）**。调度延迟只存在于临时复现构建，没有进入工作树。
+
 ### 巨档 footprint 绝对值超 100MB 预算（TextKit 2 基线，M5 之前既存）
 
 **实测**：10 万行档 base footprint ~210–255MB，远超 100MB 预算。
@@ -85,10 +99,11 @@ S7 验收报告中的 `--self-test-open → exit=0` **是无效数据**：当时
 **S7 增量不可测**：真机连跑三次的增量稳定在 **−27.9MB**（负值），因为测量区间被
 TextKit 缓存回收/替换主导，`phys_footprint` 的进程净变化无法归因成 S7 增量。
 原先的 `hugeS7IncrementUnderTenMB` 门因此是**恒真断言（假安全网）**，S7 收尾时
-已删除，改为 metric-only 输出并在 `CodeInsightApp.swift:989` 标注。
+已删除，改为 metric-only 输出并在 `runReadingSelfTest` 的巨档测量段标注。
 
-**遗留**：巨档内存本身该不该治、怎么治，留 S9 决策。若要治，先解决"如何测出可归因
-的增量"这个前置问题。
+**M7 候选**：巨档绝对 footprint 超 100MB 正式转入 M7 候选，不再作为 M5/M6
+pass/fail 门。进入预算或优化前，必须先解决"如何得到可归因的 baseline / after /
+delta"这一测量方法学；方法学未成立前只输出三个原始 metric。
 
 ## 交互测试待人工目视（S7 部分，无头不可证）
 
@@ -106,7 +121,8 @@ TextKit 缓存回收/替换主导，`phys_footprint` 的进程净变化无法归
 - **Relation Window 随光标自动跟踪**。
 - **RA 进程组化**：从直接子进程守卫扩到孙进程/进程组的生命周期治理。
 - **AX 值变更防御**。
-- **huge `syntaxVisible` 属性重排**：先建立可归因探针，再动 TextKit 热路径。
+- **M7 候选：huge `syntaxVisible` / 绝对 footprint**：先建立可归因测量方法，
+  再谈预算或改 TextKit 热路径。
 - **分支图**。
 - **F4.8 lineage**：重命名/跨 commit 谱系，不用启发式冒充确定关系。
 - **依赖全量浏览/搜索**：M5 只交付依赖落点与只读打开。

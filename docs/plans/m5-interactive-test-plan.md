@@ -61,6 +61,22 @@ swift run -c release codeinsight-app
 
 ## G2 S4 依赖落点与只读阅读
 
+### G2 前置：本地依赖齐全 × trust mode
+
+依赖源码可得性不由 Trusted 产生：`Sandbox.swift` 在 trust mode 分支之外对 Safe 与
+Trusted 都设置 `CARGO_NET_OFFLINE=1`，两种模式都离线。源码是否可得取决于本地
+`~/.cargo/registry` 缓存与 `rust-src` 组件是否齐全；不要把授权写成获取依赖的步骤，
+授权后缺失源码仍然 BLOCKED。
+
+trust mode 仍会影响分析覆盖：Safe 显式设置
+`cargo.buildScripts.enable = false`（并禁用 proc macro），因此依赖 build script /
+proc-macro 的 crate 在 Safe 下，其 RA 解析与语义覆盖会受限。
+
+| 本地依赖状态 | Safe | Trusted |
+|---|---|---|
+| 本地依赖齐全 | 源码可打开；普通 crate 可测。依赖 build script / proc-macro 的 crate 解析与语义覆盖受限，按实际结果记 partial/BLOCKED。 | 源码可打开；build script / proc-macro 未被 Safe 配置显式禁用，可测更完整覆盖；仍保持离线，不发生下载。 |
+| 本地依赖不齐全 | 依赖落点记 BLOCKED/partial/offline；Safe 的 build-script/proc-macro 限制同时存在。 | 仍记 BLOCKED/partial/offline；Trusted 不会下载或补齐 `~/.cargo/registry` / `rust-src`，授权不能修复可得性。 |
+
 | ID | 步骤 | 预期 |
 |----|------|------|
 | G2.1 | 从 `Future`/`Context`/`Poll` 或可用的 serde 类型跳定义 | Context 卡片显示 `External · in dependency` / `in dependency`，crate 可证时显示 crate，否则显示绝对路径 |

@@ -169,11 +169,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         launch(offscreen: true, measuresIdleFootprint: true)
         let coldStartMS = milliseconds(since: startedAt)
         guard let windowController, windowController.window?.isVisible == true else {
-            Darwin.exit(1)
+            Self.exitSelfTest(channel: "base", status: 1)
         }
         windowController.window?.contentView?.layoutSubtreeIfNeeded()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.35))
-        guard let footprint = physicalFootprintBytes() else { Darwin.exit(1) }
+        guard let footprint = physicalFootprintBytes() else {
+            Self.exitSelfTest(channel: "base", status: 1)
+        }
         let idleFootprintMB = Double(footprint) / 1_048_576
         windowController.prepareTitledWindowForSelfTest()
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
@@ -777,7 +779,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "error": error.localizedDescription,
                 "selfTest": "search",
             ])
-            Darwin.exit(1)
+            Self.exitSelfTest(channel: "search", status: 1)
         }
 
         func finish(
@@ -810,8 +812,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "totalRows": state?.totalRows as Any,
                 "truncationRows": state?.truncationRows as Any,
             ])
-            Darwin.exit(
-                error == nil && checks.values.allSatisfy { $0 } ? 0 : 1
+            Self.exitSelfTest(
+                channel: "search",
+                status: error == nil && checks.values.allSatisfy { $0 } ? 0 : 1
             )
         }
 
@@ -1054,12 +1057,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ]) { _, new in new }
         // phys_footprint is a process-wide net metric. TextKit rendering-cache
         // reclamation can dominate this interval, so it cannot gate S7 cost.
-        // The >100 MB absolute baseline predates S7 and remains S9 backlog.
+        // The >100 MB absolute baseline predates S7 and is an M7 candidate.
         let metrics = [
             "regularFootprintMB": regularFootprintMB,
-            "hugeFootprintMB": hugeFootprintMB,
             "hugeBaselineFootprintMB": hugeBaselineFootprintMB,
-            "hugeIncrementalFootprintMB": hugeIncrementalFootprintMB,
+            "hugeAfterFootprintMB": hugeFootprintMB,
+            "hugeDeltaFootprintMB": hugeIncrementalFootprintMB,
             "hugeLineCount": Double(hugeLineCount),
             "hugeOccurrenceCount": Double(hugeOccurrenceCount),
             "styledFragmentCount": Double(styledFragments),
@@ -1074,12 +1077,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "visibleLines": hugeVisibleLines,
             "firstVisibleMS": hugeFirstVisibleMS,
             "baselineFootprintMB": hugeBaselineFootprintMB,
+            "afterFootprintMB": hugeFootprintMB,
+            "deltaFootprintMB": hugeIncrementalFootprintMB,
+            // Keep the established keys for downstream readers.
             "incrementalFootprintMB": hugeIncrementalFootprintMB,
             "footprintMB": hugeFootprintMB,
             "memoryAssessment":
                 "metric-only: TextKit cache reclamation makes the S7 delta "
                 + "non-attributable; >100 MB absolute baseline predates S7 "
-                + "and remains S9 backlog",
+                + "and is an M7 candidate after attributable measurement",
         ])
         finish(checks: checks, metrics: metrics)
     }
@@ -1352,7 +1358,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ?? true
         if let error { summary["error"] = error }
         Self.writeJSON(summary)
-        Darwin.exit(passed ? 0 : 1)
+        Self.exitSelfTest(channel: "diff", status: passed ? 0 : 1)
     }
 
     private static func jsonGutterCounts(
@@ -1586,7 +1592,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             offset: localCallOffset,
             commandClick: false
         )
-        guard waitUntil(timeout: 5, condition: { self.pinContextSummary != nil }),
+        guard waitUntil(timeout: 5, condition: {
+                  self.pinContextSummary != nil
+                      && !windowController.selfTestContextPlaceholderVisible
+                      && windowController.selfTestContextReaderVisible
+              }),
               let initialContext = pinContextSummary
         else {
             finishPinSelfTest(
@@ -3099,7 +3109,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: controller,
             extra: summary
         )
-        Darwin.exit(passed ? 0 : 1)
+        Self.exitSelfTest(channel: "exact", status: passed ? 0 : 1)
     }
 
     private func performHistoryNavigation(
@@ -3197,7 +3207,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         summary["passed"] = passed
         if let error { summary["error"] = error }
         emitPinStep("summary", controller: controller, extra: summary)
-        Darwin.exit(passed ? 0 : 1)
+        Self.exitSelfTest(channel: "pin", status: passed ? 0 : 1)
     }
 
     func runSwitchSelfTest(root: URL) -> Never {
@@ -3281,7 +3291,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 let fragment = state.textView.view.textLayoutManager?
                     .textLayoutFragment(for: .zero),
                 !fragment.textLineFragments.isEmpty
-            else { Darwin.exit(1) }
+            else { Self.exitSelfTest(channel: "open", status: 1) }
             state.firstVisibleMS = milliseconds(since: openedAt)
             state.firstVisibleOutlineFacets = loaded.document.outlineFacets.count
             if loaded.tier == .regular {
@@ -3307,7 +3317,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             }
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
-            Darwin.exit(1)
+            Self.exitSelfTest(channel: "open", status: 1)
         }
 
         let deadline = Date(timeIntervalSinceNow: 30)
@@ -3321,7 +3331,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             let firstVisibleOutlineFacets = state.firstVisibleOutlineFacets,
             let outlineFacets = state.outlineFacets,
             !state.failed
-        else { Darwin.exit(1) }
+        else { Self.exitSelfTest(channel: "open", status: 1) }
         Self.finishOpenSelfTest(
             tier: tier,
             firstVisibleMS: firstVisibleMS,
@@ -3971,10 +3981,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(passed ? 0 : 1)
+            exitSelfTest(channel: "base", status: passed ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
-            Darwin.exit(1)
+            exitSelfTest(channel: "base", status: 1)
         }
     }
 
@@ -4095,7 +4105,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         summary["passed"] = passed
         if let error { summary["error"] = error }
         writeJSON(summary)
-        Darwin.exit(passed ? 0 : 1)
+        exitSelfTest(channel: "tabs", status: passed ? 0 : 1)
     }
 
     private static func finishReadingSelfTest(
@@ -4112,7 +4122,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         summary["passed"] = passed
         if let error { summary["error"] = error }
         writeJSON(summary)
-        Darwin.exit(passed ? 0 : 1)
+        exitSelfTest(channel: "reading", status: passed ? 0 : 1)
     }
 
     private static func finishProjectSelfTest(
@@ -4162,8 +4172,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(
-                ready
+            exitSelfTest(
+                channel: "project",
+                status: ready
                     && emptyStateRemoved
                     && readerDocumentVisible
                     && commitPickerShowsCurrentBranch
@@ -4177,7 +4188,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
-            Darwin.exit(1)
+            exitSelfTest(channel: "project", status: 1)
         }
     }
 
@@ -4203,8 +4214,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            Darwin.exit(
-                firstPaintMS >= 0
+            exitSelfTest(
+                channel: "switch",
+                status: firstPaintMS >= 0
                     && firstPaintMS < SelfTestBudgets.snapshotFirstPaintMS
                     && cachedReadyMS >= firstPaintMS
                     && fullReadyMS >= cachedReadyMS
@@ -4213,7 +4225,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
-            Darwin.exit(1)
+            exitSelfTest(channel: "switch", status: 1)
         }
     }
 
@@ -4236,7 +4248,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ]
         if let error { summary["error"] = error }
         writeJSON(summary)
-        Darwin.exit(passed ? 0 : 1)
+        exitSelfTest(channel: "history", status: passed ? 0 : 1)
     }
 
     private static func writeJSON(_ object: [String: Any]) {
@@ -4250,6 +4262,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
         }
+    }
+
+    private static func exitSelfTest(
+        channel: String,
+        status: Int32
+    ) -> Never {
+        let marker = "SELF_TEST_FINISH"
+            + " timestamp=\(Date().timeIntervalSince1970)"
+            + " pid=\(getpid()) channel=\(channel) exit=\(status)\n"
+        FileHandle.standardError.write(Data(marker.utf8))
+        Darwin.exit(status)
     }
 
     private static func finishOpenSelfTest(
@@ -4283,10 +4306,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                             && firstVisibleOutlineFacets == 0
                             && styledFragments < SelfTestBudgets.hugeStyledFragments
                     )
-            Darwin.exit(withinBudget ? 0 : 1)
+            exitSelfTest(channel: "open", status: withinBudget ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
-            Darwin.exit(1)
+            exitSelfTest(channel: "open", status: 1)
         }
     }
 }
