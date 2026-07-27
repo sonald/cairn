@@ -236,6 +236,7 @@ public final class LSPClient: @unchecked Sendable {
             ]],
             "capabilities": [
                 "textDocument": [
+                    "callHierarchy": [String: Any](),
                     "definition": ["linkSupport": true],
                     "implementation": ["linkSupport": true],
                 ],

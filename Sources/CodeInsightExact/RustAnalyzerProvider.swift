@@ -3,7 +3,9 @@ import CodeInsightGit
 import Foundation
 
 public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
-    public let capabilities: ExactCapabilities = [.definition, .implementations]
+    public let capabilities: ExactCapabilities = [
+        .definition, .implementations, .callHierarchy,
+    ]
     public let toolVersion: String
 
     private let projectURL: URL
@@ -327,13 +329,17 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     ) -> ExactCapabilities {
         var negotiated: ExactCapabilities = [.definition]
         guard let result = initializeResult as? [String: Any],
-              let capabilities = result["capabilities"] as? [String: Any],
-              let provider = capabilities["implementationProvider"]
+              let capabilities = result["capabilities"] as? [String: Any]
         else { return negotiated }
-        if (provider as? Bool) == true
-            || provider is [String: Any]
+        if let provider = capabilities["implementationProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
         {
             negotiated.insert(.implementations)
+        }
+        if let provider = capabilities["callHierarchyProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.callHierarchy)
         }
         return negotiated
     }
@@ -368,13 +374,6 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         method: String,
         parse: (Any) throws -> Result?
     ) throws -> Result? {
-        operationLock.lock()
-        defer { operationLock.unlock() }
-
-        stateLock.lock()
-        cancelled = false
-        stateLock.unlock()
-        var activeClient = try clientForRequest()
         let path = try relativePath(file)
         let bytes = try snapshot.readBytes(path: path)
         guard let map = LSPPositionMap(utf8: bytes) else {
@@ -384,29 +383,47 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             throw ExactError.invalidPosition(path, byteOffset)
         }
 
+        return try request(
+            method: method,
+            params: [
+                "textDocument": [
+                    "uri": projectURL.appendingPathComponent(path).absoluteString,
+                ],
+                "position": [
+                    "line": position.line,
+                    "character": position.character,
+                ],
+            ],
+            beforeRequest: { client in
+                try self.open(path: path, bytes: bytes, client: client)
+            },
+            parse: parse
+        )
+    }
+
+    private func request<Result>(
+        method: String,
+        params: Any,
+        beforeRequest: (LSPClient) throws -> Void,
+        parse: (Any) throws -> Result?
+    ) throws -> Result? {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
+        stateLock.lock()
+        cancelled = false
+        stateLock.unlock()
+        var activeClient = try clientForRequest()
         var retriedAfterCrash = false
         while true {
             do {
-                try open(
-                    path: path,
-                    bytes: bytes,
-                    client: activeClient
-                )
+                try beforeRequest(activeClient)
                 for attempt in 0..<3 {
                     try throwIfCancelled(method)
                     do {
                         let response = try activeClient.request(
                             method,
-                            params: [
-                                "textDocument": [
-                                    "uri": projectURL.appendingPathComponent(path)
-                                        .absoluteString,
-                                ],
-                                "position": [
-                                    "line": position.line,
-                                    "character": position.character,
-                                ],
-                            ],
+                            params: params,
                             timeout: requestTimeout
                         )
                         if let result = try parse(response) {
@@ -444,19 +461,65 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         file: String,
         byteOffset: Int
     ) throws -> [ExactCallHierarchyItem]? {
-        nil
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/prepareCallHierarchy",
+            parse: parseCallHierarchyItems
+        )
     }
 
     func incomingCalls(
         item: ExactCallHierarchyItem
     ) throws -> [ExactCallRelation]? {
-        nil
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestCallRelations(
+            item: item,
+            method: "callHierarchy/incomingCalls",
+            itemKey: "from",
+            callSiteURI: { $0.uri }
+        )
     }
 
     func outgoingCalls(
         item: ExactCallHierarchyItem
     ) throws -> [ExactCallRelation]? {
-        nil
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestCallRelations(
+            item: item,
+            method: "callHierarchy/outgoingCalls",
+            itemKey: "to",
+            callSiteURI: { _ in item.uri }
+        )
+    }
+
+    private func requestCallRelations(
+        item: ExactCallHierarchyItem,
+        method: String,
+        itemKey: String,
+        callSiteURI: @escaping (ExactCallHierarchyItem) -> String
+    ) throws -> [ExactCallRelation]? {
+        try request(
+            method: method,
+            params: ["item": try callHierarchyItemObject(item)],
+            beforeRequest: { client in
+                try self.open(item: item, client: client)
+            },
+            parse: {
+                try self.parseCallRelations(
+                    $0,
+                    itemKey: itemKey,
+                    callSiteURI: callSiteURI
+                )
+            }
+        )
     }
 
     func cancel() {
@@ -613,6 +676,131 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 ],
             ])
         }
+    }
+
+    private func open(
+        item: ExactCallHierarchyItem,
+        client: LSPClient
+    ) throws {
+        guard let url = URL(string: item.uri), url.isFileURL else {
+            throw ExactError.invalidDefinitionResponse(item.uri)
+        }
+        guard let path = projectRelativePath(of: url) else { return }
+        try open(
+            path: path,
+            bytes: snapshot.readBytes(path: path),
+            client: client
+        )
+    }
+
+    private func parseCallHierarchyItems(
+        _ value: Any
+    ) throws -> [ExactCallHierarchyItem]? {
+        if value is NSNull { return nil }
+        guard let objects = value as? [[String: Any]] else {
+            throw ExactError.invalidDefinitionResponse(String(describing: value))
+        }
+        return try objects.map(parseCallHierarchyItem)
+    }
+
+    private func parseCallHierarchyItem(
+        _ object: [String: Any]
+    ) throws -> ExactCallHierarchyItem {
+        guard let name = object["name"] as? String,
+              let kind = (object["kind"] as? NSNumber)?.intValue,
+              let uri = object["uri"] as? String,
+              let range = object["range"] as? [String: Any],
+              let selectionRange = object["selectionRange"] as? [String: Any]
+        else {
+            throw ExactError.invalidDefinitionResponse(String(describing: object))
+        }
+        let data: Data?
+        if let value = object["data"] {
+            data = try JSONSerialization.data(
+                withJSONObject: value,
+                options: [.fragmentsAllowed, .sortedKeys]
+            )
+        } else {
+            data = nil
+        }
+        return ExactCallHierarchyItem(
+            name: name,
+            kind: kind,
+            uri: uri,
+            range: try parseLocation(["uri": uri, "range": range]),
+            selectionRange: try parseLocation([
+                "uri": uri,
+                "range": selectionRange,
+            ]),
+            data: data
+        )
+    }
+
+    private func parseCallRelations(
+        _ value: Any,
+        itemKey: String,
+        callSiteURI: (ExactCallHierarchyItem) -> String
+    ) throws -> [ExactCallRelation]? {
+        if value is NSNull { return nil }
+        guard let objects = value as? [[String: Any]] else {
+            throw ExactError.invalidDefinitionResponse(String(describing: value))
+        }
+        return try objects.map { object in
+            guard let itemObject = object[itemKey] as? [String: Any],
+                  let ranges = object["fromRanges"] as? [[String: Any]]
+            else {
+                throw ExactError.invalidDefinitionResponse(
+                    String(describing: object)
+                )
+            }
+            let item = try parseCallHierarchyItem(itemObject)
+            let uri = callSiteURI(item)
+            return ExactCallRelation(
+                item: item,
+                callSites: try ranges.map {
+                    try parseLocation(["uri": uri, "range": $0])
+                }
+            )
+        }
+    }
+
+    private func callHierarchyItemObject(
+        _ item: ExactCallHierarchyItem
+    ) throws -> [String: Any] {
+        var object: [String: Any] = [
+            "name": item.name,
+            "kind": item.kind,
+            "uri": item.uri,
+            "range": try lspRange(for: item.range),
+            "selectionRange": try lspRange(for: item.selectionRange),
+        ]
+        if let data = item.data {
+            object["data"] = try JSONSerialization.jsonObject(
+                with: data,
+                options: [.fragmentsAllowed]
+            )
+        }
+        return object
+    }
+
+    private func lspRange(for location: ExactLocation) throws -> [String: Any] {
+        let bytes: [UInt8]
+        if location.file.hasPrefix("/") {
+            bytes = [UInt8](try Data(
+                contentsOf: URL(fileURLWithPath: location.file),
+                options: .mappedIfSafe
+            ))
+        } else {
+            bytes = try snapshot.readBytes(path: relativePath(location.file))
+        }
+        guard let map = LSPPositionMap(utf8: bytes) else {
+            throw ExactError.invalidUTF8(location.file)
+        }
+        guard let position = map.position(forByteOffset: location.byteOffset) else {
+            throw ExactError.invalidPosition(location.file, location.byteOffset)
+        }
+        let point = ["line": position.line, "character": position.character]
+        return ["start": point, "end": point]
     }
 
     private func parseDefinition(_ value: Any) throws -> ExactLocation? {

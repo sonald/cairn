@@ -409,6 +409,7 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
         #expect(server.receivedExit)
         #expect(server.receivedRegisterCapabilityResponse)
         #expect(server.receivedImplementationCapability)
+        #expect(server.receivedCallHierarchyCapability)
         #expect(diagnostic?.contains("failed to resolve dependency in offline mode") == true)
         let location = try #require(result as? [String: Any])
         #expect(location["uri"] as? String == "file:///fixture/src/lib.rs")
@@ -548,6 +549,145 @@ func rustAnalyzerDoesNotNegotiateFalseImplementationProvider() throws {
         implementationResult: NSNull()
     ) { session in
         #expect(!session.negotiatedCapabilities.contains(.implementations))
+    }
+}
+
+@Test
+func rustAnalyzerParsesIncomingCallHierarchyRelation() throws {
+    let root = try temporaryCallHierarchyFixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let aURI = root.appendingPathComponent("src/a.rs").absoluteString
+    let bURI = root.appendingPathComponent("src/b.rs").absoluteString
+    let incoming: [[String: Any]] = [[
+        "from": [
+            "name": "foo",
+            "kind": 12,
+            "uri": aURI,
+            "range": lspRange(line: 2, character: 0),
+            "selectionRange": lspRange(line: 2, character: 7),
+        ],
+        "fromRanges": [
+            lspRange(line: 3, character: 16),
+            lspRange(line: 4, character: 17),
+        ],
+    ]]
+    let bar = ExactCallHierarchyItem(
+        name: "bar",
+        kind: 12,
+        uri: bURI,
+        range: ExactLocation(file: "src/b.rs", byteOffset: 0, line: 1, column: 1),
+        selectionRange: ExactLocation(
+            file: "src/b.rs",
+            byteOffset: 7,
+            line: 1,
+            column: 8
+        ),
+        data: nil
+    )
+
+    try withFakeRustAnalyzerSession(
+        root: root,
+        snapshotFiles: ["src/a.rs", "src/b.rs"],
+        incomingCallResult: incoming
+    ) { session in
+        let relations = try #require(try session.incomingCalls(item: bar))
+
+        #expect(relations.count == 1)
+        #expect(relations[0].item.name == "foo")
+        #expect(relations[0].item.selectionRange.file == "src/a.rs")
+        #expect(relations[0].callSites.count == 2)
+        #expect(relations[0].callSites.map(\.file) == ["src/a.rs", "src/a.rs"])
+        #expect(relations[0].callSites.map(\.line) == [4, 5])
+    }
+}
+
+@Test
+func rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites() throws {
+    let root = try temporaryCallHierarchyFixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let aURI = root.appendingPathComponent("src/a.rs").absoluteString
+    let bURI = root.appendingPathComponent("src/b.rs").absoluteString
+    let foo: [String: Any] = [
+        "name": "foo",
+        "kind": 12,
+        "uri": aURI,
+        "range": lspRange(line: 2, character: 0),
+        "selectionRange": lspRange(line: 2, character: 7),
+    ]
+    let bar: [String: Any] = [
+        "name": "bar",
+        "kind": 12,
+        "uri": bURI,
+        "range": lspRange(line: 0, character: 0),
+        "selectionRange": lspRange(line: 0, character: 7),
+    ]
+    let outgoing: [[String: Any]] = [[
+        "to": bar,
+        "fromRanges": [
+            lspRange(line: 3, character: 16),
+            lspRange(line: 4, character: 17),
+        ],
+    ]]
+
+    try withFakeRustAnalyzerSession(
+        root: root,
+        snapshotFiles: ["src/a.rs", "src/b.rs"],
+        prepareCallHierarchyResult: [foo, bar],
+        outgoingCallResult: outgoing
+    ) { session in
+        let items = try #require(try session.prepareCallHierarchy(
+            file: "src/a.rs",
+            byteOffset: 0
+        ))
+        #expect(items.map(\.name) == ["foo", "bar"])
+
+        let relations = try #require(try session.outgoingCalls(item: items[0]))
+        #expect(relations.count == 1)
+        #expect(relations[0].item.selectionRange.file == "src/b.rs")
+        #expect(relations[0].callSites.count == 2)
+        #expect(relations[0].callSites.map(\.file) == ["src/a.rs", "src/a.rs"])
+        #expect(!relations[0].callSites.contains { $0.file == "src/b.rs" })
+        #expect(relations[0].callSites.map(\.line) == [4, 5])
+    }
+}
+
+@Test
+func rustAnalyzerTreatsEmptyCallHierarchyPrepareAsEmpty() throws {
+    let root = try temporaryCallHierarchyFixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try withFakeRustAnalyzerSession(
+        root: root,
+        snapshotFiles: ["src/a.rs", "src/b.rs"],
+        prepareCallHierarchyResult: []
+    ) { session in
+        let items = try #require(try session.prepareCallHierarchy(
+            file: "src/a.rs",
+            byteOffset: 0
+        ))
+        #expect(items.isEmpty)
+    }
+}
+
+@Test
+func rustAnalyzerNegotiatesCallHierarchyBooleanProvider() throws {
+    try withFakeRustAnalyzerSession(callHierarchyProvider: true) { session in
+        #expect(session.negotiatedCapabilities.contains(.callHierarchy))
+    }
+}
+
+@Test
+func rustAnalyzerNegotiatesCallHierarchyObjectProvider() throws {
+    try withFakeRustAnalyzerSession(
+        callHierarchyProvider: [String: Any]()
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.callHierarchy))
+    }
+}
+
+@Test
+func rustAnalyzerDoesNotNegotiateMissingCallHierarchyProvider() throws {
+    try withFakeRustAnalyzerSession(callHierarchyProvider: nil) { session in
+        #expect(!session.negotiatedCapabilities.contains(.callHierarchy))
     }
 }
 
@@ -1337,8 +1477,13 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedExit = false
     private var _receivedRegisterCapabilityResponse = false
     private var _receivedImplementationCapability = false
+    private var _receivedCallHierarchyCapability = false
     private let implementationProvider: Any?
     private let implementationResult: Any
+    private let callHierarchyProvider: Any?
+    private let prepareCallHierarchyResult: Any
+    private let incomingCallResult: Any
+    private let outgoingCallResult: Any
     private var _error: Error?
 
     var requestMethods: [String] { locked { _requestMethods } }
@@ -1351,6 +1496,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     var receivedImplementationCapability: Bool {
         locked { _receivedImplementationCapability }
     }
+    var receivedCallHierarchyCapability: Bool {
+        locked { _receivedCallHierarchyCapability }
+    }
     var error: Error? { locked { _error } }
 
     init(
@@ -1358,12 +1506,20 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         output: FileHandle,
         implementationProvider: Any? = true,
         implementationResult: Any = NSNull(),
+        callHierarchyProvider: Any? = true,
+        prepareCallHierarchyResult: Any = NSNull(),
+        incomingCallResult: Any = NSNull(),
+        outgoingCallResult: Any = NSNull(),
         done: @escaping () -> Void
     ) {
         self.input = input
         self.output = output
         self.implementationProvider = implementationProvider
         self.implementationResult = implementationResult
+        self.callHierarchyProvider = callHierarchyProvider
+        self.prepareCallHierarchyResult = prepareCallHierarchyResult
+        self.incomingCallResult = incomingCallResult
+        self.outgoingCallResult = outgoingCallResult
         self.done = done
     }
 
@@ -1403,6 +1559,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     locked {
                         _receivedImplementationCapability =
                             textDocument?["implementation"] != nil
+                        _receivedCallHierarchyCapability =
+                            textDocument?["callHierarchy"] != nil
                     }
                     try write([
                         "jsonrpc": "2.0",
@@ -1421,6 +1579,10 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     if let implementationProvider {
                         serverCapabilities["implementationProvider"] =
                             implementationProvider
+                    }
+                    if let callHierarchyProvider {
+                        serverCapabilities["callHierarchyProvider"] =
+                            callHierarchyProvider
                     }
                     try write([
                         "jsonrpc": "2.0", "id": id,
@@ -1443,6 +1605,21 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     try write([
                         "jsonrpc": "2.0", "id": id,
                         "result": implementationResult,
+                    ])
+                case "textDocument/prepareCallHierarchy":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": prepareCallHierarchyResult,
+                    ])
+                case "callHierarchy/incomingCalls":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": incomingCallResult,
+                    ])
+                case "callHierarchy/outgoingCalls":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": outgoingCallResult,
                     ])
                 case "shutdown":
                     try write([
@@ -1481,12 +1658,17 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
 }
 
 private func withFakeRustAnalyzerSession<T>(
+    root: URL = exactFixtureURL(),
+    snapshotFiles: [String] = ["src/lib.rs", "src/main.rs"],
     implementationProvider: Any? = true,
-    implementationResult: Any,
+    implementationResult: Any = NSNull(),
+    callHierarchyProvider: Any? = true,
+    prepareCallHierarchyResult: Any = NSNull(),
+    incomingCallResult: Any = NSNull(),
+    outgoingCallResult: Any = NSNull(),
     body: (any ExactSession) throws -> T
 ) throws -> T {
-    let root = exactFixtureURL()
-    let snapshot = try DirectorySnapshot(root: root)
+    let snapshot = try DirectorySnapshot(root: root, files: snapshotFiles)
     let clientToServer = Pipe()
     let serverToClient = Pipe()
     let done = DispatchSemaphore(value: 0)
@@ -1495,6 +1677,10 @@ private func withFakeRustAnalyzerSession<T>(
         output: serverToClient.fileHandleForWriting,
         implementationProvider: implementationProvider,
         implementationResult: implementationResult,
+        callHierarchyProvider: callHierarchyProvider,
+        prepareCallHierarchyResult: prepareCallHierarchyResult,
+        incomingCallResult: incomingCallResult,
+        outgoingCallResult: outgoingCallResult,
         done: { done.signal() }
     )
     server.start()
@@ -1534,6 +1720,32 @@ private func exactFixtureURL() -> URL {
     URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent()
         .appendingPathComponent("Fixtures/exact_fixture", isDirectory: true)
+}
+
+private func temporaryCallHierarchyFixture() throws -> URL {
+    let root = try temporaryTestDirectory()
+    let source = root.appendingPathComponent("src", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: source,
+        withIntermediateDirectories: true
+    )
+    try Data("""
+        use crate::b::bar;
+
+        pub fn foo() -> i32 {
+            let first = bar();
+            let second = bar();
+            first + second
+        }
+        """.utf8).write(to: source.appendingPathComponent("a.rs"))
+    try Data("""
+        pub fn bar() -> i32 {
+            1
+        }
+        // wrong-base padding
+        // wrong-base padding
+        """.utf8).write(to: source.appendingPathComponent("b.rs"))
+    return root
 }
 
 private func lspRange(line: Int, character: Int) -> [String: Any] {
@@ -1588,10 +1800,14 @@ private struct DirectorySnapshot: Snapshot {
     let objectFormat: GitObjectFormat = .sha1
     let sourceKind: SourceKind = .untracked
     let root: URL
-    private let files = ["src/lib.rs", "src/main.rs"]
+    private let files: [String]
 
-    init(root: URL) throws {
+    init(
+        root: URL,
+        files: [String] = ["src/lib.rs", "src/main.rs"]
+    ) throws {
         self.root = root
+        self.files = files
         for file in files {
             _ = try Data(contentsOf: root.appendingPathComponent(file))
         }
