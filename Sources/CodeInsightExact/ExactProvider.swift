@@ -13,6 +13,7 @@ public struct ExactCapabilities: OptionSet, Sendable {
     public static let definition = ExactCapabilities(rawValue: 1 << 0)
     public static let implementations = ExactCapabilities(rawValue: 1 << 1)
     public static let callHierarchy = ExactCapabilities(rawValue: 1 << 2)
+    public static let references = ExactCapabilities(rawValue: 1 << 3)
 }
 
 public enum ExactCoverage: String, Equatable, Sendable {
@@ -194,6 +195,11 @@ public protocol ExactSession: AnyObject, Sendable {
     func implementations(
         file: String,
         byteOffset: Int
+    ) throws -> [ExactLocation]?
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
     ) throws -> [ExactLocation]?
     func prepareCallHierarchy(
         file: String,

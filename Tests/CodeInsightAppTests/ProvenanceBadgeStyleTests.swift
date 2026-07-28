@@ -80,9 +80,15 @@ func inProcessExactProviderDefinitionOnlySubsetReturnsNilForNewCapabilities() th
     )
     let provider = InProcessExactProvider(
         location: itemLocation,
-        capabilities: [.definition, .implementations, .callHierarchy],
+        capabilities: [
+            .definition,
+            .implementations,
+            .callHierarchy,
+            .references,
+        ],
         negotiatedCapabilities: [.definition],
         // 带上数据：验证守卫按能力拦截，而不是靠 fake 恰好没数据才返回 nil
+        referenceLocations: [itemLocation],
         incomingRelations: [ExactCallRelation(item: item, callSites: [itemLocation])],
         outgoingRelations: [ExactCallRelation(item: item, callSites: [itemLocation])]
     )
@@ -96,6 +102,13 @@ func inProcessExactProviderDefinitionOnlySubsetReturnsNilForNewCapabilities() th
     )
 
     #expect(try session.implementations(file: "src/lib.rs", byteOffset: 7) == nil)
+    #expect(
+        try session.references(
+            file: "src/lib.rs",
+            byteOffset: 7,
+            includeDeclaration: false
+        ) == nil
+    )
     #expect(
         try session.prepareCallHierarchy(file: "src/lib.rs", byteOffset: 7) == nil
     )

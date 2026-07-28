@@ -470,8 +470,7 @@ public final class RelationTreeModel {
                 nil
             }
             let exactResult: ExactCoordinator.RelationQueryResult?
-            if direction != .references,
-               let exactRelationsResolver,
+            if let exactRelationsResolver,
                let query = node.queryTarget ?? node.target
             {
                 exactResult = await exactRelationsResolver(
@@ -617,7 +616,7 @@ public final class RelationTreeModel {
                     byteOffset: byteOffset,
                     line: line,
                     evidence: [],
-                    identityTarget: (
+                    identityTarget: direction == .references ? nil : (
                         relation.location.file,
                         byteOffset
                     ),
@@ -658,6 +657,8 @@ public final class RelationTreeModel {
     ) -> [Node] {
         if direction == .references {
             let visible = Array(loaded.edges.prefix(500))
+            let exact = visible.filter { $0.certainty == .exact }
+            let references = visible.filter { $0.certainty != .exact }
             let status = if loaded.isTruncated {
                 "\(loaded.edges.count) verified references · partial"
             } else if loaded.edges.count > 500 {
@@ -665,20 +666,32 @@ public final class RelationTreeModel {
             } else {
                 "\(loaded.edges.count) references"
             }
-            let group = makeGroup(
-                "References",
-                subtitle: loaded.isTruncated || loaded.edges.count > 500
-                    ? nil : status,
-                edges: visible,
-                under: parent,
-                direction: direction,
-                session: session
-            )
+            let children = [
+                makeGroup(
+                    exactGroupTitle(
+                        state: loaded.exactState,
+                        count: exact.count,
+                        direction: direction
+                    ),
+                    edges: exact,
+                    under: parent,
+                    direction: direction,
+                    session: session
+                ),
+                makeGroup(
+                    "References",
+                    subtitle: loaded.isTruncated || loaded.edges.count > 500
+                        ? nil : "\(references.count) references",
+                    edges: references,
+                    under: parent,
+                    direction: direction,
+                    session: session
+                ),
+            ]
             guard loaded.isTruncated || loaded.edges.count > 500 else {
-                return [group]
+                return children
             }
-            return [
-                group,
+            return children + [
                 Node(kind: .truncated, title: status, parent: parent),
             ]
         }
@@ -764,8 +777,14 @@ public final class RelationTreeModel {
             "Exact (0): no implementations"
         case (.notApplicable, .implementations):
             "Exact (0): no implementations"
-        case (_, .references):
-            "Exact (0)"
+        case (.unsupported, .references):
+            "Exact unavailable: server does not support references"
+        case (.notApplicable, .references):
+            "Exact unavailable here: references not applicable"
+        case (.queried, .references):
+            "Exact (0): no references"
+        case (.legacy, .references):
+            "Exact unavailable: no exact session"
         case (.legacy, _):
             "Exact (0)"
         }

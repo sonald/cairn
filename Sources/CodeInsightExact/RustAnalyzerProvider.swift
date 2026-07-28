@@ -4,7 +4,7 @@ import Foundation
 
 public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
     public let capabilities: ExactCapabilities = [
-        .definition, .implementations, .callHierarchy,
+        .definition, .implementations, .callHierarchy, .references,
     ]
     public let toolVersion: String
 
@@ -341,6 +341,11 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         {
             negotiated.insert(.callHierarchy)
         }
+        if let provider = capabilities["referencesProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.references)
+        }
         return negotiated
     }
 
@@ -364,7 +369,24 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/implementation",
-            parse: parseImplementations
+            parse: parseLocations
+        )
+    }
+
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.references) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/references",
+            includeDeclaration: includeDeclaration,
+            parse: parseLocations
         )
     }
 
@@ -372,6 +394,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         file: String,
         byteOffset: Int,
         method: String,
+        includeDeclaration: Bool? = nil,
         parse: (Any) throws -> Result?
     ) throws -> Result? {
         let path = try relativePath(file)
@@ -383,17 +406,24 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             throw ExactError.invalidPosition(path, byteOffset)
         }
 
+        var params: [String: Any] = [
+            "textDocument": [
+                "uri": projectURL.appendingPathComponent(path).absoluteString,
+            ],
+            "position": [
+                "line": position.line,
+                "character": position.character,
+            ],
+        ]
+        if let includeDeclaration {
+            params["context"] = [
+                "includeDeclaration": includeDeclaration,
+            ]
+        }
+
         return try request(
             method: method,
-            params: [
-                "textDocument": [
-                    "uri": projectURL.appendingPathComponent(path).absoluteString,
-                ],
-                "position": [
-                    "line": position.line,
-                    "character": position.character,
-                ],
-            ],
+            params: params,
             beforeRequest: { client in
                 try self.open(path: path, bytes: bytes, client: client)
             },
@@ -817,7 +847,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         return try parseLocation(object)
     }
 
-    private func parseImplementations(_ value: Any) throws -> [ExactLocation]? {
+    private func parseLocations(_ value: Any) throws -> [ExactLocation]? {
         if value is NSNull { return nil }
         let objects: [[String: Any]]
         if let dictionary = value as? [String: Any] {

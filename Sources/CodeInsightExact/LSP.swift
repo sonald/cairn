@@ -239,6 +239,7 @@ public final class LSPClient: @unchecked Sendable {
                     "callHierarchy": [String: Any](),
                     "definition": ["linkSupport": true],
                     "implementation": ["linkSupport": true],
+                    "references": [String: Any](),
                 ],
                 "window": ["workDoneProgress": true],
                 "workspace": ["configuration": true],

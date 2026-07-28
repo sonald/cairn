@@ -69,8 +69,11 @@ private struct CodeInsightApplication {
             }
             let provider = InProcessExactProvider(
                 location: target?.definition,
-                capabilities: [.definition, .implementations, .callHierarchy],
+                capabilities: [
+                    .definition, .implementations, .callHierarchy, .references,
+                ],
                 implementationLocations: target.map { [$0.dependencyDefinition] },
+                referenceLocations: target?.referenceLocations,
                 callHierarchyItems: rootItem.map { [$0] },
                 incomingRelations: callerItem.map {
                     [ExactCallRelation(
@@ -2205,20 +2208,54 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 direction: .references
             )
         }
-        let projectReferenceTitles: [String]
-        let projectReferencesVisible = waitUntil(timeout: 5, condition: {
+        let exactReferencesVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.direction == .references
-                && windowController.selfTestReferenceGroupTitle == "References"
                 && windowController.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "References"
+                    inGroup: "Exact"
                 ).contains { $0.hasPrefix("main.rs:") }
         })
-        projectReferenceTitles = windowController.selfTestVisibleRelationEdgeTitles(
+        let exactReferenceTitles = windowController
+            .selfTestVisibleRelationEdgeTitles(inGroup: "Exact")
+        let fuzzyReferenceTitles = windowController.selfTestVisibleRelationEdgeTitles(
             inGroup: "References"
         )
+        let exactReferenceGroup = model.relationTree.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Exact")
+        }
+        let fuzzyReferenceGroup = model.relationTree.root?.children?.first {
+            $0.kind == .group && $0.title == "References"
+        }
+        let exactReferenceRowCount = exactReferenceGroup?.children?.count ?? 0
+        let fuzzyReferenceRowCount = fuzzyReferenceGroup?.children?.count ?? 0
+        let mixedReferenceGroupCountsHonest =
+            exactReferenceRowCount > 0
+            && fuzzyReferenceRowCount > 0
+            && exactReferenceGroup?.title == "Exact"
+            && exactReferenceTitles.count == exactReferenceRowCount
+            && fuzzyReferenceTitles.count == fuzzyReferenceRowCount
+            && fuzzyReferenceGroup?.subtitle
+                == "\(fuzzyReferenceRowCount) references"
+        let projectReferenceTitles = exactReferenceTitles + fuzzyReferenceTitles
+        let projectReferencesVisible = exactReferencesVisible
+            && !projectReferenceTitles.isEmpty
         let projectReferencesCrossFile = projectReferenceTitles.contains {
             $0.hasPrefix("main.rs:")
         }
+        let exactReferencesHeuristicProvenanceRetained =
+            exactReferenceTitles.contains { title in
+                windowController.selfTestVisibleRelationEdgeSubtitle(
+                    titled: title,
+                    inGroup: "Exact"
+                )?.contains("heuristic also matched") == true
+            }
+        let exactReferencesDeclarationExcluded =
+            !(model.relationTree.root?.children?
+                .flatMap { $0.children ?? [] }
+                .contains {
+                    $0.target?.path == target.definition.file
+                        && $0.target?.byteOffset
+                            == UInt32(target.definition.byteOffset)
+                } ?? false)
         let projectReferenceNodes = model.relationTree.root?.children?
             .flatMap { $0.children ?? [] } ?? []
         let projectReferenceNode = projectReferenceNodes.first {
@@ -2229,13 +2266,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         emitExactStep(
             "project-references",
-            variant: "fuzzy-two-stage",
+            variant: "exact+fuzzy",
             controller: windowController,
             extra: [
                 "direction": "\(model.relationTree.direction)",
                 "groupTitle": windowController.selfTestReferenceGroupTitle ?? "",
                 "edgeCount": projectReferenceTitles.count,
                 "edgeTitles": projectReferenceTitles,
+                "exactEdgeTitles": exactReferenceTitles,
+                "fuzzyEdgeTitles": fuzzyReferenceTitles,
+                "exactRowCount": exactReferenceRowCount,
+                "fuzzyRowCount": fuzzyReferenceRowCount,
+                "fuzzySubtitle": fuzzyReferenceGroup?.subtitle ?? "",
+                "mixedGroupCountsHonest": mixedReferenceGroupCountsHonest,
+                "exactVisible": exactReferencesVisible,
+                "heuristicProvenanceRetained":
+                    exactReferencesHeuristicProvenanceRetained,
+                "declarationExcluded": exactReferencesDeclarationExcluded,
                 "crossFile": projectReferencesCrossFile,
             ]
         )
@@ -2306,7 +2353,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             )
         }
         let exactGroupVisible = waitUntil(timeout: 5, condition: {
-            windowController.selfTestExactGroupRowCount > 0
+            model.relationTree.direction == .callers
+                && model.relationTree.root?.title == "answer"
+                && windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "Exact"
+                ).contains("exact_dependency_caller")
         })
         let contextAndRelationsReadyMS = milliseconds(since: reprofiledAt)
         let exactGroupHeaderHonest = windowController.selfTestExactGroupTitle == "Exact"
@@ -2820,6 +2871,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "localReferenceContextRestored": localReferenceContextRestored,
             "projectReferencesVisible": projectReferencesVisible,
             "projectReferencesCrossFile": projectReferencesCrossFile,
+            "exactReferencesVisible": exactReferencesVisible,
+            "exactReferencesHeuristicProvenanceRetained":
+                exactReferencesHeuristicProvenanceRetained,
+            "exactReferencesDeclarationExcluded":
+                exactReferencesDeclarationExcluded,
+            "mixedReferenceGroupCountsHonest":
+                mixedReferenceGroupCountsHonest,
             "referenceSingleClickSelected": referenceSingleClickSelected,
             "referenceSingleClickNavigated": referenceSingleClickNavigated,
             "referenceSingleClickExactlyOnce": referenceSingleClickExactlyOnce,
@@ -3396,10 +3454,37 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             variant: "rust-analyzer",
             controller: controller
         )
-        return (
-            exactVisible && fuzzyRetained ? "passed" : "failed:exact",
-            exactVisible && fuzzyRetained
+        guard exactVisible && fuzzyRetained,
+              let definitionOffset = UInt32(exactly: target.definition.byteOffset),
+              controller.selectFileInSidebar(target.relationFile),
+              waitUntil(timeout: 5, condition: {
+                  controller.displayedReaderFile?.standardizedFileURL
+                      == target.relationFile.standardizedFileURL
+              })
+        else {
+            return ("failed:exact", false)
+        }
+        controller.selfTestReaderRelation(
+            offset: definitionOffset,
+            direction: .references
         )
+        let exactReferencesVisible = waitUntil(timeout: 45, condition: {
+            realModel.relationTree.direction == .references
+                && controller.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "Exact"
+                ).contains { $0.hasPrefix("main.rs:") }
+        })
+        emitExactStep(
+            exactReferencesVisible ? "real-references" : "failed",
+            variant: "rust-analyzer",
+            controller: controller,
+            extra: [
+                "textDocumentReferencesReached": exactReferencesVisible,
+            ]
+        )
+        return exactReferencesVisible
+            ? ("passed", true)
+            : ("failed:references", false)
     }
 
     private func runRealOfflineCoverageVariant(
@@ -4847,6 +4932,7 @@ private struct ExactSelfTestTarget {
     let file: URL
     let clickOffset: UInt32
     let definition: ExactLocation
+    let referenceLocations: [ExactLocation]
     let dependencyFile: URL
     let dependencyBytes: [UInt8]
     let dependencyDefinition: ExactLocation
@@ -4907,6 +4993,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
     private let negotiatedCapabilities: ExactCapabilities
     private let location: ExactLocation?
     private let implementationLocations: [ExactLocation]?
+    private let referenceLocations: [ExactLocation]?
     private let callHierarchyItems: [ExactCallHierarchyItem]?
     private let incomingRelations: [ExactCallRelation]?
     private let outgoingRelations: [ExactCallRelation]?
@@ -4920,6 +5007,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         capabilities: ExactCapabilities = [.definition],
         negotiatedCapabilities: ExactCapabilities? = nil,
         implementationLocations: [ExactLocation]? = nil,
+        referenceLocations: [ExactLocation]? = nil,
         callHierarchyItems: [ExactCallHierarchyItem]? = nil,
         incomingRelations: [ExactCallRelation]? = nil,
         outgoingRelations: [ExactCallRelation]? = nil,
@@ -4932,6 +5020,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         self.capabilities = capabilities
         self.negotiatedCapabilities = negotiatedCapabilities ?? capabilities
         self.implementationLocations = implementationLocations
+        self.referenceLocations = referenceLocations
         self.callHierarchyItems = callHierarchyItems
         self.incomingRelations = incomingRelations
         self.outgoingRelations = outgoingRelations
@@ -4954,6 +5043,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
             negotiatedCapabilities: negotiatedCapabilities,
             location: location,
             implementationLocations: implementationLocations,
+            referenceLocations: referenceLocations,
             callHierarchyItems: callHierarchyItems,
             incomingRelations: incomingRelations,
             outgoingRelations: outgoingRelations,
@@ -4982,6 +5072,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
     let attribution: ExactAttribution
     private let location: ExactLocation?
     private let implementationLocations: [ExactLocation]?
+    private let referenceLocations: [ExactLocation]?
     private let callHierarchyItems: [ExactCallHierarchyItem]?
     private let incomingRelations: [ExactCallRelation]?
     private let outgoingRelations: [ExactCallRelation]?
@@ -4995,6 +5086,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         negotiatedCapabilities: ExactCapabilities,
         location: ExactLocation?,
         implementationLocations: [ExactLocation]?,
+        referenceLocations: [ExactLocation]?,
         callHierarchyItems: [ExactCallHierarchyItem]?,
         incomingRelations: [ExactCallRelation]?,
         outgoingRelations: [ExactCallRelation]?,
@@ -5008,6 +5100,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         self.negotiatedCapabilities = negotiatedCapabilities
         self.location = location
         self.implementationLocations = implementationLocations
+        self.referenceLocations = referenceLocations
         self.callHierarchyItems = callHierarchyItems
         self.incomingRelations = incomingRelations
         self.outgoingRelations = outgoingRelations
@@ -5040,6 +5133,17 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
             return nil
         }
         return implementationLocations
+    }
+
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.references) else {
+            return nil
+        }
+        return referenceLocations
     }
 
     func prepareCallHierarchy(
@@ -5280,8 +5384,13 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
           let relationCallOffset = UInt32(exactly: definitionSource[
               ..<relationCall.lowerBound
           ].utf8.count),
+          let clickCoordinate = LineTable(bytes: Array(source.utf8))
+              .lineColumn(at: clickOffset),
           let coordinate = LineTable(bytes: Array(definitionSource.utf8))
-              .lineColumn(at: definitionOffset)
+              .lineColumn(at: definitionOffset),
+          let relationCallCoordinate = LineTable(
+              bytes: Array(definitionSource.utf8)
+          ).lineColumn(at: relationCallOffset)
     else { return nil }
     let localReferenceDeclarationOffset = definitionSource.range(
         of: "receiver = InferredReceiver::new()"
@@ -5359,6 +5468,20 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
             line: Int(coordinate.line),
             column: Int(coordinate.column)
         ),
+        referenceLocations: [
+            ExactLocation(
+                file: path,
+                byteOffset: Int(clickOffset),
+                line: Int(clickCoordinate.line),
+                column: Int(clickCoordinate.column)
+            ),
+            ExactLocation(
+                file: definitionPath,
+                byteOffset: Int(relationCallOffset),
+                line: Int(relationCallCoordinate.line),
+                column: Int(relationCallCoordinate.column)
+            ),
+        ],
         dependencyFile: resolvedDependencyFile,
         dependencyBytes: dependencyBytes,
         dependencyDefinition: dependencyDefinition,

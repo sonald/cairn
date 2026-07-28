@@ -200,7 +200,149 @@ func relationTreeEngineReferencesFindCrossFileTypeUses() async throws {
     #expect(references.children?.count == 5)
     #expect(Set(references.children?.compactMap { $0.target?.path } ?? []) == ["b.rs"])
     #expect(references.subtitle == "5 references")
-    #expect(model.root?.children?.contains { $0.title.hasPrefix("Exact") } == false)
+    #expect(model.root?.children?.contains {
+        $0.title == "Exact unavailable: no exact session"
+    } == true)
+}
+
+@MainActor
+@Test
+func relationTreeConsumesExactReferences() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let exactLocation = relationExactLocation(
+        file: "/dependency/src/lib.rs",
+        offset: 12
+    )
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, direction, _ in
+            #expect(direction == .references)
+            return .relations([
+                .init(
+                    name: nil,
+                    location: exactLocation,
+                    item: nil,
+                    callSites: []
+                ),
+            ], origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(
+        target: .engine(fixture.a),
+        direction: .references
+    )?.value
+
+    let exact = try relationGroup("Exact", in: model.root)
+    #expect(exact.children?.map { $0.target?.path } == [exactLocation.file])
+    #expect(exact.children?.map { $0.target?.byteOffset } == [12])
+}
+
+@MainActor
+@Test
+func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let overlap = relationExactLocation(file: "main.rs", offset: 10)
+    let exactOnly = relationExactLocation(file: "exact-only.rs", offset: 30)
+    let fuzzyOnly = RelationTreeModel.LoadedEdge(
+        title: "fuzzy-only",
+        certainty: .possible,
+        dispatch: .direct,
+        symbol: nil,
+        path: "fuzzy-only.rs",
+        byteOffset: 20,
+        line: 1,
+        evidence: []
+    )
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [
+                .init(
+                    title: "overlap",
+                    certainty: .possible,
+                    dispatch: .direct,
+                    symbol: nil,
+                    path: overlap.file,
+                    byteOffset: UInt32(overlap.byteOffset),
+                    line: 1,
+                    evidence: []
+                ),
+                fuzzyOnly,
+            ], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in
+            .relations([
+                .init(
+                    name: nil,
+                    location: overlap,
+                    item: nil,
+                    callSites: []
+                ),
+                .init(
+                    name: nil,
+                    location: exactOnly,
+                    item: nil,
+                    callSites: []
+                ),
+            ], origin: .worktree)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(
+        target: .engine(fixture.a),
+        direction: .references
+    )?.value
+
+    let exact = try relationGroup("Exact", in: model.root)
+    let fuzzy = try relationGroup("References", in: model.root)
+    #expect(exact.children?.count == 2)
+    #expect(exact.children?.filter {
+        $0.target?.path == overlap.file
+            && $0.target?.byteOffset == UInt32(overlap.byteOffset)
+            && $0.subtitle == "Exact · heuristic also matched"
+    }.count == 1)
+    #expect(exact.children?.contains {
+        $0.target?.path == exactOnly.file
+            && $0.target?.byteOffset == UInt32(exactOnly.byteOffset)
+    } == true)
+    #expect(fuzzy.children?.count == 1)
+    #expect(fuzzy.subtitle == "1 references")
+    #expect(fuzzy.children?.first?.target?.path == fuzzyOnly.path)
+    #expect(fuzzy.children?.first?.target?.byteOffset == fuzzyOnly.byteOffset)
+}
+
+@MainActor
+@Test
+func relationTreeFuzzyReferencesExcludeOnlyTheDeclarationRange() async throws {
+    let source = "pub struct Foo;\nfn use_it(_: Foo) {}\n"
+    let root = try relationTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let symbol = try #require(
+        session.definitions(of: "Foo", context: context).first?.0
+    )
+    let ranges = relationTokenRanges(of: "Foo", in: source)
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    await model.setRoot(
+        target: .engine(symbol),
+        direction: .references
+    )?.value
+
+    let fuzzy = try relationGroup("References", in: model.root)
+    #expect(fuzzy.children?.map { $0.target?.byteOffset }
+        == [ranges[1].lowerBound])
+    #expect(fuzzy.children?.contains {
+        $0.target?.byteOffset == ranges[0].lowerBound
+    } == false)
 }
 
 @MainActor
@@ -268,27 +410,70 @@ func relationTreeProjectReferenceCountCopyKeepsThreeCompletenessStates()
     let complete = try await relationProjectReferenceStatus(
         fixture: fixture,
         edgeCount: 2,
-        isTruncated: false
+        isTruncated: false,
+        exactCount: 1
     )
     let displayCap = try await relationProjectReferenceStatus(
         fixture: fixture,
-        edgeCount: 501,
-        isTruncated: false
+        edgeCount: 500,
+        isTruncated: false,
+        exactCount: 1
     )
     let servicePartial = try await relationProjectReferenceStatus(
         fixture: fixture,
         edgeCount: 7,
-        isTruncated: true
+        isTruncated: true,
+        exactCount: 1
     )
 
-    #expect(complete.groupSubtitle == "2 references")
+    #expect(complete.referenceSubtitle == "2 references")
     #expect(complete.footerTitle == nil)
-    #expect(displayCap.groupSubtitle == nil)
+    #expect(displayCap.referenceSubtitle == nil)
     #expect(displayCap.footerTitle == "Showing first 500 of 501 references")
-    #expect(servicePartial.groupSubtitle == nil)
-    #expect(servicePartial.footerTitle == "7 verified references · partial")
+    #expect(servicePartial.referenceSubtitle == nil)
+    #expect(servicePartial.footerTitle == "8 verified references · partial")
     #expect(servicePartial.footerTitle?.contains(" of ") == false)
     #expect(servicePartial.footerTitle?.contains("999") == false)
+}
+
+@MainActor
+@Test
+func relationTreeCompleteReferenceCountsStayWithinEachSource() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+
+    let fuzzyOnly = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 2,
+        isTruncated: false
+    )
+    let exactOnly = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 0,
+        isTruncated: false,
+        exactCount: 2
+    )
+    let mixed = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 1,
+        isTruncated: false,
+        exactCount: 2
+    )
+
+    #expect(fuzzyOnly.exactTitle == "Exact (0): no references")
+    #expect(fuzzyOnly.exactRowCount == 0)
+    #expect(fuzzyOnly.referenceSubtitle == "2 references")
+    #expect(fuzzyOnly.referenceRowCount == 2)
+
+    #expect(exactOnly.exactTitle == "Exact")
+    #expect(exactOnly.exactRowCount == 2)
+    #expect(exactOnly.referenceSubtitle == "0 references")
+    #expect(exactOnly.referenceRowCount == 0)
+
+    #expect(mixed.exactTitle == "Exact")
+    #expect(mixed.exactRowCount == 2)
+    #expect(mixed.referenceSubtitle == "1 references")
+    #expect(mixed.referenceRowCount == 1)
 }
 
 @MainActor
@@ -376,6 +561,82 @@ func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
     await model.expand(dependencyCaller)
     let secondLevel = try relationGroup("Exact", in: dependencyCaller)
     #expect(secondLevel.children?.map(\.title) == ["top_level_caller"])
+}
+
+@MainActor
+@Test
+func exactCoordinatorRequestsReferencesWithoutTheDeclaration() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    try "[package]\nname='relation-test'\nversion='0.1.0'\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let location = relationExactLocation(file: "main.rs", offset: 12)
+    let session = RelationHierarchyExactSession(
+        referenceLocations: [location]
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in RelationHierarchyExactProvider(session: session) },
+        snapshotFactory: { _, _ in
+            RelationExactSnapshot(files: [
+                "Cargo.toml": "[package]\nname='relation-test'\nversion='0.1.0'\n",
+                "main.rs": "fn a() {}\nfn b() {}\n",
+            ])
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: fixture.root.appendingPathComponent("trust.json")
+        )
+    )
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        generation: fixture.context.generation
+    )
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+
+    let result = await coordinator.relations(
+        file: "main.rs",
+        byteOffset: 3,
+        item: nil,
+        direction: .references,
+        generation: fixture.context.generation
+    )
+
+    guard case let .relations(relations, _) = result else {
+        Issue.record("expected exact references")
+        return
+    }
+    #expect(relations.map(\.location) == [location])
+    #expect(session.referenceIncludeDeclarations == [false])
+}
+
+@MainActor
+@Test
+func exactCoordinatorDoesNotCallReferencesWithoutCapability() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let session = RelationHierarchyExactSession()
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: RelationHierarchyExactProvider(session: session)
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+
+    let result = await coordinator.relations(
+        file: "main.rs",
+        byteOffset: 3,
+        item: nil,
+        direction: .references,
+        generation: 1
+    )
+
+    let unsupported = if case .unsupported = result { true } else { false }
+    #expect(unsupported)
+    #expect(session.referenceIncludeDeclarations.isEmpty)
 }
 
 @MainActor
@@ -475,6 +736,176 @@ func exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare()
 
     #expect(await request.value == nil)
     #expect(coordinator.readiness == .ready)
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsReferencesAfterProfileSwitch() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let blocked = RelationHierarchyExactSession(
+        blockReferences: true,
+        referenceLocations: [relationExactLocation(file: "stale.rs", offset: 1)]
+    )
+    let replacement = RelationHierarchyExactSession(
+        referenceLocations: [relationExactLocation(file: "fresh.rs", offset: 2)]
+    )
+    let provider = RelationRotatingExactProvider(sessions: [blocked, replacement])
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: provider
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .references,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        featureSelection: .allFeatures,
+        generation: 1
+    )
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && provider.prepareCount == 2
+    })
+    blocked.releaseReferences()
+
+    #expect(await request.value == nil)
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsReferencesAfterSessionReplacement() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let blocked = RelationHierarchyExactSession(
+        blockReferences: true,
+        referenceLocations: [relationExactLocation(file: "stale.rs", offset: 1)]
+    )
+    let provider = RelationRotatingExactProvider(sessions: [
+        blocked,
+        RelationHierarchyExactSession(referenceLocations: []),
+    ])
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: provider
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .references,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && provider.prepareCount == 2
+    })
+    blocked.releaseReferences()
+
+    #expect(await request.value == nil)
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsReferencesAfterSnapshotSwitch() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let blocked = RelationHierarchyExactSession(
+        blockReferences: true,
+        referenceLocations: [relationExactLocation(file: "stale.rs", offset: 1)]
+    )
+    let provider = RelationRotatingExactProvider(sessions: [
+        blocked,
+        RelationHierarchyExactSession(referenceLocations: []),
+    ])
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: provider
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: "old", generation: 1)
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .references,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+
+    coordinator.prepare(projectURL: fixture.root, revision: "new", generation: 2)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && provider.prepareCount == 2
+    })
+    blocked.releaseReferences()
+
+    #expect(await request.value == nil)
+}
+
+@MainActor
+@Test
+func exactCoordinatorDiscardsReferencesAfterTrustSwitch() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let blocked = RelationHierarchyExactSession(
+        blockReferences: true,
+        referenceLocations: [relationExactLocation(file: "stale.rs", offset: 1)]
+    )
+    let provider = RelationRotatingExactProvider(sessions: [
+        blocked,
+        RelationHierarchyExactSession(referenceLocations: []),
+    ])
+    let trustRegistry = TrustRegistry(
+        fileURL: fixture.root.appendingPathComponent("trust.json")
+    )
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: provider,
+        trustRegistry: trustRegistry
+    )
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready && coordinator.trustMode == .safe
+    })
+    let request = Task {
+        await coordinator.relations(
+            file: "main.rs",
+            byteOffset: 3,
+            item: nil,
+            direction: .references,
+            generation: 1
+        )
+    }
+    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+
+    try await coordinator.grantTrust(fixture.root)
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await relationWaitUntilSlow {
+        coordinator.readiness == .ready
+            && coordinator.trustMode == .trusted
+            && provider.prepareCount == 2
+    })
+    blocked.releaseReferences()
+
+    #expect(await request.value == nil)
 }
 
 @MainActor
@@ -650,6 +1081,90 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         implementationsUnsupported,
         implementationsEmpty,
     ]).count == 5)
+}
+
+@MainActor
+@Test
+func relationTreeUsesFourDistinctExactReferenceStates() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let unsupported = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .references,
+        result: .unsupported
+    )
+    let notApplicable = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .references,
+        result: .notApplicable
+    )
+    let queried = try await relationExactEmptyTitle(
+        session: fixture.session,
+        context: fixture.context,
+        symbol: fixture.a,
+        direction: .references,
+        result: .relations([], origin: .worktree)
+    )
+    let legacyModel = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [], isTruncated: false)
+    })
+    legacyModel.updateProjectState(.ready(fixture.session, fixture.context))
+    await legacyModel.setRoot(
+        target: .engine(fixture.a),
+        direction: .references
+    )?.value
+    let legacy = try #require(legacyModel.root?.children?.first {
+        $0.kind == .group && $0.title.hasPrefix("Exact")
+    }?.title)
+
+    #expect(unsupported
+        == "Exact unavailable: server does not support references")
+    #expect(notApplicable
+        == "Exact unavailable here: references not applicable")
+    #expect(queried == "Exact (0): no references")
+    #expect(legacy == "Exact unavailable: no exact session")
+    #expect(Set([unsupported, notApplicable, queried, legacy]).count == 4)
+}
+
+@MainActor
+@Test
+func relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let exactSession = RelationHierarchyExactSession()
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: RelationHierarchyExactProvider(session: exactSession)
+    )
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        generation: fixture.context.generation
+    )
+    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    let model = RelationTreeModel()
+    model.attachExactCoordinator(coordinator)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(
+        target: .engine(fixture.b),
+        direction: .references
+    )?.value
+
+    let exact = try relationGroup(
+        "Exact unavailable: server does not support references",
+        in: model.root
+    )
+    let references = try relationGroup("References", in: model.root)
+    #expect(exact.children?.isEmpty == true)
+    #expect(references.children?.count == 1)
+    #expect(references.children?.first?.target?.path == "main.rs")
+    #expect(references.subtitle == "1 references")
+    #expect(exactSession.referenceIncludeDeclarations.isEmpty)
 }
 
 @MainActor
@@ -1504,7 +2019,7 @@ private enum RelationTestError: Error {
 }
 
 private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Sendable {
-    let capabilities: ExactCapabilities = [.callHierarchy]
+    let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-hierarchy-fake-1"
     private let session: RelationHierarchyExactSession
 
@@ -1532,7 +2047,7 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
 }
 
 private final class RelationRotatingExactProvider: ExactProvider, @unchecked Sendable {
-    let capabilities: ExactCapabilities = [.callHierarchy]
+    let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-rotating-fake-1"
     private let lock = NSLock()
     private let sessions: [RelationHierarchyExactSession]
@@ -1573,12 +2088,16 @@ private final class RelationRotatingExactProvider: ExactProvider, @unchecked Sen
 }
 
 private final class RelationHierarchyExactSession: ExactSession, @unchecked Sendable {
-    let negotiatedCapabilities: ExactCapabilities = [.callHierarchy]
+    let negotiatedCapabilities: ExactCapabilities
     let readiness: ExactReadiness = .ready
     var attribution = relationExactAttribution()
     private let condition = NSCondition()
     private var blockIncoming: Bool
+    private var blockReferences: Bool
     private var didStartIncoming = false
+    private var didStartReferences = false
+    private let referenceLocations: [ExactLocation]?
+    private var storedReferenceIncludeDeclarations: [Bool] = []
 
     private let root = relationCallItem(name: "a", file: "main.rs", offset: 3)
     private let dependency = relationCallItem(
@@ -1592,14 +2111,29 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
         offset: 20
     )
 
-    init(blockIncoming: Bool = false) {
+    init(
+        blockIncoming: Bool = false,
+        blockReferences: Bool = false,
+        referenceLocations: [ExactLocation]? = nil
+    ) {
         self.blockIncoming = blockIncoming
+        self.blockReferences = blockReferences
+        self.referenceLocations = referenceLocations
+        negotiatedCapabilities = referenceLocations == nil
+            ? [.callHierarchy]
+            : [.callHierarchy, .references]
     }
 
     var incomingStarted: Bool {
         condition.lock()
         defer { condition.unlock() }
         return didStartIncoming
+    }
+
+    var referencesStarted: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return didStartReferences
     }
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? { nil }
@@ -1609,6 +2143,28 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
         byteOffset: Int
     ) throws -> [ExactLocation]? {
         nil
+    }
+
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
+    ) throws -> [ExactLocation]? {
+        condition.lock()
+        storedReferenceIncludeDeclarations.append(includeDeclaration)
+        if blockReferences {
+            didStartReferences = true
+            condition.broadcast()
+            while blockReferences { condition.wait() }
+        }
+        condition.unlock()
+        return referenceLocations
+    }
+
+    var referenceIncludeDeclarations: [Bool] {
+        condition.lock()
+        defer { condition.unlock() }
+        return storedReferenceIncludeDeclarations
     }
 
     func prepareCallHierarchy(
@@ -1659,6 +2215,13 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
     func releaseIncoming() {
         condition.lock()
         blockIncoming = false
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func releaseReferences() {
+        condition.lock()
+        blockReferences = false
         condition.broadcast()
         condition.unlock()
     }
@@ -1815,8 +2378,15 @@ private func relationExactEmptyTitle(
 private func relationProjectReferenceStatus(
     fixture: RelationFixture,
     edgeCount: Int,
-    isTruncated: Bool
-) async throws -> (groupSubtitle: String?, footerTitle: String?) {
+    isTruncated: Bool,
+    exactCount: Int = 0
+) async throws -> (
+    exactTitle: String,
+    exactRowCount: Int,
+    referenceSubtitle: String?,
+    referenceRowCount: Int,
+    footerTitle: String?
+) {
     let edges = (0..<edgeCount).map {
         RelationTreeModel.LoadedEdge(
             title: "reference-\($0)",
@@ -1829,18 +2399,69 @@ private func relationProjectReferenceStatus(
             evidence: []
         )
     }
-    let model = RelationTreeModel(loader: { _, _, _, _ in
-        .init(edges: edges, isTruncated: isTruncated)
-    })
+    let exact = (0..<exactCount).map {
+        ExactCoordinator.Relation(
+            name: nil,
+            location: relationExactLocation(
+                file: "exact-\($0).rs",
+                offset: 10_000 + $0
+            ),
+            item: nil,
+            callSites: []
+        )
+    }
+    let exactResolver: RelationTreeModel.ExactRelationsResolver = {
+        _, _, _, _, _ in
+        .relations(exact, origin: .worktree)
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: edges, isTruncated: isTruncated)
+        },
+        exactRelationsResolver: exactResolver
+    )
     model.updateProjectState(.ready(fixture.session, fixture.context))
     await model.setRoot(
         target: .engine(fixture.a),
         direction: .references
     )?.value
-    let group = try relationGroup("References", in: model.root)
+    let exactGroup = try #require(model.root?.children?.first {
+        $0.kind == .group && $0.title.hasPrefix("Exact")
+    })
+    let referenceGroup = try relationGroup("References", in: model.root)
     return (
-        group.subtitle,
+        exactGroup.title,
+        exactGroup.children?.count ?? 0,
+        referenceGroup.subtitle,
+        referenceGroup.children?.count ?? 0,
         model.root?.children?.first { $0.kind == .truncated }?.title
+    )
+}
+
+@MainActor
+private func relationExactCoordinator(
+    fixture: RelationFixture,
+    provider: any ExactProvider,
+    trustRegistry: TrustRegistry? = nil
+) throws -> ExactCoordinator {
+    let cargo = "[package]\nname='relation-test'\nversion='0.1.0'\n"
+    try cargo.write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    return ExactCoordinator(
+        providerFactory: { _ in provider },
+        snapshotFactory: { _, _ in
+            RelationExactSnapshot(files: [
+                "Cargo.toml": cargo,
+                "main.rs": "fn a() {}\nfn b() {}\n",
+            ])
+        },
+        sandboxAvailable: { true },
+        trustRegistry: trustRegistry ?? TrustRegistry(
+            fileURL: fixture.root.appendingPathComponent("trust.json")
+        )
     )
 }
 

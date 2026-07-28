@@ -118,7 +118,7 @@ public final class ExactCoordinator {
         case unsupported
         case notApplicable
         case calls([ExactCallRelation])
-        case implementations([ExactLocation])
+        case locations([ExactLocation])
     }
 
     private struct Active: Sendable {
@@ -542,11 +542,19 @@ public final class ExactCoordinator {
         try await Task.detached(priority: .userInitiated) {
             switch direction {
             case .references:
-                return .notApplicable
+                guard session.negotiatedCapabilities.contains(.references)
+                else { return .unsupported }
+                return .locations(
+                    try session.references(
+                        file: file,
+                        byteOffset: byteOffset,
+                        includeDeclaration: false
+                    ) ?? []
+                )
             case .implementations:
                 guard session.negotiatedCapabilities.contains(.implementations)
                 else { return .unsupported }
-                return .implementations(
+                return .locations(
                     try session.implementations(
                         file: file,
                         byteOffset: byteOffset
@@ -696,7 +704,7 @@ public final class ExactCoordinator {
                     }
                 )
             }, origin: origin)
-        case .implementations(let locations):
+        case .locations(let locations):
             .relations(locations.map {
                 Relation(
                     name: nil,

@@ -1005,6 +1005,14 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
         nil
     }
 
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
     func prepareCallHierarchy(
         file: String,
         byteOffset: Int
@@ -1161,6 +1169,14 @@ private final class BlockingExactSession: ExactSession, @unchecked Sendable {
     func implementations(
         file: String,
         byteOffset: Int
+    ) throws -> [ExactLocation]? {
+        nil
+    }
+
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
     ) throws -> [ExactLocation]? {
         nil
     }

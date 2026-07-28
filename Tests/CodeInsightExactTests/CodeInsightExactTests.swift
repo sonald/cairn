@@ -9,6 +9,11 @@ import Testing
 @testable import CodeInsightExact
 
 @Test
+func exactReferencesCapabilityUsesTheNextUnusedBit() {
+    #expect(ExactCapabilities.references.rawValue == 1 << 3)
+}
+
+@Test
 func frameDecoderReadsSingleFrame() throws {
     var decoder = LSPFrameDecoder()
     let messages = try decoder.append(
@@ -417,6 +422,7 @@ func pipeFakeRunsInitializeDefinitionShutdownLifecycle() async throws {
         #expect(server.receivedRegisterCapabilityResponse)
         #expect(server.receivedImplementationCapability)
         #expect(server.receivedCallHierarchyCapability)
+        #expect(server.receivedReferencesCapability)
         #expect(diagnostic?.contains("failed to resolve dependency in offline mode") == true)
         let location = try #require(result as? [String: Any])
         #expect(location["uri"] as? String == "file:///fixture/src/lib.rs")
@@ -536,6 +542,52 @@ func rustAnalyzerTreatsNullImplementationAsNoResult() throws {
             exactTestMilliseconds(since: startedAt)
         ))
         #expect(result == nil)
+    }
+}
+
+@Test
+func rustAnalyzerRequestsReferencesWithoutTheDeclaration() throws {
+    let locations: [[String: Any]] = [[
+        "uri": exactFixtureURL()
+            .appendingPathComponent("src/main.rs")
+            .absoluteString,
+        "range": lspRange(line: 3, character: 12),
+    ]]
+
+    try withFakeRustAnalyzerSession(
+        referencesProvider: true,
+        referenceResult: locations,
+        serverCheck: { server in
+            #expect(server.receivedReferencesCapability)
+            #expect(server.referenceIncludeDeclarations == [false])
+        }
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.references))
+        let references = try #require(try session.references(
+            file: "src/lib.rs",
+            byteOffset: 7,
+            includeDeclaration: false
+        ))
+        #expect(references.count == 1)
+        #expect(references[0].file == "src/main.rs")
+        #expect(references[0].line == 4)
+        #expect(references[0].column == 13)
+    }
+}
+
+@Test
+func rustAnalyzerNegotiatesReferenceOptionsProvider() throws {
+    try withFakeRustAnalyzerSession(
+        referencesProvider: [String: Any]()
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.references))
+    }
+}
+
+@Test
+func rustAnalyzerDoesNotNegotiateMissingReferenceProvider() throws {
+    try withFakeRustAnalyzerSession(referencesProvider: nil) { session in
+        #expect(!session.negotiatedCapabilities.contains(.references))
     }
 }
 
@@ -1520,12 +1572,16 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedRegisterCapabilityResponse = false
     private var _receivedImplementationCapability = false
     private var _receivedCallHierarchyCapability = false
+    private var _receivedReferencesCapability = false
+    private var _referenceIncludeDeclarations: [Bool] = []
     private let implementationProvider: Any?
     private let implementationResult: Any
     private let callHierarchyProvider: Any?
     private let prepareCallHierarchyResult: Any
     private let incomingCallResult: Any
     private let outgoingCallResult: Any
+    private let referencesProvider: Any?
+    private let referenceResult: Any
     private var _error: Error?
 
     var requestMethods: [String] { locked { _requestMethods } }
@@ -1541,6 +1597,12 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     var receivedCallHierarchyCapability: Bool {
         locked { _receivedCallHierarchyCapability }
     }
+    var receivedReferencesCapability: Bool {
+        locked { _receivedReferencesCapability }
+    }
+    var referenceIncludeDeclarations: [Bool] {
+        locked { _referenceIncludeDeclarations }
+    }
     var error: Error? { locked { _error } }
 
     init(
@@ -1552,6 +1614,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         prepareCallHierarchyResult: Any = NSNull(),
         incomingCallResult: Any = NSNull(),
         outgoingCallResult: Any = NSNull(),
+        referencesProvider: Any? = true,
+        referenceResult: Any = NSNull(),
         done: @escaping () -> Void
     ) {
         self.input = input
@@ -1562,6 +1626,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         self.prepareCallHierarchyResult = prepareCallHierarchyResult
         self.incomingCallResult = incomingCallResult
         self.outgoingCallResult = outgoingCallResult
+        self.referencesProvider = referencesProvider
+        self.referenceResult = referenceResult
         self.done = done
     }
 
@@ -1603,6 +1669,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                             textDocument?["implementation"] != nil
                         _receivedCallHierarchyCapability =
                             textDocument?["callHierarchy"] != nil
+                        _receivedReferencesCapability =
+                            textDocument?["references"] != nil
                     }
                     try write([
                         "jsonrpc": "2.0",
@@ -1626,6 +1694,10 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                         serverCapabilities["callHierarchyProvider"] =
                             callHierarchyProvider
                     }
+                    if let referencesProvider {
+                        serverCapabilities["referencesProvider"] =
+                            referencesProvider
+                    }
                     try write([
                         "jsonrpc": "2.0", "id": id,
                         "result": [
@@ -1647,6 +1719,22 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     try write([
                         "jsonrpc": "2.0", "id": id,
                         "result": implementationResult,
+                    ])
+                case "textDocument/references":
+                    let params = message["params"] as? [String: Any]
+                    let context = params?["context"] as? [String: Any]
+                    let includeDeclaration = context?["includeDeclaration"]
+                        as? Bool
+                    locked {
+                        if let includeDeclaration {
+                            _referenceIncludeDeclarations.append(
+                                includeDeclaration
+                            )
+                        }
+                    }
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": referenceResult,
                     ])
                 case "textDocument/prepareCallHierarchy":
                     try write([
@@ -1716,6 +1804,9 @@ private func withFakeRustAnalyzerSession<T>(
     prepareCallHierarchyResult: Any = NSNull(),
     incomingCallResult: Any = NSNull(),
     outgoingCallResult: Any = NSNull(),
+    referencesProvider: Any? = true,
+    referenceResult: Any = NSNull(),
+    serverCheck: ((PipeFakeLSPServer) -> Void)? = nil,
     body: (any ExactSession) throws -> T
 ) throws -> T {
     let snapshot = try DirectorySnapshot(root: root, files: snapshotFiles)
@@ -1731,6 +1822,8 @@ private func withFakeRustAnalyzerSession<T>(
         prepareCallHierarchyResult: prepareCallHierarchyResult,
         incomingCallResult: incomingCallResult,
         outgoingCallResult: outgoingCallResult,
+        referencesProvider: referencesProvider,
+        referenceResult: referenceResult,
         done: { done.signal() }
     )
     server.start()
@@ -1763,7 +1856,9 @@ private func withFakeRustAnalyzerSession<T>(
         session.close()
         _ = done.wait(timeout: .now() + 5)
     }
-    return try body(session)
+    let result = try body(session)
+    serverCheck?(server)
+    return result
 }
 
 private func exactFixtureURL() -> URL {
