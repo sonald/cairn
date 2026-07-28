@@ -2966,6 +2966,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "historicalProvenanceAttributed": historical.provenanceAttributed,
         ]
         for (key, value) in trustRevoke { checks[key] = value }
+        for (key, value) in real.reachedChecks { checks[key] = value }
         finishExactSelfTest(
             controller: windowController,
             checks: checks,
@@ -3296,15 +3297,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     private func runRealExactVariant(
         root: URL
-    ) -> (status: String, passed: Bool) {
+    ) -> (status: String, passed: Bool, reachedChecks: [String: Bool]) {
+        let unreached: [String: Any] = [
+            "textDocumentImplementationReached": false,
+            "callHierarchyIncomingCallsReached": false,
+            "callHierarchyOutgoingCallsReached": false,
+        ]
         guard let executable = RustAnalyzerProvider.findExecutable() else {
             emitExactStep(
                 "skipped",
                 variant: "rust-analyzer",
                 controller: nil,
-                extra: ["reason": "rust-analyzer not installed"]
+                extra: unreached.merging(
+                    ["reason": "rust-analyzer not installed"]
+                ) { _, new in new }
             )
-            return ("skipped:not-installed", true)
+            return ("skipped:not-installed", true, [:])
         }
 
         let fixtureRoot = exactSelfTestFixtureRoot(root: root)
@@ -3313,9 +3321,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "skipped",
                 variant: "rust-analyzer",
                 controller: nil,
-                extra: ["reason": "real-provider fixture unavailable"]
+                extra: unreached.merging(
+                    ["reason": "real-provider fixture unavailable"]
+                ) { _, new in new }
             )
-            return ("skipped:fixture-unavailable", true)
+            return ("skipped:fixture-unavailable", true, [:])
         }
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
             "CodeInsightExactRealSelfTest-\(UUID().uuidString)",
@@ -3370,7 +3380,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: controller,
                 extra: ["reason": "project or file unavailable"]
             )
-            return ("failed:project", false)
+            return ("failed:project", false, [:])
         }
 
         if case .off(let reason) = coordinator.readiness {
@@ -3378,9 +3388,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "skipped",
                 variant: "rust-analyzer",
                 controller: controller,
-                extra: ["reason": reason]
+                extra: unreached.merging(["reason": reason]) { _, new in new }
             )
-            return ("skipped:sandbox-unavailable", true)
+            return ("skipped:sandbox-unavailable", true, [:])
         }
         let initialStatusSafe = waitUntil(timeout: 5, condition: {
             coordinator.readiness == .ready
@@ -3396,12 +3406,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "skipped",
                 variant: "rust-analyzer",
                 controller: controller,
-                extra: ["reason": reason]
+                extra: unreached.merging(["reason": reason]) { _, new in new }
             )
-            return ("skipped:sandbox-unavailable", true)
+            return ("skipped:sandbox-unavailable", true, [:])
         }
         guard initialStatusSafe else {
-            return ("failed:initial-status", false)
+            return ("failed:initial-status", false, [:])
         }
 
         controller.selfTestReaderClick(offset: target.clickOffset, commandClick: false)
@@ -3415,7 +3425,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             variant: "rust-analyzer",
             controller: controller
         )
-        guard fuzzyVisible else { return ("failed:fuzzy", false) }
+        guard fuzzyVisible else { return ("failed:fuzzy", false, [:]) }
 
         let finished = waitUntil(timeout: 45, condition: {
             if controller.selfTestContextProvenance?.contains("Exact") == true {
@@ -3433,9 +3443,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "skipped",
                 variant: "rust-analyzer",
                 controller: controller,
-                extra: ["reason": reason]
+                extra: unreached.merging(["reason": reason]) { _, new in new }
             )
-            return ("skipped:sandbox-unavailable", true)
+            return ("skipped:sandbox-unavailable", true, [:])
         }
         if case .unavailable(let reason) = coordinator.readiness {
             emitExactStep(
@@ -3444,7 +3454,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 controller: controller,
                 extra: ["reason": reason]
             )
-            return ("failed:unavailable", false)
+            return ("failed:unavailable", false, [:])
         }
         let exactVisible = finished
             && controller.selfTestContextProvenance?.contains("Exact") == true
@@ -3456,14 +3466,114 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         guard exactVisible && fuzzyRetained,
               let definitionOffset = UInt32(exactly: target.definition.byteOffset),
+              let signatureTraitOffset = target.signatureTraitOffset,
+              let relationRootOffset = target.relationRootOffset,
               controller.selectFileInSidebar(target.relationFile),
               waitUntil(timeout: 5, condition: {
                   controller.displayedReaderFile?.standardizedFileURL
                       == target.relationFile.standardizedFileURL
               })
         else {
-            return ("failed:exact", false)
+            return ("failed:exact", false, [:])
         }
+
+        func exactEdges() -> [(symbol: String, file: String)] {
+            realModel.relationTree.root?.children?.first {
+                $0.kind == .group && $0.title.hasPrefix("Exact")
+            }?.children?.compactMap {
+                guard let file = $0.target?.path else { return nil }
+                return ($0.title, file)
+            } ?? []
+        }
+
+        controller.selfTestReaderRelation(
+            offset: signatureTraitOffset,
+            direction: .implementations
+        )
+        let implementationReached = waitUntil(timeout: 45, condition: {
+            realModel.relationTree.direction == .implementations
+                && realModel.relationTree.root?.title == "Backend"
+                && exactEdges().contains {
+                    $0 == ("ExactFixtureBackend", "src/lib.rs")
+                }
+        })
+        emitExactStep(
+            implementationReached ? "real-implementations" : "failed",
+            variant: "rust-analyzer",
+            controller: controller,
+            extra: [
+                "textDocumentImplementationReached": implementationReached,
+                "exactEdges": exactEdges().map {
+                    ["symbol": $0.symbol, "file": $0.file]
+                },
+            ]
+        )
+        var reachedChecks = [
+            "textDocumentImplementationReached": implementationReached,
+        ]
+        guard implementationReached else {
+            return ("failed:implementations", false, reachedChecks)
+        }
+
+        controller.selfTestReaderRelation(
+            offset: definitionOffset,
+            direction: .callers
+        )
+        let incomingCallsReached = waitUntil(timeout: 45, condition: {
+            realModel.relationTree.direction == .callers
+                && realModel.relationTree.root?.title == "answer"
+                && exactEdges().contains {
+                    $0 == ("relation_root", "src/lib.rs")
+                }
+                && exactEdges().contains {
+                    $0 == ("main", "src/main.rs")
+                }
+        })
+        emitExactStep(
+            incomingCallsReached ? "real-incoming-calls" : "failed",
+            variant: "rust-analyzer",
+            controller: controller,
+            extra: [
+                "callHierarchyIncomingCallsReached": incomingCallsReached,
+                "exactEdges": exactEdges().map {
+                    ["symbol": $0.symbol, "file": $0.file]
+                },
+            ]
+        )
+        reachedChecks["callHierarchyIncomingCallsReached"] =
+            incomingCallsReached
+        guard incomingCallsReached else {
+            return ("failed:incoming-calls", false, reachedChecks)
+        }
+
+        controller.selfTestReaderRelation(
+            offset: relationRootOffset,
+            direction: .calls
+        )
+        let outgoingCallsReached = waitUntil(timeout: 45, condition: {
+            realModel.relationTree.direction == .calls
+                && realModel.relationTree.root?.title == "relation_root"
+                && exactEdges().contains {
+                    $0 == ("answer", "src/lib.rs")
+                }
+        })
+        emitExactStep(
+            outgoingCallsReached ? "real-outgoing-calls" : "failed",
+            variant: "rust-analyzer",
+            controller: controller,
+            extra: [
+                "callHierarchyOutgoingCallsReached": outgoingCallsReached,
+                "exactEdges": exactEdges().map {
+                    ["symbol": $0.symbol, "file": $0.file]
+                },
+            ]
+        )
+        reachedChecks["callHierarchyOutgoingCallsReached"] =
+            outgoingCallsReached
+        guard outgoingCallsReached else {
+            return ("failed:outgoing-calls", false, reachedChecks)
+        }
+
         controller.selfTestReaderRelation(
             offset: definitionOffset,
             direction: .references
@@ -3483,8 +3593,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ]
         )
         return exactReferencesVisible
-            ? ("passed", true)
-            : ("failed:references", false)
+            ? ("passed", true, reachedChecks)
+            : ("failed:references", false, reachedChecks)
     }
 
     private func runRealOfflineCoverageVariant(
@@ -4938,6 +5048,7 @@ private struct ExactSelfTestTarget {
     let dependencyDefinition: ExactLocation
     let relationFile: URL
     let relationCallOffset: UInt32
+    let relationRootOffset: UInt32?
     let localReferenceDeclarationOffset: UInt32?
     let localReferenceUseOffset: UInt32?
     let signatureTraitOffset: UInt32?
@@ -5392,6 +5503,13 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
               bytes: Array(definitionSource.utf8)
           ).lineColumn(at: relationCallOffset)
     else { return nil }
+    let relationRootOffset = definitionSource.range(
+        of: "pub fn relation_root"
+    ).flatMap {
+        definitionSource[$0].range(of: "relation_root")
+    }.flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
     let localReferenceDeclarationOffset = definitionSource.range(
         of: "receiver = InferredReceiver::new()"
     ).flatMap {
@@ -5432,7 +5550,11 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
             column: Int(coordinate.column)
         )
     }
-    let signatureTraitOffset = definitionSource.range(of: "Backend").flatMap {
+    let signatureTraitOffset = definitionSource.range(
+        of: "pub trait Backend"
+    ).flatMap {
+        definitionSource[$0].range(of: "Backend")
+    }.flatMap {
         UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
     }
     let externalRootOffset = definitionSource.range(of: "dependency_call").flatMap {
@@ -5487,6 +5609,7 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
         dependencyDefinition: dependencyDefinition,
         relationFile: relationFile,
         relationCallOffset: relationCallOffset,
+        relationRootOffset: relationRootOffset,
         localReferenceDeclarationOffset: localReferenceDeclarationOffset,
         localReferenceUseOffset: localReferenceUseOffset,
         signatureTraitOffset: signatureTraitOffset,

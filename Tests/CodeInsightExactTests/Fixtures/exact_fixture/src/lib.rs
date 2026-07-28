@@ -37,3 +37,9 @@ pub trait TraitObjectReceiver {
 pub fn trait_object_receiver_call(receiver: &dyn TraitObjectReceiver) {
     receiver.trait_object_edge();
 }
+
+pub struct ExactFixtureBackend;
+
+impl Backend for ExactFixtureBackend {
+    fn get_completion(&self) -> String { String::new() }
+}
