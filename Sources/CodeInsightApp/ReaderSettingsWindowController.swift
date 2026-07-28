@@ -29,6 +29,45 @@ final class ReaderSettingsWindowController: NSWindowController {
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    var selfTestVisualControlGeometry: (
+        frames: [NSRect],
+        existingFrames: [NSRect],
+        visibleFrame: NSRect
+    ) {
+        guard let contentView = window?.contentView else {
+            return ([], [], .zero)
+        }
+        func collect(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(collect)
+        }
+        func isVisible(_ view: NSView) -> Bool {
+            var current: NSView? = view
+            while let candidate = current {
+                if candidate.isHidden { return false }
+                current = candidate.superview
+            }
+            return view.window === window && !view.bounds.isEmpty
+        }
+        let controls = collect(contentView).compactMap { $0 as? NSControl }
+            .filter(isVisible)
+        let sliders = controls.compactMap { $0 as? NSSlider }
+        guard sliders.count == 5 else {
+            return ([], [], contentView.bounds)
+        }
+        let visualSliders = Array(sliders.dropFirst())
+        let visualIdentities = Set(visualSliders.map(ObjectIdentifier.init))
+        func frame(_ view: NSView) -> NSRect {
+            view.convert(view.bounds, to: contentView)
+        }
+        return (
+            visualSliders.map(frame),
+            controls.filter {
+                !visualIdentities.contains(ObjectIdentifier($0))
+            }.map(frame),
+            contentView.bounds
+        )
+    }
 }
 
 private struct SettingsView: View {
@@ -67,7 +106,7 @@ private struct SettingsView: View {
             .tabItem { Label("Exact", systemImage: "checkmark.shield") }
         }
         .padding()
-        .frame(width: 560, height: 360)
+        .frame(width: 560, height: 520)
     }
 }
 
@@ -116,6 +155,30 @@ private struct ReaderSettingsView: View {
                 in: ReaderSettings.functionNameDeltaRange,
                 step: 1
             )
+            valueControl(
+                "Parameter reference opacity",
+                value: $settings.parameterReferenceAlpha,
+                range: ReaderSettings.parameterReferenceAlphaRange,
+                step: 0.01
+            )
+            valueControl(
+                "Declaration marker opacity",
+                value: $settings.declarationMarkerAlpha,
+                range: ReaderSettings.declarationMarkerAlphaRange,
+                step: 0.01
+            )
+            valueControl(
+                "Function / declaration title weight",
+                value: $settings.functionDeclarationFontWeight,
+                range: ReaderSettings.functionDeclarationFontWeightRange,
+                step: 0.05
+            )
+            valueControl(
+                "Declaration emphasis weight",
+                value: $settings.declarationEmphasisFontWeight,
+                range: ReaderSettings.declarationEmphasisFontWeightRange,
+                step: 0.05
+            )
             Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
             Toggle("Use humanist font for comments", isOn: $settings.humanistComments)
             Toggle("Show line numbers", isOn: $settings.lineNumbers)
@@ -124,6 +187,22 @@ private struct ReaderSettingsView: View {
         .padding()
         .onChange(of: settings) { _, value in
             onChange(value)
+        }
+    }
+
+    private func valueControl(
+        _ label: String,
+        value: Binding<Double>,
+        range: ClosedRange<Double>,
+        step: Double
+    ) -> some View {
+        LabeledContent(label) {
+            HStack {
+                Slider(value: value, in: range, step: step)
+                Text(value.wrappedValue, format: .number.precision(.fractionLength(2)))
+                    .monospacedDigit()
+                    .frame(width: 40, alignment: .trailing)
+            }
         }
     }
 }

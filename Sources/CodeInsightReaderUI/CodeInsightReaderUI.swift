@@ -289,7 +289,9 @@ public final class RenderingAttributesCoordinator {
                 theme.color(for: $0)
             } ?? theme.foregroundColor
             if styled.isParameterReference == true {
-                foregroundColor = foregroundColor.withAlphaComponent(0.72)
+                foregroundColor = foregroundColor.withAlphaComponent(
+                    theme.parameterReferenceAlpha
+                )
             }
             var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: foregroundColor,
@@ -722,6 +724,17 @@ public final class ReaderTextView {
 
     public var displayedBytes: [UInt8]? { displayedDocument?.bytes }
 
+    package func font(atByteOffset byteOffset: UInt32) -> NSFont? {
+        guard let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset)),
+              location < backingTextStorage.length
+        else { return nil }
+        return backingTextStorage.attribute(
+            .font,
+            at: location,
+            effectiveRange: nil
+        ) as? NSFont
+    }
+
     public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
         byteUTF16Map?.byteOffset(forUTF16: index).flatMap(UInt32.init(exactly:))
     }
@@ -966,18 +979,7 @@ public final class ReaderTextView {
         _ kind: OutlineKind,
         in rect: NSRect
     ) {
-        let color: NSColor
-        switch kind {
-        case .fn, .method:
-            color = theme.color(for: .functionName)
-        case .struct, .enum, .trait, .typeAlias:
-            color = theme.color(for: .declarationTitle)
-        case .impl:
-            color = theme.color(for: .typeName)
-        case .mod, .const, .static:
-            color = theme.color(for: .declarationEmphasis)
-        }
-        color.withAlphaComponent(0.7).setFill()
+        declarationMarkerColor(for: kind).setFill()
         switch kind {
         case .fn, .method:
             NSBezierPath(ovalIn: rect).fill()
@@ -995,6 +997,21 @@ public final class ReaderTextView {
         case .struct, .enum, .trait, .typeAlias:
             rect.fill()
         }
+    }
+
+    func declarationMarkerColor(for kind: OutlineKind) -> NSColor {
+        let color: NSColor
+        switch kind {
+        case .fn, .method:
+            color = theme.color(for: .functionName)
+        case .struct, .enum, .trait, .typeAlias:
+            color = theme.color(for: .declarationTitle)
+        case .impl:
+            color = theme.color(for: .typeName)
+        case .mod, .const, .static:
+            color = theme.color(for: .declarationEmphasis)
+        }
+        return color.withAlphaComponent(theme.declarationMarkerAlpha)
     }
 
     private var baseAttributes: [NSAttributedString.Key: Any] {
@@ -1071,7 +1088,9 @@ public final class ReaderTextView {
                 attributed.addAttributes([
                     .font: NSFont.monospacedSystemFont(
                         ofSize: theme.functionNameFontSize,
-                        weight: .semibold
+                        weight: NSFont.Weight(
+                            rawValue: theme.functionDeclarationFontWeight
+                        )
                     ),
                     .kern: 0.15,
                 ], range: safeRange)
@@ -1080,7 +1099,9 @@ public final class ReaderTextView {
                     .font,
                     value: NSFont.monospacedSystemFont(
                         ofSize: theme.fontSize,
-                        weight: .semibold
+                        weight: NSFont.Weight(
+                            rawValue: theme.declarationEmphasisFontWeight
+                        )
                     ),
                     range: safeRange
                 )

@@ -8,6 +8,10 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
         lineHeightMultiple: 1.25,
         fontSize: 13,
         functionNameDelta: 1,
+        parameterReferenceAlpha: 0.72,
+        declarationMarkerAlpha: 0.7,
+        functionDeclarationFontWeight: 0.3,
+        declarationEmphasisFontWeight: 0.3,
         theme: .auto,
         syntaxFormatting: true,
         humanistComments: false,
@@ -42,16 +46,66 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
 }
 
 @Test
+func readerVisualSettingsKeepLegacyDefaultsAndClampEveryBoundary() {
+    let defaults = ReaderSettings()
+    #expect(defaults.parameterReferenceAlpha == 0.72)
+    #expect(defaults.declarationMarkerAlpha == 0.7)
+    #expect(defaults.functionDeclarationFontWeight == 0.3)
+    #expect(defaults.declarationEmphasisFontWeight == 0.3)
+
+    let low = ReaderSettings(
+        parameterReferenceAlpha: -1,
+        declarationMarkerAlpha: -1,
+        functionDeclarationFontWeight: -2,
+        declarationEmphasisFontWeight: -2
+    )
+    #expect(low.parameterReferenceAlpha == 0)
+    #expect(low.declarationMarkerAlpha == 0)
+    #expect(low.functionDeclarationFontWeight == -1)
+    #expect(low.declarationEmphasisFontWeight == -1)
+
+    let high = ReaderSettings(
+        parameterReferenceAlpha: 2,
+        declarationMarkerAlpha: 2,
+        functionDeclarationFontWeight: 2,
+        declarationEmphasisFontWeight: 2
+    )
+    #expect(high.parameterReferenceAlpha == 1)
+    #expect(high.declarationMarkerAlpha == 1)
+    #expect(high.functionDeclarationFontWeight == 1)
+    #expect(high.declarationEmphasisFontWeight == 1)
+
+    var mutated = ReaderSettings()
+    mutated.parameterReferenceAlpha = -1
+    mutated.declarationMarkerAlpha = 2
+    mutated.functionDeclarationFontWeight = -2
+    mutated.declarationEmphasisFontWeight = 2
+    #expect(mutated.parameterReferenceAlpha == 0)
+    #expect(mutated.declarationMarkerAlpha == 1)
+    #expect(mutated.functionDeclarationFontWeight == -1)
+    #expect(mutated.declarationEmphasisFontWeight == 1)
+}
+
+@Test
 func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
     let suite = "ReaderSettingsTests.\(UUID().uuidString)"
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
-    #expect(ReaderSettings(defaults: defaults).syntaxFormatting)
-    #expect(ReaderSettings(defaults: defaults).lineNumbers)
+    let missingKeys = ReaderSettings(defaults: defaults)
+    #expect(missingKeys.parameterReferenceAlpha == 0.72)
+    #expect(missingKeys.declarationMarkerAlpha == 0.7)
+    #expect(missingKeys.functionDeclarationFontWeight == 0.3)
+    #expect(missingKeys.declarationEmphasisFontWeight == 0.3)
+    #expect(missingKeys.syntaxFormatting)
+    #expect(missingKeys.lineNumbers)
     let expected = ReaderSettings(
         lineHeightMultiple: 1.6,
         fontSize: 17,
         functionNameDelta: 2,
+        parameterReferenceAlpha: 0.41,
+        declarationMarkerAlpha: 0.62,
+        functionDeclarationFontWeight: 0,
+        declarationEmphasisFontWeight: 0.4,
         theme: .siClassic,
         syntaxFormatting: false,
         humanistComments: true,

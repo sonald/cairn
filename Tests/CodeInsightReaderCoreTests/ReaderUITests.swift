@@ -1,8 +1,8 @@
 import AppKit
 import CodeInsightReaderCore
-import CodeInsightReaderUI
 import Foundation
 import Testing
+@testable import CodeInsightReaderUI
 
 @MainActor
 @Test
@@ -387,6 +387,110 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
     withExtendedLifetime(window) {}
 }
 
+@MainActor
+@Test
+func defaultVisualSettingsMatchLegacyRenderingSnapshotByteForByte() throws {
+    let fixture = try visualSettingsFixture()
+    let (reader, _, window) = renderOffscreen(fixture.document)
+    let storage = try #require(reader.view.textStorage)
+    let parameterColor = try #require(
+        renderedColors(in: reader, intersecting: fixture.parameterReference).first
+    )
+    let functionAttributes = storage.attributes(
+        at: fixture.functionName.location,
+        effectiveRange: nil
+    )
+    let emphasisAttributes = storage.attributes(
+        at: fixture.declarationEmphasis.location,
+        effectiveRange: nil
+    )
+    let actual = visualSnapshotData(
+        parameterColor: parameterColor,
+        markerColor: reader.declarationMarkerColor(for: .fn),
+        functionFont: try #require(functionAttributes[.font] as? NSFont),
+        functionKern: try #require(functionAttributes[.kern] as? NSNumber).doubleValue,
+        emphasisFont: try #require(emphasisAttributes[.font] as? NSFont)
+    )
+    let legacyTheme = ReaderTheme(settings: ReaderSettings())
+    let expected = visualSnapshotData(
+        parameterColor: legacyTheme.foregroundColor.withAlphaComponent(0.72),
+        markerColor: legacyTheme.color(for: .functionName).withAlphaComponent(0.7),
+        functionFont: .monospacedSystemFont(
+            ofSize: legacyTheme.functionNameFontSize,
+            weight: .semibold
+        ),
+        functionKern: 0.15,
+        emphasisFont: .monospacedSystemFont(
+            ofSize: legacyTheme.fontSize,
+            weight: .semibold
+        )
+    )
+
+    #expect(actual == expected)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func visualSettingsImmediatelyRedrawAnOpenReader() throws {
+    let fixture = try visualSettingsFixture()
+    let (reader, _, window) = renderOffscreen(fixture.document)
+    let storage = try #require(reader.view.textStorage)
+    let oldParameterAlpha = try #require(
+        renderedColors(in: reader, intersecting: fixture.parameterReference).first
+    ).alphaComponent
+    let oldMarkerAlpha = reader.declarationMarkerColor(for: .fn).alphaComponent
+    let oldFunctionFont = try #require(storage.attribute(
+        .font,
+        at: fixture.functionName.location,
+        effectiveRange: nil
+    ) as? NSFont)
+    let oldEmphasisFont = try #require(storage.attribute(
+        .font,
+        at: fixture.declarationEmphasis.location,
+        effectiveRange: nil
+    ) as? NSFont)
+
+    reader.apply(settings: ReaderSettings(
+        parameterReferenceAlpha: 0.4,
+        declarationMarkerAlpha: 0.25,
+        functionDeclarationFontWeight: Double(NSFont.Weight.regular.rawValue),
+        declarationEmphasisFontWeight: Double(NSFont.Weight.bold.rawValue)
+    ))
+    window.displayIfNeeded()
+
+    let newParameterAlpha = try #require(
+        renderedColors(in: reader, intersecting: fixture.parameterReference).first
+    ).alphaComponent
+    let newMarkerAlpha = reader.declarationMarkerColor(for: .fn).alphaComponent
+    let newFunctionFont = try #require(storage.attribute(
+        .font,
+        at: fixture.functionName.location,
+        effectiveRange: nil
+    ) as? NSFont)
+    let newEmphasisFont = try #require(storage.attribute(
+        .font,
+        at: fixture.declarationEmphasis.location,
+        effectiveRange: nil
+    ) as? NSFont)
+
+    #expect(abs(newParameterAlpha - 0.4) < 0.001)
+    #expect(newParameterAlpha != oldParameterAlpha)
+    #expect(abs(newMarkerAlpha - 0.25) < 0.001)
+    #expect(newMarkerAlpha != oldMarkerAlpha)
+    #expect(newFunctionFont.fontName == NSFont.monospacedSystemFont(
+        ofSize: 14,
+        weight: .regular
+    ).fontName)
+    #expect(newFunctionFont.fontName != oldFunctionFont.fontName)
+    #expect(newEmphasisFont.fontName == NSFont.monospacedSystemFont(
+        ofSize: 13,
+        weight: .bold
+    ).fontName)
+    #expect(newEmphasisFont.fontName != oldEmphasisFont.fontName)
+    withExtendedLifetime(window) {}
+}
+
 @Test
 func m6ReferenceDensityStylesOnlyViewportFragments() async throws {
     let (_, document) = try await m6ReferenceDocument()
@@ -602,4 +706,83 @@ private func colorsEqual(_ lhs: NSColor, _ rhs: NSColor) -> Bool {
         }
     }
     return left == right
+}
+
+private func visualSettingsFixture() throws -> (
+    document: ReaderDocument,
+    parameterReference: NSRange,
+    functionName: NSRange,
+    declarationEmphasis: NSRange
+) {
+    let source = """
+        fn demo(param: i32) -> i32 { param }
+        const LIMIT: i32 = 1;
+        """
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let parameterBinding = try #require(highlighted.bindings.indices.first {
+        if case .param = highlighted.bindings[$0].kind { true } else { false }
+    })
+    let parameterReference = try #require(
+        highlighted.referencesByBinding[parameterBinding].first
+    )
+    let functionSpan = try #require(highlighted.spans.first {
+        $0.kind == .functionName
+    })
+    let emphasisSpan = try #require(highlighted.spans.first {
+        $0.kind == .declarationEmphasis
+    })
+    return (
+        document,
+        try #require(document.byteUTF16Map.nsRange(
+            byteLowerBound: Int(parameterReference.lowerBound),
+            byteUpperBound: Int(parameterReference.upperBound)
+        )),
+        try #require(document.byteUTF16Map.nsRange(
+            byteLowerBound: Int(functionSpan.range.lowerBound),
+            byteUpperBound: Int(functionSpan.range.upperBound)
+        )),
+        try #require(document.byteUTF16Map.nsRange(
+            byteLowerBound: Int(emphasisSpan.range.lowerBound),
+            byteUpperBound: Int(emphasisSpan.range.upperBound)
+        ))
+    )
+}
+
+@MainActor
+private func visualSnapshotData(
+    parameterColor: NSColor,
+    markerColor: NSColor,
+    functionFont: NSFont,
+    functionKern: Double,
+    emphasisFont: NSFont
+) -> Data {
+    let appearance = NSAppearance(named: .aqua)!
+    var colorComponents: [CGFloat] = []
+    appearance.performAsCurrentDrawingAppearance {
+        for color in [parameterColor, markerColor] {
+            guard let rgb = color.usingColorSpace(.deviceRGB) else { continue }
+            var red = CGFloat.zero
+            var green = CGFloat.zero
+            var blue = CGFloat.zero
+            var alpha = CGFloat.zero
+            rgb.getRed(&red, green: &green, blue: &blue, alpha: &alpha)
+            colorComponents.append(contentsOf: [red, green, blue, alpha])
+        }
+    }
+    let fields = colorComponents.map { String(format: "%.17g", Double($0)) } + [
+        functionFont.fontName,
+        String(format: "%.17g", Double(functionFont.pointSize)),
+        String(format: "%.17g", functionKern),
+        emphasisFont.fontName,
+        String(format: "%.17g", Double(emphasisFont.pointSize)),
+    ]
+    return Data(fields.joined(separator: "\u{1f}").utf8)
 }

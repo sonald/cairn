@@ -11,6 +11,10 @@ public struct ReaderSettings: Equatable, Sendable {
     public static let lineHeightRange = 1.0...2.0
     public static let fontSizeRange = 10.0...24.0
     public static let functionNameDeltaRange = 0.0...4.0
+    public static let parameterReferenceAlphaRange = 0.0...1.0
+    public static let declarationMarkerAlphaRange = 0.0...1.0
+    public static let functionDeclarationFontWeightRange = -1.0...1.0
+    public static let declarationEmphasisFontWeightRange = -1.0...1.0
 
     public var lineHeightMultiple: Double {
         didSet { lineHeightMultiple = lineHeightMultiple.clamped(to: Self.lineHeightRange) }
@@ -25,6 +29,34 @@ public struct ReaderSettings: Equatable, Sendable {
             )
         }
     }
+    public var parameterReferenceAlpha: Double {
+        didSet {
+            parameterReferenceAlpha = parameterReferenceAlpha.clamped(
+                to: Self.parameterReferenceAlphaRange
+            )
+        }
+    }
+    public var declarationMarkerAlpha: Double {
+        didSet {
+            declarationMarkerAlpha = declarationMarkerAlpha.clamped(
+                to: Self.declarationMarkerAlphaRange
+            )
+        }
+    }
+    public var functionDeclarationFontWeight: Double {
+        didSet {
+            functionDeclarationFontWeight = functionDeclarationFontWeight.clamped(
+                to: Self.functionDeclarationFontWeightRange
+            )
+        }
+    }
+    public var declarationEmphasisFontWeight: Double {
+        didSet {
+            declarationEmphasisFontWeight = declarationEmphasisFontWeight.clamped(
+                to: Self.declarationEmphasisFontWeightRange
+            )
+        }
+    }
     public var theme: Theme
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
@@ -34,6 +66,10 @@ public struct ReaderSettings: Equatable, Sendable {
         lineHeightMultiple: Double = 1.25,
         fontSize: Double = 13,
         functionNameDelta: Double = 1,
+        parameterReferenceAlpha: Double = 0.72,
+        declarationMarkerAlpha: Double = 0.7,
+        functionDeclarationFontWeight: Double = 0.3,
+        declarationEmphasisFontWeight: Double = 0.3,
         theme: Theme = .auto,
         syntaxFormatting: Bool = true,
         humanistComments: Bool = false,
@@ -43,6 +79,18 @@ public struct ReaderSettings: Equatable, Sendable {
         self.fontSize = fontSize.clamped(to: Self.fontSizeRange)
         self.functionNameDelta = functionNameDelta.clamped(
             to: Self.functionNameDeltaRange
+        )
+        self.parameterReferenceAlpha = parameterReferenceAlpha.clamped(
+            to: Self.parameterReferenceAlphaRange
+        )
+        self.declarationMarkerAlpha = declarationMarkerAlpha.clamped(
+            to: Self.declarationMarkerAlphaRange
+        )
+        self.functionDeclarationFontWeight = functionDeclarationFontWeight.clamped(
+            to: Self.functionDeclarationFontWeightRange
+        )
+        self.declarationEmphasisFontWeight = declarationEmphasisFontWeight.clamped(
+            to: Self.declarationEmphasisFontWeightRange
         )
         self.theme = theme
         self.syntaxFormatting = syntaxFormatting
@@ -60,6 +108,24 @@ public struct ReaderSettings: Equatable, Sendable {
             functionNameDelta: (defaults.object(forKey: Keys.functionNameDelta) as? NSNumber)?
                 .doubleValue
                 ?? 1,
+            parameterReferenceAlpha:
+                (defaults.object(forKey: Keys.parameterReferenceAlpha) as? NSNumber)?
+                    .doubleValue
+                    ?? 0.72,
+            declarationMarkerAlpha:
+                (defaults.object(forKey: Keys.declarationMarkerAlpha) as? NSNumber)?
+                    .doubleValue
+                    ?? 0.7,
+            functionDeclarationFontWeight:
+                (defaults.object(
+                    forKey: Keys.functionDeclarationFontWeight
+                ) as? NSNumber)?.doubleValue
+                    ?? 0.3,
+            declarationEmphasisFontWeight:
+                (defaults.object(
+                    forKey: Keys.declarationEmphasisFontWeight
+                ) as? NSNumber)?.doubleValue
+                    ?? 0.3,
             theme: defaults.string(forKey: Keys.theme).flatMap(Theme.init(rawValue:))
                 ?? .auto,
             syntaxFormatting: (defaults.object(forKey: Keys.syntaxFormatting) as? NSNumber)?
@@ -79,6 +145,10 @@ public struct ReaderSettings: Equatable, Sendable {
             lineHeightMultiple: lineHeightMultiple,
             fontSize: fontSize,
             functionNameDelta: functionNameDelta,
+            parameterReferenceAlpha: parameterReferenceAlpha,
+            declarationMarkerAlpha: declarationMarkerAlpha,
+            functionDeclarationFontWeight: functionDeclarationFontWeight,
+            declarationEmphasisFontWeight: declarationEmphasisFontWeight,
             theme: theme,
             syntaxFormatting: syntaxFormatting,
             humanistComments: humanistComments,
@@ -87,6 +157,22 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
+        defaults.set(
+            validated.parameterReferenceAlpha,
+            forKey: Keys.parameterReferenceAlpha
+        )
+        defaults.set(
+            validated.declarationMarkerAlpha,
+            forKey: Keys.declarationMarkerAlpha
+        )
+        defaults.set(
+            validated.functionDeclarationFontWeight,
+            forKey: Keys.functionDeclarationFontWeight
+        )
+        defaults.set(
+            validated.declarationEmphasisFontWeight,
+            forKey: Keys.declarationEmphasisFontWeight
+        )
         defaults.set(validated.theme.rawValue, forKey: Keys.theme)
         defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
@@ -97,6 +183,12 @@ public struct ReaderSettings: Equatable, Sendable {
         static let lineHeightMultiple = "reader.lineHeightMultiple"
         static let fontSize = "reader.fontSize"
         static let functionNameDelta = "reader.functionNameDelta"
+        static let parameterReferenceAlpha = "reader.parameterReferenceAlpha"
+        static let declarationMarkerAlpha = "reader.declarationMarkerAlpha"
+        static let functionDeclarationFontWeight =
+            "reader.functionDeclarationFontWeight"
+        static let declarationEmphasisFontWeight =
+            "reader.declarationEmphasisFontWeight"
         static let theme = "reader.theme"
         static let syntaxFormatting = "reader.syntaxFormatting"
         static let humanistComments = "reader.humanistComments"
@@ -109,6 +201,10 @@ public struct ReaderTheme: Equatable, Sendable {
     public let lineHeightMultiple: Double
     public let fontSize: Double
     public let functionNameFontSize: Double
+    public let parameterReferenceAlpha: Double
+    public let declarationMarkerAlpha: Double
+    public let functionDeclarationFontWeight: Double
+    public let declarationEmphasisFontWeight: Double
     public let syntaxFormatting: Bool
     public let humanistComments: Bool
 
@@ -117,6 +213,10 @@ public struct ReaderTheme: Equatable, Sendable {
         lineHeightMultiple = settings.lineHeightMultiple
         fontSize = settings.fontSize
         functionNameFontSize = settings.fontSize + settings.functionNameDelta
+        parameterReferenceAlpha = settings.parameterReferenceAlpha
+        declarationMarkerAlpha = settings.declarationMarkerAlpha
+        functionDeclarationFontWeight = settings.functionDeclarationFontWeight
+        declarationEmphasisFontWeight = settings.declarationEmphasisFontWeight
         syntaxFormatting = settings.syntaxFormatting
         humanistComments = settings.humanistComments
     }

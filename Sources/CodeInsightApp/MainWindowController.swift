@@ -695,6 +695,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.selfTestVisibleChildEdgeTitles(ofEdge: title)
     }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
+    func selfTestLeftReaderFontName(at byteOffset: UInt32) -> String? {
+        readerController.selfTestFontName(at: byteOffset)
+    }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
     var selfTestLeftReaderIsEditable: Bool { readerController.isEditable }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
@@ -3146,6 +3149,9 @@ final class ReaderViewController: NSViewController {
     }
     var selfTestReferenceScannedCount: Int {
         textView.renderingCoordinator.referenceScannedCount
+    }
+    func selfTestFontName(at byteOffset: UInt32) -> String? {
+        textView.font(atByteOffset: byteOffset)?.fontName
     }
     var selfTestVisibleLineNumbers: [Int] {
         textView.captureVisibleDecorationState()

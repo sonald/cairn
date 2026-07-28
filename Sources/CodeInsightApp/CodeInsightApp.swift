@@ -1004,6 +1004,63 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 - geometryOn.contentFrame.width
                 - geometryOn.rulerFrame.width
         ) <= tolerance
+        let legacySettings = ReaderSettings()
+        controller.applyReaderSettings(legacySettings)
+        let legacyFunctionFontName = controller.selfTestLeftReaderFontName(
+            at: UInt32(alphaOffset)
+        )
+        var changedVisualSettings = legacySettings
+        changedVisualSettings.functionDeclarationFontWeight =
+            Double(NSFont.Weight.regular.rawValue)
+        controller.applyReaderSettings(changedVisualSettings)
+        pumpRunLoop()
+        let changedFunctionFontName = controller.selfTestLeftReaderFontName(
+            at: UInt32(alphaOffset)
+        )
+        let visualSettingAppliedImmediately =
+            legacyFunctionFontName
+                == NSFont.monospacedSystemFont(
+                    ofSize: legacySettings.fontSize
+                        + legacySettings.functionNameDelta,
+                    weight: .semibold
+                ).fontName
+            && changedFunctionFontName
+                == NSFont.monospacedSystemFont(
+                    ofSize: legacySettings.fontSize
+                        + legacySettings.functionNameDelta,
+                    weight: .regular
+                ).fontName
+            && changedFunctionFontName != legacyFunctionFontName
+
+        let settingsController = ReaderSettingsWindowController(
+            settings: legacySettings,
+            exactCoordinator: model.exactCoordinator,
+            onRevoke: { _ in },
+            onChange: { _ in }
+        )
+        settingsController.window?.setFrameOrigin(
+            NSPoint(x: -20_000, y: -20_000)
+        )
+        settingsController.showWindow(nil)
+        pumpRunLoop()
+        let settingsGeometry = settingsController.selfTestVisualControlGeometry
+        settingsController.close()
+        let visualControlsVisible = settingsGeometry.frames.count == 4
+            && settingsGeometry.frames.allSatisfy {
+                $0.width > 0 && $0.height > 0
+                    && settingsGeometry.visibleFrame.contains($0)
+            }
+        let visualControlsDoNotOverlap = settingsGeometry.frames.indices.allSatisfy {
+            index in
+            settingsGeometry.frames.indices.allSatisfy {
+                $0 == index
+                    || !settingsGeometry.frames[index]
+                        .intersects(settingsGeometry.frames[$0])
+            }
+                && settingsGeometry.existingFrames.allSatisfy {
+                    !settingsGeometry.frames[index].intersects($0)
+                }
+        }
         var checks: [String: Bool] = [
             "rulerExistsByDefault":
                 geometryOn.hasRuler && geometryOn.rulerThickness > 0,
@@ -1024,6 +1081,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 currentLine == 2 && currentLineState == [2],
             "blankClickClearsOccurrences":
                 blankCount == 0 && controller.selfTestOccurrenceCount == 0,
+            "readerVisualSettingAppliedImmediately":
+                visualSettingAppliedImmediately,
+            "readerVisualControlsVisibleWithGeometry":
+                visualControlsVisible,
+            "readerVisualControlsDoNotOverlap":
+                visualControlsDoNotOverlap,
             "regularFootprintUnderBudget":
                 regularFootprintMB >= 0
                 && regularFootprintMB < SelfTestBudgets.idleFootprintMB,
