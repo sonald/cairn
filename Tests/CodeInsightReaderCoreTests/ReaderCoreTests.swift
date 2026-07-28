@@ -424,19 +424,8 @@ func viewportGatingMatchesLinearScanForLargeSortedInput() {
 }
 
 @Test
-func m6FixtureLocalReferencesConvertOnlyViewportTokens() throws {
-    let fixture = repositoryRoot.appendingPathComponent(
-        "Tests/Fixtures/m6_reference_density.rust"
-    )
-    let bytes = [UInt8](try Data(contentsOf: fixture))
-    let highlighted = try RustHighlighter().highlight(bytes: bytes)
-    let document = ReaderDocument(
-        bytes: bytes,
-        highlightSpans: highlighted.spans,
-        outlineFacets: highlighted.outlineFacets,
-        localBindings: highlighted.bindings,
-        referencesByBinding: highlighted.referencesByBinding
-    )
+func m6FixtureLocalReferencesConvertOnlyViewportTokens() async throws {
+    let (bytes, document) = try await m6ReferenceDocument()
     let marker = Array("}\n// f0 deterministic padding 0".utf8)
     let viewportUpper = try #require(bytes.firstRange(of: marker)?.upperBound)
     let visible = document.localReferences(
@@ -461,6 +450,32 @@ func m6FixtureLocalReferencesConvertOnlyViewportTokens() throws {
             + "viewportBytes=\(viewportUpper) queriedTokens=\(visible.count) "
             + "convertedTokens=\(converted.count)"
     )
+}
+
+func m6ReferenceDocument() async throws -> ([UInt8], ReaderDocument) {
+    try await withCheckedThrowingContinuation { continuation in
+        let thread = Thread {
+            do {
+                let fixture = repositoryRoot.appendingPathComponent(
+                    "Tests/Fixtures/m6_reference_density.rust"
+                )
+                let bytes = [UInt8](try Data(contentsOf: fixture))
+                let highlighted = try RustHighlighter().highlight(bytes: bytes)
+                let document = ReaderDocument(
+                    bytes: bytes,
+                    highlightSpans: highlighted.spans,
+                    outlineFacets: highlighted.outlineFacets,
+                    localBindings: highlighted.bindings,
+                    referencesByBinding: highlighted.referencesByBinding
+                )
+                continuation.resume(returning: (bytes, document))
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
+        thread.qualityOfService = .utility
+        thread.start()
+    }
 }
 
 @Test

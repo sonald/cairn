@@ -53,8 +53,10 @@ run_case() {
     stderr_file="$output_dir/$label.stderr"
     timeout_marker="$output_dir/$label.timeout"
     sample_file="$output_dir/$label.sample.txt"
+    case_tmp="$output_dir/$label.tmp"
+    mkdir -p "$case_tmp"
 
-    "$binary" "$@" >"$stdout_file" 2>"$stderr_file" &
+    TMPDIR="$case_tmp/" "$binary" "$@" >"$stdout_file" 2>"$stderr_file" &
     pid=$!
     (
         sleep "$timeout_seconds"
@@ -73,6 +75,7 @@ run_case() {
     wait "$pid" || exit_code=$?
     kill "$watchdog" 2>/dev/null || true
     wait "$watchdog" 2>/dev/null || true
+    rm -rf "$case_tmp"
 
     if [[ -f "$timeout_marker" ]]; then
         hang_count=$((hang_count + 1))

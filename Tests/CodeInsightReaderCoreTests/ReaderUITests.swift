@@ -389,20 +389,7 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
 
 @Test
 func m6ReferenceDensityStylesOnlyViewportFragments() async throws {
-    let fixture = URL(fileURLWithPath: #filePath)
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .deletingLastPathComponent()
-        .appendingPathComponent("Tests/Fixtures/m6_reference_density.rust")
-    let bytes = [UInt8](try Data(contentsOf: fixture))
-    let highlighted = try RustHighlighter().highlight(bytes: bytes)
-    let document = ReaderDocument(
-        bytes: bytes,
-        highlightSpans: highlighted.spans,
-        outlineFacets: highlighted.outlineFacets,
-        localBindings: highlighted.bindings,
-        referencesByBinding: highlighted.referencesByBinding
-    )
+    let (_, document) = try await m6ReferenceDocument()
     let totalReferences = document.referencesByBinding.lazy
         .map(\.count)
         .reduce(0, +)

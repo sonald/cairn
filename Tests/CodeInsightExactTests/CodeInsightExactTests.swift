@@ -829,6 +829,7 @@ func closeForceKillsAndReapsUnresponsiveProcess() throws {
 
 @Test
 func childProcessRegistryRegistersAndUnregistersConcurrently() async {
+    #expect(ci_process_guard_install())
     let results = await withTaskGroup(
         of: (pid_t, Bool).self,
         returning: [(pid_t, Bool)].self
@@ -902,6 +903,38 @@ func crashGuardKillsRegisteredGrandchildAndReraisesAbort() throws {
     if !orphanDisappeared {
         Darwin.kill(fakeChildPID, SIGKILL)
     }
+}
+
+@Test
+func terminationGuardKillsRegisteredGrandchildAndPreservesDefaultSignal()
+    async throws
+{
+    for signal in [SIGTERM, SIGINT, SIGHUP] {
+        let (deliveredSignal, orphanDisappeared) =
+            try await guardedSignalResult(signal)
+        print(
+            "process-guard termination signal=\(signal)"
+                + " helperSignal=\(deliveredSignal)"
+                + " orphanAlive=\(!orphanDisappeared)"
+        )
+
+        #expect(deliveredSignal == signal)
+        #expect(orphanDisappeared)
+    }
+}
+
+@Test
+func reaperKillsRegisteredGrandchildAfterParentSIGKILL() async throws {
+    let (deliveredSignal, orphanDisappeared) =
+        try await guardedSignalResult(SIGKILL)
+    print(
+        "process-guard uncatchable signal=\(SIGKILL)"
+            + " helperSignal=\(deliveredSignal)"
+            + " orphanAlive=\(!orphanDisappeared)"
+    )
+
+    #expect(deliveredSignal == SIGKILL)
+    #expect(orphanDisappeared)
 }
 
 @Test
@@ -1938,6 +1971,44 @@ private func waitForProcessToDisappear(_ pid: pid_t) -> Bool {
         usleep(1_000)
     }
     return !processExists(pid)
+}
+
+private func guardedSignalResult(
+    _ signal: Int32
+) async throws -> (deliveredSignal: Int32, orphanDisappeared: Bool) {
+    try await withCheckedThrowingContinuation { continuation in
+        Thread.detachNewThread {
+            var helperPID: pid_t = 0
+            var fakeChildPID: pid_t = 0
+            guard ci_test_spawn_signal_helper(
+                true,
+                signal,
+                &helperPID,
+                &fakeChildPID
+            ) else {
+                continuation.resume(
+                    throwing: CocoaError(.executableRuntimeMismatch)
+                )
+                return
+            }
+            do {
+                let status = try waitForProcess(helperPID)
+                let orphanDisappeared =
+                    waitForProcessToDisappear(fakeChildPID)
+                if !orphanDisappeared {
+                    Darwin.kill(fakeChildPID, SIGKILL)
+                }
+                continuation.resume(
+                    returning: (status & 0x7f, orphanDisappeared)
+                )
+            } catch {
+                if fakeChildPID > 1 {
+                    Darwin.kill(fakeChildPID, SIGKILL)
+                }
+                continuation.resume(throwing: error)
+            }
+        }
+    }
 }
 
 private struct DirectorySnapshot: Snapshot {
