@@ -113,6 +113,54 @@ delta"这一测量方法学；方法学未成立前只输出三个原始 metric�
 - 同名高亮与 diff / 查找闪烁同屏时的视觉层级
 - 点击、空白清除、Esc 清除的真实窗口手感
 
+## M6 期间新记（2026-07-28）
+
+### 【真缺陷，已定位根因】点击定位到整个调用表达式而非被点 token
+
+**决策者报告的三个现象，同一个根因**：
+1. 点 `Config::set(...)` 里的 `Config`，Context 显示的是 `set` 的定义
+2. 同一行有多个符号时，点第二个符号 Context 不更新
+3. 同名高亮延迟约 1 秒才出现（此条根因未明，见下）
+
+**根因（监工实测坐实）**：`RustCalls.swift:43` 提取 call 时
+`range: node.coreByteRange(...)` 的 `node` 是**整个 `call_expression` 节点**
+（含 callee、参数、括号），不是函数名 token。探针实测：
+
+```
+click=Config     text=[Config::set(ConfigKey::Backend, 1)]
+click=set        text=[Config::set(ConfigKey::Backend, 1)]
+click=ConfigKey  text=[Config::set(ConfigKey::Backend, 1)]
+```
+
+于是 `Resolver.swift:195` 的 `call.range.contains(offset)` 让**行内任何位置都命中
+同一个 call**，而该 call 的 `nameID` 是被调函数名 → 现象 1。
+
+现象 2 叠加了 `ContextWindowModel.swift:255` 的早退：
+`locatedToken.range.contains(token.offset)` 认为"还是同一个 token"直接返回旧结果，
+连查都不查。第一次点把 range 记成整个表达式，第二次点必然落在里面。
+
+**影响面**：Context 窗口在所有含调用的行上给的都是被调函数信息，与点了哪个词无关。
+M1 起就存在，一直没暴露是因为用户习惯点函数名。
+
+**修法方向**：`UnresolvedCall` 需要区分"调用表达式 range"与"函数名 token range"
+（后者用于点击命中判定）。注意这会改 ContentIndex 语义，**需 bump extractorVersion
+并走完整 determinism 验收**（canonical dump 会变）。
+
+**现象 3（高亮延迟）根因未明**：`activate` 是同步调用（`CodeInsightReaderUI.swift:358`），
+理论上应立即。可能与 Context 查询争抢主线程有关，**但无证据，不猜**。修现象 1/2 后
+应重新观察是否自愈。
+
+### 【功能需求】视觉调整项可配置
+
+决策者 2026-07-28 提出：M5/M6 加的这些视觉调整应当可配置，而非硬编码。
+当前散落的硬编码值包括但不限于：
+- M6-S6 引用样式的 param alpha（`0.72`）
+- M5-S6 声明分级的 `functionNameDelta`、二级 semibold 规格
+- M5-S7 行号/当前行/同名高亮的配色与开关粒度
+
+**建议**：统一收进 `ReaderSettings` + Settings 窗口的 Reading 页，
+而不是每次微调都改代码。做之前先盘点全部硬编码视觉常量，避免只做一半。
+
 ## M6 候选结转（S9 汇总，只挂账不预实现）
 
 - **Exact 能力面**：references / implementations / callHierarchy。
