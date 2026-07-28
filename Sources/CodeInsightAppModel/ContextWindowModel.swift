@@ -361,8 +361,8 @@ public final class ContextWindowModel {
                     guard index.calls.indices.contains(Int(resolution.target.localIndex))
                     else { continue }
                     let call = index.calls[Int(resolution.target.localIndex)]
-                    targetRange = call.range
-                    targetOffset = call.range.lowerBound
+                    targetRange = call.nameRange
+                    targetOffset = call.nameRange.lowerBound
                 }
             }
 

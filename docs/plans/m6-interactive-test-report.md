@@ -78,8 +78,8 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 |----|------|------|
 | G2.1 | **PASS** | incoming：`from`=**a.rs**，fromRanges=`[3:16, 4:17]` **在 a.rs**，一个 caller 行聚合两个 call site |
 | G2.2 | **PASS（关键）** | outgoing：`to`=**b.rs**，但 fromRanges=`[3:16, 4:17]` **仍在 a.rs**。证实"套用 to.uri 会稳定跳错文件"；M6-S3 用请求源 item URI，方向正确 |
-| G2.3 | **BLOCKED** | 需真机 GUI 逐个打开结果核对，非协议层可证。协议侧已由 G2.1 覆盖 |
-| G2.4 | **BLOCKED** | 同上；calls↔outgoing 的映射已由 G2.2 在协议层证实不冒充 references |
+| G2.3 | **PASS（真机 GUI）** | 真实 tokio + RA 下逐个打开 4 个 Exact caller：`poll` → `raw.rs:325`，`core` → `harness.rs:159`、`:211`、`:249`；文件、行和调用 token 全部正确，无跳错 |
+| G2.4 | **PASS（关键，真机 GUI）** | `shutdown` 的 Exact outgoing `transition_to_shutdown` 定义在 `state.rs:337`；双击后主编辑区仍落在请求源 `harness.rs:241` 的 `self.state().transition_to_shutdown()`，没有跳到 callee 文件 |
 | G2.5 | **PASS** | 不可调用 token（`let`）→ prepare **0 items**；可调用（`bar`）→ 1 item。产品侧三态文案见 G1.3 |
 
 ## G3 S4 Exact Relations 并置、聚合与深层展开
@@ -106,11 +106,48 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 
 | ID | 结果 | 备注 |
 |----|------|------|
-| G6.1 | **BLOCKED** | 总弧线需真机 GUI 连续操作（Safe→callers→calls→implementations→深层展开→引用样式→Trusted→撤销），非协议层可证 |
+| G6.1 | **FAIL** | 修复语料后八步重跑：步骤 1–6、8 PASS，步骤 7 FAIL。切到 Trusted 后全局为 `Exact: ready · Trusted`，新解析为 `Trusted · coverage: full`，但同一 `poll_read` 及其 Relations 重查仍稳定显示旧的 `Safe · coverage: partial`，构成 profile 串档。无崩溃/卡死，退出无 Cairn/RA 残留。详见 §G6.1 现场记录 |
 | G6.2 | **BLOCKED** | 帧率/卡顿是人工结论，计划本身禁止用 fragment 数替代 |
 | G6.3 | **NOT RUN** | 点击定位缺陷已列 K-M6-1/K-M6-2，M7-S0A 会修，此处不重复验 |
 | G6.4 | **NOT RUN** | Pin 产品行为需真机；`--self-test-pin` 已 PASS 但计划明说 harness 修复不代替此项 |
 | G6.5 | **PASS** | `run-self-tests.sh` 12 通道全 exit 0，无 RA/helper 残留（每条独立进程 + finish marker 验证） |
+
+### G6.1 真机 GUI 现场记录（修复语料重跑，2026-07-28）
+
+**执行基线**：当前 `HEAD 4d40cd1`，工作区含用户正在进行的 M7-S0A 未提交改动
+（执行前 `git stash list` 为空）；release 构建与 app bundle 均通过，由
+`.build/g6-rerun/Cairn.app` 启动。未改产品代码。
+
+**语料前置**：tokio 仓库 `main` / `HEAD 046852f`；`cargo metadata --offline
+--no-deps` exit 0。此前因语料缺 `.git` 得到的 FAIL 证据成立但不再代表当前语料；
+旧截图仍保留为
+[历史证据](evidence/g6.1-step1-exact-unavailable.jpeg)。
+
+**现场**：深色主题；主执行窗口约 `1908×1024 pt`，满足 `≥1600×1000`。
+全程无崩溃、无 >5 秒 beachball；首次 Callers Exact 查询约 55 秒完成，但窗口持续响应。
+
+| 步骤 | 结果 | 实测 |
+|---|---|---|
+| 1 | **PASS** | Cmd+O 打开修复后的 tokio，约 5 秒稳定；状态栏原文 `Exact: ready · Safe (partial)`。Provider `rust-analyzer 0.0.0 (cac0779549 2026-07-18)` |
+| 2 | **PASS** | `harness.rs:153` 的 `poll` → 组标题原文 `EXACT`，Exact 结果 **1** 条：`poll  tokio/src/runtime/task/raw.rs:323`，标注 `1 call site` |
+| 3 | **PASS（关键）** | 逐个打开 4 个 Exact caller：`harness.rs:153 poll` → `raw.rs:325 harness.poll()`；`harness.rs:48 core` → `harness.rs:159 self.core()`、`:211 poll_future(self.core(), cx)`、`:249 cancel_task(self.core())`。文件、行、token 与源码一致，**0 次跳错** |
+| 4 | **PASS（关键）** | `shutdown` 的 Show Calls 出现 `EXACT`；callee 含 `transition_to_shutdown state.rs:337`、`state harness.rs:40`、`drop_reference :143`、`cancel_task :500`、`core :48`、`complete :331`。双击跨文件 callee 后主编辑区仍落在 `harness.rs:241 self.state().transition_to_shutdown()`；仅底部定义预览显示 `state.rs:337` |
+| 5 | **PASS** | `AsyncRead` → `EXACT`；前三个结果及真实落点：`MaybePending` → `tokio/tests/io_buf_reader.rs:44 impl AsyncRead for MaybePending`，`BadReader` → `tokio/tests/io_take.rs:54 impl AsyncRead for BadReader`，`RW` → `tokio/tests/io_split.rs:14 impl AsyncRead for RW` |
+| 6 | **PASS** | 展开依赖 Exact 节点 `Ready  ~/.rustup/.../library/core/src/task/poll.rs:18`；出现第二层 `EXACT (0): NO CALLS`、`STRONG`、`PROBABLE`、`POSSIBLE`、`EXTERNAL / UNRESOLVED (0)`，没有因缺产品 symbol 停住 |
+| 7 | **FAIL（profile 串档）** | 切换前 `Exact: ready · Safe (partial)`；切换后全局状态 `Exact: ready · Trusted`。新点 `put_slice` 显示 `Trusted · coverage: full`，证明 Trusted session 已生效；但回到同一 `poll_read` 并重查 Relations，底部结果仍稳定为 `Safe · coverage: partial`，再次切 `put_slice → poll_read` 仍复现。Safe/Trusted 同屏，不是 K-M6-1 |
+| 8 | **PASS** | Settings 撤销 tokio 授权后确认 `Exact: ready · Safe (partial)`，Cmd+Q 正常退出。两次残留检查均只见 Cursor RA（PID `85159`，PPID `85108`）及其 proc-macro-srv；无 Cairn app、Cairn RA 或 helper 残留 |
+
+**步骤 7 最小复现**：
+
+1. Safe 下打开 `tokio/tests/io_split.rs:15` 的 `poll_read`，得到
+   `Safe · coverage: partial`。
+2. File → Trust This Repository… → Trust；等待全局状态为
+   `Exact: ready · Trusted`。
+3. 点击 `put_slice`，确认新结果为 `Trusted · coverage: full`。
+4. 回到 `poll_read` 并重查 Calls；其详情仍为
+   `Safe · coverage: partial`。重复 `put_slice → poll_read` 结果不变。
+
+![G6.1 步骤 7：全局 Trusted，但 poll_read 仍显示 Safe profile](evidence/g6.1-step7-profile-stale.jpeg)
 
 ---
 
@@ -118,35 +155,39 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 
 ### 证据采集：**完成**
 
-15 项全部有结论（G4/G5 是 M6-S5/S6 的观感项，决策者已在 M6-S6 目验"整体视觉还行"，
+20 项全部有结论（G4/G5 是 M6-S5/S6 的观感项，决策者已在 M6-S6 目验"整体视觉还行"，
 本报告不重复占位）。
 
 | 结论 | 项 |
 |---|---|
-| **PASS** | G1.1–G1.5、G2.1、G2.2、G2.5、G3.1–G3.5、G6.5（**13 项**） |
-| **BLOCKED** | G2.3、G2.4（需真机 GUI 逐项打开）、G6.1、G6.2（**4 项**） |
+| **PASS** | G1.1–G1.5、G2.1–G2.5、G3.1–G3.5、G6.5（**16 项**） |
+| **FAIL** | G6.1（步骤 7 的 Safe/Trusted profile 串档；**1 项**） |
+| **BLOCKED** | G6.2（**1 项**） |
 | **NOT RUN** | G6.3、G6.4（**2 项**，理由见表内） |
 
 ### G0 门：**未 PASS**
 
 `m7-plan.md` 定义的 G0 PASS 标准是「G1–G3 与 **G6.1** 的真实 RA 核心路径全部 PASS」。
 
-- **G1、G2、G3 的协议与实现层全部 PASS**——含最关键的 G2.2（outgoing 的
-  fromRanges 属请求源文件，证实 M6-S3 方向正确）与 G3.2（exact-only 节点可深层展开）
-- **但 G6.1（总弧线）BLOCKED**：需真机 GUI 连续操作，非协议层可证
+- **G1、G2、G3 全部 PASS**——含真机 GUI 的 G2.3/G2.4：incoming 四个落点
+  全部正确，outgoing 跨文件 callee 仍落请求源 `harness.rs`
+- **G6.1 步骤 1–6、8 PASS**，真实 RA 的 callers / calls / implementations /
+  依赖二层展开均已走通
+- **但 G6.1（总弧线）仍 FAIL**：步骤 7 在 Trusted session 已生效后，同一
+  `poll_read` 仍复用旧 Safe profile 结果，违反“无 profile 串档”
 
 ### 因此按门规则
 
 | | 状态 |
 |---|---|
-| **S4 Exact References** | **不得派发**（G6.1 未 PASS） |
+| **S4 Exact References** | **不得派发**（G6.1 步骤 7 未 PASS） |
 | **S0A / S0B / S1 / S2 / S3** | **可继续** |
 
-这正是两级门的设计意图：真机 GUI 暂时不可自动化，不该冻结全部 Fuzzy 工作；
-但 BLOCKED 也不能悄悄穿过 Exact gate。
+这正是两级门的设计意图：Fuzzy 工作可继续，但 FAIL 不能穿过 Exact gate。
 
-**解除 G6.1 BLOCKED 的办法**：决策者在真机走一遍总弧线（约 15 分钟），
-或后续把总弧线的关键断点补进 `--self-test-exact` 的真实 RA 变体。
+**解除 G6.1 FAIL 的办法**：修复 Trust 切换后同 token/context
+仍复用旧 profile 结果的问题，再用当前已修复的 tokio 语料重跑完整八步；只有八步全部满足后，
+才能把 G6.1 改为 PASS 并解锁 S4。
 
 ### 附带发现（已记入 §0.1，需结转 backlog）
 

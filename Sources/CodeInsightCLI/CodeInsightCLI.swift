@@ -338,7 +338,7 @@ extension CodeInsight {
                     dispatch: String(describing: caller.dispatch),
                     location: location(
                         file: session.paths.resolve(caller.callSite.pathID),
-                        offset: call.range.lowerBound,
+                        offset: call.nameRange.lowerBound,
                         table: index.lineTable
                     ),
                     byteRange: ByteRangeJSON(call.range),

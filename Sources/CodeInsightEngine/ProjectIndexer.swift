@@ -594,6 +594,7 @@ public struct ProjectIndexer: Sendable {
                     regionID: $0.regionID,
                     nameID: name($0.nameID),
                     range: $0.range,
+                    nameRange: $0.nameRange,
                     syntacticKind: $0.syntacticKind,
                     qualifierRange: $0.qualifierRange,
                     receiverRange: $0.receiverRange,

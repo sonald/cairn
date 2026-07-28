@@ -79,12 +79,131 @@ func tokenRangeLocatesNameWithoutResolvingCandidates() throws {
             file: path,
             offset: start + 2,
             context: queryContext(for: session)
-        ) == ByteRange(lowerBound: start, upperBound: start + 8))
+        ) == ByteRange(lowerBound: start, upperBound: start + 6))
         #expect(try session.tokenRange(
             file: path,
             offset: offset(of: " { target", in: source),
             context: queryContext(for: session)
         ) == nil)
+    }
+}
+
+@Test
+func qualifiedCallQualifierResolvesItsOwnSymbol() throws {
+    let source = """
+        struct Config;
+        impl Config { fn set() {} }
+        enum ConfigKey { Backend }
+        fn f() { Config::set(ConfigKey::Backend, 1); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let index = try #require(session.content(at: path)?.1)
+        #expect(index.imports.isEmpty)
+        #expect(index.symbols.contains {
+            session.names.resolve($0.nameID) == "Config"
+        })
+
+        let resolved = try session.resolve(
+            file: path,
+            offset: offset(of: "Config::set", in: source),
+            context: queryContext(for: session)
+        )
+        let top = try #require(resolved.first)
+        #expect(top.target.localKind == .declarationFacet)
+        let target = try #require(session.content(at: top.target.pathID)?.1)
+        let targetIndex = Int(top.target.localIndex)
+        let facet = try #require(
+            target.symbols.indices.contains(targetIndex)
+                ? target.symbols[targetIndex] : nil
+        )
+
+        #expect(session.names.resolve(facet.nameID) == "Config")
+        #expect(session.names.resolve(facet.nameID) != "set")
+    }
+}
+
+@Test
+func methodCallReceiverResolvesMethodsWithoutClaimingStrong() throws {
+    let source = """
+        struct A; impl A { fn tick(&self) {} }
+        struct B; impl B { fn tick(&self) {} }
+        fn probe<T>(a: T) { a.tick(); }
+        """
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let index = try #require(session.content(at: path)?.1)
+        let receiverOffset = offset(of: "a.tick", in: source)
+        let call = try #require(index.calls.first)
+        let parameter = try #require(index.bindings.first {
+            session.names.resolve($0.localNameID) == "a"
+        })
+        let receiverRange = try #require(call.receiverRange)
+
+        #expect(receiverRange == ByteRange(
+            lowerBound: receiverOffset,
+            upperBound: receiverOffset + 1
+        ))
+        #expect(parameter.declarationRange.length == receiverRange.length)
+        #expect(!parameter.declarationRange.contains(receiverOffset))
+        #expect(try session.tokenRange(
+            file: path,
+            offset: receiverOffset,
+            context: queryContext(for: session)
+        ) == receiverRange)
+
+        let resolved = try session.resolve(
+            file: path,
+            offset: receiverOffset,
+            context: queryContext(for: session)
+        )
+        let firstTickOffset = offset(of: "tick(&self)", in: source)
+
+        #expect(resolved.contains {
+            guard $0.target.localKind == .declarationFacet,
+                  let target = session.content(at: $0.target.pathID)?.1,
+                  target.symbols.indices.contains(Int($0.target.localIndex))
+            else { return false }
+            return target.symbols[Int($0.target.localIndex)].nameRange.lowerBound
+                == firstTickOffset
+        })
+        #expect(resolved.allSatisfy { $0.certainty <= .possible })
+    }
+}
+
+@Test
+func qualifiedCallQualifierUsesItsOwnRangeWhenNoSymbolMatches() throws {
+    let source = "fn target() {}\nfn f() { unknown::target(); }"
+    try withProject(["main.rs": source]) { session in
+        let path = try #require(pathID("main.rs", in: session))
+        let index = try #require(session.content(at: path)?.1)
+        let qualifierOffset = offset(of: "unknown::", in: source)
+        let call = try #require(index.calls.first)
+        let qualifierRange = try #require(call.qualifierRange)
+
+        #expect(qualifierRange == ByteRange(
+            lowerBound: qualifierOffset,
+            upperBound: qualifierOffset + UInt32("unknown".utf8.count)
+        ))
+        #expect(try session.tokenRange(
+            file: path,
+            offset: qualifierOffset,
+            context: queryContext(for: session)
+        ) == qualifierRange)
+
+        let resolved = try session.resolve(
+            file: path,
+            offset: qualifierOffset,
+            context: queryContext(for: session)
+        )
+        let top = try #require(resolved.first)
+        let target = try #require(session.content(at: top.target.pathID)?.1)
+        let facet = try #require(
+            target.symbols.indices.contains(Int(top.target.localIndex))
+                ? target.symbols[Int(top.target.localIndex)] : nil
+        )
+
+        #expect(session.names.resolve(facet.nameID) == "target")
     }
 }
 

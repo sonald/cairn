@@ -213,6 +213,8 @@ func skipsMacroDefinitionAndInvocationSubtrees() throws {
     #expect(result.index.calls.count == 1)
     #expect(macroCall.syntacticKind == .macroInvocation)
     #expect(result.names.resolve(macroCall.nameID) == "println")
+    #expect(text(in: source, range: macroCall.nameRange) == "println")
+    #expect(text(in: source, range: macroCall.range)?.hasPrefix("println!(") == true)
 }
 
 @Test
@@ -378,26 +380,33 @@ func extractsQualifiedAndMethodCalls() throws {
 
     #expect(result.names.resolve(qualified.nameID) == "c")
     #expect(qualified.syntacticKind == .qualifiedCall)
+    #expect(text(in: source, range: qualified.nameRange) == "c")
+    #expect(text(in: source, range: qualified.range) == "a::b::c()")
     #expect(text(in: source, range: qualified.qualifierRange) == "a::b")
     #expect(result.names.resolve(method.nameID) == "foo")
     #expect(method.syntacticKind == .methodCall)
+    #expect(text(in: source, range: method.nameRange) == "foo")
+    #expect(text(in: source, range: method.range) == "x.foo(1, 2)")
     #expect(text(in: source, range: method.receiverRange) == "x")
     #expect(method.argumentCount == 2)
 }
 
 @Test
 func stripsTurbofishBeforeClassifyingCalls() throws {
-    let result = try extract(
-        "fn caller() { f::<T>(); Vec::<u8>::new(); }"
-    )
+    let source = "fn caller() { f::<T>(); Vec::<u8>::new(); }"
+    let result = try extract(source)
     let direct = try #require(result.index.calls.first)
     let qualified = try #require(result.index.calls.last)
 
     #expect(result.index.calls.count == 2)
     #expect(result.names.resolve(direct.nameID) == "f")
     #expect(direct.syntacticKind == .directCall)
+    #expect(text(in: source, range: direct.nameRange) == "f")
+    #expect(text(in: source, range: direct.range) == "f::<T>()")
     #expect(result.names.resolve(qualified.nameID) == "new")
     #expect(qualified.syntacticKind == .qualifiedCall)
+    #expect(text(in: source, range: qualified.nameRange) == "new")
+    #expect(text(in: source, range: qualified.range) == "Vec::<u8>::new()")
 }
 
 @Test

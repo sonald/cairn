@@ -11,6 +11,7 @@ public struct UnresolvedCall: Codable, Sendable {
     public let regionID: ExecutableRegionID
     public let nameID: NameID
     public let range: ByteRange
+    public let nameRange: ByteRange
     public let syntacticKind: CallKind
     public let qualifierRange: ByteRange?
     public let receiverRange: ByteRange?
@@ -20,6 +21,7 @@ public struct UnresolvedCall: Codable, Sendable {
         regionID: ExecutableRegionID,
         nameID: NameID,
         range: ByteRange,
+        nameRange: ByteRange,
         syntacticKind: CallKind,
         qualifierRange: ByteRange?,
         receiverRange: ByteRange?,
@@ -28,6 +30,7 @@ public struct UnresolvedCall: Codable, Sendable {
         self.regionID = regionID
         self.nameID = nameID
         self.range = range
+        self.nameRange = nameRange
         self.syntacticKind = syntacticKind
         self.qualifierRange = qualifierRange
         self.receiverRange = receiverRange

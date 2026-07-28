@@ -146,6 +146,7 @@ func publicModelsCompose() {
         regionID: regionID,
         nameID: nameID,
         range: range,
+        nameRange: range,
         syntacticKind: .directCall,
         qualifierRange: nil,
         receiverRange: nil,

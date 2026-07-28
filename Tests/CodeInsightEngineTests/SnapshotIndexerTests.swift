@@ -177,7 +177,7 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
 }
 
 @Test
-func extractorVersionBumpRemapsAndPersistsReceiverHintsAcrossFiles() throws {
+func extractorVersionBumpRemapsAndPersistsCallNamesAcrossFiles() throws {
     let fixture = snapshotIndexerRepositoryRoot.appendingPathComponent(
         "Tests/RustExtractorTests/Fixtures/receiver_type",
         isDirectory: true
@@ -187,15 +187,15 @@ func extractorVersionBumpRemapsAndPersistsReceiverHintsAcrossFiles() throws {
 
     var oldCache: IndexCache? = try IndexCache(
         fileURL: cacheURL,
-        extractorVersion: 5
+        extractorVersion: 6
     )
-    oldCache?.storeSynchronously([("v5-payload", Data([1, 2, 3]), 1)])
+    oldCache?.storeSynchronously([("v6-payload", Data([1, 2, 3]), 1)])
     oldCache?.flush()
     oldCache = nil
 
     let cache = try IndexCache(fileURL: cacheURL)
     #expect(cache.metadata.extractorVersion == RustExtractorInfo.extractorVersion)
-    #expect(cache.payload(for: "v5-payload") == nil)
+    #expect(cache.payload(for: "v6-payload") == nil)
     let writer = ProjectIndexer(parallelism: 2, cache: cache)
     let first = try writer.index(root: fixture)
     writer.flushPersistentWrites()
@@ -213,6 +213,17 @@ func extractorVersionBumpRemapsAndPersistsReceiverHintsAcrossFiles() throws {
         reloaded.paths.resolve($0.pathID) == "main.rs"
     }?.pathID)
     let mainIndex = try #require(reloaded.content(at: mainPath)?.1)
+    let source = try #require(reloaded.sourceBytes(at: mainPath))
+    let call = try #require(mainIndex.calls.first {
+        reloaded.names.resolve($0.nameID) == "foo"
+    })
+    #expect(String(decoding: source[
+        Int(call.nameRange.lowerBound)..<Int(call.nameRange.upperBound)
+    ], as: UTF8.self) == "foo")
+    #expect(String(decoding: source[
+        Int(call.range.lowerBound)..<Int(call.range.upperBound)
+    ], as: UTF8.self) == "receiver.foo()")
+
     let receiver = try #require(mainIndex.bindings.first {
         reloaded.names.resolve($0.localNameID) == "receiver"
             && $0.kind == .param

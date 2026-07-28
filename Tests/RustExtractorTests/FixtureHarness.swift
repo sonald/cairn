@@ -109,8 +109,14 @@ private func check(
                 session: session,
                 label: label
             )
+            let query = try position(
+                pathID: caller.callSite.pathID,
+                offset: call.nameRange.lowerBound,
+                session: session,
+                label: label
+            )
             let targets = try resolve(
-                source,
+                query,
                 session: session,
                 context: context,
                 label: label

@@ -227,7 +227,7 @@ public final class EngineSession: Sendable {
 
                     let candidates = resolver.resolve(
                         file: file.pathID,
-                        offset: call.range.lowerBound,
+                        offset: call.nameRange.lowerBound,
                         context: context
                     )
                     let matched = candidates.first { candidate in
@@ -321,7 +321,7 @@ public final class EngineSession: Sendable {
                 calleeName: names.resolve(call.nameID),
                 candidates: resolver.resolve(
                     file: definition.pathID,
-                    offset: call.range.lowerBound,
+                    offset: call.nameRange.lowerBound,
                     context: context
                 )
             )

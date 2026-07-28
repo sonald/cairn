@@ -102,6 +102,9 @@ enum ContentIndexDraftCodec {
             regions.contains($0.regionID)
                 && valid($0.nameID, count: nameCount)
                 && valid($0.range, byteCount: byteCount)
+                && valid($0.nameRange, byteCount: byteCount)
+                && $0.range.lowerBound <= $0.nameRange.lowerBound
+                && $0.nameRange.upperBound <= $0.range.upperBound
                 && $0.qualifierRange.map { valid($0, byteCount: byteCount) } != false
                 && $0.receiverRange.map { valid($0, byteCount: byteCount) } != false
         }), index.imports.allSatisfy({

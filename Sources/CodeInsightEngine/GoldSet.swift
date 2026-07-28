@@ -193,7 +193,12 @@ private func evaluate(
                 offset: call.range.lowerBound,
                 session: session
             )
-            let targets = try resolve(source, session: session, context: context)
+            let query = try position(
+                pathID: caller.callSite.pathID,
+                offset: call.nameRange.lowerBound,
+                session: session
+            )
+            let targets = try resolve(query, session: session, context: context)
             return try targets.contains {
                 try targetPosition(of: $0, session: session) == definition
             } ? source : nil

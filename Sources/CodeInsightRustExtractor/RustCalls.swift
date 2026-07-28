@@ -22,6 +22,7 @@ struct RustCalls {
                 regionID: regionID,
                 nameID: names.intern(name),
                 range: node.coreByteRange(byteOffset: byteOffset),
+                nameRange: nameNode.coreByteRange(byteOffset: byteOffset),
                 syntacticKind: .macroInvocation,
                 qualifierRange: nil,
                 receiverRange: nil,
@@ -41,6 +42,7 @@ struct RustCalls {
             regionID: regionID,
             nameID: names.intern(call.name),
             range: node.coreByteRange(byteOffset: byteOffset),
+            nameRange: call.nameRange,
             syntacticKind: call.kind,
             qualifierRange: call.qualifierRange,
             receiverRange: call.receiverRange,
@@ -59,6 +61,7 @@ struct RustCalls {
         byteOffset: UInt32
     ) -> (
         name: String,
+        nameRange: CodeInsightCore.ByteRange,
         kind: CallKind,
         qualifierRange: CodeInsightCore.ByteRange?,
         receiverRange: CodeInsightCore.ByteRange?
@@ -66,18 +69,26 @@ struct RustCalls {
         switch node.kind {
         case "identifier":
             return node.text(in: bytes, byteOffset: byteOffset).map {
-                ($0, .directCall, nil, nil)
+                (
+                    $0,
+                    node.coreByteRange(byteOffset: byteOffset),
+                    .directCall,
+                    nil,
+                    nil
+                )
             }
         case "scoped_identifier":
             let children = node.namedChildren
             guard children.count >= 2,
-                  let name = children.last?.text(
+                  let nameNode = children.last,
+                  let name = nameNode.text(
                       in: bytes,
                       byteOffset: byteOffset
                   )
             else { return nil }
             return (
                 name,
+                nameNode.coreByteRange(byteOffset: byteOffset),
                 .qualifiedCall,
                 children.first?.coreByteRange(byteOffset: byteOffset),
                 nil
@@ -85,13 +96,15 @@ struct RustCalls {
         case "field_expression":
             let children = node.namedChildren
             guard children.count >= 2,
-                  let name = children.last?.text(
+                  let nameNode = children.last,
+                  let name = nameNode.text(
                       in: bytes,
                       byteOffset: byteOffset
                   )
             else { return nil }
             return (
                 name,
+                nameNode.coreByteRange(byteOffset: byteOffset),
                 .methodCall,
                 nil,
                 children.first?.coreByteRange(byteOffset: byteOffset)

@@ -193,7 +193,13 @@ struct Resolver {
     )? {
         var matches: [(range: ByteRange, nameID: NameID, call: UnresolvedCall?)] = []
         matches += index.calls.compactMap { call in
-            call.range.contains(offset) ? (call.range, call.nameID, call) : nil
+            if call.nameRange.contains(offset) {
+                return (call.nameRange, call.nameID, call)
+            }
+            if let range = call.receiverRange, range.contains(offset) {
+                return (range, call.nameID, call)
+            }
+            return nil
         }
         matches += index.bindings.compactMap { binding in
             binding.declarationRange.contains(offset)
@@ -205,11 +211,27 @@ struct Resolver {
         if let match = matches.min(by: { $0.range.length < $1.range.length }) {
             return (match.range, match.nameID, match.call, nil, false)
         }
+        let qualifierMatch = index.calls.compactMap {
+            call -> (ByteRange, NameID, UnresolvedCall)? in
+            guard let range = call.qualifierRange, range.contains(offset) else {
+                return nil
+            }
+            return (range, call.nameID, call)
+        }.min(by: { $0.0.length < $1.0.length })
 
         // M0 identifier fallback is ASCII-only.
         guard let bytes, Int(offset) < bytes.count,
               isIdentifierByte(bytes[Int(offset)])
-        else { return nil }
+        else {
+            guard let qualifierMatch else { return nil }
+            return (
+                qualifierMatch.0,
+                qualifierMatch.1,
+                qualifierMatch.2,
+                nil,
+                false
+            )
+        }
         var lower = Int(offset)
         var upper = Int(offset) + 1
         while lower > 0 && isIdentifierByte(bytes[lower - 1]) { lower -= 1 }
@@ -237,7 +259,16 @@ struct Resolver {
             default: return false
             }
         }
-        guard hasLocalBinding || hasGlobalDefinition else { return nil }
+        guard hasLocalBinding || hasGlobalDefinition else {
+            guard let qualifierMatch else { return nil }
+            return (
+                qualifierMatch.0,
+                qualifierMatch.1,
+                qualifierMatch.2,
+                nil,
+                false
+            )
+        }
         return (range, nameID, nil, nil, !hasLocalBinding)
     }
 

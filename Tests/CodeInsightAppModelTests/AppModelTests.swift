@@ -466,6 +466,41 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
 
 @MainActor
 @Test
+func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
+    let source = """
+        struct Config;
+        impl Config { fn set() {} }
+        enum ConfigKey { Backend }
+        fn f() { Config::set(ConfigKey::Backend, 1); }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "set(ConfigKey", in: source)
+    )
+    #expect(await waitUntil {
+        model.selectedCandidate?.targetByteOffset
+            == byteOffset(of: "set() {}", in: source)
+    })
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "ConfigKey::Backend", in: source)
+    )
+    #expect(await waitUntil {
+        model.selectedCandidate?.targetByteOffset
+            == byteOffset(of: "ConfigKey {", in: source)
+    })
+}
+
+@MainActor
+@Test
 func contextWindowReusesLoadedTargetDocumentAcrossClicks() async throws {
     let source = "fn target() {}\nfn main() { target(); target(); }"
     let root = try temporaryProject(["main.rs": source])
