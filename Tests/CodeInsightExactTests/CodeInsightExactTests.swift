@@ -150,7 +150,14 @@ func dependencyFreeProjectIgnoresGenericOfflineFailure() {
 
 @Test
 func explicitOfflineDependencyFailureDowngradesCoverage() {
-    let diagnostic = "failed to download crate; --offline was specified"
+    let diagnostic = """
+        error: failed to get `codeinsight-definitely-missing-offline-dependency` \
+        as a dependency of package `exact_fixture`
+
+        Caused by:
+          error in environment variable `CARGO_NET_OFFLINE`: \
+        provided string was not `true` or `false`
+        """
 
     #expect(rustAnalyzerCoverage(
         base: .partial,

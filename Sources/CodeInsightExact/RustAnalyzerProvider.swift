@@ -918,6 +918,8 @@ func rustAnalyzerCoverage(
         || diagnostic.contains("no matching package named")
         || diagnostic.contains("attempting to make an http request")
         || diagnostic.contains("can't check for updates in offline mode")
+        || (diagnostic.contains("failed to get")
+            && diagnostic.contains("as a dependency of package"))
     guard offline,
           dependencyFailure
     else { return base }

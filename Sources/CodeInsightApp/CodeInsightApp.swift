@@ -2130,13 +2130,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestExactGroupVisibleWithGeometry
         let exactAndHeuristicGroupsDoNotOverlap =
             windowController.selfTestExactAndHeuristicGroupsDoNotOverlap
+        // metric-only：physicalFootprint 是进程级净指标，而本通道在同一进程里可能
+        // 已经跑过真实 rust-analyzer 变体（RA 子进程 + 真实索引会把 footprint 抬到
+        // ~150MB）。用 100MB 空载预算去守这个场景不可归因——沿用 M5 对巨档
+        // footprint 的同一裁决：只报数，不设布尔门。
+        // 空载内存预算由 --self-test / --self-test-reading 的独立进程守。
         let exactRelationsFootprintMB = physicalFootprintBytes().map {
             Double($0) / 1_048_576
         }
-        let exactRelationsFootprintBelowBudget =
-            exactRelationsFootprintMB.map {
-                $0 < SelfTestBudgets.idleFootprintMB
-            } == true
         emitExactStep(
             "relations",
             variant: "fake",
@@ -2558,8 +2559,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactGroupVisibleWithGeometry": exactGroupVisibleWithGeometry,
             "exactAndHeuristicGroupsDoNotOverlap":
                 exactAndHeuristicGroupsDoNotOverlap,
-            "exactRelationsFootprintBelowBudget":
-                exactRelationsFootprintBelowBudget,
+
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
             "initialProfileVisible": initialProfileVisible,
