@@ -21,17 +21,20 @@ public struct ExactOverlay: Sendable {
         public let versionIdentity: String
         public let configFingerprint: String
         public let featureSelection: FeatureSelection
+        public let trustMode: TrustMode
         public let toolVersion: String
 
         public init(
             versionIdentity: String,
             configFingerprint: String,
             featureSelection: FeatureSelection,
+            trustMode: TrustMode,
             toolVersion: String
         ) {
             self.versionIdentity = versionIdentity
             self.configFingerprint = configFingerprint
             self.featureSelection = featureSelection
+            self.trustMode = trustMode
             self.toolVersion = toolVersion
         }
     }
@@ -274,6 +277,7 @@ public final class ExactCoordinator {
                         versionIdentity: versionIdentity,
                         configFingerprint: profile.configFingerprint,
                         featureSelection: profile.featureSelection,
+                        trustMode: trustMode,
                         toolVersion: provider.toolVersion
                     )
                     let session = try provider.prepare(

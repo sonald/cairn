@@ -242,6 +242,66 @@ func appModelTrustActionsRebuildExactSessionImmediately() async throws {
 
 @MainActor
 @Test
+func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let coordinator = fixture.coordinator(state: state)
+    let model = AppModel(exactCoordinator: coordinator)
+
+    model.openProject(root: fixture.root)
+    #expect(await exactWaitUntil {
+        guard case .ready = model.projectState else { return false }
+        return coordinator.readiness == .ready
+    })
+    let generation = model.generation
+
+    let safe = try #require(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: generation
+    ))
+    #expect(safe.attribution.trustMode == .safe)
+    #expect(safe.attribution.coverage == .partial)
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: generation
+    ) != nil)
+    #expect(state.definitionCount == 1)
+
+    try await model.grantCurrentRepositoryTrust()
+    #expect(await exactWaitUntil {
+        state.prepareCount == 2 && coordinator.readiness == .ready
+    })
+    let trustedNew = try #require(await coordinator.definition(
+        file: "main.rs", byteOffset: 1, generation: generation
+    ))
+    #expect(trustedNew.attribution.trustMode == .trusted)
+    #expect(trustedNew.attribution.coverage == .full)
+    let trustedOld = try #require(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: generation
+    ))
+    #expect(trustedOld.attribution.trustMode == .trusted)
+    #expect(trustedOld.attribution.coverage == .full)
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: generation
+    ) != nil)
+    #expect(state.definitionCount == 3)
+
+    try await model.revokeRepositoryTrust(fixture.root)
+    #expect(await exactWaitUntil {
+        state.prepareCount == 3 && coordinator.readiness == .ready
+    })
+    let safeAgain = try #require(await coordinator.definition(
+        file: "main.rs", byteOffset: 1, generation: generation
+    ))
+    #expect(safeAgain.attribution.trustMode == .safe)
+    #expect(safeAgain.attribution.coverage == .partial)
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 1, generation: generation
+    ) != nil)
+    #expect(state.definitionCount == 4)
+}
+
+@MainActor
+@Test
 func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
     async throws
 {
@@ -1221,6 +1281,7 @@ private func exactReuseKey(
         versionIdentity: "worktree:/fixture",
         configFingerprint: "config",
         featureSelection: featureSelection,
+        trustMode: .safe,
         toolVersion: "fake-1"
     )
 }
