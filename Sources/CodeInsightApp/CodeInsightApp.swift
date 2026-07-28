@@ -2131,9 +2131,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let localReferenceSelected = localReferenceTitle.map {
             windowController.selfTestSelectRelationEdge(titled: $0)
         } == true
-        if localReferenceSelected {
-            windowController.selfTestOpenRelationSelection()
-        }
         let localReferenceOpenedAtCorrectOffset = waitUntil(timeout: 5, condition: {
             model.selectedByteOffset == localReferenceUseOffset
         })
@@ -2222,6 +2219,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let projectReferencesCrossFile = projectReferenceTitles.contains {
             $0.hasPrefix("main.rs:")
         }
+        let projectReferenceNodes = model.relationTree.root?.children?
+            .flatMap { $0.children ?? [] } ?? []
+        let projectReferenceNode = projectReferenceNodes.first {
+            $0.kind == .edge
+                && $0.title.hasPrefix("main.rs:")
+                && $0.symbol == nil
+                && $0.target != nil
+        }
         emitExactStep(
             "project-references",
             variant: "fuzzy-two-stage",
@@ -2232,6 +2237,66 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "edgeCount": projectReferenceTitles.count,
                 "edgeTitles": projectReferenceTitles,
                 "crossFile": projectReferencesCrossFile,
+            ]
+        )
+        let referenceNavigationRoot = model.relationTree.root
+        let referenceNavigationTreeGeneration = model.relationTree.generation
+        let referenceNavigationGeneration = model.navigationGeneration
+        let originalRelationOnSelect = model.relationTree.onSelect
+        var referenceSelectionCount = 0
+        model.relationTree.onSelect = { node in
+            referenceSelectionCount += 1
+            originalRelationOnSelect(node)
+        }
+        let referenceSingleClickSelected = projectReferenceNode.map {
+            windowController.selfTestSelectRelationEdge(titled: $0.title)
+        } == true
+        let referenceSingleClickNavigated = projectReferenceNode?.target.map { target in
+            waitUntil(timeout: 5, condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == projectRoot.appendingPathComponent(target.path)
+                        .standardizedFileURL
+                    && model.selectedByteOffset == target.byteOffset
+            })
+        } ?? false
+        pumpRunLoop()
+        let referenceSingleClickExactlyOnce =
+            model.navigationGeneration == referenceNavigationGeneration + 1
+        let referenceSingleClickNoFeedback = referenceSelectionCount == 1
+        let referenceSingleClickNoReroot =
+            model.relationTree.root === referenceNavigationRoot
+            && model.relationTree.generation == referenceNavigationTreeGeneration
+            && projectReferenceNode?.symbol == nil
+        let navigationAfterReferenceSingleClick = model.navigationGeneration
+        if referenceSingleClickSelected {
+            windowController.selfTestOpenRelationSelection()
+        }
+        pumpRunLoop()
+        let referenceDoubleClickDidNotNavigateTwice =
+            model.navigationGeneration == navigationAfterReferenceSingleClick
+        model.relationTree.onSelect = originalRelationOnSelect
+        if referenceSingleClickNavigated {
+            windowController.goBack(nil)
+        }
+        let referenceSingleClickHistoryBack = referenceSingleClickNavigated
+            && waitUntil(timeout: 5, condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            })
+        emitExactStep(
+            "reference-single-click-navigation",
+            variant: "fuzzy-two-stage",
+            controller: windowController,
+            extra: [
+                "selected": referenceSingleClickSelected,
+                "navigated": referenceSingleClickNavigated,
+                "navigationExactlyOnce": referenceSingleClickExactlyOnce,
+                "selectionCount": referenceSelectionCount,
+                "noFeedback": referenceSingleClickNoFeedback,
+                "noReroot": referenceSingleClickNoReroot,
+                "doubleClickDidNotNavigateTwice":
+                    referenceDoubleClickDidNotNavigateTwice,
+                "historyBack": referenceSingleClickHistoryBack,
             ]
         )
         if relationFileVisible {
@@ -2755,6 +2820,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "localReferenceContextRestored": localReferenceContextRestored,
             "projectReferencesVisible": projectReferencesVisible,
             "projectReferencesCrossFile": projectReferencesCrossFile,
+            "referenceSingleClickSelected": referenceSingleClickSelected,
+            "referenceSingleClickNavigated": referenceSingleClickNavigated,
+            "referenceSingleClickExactlyOnce": referenceSingleClickExactlyOnce,
+            "referenceSingleClickNoFeedback": referenceSingleClickNoFeedback,
+            "referenceSingleClickNoReroot": referenceSingleClickNoReroot,
+            "referenceDoubleClickDidNotNavigateTwice":
+                referenceDoubleClickDidNotNavigateTwice,
+            "referenceSingleClickHistoryBack": referenceSingleClickHistoryBack,
 
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,

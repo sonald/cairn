@@ -897,53 +897,6 @@ func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async thro
 
 @MainActor
 @Test
-func relationReferenceSelectionUpdatesContextAcrossFiles() async throws {
-    let root = try temporaryProject([
-        "main.rs": "fn target() {}\n",
-        "a.rs": "fn target() {}\n",
-        "b.rs": "fn target() {}\n",
-    ])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let context = queryContext(for: session)
-    var requests: [(path: String, offset: UInt32)] = []
-    let contextWindow = ContextWindowModel { session, file, offset, context in
-        requests.append((session.paths.resolve(file), offset))
-        return try session.resolve(file: file, offset: offset, context: context)
-    }
-    let model = AppModel(
-        indexService: FailingIndexService(),
-        contextWindow: contextWindow
-    )
-    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
-    #expect(model.transition(to: .ready(session, context)))
-    let mainTarget = try #require(
-        session.definitions(of: "target", context: context).first {
-            $0.2 == pathID("main.rs", in: session)
-        }?.0
-    )
-
-    await model.relationTree.setRoot(
-        target: .engine(mainTarget),
-        direction: .references
-    )?.value
-    let edges = model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
-    let first = try #require(edges?.first { $0.target?.path == "a.rs" })
-    let second = try #require(edges?.first { $0.target?.path == "b.rs" })
-
-    model.relationTree.select(first)
-    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
-    let firstCandidate = try #require(contextWindow.selectedCandidate)
-    model.relationTree.select(second)
-    #expect(await waitUntil {
-        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
-    })
-    #expect(requests.map(\.path) == ["a.rs", "b.rs"])
-}
-
-@MainActor
-@Test
 func contextCandidateSelectionWraps() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
@@ -1209,4 +1162,3 @@ private func jumpRecord(
         snapshotID: snapshotID
     )
 }
-

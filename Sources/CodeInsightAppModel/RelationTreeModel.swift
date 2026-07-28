@@ -43,6 +43,7 @@ public final class RelationTreeModel {
         public fileprivate(set) var target: (path: String, byteOffset: UInt32)?
         public fileprivate(set) var line: UInt32?
         public let symbol: SymbolOccurrenceID?
+        public let representsLocation: Bool
         public let expansionIdentity: ExpansionIdentity?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
@@ -66,6 +67,7 @@ public final class RelationTreeModel {
             isExpandable: Bool = false,
             parent: Node? = nil,
             symbol: SymbolOccurrenceID? = nil,
+            representsLocation: Bool = false,
             expansionIdentity: ExpansionIdentity? = nil,
             evidence: [ResolutionEvidence] = [],
             cycleKey: CycleKey? = nil,
@@ -82,6 +84,7 @@ public final class RelationTreeModel {
             self.isExpandable = isExpandable
             self.parent = parent
             self.symbol = symbol
+            self.representsLocation = representsLocation
             self.expansionIdentity = expansionIdentity
             self.evidence = evidence
             self.cycleKey = cycleKey
@@ -375,6 +378,7 @@ public final class RelationTreeModel {
                 line: coordinate.line,
                 children: [],
                 parent: group,
+                representsLocation: true,
                 cycleKey: Self.cycleKey(path: path, byteOffset: range.lowerBound)
             )
         }
@@ -862,6 +866,7 @@ public final class RelationTreeModel {
                 isExpandable: canExpand,
                 parent: group,
                 symbol: edge.symbol,
+                representsLocation: direction == .references,
                 expansionIdentity: identity,
                 evidence: edge.evidence,
                 cycleKey: cycleKey,

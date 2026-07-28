@@ -461,6 +461,8 @@ final class RelationWindowController: NSViewController,
             return
         }
         model.select(node)
+        guard node.representsLocation, let target = node.target else { return }
+        onOpen?(target.path, target.byteOffset)
     }
 
     func outlineViewItemWillExpand(_ notification: Notification) {
@@ -505,7 +507,9 @@ final class RelationWindowController: NSViewController,
               node.kind == .edge,
               let target = node.target
         else { return }
-        onOpen?(target.path, target.byteOffset)
+        if !node.representsLocation || sender == nil {
+            onOpen?(target.path, target.byteOffset)
+        }
         guard let symbol = node.symbol,
               symbol.localKind == .declarationFacet
         else { return }
