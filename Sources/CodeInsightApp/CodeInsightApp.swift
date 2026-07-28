@@ -2328,6 +2328,46 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && windowController.selfTestExactGroupRowCount > 0
         })
 
+        let selectedFirstFollowCaller =
+            windowController.selfTestSelectRelationEdge(titled: "relation_root")
+        let firstFollowSummary = selectedFirstFollowCaller
+            && waitUntil(timeout: 5, condition: {
+                windowController.selfTestContextSummary != exactSummary
+            })
+            ? windowController.selfTestContextSummary
+            : nil
+        let selectedSecondFollowCaller =
+            windowController.selfTestSelectRelationEdge(titled: "main")
+        let relationRowsUpdateFollowContext = firstFollowSummary != nil
+            && selectedSecondFollowCaller
+            && waitUntil(timeout: 5, condition: {
+                let summary = windowController.selfTestContextSummary
+                return summary != nil && summary != firstFollowSummary
+            })
+        let secondFollowSummary = relationRowsUpdateFollowContext
+            ? windowController.selfTestContextSummary
+            : nil
+        windowController.selfTestReaderClick(
+            offset: target.relationCallOffset,
+            commandClick: false
+        )
+        let relationFollowContextRestored = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextSummary == exactSummary
+        })
+        emitExactStep(
+            "relation-follow-context",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "selectedFirst": selectedFirstFollowCaller,
+                "firstSummary": firstFollowSummary ?? "",
+                "selectedSecond": selectedSecondFollowCaller,
+                "secondSummary": secondFollowSummary ?? "",
+                "updatedTwice": relationRowsUpdateFollowContext,
+                "restored": relationFollowContextRestored,
+            ]
+        )
+
         windowController.selfTestSetContextPinned(true)
         let pinnedStable = waitUntil(timeout: 5, condition: {
             windowController.selfTestContextPinned
@@ -2741,6 +2781,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "featureProfileButtonVisibleWithGeometry":
                 profileButtonVisibleWithGeometry,
             "relationFileVisible": relationFileVisible,
+            "selectedFirstFollowCaller": selectedFirstFollowCaller,
+            "selectedSecondFollowCaller": selectedSecondFollowCaller,
+            "relationRowsUpdateFollowContext": relationRowsUpdateFollowContext,
+            "relationFollowContextRestored": relationFollowContextRestored,
             "selectedForDirection": selectedForDirection,
             "selectedEdgeDrivesRoot": selectedEdgeDrivesRoot,
             "directionGenerationIncremented": directionGenerationIncremented,

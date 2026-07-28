@@ -50,7 +50,7 @@ public final class RelationTreeModel {
         fileprivate weak var parent: Node?
         fileprivate let evidence: [ResolutionEvidence]
         fileprivate let cycleKey: CycleKey?
-        fileprivate let queryTarget: (path: String, byteOffset: UInt32)?
+        let queryTarget: (path: String, byteOffset: UInt32)?
         fileprivate let callSites: [ExactLocation]
         fileprivate var nextCallSiteIndex = 0
         fileprivate var loadRequestID: UInt64?

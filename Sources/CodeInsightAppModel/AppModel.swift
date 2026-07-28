@@ -359,7 +359,7 @@ public final class AppModel {
         relationTree.onSelect = { [weak self] node in
             guard let self,
                   contextWindow.mode != .pinned,
-                  let target = node.target
+                  let target = node.queryTarget ?? node.target
             else { return }
             Task { [weak self] in
                 _ = await self?.contextWindow.explicitJump(

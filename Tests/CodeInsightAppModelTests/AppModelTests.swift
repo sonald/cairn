@@ -458,6 +458,7 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
 
     model.tokenClicked(file: "main.rs", offset: offset)
     #expect(await waitUntil { model.candidateCount == 1 })
+    model.tokenClicked(file: "main.rs", offset: offset)
     model.tokenClicked(file: "main.rs", offset: offset + 2)
     for _ in 0..<10 { await Task.yield() }
 
@@ -747,6 +748,202 @@ func relationSelectionUpdatesContextUnlessPinned() async throws {
 
 @MainActor
 @Test
+func relationSelectionUpdatesContextOnConsecutiveCallerRows() async throws {
+    let source = """
+        fn target() {}
+        fn first() { target(); }
+        fn second() { target(); }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var requests: [(path: String, offset: UInt32)] = []
+    let contextWindow = ContextWindowModel { session, file, offset, context in
+        requests.append((session.paths.resolve(file), offset))
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    let model = AppModel(
+        indexService: FailingIndexService(),
+        contextWindow: contextWindow
+    )
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    let target = try #require(
+        session.definitions(of: "target", context: context).first?.0
+    )
+
+    await model.relationTree.setRoot(
+        target: .engine(target),
+        direction: .callers
+    )?.value
+    let edges = model.relationTree.root?.children?
+        .flatMap { $0.children ?? [] }
+    let first = try #require(edges?.first { $0.title == "first" })
+    let second = try #require(edges?.first { $0.title == "second" })
+
+    model.relationTree.select(first)
+    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
+    let firstCandidate = try #require(contextWindow.selectedCandidate)
+
+    model.relationTree.select(second)
+    #expect(await waitUntil {
+        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
+    })
+    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
+    #expect(requests.map(\.offset) == [
+        byteOffset(of: "first() {", in: source),
+        byteOffset(of: "second() {", in: source),
+    ])
+}
+
+@MainActor
+@Test
+func relationSelectionUpdatesContextOnConsecutiveCallRows() async throws {
+    let source = """
+        fn first() {}
+        fn second() {}
+        fn root() { first(); second(); }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var requests: [(path: String, offset: UInt32)] = []
+    let contextWindow = ContextWindowModel { session, file, offset, context in
+        requests.append((session.paths.resolve(file), offset))
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    let model = AppModel(
+        indexService: FailingIndexService(),
+        contextWindow: contextWindow
+    )
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    let rootSymbol = try #require(
+        session.definitions(of: "root", context: context).first?.0
+    )
+
+    await model.relationTree.setRoot(
+        target: .engine(rootSymbol),
+        direction: .calls
+    )?.value
+    let edges = model.relationTree.root?.children?
+        .flatMap { $0.children ?? [] }
+    let first = try #require(edges?.first { $0.title == "first" })
+    let second = try #require(edges?.first { $0.title == "second" })
+
+    model.relationTree.select(first)
+    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
+    let firstCandidate = try #require(contextWindow.selectedCandidate)
+    model.relationTree.select(second)
+    #expect(await waitUntil {
+        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
+    })
+    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
+    #expect(requests.map(\.offset) == [
+        byteOffset(of: "first() {}", in: source),
+        byteOffset(of: "second() {}", in: source),
+    ])
+}
+
+@MainActor
+@Test
+func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async throws {
+    let source = """
+        trait Render { fn render(&self); }
+        struct First;
+        struct Second;
+        impl Render for First { fn render(&self) {} }
+        impl Render for Second { fn render(&self) {} }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var requests: [(path: String, offset: UInt32)] = []
+    let contextWindow = ContextWindowModel { session, file, offset, context in
+        requests.append((session.paths.resolve(file), offset))
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    let model = AppModel(
+        indexService: FailingIndexService(),
+        contextWindow: contextWindow
+    )
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    let trait = try #require(
+        session.definitions(of: "Render", context: context).first?.0
+    )
+
+    await model.relationTree.setRoot(
+        target: .engine(trait),
+        direction: .implementations
+    )?.value
+    let edges = model.relationTree.root?.children?
+        .flatMap { $0.children ?? [] }
+    let first = try #require(edges?.first { $0.title == "First" })
+    let second = try #require(edges?.first { $0.title == "Second" })
+
+    model.relationTree.select(first)
+    #expect(await waitUntil { !requests.isEmpty })
+    let firstCandidate = contextWindow.selectedCandidate
+    model.relationTree.select(second)
+    #expect(await waitUntil { requests.count == 2 })
+    #expect(contextWindow.selectedCandidate?.symbol != firstCandidate?.symbol)
+    #expect(requests.map(\.path) == ["main.rs", "main.rs"])
+    #expect(requests[0].offset != requests[1].offset)
+}
+
+@MainActor
+@Test
+func relationReferenceSelectionUpdatesContextAcrossFiles() async throws {
+    let root = try temporaryProject([
+        "main.rs": "fn target() {}\n",
+        "a.rs": "fn target() {}\n",
+        "b.rs": "fn target() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = queryContext(for: session)
+    var requests: [(path: String, offset: UInt32)] = []
+    let contextWindow = ContextWindowModel { session, file, offset, context in
+        requests.append((session.paths.resolve(file), offset))
+        return try session.resolve(file: file, offset: offset, context: context)
+    }
+    let model = AppModel(
+        indexService: FailingIndexService(),
+        contextWindow: contextWindow
+    )
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    let mainTarget = try #require(
+        session.definitions(of: "target", context: context).first {
+            $0.2 == pathID("main.rs", in: session)
+        }?.0
+    )
+
+    await model.relationTree.setRoot(
+        target: .engine(mainTarget),
+        direction: .references
+    )?.value
+    let edges = model.relationTree.root?.children?
+        .flatMap { $0.children ?? [] }
+    let first = try #require(edges?.first { $0.target?.path == "a.rs" })
+    let second = try #require(edges?.first { $0.target?.path == "b.rs" })
+
+    model.relationTree.select(first)
+    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
+    let firstCandidate = try #require(contextWindow.selectedCandidate)
+    model.relationTree.select(second)
+    #expect(await waitUntil {
+        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
+    })
+    #expect(requests.map(\.path) == ["a.rs", "b.rs"])
+}
+
+@MainActor
+@Test
 func contextCandidateSelectionWraps() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
@@ -1012,3 +1209,4 @@ private func jumpRecord(
         snapshotID: snapshotID
     )
 }
+
