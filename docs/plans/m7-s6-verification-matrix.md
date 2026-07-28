@@ -23,16 +23,31 @@
 > **这就是"12 通道全 PASS"最大的误导源**：Relation/References 的全部通道级证据
 > 集中在**一条**通道上。报"12 PASS"时必须同时说明这一点（铁律⑩）。
 
-### 1.2 真实 rust-analyzer 的盲区
+### 1.2 真实 rust-analyzer 的盲区（**references 一格已由 S4 填上**）
 
-`runRealExactVariant`（`CodeInsightApp.swift:3239-3404`）
-对 `selfTestReaderRelation` / `selfTestSelectRelationEdge` / `relationTree`
-的触点数 = **0**（实测）。
+建表时（`2d37412`）`runRealExactVariant` 对 `relationTree` 的触点数 = **0**：
+真实 RA 只被验过 click→Context 的 definition 升级。
 
-**即：真实 RA 只被验过 click→Context 的 definition 升级，
-`implementations` / `incomingCalls` / `outgoingCalls` / `references`
-的真实 LSP 往返从未在自动化里跑过。**
-S4 若能补上，这一格才算填；补不上就记 **BLOCKED**，不记 PASS。
+**S4（`4d184d4`）补上了 `references` 这一格。** 监工在真机实跑
+`--self-test-exact .`（`sandbox-exec` 与 `rust-analyzer` 均可用），实测：
+
+```
+step=real-references  variant=rust-analyzer
+realProvider=passed
+textDocumentReferencesReached=true
+skipped 步骤数 = 0（28 个 step 全跑）
+channel=exact exit=0
+```
+
+> Codex 环境无 `sandbox-exec`，它自己那轮输出的是
+> `realProvider="skipped:sandbox-unavailable"` 并**如实记 BLOCKED**。
+> **注意 `runRealExactVariant` 的 skip 分支返回 `passed=true`**
+> （`CodeInsightApp.swift:3438`）——skip 在通道门里算过。
+> 所以"exact 通道 exit=0"**不蕴含真实 RA 跑过**，必须另看 `realProvider` 的值。
+> 这是铁律⑧的具体形态，S6 报告要显式引这个字段而不是引 exit code。
+
+**仍然是 0 的三格**：`implementations` / `incomingCalls` / `outgoingCalls`
+的真实 LSP 往返，至今没有任何自动化覆盖。见 §8 B1。
 
 ---
 
@@ -65,7 +80,7 @@ S4 若能补上，这一格才算填；补不上就记 **BLOCKED**，不记 PASS
 | callers | exact 通道 | **0 触点（盲区）** | ✓ | n/a |
 | calls | exact 通道 | **0 触点（盲区）** | ✓ | n/a |
 | implementations | exact 通道 | **0 触点（盲区）** | ✓ | n/a |
-| **references** | **S4 交付** | **S4 交付或 BLOCKED** | S3 两阶段扫描 | S2 |
+| **references** | ✓ S4（分列 Exact 组） | **✓ 真机实证** `realProvider=passed` | S3 两阶段扫描 | S2 |
 
 **S4 的三条去重断言也进这张表**：同位置双命中（带 `heuristic also matched`）／
 只 Fuzzy 命中／只 Exact 命中。
@@ -89,6 +104,7 @@ S4 若能补上，这一格才算填；补不上就记 **BLOCKED**，不记 PASS
 | complete | `M references` | 有 |
 | display cap only | `Showing first N of M references` | 有 |
 | **service truncated** | `N verified references · partial` | **必须断言文案不含真实总数** |
+| （组计数 scope） | 组副标题只数本组，跨组总数只挂兄弟/父节点 | S4-Fix：complete 态 fuzzy-only / exact-only / mixed 三种构成各有断言 |
 | （空） | 可区分的空态文案 | 四种 `exactState` 不得折叠成一句 |
 
 **红线**：启发式结果一律封顶 Strong，绝不冒充 exact；nil 字段绝不显示。
@@ -104,7 +120,8 @@ S4 若能补上，这一格才算填；补不上就记 **BLOCKED**，不记 PASS
 
 | # | 项 | 状态 |
 |---|---|---|
-| B1 | 真实 RA 的 Relations 路径 0 覆盖 | S4 填或记 BLOCKED |
+| B1 | 真实 RA 的 **references** 往返 | **已填**：`4d184d4` + 监工真机实跑 `realProvider=passed` |
+| B1b | 真实 RA 的 **implementations / incomingCalls / outgoingCalls** 往返 | **仍 0 覆盖**，M7 不在范围内，需单独立项 |
 | B2 | `ExactOverlay.ReuseKey` 不含 worktree 内容身份（改文件后可能命中陈旧 overlay） | 无稳定复现，S0B 红线内未改 |
 | B3 | G6.2 帧率手感 | 人工项 BLOCKED，**禁止用 fragment 数替代** |
 | B4 | ripgrep 语料 10 个 crate 缺 `Cargo.toml`，`cargo metadata` exit 101 | 需重新获取；**不可用于真实 RA 实验** |
