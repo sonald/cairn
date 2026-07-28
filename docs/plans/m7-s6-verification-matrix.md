@@ -126,7 +126,8 @@ channel=exact exit=0
 | B3 | G6.2 帧率手感 | 人工项 BLOCKED，**禁止用 fragment 数替代** |
 | B4 | ripgrep 语料 10 个 crate 缺 `Cargo.toml`，`cargo metadata` exit 101 | 需重新获取；**不可用于真实 RA 实验** |
 | B5 | 批量通道偶发挂起的根因 | 未知；`run-self-tests.sh` 用 90s 超时 + 自动 `sample` 兜住 |
-| B6 | **测试套件 40%+ 概率整体变红**（`ExactCoordinatorTests` 超时，单次最多 34 条） | **根因已取证**：`rust-analyzer` 孤儿进程泄漏（`ppid=1`，存活 6h57m / 3h42m）+ 171 个残留临时目录，累积抢 CPU。已派 LeakFix。**修好前 S6 的"全量绿"没有意义** |
+| B6 | **测试套件 40%+ 概率整体变红** | **已修** `fdadef7`：真因是 `m6_reference_density`（10 万行）在默认 QoS 上同步解析 9–13 秒饿死并发测试，移到 `.utility` 线程后 20/20 全 0。**注意：最初归因于孤儿进程是错的，见 §8.2** |
+| B7 | `rust-analyzer` 孤儿泄漏（`ppid=1`，存活 6h57m） | **已修** `fdadef7`（fork reaper + 管道 EOF + 共享内存 PID 表，覆盖 SIGKILL）。**与 B6 是两件独立的事，不能互相冒充** |
 
 ## §8.1 B6 的实测数据（20 次同 commit 连跑）
 
@@ -149,6 +150,36 @@ channel=exact exit=0
 > 并且**跑前跑后都要查进程表孤儿数**
 > （`ps -eo pid,ppid,command | grep rust-analyzer`，
 > 排除用户编辑器自己那个——它的 `ppid` 不是 1）。
+
+## §8.2 一次归因失败的完整记录（S6 要引以为戒）
+
+监工最初的因果链是：
+`timeout 发 SIGTERM → atexit 不执行 → RA 变孤儿 → 累积抢 CPU → exactWaitUntil 超时`。
+证据看起来很硬：孤儿真的存在（`ppid=1`，存活 6h57m / 3h42m）、失败数真的在递增
+（12→13→20→34）、`CProcessGuard.c` 的 crash_signals 确实没有 SIGTERM。
+
+**但注入实验推翻了它**：禁掉 reaper 后对 app 发 SIGTERM，RA 照样被回收——
+因为 **rust-analyzer 在 stdin 关闭时会自行退出**。那两个孤儿不是从这条路来的。
+
+三臂实测才定出真因：
+
+| 配置 | 红的比例 | 孤儿 |
+|---|---|---|
+| 基线（都没有） | 4/10（12,13,20,34） | 有 |
+| **只有 reaper，无 QoS** | **4/10（2,11,13,4）** | 0 |
+| 完整修复 | **0/20** | 0 |
+
+**"孤儿归零"和"套件变绿"是两条独立的曲线。**
+
+三条可迁移的教训：
+
+1. **相关不是因果。** 孤儿存在 + 失败递增 + 防线确实有缺口，三个真事实拼出了一条
+   假因果链。每一环都真，链条是假的。
+2. **修好了不等于诊断对了。** 完整修复确实 20/20 全绿——若不做"只撤一半"的
+   区分实验，就会带着错误的因果故事提交，下次同类问题会照错方向查。
+3. **别人报告里的注入证据要看语料。** Codex 报的 `signal=15 orphanAlive=true`
+   用的是不会因 stdin EOF 退出的 helper 进程——它证明 guard 对通用子进程有效，
+   **不证明真实 RA 走的是这条路**。又一次"语料形似而质不同"。
 
 ## §9 S6 验收方式的硬要求
 
