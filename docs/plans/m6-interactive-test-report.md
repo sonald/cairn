@@ -106,7 +106,7 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 
 | ID | 结果 | 备注 |
 |----|------|------|
-| G6.1 | **FAIL** | 修复语料后八步重跑：步骤 1–6、8 PASS，步骤 7 FAIL。切到 Trusted 后全局为 `Exact: ready · Trusted`，新解析为 `Trusted · coverage: full`，但同一 `poll_read` 及其 Relations 重查仍稳定显示旧的 `Safe · coverage: partial`，构成 profile 串档。无崩溃/卡死，退出无 Cairn/RA 残留。详见 §G6.1 现场记录 |
+| G6.1 | **PASS** | 修复语料后的完整重跑中步骤 1–6、8 已 PASS；S0B `6808dfd` 入库后只复验步骤 7，Safe→Trusted 与 Trusted→Safe 双向重查均使用当前 profile，两轮 `put_slice ↔ poll_read` 稳定，无崩溃、卡死或新进程残留。详见 §G6.1 现场记录 |
 | G6.2 | **BLOCKED** | 帧率/卡顿是人工结论，计划本身禁止用 fragment 数替代 |
 | G6.3 | **NOT RUN** | 点击定位缺陷已列 K-M6-1/K-M6-2，M7-S0A 会修，此处不重复验 |
 | G6.4 | **NOT RUN** | Pin 产品行为需真机；`--self-test-pin` 已 PASS 但计划明说 harness 修复不代替此项 |
@@ -134,20 +134,39 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 | 4 | **PASS（关键）** | `shutdown` 的 Show Calls 出现 `EXACT`；callee 含 `transition_to_shutdown state.rs:337`、`state harness.rs:40`、`drop_reference :143`、`cancel_task :500`、`core :48`、`complete :331`。双击跨文件 callee 后主编辑区仍落在 `harness.rs:241 self.state().transition_to_shutdown()`；仅底部定义预览显示 `state.rs:337` |
 | 5 | **PASS** | `AsyncRead` → `EXACT`；前三个结果及真实落点：`MaybePending` → `tokio/tests/io_buf_reader.rs:44 impl AsyncRead for MaybePending`，`BadReader` → `tokio/tests/io_take.rs:54 impl AsyncRead for BadReader`，`RW` → `tokio/tests/io_split.rs:14 impl AsyncRead for RW` |
 | 6 | **PASS** | 展开依赖 Exact 节点 `Ready  ~/.rustup/.../library/core/src/task/poll.rs:18`；出现第二层 `EXACT (0): NO CALLS`、`STRONG`、`PROBABLE`、`POSSIBLE`、`EXTERNAL / UNRESOLVED (0)`，没有因缺产品 symbol 停住 |
-| 7 | **FAIL（profile 串档）** | 切换前 `Exact: ready · Safe (partial)`；切换后全局状态 `Exact: ready · Trusted`。新点 `put_slice` 显示 `Trusted · coverage: full`，证明 Trusted session 已生效；但回到同一 `poll_read` 并重查 Relations，底部结果仍稳定为 `Safe · coverage: partial`，再次切 `put_slice → poll_read` 仍复现。Safe/Trusted 同屏，不是 K-M6-1 |
+| 7 | **PASS（S0B 聚焦复验）** | `6808dfd` 下：`poll_read` 初始为 `Safe · coverage: partial`；授权后全局为 `Exact: ready · Trusted`，`put_slice` 与重新查询的 `poll_read` 均为 `Trusted · coverage: full`，两轮 `put_slice ↔ poll_read` 稳定；撤销后重新查询 `put_slice → poll_read`，两者均恢复 `Safe · coverage: partial`，Relations 也使用 Safe profile。无串档 |
 | 8 | **PASS** | Settings 撤销 tokio 授权后确认 `Exact: ready · Safe (partial)`，Cmd+Q 正常退出。两次残留检查均只见 Cursor RA（PID `85159`，PPID `85108`）及其 proc-macro-srv；无 Cairn app、Cairn RA 或 helper 残留 |
 
-**步骤 7 最小复现**：
+#### S0B 步骤 7 聚焦复验（`6808dfd`，2026-07-28）
 
-1. Safe 下打开 `tokio/tests/io_split.rs:15` 的 `poll_read`，得到
+当前 `HEAD 6808dfd`、工作区干净；release 构建与
+`.build/g6-s0b/Cairn.app` bundle 通过。按派发说明只复验步骤 7，未改产品代码。
+
+1. Safe 下查询 `tokio/tests/io_split.rs:15` 的 `poll_read`：
    `Safe · coverage: partial`。
-2. File → Trust This Repository… → Trust；等待全局状态为
+2. File → Trust This Repository… → Trust；全局变为
    `Exact: ready · Trusted`。
-3. 点击 `put_slice`，确认新结果为 `Trusted · coverage: full`。
-4. 回到 `poll_read` 并重查 Calls；其详情仍为
-   `Safe · coverage: partial`。重复 `put_slice → poll_read` 结果不变。
+3. `put_slice` 为 `Trusted · coverage: full`；回到 `poll_read` 重查，
+   也变为 `Trusted · coverage: full`。再做两轮
+   `put_slice ↔ poll_read`，结果稳定。
+4. 撤销 tokio 授权后全局变为 `Exact: ready · Safe (partial)`；
+   重新查询 `put_slice → poll_read`，两者均为
+   `Safe · coverage: partial`。再次执行 poll_read Relations，根节点与详情均使用
+   Safe profile。
 
-![G6.1 步骤 7：全局 Trusted，但 poll_read 仍显示 Safe profile](evidence/g6.1-step7-profile-stale.jpeg)
+Trust 切换本身保留“上次查看的详情”；发起新查询后才替换详情。两次方向的实际重查
+均未命中旧 profile，符合 `ReuseKey.trustMode` 的修复语义。
+
+![G6.1 步骤 7：Trusted 下 poll_read 与 Relations 使用 full coverage](evidence/g6.1-step7-s0b-trusted-full.jpeg)
+
+![G6.1 步骤 7：撤销后 poll_read 与 Relations 恢复 Safe partial](evidence/g6.1-step7-s0b-safe-restored.jpeg)
+
+旧的修前红证据仍保留用于对照：
+[全局 Trusted，但 poll_read 仍显示 Safe profile](evidence/g6.1-step7-profile-stale.jpeg)。
+
+复验结束前已恢复 Safe 并正常退出。残留检查未发现本次启动的新 Cairn/RA/helper；
+PID `24503` 的裸 RA 启动于 `14:39:23`，早于本次 `14:51` 启动，故记为复验前既存进程，
+未擅自终止；Cursor RA 为 PID `85159`。
 
 ---
 
@@ -155,43 +174,39 @@ tokio `AsyncRead`（`tokio/src/io/async_read.rs:44`）。
 
 ### 证据采集：**完成**
 
-20 项全部有结论（G4/G5 是 M6-S5/S6 的观感项，决策者已在 M6-S6 目验"整体视觉还行"，
-本报告不重复占位）。
+15 项全部有结论（G4/G5 是 M6-S5/S6 的观感项，决策者已在 M6-S6 目验"整体视觉还行"）。
 
 | 结论 | 项 |
 |---|---|
-| **PASS** | G1.1–G1.5、G2.1–G2.5、G3.1–G3.5、G6.5（**16 项**） |
-| **FAIL** | G6.1（步骤 7 的 Safe/Trusted profile 串档；**1 项**） |
-| **BLOCKED** | G6.2（**1 项**） |
-| **NOT RUN** | G6.3、G6.4（**2 项**，理由见表内） |
+| **PASS** | G1.1–G1.5、G2.1–G2.5、G3.1–G3.5、**G6.1**、G6.5（**16 项**） |
+| **BLOCKED** | G6.2（帧率/卡顿是人工结论，计划本身禁止用 fragment 数替代） |
+| **NOT RUN** | G6.3、G6.4（理由见表内） |
 
-### G0 门：**未 PASS**
+### G0 门：**PASS** ✅
 
-`m7-plan.md` 定义的 G0 PASS 标准是「G1–G3 与 **G6.1** 的真实 RA 核心路径全部 PASS」。
-
-- **G1、G2、G3 全部 PASS**——含真机 GUI 的 G2.3/G2.4：incoming 四个落点
-  全部正确，outgoing 跨文件 callee 仍落请求源 `harness.rs`
-- **G6.1 步骤 1–6、8 PASS**，真实 RA 的 callers / calls / implementations /
-  依赖二层展开均已走通
-- **但 G6.1（总弧线）仍 FAIL**：步骤 7 在 Trusted session 已生效后，同一
-  `poll_read` 仍复用旧 Safe profile 结果，违反“无 profile 串档”
-
-### 因此按门规则
+`m7-plan.md` 的标准是「G1–G3 与 G6.1 的真实 RA 核心路径全部 PASS」——**已全部满足**。
 
 | | 状态 |
 |---|---|
-| **S4 Exact References** | **不得派发**（G6.1 步骤 7 未 PASS） |
-| **S0A / S0B / S1 / S2 / S3** | **可继续** |
+| **S4 Exact References** | **解锁，可派发** |
+| S0A / S0B / S1 / S2 / S3 | 可继续 |
 
-这正是两级门的设计意图：Fuzzy 工作可继续，但 FAIL 不能穿过 Exact gate。
+### 执行过程中修掉的两个真缺陷
 
-**解除 G6.1 FAIL 的办法**：修复 Trust 切换后同 token/context
-仍复用旧 profile 结果的问题，再用当前已修复的 tokio 语料重跑完整八步；只有八步全部满足后，
-才能把 G6.1 改为 PASS 并解锁 S4。
+G0 不只是"跑一遍打勾"，它抓出了两个 fake provider 覆盖不到的问题：
 
-### 附带发现（已记入 §0.1，需结转 backlog）
+1. **profile 串档**（步骤 7，S0B `6808dfd` 已修）：`ExactOverlay.ReuseKey` 不含
+   `trustMode`，切 Trusted 后旧位置的 overlay 条目 key 未变被复用，
+   导致同一屏 Safe 与 Trusted 结果并存。**这正是"真实 RA 只被 fake 覆盖过"的代价。**
+2. **M6-S3 的 base URI 方向得到真机确认**（步骤 4）：outgoing 跨文件 callee 的调用处
+   仍落在 `harness.rs:241` 源文件，不是被调用者文件。协议层证据（G2.2）+ 真机点击
+   双证。
 
-**ripgrep 14.1.1 语料残缺**：全部 10 个 workspace crate 缺 `Cargo.toml`，
-`cargo metadata` exit 101，RA 无法建立项目模型。
-这不影响 12 通道（它们不依赖 ripgrep 的 cargo 模型），但**任何需要 ripgrep
-真实 RA 语义的验收都会假失败**。需重新获取语料。
+### 环境处置记录
+
+- **ripgrep 14.1.1 语料残缺**（§0.1）：全部 10 个 workspace crate 缺 `Cargo.toml`，
+  `cargo metadata` exit 101。G1 改用 tokio 等价目标。**语料需重新获取，结转 backlog。**
+- **tokio 语料补齐**：执行前无 `.git` 且缺 `futures-concurrency` 依赖，
+  已 `git init` + `cargo fetch`（commit `046852f`，731 文件），
+  `cargo metadata` exit 0。**这是 G6.1 首轮 FAIL 的根因，不是产品缺陷。**
+
