@@ -446,8 +446,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestStyledFragmentCount: Int {
         readerController.selfTestStyledFragmentCount
     }
+    var selfTestReferenceStyledFragmentCount: Int {
+        readerController.selfTestReferenceStyledFragmentCount
+    }
+    var selfTestReferenceAttributeRunCount: Int {
+        readerController.selfTestReferenceAttributeRunCount
+    }
     func selfTestActivateReading(at byteOffset: UInt32) -> Int {
         readerController.selfTestActivate(at: byteOffset)
+    }
+
+    var selfTestReferenceScannedCount: Int {
+        readerController.selfTestReferenceScannedCount
     }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
@@ -3033,6 +3043,15 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     var selfTestCurrentLineNumber: Int? { textView.currentLineNumber }
     var selfTestStyledFragmentCount: Int {
         textView.renderingCoordinator.styledFragmentCount
+    }
+    var selfTestReferenceStyledFragmentCount: Int {
+        textView.renderingCoordinator.referenceStyledFragmentCount
+    }
+    var selfTestReferenceAttributeRunCount: Int {
+        textView.renderingCoordinator.referenceAttributeRunCount
+    }
+    var selfTestReferenceScannedCount: Int {
+        textView.renderingCoordinator.referenceScannedCount
     }
     var selfTestVisibleLineNumbers: [Int] {
         textView.captureVisibleDecorationState()

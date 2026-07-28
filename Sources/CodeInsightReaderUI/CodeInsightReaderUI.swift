@@ -51,9 +51,15 @@ public extension ReaderTheme {
 @MainActor
 public final class RenderingAttributesCoordinator {
     public private(set) var styledFragmentCount = 0
+    public private(set) var referenceStyledFragmentCount = 0
+    public private(set) var referenceAttributeRunCount = 0
+    /// 引用查询实际扫描到的候选数（工作量，非输出量）。
+    /// 输出计数会被 fragment 交集过滤，测不出 viewport 门控是否失效。
+    public private(set) var referenceScannedCount = 0
 
     private var spans: [HighlightSpan] = []
     private var occurrenceRanges: [NSRange] = []
+    private var document: ReaderDocument?
     private var map: ByteUTF16Map?
     private var theme = ReaderTheme(settings: ReaderSettings())
 
@@ -61,25 +67,41 @@ public final class RenderingAttributesCoordinator {
 
     public func update(document: ReaderDocument, theme: ReaderTheme) {
         spans = document.highlightSpans
+        self.document = document
         map = document.byteUTF16Map
         self.theme = theme
         styledFragmentCount = 0
+        referenceStyledFragmentCount = 0
+        referenceAttributeRunCount = 0
+        referenceScannedCount = 0
     }
 
     var hasRenderingAttributes: Bool {
-        !spans.isEmpty || !occurrenceRanges.isEmpty
+        !spans.isEmpty
+            || !occurrenceRanges.isEmpty
+            || (
+                theme.syntaxFormatting
+                    && document?.localBindings.isEmpty == false
+            )
     }
 
     func setOccurrences(_ ranges: [NSRange]) {
         occurrenceRanges = ranges
         styledFragmentCount = 0
+        referenceStyledFragmentCount = 0
+        referenceAttributeRunCount = 0
+        referenceScannedCount = 0
     }
 
     func clear() {
         spans = []
         occurrenceRanges = []
+        document = nil
         map = nil
         styledFragmentCount = 0
+        referenceStyledFragmentCount = 0
+        referenceAttributeRunCount = 0
+        referenceScannedCount = 0
     }
 
     public func style(
@@ -126,6 +148,35 @@ public final class RenderingAttributesCoordinator {
             guard intersection.length > 0 else { continue }
             syntaxRanges.append((intersection, span.kind))
         }
+        var referenceRanges: [(range: NSRange, isParameter: Bool)] = []
+        if theme.syntaxFormatting, let document {
+            let references = document.localReferences(
+                intersectingBytes: lower..<upper
+            )
+            referenceScannedCount += references.count
+            referenceRanges.reserveCapacity(references.count)
+            for reference in references {
+                let isParameter: Bool
+                switch reference.kind {
+                case .param:
+                    isParameter = true
+                case .letBinding:
+                    isParameter = false
+                default:
+                    continue
+                }
+                guard let globalRange = map.nsRange(
+                    byteLowerBound: Int(reference.range.lowerBound),
+                    byteUpperBound: Int(reference.range.upperBound)
+                ) else { continue }
+                let intersection = NSIntersectionRange(
+                    globalRange,
+                    fragmentNSRange
+                )
+                guard intersection.length > 0 else { continue }
+                referenceRanges.append((intersection, isParameter))
+            }
+        }
         var low = 0
         var high = occurrenceRanges.count
         while low < high {
@@ -145,16 +196,25 @@ public final class RenderingAttributesCoordinator {
         }
 
         var styledRanges: [
-            (range: NSRange, kind: HighlightKind?, occurrence: Bool)
+            (
+                range: NSRange,
+                kind: HighlightKind?,
+                occurrence: Bool,
+                isParameterReference: Bool?
+            )
         ] = []
         styledRanges.reserveCapacity(
-            syntaxRanges.count + visibleOccurrences.count
+            syntaxRanges.count
+                + visibleOccurrences.count
+                + referenceRanges.count
         )
         var spanIndex = 0
         var occurrenceIndex = 0
+        var referenceIndex = 0
         var location = min(
             syntaxRanges.first?.range.location ?? Int.max,
-            visibleOccurrences.first?.location ?? Int.max
+            visibleOccurrences.first?.location ?? Int.max,
+            referenceRanges.first?.range.location ?? Int.max
         )
         while location != Int.max {
             while spanIndex < syntaxRanges.count,
@@ -167,6 +227,11 @@ public final class RenderingAttributesCoordinator {
             {
                 occurrenceIndex += 1
             }
+            while referenceIndex < referenceRanges.count,
+                  NSMaxRange(referenceRanges[referenceIndex].range) <= location
+            {
+                referenceIndex += 1
+            }
 
             let syntax = syntaxRanges.indices.contains(spanIndex)
                 ? syntaxRanges[spanIndex]
@@ -174,38 +239,58 @@ public final class RenderingAttributesCoordinator {
             let occurrence = visibleOccurrences.indices.contains(occurrenceIndex)
                 ? visibleOccurrences[occurrenceIndex]
                 : nil
+            let reference = referenceRanges.indices.contains(referenceIndex)
+                ? referenceRanges[referenceIndex]
+                : nil
             let kind = syntax.flatMap {
                 $0.range.location <= location ? $0.kind : nil
             }
             let isOccurrence = occurrence.map {
                 $0.location <= location
             } ?? false
+            let isParameterReference = reference.flatMap {
+                $0.range.location <= location ? $0.isParameter : nil
+            }
             let nextSyntaxBoundary = syntax.map {
                 kind == nil ? $0.range.location : NSMaxRange($0.range)
             } ?? Int.max
             let nextOccurrenceBoundary = occurrence.map {
                 isOccurrence ? NSMaxRange($0) : $0.location
             } ?? Int.max
-            let next = min(nextSyntaxBoundary, nextOccurrenceBoundary)
+            let nextReferenceBoundary = reference.map {
+                isParameterReference == nil
+                    ? $0.range.location
+                    : NSMaxRange($0.range)
+            } ?? Int.max
+            let next = min(
+                nextSyntaxBoundary,
+                nextOccurrenceBoundary,
+                nextReferenceBoundary
+            )
             guard next > location else { break }
-            if kind != nil || isOccurrence {
+            if kind != nil || isOccurrence || isParameterReference != nil {
                 styledRanges.append((
                     NSRange(location: location, length: next - location),
                     kind,
-                    isOccurrence
+                    isOccurrence,
+                    isParameterReference
                 ))
             }
             location = next
         }
 
         var wroteAttributes = false
+        var wroteReferenceAttributes = false
         for styled in styledRanges {
             guard let textRange = textRange(styled.range, in: content) else {
                 continue
             }
-            let foregroundColor = styled.kind.map {
+            var foregroundColor = styled.kind.map {
                 theme.color(for: $0)
             } ?? theme.foregroundColor
+            if styled.isParameterReference == true {
+                foregroundColor = foregroundColor.withAlphaComponent(0.72)
+            }
             var attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: foregroundColor,
             ]
@@ -214,8 +299,13 @@ public final class RenderingAttributesCoordinator {
             }
             manager.setRenderingAttributes(attributes, for: textRange)
             wroteAttributes = true
+            if styled.isParameterReference != nil {
+                referenceAttributeRunCount += 1
+                wroteReferenceAttributes = true
+            }
         }
         if wroteAttributes { styledFragmentCount += 1 }
+        if wroteReferenceAttributes { referenceStyledFragmentCount += 1 }
     }
 
     private func textRange(

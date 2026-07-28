@@ -280,6 +280,165 @@ func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
 }
 
 @MainActor
+@Test
+func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
+    let source = """
+        fn demo(param: i32) -> i32 {
+            let local = param;
+            local + param
+        }
+        """
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let paramIndex = try #require(highlighted.bindings.indices.first {
+        if case .param = highlighted.bindings[$0].kind { true } else { false }
+    })
+    let localIndex = try #require(highlighted.bindings.indices.first {
+        if case .letBinding = highlighted.bindings[$0].kind { true } else { false }
+    })
+    let paramRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(highlighted.referencesByBinding[paramIndex][0].lowerBound),
+        byteUpperBound: Int(highlighted.referencesByBinding[paramIndex][0].upperBound)
+    ))
+    let localRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(highlighted.referencesByBinding[localIndex][0].lowerBound),
+        byteUpperBound: Int(highlighted.referencesByBinding[localIndex][0].upperBound)
+    ))
+    let (reader, _, window) = renderOffscreen(document)
+    let localColor = try #require(
+        renderedColors(in: reader, intersecting: localRange).first
+    )
+    let paramColor = try #require(
+        renderedColors(in: reader, intersecting: paramRange).first
+    )
+    let referenceRanges = highlighted.referencesByBinding.flatMap { $0 }
+    let declarationSpan = try #require(highlighted.spans.first {
+        $0.kind == .functionName
+    })
+    let declarationRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(declarationSpan.range.lowerBound),
+        byteUpperBound: Int(declarationSpan.range.upperBound)
+    ))
+    let declarationFont = try #require(reader.view.textStorage?.attribute(
+        .font,
+        at: declarationRange.location,
+        effectiveRange: nil
+    ) as? NSFont)
+
+    #expect(localColor.alphaComponent == 1)
+    #expect(paramColor.alphaComponent < localColor.alphaComponent)
+    #expect(reader.renderingCoordinator.referenceStyledFragmentCount > 0)
+    #expect(reader.renderingCoordinator.referenceAttributeRunCount > 0)
+    #expect(referenceRanges.allSatisfy { reference in
+        document.highlightSpans.allSatisfy {
+            !$0.range.overlaps(reference)
+        }
+    })
+    #expect(abs(
+        declarationFont.pointSize - ReaderTheme(
+            settings: ReaderSettings()
+        ).functionNameFontSize
+    ) < 0.01)
+    for range in [localRange, paramRange] {
+        #expect(renderedAttributes(
+            in: reader,
+            intersecting: range
+        ).allSatisfy {
+            $0.attributes[.font] == nil
+                && $0.attributes[.paragraphStyle] == nil
+                && $0.attributes[.baselineOffset] == nil
+                && $0.attributes[.kern] == nil
+        })
+        #expect(renderedBackgroundColors(
+            in: reader,
+            intersecting: range
+        ).isEmpty)
+    }
+
+    let paramByteOffset = highlighted.referencesByBinding[paramIndex][0].lowerBound
+    #expect(reader.activate(atByteOffset: paramByteOffset) == 3)
+    #expect(!renderedBackgroundColors(
+        in: reader,
+        intersecting: paramRange
+    ).isEmpty)
+    #expect(try #require(
+        renderedColors(in: reader, intersecting: paramRange).first
+    ).alphaComponent < 1)
+
+    reader.view.cancelOperation(nil)
+    reader.apply(settings: ReaderSettings(syntaxFormatting: false))
+    window.displayIfNeeded()
+    #expect(reader.renderingCoordinator.referenceStyledFragmentCount == 0)
+    #expect(reader.renderingCoordinator.referenceAttributeRunCount == 0)
+    #expect(renderedColors(in: reader, intersecting: paramRange).isEmpty)
+    let typeSpan = try #require(highlighted.spans.first { $0.kind == .typeName })
+    let typeRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(typeSpan.range.lowerBound),
+        byteUpperBound: Int(typeSpan.range.upperBound)
+    ))
+    #expect(!renderedColors(in: reader, intersecting: typeRange).isEmpty)
+    withExtendedLifetime(window) {}
+}
+
+@Test
+func m6ReferenceDensityStylesOnlyViewportFragments() async throws {
+    let fixture = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .deletingLastPathComponent()
+        .appendingPathComponent("Tests/Fixtures/m6_reference_density.rust")
+    let bytes = [UInt8](try Data(contentsOf: fixture))
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let totalReferences = document.referencesByBinding.lazy
+        .map(\.count)
+        .reduce(0, +)
+    let (runs, fragments, backingFontRuns) = await MainActor.run {
+        let (reader, _, window) = renderOffscreen(document)
+        let runs = reader.renderingCoordinator.referenceAttributeRunCount
+        let fragments =
+            reader.renderingCoordinator.referenceStyledFragmentCount
+        var backingFontRuns = 0
+        reader.view.textStorage?.enumerateAttribute(
+            .font,
+            in: NSRange(
+                location: 0,
+                length: reader.view.textStorage?.length ?? 0
+            )
+        ) { _, _, _ in
+            backingFontRuns += 1
+        }
+        withExtendedLifetime(window) {}
+        return (runs, fragments, backingFontRuns)
+    }
+
+    #expect(totalReferences == 35_000)
+    #expect(runs > 0 && runs < 350)
+    #expect(fragments > 0 && fragments < 350)
+    #expect(runs * 100 < totalReferences)
+    #expect(backingFontRuns < 5_000)
+    print(
+        "M6_REFERENCE_RENDER totalReferences=\(totalReferences) "
+            + "backingFontRuns=\(backingFontRuns) "
+            + "referenceAttributeRuns=\(runs) "
+            + "referenceStyledFragments=\(fragments)"
+    )
+}
+
+@MainActor
 private func renderOffscreen(
     _ document: ReaderDocument
 ) -> (ReaderTextView, NSScrollView, NSWindow) {
@@ -338,6 +497,38 @@ private func renderedColors(
         return true
     }
     return colors
+}
+
+@MainActor
+private func renderedAttributes(
+    in reader: ReaderTextView,
+    intersecting expectedRange: NSRange
+) -> [(range: NSRange, attributes: [NSAttributedString.Key: Any])] {
+    guard let manager = reader.view.textLayoutManager,
+          let content = manager.textContentManager
+    else { return [] }
+    var result: [
+        (range: NSRange, attributes: [NSAttributedString.Key: Any])
+    ] = []
+    manager.enumerateRenderingAttributes(
+        from: content.documentRange.location,
+        reverse: false
+    ) { _, attributes, textRange in
+        let lower = content.offset(
+            from: content.documentRange.location,
+            to: textRange.location
+        )
+        let upper = content.offset(
+            from: content.documentRange.location,
+            to: textRange.endLocation
+        )
+        let range = NSRange(location: lower, length: upper - lower)
+        if NSIntersectionRange(expectedRange, range).length > 0 {
+            result.append((range, attributes))
+        }
+        return true
+    }
+    return result
 }
 
 @MainActor

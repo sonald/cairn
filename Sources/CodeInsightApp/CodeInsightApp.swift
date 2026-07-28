@@ -1097,7 +1097,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         // phys_footprint is a process-wide net metric. TextKit rendering-cache
         // reclamation can dominate this interval, so it cannot gate S7 cost.
         // The >100 MB absolute baseline predates S7 and is an M7 candidate.
-        let metrics = [
+        var metrics = [
             "regularFootprintMB": regularFootprintMB,
             "hugeBaselineFootprintMB": hugeBaselineFootprintMB,
             "hugeAfterFootprintMB": hugeFootprintMB,
@@ -1125,6 +1125,75 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "metric-only: TextKit cache reclamation makes the S7 delta "
                 + "non-attributable; >100 MB absolute baseline predates S7 "
                 + "and is an M7 candidate after attributable measurement",
+        ])
+
+        let fixture = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath
+        ).appendingPathComponent(
+            "Tests/Fixtures/m6_reference_density.rust"
+        )
+        let referenceFixture = root.appendingPathComponent(
+            "m6_reference_density.rust"
+        )
+        guard let referenceBytes = try? [UInt8](Data(contentsOf: fixture)),
+              (try? Data(referenceBytes).write(to: referenceFixture)) != nil
+        else {
+            finish(
+                checks: checks,
+                metrics: metrics,
+                error: "M6 reference fixture unavailable"
+            )
+        }
+        controller.openFileForSelfTest(referenceFixture)
+        guard waitUntil(timeout: 30, condition: {
+            controller.selfTestLeftReaderBytes?.count == referenceBytes.count
+                && controller.selfTestReferenceAttributeRunCount > 0
+        }) else {
+            finish(
+                checks: checks,
+                metrics: metrics,
+                error: "M6 reference styling did not render"
+            )
+        }
+        pumpRunLoop()
+        let referenceRuns = controller.selfTestReferenceAttributeRunCount
+        let referenceFragments =
+            controller.selfTestReferenceStyledFragmentCount
+        let referenceScanned = controller.selfTestReferenceScannedCount
+
+        var syntaxOffSettings = readerSettings
+        syntaxOffSettings.syntaxFormatting = false
+        controller.applyReaderSettings(syntaxOffSettings)
+        pumpRunLoop()
+        let referenceRunsWhenOff =
+            controller.selfTestReferenceAttributeRunCount
+        let referenceFragmentsWhenOff =
+            controller.selfTestReferenceStyledFragmentCount
+        checks.merge([
+            "referenceRunsTrackViewport":
+                referenceRuns > 0 && referenceRuns < 350,
+            "referenceFragmentsTrackViewport":
+                referenceFragments > 0 && referenceFragments < 350,
+            "referenceRunsDoNotTrackFile":
+                referenceRuns * 100 < 35_000,
+            // 工作量门：输出计数会被 fragment 交集过滤，即使 viewport 门控失效
+            // 也仍是 51。必须另测"实际扫描到多少候选"才能抓住门控回退。
+            "referenceLookupIsViewportGated":
+                referenceScanned > 0 && referenceScanned * 50 < 35_000,
+            "syntaxFormattingOffSuppressesReferenceRuns":
+                referenceRunsWhenOff == 0
+                    && referenceFragmentsWhenOff == 0,
+        ]) { _, new in new }
+        metrics["referenceAttributeRunCount"] = Double(referenceRuns)
+        metrics["referenceStyledFragmentCount"] = Double(referenceFragments)
+        metrics["referenceScannedCount"] = Double(referenceScanned)
+        Self.writeJSON([
+            "step": "references",
+            "totalReferences": 35_000,
+            "referenceAttributeRuns": referenceRuns,
+            "referenceStyledFragments": referenceFragments,
+            "referenceAttributeRunsWhenOff": referenceRunsWhenOff,
+            "referenceStyledFragmentsWhenOff": referenceFragmentsWhenOff,
         ])
         finish(checks: checks, metrics: metrics)
     }
