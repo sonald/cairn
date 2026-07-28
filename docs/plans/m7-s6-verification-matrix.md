@@ -126,7 +126,29 @@ channel=exact exit=0
 | B3 | G6.2 帧率手感 | 人工项 BLOCKED，**禁止用 fragment 数替代** |
 | B4 | ripgrep 语料 10 个 crate 缺 `Cargo.toml`，`cargo metadata` exit 101 | 需重新获取；**不可用于真实 RA 实验** |
 | B5 | 批量通道偶发挂起的根因 | 未知；`run-self-tests.sh` 用 90s 超时 + 自动 `sample` 兜住 |
-| B6 | Exact 相关测试在全量并发下有既有 flake | 基线同样红；单跑与复跑均绿 |
+| B6 | **测试套件 40%+ 概率整体变红**（`ExactCoordinatorTests` 超时，单次最多 34 条） | **根因已取证**：`rust-analyzer` 孤儿进程泄漏（`ppid=1`，存活 6h57m / 3h42m）+ 171 个残留临时目录，累积抢 CPU。已派 LeakFix。**修好前 S6 的"全量绿"没有意义** |
+
+## §8.1 B6 的实测数据（20 次同 commit 连跑）
+
+同一 commit、零代码改动，`swift test` 全量跑 20 次的失败条数：
+
+```
+0, 12, 0, 13, 0, 0, 0, 0, 20, 34,
+13, 0, 8, 13, 19, 3, 0, 32, 18, 9
+```
+
+**红占 40%+，且随跑次数递增**——递增是"孤儿进程累积"的直接指纹。
+同样几条测试**单跑 0.03 秒全绿**。
+
+已有防线 `Sources/CProcessGuard/CProcessGuard.c` 挂了 `atexit` 与五个 crash 信号
+（`SIGTRAP/ABRT/SEGV/BUS/ILL`），**但没有 `SIGTERM`**；
+而 `run-self-tests.sh` 用 `timeout` 守着，`timeout` 默认就发 SIGTERM。
+
+> **给 S6 的方法论警告**：这一条同时说明，**"跑一次全绿"不构成套件健康的证据**。
+> S6 的稳定性结论必须建立在**多次连跑的失败数分布**上，不是单次绿。
+> 并且**跑前跑后都要查进程表孤儿数**
+> （`ps -eo pid,ppid,command | grep rust-analyzer`，
+> 排除用户编辑器自己那个——它的 `ppid` 不是 1）。
 
 ## §9 S6 验收方式的硬要求
 
