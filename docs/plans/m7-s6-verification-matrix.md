@@ -95,7 +95,7 @@ channel=exact exit=0
 | M4 | git 语料 / 非 git 语料 | 通道各跑一次 | 非 git 下 Exact 不可用时 Fuzzy 兜底 |
 | M5 | Context pinned / unpinned | Fix3 两条断言 | — |
 | M6 | 多标签 | Fix3 `selfTestTabCount == 3` 断言 | 跳转落在正确 tab |
-| M7 | 大结果（规模） | `m6_reference_density.rust`：100k 行 / 20k binding / 35k 引用 | 视口门控有效；显示上限与真实总数分开 |
+| M7 | 大结果（规模） | `m6_reference_density.rust`：100k 行 / 20k binding / 35k 引用；S5A 实测 18,001 候选 → 201 verified，首批 2,500ms，footer `201 verified references · partial` | 视口门控有效（正常 `referenceScannedCount=55`，注入全扫 3,885,000）；显示上限与真实总数分开 |
 
 ## §6 诚实与计数合同（§2.2 四态）
 
@@ -180,6 +180,35 @@ channel=exact exit=0
 3. **别人报告里的注入证据要看语料。** Codex 报的 `signal=15 orphanAlive=true`
    用的是不会因 stdin EOF 退出的 helper 进程——它证明 guard 对通用子进程有效，
    **不证明真实 RA 走的是这条路**。又一次"语料形似而质不同"。
+
+## §8.3 内存断言的真实强度（S6 不许高估）
+
+`largeReferenceDeltaFootprintMB = 48` 这条断言**只挡得住粗大回归**：
+
+- 监工真机三次实测 delta = **-14.1 / -28.4 / +4.4 MB**——前两次为负，
+  即 References 这一步进程内存反而降了，断言属**退化性通过**。
+- 它确实有牙：注入"真实持有 64MiB"后 delta 86.9MB、reading `exit=1`。
+- 但中小回归会被 TextKit 缓存回收噪声吃掉，
+  与 `huge` 步骤既有的 `TextKit cache reclamation makes the delta
+  non-attributable` 是同一件事。
+
+**S6 报告只能写"粗大内存回归有守护"，不许写成"References 的内存开销有守护"。**
+
+### 附带的一次口径事故
+
+S5A 首版用 `idleFootprintMB = 100` 卡**进程绝对占用**，
+监工真机 baseline 本身就是 101.9–102.6MB——**在被测功能干活之前就注定失败**，
+3/3 `exit=1`。而 Codex 那边绿，因为它的 20 次内存表用的是**每次独立进程**
+（52.9→76.2），与通道内**单进程跑完整条序列**测的不是同一个东西。
+
+> **给 S6 的判据**：看到"某某数字证明某断言成立"时，
+> 先问**那些数字是不是在同一测法下产生的**。
+
+### 其它待观察
+
+大语料首批延迟 **2,500ms**（形态像撞了时间预算而非真算了 2.5 秒）。
+诚实标注是对的（`partial` + 不声称真实总数），但手感偏慢，
+**需要决策者真机感受后再决定是否单独立项优化**。
 
 ## §9 S6 验收方式的硬要求
 
