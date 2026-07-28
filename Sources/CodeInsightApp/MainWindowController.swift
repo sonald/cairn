@@ -645,6 +645,49 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             inGroup: titlePrefix
         )
     }
+    func selfTestRelationAccessibility(
+        titled title: String,
+        inGroup titlePrefix: String
+    ) -> (
+        label: String,
+        value: String,
+        role: String,
+        valueSettable: Bool
+    )? {
+        relationController.selfTestAccessibility(
+            titled: title,
+            inGroup: titlePrefix
+        )
+    }
+    func selfTestVisibleRelationEdgeFrames(
+        inGroup titlePrefix: String
+    ) -> [NSRect] {
+        relationController.selfTestVisibleEdgeFrames(inGroup: titlePrefix)
+    }
+    var selfTestExactAndReferenceGroupsDoNotOverlap: Bool {
+        relationController.selfTestExactAndReferenceGroupsDoNotOverlap
+    }
+    var selfTestRelationResultsAndDirectionControlDoNotOverlap: Bool {
+        relationController.selfTestResultsAndDirectionControlDoNotOverlap
+    }
+    var selfTestRelationLayoutPasses: Int {
+        relationController.selfTestLayoutPasses
+    }
+    var selfTestSelectedRelationEdgeTitle: String? {
+        relationController.selfTestSelectedEdgeTitle
+    }
+    var selfTestLastRelationAccessibilityNotification: String? {
+        relationController.selfTestLastAccessibilityNotification
+    }
+    var selfTestRelationAccessibilityNotificationCount: Int {
+        relationController.selfTestAccessibilityNotificationCount
+    }
+    var selfTestRelationOpenCount: Int {
+        relationController.selfTestOpenCount
+    }
+    func selfTestPressRelationKey(_ keyCode: UInt16) -> Bool {
+        relationController.selfTestPressKey(keyCode)
+    }
     func selfTestExpandRelationEdge(titled title: String) -> Bool {
         relationController.selfTestExpandEdge(titled: title)
     }

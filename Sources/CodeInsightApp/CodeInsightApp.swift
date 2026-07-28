@@ -13,6 +13,9 @@ import SwiftUI
 private enum SelfTestBudgets {
     static let coldStartMS = 500.0
     static let idleFootprintMB = 100.0
+    // Reference result materialization reached 42.5 MB before unrelated
+    // process-wide cache reclamation; do not budget against that reclamation.
+    static let largeReferenceDeltaFootprintMB = 48.0
     static let regularFirstVisibleMS = 100.0
     static let hugeFirstVisibleMS = 2_500.0
     static let hugeStyledFragments = 500
@@ -1052,6 +1055,256 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 Double(geometryOn.clipFrame.maxX),
         ])
 
+        let referenceFixture = root.appendingPathComponent(
+            "m6_reference_density.rust"
+        )
+        let referenceProjectFixture = root.appendingPathComponent(
+            "m6_reference_density.rs"
+        )
+        let referenceUsesFixture = root.appendingPathComponent(
+            "a_reference_use.rs"
+        )
+        guard let referenceBytes = try? [UInt8](Data(contentsOf: referenceFixture)),
+              let referenceProjectBytes = try? [UInt8](
+                  Data(contentsOf: referenceProjectFixture)
+              ),
+              let referenceUsesBytes = try? [UInt8](
+                  Data(contentsOf: referenceUsesFixture)
+              )
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "M6 reference scale bytes unavailable"
+            )
+        }
+        guard case let .ready(referenceSession, referenceContext) =
+                model.projectState
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "M6 reference scale session unavailable"
+            )
+        }
+        let regularPathID = referenceSession.manifest.files.first {
+            URL(
+                fileURLWithPath: referenceSession.paths.resolve($0.pathID)
+            ).lastPathComponent == regular.lastPathComponent
+        }?.pathID
+        guard let referenceSymbol = (try? referenceSession.definitions(
+            of: "p0",
+            context: referenceContext
+        ))?.first(where: { $0.0.pathID == regularPathID })?.0
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "regular p0 definition unavailable; files="
+                    + referenceSession.manifest.files.map {
+                        referenceSession.paths.resolve($0.pathID)
+                    }.joined(separator: ",")
+            )
+        }
+        guard let referenceFile = referenceSession.manifest.files.first(where: {
+                  $0.pathID == referenceSymbol.pathID
+              }),
+              let referenceIndex = referenceSession.contentIndexes.first(where: {
+                  $0.key.contentID == referenceFile.contentID
+              })?.value,
+              referenceIndex.symbols.indices.contains(
+                  Int(referenceSymbol.localIndex)
+              )
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "regular p0 content index unavailable"
+            )
+        }
+        let referenceCandidateNeedle = Data("p0".utf8)
+        var referenceCandidateCount = 0
+        for candidateBytes in [referenceProjectBytes, referenceUsesBytes] {
+            let bytes = Data(candidateBytes)
+            var offset = 0
+            while offset < bytes.count,
+                  let range = bytes.range(
+                      of: referenceCandidateNeedle,
+                      in: offset..<bytes.count
+                  )
+            {
+                referenceCandidateCount += 1
+                offset = range.upperBound
+            }
+        }
+        let referenceDeclarationRange =
+            referenceIndex.symbols[Int(referenceSymbol.localIndex)].nameRange
+        let referenceScaleBaselineFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        var referenceProbe: (
+            verifiedCount: Int,
+            firstBatchMS: Double,
+            totalMS: Double,
+            isTruncated: Bool,
+            error: String?
+        )?
+        let referenceProbeStartedAt = ContinuousClock.now
+        Task { @MainActor in
+            do {
+                let stream = try referenceSession.searchReferences(
+                    ContentSearchQuery(
+                        pattern: "p0",
+                        caseSensitive: true
+                    ),
+                    excludingPathID: referenceSymbol.pathID,
+                    excludingRange: referenceDeclarationRange,
+                    context: referenceContext
+                )
+                var verifiedCount = 0
+                var firstBatchMS: Double?
+                var isTruncated = false
+                for try await batch in stream {
+                    let count = batch.matchesByPath.values.reduce(0) {
+                        $0 + $1.count
+                    }
+                    if firstBatchMS == nil, count > 0 {
+                        firstBatchMS = milliseconds(
+                            since: referenceProbeStartedAt
+                        )
+                    }
+                    verifiedCount += count
+                    isTruncated =
+                        isTruncated || batch.completeness == .truncated
+                }
+                referenceProbe = (
+                    verifiedCount,
+                    firstBatchMS ?? -1,
+                    milliseconds(since: referenceProbeStartedAt),
+                    isTruncated,
+                    nil
+                )
+            } catch {
+                referenceProbe = (
+                    0,
+                    -1,
+                    milliseconds(since: referenceProbeStartedAt),
+                    false,
+                    error.localizedDescription
+                )
+            }
+        }
+        guard waitUntil(timeout: 10, condition: { referenceProbe != nil }),
+              let referenceProbe,
+              referenceProbe.error == nil
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: referenceProbe?.error ?? "reference scale probe timed out"
+            )
+        }
+        let referenceResultStartedAt = ContinuousClock.now
+        controller.selfTestReaderRelation(
+            offset: referenceDeclarationRange.lowerBound,
+            direction: .references
+        )
+        let referenceResultVisible = waitUntil(timeout: 10, condition: {
+            controller.selfTestVisibleRelationEdgeTitles(
+                inGroup: "References"
+            ).count == referenceProbe.verifiedCount
+        })
+        let referenceResultTotalMS = milliseconds(
+            since: referenceResultStartedAt
+        )
+        let referenceVisibleRowCount = controller
+            .selfTestVisibleRelationEdgeTitles(inGroup: "References").count
+        let referenceFooter = model.relationTree.root?.children?.first {
+            $0.kind == .truncated
+        }?.title
+        let referenceResultVisibleWithGeometry =
+            controller.selfTestReferenceGroupVisibleWithGeometry
+        let referenceScaleAfterFootprintMB = physicalFootprintBytes().map {
+            Double($0) / 1_048_576
+        } ?? -1
+        let referenceScaleDeltaFootprintMB =
+            referenceScaleAfterFootprintMB
+                - referenceScaleBaselineFootprintMB
+        let referenceOriginOffset = controller.selfTestReadingByteOffset
+        let historyCountBeforeReferenceOpen =
+            model.navigationHistory.records.count
+        let referenceFirstTitle = controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).first
+        let referenceSelected = referenceFirstTitle.map {
+            controller.selfTestSelectRelationEdge(titled: $0)
+        } == true
+        let referenceOpenedCrossFile = referenceSelected
+            && waitUntil(timeout: 5, condition: {
+                controller.displayedReaderFile?.standardizedFileURL
+                    == referenceUsesFixture.standardizedFileURL
+            })
+        let referenceHistoryRecorded =
+            model.navigationHistory.records.count
+                > historyCountBeforeReferenceOpen
+        if referenceOpenedCrossFile {
+            controller.goBack(nil)
+        }
+        let referenceHistoryBack = referenceOriginOffset.map { origin in
+            waitUntil(timeout: 5, condition: {
+                controller.displayedReaderFile?.standardizedFileURL
+                    == regular.standardizedFileURL
+                    && model.selectedByteOffset == origin
+            })
+        } ?? false
+        checks.merge([
+            "largeReferenceCandidateCountMeasured":
+                referenceCandidateCount == 18_001,
+            "largeReferenceVerifiedCountMeasured":
+                referenceProbe.verifiedCount == 201,
+            "largeReferenceFirstBatchMeasured":
+                referenceProbe.firstBatchMS >= 0
+                    && referenceProbe.firstBatchMS <= referenceProbe.totalMS,
+            "largeReferenceTotalMeasured":
+                referenceProbe.totalMS >= 0,
+            "largeReferenceRowsVisible":
+                referenceResultVisible
+                    && referenceVisibleRowCount == referenceProbe.verifiedCount,
+            "largeReferenceServicePartialHonest":
+                referenceProbe.isTruncated
+                    && referenceFooter
+                        == "\(referenceProbe.verifiedCount) "
+                            + "verified references · partial"
+                    && referenceFooter?.contains("18001") == false,
+            "largeReferenceResultVisibleWithGeometry":
+                referenceResultVisibleWithGeometry,
+            "largeReferenceHistoryRecorded":
+                referenceHistoryRecorded,
+            "largeReferenceHistoryBack":
+                referenceHistoryBack,
+            "largeReferenceFootprintUnderBudget":
+                referenceScaleBaselineFootprintMB >= 0
+                    && referenceScaleAfterFootprintMB >= 0
+                    && referenceScaleDeltaFootprintMB
+                        < SelfTestBudgets.largeReferenceDeltaFootprintMB,
+        ]) { _, new in new }
+        Self.writeJSON([
+            "step": "reference-scale",
+            "candidateCount": referenceCandidateCount,
+            "verifiedCount": referenceProbe.verifiedCount,
+            "firstBatchMS": referenceProbe.firstBatchMS,
+            "serviceTotalMS": referenceProbe.totalMS,
+            "resultTotalMS": referenceResultTotalMS,
+            "visibleRowCount": referenceVisibleRowCount,
+            "serviceTruncated": referenceProbe.isTruncated,
+            "footer": referenceFooter ?? "",
+            "historyRecorded": referenceHistoryRecorded,
+            "historyBack": referenceHistoryBack,
+            "baselineFootprintMB": referenceScaleBaselineFootprintMB,
+            "afterFootprintMB": referenceScaleAfterFootprintMB,
+            "deltaFootprintMB": referenceScaleDeltaFootprintMB,
+        ])
+
         controller.applyReaderSettings(readerSettings)
         let huge = root.appendingPathComponent("huge.txt")
         guard let hugeBytes = try? [UInt8](Data(contentsOf: huge)),
@@ -1102,6 +1355,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         // The >100 MB absolute baseline predates S7 and is an M7 candidate.
         var metrics = [
             "regularFootprintMB": regularFootprintMB,
+            "referenceCandidateCount": Double(referenceCandidateCount),
+            "referenceVerifiedCount": Double(referenceProbe.verifiedCount),
+            "referenceFirstBatchMS": referenceProbe.firstBatchMS,
+            "referenceServiceTotalMS": referenceProbe.totalMS,
+            "referenceResultTotalMS": referenceResultTotalMS,
+            "referenceVisibleRowCount": Double(referenceVisibleRowCount),
+            "referenceScaleBaselineFootprintMB":
+                referenceScaleBaselineFootprintMB,
+            "referenceScaleAfterFootprintMB":
+                referenceScaleAfterFootprintMB,
+            "referenceScaleDeltaFootprintMB":
+                referenceScaleDeltaFootprintMB,
             "hugeBaselineFootprintMB": hugeBaselineFootprintMB,
             "hugeAfterFootprintMB": hugeFootprintMB,
             "hugeDeltaFootprintMB": hugeIncrementalFootprintMB,
@@ -1130,23 +1395,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 + "and is an M7 candidate after attributable measurement",
         ])
 
-        let fixture = URL(
-            fileURLWithPath: FileManager.default.currentDirectoryPath
-        ).appendingPathComponent(
-            "Tests/Fixtures/m6_reference_density.rust"
-        )
-        let referenceFixture = root.appendingPathComponent(
-            "m6_reference_density.rust"
-        )
-        guard let referenceBytes = try? [UInt8](Data(contentsOf: fixture)),
-              (try? Data(referenceBytes).write(to: referenceFixture)) != nil
-        else {
-            finish(
-                checks: checks,
-                metrics: metrics,
-                error: "M6 reference fixture unavailable"
-            )
-        }
         controller.openFileForSelfTest(referenceFixture)
         guard waitUntil(timeout: 30, condition: {
             controller.selfTestLeftReaderBytes?.count == referenceBytes.count
@@ -1195,6 +1443,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "totalReferences": 35_000,
             "referenceAttributeRuns": referenceRuns,
             "referenceStyledFragments": referenceFragments,
+            "referenceScannedCount": referenceScanned,
             "referenceAttributeRunsWhenOff": referenceRunsWhenOff,
             "referenceStyledFragmentsWhenOff": referenceFragmentsWhenOff,
         ])
@@ -2264,6 +2513,51 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && $0.symbol == nil
                 && $0.target != nil
         }
+        let exactReferenceAXTitle = exactReferenceTitles.first { title in
+            windowController.selfTestVisibleRelationEdgeSubtitle(
+                titled: title,
+                inGroup: "Exact"
+            )?.contains("heuristic also matched") == true
+        }
+        let projectReferenceAccessibility = exactReferenceAXTitle.flatMap {
+            windowController.selfTestRelationAccessibility(
+                titled: $0,
+                inGroup: "Exact"
+            )
+        }
+        let projectReferenceAXProvenanceReachable =
+            projectReferenceAccessibility.map {
+                [$0.label, $0.value].joined(separator: " ")
+                    .contains("Exact · heuristic also matched")
+            } == true
+        let projectReferenceAXReadOnly =
+            projectReferenceAccessibility.map {
+                $0.role != NSAccessibility.Role.textField.rawValue
+                    && !$0.valueSettable
+            } == true
+        let relationLayoutPassesBeforeGeometryRead =
+            windowController.selfTestRelationLayoutPasses
+        let projectReferenceEdgeFrames =
+            windowController.selfTestVisibleRelationEdgeFrames(
+                inGroup: "Exact"
+            ) + windowController.selfTestVisibleRelationEdgeFrames(
+                inGroup: "References"
+            )
+        let projectReferenceRowsVisibleWithGeometry =
+            !projectReferenceEdgeFrames.isEmpty
+            && projectReferenceEdgeFrames.allSatisfy {
+                $0.width > 0
+                    && $0.height > 0
+                    && windowController.selfTestRelationsVisibleRect.contains($0)
+            }
+        let projectReferenceGroupsDoNotOverlap =
+            windowController.selfTestExactAndReferenceGroupsDoNotOverlap
+        let projectReferenceResultsAndControlsDoNotOverlap =
+            windowController
+                .selfTestRelationResultsAndDirectionControlDoNotOverlap
+        let relationGeometryReadDidNotForceLayout =
+            relationLayoutPassesBeforeGeometryRead
+                == windowController.selfTestRelationLayoutPasses
         emitExactStep(
             "project-references",
             variant: "exact+fuzzy",
@@ -2284,6 +2578,22 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     exactReferencesHeuristicProvenanceRetained,
                 "declarationExcluded": exactReferencesDeclarationExcluded,
                 "crossFile": projectReferencesCrossFile,
+                "axLabel": projectReferenceAccessibility?.label ?? "",
+                "axValue": projectReferenceAccessibility?.value ?? "",
+                "axRole": projectReferenceAccessibility?.role ?? "",
+                "axValueSettable":
+                    projectReferenceAccessibility?.valueSettable ?? true,
+                "axProvenanceReachable":
+                    projectReferenceAXProvenanceReachable,
+                "axReadOnly": projectReferenceAXReadOnly,
+                "rowsVisibleWithGeometry":
+                    projectReferenceRowsVisibleWithGeometry,
+                "groupsDoNotOverlap":
+                    projectReferenceGroupsDoNotOverlap,
+                "resultsAndControlsDoNotOverlap":
+                    projectReferenceResultsAndControlsDoNotOverlap,
+                "geometryReadDidNotForceLayout":
+                    relationGeometryReadDidNotForceLayout,
             ]
         )
         let referenceNavigationRoot = model.relationTree.root
@@ -2330,6 +2640,60 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 windowController.displayedReaderFile?.standardizedFileURL
                     == target.relationFile.standardizedFileURL
             })
+        var referenceKeyboardDownMovedSelection = false
+        var referenceKeyboardUpMovedSelection = false
+        var referenceKeyboardSelectionNavigated = false
+        var referenceKeyboardAXNotificationCorrect = false
+        var referenceKeyboardEnterOpened = false
+        var referenceKeyboardKeypadEnterOpened = false
+        var referenceKeyboardRestoredRelationFile = false
+        if exactReferenceTitles.count >= 2 {
+            let firstTitle = exactReferenceTitles[0]
+            let secondTitle = exactReferenceTitles[1]
+            let selectedFirst =
+                windowController.selfTestSelectRelationEdge(titled: firstTitle)
+            let navigationBeforeDown = model.navigationGeneration
+            let notificationsBeforeDown =
+                windowController.selfTestRelationAccessibilityNotificationCount
+            referenceKeyboardDownMovedSelection =
+                selectedFirst
+                && windowController.selfTestPressRelationKey(125)
+                && windowController.selfTestSelectedRelationEdgeTitle
+                    == secondTitle
+            referenceKeyboardSelectionNavigated =
+                referenceKeyboardDownMovedSelection
+                && waitUntil(timeout: 5, condition: {
+                    model.navigationGeneration > navigationBeforeDown
+                })
+            referenceKeyboardAXNotificationCorrect =
+                windowController.selfTestLastRelationAccessibilityNotification
+                    == NSAccessibility.Notification.selectedRowsChanged.rawValue
+                && windowController
+                    .selfTestRelationAccessibilityNotificationCount
+                    == notificationsBeforeDown + 1
+            referenceKeyboardUpMovedSelection =
+                windowController.selfTestPressRelationKey(126)
+                && windowController.selfTestSelectedRelationEdgeTitle
+                    == firstTitle
+            let openCountBeforeEnter =
+                windowController.selfTestRelationOpenCount
+            referenceKeyboardEnterOpened =
+                windowController.selfTestPressRelationKey(36)
+                && windowController.selfTestRelationOpenCount
+                    == openCountBeforeEnter + 1
+            let openCountBeforeKeypadEnter =
+                windowController.selfTestRelationOpenCount
+            referenceKeyboardKeypadEnterOpened =
+                windowController.selfTestPressRelationKey(76)
+                && windowController.selfTestRelationOpenCount
+                    == openCountBeforeKeypadEnter + 1
+            referenceKeyboardRestoredRelationFile =
+                windowController.selectFileInSidebar(target.relationFile)
+                && waitUntil(timeout: 5, condition: {
+                    windowController.displayedReaderFile?.standardizedFileURL
+                        == target.relationFile.standardizedFileURL
+                })
+        }
         emitExactStep(
             "reference-single-click-navigation",
             variant: "fuzzy-two-stage",
@@ -2344,6 +2708,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "doubleClickDidNotNavigateTwice":
                     referenceDoubleClickDidNotNavigateTwice,
                 "historyBack": referenceSingleClickHistoryBack,
+                "keyboardDownMovedSelection":
+                    referenceKeyboardDownMovedSelection,
+                "keyboardUpMovedSelection":
+                    referenceKeyboardUpMovedSelection,
+                "keyboardSelectionNavigated":
+                    referenceKeyboardSelectionNavigated,
+                "keyboardAXNotificationCorrect":
+                    referenceKeyboardAXNotificationCorrect,
+                "keyboardEnterOpened": referenceKeyboardEnterOpened,
+                "keyboardKeypadEnterOpened":
+                    referenceKeyboardKeypadEnterOpened,
+                "keyboardRestoredRelationFile":
+                    referenceKeyboardRestoredRelationFile,
             ]
         )
         if relationFileVisible {
@@ -2874,6 +3251,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactReferencesVisible": exactReferencesVisible,
             "exactReferencesHeuristicProvenanceRetained":
                 exactReferencesHeuristicProvenanceRetained,
+            "projectReferenceAXProvenanceReachable":
+                projectReferenceAXProvenanceReachable,
+            "projectReferenceAXReadOnly": projectReferenceAXReadOnly,
+            "projectReferenceRowsVisibleWithGeometry":
+                projectReferenceRowsVisibleWithGeometry,
+            "projectReferenceGroupsDoNotOverlap":
+                projectReferenceGroupsDoNotOverlap,
+            "projectReferenceResultsAndControlsDoNotOverlap":
+                projectReferenceResultsAndControlsDoNotOverlap,
+            "relationGeometryReadDidNotForceLayout":
+                relationGeometryReadDidNotForceLayout,
             "exactReferencesDeclarationExcluded":
                 exactReferencesDeclarationExcluded,
             "mixedReferenceGroupCountsHonest":
@@ -2886,6 +3274,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "referenceDoubleClickDidNotNavigateTwice":
                 referenceDoubleClickDidNotNavigateTwice,
             "referenceSingleClickHistoryBack": referenceSingleClickHistoryBack,
+            "referenceKeyboardDownMovedSelection":
+                referenceKeyboardDownMovedSelection,
+            "referenceKeyboardUpMovedSelection":
+                referenceKeyboardUpMovedSelection,
+            "referenceKeyboardSelectionNavigated":
+                referenceKeyboardSelectionNavigated,
+            "referenceKeyboardAXNotificationCorrect":
+                referenceKeyboardAXNotificationCorrect,
+            "referenceKeyboardEnterOpened": referenceKeyboardEnterOpened,
+            "referenceKeyboardKeypadEnterOpened":
+                referenceKeyboardKeypadEnterOpened,
+            "referenceKeyboardRestoredRelationFile":
+                referenceKeyboardRestoredRelationFile,
 
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
@@ -5783,11 +6184,25 @@ private func makeReadingSelfTestDirectory() throws -> URL {
         try Data("""
             fn alpha() {}
             fn beta() { alpha(); }
-            fn gamma() { alpha(); beta(); }
+            fn gamma() { alpha(); beta(); } fn p0() {}
             """.utf8).write(to: root.appendingPathComponent("regular.rs"))
         let huge = String(repeating: "needle\n", count: 200)
             + String(repeating: "\n", count: 99_799)
         try Data(huge.utf8).write(to: root.appendingPathComponent("huge.txt"))
+        let referenceFixture = URL(
+            fileURLWithPath: FileManager.default.currentDirectoryPath
+        ).appendingPathComponent("Tests/Fixtures/m6_reference_density.rust")
+        try FileManager.default.copyItem(
+            at: referenceFixture,
+            to: root.appendingPathComponent("m6_reference_density.rust")
+        )
+        try FileManager.default.copyItem(
+            at: referenceFixture,
+            to: root.appendingPathComponent("m6_reference_density.rs")
+        )
+        try Data("fn use_reference() { p0(); }\n".utf8).write(
+            to: root.appendingPathComponent("a_reference_use.rs")
+        )
         return root
     } catch {
         try? FileManager.default.removeItem(at: root)

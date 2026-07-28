@@ -26,6 +26,8 @@ final class RelationWindowController: NSViewController,
     )
     private var currentTarget: ReferenceTarget?
     private var currentDocument: ReaderDocument?
+    private var layoutPassCount = 0
+    private var selfTestOpenSelectionCount = 0
 
     var selfTestPlaceholderText: String? {
         loadViewIfNeeded()
@@ -160,6 +162,56 @@ final class RelationWindowController: NSViewController,
         }?.subtitle
     }
 
+    func selfTestAccessibility(
+        titled title: String,
+        inGroup titlePrefix: String
+    ) -> (
+        label: String,
+        value: String,
+        role: String,
+        valueSettable: Bool
+    )? {
+        guard let cell = selfTestCell(titled: title, inGroup: titlePrefix)
+        else { return nil }
+        return (
+            cell.accessibilityLabel() ?? "",
+            cell.accessibilityValue() as? String ?? "",
+            cell.accessibilityRole()?.rawValue ?? "",
+            cell.isAccessibilitySelectorAllowed(
+                NSSelectorFromString("setAccessibilityValue:")
+            )
+        )
+    }
+
+    func selfTestVisibleEdgeFrames(inGroup titlePrefix: String) -> [NSRect] {
+        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
+              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        else { return [] }
+        return group.children?.compactMap {
+            let row = outlineView.row(forItem: $0)
+            return $0.kind == .edge && row >= 0
+                ? outlineView.rect(ofRow: row)
+                : nil
+        } ?? []
+    }
+
+    var selfTestExactAndReferenceGroupsDoNotOverlap: Bool {
+        let exact = selfTestExactGroupFrame
+        let references = selfTestReferenceGroupFrame
+        return exact.width > 0
+            && references.width > 0
+            && exact.intersection(references).isEmpty
+    }
+
+    var selfTestResultsAndDirectionControlDoNotOverlap: Bool {
+        guard isViewLoaded else { return false }
+        return scrollView.frame.width > 0
+            && directionControl.frame.width > 0
+            && scrollView.frame.intersection(directionControl.frame).isEmpty
+    }
+
+    var selfTestLayoutPasses: Int { layoutPassCount }
+
     func selfTestSelectEdge(titled title: String) -> Bool {
         guard isViewLoaded else { return false }
         for row in 0..<outlineView.numberOfRows {
@@ -218,6 +270,53 @@ final class RelationWindowController: NSViewController,
         selectSelection(outlineView)
     }
 
+    var selfTestSelectedEdgeTitle: String? {
+        guard isViewLoaded,
+              let node = outlineView.item(atRow: outlineView.selectedRow)
+                as? RelationTreeModel.Node,
+              node.kind == .edge
+        else { return nil }
+        return node.title
+    }
+
+    var selfTestLastAccessibilityNotification: String? {
+        outlineView.lastAccessibilityNotification?.rawValue
+    }
+
+    var selfTestAccessibilityNotificationCount: Int {
+        outlineView.accessibilityNotificationCount
+    }
+
+    var selfTestOpenCount: Int {
+        selfTestOpenSelectionCount
+    }
+
+    func selfTestPressKey(_ keyCode: UInt16) -> Bool {
+        let characters = switch keyCode {
+        case 125: String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        case 126: String(UnicodeScalar(NSUpArrowFunctionKey)!)
+        case 36, 76: "\r"
+        default: ""
+        }
+        guard isViewLoaded,
+              let event = NSEvent.keyEvent(
+                  with: .keyDown,
+                  location: .zero,
+                  modifierFlags: [],
+                  timestamp: 0,
+                  windowNumber: view.window?.windowNumber ?? 0,
+                  context: nil,
+                  characters: characters,
+                  charactersIgnoringModifiers: characters,
+                  isARepeat: false,
+                  keyCode: keyCode
+              )
+        else { return false }
+        view.window?.makeFirstResponder(outlineView)
+        outlineView.keyDown(with: event)
+        return true
+    }
+
     func selfTestChangeDirection(_ direction: RelationTreeModel.Direction) {
         directionControl.selectedSegment = segment(for: direction)
         directionChanged(directionControl)
@@ -246,6 +345,26 @@ final class RelationWindowController: NSViewController,
             return .zero
         }
         return outlineView.rect(ofRow: row)
+    }
+
+    private func selfTestCell(
+        titled title: String,
+        inGroup titlePrefix: String
+    ) -> NSTableCellView? {
+        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
+              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node,
+              let child = group.children?.first(where: {
+                  $0.kind == .edge
+                      && $0.title == title
+                      && outlineView.row(forItem: $0) >= 0
+              })
+        else { return nil }
+        let childRow = outlineView.row(forItem: child)
+        return outlineView.view(
+            atColumn: 0,
+            row: childRow,
+            makeIfNecessary: true
+        ) as? NSTableCellView
     }
 
     private var selfTestSegmentFrames: [NSRect] {
@@ -298,6 +417,9 @@ final class RelationWindowController: NSViewController,
         outlineView.action = #selector(selectSelection(_:))
         outlineView.doubleAction = #selector(openSelection(_:))
         outlineView.openSelection = { [weak self] in self?.openSelection(nil) }
+        outlineView.selectionChanged = { [weak self] in
+            self?.selectSelection(nil)
+        }
         outlineView.rowSizeStyle = .default
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
@@ -360,6 +482,7 @@ final class RelationWindowController: NSViewController,
 
     override func viewDidLayout() {
         super.viewDidLayout()
+        layoutPassCount += 1
         fitOutlineWidthToVisibleRect()
     }
 
@@ -452,6 +575,7 @@ final class RelationWindowController: NSViewController,
     }
 
     @objc private func selectSelection(_ sender: Any?) {
+        outlineView.postSelectedRowsChanged()
         guard outlineView.selectedRow >= 0,
               let node = outlineView.item(atRow: outlineView.selectedRow)
                 as? RelationTreeModel.Node,
@@ -508,6 +632,7 @@ final class RelationWindowController: NSViewController,
               let target = node.target
         else { return }
         if !node.representsLocation || sender == nil {
+            selfTestOpenSelectionCount += 1
             onOpen?(target.path, target.byteOffset)
         }
         guard let symbol = node.symbol,
@@ -601,12 +726,29 @@ private extension NSView {
 @MainActor
 private final class RelationOutlineView: NSOutlineView {
     var openSelection: (() -> Void)?
+    var selectionChanged: (() -> Void)?
+    private(set) var lastAccessibilityNotification:
+        NSAccessibility.Notification?
+    private(set) var accessibilityNotificationCount = 0
+
+    func postSelectedRowsChanged() {
+        lastAccessibilityNotification = .selectedRowsChanged
+        accessibilityNotificationCount += 1
+        NSAccessibility.post(
+            element: self,
+            notification: .selectedRowsChanged
+        )
+    }
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36 || event.keyCode == 76 {
             openSelection?()
         } else {
+            let selectedRowBeforeKey = selectedRow
             super.keyDown(with: event)
+            if selectedRow != selectedRowBeforeKey {
+                selectionChanged?()
+            }
         }
     }
 }
@@ -701,6 +843,10 @@ private final class RelationCellView: NSTableCellView {
             titleLabel.font = .systemFont(ofSize: 11)
             titleLabel.textColor = .systemRed
         }
+        setAccessibilityLabel(titleLabel.stringValue)
+        setAccessibilityValue(
+            [node.subtitle, node.badge].compactMap { $0 }.joined(separator: ", ")
+        )
     }
 
     private func location(of node: RelationTreeModel.Node) -> String? {
