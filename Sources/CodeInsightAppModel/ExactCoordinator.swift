@@ -541,6 +541,8 @@ public final class ExactCoordinator {
     ) async throws -> RawRelationQueryResult {
         try await Task.detached(priority: .userInitiated) {
             switch direction {
+            case .references:
+                return .notApplicable
             case .implementations:
                 guard session.negotiatedCapabilities.contains(.implementations)
                 else { return .unsupported }
@@ -572,6 +574,8 @@ public final class ExactCoordinator {
                     case .calls:
                         relations += try session.outgoingCalls(item: item) ?? []
                     case .implementations:
+                        break
+                    case .references:
                         break
                     }
                 }

@@ -331,7 +331,7 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
             )
         ).first?.0
     )
-    _ = model.relationTree.setRoot(symbol: main, direction: .calls)
+    _ = model.relationTree.setRoot(target: .engine(main), direction: .calls)
     #expect(await exactWaitUntil {
         model.relationTree.root?.title == "main"
             && model.relationTree.root?.children?.contains {

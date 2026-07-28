@@ -1,8 +1,14 @@
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
+import CodeInsightReaderCore
 import Foundation
 import Observation
+
+public enum ReferenceTarget: Sendable {
+    case engine(SymbolOccurrenceID)
+    case localBinding(pathID: PathID, bindingIndex: UInt32)
+}
 
 @MainActor
 @Observable
@@ -11,6 +17,7 @@ public final class RelationTreeModel {
         case callers
         case calls
         case implementations
+        case references
     }
 
     public final class Node {
@@ -247,12 +254,73 @@ public final class RelationTreeModel {
 
     @discardableResult
     public func setRoot(
-        symbol: SymbolOccurrenceID,
-        direction: Direction
+        target: ReferenceTarget,
+        direction: Direction,
+        document: ReaderDocument? = nil
     ) -> Task<Void, Never>? {
         generation &+= 1
         self.direction = direction
         selectedRelationSymbol = nil
+        switch target {
+        case let .localBinding(pathID, bindingIndex):
+            guard direction == .references,
+                  let session,
+                  let document,
+                  let file = session.manifest.files.first(where: {
+                      $0.pathID == pathID && $0.contentID == document.contentID
+                  }),
+                  let index = Int(exactly: bindingIndex),
+                  document.localBindings.indices.contains(index)
+            else {
+                root = nil
+                return nil
+            }
+            let binding = document.localBindings[index]
+            guard binding.kind == .param || binding.kind == .letBinding,
+                  let coordinate = document.lineTable.lineColumn(
+                      at: binding.declarationRange.lowerBound
+                  ),
+                  let title = Self.bindingTitle(binding, in: document)
+            else {
+                root = nil
+                return nil
+            }
+            let path = session.paths.resolve(file.pathID)
+            let node = Node(
+                kind: .root,
+                title: title,
+                subtitle: binding.kind == .param ? "Parameter" : "Local",
+                target: (path, binding.declarationRange.lowerBound),
+                line: coordinate.line,
+                children: [],
+                cycleKey: Self.cycleKey(
+                    path: path,
+                    byteOffset: binding.declarationRange.lowerBound
+                )
+            )
+            node.children = makeReferenceChildren(
+                document.referencesByBinding[index],
+                path: path,
+                bindingKind: binding.kind,
+                under: node,
+                document: document
+            )
+            root = node
+            return nil
+
+        case let .engine(symbol):
+            guard direction != .references else {
+                root = nil
+                return nil
+            }
+            return setEngineRoot(symbol, direction: direction)
+        }
+    }
+
+    private func setEngineRoot(
+        _ symbol: SymbolOccurrenceID,
+        direction: Direction
+    ) -> Task<Void, Never>? {
         guard let session, let location = Self.location(for: symbol, in: session),
               let title = Self.symbolTitle(symbol, in: session)
         else {
@@ -282,6 +350,47 @@ public final class RelationTreeModel {
         if !node.isExpandable { node.children = [] }
         root = node
         return expansionTask(for: node)
+    }
+
+    private func makeReferenceChildren(
+        _ references: [CodeInsightCore.ByteRange],
+        path: String,
+        bindingKind: BindingKind,
+        under parent: Node,
+        document: ReaderDocument
+    ) -> [Node] {
+        let group = Node(
+            kind: .group,
+            title: "References (\(references.count))",
+            children: [],
+            isExpandable: !references.isEmpty,
+            parent: parent
+        )
+        let label = bindingKind == .param ? "Parameter reference" : "Local reference"
+        group.children = references.prefix(500).compactMap { range in
+            guard let coordinate = document.lineTable.lineColumn(at: range.lowerBound)
+            else { return nil }
+            return Node(
+                kind: .edge,
+                title: "\(URL(fileURLWithPath: path).lastPathComponent):"
+                    + "\(coordinate.line):\(coordinate.column)",
+                subtitle: label,
+                target: (path, range.lowerBound),
+                line: coordinate.line,
+                children: [],
+                parent: group,
+                cycleKey: Self.cycleKey(path: path, byteOffset: range.lowerBound)
+            )
+        }
+        guard references.count > 500 else { return [group] }
+        return [
+            group,
+            Node(
+                kind: .truncated,
+                title: "Showing first 500 of \(references.count) references",
+                parent: parent
+            ),
+        ]
     }
 
     public func expand(_ node: Node) async {
@@ -625,6 +734,8 @@ public final class RelationTreeModel {
             "Exact (0): no implementations"
         case (.notApplicable, .implementations):
             "Exact (0): no implementations"
+        case (_, .references):
+            "Exact (0)"
         case (.legacy, _):
             "Exact (0)"
         }
@@ -1005,6 +1116,8 @@ public final class RelationTreeModel {
                 },
                 isTruncated: false
             )
+        case .references:
+            return LoadResult(edges: [], isTruncated: false)
         }
     }
 
@@ -1026,7 +1139,21 @@ public final class RelationTreeModel {
                   index.symbols.indices.contains(Int(parent))
             else { return false }
             return index.symbols[Int(parent)].kind == .rustTrait
+        case .references:
+            return false
         }
+    }
+
+    private nonisolated static func bindingTitle(
+        _ binding: BindingRecord,
+        in document: ReaderDocument
+    ) -> String? {
+        let lower = Int(binding.declarationRange.lowerBound)
+        let upper = Int(binding.declarationRange.upperBound)
+        guard lower >= 0, lower < upper, upper <= document.bytes.count else {
+            return nil
+        }
+        return String(decoding: document.bytes[lower..<upper], as: UTF8.self)
     }
 
     private nonisolated static func symbolTitle(

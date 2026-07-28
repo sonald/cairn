@@ -1,6 +1,7 @@
 import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
+import CodeInsightReaderCore
 import Observation
 
 @MainActor
@@ -12,7 +13,7 @@ final class RelationWindowController: NSViewController,
 
     private let model: RelationTreeModel
     private let directionControl = NSSegmentedControl(
-        labels: ["Callers", "Calls", "Implements"],
+        labels: ["Callers", "Calls", "Implements", "References"],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -21,9 +22,10 @@ final class RelationWindowController: NSViewController,
     private let scrollView = NSScrollView()
     private let placeholderLabel = NSTextField(
         labelWithString:
-            "Right-click a symbol → Show Callers / Calls / Implements"
+            "Right-click a symbol → Show Callers / Calls / Implements / References"
     )
-    private var currentSymbol: SymbolOccurrenceID?
+    private var currentTarget: ReferenceTarget?
+    private var currentDocument: ReaderDocument?
 
     var selfTestPlaceholderText: String? {
         loadViewIfNeeded()
@@ -55,6 +57,21 @@ final class RelationWindowController: NSViewController,
         selfTestGroupFrame(titlePrefix: "Strong")
     }
 
+    var selfTestReferenceGroupTitle: String? {
+        guard let row = selfTestGroupRow(titlePrefix: "References"),
+              let item = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        else { return nil }
+        return item.title
+    }
+
+    var selfTestReferenceGroupFrame: NSRect {
+        selfTestGroupFrame(titlePrefix: "References")
+    }
+
+    var selfTestDirectionSegmentFrames: [NSRect] {
+        selfTestSegmentFrames
+    }
+
     var selfTestRelationsVisibleRect: NSRect {
         guard isViewLoaded else { return .zero }
         return scrollView.contentView.documentVisibleRect
@@ -74,6 +91,37 @@ final class RelationWindowController: NSViewController,
         return exact.width > 0
             && heuristic.width > 0
             && exact.intersection(heuristic).isEmpty
+    }
+
+    var selfTestReferenceGroupVisibleWithGeometry: Bool {
+        let frame = selfTestReferenceGroupFrame
+        return !scrollView.isHidden
+            && frame.width > 0
+            && frame.height > 0
+            && selfTestRelationsVisibleRect.contains(frame)
+    }
+
+    var selfTestReferenceSegmentVisibleWithGeometry: Bool {
+        let frames = selfTestSegmentFrames
+        guard frames.count == 4 else { return false }
+        let frame = frames[3]
+        return directionControl.segmentCount == 4
+            && directionControl.label(forSegment: 3) == "References"
+            && directionControl.selfTestIsVisibleInWindow
+            && frame.width > 0
+            && frame.height > 0
+            && selfTestDirectionControlScreenFrame.contains(frame)
+    }
+
+    var selfTestReferenceSegmentDoesNotOverlapOtherDirections: Bool {
+        let frames = selfTestSegmentFrames
+        guard frames.count == 4 else { return false }
+        let reference = frames[3]
+        return reference.width > 0
+            && (0..<3).allSatisfy {
+                let other = frames[$0]
+                return other.width > 0 && reference.intersection(other).isEmpty
+            }
     }
 
     var selfTestExternalGroupTitle: String? {
@@ -200,6 +248,31 @@ final class RelationWindowController: NSViewController,
         return outlineView.rect(ofRow: row)
     }
 
+    private var selfTestSegmentFrames: [NSRect] {
+        guard isViewLoaded else { return [] }
+        return (directionControl.cell?.accessibilityChildren() ?? []).compactMap {
+            guard let object = $0 as? NSObject else { return nil }
+            let selector = NSSelectorFromString("accessibilityFrame")
+            guard object.responds(to: selector) else { return nil }
+            typealias FrameGetter =
+                @convention(c) (AnyObject, Selector) -> NSRect
+            let getter = unsafeBitCast(
+                object.method(for: selector),
+                to: FrameGetter.self
+            )
+            return getter(object, selector)
+        }
+    }
+
+    private var selfTestDirectionControlScreenFrame: NSRect {
+        guard isViewLoaded, let window = directionControl.window else {
+            return .zero
+        }
+        return window.convertToScreen(
+            directionControl.convert(directionControl.bounds, to: nil)
+        )
+    }
+
     init(model: RelationTreeModel) {
         self.model = model
         super.init(nibName: nil, bundle: nil)
@@ -291,14 +364,23 @@ final class RelationWindowController: NSViewController,
     }
 
     func setRoot(
-        symbol: SymbolOccurrenceID,
-        direction: RelationTreeModel.Direction
+        target: ReferenceTarget,
+        direction: RelationTreeModel.Direction,
+        document: ReaderDocument? = nil
     ) {
         loadViewIfNeeded()
-        currentSymbol = symbol
+        currentTarget = target
+        currentDocument = document
         directionControl.selectedSegment = segment(for: direction)
-        let loadTask = model.setRoot(symbol: symbol, direction: direction)
-        if model.root == nil { currentSymbol = nil }
+        let loadTask = model.setRoot(
+            target: target,
+            direction: direction,
+            document: document
+        )
+        if model.root == nil {
+            currentTarget = nil
+            currentDocument = nil
+        }
         reloadWholeTree()
         onTreeChange?()
 
@@ -406,8 +488,14 @@ final class RelationWindowController: NSViewController,
     }
 
     @objc private func directionChanged(_ sender: NSSegmentedControl) {
-        guard let symbol = model.selectedRelationSymbol ?? currentSymbol else { return }
-        setRoot(symbol: symbol, direction: direction(for: sender.selectedSegment))
+        let target = model.selectedRelationSymbol.map(ReferenceTarget.engine)
+            ?? currentTarget
+        guard let target else { return }
+        setRoot(
+            target: target,
+            direction: direction(for: sender.selectedSegment),
+            document: currentDocument
+        )
     }
 
     @objc private func openSelection(_ sender: Any?) {
@@ -421,7 +509,7 @@ final class RelationWindowController: NSViewController,
         guard let symbol = node.symbol,
               symbol.localKind == .declarationFacet
         else { return }
-        setRoot(symbol: symbol, direction: model.direction)
+        setRoot(target: .engine(symbol), direction: model.direction)
     }
 
     private func observe() {
@@ -440,7 +528,10 @@ final class RelationWindowController: NSViewController,
 
     private func render() {
         directionControl.selectedSegment = segment(for: model.direction)
-        if model.root == nil { currentSymbol = nil }
+        if model.root == nil {
+            currentTarget = nil
+            currentDocument = nil
+        }
         reloadWholeTree()
     }
 
@@ -476,6 +567,7 @@ final class RelationWindowController: NSViewController,
         case .callers: 0
         case .calls: 1
         case .implementations: 2
+        case .references: 3
         }
     }
 
@@ -483,6 +575,7 @@ final class RelationWindowController: NSViewController,
         switch segment {
         case 1: .calls
         case 2: .implementations
+        case 3: .references
         default: .callers
         }
     }

@@ -316,7 +316,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestRelationsPlaceholderVisible
         checks["relationsPlaceholderTextWithoutRoot"] =
             windowController.selfTestRelationsPlaceholderText
-            == "Right-click a symbol → Show Callers / Calls / Implements"
+            == "Right-click a symbol → Show Callers / Calls / Implements / References"
         checks.merge(layout.checks) { _, new in new }
         Self.finishSelfTest(
             coldStartMS: coldStartMS,
@@ -1842,7 +1842,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         launch(offscreen: true)
         let projectRoot = exactSelfTestFixtureRoot(root: root)
         guard let windowController,
-              let target = exactSelfTestTarget(root: projectRoot)
+              let target = exactSelfTestTarget(root: projectRoot),
+              let localReferenceDeclarationOffset =
+                  target.localReferenceDeclarationOffset,
+              let localReferenceUseOffset = target.localReferenceUseOffset
         else {
             finishExactSelfTest(
                 controller: windowController,
@@ -2094,6 +2097,109 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.displayedReaderFile?.standardizedFileURL
                 == target.relationFile.standardizedFileURL
         })
+        if relationFileVisible {
+            _ = windowController.selfTestActivateReading(
+                at: localReferenceDeclarationOffset
+            )
+            pumpRunLoop()
+            windowController.selfTestReaderRelation(
+                offset: localReferenceDeclarationOffset,
+                direction: .references
+            )
+        }
+        let localReferencesVisible = waitUntil(timeout: 5, condition: {
+            model.relationTree.direction == .references
+                && windowController.selfTestReferenceGroupTitle == "References (1)"
+                && windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "References"
+                ).count == 1
+        })
+        let localReferenceCountHonest =
+            windowController.selfTestReferenceGroupTitle == "References (1)"
+        let localReferenceGroupVisibleWithGeometry =
+            windowController.selfTestReferenceGroupVisibleWithGeometry
+        let referenceSegmentVisibleWithGeometry =
+            windowController.selfTestReferenceSegmentVisibleWithGeometry
+        let referenceSegmentDoesNotOverlapOtherDirections =
+            windowController.selfTestReferenceSegmentDoesNotOverlapOtherDirections
+        let localReferenceOriginOffset = windowController.selfTestReadingByteOffset
+        let historyCountBeforeLocalReferenceOpen =
+            model.navigationHistory.records.count
+        let localReferenceTitle = windowController.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).first
+        let localReferenceSelected = localReferenceTitle.map {
+            windowController.selfTestSelectRelationEdge(titled: $0)
+        } == true
+        if localReferenceSelected {
+            windowController.selfTestOpenRelationSelection()
+        }
+        let localReferenceOpenedAtCorrectOffset = waitUntil(timeout: 5, condition: {
+            model.selectedByteOffset == localReferenceUseOffset
+        })
+        let localReferenceOpenedOffset = model.selectedByteOffset
+        let localReferenceHistoryRecorded =
+            model.navigationHistory.records.count
+                > historyCountBeforeLocalReferenceOpen
+        if localReferenceOpenedAtCorrectOffset {
+            windowController.goBack(nil)
+        }
+        let localReferenceHistoryBack = localReferenceOriginOffset.map { origin in
+            waitUntil(timeout: 5, condition: {
+                model.selectedByteOffset == origin
+                    && windowController.displayedReaderFile?.standardizedFileURL
+                        == target.relationFile.standardizedFileURL
+            })
+        } ?? false
+        if relationFileVisible {
+            windowController.selfTestReaderClick(
+                offset: target.relationCallOffset,
+                commandClick: false
+            )
+        }
+        let localReferenceContextRestored = waitUntil(timeout: 5, condition: {
+            windowController.selfTestContextProvenance?.contains("Exact") == true
+        })
+        if localReferenceContextRestored {
+            exactSummary = windowController.selfTestContextSummary
+            exactCount = windowController.selfTestContextCandidateCount
+        }
+        emitExactStep(
+            "local-references",
+            variant: "reader-index",
+            controller: windowController,
+            extra: [
+                "direction": "\(model.relationTree.direction)",
+                "groupTitle": windowController.selfTestReferenceGroupTitle ?? "",
+                "groupFrame": NSStringFromRect(
+                    windowController.selfTestReferenceGroupFrame
+                ),
+                "visibleRect": NSStringFromRect(
+                    windowController.selfTestRelationsVisibleRect
+                ),
+                "segmentFrames":
+                    windowController.selfTestDirectionSegmentFrames.map(
+                        NSStringFromRect
+                    ),
+                "groupVisibleWithGeometry":
+                    localReferenceGroupVisibleWithGeometry,
+                "referenceSegmentVisibleWithGeometry":
+                    referenceSegmentVisibleWithGeometry,
+                "referenceSegmentDoesNotOverlapOtherDirections":
+                    referenceSegmentDoesNotOverlapOtherDirections,
+                "selected": localReferenceSelected,
+                "openedOffset": localReferenceOpenedOffset.map { $0 as Any }
+                    ?? NSNull(),
+                "returnedOffset": model.selectedByteOffset.map { $0 as Any }
+                    ?? NSNull(),
+                "expectedUseOffset": localReferenceUseOffset,
+                "historyRecorded": localReferenceHistoryRecorded,
+                "historyBack": localReferenceHistoryBack,
+                "contextRestored": localReferenceContextRestored,
+                "originOffset": localReferenceOriginOffset.map { $0 as Any }
+                    ?? NSNull(),
+            ]
+        )
         if relationFileVisible {
             windowController.selfTestReaderRelation(
                 offset: target.relationCallOffset,
@@ -2559,6 +2665,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactGroupVisibleWithGeometry": exactGroupVisibleWithGeometry,
             "exactAndHeuristicGroupsDoNotOverlap":
                 exactAndHeuristicGroupsDoNotOverlap,
+            "localReferencesVisible": localReferencesVisible,
+            "localReferenceCountHonest": localReferenceCountHonest,
+            "localReferenceGroupVisibleWithGeometry":
+                localReferenceGroupVisibleWithGeometry,
+            "referenceSegmentVisibleWithGeometry":
+                referenceSegmentVisibleWithGeometry,
+            "referenceSegmentDoesNotOverlapOtherDirections":
+                referenceSegmentDoesNotOverlapOtherDirections,
+            "localReferenceSelected": localReferenceSelected,
+            "localReferenceOpenedAtCorrectOffset":
+                localReferenceOpenedAtCorrectOffset,
+            "localReferenceHistoryRecorded": localReferenceHistoryRecorded,
+            "localReferenceHistoryBack": localReferenceHistoryBack,
+            "localReferenceContextRestored": localReferenceContextRestored,
 
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,
@@ -4579,6 +4699,8 @@ private struct ExactSelfTestTarget {
     let dependencyDefinition: ExactLocation
     let relationFile: URL
     let relationCallOffset: UInt32
+    let localReferenceDeclarationOffset: UInt32?
+    let localReferenceUseOffset: UInt32?
     let signatureTraitOffset: UInt32?
     let externalRootOffset: UInt32?
     let externalCallOffset: UInt32?
@@ -5008,6 +5130,16 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
           let coordinate = LineTable(bytes: Array(definitionSource.utf8))
               .lineColumn(at: definitionOffset)
     else { return nil }
+    let localReferenceDeclarationOffset = definitionSource.range(
+        of: "receiver = InferredReceiver::new()"
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
+    let localReferenceUseOffset = definitionSource.range(
+        of: "receiver.inferred_edge()"
+    ).flatMap {
+        UInt32(exactly: definitionSource[..<$0.lowerBound].utf8.count)
+    }
     let dependencyBytes: [UInt8]
     let dependencyDefinition: ExactLocation
     let resolvedDependencyFile: URL
@@ -5079,6 +5211,8 @@ private func exactSelfTestTarget(root: URL) -> ExactSelfTestTarget? {
         dependencyDefinition: dependencyDefinition,
         relationFile: relationFile,
         relationCallOffset: relationCallOffset,
+        localReferenceDeclarationOffset: localReferenceDeclarationOffset,
+        localReferenceUseOffset: localReferenceUseOffset,
         signatureTraitOffset: signatureTraitOffset,
         externalRootOffset: externalRootOffset,
         externalCallOffset: externalCallOffset,

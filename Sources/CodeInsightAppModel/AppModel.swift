@@ -472,7 +472,7 @@ public final class AppModel {
         }
         if let activeRelation {
             relationTree.setRoot(
-                symbol: activeRelation.0,
+                target: .engine(activeRelation.0),
                 direction: activeRelation.1
             )
         }

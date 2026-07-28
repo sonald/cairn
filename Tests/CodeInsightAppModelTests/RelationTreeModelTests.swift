@@ -2,9 +2,204 @@ import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
+import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
+
+@MainActor
+@Test
+func relationTreeShowsSemanticLocalReferencesWithoutTheDeclaration() throws {
+    let source = """
+        fn f(x: i32) {
+            x;
+            let y = x;
+        }
+        """
+    let root = try relationTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let file = root.appendingPathComponent("main.rs")
+    let document = try DocumentLoader().load(file: file).document
+    let ranges = relationTokenRanges(of: "x", in: source)
+    let binding = try #require(document.localBinding(at: ranges[0].lowerBound))
+    let pathID = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "main.rs"
+    }?.pathID)
+    let bindingIndex = try #require(UInt32(exactly: binding.bindingIndex))
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    model.setRoot(
+        target: .localBinding(
+            pathID: pathID,
+            bindingIndex: bindingIndex
+        ),
+        direction: .references,
+        document: document
+    )
+
+    let references = try relationGroup("References (2)", in: model.root)
+    #expect(model.root?.subtitle == "Parameter")
+    #expect(references.children?.compactMap { $0.target?.byteOffset }
+        == [ranges[1].lowerBound, ranges[2].lowerBound])
+    #expect(references.children?.contains {
+        $0.target?.byteOffset == binding.binding.declarationRange.lowerBound
+    } == false)
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesSeparateNestedShadowing() throws {
+    let source = """
+        fn f() {
+            let x = 0;
+            x;
+            {
+                let x = x + 1;
+                x;
+            }
+            x;
+        }
+        """
+    let outer = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 0
+    )
+    let inner = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 2
+    )
+
+    #expect(outer.offsets == [1, 3, 5].map {
+        outer.tokenRanges[$0].lowerBound
+    })
+    #expect(inner.offsets == [inner.tokenRanges[4].lowerBound])
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesSeparateSiblingScopes() throws {
+    let source = """
+        fn first() {
+            let x = 0;
+            x;
+        }
+        fn second() {
+            let x = 1;
+            x;
+        }
+        """
+    let first = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 0
+    )
+    let second = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 2
+    )
+
+    #expect(first.offsets == [first.tokenRanges[1].lowerBound])
+    #expect(second.offsets == [second.tokenRanges[3].lowerBound])
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesExcludeTokensBeforeTheDeclaration() throws {
+    let source = """
+        fn f() {
+            x();
+            let x = || {};
+            x();
+        }
+        """
+    let result = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 1
+    )
+
+    #expect(result.offsets == [result.tokenRanges[2].lowerBound])
+    #expect(!result.offsets.contains(result.tokenRanges[0].lowerBound))
+    #expect(!result.offsets.contains(result.declarationOffset))
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesDistinguishParameterFromShadowingLocal() throws {
+    let source = """
+        fn f(x: i32) {
+            x;
+            let x = x + 1;
+            x;
+        }
+        """
+    let parameter = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 0
+    )
+    let local = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 2
+    )
+
+    #expect(parameter.subtitle == "Parameter")
+    #expect(parameter.offsets == [1, 3].map {
+        parameter.tokenRanges[$0].lowerBound
+    })
+    #expect(local.subtitle == "Local")
+    #expect(local.offsets == [local.tokenRanges[4].lowerBound])
+}
+
+@MainActor
+@Test
+func relationTreeEngineReferenceTargetDoesNotFallBackToALocalDocument() throws {
+    let source = "fn f() { let x = 0; x; }\n"
+    let root = try relationTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let document = try DocumentLoader().load(
+        file: root.appendingPathComponent("main.rs")
+    ).document
+    let symbol = try #require(
+        session.definitions(of: "f", context: context).first?.0
+    )
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    model.setRoot(
+        target: .engine(symbol),
+        direction: .references,
+        document: document
+    )
+
+    #expect(model.root == nil)
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesSeparateDisplayCapFromTrueTotal() throws {
+    let source =
+        "fn f(x: i32) {\n"
+        + String(repeating: "    x;\n", count: 501)
+        + "}\n"
+    let result = try relationReferenceResult(
+        source: source,
+        token: "x",
+        declarationIndex: 0
+    )
+
+    #expect(result.offsets.count == 500)
+    #expect(result.footerTitle == "Showing first 500 of 501 references")
+}
 
 @MainActor
 @Test
@@ -40,7 +235,7 @@ func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
     model.attachExactCoordinator(coordinator)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .callers)
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact", in: model.root)
     let dependencyCaller = try #require(exact.children?.first)
@@ -193,7 +388,7 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
@@ -243,7 +438,7 @@ func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .callers)
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let first = try #require(
         try relationGroup("Exact", in: model.root).children?.first
@@ -359,7 +554,7 @@ func relationTreeShowsExactOnlyImplementations() async throws {
     )
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: trait, direction: .implementations)
+    model.setRoot(target: .engine(trait), direction: .implementations)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact", in: model.root)
 
@@ -393,7 +588,7 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: symbol, direction: .calls)
+    model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact (0)", in: model.root)
@@ -469,7 +664,7 @@ func relationTreeLabelsNameOnlyCallsHonestly() async throws {
     })
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let possible = try relationGroup("Possible", in: model.root)
@@ -535,7 +730,7 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact", in: model.root)
@@ -590,7 +785,7 @@ func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact", in: model.root)
@@ -670,7 +865,7 @@ func contextAndRelationsShareTheDependencyPathConvention() async throws {
         }
     )
     relationModel.updateProjectState(.ready(fixture.session, fixture.context))
-    relationModel.setRoot(symbol: fixture.a, direction: .calls)
+    relationModel.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil {
         relationTreeFinishedLoading(relationModel.root)
     })
@@ -711,7 +906,7 @@ func relationTreeShowsExternalCallsAsUnresolved() async throws {
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: symbol, direction: .calls)
+    model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let external = try relationGroup("External / Unresolved", in: model.root)
@@ -738,7 +933,7 @@ func relationTreeShowsEmptyExternalCallsGroupForSignatureOnlyTrait() async throw
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: symbol, direction: .calls)
+    model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let external = try relationGroup("External / Unresolved (0)", in: model.root)
@@ -777,7 +972,7 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
     })
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let symbolEdge = try #require(strong.children?.first)
@@ -785,14 +980,14 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
     let generation = model.generation
 
     model.setRoot(
-        symbol: model.selectedRelationSymbol ?? fixture.a,
+        target: .engine(model.selectedRelationSymbol ?? fixture.a),
         direction: .callers
     )
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     #expect(model.root?.title == "b")
     #expect(model.generation > generation)
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let external = try relationGroup("External / Unresolved", in: model.root)
     let unresolvedEdge = try #require(external.children?.first)
@@ -800,7 +995,7 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
     #expect(model.selectedRelationSymbol == nil)
 
     model.setRoot(
-        symbol: model.selectedRelationSymbol ?? fixture.a,
+        target: .engine(model.selectedRelationSymbol ?? fixture.a),
         direction: .callers
     )
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
@@ -826,7 +1021,7 @@ func clearingRelationSelectionDoesNotNotifyContext() async throws {
         .init(edges: [edge], isTruncated: false)
     })
     model.updateProjectState(.ready(fixture.session, fixture.context))
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let child = try #require(strong.children?.first)
@@ -854,7 +1049,7 @@ func relationTreeShowsAnErrorRowWhenLoadingFails() async throws {
     })
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     #expect(model.root?.children?.first?.kind == .error)
@@ -890,7 +1085,7 @@ func relationTreeMarksPathLocalCallerCycle() async throws {
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: symbol, direction: .callers)
+    model.setRoot(target: .engine(symbol), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let firstStrong = try relationGroup("Strong", in: model.root)
     let callerB = try #require(firstStrong.children?.first { $0.title == "b" })
@@ -932,13 +1127,13 @@ func relationTreeLoadsTraitImplementationsAndMethodOverrides() async throws {
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
-    model.setRoot(symbol: trait.0, direction: .implementations)
+    model.setRoot(target: .engine(trait.0), direction: .implementations)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let implementations = try relationGroup("Strong", in: model.root)
     #expect(implementations.children?.map(\.title) == ["View"])
     #expect(implementations.children?.first?.subtitle == "Strong · trait")
 
-    model.setRoot(symbol: method, direction: .implementations)
+    model.setRoot(target: .engine(method), direction: .implementations)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let overrides = try relationGroup("Strong", in: model.root)
     #expect(overrides.children?.map(\.title) == ["render"])
@@ -957,7 +1152,7 @@ func relationTreeExpandIsIdempotentWhileLoading() async throws {
     let model = RelationTreeModel(loader: fake.load)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(model.root?.children?.first?.kind == .loading)
     #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
     let root = try #require(model.root)
@@ -1004,9 +1199,9 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
     let model = RelationTreeModel(loader: fake.load)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
-    model.setRoot(symbol: fixture.b, direction: .calls)
+    model.setRoot(target: .engine(fixture.b), direction: .calls)
     #expect(await relationWaitUntil {
         model.root?.children?.first {
             $0.kind == .group && $0.title == "Strong"
@@ -1042,7 +1237,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     let model = RelationTreeModel(loader: fake.load)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .callers)
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let strong = try relationGroup("Strong", in: model.root)
@@ -1076,7 +1271,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
-    model.setRoot(symbol: fixture.a, direction: .callers)
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact", in: model.root)
@@ -1114,7 +1309,7 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
     ])
     let model = RelationTreeModel(loader: fake.load)
     model.updateProjectState(.ready(fixture.session, fixture.context))
-    model.setRoot(symbol: fixture.a, direction: .calls)
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let child = try #require(strong.children?.first)
@@ -1445,7 +1640,7 @@ private func relationExactEmptyTitle(
         exactRelationsResolver: { _, _, _, _, _ in result }
     )
     model.updateProjectState(.ready(session, context))
-    model.setRoot(symbol: symbol, direction: direction)
+    model.setRoot(target: .engine(symbol), direction: direction)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     return try #require(model.root?.children?.first {
         $0.kind == .group && $0.title.hasPrefix("Exact")
@@ -1465,6 +1660,74 @@ private func relationTemporaryProject(_ files: [String: String]) throws -> URL {
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
     return root
+}
+
+@MainActor
+private func relationReferenceResult(
+    source: String,
+    token: String,
+    declarationIndex: Int
+) throws -> (
+    offsets: [UInt32],
+    subtitle: String?,
+    tokenRanges: [ByteRange],
+    declarationOffset: UInt32,
+    footerTitle: String?
+) {
+    let root = try relationTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let document = try DocumentLoader().load(
+        file: root.appendingPathComponent("main.rs")
+    ).document
+    let ranges = relationTokenRanges(of: token, in: source)
+    let declaration = try #require(ranges.indices.contains(declarationIndex)
+        ? ranges[declarationIndex]
+        : nil)
+    let binding = try #require(document.localBinding(at: declaration.lowerBound))
+    let pathID = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "main.rs"
+    }?.pathID)
+    let bindingIndex = try #require(UInt32(exactly: binding.bindingIndex))
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+    model.setRoot(
+        target: .localBinding(
+            pathID: pathID,
+            bindingIndex: bindingIndex
+        ),
+        direction: .references,
+        document: document
+    )
+    let group = try relationGroup(
+        "References (\(binding.references.count))",
+        in: model.root
+    )
+    return (
+        group.children?.compactMap { $0.target?.byteOffset } ?? [],
+        model.root?.subtitle,
+        ranges,
+        binding.binding.declarationRange.lowerBound,
+        model.root?.children?.first { $0.kind == .truncated }?.title
+    )
+}
+
+private func relationTokenRanges(
+    of token: String,
+    in source: String
+) -> [ByteRange] {
+    var result: [ByteRange] = []
+    var start = source.startIndex
+    while let range = source.range(of: token, range: start..<source.endIndex) {
+        let lower = UInt32(source[..<range.lowerBound].utf8.count)
+        result.append(ByteRange(
+            lowerBound: lower,
+            upperBound: lower + UInt32(token.utf8.count)
+        ))
+        start = range.upperBound
+    }
+    return result
 }
 
 private func relationQueryContext(for session: EngineSession) -> QueryContext {

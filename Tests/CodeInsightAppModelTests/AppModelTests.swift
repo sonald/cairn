@@ -723,7 +723,10 @@ func relationSelectionUpdatesContextUnlessPinned() async throws {
         session.definitions(of: "caller", context: context).first?.0
     )
 
-    let loadTask = model.relationTree.setRoot(symbol: caller, direction: .calls)
+    let loadTask = model.relationTree.setRoot(
+        target: .engine(caller),
+        direction: .calls
+    )
     if let loadTask { await loadTask.value }
     let strong = try #require(model.relationTree.root?.children?.first {
         $0.kind == .group && $0.title == "Strong"

@@ -603,6 +603,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestHeuristicGroupFrame: NSRect {
         relationController.selfTestHeuristicGroupFrame
     }
+    var selfTestReferenceGroupTitle: String? {
+        relationController.selfTestReferenceGroupTitle
+    }
+    var selfTestReferenceGroupFrame: NSRect {
+        relationController.selfTestReferenceGroupFrame
+    }
+    var selfTestDirectionSegmentFrames: [NSRect] {
+        relationController.selfTestDirectionSegmentFrames
+    }
+    var selfTestReferenceGroupVisibleWithGeometry: Bool {
+        relationController.selfTestReferenceGroupVisibleWithGeometry
+    }
+    var selfTestReferenceSegmentVisibleWithGeometry: Bool {
+        relationController.selfTestReferenceSegmentVisibleWithGeometry
+    }
+    var selfTestReferenceSegmentDoesNotOverlapOtherDirections: Bool {
+        relationController.selfTestReferenceSegmentDoesNotOverlapOtherDirections
+    }
     var selfTestRelationsVisibleRect: NSRect {
         relationController.selfTestRelationsVisibleRect
     }
@@ -983,7 +1001,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func showRelations(direction: RelationTreeModel.Direction) {
         guard let symbol = model.contextWindow.selectedCandidate?.symbol else { return }
-        showRelations(symbol: symbol, direction: direction)
+        showRelations(target: .engine(symbol), direction: direction)
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -1741,6 +1759,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               let path = projectPath(for: file)
         else { return }
         relationItem.isCollapsed = false
+        if direction == .references,
+           case let .ready(session, _) = model.projectState,
+           let document = model.tabStrip.activeDocument,
+           let binding = document.localBinding(at: offset),
+           let file = session.manifest.files.first(where: {
+               session.paths.resolve($0.pathID) == path
+                   && $0.contentID == document.contentID
+           }),
+           let bindingIndex = UInt32(exactly: binding.bindingIndex)
+        {
+            showRelations(
+                target: .localBinding(
+                    pathID: file.pathID,
+                    bindingIndex: bindingIndex
+                ),
+                direction: direction,
+                document: document
+            )
+            return
+        }
         Task { [weak self] in
             guard let self,
                   let candidate = await model.contextWindow.resolvedCandidate(
@@ -1749,7 +1787,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                   ),
                   let symbol = candidate.symbol
             else { return }
-            showRelations(symbol: symbol, direction: direction)
+            showRelations(target: .engine(symbol), direction: direction)
         }
     }
 
@@ -1769,11 +1807,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func showRelations(
-        symbol: SymbolOccurrenceID,
-        direction: RelationTreeModel.Direction
+        target: ReferenceTarget,
+        direction: RelationTreeModel.Direction,
+        document: ReaderDocument? = nil
     ) {
         relationItem.isCollapsed = false
-        relationController.setRoot(symbol: symbol, direction: direction)
+        relationController.setRoot(
+            target: target,
+            direction: direction,
+            document: document
+        )
     }
 
     private func navigate(to file: URL, byteOffset: UInt32? = nil) {
@@ -2720,6 +2763,11 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
             action: #selector(showImplementations(_:)),
             keyEquivalent: ""
         ))
+        relationMenu.addItem(NSMenuItem(
+            title: "Show References",
+            action: #selector(showReferences(_:)),
+            keyEquivalent: ""
+        ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
     }
@@ -3248,6 +3296,10 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
     @objc private func showImplementations(_ sender: Any?) {
         showRelation(.implementations)
+    }
+
+    @objc private func showReferences(_ sender: Any?) {
+        showRelation(.references)
     }
 
     private func showRelation(_ direction: RelationTreeModel.Direction) {
