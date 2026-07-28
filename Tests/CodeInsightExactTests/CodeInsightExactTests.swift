@@ -435,9 +435,14 @@ func rustAnalyzerParsesEveryLocationLinkImplementation() throws {
     ]
 
     try withFakeRustAnalyzerSession(implementationResult: links) { session in
+        let startedAt = ContinuousClock.now
         let locations = try #require(try session.implementations(
             file: "src/lib.rs",
             byteOffset: 7
+        ))
+        print(String(
+            format: "M6_IMPLEMENTATIONS shape=LocationLink[] elapsedMS=%.3f",
+            exactTestMilliseconds(since: startedAt)
         ))
 
         #expect(locations.count == 2)
@@ -456,9 +461,14 @@ func rustAnalyzerParsesSingleLocationImplementation() throws {
     ]
 
     try withFakeRustAnalyzerSession(implementationResult: location) { session in
+        let startedAt = ContinuousClock.now
         let locations = try #require(try session.implementations(
             file: "src/lib.rs",
             byteOffset: 7
+        ))
+        print(String(
+            format: "M6_IMPLEMENTATIONS shape=Location elapsedMS=%.3f",
+            exactTestMilliseconds(since: startedAt)
         ))
 
         #expect(locations.count == 1)
@@ -488,9 +498,14 @@ func rustAnalyzerParsesEveryLocationImplementation() throws {
     ]
 
     try withFakeRustAnalyzerSession(implementationResult: locations) { session in
+        let startedAt = ContinuousClock.now
         let parsed = try #require(try session.implementations(
             file: "src/lib.rs",
             byteOffset: 7
+        ))
+        print(String(
+            format: "M6_IMPLEMENTATIONS shape=Location[] elapsedMS=%.3f",
+            exactTestMilliseconds(since: startedAt)
         ))
 
         #expect(parsed.count == 2)
@@ -504,10 +519,15 @@ func rustAnalyzerTreatsNullImplementationAsNoResult() throws {
     try withFakeRustAnalyzerSession(
         implementationResult: NSNull()
     ) { session in
+        let startedAt = ContinuousClock.now
         let result = try session.implementations(
             file: "src/lib.rs",
             byteOffset: 7
         )
+        print(String(
+            format: "M6_IMPLEMENTATIONS shape=null elapsedMS=%.3f",
+            exactTestMilliseconds(since: startedAt)
+        ))
         #expect(result == nil)
     }
 }
@@ -590,7 +610,12 @@ func rustAnalyzerParsesIncomingCallHierarchyRelation() throws {
         snapshotFiles: ["src/a.rs", "src/b.rs"],
         incomingCallResult: incoming
     ) { session in
+        let startedAt = ContinuousClock.now
         let relations = try #require(try session.incomingCalls(item: bar))
+        print(String(
+            format: "M6_CALL_HIERARCHY step=incoming elapsedMS=%.3f",
+            exactTestMilliseconds(since: startedAt)
+        ))
 
         #expect(relations.count == 1)
         #expect(relations[0].item.name == "foo")
@@ -635,13 +660,23 @@ func rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites() throws 
         prepareCallHierarchyResult: [foo, bar],
         outgoingCallResult: outgoing
     ) { session in
+        let prepareStartedAt = ContinuousClock.now
         let items = try #require(try session.prepareCallHierarchy(
             file: "src/a.rs",
             byteOffset: 0
         ))
+        print(String(
+            format: "M6_CALL_HIERARCHY step=prepare elapsedMS=%.3f",
+            exactTestMilliseconds(since: prepareStartedAt)
+        ))
         #expect(items.map(\.name) == ["foo", "bar"])
 
+        let outgoingStartedAt = ContinuousClock.now
         let relations = try #require(try session.outgoingCalls(item: items[0]))
+        print(String(
+            format: "M6_CALL_HIERARCHY step=outgoing elapsedMS=%.3f",
+            exactTestMilliseconds(since: outgoingStartedAt)
+        ))
         #expect(relations.count == 1)
         #expect(relations[0].item.selectionRange.file == "src/b.rs")
         #expect(relations[0].callSites.count == 2)
@@ -1655,6 +1690,14 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         defer { lock.unlock() }
         return operation()
     }
+}
+
+private func exactTestMilliseconds(
+    since start: ContinuousClock.Instant
+) -> Double {
+    let duration = start.duration(to: .now)
+    return Double(duration.components.seconds) * 1_000
+        + Double(duration.components.attoseconds) / 1_000_000_000_000_000
 }
 
 private func withFakeRustAnalyzerSession<T>(

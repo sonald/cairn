@@ -161,15 +161,27 @@ M1 起就存在，一直没暴露是因为用户习惯点函数名。
 **建议**：统一收进 `ReaderSettings` + Settings 窗口的 Reading 页，
 而不是每次微调都改代码。做之前先盘点全部硬编码视觉常量，避免只做一半。
 
-## M6 候选结转（S9 汇总，只挂账不预实现）
+## M7 候选结转（M6-S7 汇总，只挂账不预实现）
 
-- **Exact 能力面**：references / implementations / callHierarchy。
-- **SI Reference Styles**：与 exact references 共用语义引用数据后再做，不先造半套索引。
+继续更新本文件，不新建 `m6-backlog.md`：这里已经保存未清债项及其证据，拆文件只会增加
+重复入口和迁移成本。
+
+- **首选主体：点击定位缺陷**：修正调用表达式 range 冒充被点 token range 的问题；
+  需区分两种 range、bump `extractorVersion` 并走完整 determinism 验收。修后重新观察
+  同名高亮约 1 秒延迟是否自愈。
+- **视觉项配置化**：盘点 M5/M6 硬编码视觉常量，统一收进 `ReaderSettings` 与 Settings
+  的 Reading 页；不只做 param alpha 一个开关。
+- **Exact `references` 能力**：M6 按 YAGNI 未加入；只有产品决定交付“全局引用列表”时
+  再扩 Exact 协议与消费者。
+- **局部引用角色/access kind**：S5 首版只有 local/param；member/const/type/fn 角色与
+  read/write access kind 等出现明确消费需求后再做。
+- **self-test 批量连跑挂起根因**：保留 S0 finish marker 与
+  `scripts/run-self-tests.sh` workaround；先稳定复现，再修产品或 harness。
 - **F5.7 书签**：需先裁决快照保留与历史回放语义。
 - **Relation Window 随光标自动跟踪**。
 - **RA 进程组化**：从直接子进程守卫扩到孙进程/进程组的生命周期治理。
 - **AX 值变更防御**。
-- **M7 候选：huge `syntaxVisible` / 绝对 footprint**：先建立可归因测量方法，
+- **huge `syntaxVisible` / 绝对 footprint**：先建立可归因测量方法，
   再谈预算或改 TextKit 热路径。
 - **分支图**。
 - **F4.8 lineage**：重命名/跨 commit 谱系，不用启发式冒充确定关系。

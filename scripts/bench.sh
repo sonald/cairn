@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 3 ]]; then
-    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5] | --m4 <rust-repo> [runs=5] | --m5 <tokio-dir> [runs=5]" >&2
+    echo "usage: bash scripts/bench.sh <repo-path> [runs=5] | --app <corpus-dir> | --m2 <tokio-dir> [runs=5] | --m4 <rust-repo> [runs=5] | --m5 <tokio-dir> [runs=5] | --m6 [runs=5]" >&2
     exit 2
 fi
 
@@ -40,6 +40,13 @@ elif [[ "$1" == "--m5" ]]; then
     mode="m5"
     repo_path="$(cd "$2" && pwd -P)"
     runs="${3:-5}"
+elif [[ "$1" == "--m6" ]]; then
+    if [[ $# -gt 2 ]]; then
+        echo "usage: bash scripts/bench.sh --m6 [runs=5]" >&2
+        exit 2
+    fi
+    mode="m6"
+    runs="${2:-5}"
 else
     if [[ $# -gt 2 ]]; then
         echo "usage: bash scripts/bench.sh <repo-path> [runs=5]" >&2
@@ -400,6 +407,133 @@ print(f"{(current - baseline) / baseline * 100:+.1f}%")
     echo '|---:|---:|---:|---:|'
     printf '| %s | %s | %s | %s |\n' \
         "$search_total" "$search_displayed" "$search_rows" "$search_total"
+    exit 0
+fi
+
+if [[ "$mode" == "m6" ]]; then
+    binary="$bin_path/codeinsight-app"
+
+    percentile_row() {
+        python3 -c 'import math, sys
+label, unit = sys.argv[1], sys.argv[2]
+vals = sorted(float(x) for x in sys.stdin if x.strip())
+if not vals:
+    raise SystemExit(f"no values for {label}")
+rank = lambda p: vals[math.ceil(len(vals) * p) - 1]
+print(f"| `{label}` | {len(vals)} | {vals[0]:.3f}{unit} | {rank(0.5):.3f}{unit} | {rank(0.95):.3f}{unit} |")
+' "$1" "$2"
+    }
+
+    test_marker_values() {
+        filter="$1"
+        marker="$2"
+        run=1
+        while [[ $run -le $runs ]]; do
+            output="$(swift test \
+                ${swift_options[@]+"${swift_options[@]}"} \
+                --filter "$filter" 2>&1)"
+            printf '%s\n' "$output" | python3 -c '
+import re, sys
+marker = sys.argv[1]
+lines = [line for line in sys.stdin if marker in line]
+if not lines:
+    raise SystemExit(f"missing benchmark marker: {marker}")
+match = re.search(r"\belapsedMS=([-+0-9.]+)", lines[-1])
+if not match:
+    raise SystemExit(f"missing elapsedMS: {marker}")
+print(match.group(1))
+' "$marker"
+            run=$((run + 1))
+        done
+    }
+
+    echo '### implementations（fake provider 响应请求 + 解析）'
+    echo
+    echo '| 响应形态 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    test_marker_values \
+        rustAnalyzerParsesSingleLocationImplementation \
+        'M6_IMPLEMENTATIONS shape=Location elapsedMS=' \
+        | percentile_row "Location" "ms"
+    test_marker_values \
+        rustAnalyzerParsesEveryLocationImplementation \
+        'M6_IMPLEMENTATIONS shape=Location[] elapsedMS=' \
+        | percentile_row "Location[]" "ms"
+    test_marker_values \
+        rustAnalyzerParsesEveryLocationLinkImplementation \
+        'M6_IMPLEMENTATIONS shape=LocationLink[] elapsedMS=' \
+        | percentile_row "LocationLink[]" "ms"
+    test_marker_values \
+        rustAnalyzerTreatsNullImplementationAsNoResult \
+        'M6_IMPLEMENTATIONS shape=null elapsedMS=' \
+        | percentile_row "null" "ms"
+    echo
+
+    echo '### callHierarchy（fake provider 响应请求 + 解析）'
+    echo
+    echo '| 步骤 | runs | min | p50 | p95 |'
+    echo '|---|---:|---:|---:|---:|'
+    test_marker_values \
+        rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites \
+        'M6_CALL_HIERARCHY step=prepare elapsedMS=' \
+        | percentile_row "prepare" "ms"
+    test_marker_values \
+        rustAnalyzerParsesIncomingCallHierarchyRelation \
+        'M6_CALL_HIERARCHY step=incoming elapsedMS=' \
+        | percentile_row "incoming" "ms"
+    test_marker_values \
+        rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites \
+        'M6_CALL_HIERARCHY step=outgoing elapsedMS=' \
+        | percentile_row "outgoing" "ms"
+    echo
+
+    local_index_output="$(swift test \
+        ${swift_options[@]+"${swift_options[@]}"} \
+        --filter m6FixtureLocalReferenceIndexMetrics 2>&1)"
+    local_index_line="$(printf '%s\n' "$local_index_output" \
+        | sed -n 's/^.*\(M6_LOCAL_REFERENCE_INDEX .*$\)/\1/p' \
+        | sed -n '$p')"
+    if [[ -z "$local_index_line" ]]; then
+        echo "could not parse M6 local reference index benchmark" >&2
+        exit 1
+    fi
+    printf '%s\n' "$local_index_line" | python3 -c '
+import re, sys
+line = sys.stdin.read()
+fields = dict(re.findall(r"(\w+)=([-+0-9.]+)", line))
+required = ["parseMS", "buildMS", "baselineMB", "afterMB", "deltaMB",
+            "bindings", "references", "tokens"]
+missing = [key for key in required if key not in fields]
+if missing:
+    raise SystemExit("missing local index fields: " + ", ".join(missing))
+delta = float(fields["deltaMB"])
+print("### 局部引用索引（m6_reference_density.rust，单次独立进程）")
+print()
+print("| parse | index build | baseline footprint | after footprint | delta | bindings | references | indexed tokens |")
+print("|---:|---:|---:|---:|---:|---:|---:|---:|")
+print("| {parseMS}ms | {buildMS}ms | {baselineMB}MB | {afterMB}MB | {delta:+.3f}MB | {bindings} | {references} | {tokens} |".format(delta=delta, **fields))
+'
+    echo
+
+    reading_json="$("$binary" --self-test-reading)"
+    printf '%s\n' "$reading_json" | python3 -c '
+import json, sys
+summary = next(
+    value for value in map(json.loads, sys.stdin)
+    if value.get("step") == "summary"
+)
+metrics = summary["metrics"]
+runs = int(metrics["referenceAttributeRunCount"])
+fragments = int(metrics["referenceStyledFragmentCount"])
+scanned = int(metrics["referenceScannedCount"])
+print("### Reference Styles 写属性量（单次独立进程）")
+print()
+print("| referenceAttributeRunCount | referenceStyledFragmentCount | referenceScannedCount |")
+print("|---:|---:|---:|")
+print(f"| {runs} | {fragments} | {scanned} |")
+'
+    echo
+    echo '> 只报客观耗时与计数；帧率、卡顿与阅读手感必须真机人工判定。'
     exit 0
 fi
 

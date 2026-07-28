@@ -268,3 +268,58 @@ TextKit 2 实际写过属性的 fragment 数，而不是是否调用 lazy API。
 | 5001 | 2000 | 2001 | 5001 |
 
 cap 限制了模型持有的匹配行，同时 `totalMatches` 仍诚实保留 5,001。
+
+## M6 Exact Relations + Reference Styles 自测
+
+日期：2026-07-28。Apple Silicon (arm64e) macOS。主数据由
+`CODEX_SANDBOX=1 bash scripts/bench.sh --m6` 采集；Exact 与局部引用指标来自 DEBUG
+测试进程内的真实请求/解析或 parse/build 计时，Reference Styles 来自 release
+`codeinsight-app --self-test-reading` 单次独立进程。下列只陈述客观耗时、内存与计数；
+帧率、卡顿和阅读手感保留为 `m6-interactive-test-plan.md` 真机人工项。
+
+### implementations（S2，fake provider 响应请求 + 解析）
+
+计时只包围 `session.implementations`，不含 fake session 初始化和关闭；包含 LSP
+请求/响应与结果解析，因此不是脱离真实调用路径的 JSON parser 微基准。
+
+| 响应形态 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `Location` | 5 | 0.637ms | 0.730ms | 0.916ms |
+| `Location[]` | 5 | 0.690ms | 0.723ms | 0.957ms |
+| `LocationLink[]` | 5 | 0.781ms | 0.845ms | 1.049ms |
+| `null` | 5 | 3005.414ms | 3008.242ms | 3010.038ms |
+
+`null` 约 3 秒是现有请求路径的真实行为：空结果会按既有策略重试三次，并执行
+1 秒 + 2 秒退避；表中未删掉该成本，也未把它伪装成纯解析耗时。
+
+### callHierarchy（S3，fake provider 响应请求 + 解析）
+
+`prepare`、`incoming`、`outgoing` 分别计时；incoming/outgoing 的 fixture 同时守住
+`fromRanges` 的方向性文件身份。
+
+| 步骤 | runs | min | p50 | p95 |
+|---|---:|---:|---:|---:|
+| `prepare` | 5 | 0.762ms | 0.816ms | 1.029ms |
+| `incoming` | 5 | 0.842ms | 0.892ms | 1.375ms |
+| `outgoing` | 5 | 0.640ms | 0.791ms | 0.840ms |
+
+### 局部引用索引（S5）
+
+`Tests/Fixtures/m6_reference_density.rust`，单次独立测试进程；footprint 是进程级
+metric-only 原始值，不作布尔预算门。
+
+| parse | index build | baseline footprint | after footprint | delta | bindings | references | indexed tokens |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 437.642ms | 2811.718ms | 45.485MB | 45.766MB | +0.281MB | 20,000 | 35,000 | 55,000 |
+
+### Reference Styles 写属性量（S6）
+
+`--self-test-reading` 在 1600×1000 offscreen 窗口打开同一 35,000-reference fixture；
+`referenceScannedCount` 是实际扫描候选的工作量指标，不用输出 run 数冒充门控证据。
+
+| referenceAttributeRunCount | referenceStyledFragmentCount | referenceScannedCount |
+|---:|---:|---:|
+| 55 | 28 | 55 |
+
+三项都保持 viewport 量级。该计数不能证明滚动流畅、不卡顿或视觉层级正确；这些结论
+只能由真机交互测试给出。
