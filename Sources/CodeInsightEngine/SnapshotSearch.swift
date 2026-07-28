@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightRustExtractor
 import Foundation
 
 public protocol SnapshotContentSource: Sendable {
@@ -283,10 +284,212 @@ public struct SnapshotSearchService: Sendable {
         }
     }
 
+    func searchReferences(
+        _ query: ContentSearchQuery,
+        excludingPathID: PathID,
+        excludingRange: ByteRange,
+        context: QueryContext
+    ) throws -> AsyncThrowingStream<SearchBatch, Error> {
+        guard !query.pattern.isEmpty else {
+            throw SnapshotSearchError.emptyPattern
+        }
+        guard context.snapshotID == source.manifest.snapshotID else {
+            throw EngineError.snapshotMismatch(
+                expected: source.manifest.snapshotID,
+                actual: context.snapshotID
+            )
+        }
+        let pattern = Array(query.pattern.utf8)
+        let source = source
+        let wallClockLimit = wallClockLimit
+        #if DEBUG
+        let parseObserver = RustExtractor.parseObserver
+        #endif
+        return AsyncThrowingStream { continuation in
+            let task = Task.detached(priority: .userInitiated) {
+                do {
+                    let startedAt = ContinuousClock.now
+                    let files = source.manifest.files.filter {
+                        $0.detectedLanguage == .rust
+                    }
+                    let filesByContent = Dictionary(grouping: files, by: \.contentID)
+                    var seenContentIDs: Set<ContentID> = []
+                    let contentIDs = files.compactMap {
+                        seenContentIDs.insert($0.contentID).inserted
+                            ? $0.contentID : nil
+                    }
+                    let allPathIDs = Set(files.map(\.pathID))
+                    var processedPathIDs: Set<PathID> = []
+                    var truncatedPathIDs: Set<PathID> = []
+                    var completeness = Completeness.complete
+                    var totalMatchCount = 0
+                    var batchMatches: [PathID: [SearchMatch]] = [:]
+                    var batchMatchCount = 0
+
+                    func flush(isFinal: Bool) {
+                        continuation.yield(SearchBatch(
+                            matchesByPath: batchMatches,
+                            isFinal: isFinal,
+                            completeness: completeness,
+                            truncatedPathIDs: truncatedPathIDs
+                        ))
+                        batchMatches.removeAll(keepingCapacity: true)
+                        batchMatchCount = 0
+                    }
+
+                    contentLoop: for contentID in contentIDs {
+                        try Task.checkCancellation()
+                        if Self.expired(startedAt, limit: wallClockLimit) {
+                            completeness = .truncated
+                            truncatedPathIDs.formUnion(
+                                allPathIDs.subtracting(processedPathIDs)
+                            )
+                            break
+                        }
+
+                        let occurrences = filesByContent[contentID] ?? []
+                        guard let bytes = source.bytes(for: contentID) else {
+                            completeness = .truncated
+                            truncatedPathIDs.formUnion(occurrences.map(\.pathID))
+                            processedPathIDs.formUnion(occurrences.map(\.pathID))
+                            continue
+                        }
+                        try Task.checkCancellation()
+                        if Self.expired(startedAt, limit: wallClockLimit) {
+                            completeness = .truncated
+                            truncatedPathIDs.formUnion(
+                                allPathIDs.subtracting(processedPathIDs)
+                            )
+                            break
+                        }
+
+                        let rawRanges = Self.literalRanges(
+                            pattern,
+                            bytes: bytes,
+                            caseSensitive: query.caseSensitive,
+                            maximumMatches: nil,
+                            startedAt: startedAt,
+                            wallClockLimit: wallClockLimit
+                        )
+                        try Task.checkCancellation()
+                        if Self.expired(startedAt, limit: wallClockLimit) {
+                            completeness = .truncated
+                            truncatedPathIDs.formUnion(
+                                allPathIDs.subtracting(processedPathIDs)
+                            )
+                            break
+                        }
+                        if rawRanges.isEmpty {
+                            processedPathIDs.formUnion(occurrences.map(\.pathID))
+                            continue
+                        }
+
+                        #if DEBUG
+                        let identifiers = try RustExtractor.$parseObserver.withValue(
+                            parseObserver
+                        ) {
+                            try RustExtractor().identifierRanges(
+                                named: query.pattern,
+                                in: bytes
+                            )
+                        }
+                        #else
+                        let identifiers = try RustExtractor().identifierRanges(
+                            named: query.pattern,
+                            in: bytes
+                        )
+                        #endif
+                        let identifierOffsets = Set(identifiers.map(\.lowerBound))
+                        let verifiedRanges = rawRanges.filter {
+                            identifierOffsets.contains($0.lowerBound)
+                        }
+                        let lineTable = LineTable(bytes: bytes)
+
+                        for occurrence in occurrences {
+                            try Task.checkCancellation()
+                            if Self.expired(startedAt, limit: wallClockLimit) {
+                                completeness = .truncated
+                                truncatedPathIDs.formUnion(
+                                    allPathIDs.subtracting(processedPathIDs)
+                                )
+                                break contentLoop
+                            }
+
+                            let references = verifiedRanges.filter {
+                                occurrence.pathID != excludingPathID
+                                    || $0 != excludingRange
+                            }
+                            let fileWasTruncated = references.count
+                                > Self.matchesPerFile
+                            let visibleRanges = references.prefix(Self.matchesPerFile)
+                            let remaining = Self.totalMatches - totalMatchCount
+                            let projectedRanges = visibleRanges.prefix(max(0, remaining))
+                            let matches = projectedRanges.compactMap {
+                                range -> SearchMatch? in
+                                guard let coordinate = lineTable.lineColumn(
+                                    at: range.lowerBound
+                                ) else { return nil }
+                                let excerpt = Self.lineExcerpt(
+                                    in: bytes,
+                                    range: range,
+                                    lineTable: lineTable
+                                )
+                                return SearchMatch(
+                                    pathID: occurrence.pathID,
+                                    byteRange: range,
+                                    line: coordinate.line,
+                                    column: coordinate.column,
+                                    lineText: excerpt.text,
+                                    lineTextRange: excerpt.range
+                                )
+                            }
+                            processedPathIDs.insert(occurrence.pathID)
+                            if !matches.isEmpty {
+                                batchMatches[occurrence.pathID] = matches
+                                batchMatchCount += matches.count
+                                totalMatchCount += matches.count
+                            }
+                            if fileWasTruncated || matches.count < visibleRanges.count {
+                                completeness = .truncated
+                                truncatedPathIDs.insert(occurrence.pathID)
+                            }
+
+                            if batchMatches.count >= Self.filesPerBatch
+                                || batchMatchCount >= Self.matchesPerBatch
+                            {
+                                flush(isFinal: false)
+                            }
+
+                            if totalMatchCount == Self.totalMatches {
+                                let unprocessed = allPathIDs.subtracting(
+                                    processedPathIDs
+                                )
+                                if !unprocessed.isEmpty {
+                                    completeness = .truncated
+                                    truncatedPathIDs.formUnion(unprocessed)
+                                    break contentLoop
+                                }
+                            }
+                        }
+                    }
+
+                    flush(isFinal: true)
+                    continuation.finish()
+                } catch is CancellationError {
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
     private static func literalRanges(
         _ pattern: [UInt8],
         bytes: [UInt8],
         caseSensitive: Bool,
+        maximumMatches: Int? = matchesPerFile,
         startedAt: ContinuousClock.Instant,
         wallClockLimit: Duration
     ) -> [ByteRange] {
@@ -315,7 +518,11 @@ public struct SnapshotSearchService: Sendable {
                             lowerBound: UInt32(offset),
                             upperBound: UInt32(offset + needle.count)
                         ))
-                        if ranges.count > matchesPerFile { break }
+                        if let maximumMatches,
+                           ranges.count > maximumMatches
+                        {
+                            break
+                        }
                         offset += needle.count
                     } else {
                         offset += 1
@@ -426,5 +633,20 @@ extension EngineSession: SnapshotContentSource {
     ) throws -> AsyncThrowingStream<SearchBatch, Error> {
         try validate(context)
         return try SnapshotSearchService(source: self).search(query, context: context)
+    }
+
+    public func searchReferences(
+        _ query: ContentSearchQuery,
+        excludingPathID: PathID,
+        excludingRange: ByteRange,
+        context: QueryContext
+    ) throws -> AsyncThrowingStream<SearchBatch, Error> {
+        try validate(context)
+        return try SnapshotSearchService(source: self).searchReferences(
+            query,
+            excludingPathID: excludingPathID,
+            excludingRange: excludingRange,
+            context: context
+        )
     }
 }

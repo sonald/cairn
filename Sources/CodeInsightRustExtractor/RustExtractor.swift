@@ -125,6 +125,37 @@ public struct RustExtractor: LanguageExtractor, Sendable {
         )
     }
 
+    public func identifierRanges(
+        named name: String,
+        in bytes: [UInt8]
+    ) throws -> [CodeInsightCore.ByteRange] {
+        guard
+            let language = tree_sitter_rust(),
+            let parser = Parser(language: language)
+        else {
+            throw RustExtractionError.parserUnavailable
+        }
+        guard let tree = observedParse(parser, bytes: bytes) else {
+            throw RustExtractionError.parseFailed
+        }
+        let name = Array(name.utf8)
+        return tree.rootNode.depthFirst().compactMap { node in
+            let range = node.byteRange
+            let lower = Int(range.lowerBound)
+            let upper = Int(range.upperBound)
+            guard node.kind.contains("identifier"),
+                  upper - lower == name.count,
+                  lower >= 0,
+                  upper <= bytes.count,
+                  bytes[lower..<upper].elementsEqual(name)
+            else { return nil }
+            return CodeInsightCore.ByteRange(
+                lowerBound: range.lowerBound,
+                upperBound: range.upperBound
+            )
+        }
+    }
+
     private func traverse(
         root: Node,
         parser: Parser?,

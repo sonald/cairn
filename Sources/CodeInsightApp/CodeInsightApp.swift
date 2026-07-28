@@ -2200,6 +2200,40 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     ?? NSNull(),
             ]
         )
+        if relationFileVisible,
+           let definitionOffset = UInt32(exactly: target.definition.byteOffset)
+        {
+            windowController.selfTestReaderRelation(
+                offset: definitionOffset,
+                direction: .references
+            )
+        }
+        let projectReferenceTitles: [String]
+        let projectReferencesVisible = waitUntil(timeout: 5, condition: {
+            model.relationTree.direction == .references
+                && windowController.selfTestReferenceGroupTitle == "References"
+                && windowController.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "References"
+                ).contains { $0.hasPrefix("main.rs:") }
+        })
+        projectReferenceTitles = windowController.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        )
+        let projectReferencesCrossFile = projectReferenceTitles.contains {
+            $0.hasPrefix("main.rs:")
+        }
+        emitExactStep(
+            "project-references",
+            variant: "fuzzy-two-stage",
+            controller: windowController,
+            extra: [
+                "direction": "\(model.relationTree.direction)",
+                "groupTitle": windowController.selfTestReferenceGroupTitle ?? "",
+                "edgeCount": projectReferenceTitles.count,
+                "edgeTitles": projectReferenceTitles,
+                "crossFile": projectReferencesCrossFile,
+            ]
+        )
         if relationFileVisible {
             windowController.selfTestReaderRelation(
                 offset: target.relationCallOffset,
@@ -2679,6 +2713,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "localReferenceHistoryRecorded": localReferenceHistoryRecorded,
             "localReferenceHistoryBack": localReferenceHistoryBack,
             "localReferenceContextRestored": localReferenceContextRestored,
+            "projectReferencesVisible": projectReferencesVisible,
+            "projectReferencesCrossFile": projectReferencesCrossFile,
 
             "exactStatusVisible": exactStatusVisible,
             "initialStatusSafeBeforeClick": initialStatusSafe,

@@ -1,7 +1,9 @@
 import CodeInsightCore
+import CodeInsightRustExtractor
 @testable import CodeInsightEngine
 import Dispatch
 import Foundation
+import os
 import Testing
 
 private let snapshotSearchRepositoryRoot = URL(fileURLWithPath: #filePath)
@@ -84,6 +86,141 @@ func snapshotSearchCapsAllFilesAtFiveThousandMatches() async throws {
     #expect(result.matches.count == 5_000)
     #expect(result.final.completeness == .truncated)
     #expect(result.final.truncatedPathIDs.count == 1)
+}
+
+@Test
+func snapshotReferenceSearchParsesUniqueContentOnceAndRejectsTokenSpoofs()
+    async throws
+{
+    let bytes = Array("""
+        fn foo() {}
+        fn call_site() { foo(); }
+        const TEXT: &str = "foo";
+        // foo
+        /* foo */
+        fn foo_suffix() {}
+        """.utf8)
+    let source = FakeSnapshotSource([
+        ("a.rs", bytes),
+        ("copy.rs", bytes),
+    ])
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+
+    let result = try await RustExtractor.$parseObserver.withValue({
+        parseCount.withLock { $0 += 1 }
+    }) {
+        try await referenceSearch(
+            ContentSearchQuery(pattern: "foo", caseSensitive: true),
+            source: source,
+            excludingPathID: source.manifest.files[0].pathID,
+            excludingRange: ByteRange(lowerBound: 3, upperBound: 6)
+        )
+    }
+
+    #expect(parseCount.withLock { $0 } == 1)
+    #expect(result.matches.count == 3)
+    #expect(result.matches.map(\.line).sorted() == [1, 2, 2])
+    #expect(result.matches.allSatisfy { $0.line <= 2 })
+    #expect(result.final.completeness == .complete)
+}
+
+@Test
+func snapshotReferenceSearchAppliesCapsAfterIdentifierVerification() async throws {
+    let source = FakeSnapshotSource([
+        (
+            "main.rs",
+            Array((
+                String(repeating: "// Foo\n", count: 5_001)
+                    + "fn use_foo() { Foo; }\n"
+            ).utf8)
+        ),
+    ])
+
+    let result = try await referenceSearch(
+        ContentSearchQuery(pattern: "Foo", caseSensitive: true),
+        source: source,
+        excludingPathID: source.manifest.files[0].pathID,
+        excludingRange: ByteRange(lowerBound: 0, upperBound: 0)
+    )
+
+    #expect(result.matches.count == 1)
+    #expect(result.matches.first?.line == 5_002)
+    #expect(result.final.completeness == .complete)
+}
+
+@Test
+func snapshotReferenceSearchMarksVerifiedResultCapPartial() async throws {
+    let source = FakeSnapshotSource([
+        (
+            "main.rs",
+            Array((
+                "fn f() {\n"
+                    + String(repeating: "    foo;\n", count: 201)
+                    + "}\n"
+            ).utf8)
+        ),
+    ])
+
+    let result = try await referenceSearch(
+        ContentSearchQuery(pattern: "foo", caseSensitive: true),
+        source: source,
+        excludingPathID: source.manifest.files[0].pathID,
+        excludingRange: ByteRange(lowerBound: 0, upperBound: 0)
+    )
+
+    #expect(result.matches.count == 200)
+    #expect(result.final.completeness == .truncated)
+    #expect(result.final.truncatedPathIDs == [source.manifest.files[0].pathID])
+}
+
+@Test
+func snapshotReferenceSearchMarksTimeoutPartial() async throws {
+    let source = FakeSnapshotSource(
+        [("main.rs", Array("fn f() { foo; }\n".utf8))],
+        readDelay: 0.02
+    )
+    let service = SnapshotSearchService(
+        source: source,
+        wallClockLimit: .milliseconds(1)
+    )
+
+    let result = try await collect(try service.searchReferences(
+        ContentSearchQuery(pattern: "foo", caseSensitive: true),
+        excludingPathID: source.manifest.files[0].pathID,
+        excludingRange: ByteRange(lowerBound: 0, upperBound: 0),
+        context: context(for: source)
+    ))
+
+    #expect(result.matches.isEmpty)
+    #expect(result.final.completeness == .truncated)
+    #expect(result.final.truncatedPathIDs == [source.manifest.files[0].pathID])
+}
+
+@Test
+func snapshotReferenceSearchCancellationTerminatesConsumer() async throws {
+    let source = FakeSnapshotSource(
+        (0..<100).map { index in
+            ("file-\(index).rs", Array("fn f\(index)() { needle; }\n".utf8))
+        },
+        pauseAtScanCount: 3
+    )
+    let stream = try SnapshotSearchService(source: source).searchReferences(
+        ContentSearchQuery(pattern: "needle", caseSensitive: true),
+        excludingPathID: source.manifest.files[0].pathID,
+        excludingRange: ByteRange(lowerBound: 0, upperBound: 0),
+        context: context(for: source)
+    )
+    let consumer = Task {
+        for try await _ in stream {}
+    }
+
+    source.waitForPausedScan()
+    consumer.cancel()
+    _ = await consumer.result
+    source.resumePausedScan()
+
+    #expect(source.cancellationObservedAfterPause)
+    #expect(source.totalScanCount == 3)
 }
 
 @Test
@@ -270,6 +407,20 @@ private func search(
 ) async throws -> (matches: [SearchMatch], final: SearchBatch) {
     try await collect(try SnapshotSearchService(source: source).search(
         query,
+        context: context(for: source)
+    ))
+}
+
+private func referenceSearch(
+    _ query: ContentSearchQuery,
+    source: FakeSnapshotSource,
+    excludingPathID: PathID,
+    excludingRange: ByteRange
+) async throws -> (matches: [SearchMatch], final: SearchBatch) {
+    try await collect(try SnapshotSearchService(source: source).searchReferences(
+        query,
+        excludingPathID: excludingPathID,
+        excludingRange: excludingRange,
         context: context(for: source)
     ))
 }

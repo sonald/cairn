@@ -192,7 +192,7 @@ public final class RelationTreeModel {
 
     public init() {
         loader = { session, context, symbol, direction in
-            try Self.load(
+            try await Self.load(
                 session: session,
                 context: context,
                 symbol: symbol,
@@ -309,10 +309,6 @@ public final class RelationTreeModel {
             return nil
 
         case let .engine(symbol):
-            guard direction != .references else {
-                root = nil
-                return nil
-            }
             return setEngineRoot(symbol, direction: direction)
         }
     }
@@ -454,7 +450,10 @@ public final class RelationTreeModel {
                   self.session === session
             else { return }
 
-            if case .engine = identity, !engineLoadFailed {
+            if case .engine = identity,
+               !engineLoadFailed,
+               direction != .references
+            {
                 loaded = await promoteExactEdges(
                     loaded,
                     direction: direction,
@@ -467,7 +466,8 @@ public final class RelationTreeModel {
                 nil
             }
             let exactResult: ExactCoordinator.RelationQueryResult?
-            if let exactRelationsResolver,
+            if direction != .references,
+               let exactRelationsResolver,
                let query = node.queryTarget ?? node.target
             {
                 exactResult = await exactRelationsResolver(
@@ -652,6 +652,32 @@ public final class RelationTreeModel {
         direction: Direction,
         session: EngineSession
     ) -> [Node] {
+        if direction == .references {
+            let visible = Array(loaded.edges.prefix(500))
+            let status = if loaded.isTruncated {
+                "\(loaded.edges.count) verified references · partial"
+            } else if loaded.edges.count > 500 {
+                "Showing first 500 of \(loaded.edges.count) references"
+            } else {
+                "\(loaded.edges.count) references"
+            }
+            let group = makeGroup(
+                "References",
+                subtitle: loaded.isTruncated || loaded.edges.count > 500
+                    ? nil : status,
+                edges: visible,
+                under: parent,
+                direction: direction,
+                session: session
+            )
+            guard loaded.isTruncated || loaded.edges.count > 500 else {
+                return [group]
+            }
+            return [
+                group,
+                Node(kind: .truncated, title: status, parent: parent),
+            ]
+        }
         let capped = Array(loaded.edges.prefix(500))
         let exact = capped.filter { $0.certainty == .exact }
         var children = [
@@ -743,6 +769,7 @@ public final class RelationTreeModel {
 
     private func makeGroup(
         _ title: String,
+        subtitle: String? = nil,
         edges: [LoadedEdge],
         under parent: Node,
         direction: Direction,
@@ -751,6 +778,7 @@ public final class RelationTreeModel {
         let group = Node(
             kind: .group,
             title: title,
+            subtitle: subtitle,
             children: [],
             isExpandable: !edges.isEmpty,
             parent: parent
@@ -962,7 +990,7 @@ public final class RelationTreeModel {
         context: QueryContext,
         symbol: SymbolOccurrenceID,
         direction: Direction
-    ) throws -> LoadResult {
+    ) async throws -> LoadResult {
         switch direction {
         case .callers:
             guard let name = symbolTitle(symbol, in: session) else {
@@ -1117,7 +1145,46 @@ public final class RelationTreeModel {
                 isTruncated: false
             )
         case .references:
-            return LoadResult(edges: [], isTruncated: false)
+            guard let (_, facet) = facet(for: symbol, in: session) else {
+                return LoadResult(edges: [], isTruncated: false)
+            }
+            let stream = try session.searchReferences(
+                ContentSearchQuery(
+                    pattern: session.names.resolve(facet.nameID),
+                    caseSensitive: true
+                ),
+                excludingPathID: symbol.pathID,
+                excludingRange: facet.nameRange,
+                context: context
+            )
+            var edges: [LoadedEdge] = []
+            var isTruncated = false
+            for try await batch in stream {
+                try Task.checkCancellation()
+                isTruncated = isTruncated || batch.completeness == .truncated
+                for (pathID, matches) in batch.matchesByPath {
+                    let path = session.paths.resolve(pathID)
+                    edges += matches.map {
+                        LoadedEdge(
+                            title: "\(URL(fileURLWithPath: path).lastPathComponent):"
+                                + "\($0.line):\($0.column)",
+                            certainty: .possible,
+                            dispatch: .direct,
+                            symbol: nil,
+                            path: path,
+                            byteOffset: $0.byteRange.lowerBound,
+                            line: $0.line,
+                            evidence: [.nameOnly(nameID: facet.nameID)]
+                        )
+                    }
+                }
+            }
+            edges.sort {
+                $0.path == $1.path
+                    ? $0.byteOffset < $1.byteOffset
+                    : $0.path < $1.path
+            }
+            return LoadResult(edges: edges, isTruncated: isTruncated)
         }
     }
 
@@ -1140,7 +1207,7 @@ public final class RelationTreeModel {
             else { return false }
             return index.symbols[Int(parent)].kind == .rustTrait
         case .references:
-            return false
+            return true
         }
     }
 

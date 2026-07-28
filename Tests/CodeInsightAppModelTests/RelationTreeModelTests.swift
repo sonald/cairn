@@ -160,28 +160,84 @@ func relationTreeLocalReferencesDistinguishParameterFromShadowingLocal() throws 
 
 @MainActor
 @Test
-func relationTreeEngineReferenceTargetDoesNotFallBackToALocalDocument() throws {
-    let source = "fn f() { let x = 0; x; }\n"
-    let root = try relationTemporaryProject(["main.rs": source])
+func relationTreeEngineReferencesFindCrossFileTypeUses() async throws {
+    let root = try relationTemporaryProject([
+        "Cargo.toml": """
+            [package]
+            name = "reference-safe-offline"
+            version = "0.1.0"
+
+            [dependencies]
+            codeinsight-definitely-missing-offline-dependency = "99.99.99"
+            """,
+        "a.rs": "pub struct Foo { value: i32 }\n",
+        "b.rs": """
+            use crate::a::Foo;
+            struct Holder<T>(T);
+            fn make() -> Foo {
+                let typed: Foo = Foo { value: 1 };
+                let generic: Holder<Foo> = Holder(typed);
+                generic.0
+            }
+            """,
+    ])
     defer { try? FileManager.default.removeItem(at: root) }
     let session = try ProjectIndexer().index(root: root)
     let context = relationQueryContext(for: session)
-    let document = try DocumentLoader().load(
-        file: root.appendingPathComponent("main.rs")
-    ).document
     let symbol = try #require(
-        session.definitions(of: "f", context: context).first?.0
+        session.definitions(of: "Foo", context: context).first?.0
     )
     let model = RelationTreeModel()
     model.updateProjectState(.ready(session, context))
 
+    let task = model.setRoot(target: .engine(symbol), direction: .references)
+    await task?.value
+
+    if case .safe = session.analysisProfile.trustMode {} else {
+        Issue.record("Fuzzy references fixture must stay in Safe/offline mode")
+    }
+    let references = try relationGroup("References", in: model.root)
+    #expect(references.children?.count == 5)
+    #expect(Set(references.children?.compactMap { $0.target?.path } ?? []) == ["b.rs"])
+    #expect(references.subtitle == "5 references")
+    #expect(model.root?.children?.contains { $0.title.hasPrefix("Exact") } == false)
+}
+
+@MainActor
+@Test
+func relationTreeLocalReferencesDoNotMixSameNamedBindingsAcrossFiles() throws {
+    let source = "fn a() { let local = 1; local; }\n"
+    let root = try relationTemporaryProject([
+        "a.rs": source,
+        "b.rs": "fn b() { let local = 2; local; }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let document = try DocumentLoader().load(
+        file: root.appendingPathComponent("a.rs")
+    ).document
+    let ranges = relationTokenRanges(of: "local", in: source)
+    let binding = try #require(document.localBinding(at: ranges[0].lowerBound))
+    let file = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "a.rs"
+    })
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
     model.setRoot(
-        target: .engine(symbol),
+        target: .localBinding(
+            pathID: file.pathID,
+            bindingIndex: UInt32(binding.bindingIndex)
+        ),
         direction: .references,
         document: document
     )
 
-    #expect(model.root == nil)
+    let references = try relationGroup("References (1)", in: model.root)
+    #expect(references.children?.map { $0.target?.path } == ["a.rs"])
+    #expect(references.children?.map { $0.target?.byteOffset }
+        == [ranges[1].lowerBound])
 }
 
 @MainActor
@@ -199,6 +255,81 @@ func relationTreeLocalReferencesSeparateDisplayCapFromTrueTotal() throws {
 
     #expect(result.offsets.count == 500)
     #expect(result.footerTitle == "Showing first 500 of 501 references")
+}
+
+@MainActor
+@Test
+func relationTreeProjectReferenceCountCopyKeepsThreeCompletenessStates()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+
+    let complete = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 2,
+        isTruncated: false
+    )
+    let displayCap = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 501,
+        isTruncated: false
+    )
+    let servicePartial = try await relationProjectReferenceStatus(
+        fixture: fixture,
+        edgeCount: 7,
+        isTruncated: true
+    )
+
+    #expect(complete.groupSubtitle == "2 references")
+    #expect(complete.footerTitle == nil)
+    #expect(displayCap.groupSubtitle == nil)
+    #expect(displayCap.footerTitle == "Showing first 500 of 501 references")
+    #expect(servicePartial.groupSubtitle == nil)
+    #expect(servicePartial.footerTitle == "7 verified references · partial")
+    #expect(servicePartial.footerTitle?.contains(" of ") == false)
+    #expect(servicePartial.footerTitle?.contains("999") == false)
+}
+
+@MainActor
+@Test
+func relationTreeProjectReferencesReadHistoricalCommitSnapshot() async throws {
+    let root = try relationTemporaryProject([
+        "a.rs": "pub struct Historical;\n",
+        "b.rs": "use crate::a::Historical;\nfn use_it(_: Historical) {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try relationGit(root, "init", "-q")
+    try relationGit(root, "add", ".")
+    try relationGit(
+        root,
+        "-c", "user.name=CodeInsight",
+        "-c", "user.email=codeinsight@example.com",
+        "commit", "-q", "-m", "historical references"
+    )
+    let snapshot = try CommitSnapshot(repositoryURL: root)
+    let session = try ProjectIndexer().indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore()
+    )
+    let context = relationQueryContext(for: session)
+    let symbol = try #require(
+        session.definitions(of: "Historical", context: context).first?.0
+    )
+    let model = RelationTreeModel()
+    model.updateProjectState(.ready(session, context))
+
+    await model.setRoot(target: .engine(symbol), direction: .references)?.value
+
+    #expect(session.manifest.files.filter {
+        $0.detectedLanguage == .rust
+    }.allSatisfy {
+        if case .tracked = $0.sourceKind { return true }
+        return false
+    })
+    let references = try relationGroup("References", in: model.root)
+    #expect(references.children?.count == 2)
+    #expect(Set(references.children?.compactMap { $0.target?.path } ?? []) == ["b.rs"])
 }
 
 @MainActor
@@ -1216,6 +1347,39 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
 
 @MainActor
 @Test
+func relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let stale = RelationTreeModel.LoadedEdge(
+        title: "stale-reference",
+        certainty: .possible,
+        dispatch: .direct,
+        symbol: nil,
+        path: "main.rs",
+        byteOffset: 0,
+        line: 1,
+        evidence: []
+    )
+    let fake = FakeRelationLoader(
+        responses: [
+            fixture.a: .init(edges: [stale], isTruncated: false),
+        ],
+        gated: [fixture.a]
+    )
+    let model = RelationTreeModel(loader: fake.load)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(target: .engine(fixture.a), direction: .references)
+    #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    await fake.release(fixture.a)
+    for _ in 0..<10 { await Task.yield() }
+
+    #expect(model.root == nil)
+}
+
+@MainActor
+@Test
 func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -1647,6 +1811,39 @@ private func relationExactEmptyTitle(
     }?.title)
 }
 
+@MainActor
+private func relationProjectReferenceStatus(
+    fixture: RelationFixture,
+    edgeCount: Int,
+    isTruncated: Bool
+) async throws -> (groupSubtitle: String?, footerTitle: String?) {
+    let edges = (0..<edgeCount).map {
+        RelationTreeModel.LoadedEdge(
+            title: "reference-\($0)",
+            certainty: .possible,
+            dispatch: .direct,
+            symbol: nil,
+            path: "main.rs",
+            byteOffset: UInt32($0),
+            line: 1,
+            evidence: []
+        )
+    }
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: edges, isTruncated: isTruncated)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    await model.setRoot(
+        target: .engine(fixture.a),
+        direction: .references
+    )?.value
+    let group = try relationGroup("References", in: model.root)
+    return (
+        group.subtitle,
+        model.root?.children?.first { $0.kind == .truncated }?.title
+    )
+}
+
 private func relationTemporaryProject(_ files: [String: String]) throws -> URL {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("RelationTreeModelTests-\(UUID().uuidString)")
@@ -1660,6 +1857,21 @@ private func relationTemporaryProject(_ files: [String: String]) throws -> URL {
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
     return root
+}
+
+private func relationGit(_ root: URL, _ arguments: String...) throws {
+    let process = Process()
+    let output = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = arguments
+    process.currentDirectoryURL = root
+    process.standardOutput = output
+    process.standardError = output
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw RelationTestError.expected
+    }
 }
 
 @MainActor
