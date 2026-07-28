@@ -328,6 +328,7 @@ public final class ReaderTextView {
     public let view: NSTextView
     public let renderingCoordinator = RenderingAttributesCoordinator()
     public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
+    public var onContextMenu: ((Int) -> Void)?
     public var onViewportChange: (() -> Void)?
     private let backingTextStorage: NSTextStorage
     private var byteUTF16Map: ByteUTF16Map?
@@ -357,6 +358,9 @@ public final class ReaderTextView {
         textView.clickHandler = { [weak self] index, modifiers in
             self?.activate(atCharacterIndex: index)
             self?.onClick?(index, modifiers)
+        }
+        textView.contextMenuHandler = { [weak self] index in
+            self?.onContextMenu?(index)
         }
         textView.selectionHandler = { [weak self] index in
             guard let byteOffset = self?.byteOffset(forCharacterIndex: index) else {
@@ -1140,6 +1144,7 @@ private final class ReaderRulerView: NSRulerView {
 @MainActor
 private final class ClickTextView: NSTextView {
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+    var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
     var escapeHandler: (() -> Bool)?
@@ -1168,6 +1173,11 @@ private final class ClickTextView: NSTextView {
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
         clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        contextMenuHandler?(characterIndex(for: event))
+        return super.menu(for: event)
     }
 
     override func keyDown(with event: NSEvent) {

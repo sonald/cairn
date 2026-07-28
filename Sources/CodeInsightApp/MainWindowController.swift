@@ -2651,7 +2651,7 @@ private final class TabStripView: NSView {
 }
 
 @MainActor
-final class ReaderViewController: NSViewController, NSMenuDelegate {
+final class ReaderViewController: NSViewController {
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
@@ -2747,7 +2747,6 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
 
         let relationMenu = NSMenu(title: "Relations")
         relationMenu.autoenablesItems = false
-        relationMenu.delegate = self
         relationMenu.addItem(NSMenuItem(
             title: "Show Callers",
             action: #selector(showCallers(_:)),
@@ -2770,6 +2769,15 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
+        textView.onContextMenu = { [weak self] characterIndex in
+            guard let self else { return }
+            contextMenuOffset = displayedDocument == nil
+                ? nil
+                : textView.byteOffset(forCharacterIndex: characterIndex)
+            for item in textView.view.menu?.items ?? [] {
+                item.isEnabled = contextMenuOffset != nil
+            }
+        }
     }
 
     private func compareContainer(readerView: NSView) -> NSView {
@@ -2866,11 +2874,6 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
         case .signatureChanged: "Signature"
         case .bodyChanged: "Body"
         }
-    }
-
-    func menuNeedsUpdate(_ menu: NSMenu) {
-        contextMenuOffset = contextMenuByteOffset()
-        for item in menu.items { item.isEnabled = contextMenuOffset != nil }
     }
 
     func apply(settings: ReaderSettings) {
@@ -3305,21 +3308,6 @@ final class ReaderViewController: NSViewController, NSMenuDelegate {
     private func showRelation(_ direction: RelationTreeModel.Direction) {
         guard let contextMenuOffset else { return }
         onShowRelation?(contextMenuOffset, direction)
-    }
-
-    private func contextMenuByteOffset() -> UInt32? {
-        guard displayedDocument != nil else { return nil }
-        let characterIndex: Int
-        if let event = NSApplication.shared.currentEvent,
-           event.window === textView.view.window
-        {
-            characterIndex = textView.view.characterIndexForInsertion(
-                at: textView.view.convert(event.locationInWindow, from: nil)
-            )
-        } else {
-            characterIndex = textView.view.selectedRange().location
-        }
-        return textView.byteOffset(forCharacterIndex: characterIndex)
     }
 
 }
