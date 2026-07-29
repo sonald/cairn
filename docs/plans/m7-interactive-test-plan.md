@@ -11,7 +11,7 @@ M7 的自动化已经跑满：381 测试、12 通道、四方向真实 rust-anal
 1. **手感与帧率**——S6 §7 的 B3、N1 明确留给人判断，禁止用 fragment 数或延迟数字替代。
 2. **"绿但看不见"**——M7 期间决策者报的两个真机缺陷（右键菜单四方向全废、
    Follow 只响应一次），发生时**通道全绿、测试全绿**。存在性断言证明不了可见性。
-3. **可读性**——provenance 标注、计数文案、AX 朗读，机器只能断言字符串存在，
+3. **可读性**——provenance 标注与计数文案，机器只能断言字符串存在，
    判断不了"用户能不能看懂"。
 
 **所以本轮的重点不是"再验一遍功能"，而是验自动化结构性覆盖不到的那部分。**
@@ -50,7 +50,8 @@ swift run -c release codeinsight-app
 |---|---|---|
 | **Follow 更新回归** | `tokio/src/runtime/task/harness.rs:420` `fn can_read_output` | **恰好两个 caller，且都在同一文件**：`:133` `try_set_join_waker`、`:281` `try_read_output`。这正是决策者报缺陷时的现场 |
 | callers / calls | `harness.rs:153` `pub(super) fn poll(self)` | |
-| **引用但不是调用** | `tokio/src/runtime/task/mod.rs:247` `pub(crate) struct Notified<S>` | 大量**类型位置**使用：`schedule.rs:57` 参数、`tests/task.rs:392` `VecDeque<task::Notified<Runtime>>` 字段。**这些位置 Call Hierarchy 覆盖不到** |
+| **引用但不是调用** | `tokio/src/runtime/task/core.rs:159` `pub(crate) struct Header` | **具名字段结构体，实测零个 `Header(` 构造调用**，因此不可调用；类型位置密集：`core.rs:164` `NonNull<Header>`、`:194` `Pointers<Header>`、`:269` `&Header` |
+| ~~Notified~~（**首轮用错，勿再用**） | `task/mod.rs:247` `struct Notified<S>(Task<S>)` | **元组结构体，构造函数本身可调用**（`harness.rs:161`、`raw.rs:334`、`mod.rs:349` 都是真实构造点）。首轮把它当"不可调用符号"是规格错误 |
 | implementations | `task/mod.rs:298` `pub(crate) trait Schedule` | 真 impl：`scheduler/current_thread/mod.rs:637`、`tests/task.rs:455` |
 | 大结果规模 | `Tests/Fixtures/m6_reference_density.rust` | 100,000 行 / 20,000 binding / 35,000 引用。**只用于观感与工作量，不替代真实 RA** |
 
@@ -70,6 +71,10 @@ swift run -c release codeinsight-app
 - Safe 模式禁用 build script 与 proc macro，相关 crate 覆盖可能 partial。
 - 依赖源码只来自本地 Cargo 缓存；**Trusted 不会下载任何东西**，
   不要把"需要 Trusted"写成获取依赖的手段。
+- **a11y 不在本轮范围。** 全仓库唯一被设计并验收过的 AX 只有 Relation 结果行
+  （M7-S5A，`RelationWindowController:737/846-847`）；阅读区、大纲、搜索面板、
+  设置窗从未做过 AX——这是 **M2 起挂了五个里程碑的 backlog #11**，
+  将由独立专项处理。**本轮不测 VoiceOver，相关问题不记 M7 FAIL。**
 
 ---
 
@@ -114,13 +119,15 @@ swift run -c release codeinsight-app
 > **为什么在这里**：最容易退化成"Callers 的别名"。要用**类型位置**证明
 > References 覆盖了 Call Hierarchy 覆盖不到的东西。
 
-对 `task/mod.rs:247` 的 `struct Notified` 操作：
+对 `task/core.rs:159` 的 `struct Header` 操作（**首轮用的 `Notified` 是元组结构体、
+构造函数可调用，那是规格错误，已换锚点**）：
 
 | # | 操作 | 期望的可证伪观察 |
 |---|---|---|
-| H3.1 | 查 References | 结果**包含类型位置**，例如 `schedule.rs:57` 的参数、`tests/task.rs:392` 的 `VecDeque<...>` 字段。**写下至少两条类型位置的结果行** |
-| H3.2 | 对同一符号查 Callers | **要么空、要么明确的"不是可调用符号"文案**（写下原文）。若 Callers 与 References 结果相同 → **FAIL，退化成别名了** |
-| H3.3 | 注释/字符串不得混入 | 浏览结果，确认没有把注释里或字符串里的 `Notified` 当引用（若有，记下具体行） |
+| H3.1 | 查 References | 结果**包含类型位置**，例如 `core.rs:164` `NonNull<Header>`、`:194` `Pointers<Header>`、`:269` `&Header`。**写下至少两条** |
+| H3.2 | 对同一符号查 Callers | `Header` 无构造调用，**期望空或"不是可调用符号"文案**（写下原文） |
+| H3.3 | **两个结果集必须不同** | 把 H3.1 与 H3.2 的结果对比。**若相同 → FAIL，References 退化成 Callers 的别名** |
+| H3.4 | 注释/字符串不得混入 | 浏览结果，确认没把注释或字符串里的 `Header` 当引用 |
 
 ## H4 Exact / Fuzzy 并置与来源可读性
 
@@ -138,7 +145,7 @@ swift run -c release codeinsight-app
 |---|---|---|
 | H5.1 | 小结果 | 组副标题 `N references`，**N 等于该组实际行数**（数一下） |
 | H5.2 | 超显示上限 | `Showing first 500 of M references`（写下原文） |
-| H5.3 | 服务截断 | `N verified references · partial`，**文案里不得出现"共 M 条"这类真实总数**（逐字看） |
+| H5.3 | 服务截断 | **看 References 面板内最后一行的橙色 footer**，不是窗口状态栏。状态栏那个 `Results truncated` 是另一个控件（`MainWindowController:56`），**不要拿它当本项证据**。footer 应为 `N verified references · partial` |
 | H5.4 | Exact + Fuzzy 混合时 | **两组各自的数字都等于自己的行数**，没有一个组标着跨组总和（这是 S4-Fix 修的，回归重点） |
 
 ## H6 规模与手感（**S6 §7 N1 / B3，机器判不了**）
@@ -147,7 +154,7 @@ swift run -c release codeinsight-app
 |---|---|---|
 | H6.1 | 对 tokio 里一个热门符号查 References | **首批结果多久出现**？自动化实测 2,500ms（形态像撞时间预算）。**你的体感是"可接受"还是"卡"**——写下判断 |
 | H6.2 | 结果出现过程中滚动面板 | 是否掉帧、是否卡顿。**禁止用 fragment 数替代目视** |
-| H6.3 | 打开 `m6_reference_density.rust`（10 万行）滚动 | 滚动是否顺滑；语义引用样式是否只作用于视口内 |
+| H6.3 | 大文件滚动 | **注意：文件树按 `pathExtension == "rs"` 过滤（`AppModel.swift:183`），`.rust` 后缀在树里看不见——这是设计，不是缺陷。** 先 `mkdir -p /tmp/bigfile/src && cp Tests/Fixtures/m6_reference_density.rust /tmp/bigfile/src/big.rs`，再把 `/tmp/bigfile` 当项目打开。滚动是否顺滑；语义引用样式是否只作用于视口内 |
 | H6.4 | 大结果出现中途切换方向 | 旧结果**不得继续流入**面板 |
 | H6.5 | 连续操作 10 分钟后 | 是否变慢、内存是否明显上涨（自动化只挡得住粗大回归，见 S6 §7 N2） |
 
@@ -163,22 +170,11 @@ swift run -c release codeinsight-app
 | H7.4 | **粒度判断** | 这四项是不是你想要的旋钮？**缺哪个、哪个没用**——直接写下来，这是本项的主要产出 |
 | H7.5 | 三主题各看一遍 | 在 Dark 与 SI Classic 下这些值是否仍合适 |
 
-## H8 AX：VoiceOver 真的读得出来吗
-
-> **为什么在这里**：自动化断言的是 `accessibilityValue()` 返回值，
-> **证明不了 VoiceOver 会把它读出来**。
-
-| # | 操作 | 期望的可证伪观察 |
-|---|---|---|
-| H8.1 | 开 VoiceOver，focus 到一条 Exact 结果行 | **朗读内容里包含 provenance**（写下实际听到的句子） |
-| H8.2 | 方向键在结果行间移动 | 每次朗读跟着变；**焦点变化有播报** |
-| H8.3 | 尝试编辑 | **没有任何编辑入口**（只读铁律） |
-
 ## H9 语境交叉抽验
 
 | # | 操作 | 期望的可证伪观察 |
 |---|---|---|
-| H9.1 | 切到历史 commit 快照后查 References | 仍能出结果；标注反映历史快照 |
+| H9.1 | 切到历史 commit 快照后查 References | **要求只有"仍能出结果"**（计划 §S3 原文：Safe / offline / 历史快照三种场景各验）。行内是否带快照标注**目前不是需求**——若你觉得缺了会误导，写进建议，不记 FAIL |
 | H9.2 | Safe → Trusted 切换后重查 | 结果或覆盖度**如实变化**，标注同步更新（写下切换前后的标注原文） |
 | H9.3 | 在 ripgrep 语料上查 References | Exact 记 **BLOCKED**（`cargo metadata` exit 101）；**Fuzzy 应仍有结果**——这是 Fuzzy 存在的理由 |
 
