@@ -101,7 +101,7 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
         opened.append((file.lastPathComponent, offset))
     }
     model.openProject(root: root)
-    #expect(await waitUntil { model.fileTree != nil })
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
     let a = root.appendingPathComponent("a.rs")
     let b = root.appendingPathComponent("b.rs")
     let oldA = jumpRecord("a.rs", offset: 100, line: 2, column: 2)
@@ -112,7 +112,7 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
     model.goBack(from: jumpRecord("b.rs", offset: 0))
 
     #expect(opened.last?.0 == "b.rs")
-    #expect(await waitUntil { opened.last?.0 == "a.rs" && opened.last?.1 == 3 })
+    #expect(await testWaitUntil("opened.last?.0 == \"a.rs\" && opened.last?.1 == 3") { opened.last?.0 == "a.rs" && opened.last?.1 == 3 })
 }
 
 @MainActor
@@ -130,7 +130,7 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async thr
         opened.append((file.lastPathComponent, offset))
     }
     model.openProject(root: root)
-    #expect(await waitUntil { model.fileTree != nil })
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
 
     model.navigate(to: root.appendingPathComponent("a.rs"), byteOffset: 10)
     model.navigate(
@@ -144,11 +144,11 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async thr
         leaving: jumpRecord("b.rs", offset: 20)
     )
     model.goBack(from: jumpRecord("c.rs", offset: 30))
-    #expect(await waitUntil { opened.count == 4 })
+    #expect(await testWaitUntil("opened.count == 4") { opened.count == 4 })
     model.goBack(from: jumpRecord("b.rs", offset: 20))
-    #expect(await waitUntil { opened.count == 5 })
+    #expect(await testWaitUntil("opened.count == 5") { opened.count == 5 })
     model.goForward()
-    #expect(await waitUntil { opened.count == 6 })
+    #expect(await testWaitUntil("opened.count == 6") { opened.count == 6 })
 
     #expect(opened.map { "\($0.0):\($0.1 ?? 0)" } == [
         "a.rs:10", "b.rs:20", "c.rs:30", "b.rs:20", "a.rs:10", "b.rs:20",
@@ -172,7 +172,7 @@ func navigationHistoryReplaysAnAbsoluteDependencyPath() async throws {
         opened.append(file.standardizedFileURL)
     }
     model.openProject(root: root)
-    #expect(await waitUntil { model.fileTree != nil })
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
 
     let projectFile = root.appendingPathComponent("main.rs")
     model.navigate(to: projectFile)
@@ -185,9 +185,9 @@ func navigationHistoryReplaysAnAbsoluteDependencyPath() async throws {
         offset: 0,
         snapshotID: nil
     ))
-    #expect(await waitUntil { opened.count == 3 })
+    #expect(await testWaitUntil("opened.count == 3") { opened.count == 3 })
     model.goForward()
-    #expect(await waitUntil { opened.count == 4 })
+    #expect(await testWaitUntil("opened.count == 4") { opened.count == 4 })
 
     #expect(opened == [
         projectFile.standardizedFileURL,
@@ -272,7 +272,7 @@ func projectOpenPublishesFileTreeAsynchronously() async throws {
     model.openProject(root: root)
 
     #expect(model.fileTree == nil)
-    #expect(await waitUntil { model.fileTree?.fileCount == 1 })
+    #expect(await testWaitUntil("model.fileTree?.fileCount == 1") { model.fileTree?.fileCount == 1 })
 }
 
 @MainActor
@@ -291,7 +291,7 @@ func openingAnotherProjectDiscardsLateSession() async throws {
 
     model.openProject(root: rootA)
     #expect(model.fileTree == nil)
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("model.fileTree?.root == rootA.standardizedFileURL") {
         model.fileTree?.root == rootA.standardizedFileURL
     })
     #expect(await service.waitUntilRequested(root: rootA))
@@ -304,12 +304,12 @@ func openingAnotherProjectDiscardsLateSession() async throws {
         return
     }
     #expect(root == rootB.standardizedFileURL)
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("model.fileTree?.root == rootB.standardizedFileURL") {
         model.fileTree?.root == rootB.standardizedFileURL
     })
 
     await service.complete(root: rootB, result: .success(sessionB))
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("if case .ready = model.projectState { return true } return false") {
         if case .ready = model.projectState { return true }
         return false
     })
@@ -340,7 +340,7 @@ func indexingFailureMovesProjectToFailed() async throws {
         Issue.record("expected indexing")
         return
     }
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("if case .failed = model.projectState { return true } return false") {
         if case .failed = model.projectState { return true }
         return false
     })
@@ -376,7 +376,7 @@ func symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() async throws {
     let model = SymbolSearchPanelModel()
 
     model.updateQuery("al", projectState: .ready(session, context))
-    #expect(await waitUntil { model.rows.count == 2 })
+    #expect(await testWaitUntil("model.rows.count == 2") { model.rows.count == 2 })
     #expect(model.selectedIndex == 0)
 
     model.selectPrevious()
@@ -426,14 +426,14 @@ func symbolSearchPathCacheRefreshesForANewSession() async throws {
         projectState: .ready(first, queryContext(for: first)),
         currentPath: "z.rs"
     )
-    #expect(await waitUntil { !model.rows.isEmpty })
+    #expect(await testWaitUntil("!model.rows.isEmpty") { !model.rows.isEmpty })
 
     model.updateQuery(
         "target",
         projectState: .ready(second, queryContext(for: second)),
         currentPath: "z.rs"
     )
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("guard case let .result(name, hit) = model.rows.first else { return false } return name == \"target\" && hit.path == \"z.rs\"") {
         guard case let .result(name, hit) = model.rows.first else { return false }
         return name == "target" && hit.path == "z.rs"
     })
@@ -457,7 +457,7 @@ func contextWindowDebouncesClicksInsideTheSameToken() async throws {
     let offset = byteOffset(of: "target();", in: "fn target() {}\nfn main() { target(); }")
 
     model.tokenClicked(file: "main.rs", offset: offset)
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
     model.tokenClicked(file: "main.rs", offset: offset)
     model.tokenClicked(file: "main.rs", offset: offset + 2)
     for _ in 0..<10 { await Task.yield() }
@@ -485,7 +485,7 @@ func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
         file: "main.rs",
         offset: byteOffset(of: "set(ConfigKey", in: source)
     )
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"set() {}\", in: source)") {
         model.selectedCandidate?.targetByteOffset
             == byteOffset(of: "set() {}", in: source)
     })
@@ -494,7 +494,7 @@ func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
         file: "main.rs",
         offset: byteOffset(of: "ConfigKey::Backend", in: source)
     )
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"ConfigKey {\", in: source)") {
         model.selectedCandidate?.targetByteOffset
             == byteOffset(of: "ConfigKey {", in: source)
     })
@@ -542,7 +542,7 @@ func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
     let commentOffset = byteOffset(of: "plain comment", in: source)
 
     model.tokenClicked(file: "main.rs", offset: tokenOffset)
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
     // Click a location with no resolvable token: stage empties and the stale
     // located token must be cleared, not retained.
@@ -552,7 +552,7 @@ func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
     // Clicking the original token again must re-resolve instead of hitting the
     // debounce guard with a stale locatedToken and staying blank forever.
     model.tokenClicked(file: "main.rs", offset: tokenOffset)
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
     #expect(resolveCount == 2)
 }
 
@@ -572,14 +572,14 @@ func contextWindowDiscardsOutOfOrderRequests() async throws {
     model.updateProjectState(.ready(session, context), root: root)
 
     model.tokenClicked(file: "main.rs", offset: alpha)
-    #expect(await waitUntil { gate.isPending(alpha) })
+    #expect(await testWaitUntil("gate.isPending(alpha)") { gate.isPending(alpha) })
     model.tokenClicked(file: "main.rs", offset: beta)
-    #expect(await waitUntil { gate.isPending(beta) })
+    #expect(await testWaitUntil("gate.isPending(beta)") { gate.isPending(beta) })
     gate.complete(
         beta,
         with: try session.resolve(file: path, offset: beta, context: context)
     )
-    #expect(await waitUntil { model.selectedCandidate?.line == 2 })
+    #expect(await testWaitUntil("model.selectedCandidate?.line == 2") { model.selectedCandidate?.line == 2 })
     gate.complete(
         alpha,
         with: try session.resolve(file: path, offset: alpha, context: context)
@@ -612,7 +612,7 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
     model.updateProjectState(.ready(session, firstContext), root: root)
 
     model.tokenClicked(file: "main.rs", offset: alpha)
-    #expect(await waitUntil { gate.isPending(alpha) })
+    #expect(await testWaitUntil("gate.isPending(alpha)") { gate.isPending(alpha) })
     model.updateProjectState(.ready(session, secondContext), root: root)
     gate.complete(
         alpha,
@@ -626,7 +626,7 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
     #expect(model.candidateCount == 0)
 
     model.tokenClicked(file: "main.rs", offset: beta)
-    #expect(await waitUntil { gate.isPending(beta) })
+    #expect(await testWaitUntil("gate.isPending(beta)") { gate.isPending(beta) })
     gate.complete(
         beta,
         with: try session.resolve(
@@ -635,7 +635,7 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
             context: secondContext
         )
     )
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"beta() {}\", in: source)") {
         model.selectedCandidate?.targetByteOffset
             == byteOffset(of: "beta() {}", in: source)
     })
@@ -741,7 +741,7 @@ func relationSelectionUpdatesContextUnlessPinned() async throws {
 
     contextWindow.setMode(.follow)
     model.relationTree.select(edge)
-    #expect(await waitUntil { requests.count == 1 })
+    #expect(await testWaitUntil("requests.count == 1") { requests.count == 1 })
     #expect(requests.first?.path == "main.rs")
     #expect(requests.first?.offset == byteOffset(of: "target() {}", in: source))
 }
@@ -783,11 +783,11 @@ func relationSelectionUpdatesContextOnConsecutiveCallerRows() async throws {
     let second = try #require(edges?.first { $0.title == "second" })
 
     model.relationTree.select(first)
-    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
+    #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
     let firstCandidate = try #require(contextWindow.selectedCandidate)
 
     model.relationTree.select(second)
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("contextWindow.selectedCandidate?.symbol != firstCandidate.symbol") {
         contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
     })
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
@@ -834,10 +834,10 @@ func relationSelectionUpdatesContextOnConsecutiveCallRows() async throws {
     let second = try #require(edges?.first { $0.title == "second" })
 
     model.relationTree.select(first)
-    #expect(await waitUntil { contextWindow.selectedCandidate != nil })
+    #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
     let firstCandidate = try #require(contextWindow.selectedCandidate)
     model.relationTree.select(second)
-    #expect(await waitUntil {
+    #expect(await testWaitUntil("contextWindow.selectedCandidate?.symbol != firstCandidate.symbol") {
         contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
     })
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
@@ -886,10 +886,10 @@ func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async thro
     let second = try #require(edges?.first { $0.title == "Second" })
 
     model.relationTree.select(first)
-    #expect(await waitUntil { !requests.isEmpty })
+    #expect(await testWaitUntil("!requests.isEmpty") { !requests.isEmpty })
     let firstCandidate = contextWindow.selectedCandidate
     model.relationTree.select(second)
-    #expect(await waitUntil { requests.count == 2 })
+    #expect(await testWaitUntil("requests.count == 2") { requests.count == 2 })
     #expect(contextWindow.selectedCandidate?.symbol != firstCandidate?.symbol)
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
     #expect(requests[0].offset != requests[1].offset)
@@ -909,7 +909,7 @@ func contextCandidateSelectionWraps() async throws {
     let model = ContextWindowModel()
     model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
     model.tokenClicked(file: "main.rs", offset: byteOffset(of: "close();", in: source))
-    #expect(await waitUntil { model.candidateCount == 2 })
+    #expect(await testWaitUntil("model.candidateCount == 2") { model.candidateCount == 2 })
 
     model.selectPrevious()
     #expect(model.selectedIndex == 1)
@@ -942,7 +942,7 @@ func contextPendingTokenResolvesWhenIndexBecomesReady() async throws {
         .ready(session, queryContext(for: session)),
         root: root
     )
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
     #expect(resolveCount == 1)
 }
 
@@ -963,7 +963,7 @@ func contextWindowResolvesUseAliasFixtureWithPresentationLabel() async throws {
         file: "main.rs",
         offset: byteOffset(of: "open_db();", in: source)
     )
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
     let candidate = try #require(model.selectedCandidate)
 
     #expect(candidate.label.lowercased().contains("strong"))
@@ -984,7 +984,7 @@ func contextWindowPresentsLocalBindingKind() async throws {
         file: "main.rs",
         offset: byteOffset(of: "local;", in: source)
     )
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
     #expect(model.selectedCandidate?.bindingKind == "letBinding")
     #expect(model.selectedCandidate?.line == 2)
@@ -1004,7 +1004,7 @@ func contextWindowExplainsUnresolvedExternalCrate() async throws {
         file: "main.rs",
         offset: byteOffset(of: "Read();", in: source)
     )
-    #expect(await waitUntil { model.candidateCount == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
     #expect(model.selectedCandidate?.excerpt == "external crate — not resolved (M1)")
 }
@@ -1038,19 +1038,35 @@ private actor ControlledIndexService: IndexService {
 
     func waitUntilDelivered(root: URL) async -> Bool {
         let key = root.standardizedFileURL.path
-        for _ in 0..<100 {
-            if delivered.contains(key) { return true }
-            await Task.yield()
+        return await waitUntil("index result delivered for \(key)") {
+            delivered.contains(key)
         }
-        return false
     }
 
     func waitUntilRequested(root: URL) async -> Bool {
         let key = root.standardizedFileURL.path
-        for _ in 0..<100 {
-            if pending[key] != nil { return true }
-            await Task.yield()
+        return await waitUntil("index request received for \(key)") {
+            pending[key] != nil
         }
+    }
+
+    private func waitUntil(
+        _ description: String,
+        _ condition: () -> Bool
+    ) async -> Bool {
+        // This wall-clock bound is only a hang fuse; performance has separate budget tests.
+        let deadline = ContinuousClock.now + .seconds(120)
+        while ContinuousClock.now < deadline {
+            if condition() { return true }
+            do {
+                try await Task.sleep(for: .milliseconds(10))
+            } catch {
+                Issue.record("Cancelled while waiting for: \(description)")
+                return false
+            }
+        }
+        if condition() { return true }
+        Issue.record("Hang fuse expired while waiting for: \(description)")
         return false
     }
 }
@@ -1095,15 +1111,6 @@ private struct FailingIndexService: IndexService {
 
 private enum Failure: Error {
     case expected
-}
-
-@MainActor
-private func waitUntil(_ condition: @MainActor () -> Bool) async -> Bool {
-    for _ in 0..<100 {
-        if condition() { return true }
-        await Task.yield()
-    }
-    return false
 }
 
 private func temporaryProject(_ files: [String: String]) throws -> URL {

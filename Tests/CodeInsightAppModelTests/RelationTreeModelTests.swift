@@ -556,13 +556,13 @@ func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
         revision: nil,
         generation: fixture.context.generation
     )
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let model = RelationTreeModel()
     model.attachExactCoordinator(coordinator)
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact (1)", in: model.root)
     let dependencyCaller = try #require(exact.children?.first)
 
@@ -605,7 +605,7 @@ func exactCoordinatorRequestsReferencesWithoutTheDeclaration() async throws {
         revision: nil,
         generation: fixture.context.generation
     )
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let result = await coordinator.relations(
         file: "main.rs",
@@ -644,7 +644,7 @@ func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
             revision: nil,
             generation: fixture.context.generation
         )
-        #expect(await relationWaitUntilSlow {
+        #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.coverage == coverage") {
             coordinator.readiness == .ready && coordinator.coverage == coverage
         })
         let model = RelationTreeModel()
@@ -747,7 +747,7 @@ func exactCoordinatorDoesNotCallReferencesWithoutCapability() async throws {
         provider: RelationHierarchyExactProvider(session: session)
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let result = await coordinator.relations(
         file: "main.rs",
@@ -787,7 +787,7 @@ func exactCoordinatorDiscardsAStaleCallHierarchyResult() async throws {
         )
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let request = Task {
         await coordinator.relations(
@@ -798,7 +798,7 @@ func exactCoordinatorDiscardsAStaleCallHierarchyResult() async throws {
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { session.incomingStarted })
+    #expect(await testWaitUntil("session.incomingStarted") { session.incomingStarted })
     coordinator.invalidate(generation: 2)
     session.releaseIncoming()
 
@@ -837,7 +837,7 @@ func exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare()
         )
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && provider.prepareCount == 1") {
         coordinator.readiness == .ready && provider.prepareCount == 1
     })
     let request = Task {
@@ -849,10 +849,10 @@ func exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare()
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { blocked.incomingStarted })
+    #expect(await testWaitUntil("blocked.incomingStarted") { blocked.incomingStarted })
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && provider.prepareCount == 2") {
         coordinator.readiness == .ready && provider.prepareCount == 2
     })
     blocked.releaseIncoming()
@@ -879,7 +879,7 @@ func exactCoordinatorDiscardsReferencesAfterProfileSwitch() async throws {
         provider: provider
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let request = Task {
         await coordinator.relations(
             file: "main.rs",
@@ -889,7 +889,7 @@ func exactCoordinatorDiscardsReferencesAfterProfileSwitch() async throws {
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+    #expect(await testWaitUntil("blocked.referencesStarted") { blocked.referencesStarted })
 
     coordinator.prepare(
         projectURL: fixture.root,
@@ -897,7 +897,7 @@ func exactCoordinatorDiscardsReferencesAfterProfileSwitch() async throws {
         featureSelection: .allFeatures,
         generation: 1
     )
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && provider.prepareCount == 2") {
         coordinator.readiness == .ready && provider.prepareCount == 2
     })
     blocked.releaseReferences()
@@ -923,7 +923,7 @@ func exactCoordinatorDiscardsReferencesAfterSessionReplacement() async throws {
         provider: provider
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let request = Task {
         await coordinator.relations(
             file: "main.rs",
@@ -933,10 +933,10 @@ func exactCoordinatorDiscardsReferencesAfterSessionReplacement() async throws {
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+    #expect(await testWaitUntil("blocked.referencesStarted") { blocked.referencesStarted })
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && provider.prepareCount == 2") {
         coordinator.readiness == .ready && provider.prepareCount == 2
     })
     blocked.releaseReferences()
@@ -962,7 +962,7 @@ func exactCoordinatorDiscardsReferencesAfterSnapshotSwitch() async throws {
         provider: provider
     )
     coordinator.prepare(projectURL: fixture.root, revision: "old", generation: 1)
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let request = Task {
         await coordinator.relations(
             file: "main.rs",
@@ -972,10 +972,10 @@ func exactCoordinatorDiscardsReferencesAfterSnapshotSwitch() async throws {
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+    #expect(await testWaitUntil("blocked.referencesStarted") { blocked.referencesStarted })
 
     coordinator.prepare(projectURL: fixture.root, revision: "new", generation: 2)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && provider.prepareCount == 2") {
         coordinator.readiness == .ready && provider.prepareCount == 2
     })
     blocked.releaseReferences()
@@ -1005,7 +1005,7 @@ func exactCoordinatorDiscardsReferencesAfterTrustSwitch() async throws {
         trustRegistry: trustRegistry
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.trustMode == .safe") {
         coordinator.readiness == .ready && coordinator.trustMode == .safe
     })
     let request = Task {
@@ -1017,11 +1017,11 @@ func exactCoordinatorDiscardsReferencesAfterTrustSwitch() async throws {
             generation: 1
         )
     }
-    #expect(await relationWaitUntilSlow { blocked.referencesStarted })
+    #expect(await testWaitUntil("blocked.referencesStarted") { blocked.referencesStarted })
 
     try await coordinator.grantTrust(fixture.root)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await relationWaitUntilSlow {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.trustMode == .trusted && provider.prepareCount == 2") {
         coordinator.readiness == .ready
             && coordinator.trustMode == .trusted
             && provider.prepareCount == 2
@@ -1074,7 +1074,7 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     let edge = try #require(exact.children?.first)
@@ -1124,7 +1124,7 @@ func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let first = try #require(
         try relationGroup("Exact (1)", in: model.root).children?.first
     )
@@ -1268,7 +1268,7 @@ func relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() async throws {
         revision: nil,
         generation: fixture.context.generation
     )
-    #expect(await relationWaitUntilSlow { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let model = RelationTreeModel()
     model.attachExactCoordinator(coordinator)
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1324,7 +1324,7 @@ func relationTreeShowsExactOnlyImplementations() async throws {
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(trait), direction: .implementations)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let exact = try relationGroup("Exact (1)", in: model.root)
 
     #expect(exact.children?.map(\.title) == ["view.rs:1"])
@@ -1358,7 +1358,7 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(symbol), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup(
         "Exact unavailable: no exact session",
@@ -1437,7 +1437,7 @@ func relationTreeLabelsNameOnlyCallsHonestly() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let possible = try relationGroup("Possible", in: model.root)
     let probable = try relationGroup("Probable", in: model.root)
@@ -1503,7 +1503,7 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
@@ -1558,7 +1558,7 @@ func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
@@ -1607,7 +1607,7 @@ func contextAndRelationsShareTheDependencyPathConvention() async throws {
         root: fixture.root
     )
     contextModel.tokenClicked(file: "main.rs", offset: 9)
-    #expect(await relationWaitUntil {
+    #expect(await testWaitUntil("contextModel.selectedCandidate?.path == dependency.path") {
         contextModel.selectedCandidate?.path == dependency.path
     })
 
@@ -1638,7 +1638,7 @@ func contextAndRelationsShareTheDependencyPathConvention() async throws {
     )
     relationModel.updateProjectState(.ready(fixture.session, fixture.context))
     relationModel.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil {
+    #expect(await testWaitUntil("relationTreeFinishedLoading(relationModel.root)") {
         relationTreeFinishedLoading(relationModel.root)
     })
     let external = try relationGroup(
@@ -1679,7 +1679,7 @@ func relationTreeShowsExternalCallsAsUnresolved() async throws {
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(symbol), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let external = try relationGroup("External / Unresolved", in: model.root)
     #expect(external.children?.map(\.title) == ["post", "spawn"])
@@ -1706,7 +1706,7 @@ func relationTreeShowsEmptyExternalCallsGroupForSignatureOnlyTrait() async throw
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(symbol), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let external = try relationGroup("External / Unresolved (0)", in: model.root)
     #expect(external.children?.isEmpty == true)
@@ -1745,7 +1745,7 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let symbolEdge = try #require(strong.children?.first)
     model.select(symbolEdge)
@@ -1755,12 +1755,12 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
         target: .engine(model.selectedRelationSymbol ?? fixture.a),
         direction: .callers
     )
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     #expect(model.root?.title == "b")
     #expect(model.generation > generation)
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let external = try relationGroup("External / Unresolved", in: model.root)
     let unresolvedEdge = try #require(external.children?.first)
     model.select(unresolvedEdge)
@@ -1770,7 +1770,7 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
         target: .engine(model.selectedRelationSymbol ?? fixture.a),
         direction: .callers
     )
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     #expect(model.root?.title == "a")
 }
 
@@ -1794,7 +1794,7 @@ func clearingRelationSelectionDoesNotNotifyContext() async throws {
     })
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let child = try #require(strong.children?.first)
     var selectedTitles: [String] = []
@@ -1822,7 +1822,7 @@ func relationTreeShowsAnErrorRowWhenLoadingFails() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     #expect(model.root?.children?.first?.kind == .error)
     #expect(model.root?.children?.first?.title == "Could not load relations.")
@@ -1858,7 +1858,7 @@ func relationTreeMarksPathLocalCallerCycle() async throws {
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(symbol), direction: .callers)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let firstStrong = try relationGroup("Strong", in: model.root)
     let callerB = try #require(firstStrong.children?.first { $0.title == "b" })
 
@@ -1900,13 +1900,13 @@ func relationTreeLoadsTraitImplementationsAndMethodOverrides() async throws {
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(trait.0), direction: .implementations)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let implementations = try relationGroup("Strong", in: model.root)
     #expect(implementations.children?.map(\.title) == ["View"])
     #expect(implementations.children?.first?.subtitle == "Strong · trait")
 
     model.setRoot(target: .engine(method), direction: .implementations)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let overrides = try relationGroup("Strong", in: model.root)
     #expect(overrides.children?.map(\.title) == ["render"])
     #expect(overrides.children?.first?.subtitle == "Strong · trait")
@@ -1926,14 +1926,14 @@ func relationTreeExpandIsIdempotentWhileLoading() async throws {
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(model.root?.children?.first?.kind == .loading)
-    #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
+    #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
     let root = try #require(model.root)
     await model.expand(root)
     await model.expand(root)
 
     #expect(await fake.count(for: fixture.a) == 1)
     await fake.release(fixture.a)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 }
 
 @MainActor
@@ -1972,9 +1972,9 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
+    #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
     model.setRoot(target: .engine(fixture.b), direction: .calls)
-    #expect(await relationWaitUntil {
+    #expect(await testWaitUntil("model.root?.children?.first { $0.kind == .group && $0.title == \"Strong\" }?.children?.first?.title == \"fresh\"") {
         model.root?.children?.first {
             $0.kind == .group && $0.title == "Strong"
         }?.children?.first?.title == "fresh"
@@ -2011,7 +2011,7 @@ func relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() async thr
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .references)
-    #expect(await relationWaitUntil { await fake.isPending(fixture.a) })
+    #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
     model.updateProjectState(.ready(fixture.session, fixture.context))
     await fake.release(fixture.a)
     for _ in 0..<10 { await Task.yield() }
@@ -2043,7 +2043,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let strong = try relationGroup("Strong", in: model.root)
     #expect(strong.children?.count == 500)
@@ -2077,7 +2077,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let exact = try relationGroup("Exact (500)", in: model.root)
     #expect(exact.children?.count == 500)
@@ -2115,7 +2115,7 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
     let model = RelationTreeModel(loader: fake.load)
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setRoot(target: .engine(fixture.a), direction: .calls)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let strong = try relationGroup("Strong", in: model.root)
     let child = try #require(strong.children?.first)
 
@@ -2446,28 +2446,6 @@ private struct RelationFixture {
 }
 
 @MainActor
-private func relationWaitUntil(
-    _ condition: @escaping @MainActor () async -> Bool
-) async -> Bool {
-    for _ in 0..<200 {
-        if await condition() { return true }
-        await Task.yield()
-    }
-    return false
-}
-
-@MainActor
-private func relationWaitUntilSlow(
-    _ condition: @escaping @MainActor () async -> Bool
-) async -> Bool {
-    for _ in 0..<200 {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    return false
-}
-
-@MainActor
 private func relationTreeFinishedLoading(_ root: RelationTreeModel.Node?) -> Bool {
     guard let children = root?.children else { return false }
     return !children.contains { $0.kind == .loading }
@@ -2499,7 +2477,7 @@ private func relationExactEmptyTitle(
     )
     model.updateProjectState(.ready(session, context))
     model.setRoot(target: .engine(symbol), direction: direction)
-    #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     return try #require(model.root?.children?.first {
         $0.kind == .group && $0.title.hasPrefix("Exact")
     }?.title)

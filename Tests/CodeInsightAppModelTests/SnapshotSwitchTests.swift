@@ -26,16 +26,16 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.switchToCommit("C")
 
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .firstPaint })
+    #expect(await testWaitUntil("model.snapshotPhase == .firstPaint") { model.snapshotPhase == .firstPaint })
     #expect(model.fileTree?.children.first?.name == "src")
     #expect(model.coverage.filesIndexed == 0)
     #expect(model.coverage.filesTotal == 1)
 
     await service.releaseCached("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .cachedReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .cachedReady") { model.snapshotPhase == .cachedReady })
     guard case let .ready(_, cachedContext) = model.projectState else {
         Issue.record("expected cached session")
         return
@@ -43,7 +43,7 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     #expect(cachedContext.generation == model.generation)
 
     await service.releaseFull("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.coverage.filesIndexed == 1)
     #expect(model.coverage.importsResolved == nil)
 }
@@ -65,15 +65,15 @@ func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.switchToCommit("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .cachedReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .cachedReady") { model.snapshotPhase == .cachedReady })
 
     let cSnapshotID = model.currentSnapshotID
     model.switchToCommit("D")
     #expect(model.currentSnapshotID == cSnapshotID)
     #expect(model.documentSource != nil)
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady && model.currentRevision == \"D\"") {
         model.snapshotPhase == .fullReady && model.currentRevision == "D"
     })
     #expect(await service.wasCancelled("C"))
@@ -106,9 +106,9 @@ func snapshotSwitchInvalidatesAnOlderContextRequest() async throws {
     let offset = UInt32(source[..<source.range(of: "target();")!.lowerBound].utf8.count)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     contextWindow.tokenClicked(file: "main.rs", offset: offset)
-    #expect(await snapshotWaitUntil { resolver.isPending })
+    #expect(await testWaitUntil("resolver.isPending") { resolver.isPending })
 
     model.switchToCommit("C")
     let oldRequestID = contextWindow.requestID
@@ -133,14 +133,14 @@ func commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() async throws {
     let model = AppModel()
 
     model.openProject(root: fixture.root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigate(to: file)
     let worktreeSnapshotID = model.currentSnapshotID
     let worktree = try DocumentLoader().load(file: file).document
     #expect(String(bytes: worktree.bytes, encoding: .utf8)?.contains("Y") == true)
 
     model.switchToCommit("HEAD")
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.currentRevision == \"HEAD\" && model.snapshotPhase != nil") {
         model.currentRevision == "HEAD" && model.snapshotPhase != nil
     })
     #expect(model.selectedFile == file.standardizedFileURL)
@@ -152,7 +152,7 @@ func commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() async throws {
 
     let commitSnapshotID = model.currentSnapshotID
     model.switchToWorktree()
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.snapshotPhase != nil && model.currentSnapshotID != commitSnapshotID") {
         model.snapshotPhase != nil && model.currentSnapshotID != commitSnapshotID
     })
     #expect(model.documentSource == nil)
@@ -182,9 +182,9 @@ func appModelResolvesAgainstTheSelectedCommitSession() async throws {
     let model = AppModel()
 
     model.openProject(root: fixture.root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.switchToCommit("HEAD~1")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     let offset = UInt32(
         oldMain[..<oldMain.range(of: "old_target();")!.lowerBound].utf8.count
     )
@@ -243,14 +243,14 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
     )
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigate(to: a, byteOffset: 8)
     #expect(model.currentSnapshotID == worktree.snapshotID)
     #expect(model.selectedFile == a)
 
     model.switchToCommit("C", leaving: worktreeA)
     #expect(model.navigationHistory.records.last?.snapshotID == worktree.snapshotID)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.currentSnapshotID == commit.snapshotID)
     #expect(model.selectedFile == a)
 
@@ -261,13 +261,13 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
 
     model.goBack(from: commitB)
     #expect(model.currentSnapshotID == commit.snapshotID)
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.selectedFile == a && model.selectedByteOffset == 8") {
         model.selectedFile == a && model.selectedByteOffset == 8
     })
     #expect(model.navigationHistory.records.count == 2)
 
     model.goBack(from: commitA)
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.currentSnapshotID == worktree.snapshotID && model.selectedFile == a && model.selectedByteOffset == 8") {
         model.currentSnapshotID == worktree.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == 8
@@ -275,7 +275,7 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
     #expect(model.navigationHistory.records.count == 2)
 
     model.goForward()
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.currentSnapshotID == commit.snapshotID && model.selectedFile == a && model.selectedByteOffset == 8") {
         model.currentSnapshotID == commit.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == 8
@@ -284,7 +284,7 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
 
     model.goForward()
     #expect(model.currentSnapshotID == commit.snapshotID)
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.selectedFile == b && model.selectedByteOffset == 9") {
         model.selectedFile == b && model.selectedByteOffset == 9
     })
     #expect(model.navigationHistory.records.count == 2)
@@ -305,7 +305,7 @@ func snapshotSwitchDoesNotPushWithoutASelectedFile() async throws {
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.switchToCommit("C", leaving: snapshotJumpRecord(
         "a.rs",
         offset: 0,
@@ -313,7 +313,7 @@ func snapshotSwitchDoesNotPushWithoutASelectedFile() async throws {
     ))
 
     #expect(model.navigationHistory.records.isEmpty)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
 }
 
 @MainActor
@@ -332,7 +332,7 @@ func snapshotSwitchClearsASelectionMissingFromTheTarget() async throws {
     let a = root.appendingPathComponent("a.rs")
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigate(to: a)
     model.switchToCommit("C", leaving: snapshotJumpRecord(
         "a.rs",
@@ -340,7 +340,7 @@ func snapshotSwitchClearsASelectionMissingFromTheTarget() async throws {
         snapshotID: initial.snapshotID
     ))
 
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.selectedFile == nil)
 }
 
@@ -369,7 +369,7 @@ func crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() async throws 
     let a = root.appendingPathComponent("a.rs")
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigationHistory.push(snapshotJumpRecord(
         "a.rs",
         offset: 100,
@@ -378,7 +378,7 @@ func crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() async throws 
         snapshotID: worktree.snapshotID
     ))
     model.switchToCommit("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
 
     model.goBack(from: snapshotJumpRecord(
         "b.rs",
@@ -386,7 +386,7 @@ func crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() async throws 
         snapshotID: commit.snapshotID
     ))
 
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.currentSnapshotID == worktree.snapshotID && model.selectedFile == a && model.selectedByteOffset == 2") {
         model.currentSnapshotID == worktree.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == 2
@@ -420,7 +420,7 @@ func crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() async
     let nameOffset = UInt32(source[..<source.range(of: "moved_target")!.lowerBound].utf8.count)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigationHistory.push(snapshotJumpRecord(
         "a.rs",
         offset: 100,
@@ -430,7 +430,7 @@ func crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() async
         snapshotID: worktree.snapshotID
     ))
     model.switchToCommit("C")
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
 
     model.goBack(from: snapshotJumpRecord(
         "b.rs",
@@ -438,7 +438,7 @@ func crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() async
         snapshotID: commit.snapshotID
     ))
 
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.currentSnapshotID == worktree.snapshotID && model.selectedFile == a && model.selectedByteOffset == nameOffset") {
         model.currentSnapshotID == worktree.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == nameOffset
@@ -457,7 +457,7 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
     let a = root.appendingPathComponent("a.rs")
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     let generation = model.generation
     model.navigationHistory.push(snapshotJumpRecord(
         "a.rs",
@@ -473,7 +473,7 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
 
     #expect(model.generation == generation)
     #expect(model.snapshotPhase == .fullReady)
-    #expect(await snapshotWaitUntil {
+    #expect(await testWaitUntil("model.selectedFile == a && model.selectedByteOffset == 3") {
         model.selectedFile == a && model.selectedByteOffset == 3
     })
 }
@@ -488,7 +488,7 @@ func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
     let model = AppModel(indexService: service)
 
     model.openProject(root: root)
-    #expect(await snapshotWaitUntil { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.navigate(to: root.appendingPathComponent("main.rs"))
 
     var right: TestSnapshot? = TestSnapshot(
@@ -690,18 +690,6 @@ private final class SnapshotGitFixture {
     }
 
     func remove() { try? FileManager.default.removeItem(at: root) }
-}
-
-@MainActor
-private func snapshotWaitUntil(
-    _ condition: @MainActor () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now + .seconds(10)
-    while ContinuousClock.now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(1))
-    }
-    return condition()
 }
 
 private func snapshotTemporaryProject(_ files: [String: String]) throws -> URL {

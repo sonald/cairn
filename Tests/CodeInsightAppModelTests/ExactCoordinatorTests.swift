@@ -28,7 +28,7 @@ func exactCoordinatorAttributionObservationTracksPrepareAndInvalidate()
     )
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.trustMode == .safe })
+    #expect(await testWaitUntil("coordinator.trustMode == .safe") { coordinator.trustMode == .safe })
 
     await confirmation("prepare publishes attribution") { observed in
         withObservationTracking {
@@ -37,7 +37,7 @@ func exactCoordinatorAttributionObservationTracksPrepareAndInvalidate()
             observed()
         }
         prepareGate.signal()
-        #expect(await exactWaitUntil { coordinator.readiness == .ready })
+        #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     }
     #expect(coordinator.attribution != nil)
 
@@ -73,12 +73,12 @@ func exactCoordinatorPublishesTrustBeforeSessionReadyAndClearsOnInvalidate()
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
 
-    #expect(await exactWaitUntil { coordinator.trustMode == .safe })
+    #expect(await testWaitUntil("coordinator.trustMode == .safe") { coordinator.trustMode == .safe })
     #expect(coordinator.readiness == .preparing)
     coordinator.invalidate(generation: 2)
     #expect(coordinator.trustMode == nil)
     prepareGate.signal()
-    #expect(await exactWaitUntil { state.prepareCount == 1 })
+    #expect(await testWaitUntil("state.prepareCount == 1") { state.prepareCount == 1 })
 }
 
 @MainActor
@@ -91,7 +91,7 @@ func exactCoordinatorPreparesOpportunistically() async throws {
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
 
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(state.prepareCount == 1)
 }
 
@@ -103,7 +103,7 @@ func exactCoordinatorMarksWorktreeOrigin() async throws {
     let coordinator = fixture.coordinator(state: ExactProviderState())
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let result = await coordinator.definition(
         file: "main.rs",
@@ -121,13 +121,13 @@ func exactCoordinatorRefreshesCoverageWithoutAQuery() async throws {
     let state = ExactProviderState()
     let coordinator = fixture.coordinator(state: state)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.coverage == .partial") {
         coordinator.readiness == .ready && coordinator.coverage == .partial
     })
 
     state.publishCoverage(.dependenciesUnavailableOffline)
 
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("coordinator.coverage == .dependenciesUnavailableOffline") {
         coordinator.coverage == .dependenciesUnavailableOffline
     })
     #expect(state.definitionCount == 0)
@@ -143,7 +143,7 @@ func exactCoordinatorRestartsOneCrashThenBecomesUnavailable() async throws {
     }
     let coordinator = fixture.coordinator(state: state)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let result = await coordinator.definition(
         file: "main.rs",
@@ -173,7 +173,7 @@ func exactCoordinatorTurnsOffSafeModeWithoutSandbox() async throws {
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
 
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("if case .off = coordinator.readiness { return true } return false") {
         if case .off = coordinator.readiness { return true }
         return false
     })
@@ -197,7 +197,7 @@ func exactCoordinatorTrustUIStateFlowsGrantAndRevoke() async throws {
     #expect(coordinator.trustedRepositories.first?.path == fixture.root.path)
     #expect(coordinator.trustedRepositories.first?.grantedAt == grantedAt)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(state.trustModes.last == "trusted")
     #expect(coordinator.trustMode == .trusted)
 
@@ -206,7 +206,7 @@ func exactCoordinatorTrustUIStateFlowsGrantAndRevoke() async throws {
     try await coordinator.revokeTrust(fixture.root)
     #expect(coordinator.trustedRepositories.isEmpty)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(state.trustModes.last == "safe")
     #expect(coordinator.trustMode == .safe)
 }
@@ -221,20 +221,20 @@ func appModelTrustActionsRebuildExactSessionImmediately() async throws {
     let model = AppModel(exactCoordinator: coordinator)
 
     model.openProject(root: fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("guard case .ready = model.projectState else { return false } return coordinator.readiness == .ready") {
         guard case .ready = model.projectState else { return false }
         return coordinator.readiness == .ready
     })
     #expect(state.trustModes == ["safe"])
 
     try await model.grantCurrentRepositoryTrust()
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 2 && coordinator.readiness == .ready") {
         state.prepareCount == 2 && coordinator.readiness == .ready
     })
     #expect(state.trustModes == ["safe", "trusted"])
 
     try await model.revokeRepositoryTrust(fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 3 && coordinator.readiness == .ready") {
         state.prepareCount == 3 && coordinator.readiness == .ready
     })
     #expect(state.trustModes == ["safe", "trusted", "safe"])
@@ -250,7 +250,7 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     let model = AppModel(exactCoordinator: coordinator)
 
     model.openProject(root: fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("guard case .ready = model.projectState else { return false } return coordinator.readiness == .ready") {
         guard case .ready = model.projectState else { return false }
         return coordinator.readiness == .ready
     })
@@ -267,7 +267,7 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     #expect(state.definitionCount == 1)
 
     try await model.grantCurrentRepositoryTrust()
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 2 && coordinator.readiness == .ready") {
         state.prepareCount == 2 && coordinator.readiness == .ready
     })
     let trustedNew = try #require(await coordinator.definition(
@@ -286,7 +286,7 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     #expect(state.definitionCount == 3)
 
     try await model.revokeRepositoryTrust(fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 3 && coordinator.readiness == .ready") {
         state.prepareCount == 3 && coordinator.readiness == .ready
     })
     let safeAgain = try #require(await coordinator.definition(
@@ -312,7 +312,7 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
     let model = AppModel(exactCoordinator: coordinator)
 
     model.openProject(root: fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("guard case .ready = model.projectState else { return false } return coordinator.readiness == .ready") {
         guard case .ready = model.projectState else { return false }
         return coordinator.readiness == .ready
     })
@@ -332,7 +332,7 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
         ).first?.0
     )
     _ = model.relationTree.setRoot(target: .engine(main), direction: .calls)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.relationTree.root?.title == \"main\" && model.relationTree.root?.children?.contains { $0.kind == .loading } == false") {
         model.relationTree.root?.title == "main"
             && model.relationTree.root?.children?.contains {
                 $0.kind == .loading
@@ -341,7 +341,7 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
 
     model.switchFeatureSelection(.allFeatures)
 
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 2 && coordinator.readiness == .ready") {
         state.prepareCount == 2 && coordinator.readiness == .ready
     })
     guard case let .ready(reprofiled, context) = model.projectState else {
@@ -355,7 +355,7 @@ func appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction()
     #expect(context.analysisProfileID == reprofiled.analysisProfile.id)
     #expect(context.generation == model.generation)
     #expect(model.relationTree.generation > relationGeneration)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.relationTree.root?.title == \"main\" && model.relationTree.root?.children?.isEmpty == false && model.relationTree.root?.children?.contains { $0.kind == .loading } == false") {
         model.relationTree.root?.title == "main"
             && model.relationTree.root?.children?.isEmpty == false
             && model.relationTree.root?.children?.contains {
@@ -382,13 +382,13 @@ func appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe()
     let model = AppModel(exactCoordinator: coordinator)
 
     model.openProject(root: fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("guard case .ready = model.projectState else { return false } return coordinator.readiness == .ready") {
         guard case .ready = model.projectState else { return false }
         return coordinator.readiness == .ready
     })
 
     try await model.grantCurrentRepositoryTrust()
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 2 && coordinator.readiness == .ready") {
         state.prepareCount == 2 && coordinator.readiness == .ready
     })
     let trustedRepository: TrustedRepository = try #require(
@@ -397,7 +397,7 @@ func appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe()
     #expect(trustedRepository.path == fixture.root.path)
 
     try await model.revokeRepositoryTrust(fixture.root)
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("state.prepareCount == 3 && coordinator.readiness == .ready && state.closedSessions.contains(2)") {
         state.prepareCount == 3
             && coordinator.readiness == .ready
             && state.closedSessions.contains(2)
@@ -433,13 +433,13 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     )
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 1
     ) != nil)
 
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 2
     ) != nil)
@@ -448,7 +448,7 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
 
     versions.value = "fake-2"
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 3)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 3
     ) != nil)
@@ -460,7 +460,7 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         encoding: .utf8
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 4)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 4
     ) != nil)
@@ -506,12 +506,12 @@ func exactCoordinatorInvalidatesAnOlderSnapshotResult() async throws {
         trustRegistry: fixture.trustRegistry
     )
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
 
     let request = Task {
         await coordinator.definition(file: "main.rs", byteOffset: 0, generation: 1)
     }
-    #expect(await exactWaitUntil { blocker.started })
+    #expect(await testWaitUntil("blocker.started") { blocker.started })
     coordinator.invalidate(generation: 2)
     blocker.release()
 
@@ -567,7 +567,7 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
     )
 
     coordinator.prepare(projectURL: root, revision: "HEAD", generation: 1)
-    #expect(await exactWaitUntil { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let result = await coordinator.definition(
         file: "src/main.rs",
         byteOffset: 0,
@@ -611,7 +611,7 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     ) + exactByteOffset(of: "struct B", in: source)
 
     model.tokenClicked(file: "main.rs", offset: callOffset)
-    #expect(await exactWaitUntil { model.candidateCount == 2 && gate.count == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 2 && gate.count == 1") { model.candidateCount == 2 && gate.count == 1 })
     let fuzzySymbols = exactSymbols(model)
     #expect(model.selectedCandidate?.provenanceBadge.contains("Exact") == false)
 
@@ -620,7 +620,7 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
         byteOffset: secondDefinition
     ))
 
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.provenanceBadge.contains(\"Exact\") == true") {
         model.selectedCandidate?.provenanceBadge.contains("Exact") == true
     })
     #expect(model.candidateCount == 2)
@@ -640,13 +640,13 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
 
     let commitOID = "0123456789abcdef"
     model.setMode(.pinned)
-    #expect(await exactWaitUntil { gate.count == 2 })
+    #expect(await testWaitUntil("gate.count == 2") { gate.count == 2 })
     gate.complete(1, with: exactEntry(
         file: "main.rs",
         byteOffset: secondDefinition,
         origin: .materialized(commitOID: commitOID)
     ))
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.provenanceBadge.contains(\"@0123456\") == true") {
         model.selectedCandidate?.provenanceBadge.contains("@0123456") == true
     })
     #expect(model.selectedCandidate?.exactOrigin == .materialized(
@@ -681,7 +681,7 @@ func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
         file: "main.rs",
         offset: exactByteOffset(of: "target();", in: source)
     )
-    #expect(await exactWaitUntil { model.candidateCount == 1 && gate.count == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1 && gate.count == 1") { model.candidateCount == 1 && gate.count == 1 })
     gate.complete(0, with: exactEntry(
         file: dependency.path,
         byteOffset: exactByteOffset(
@@ -689,7 +689,7 @@ func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
             in: dependencySource
         )
     ))
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.path == dependency.path") {
         model.selectedCandidate?.path == dependency.path
     })
     let candidate = try #require(model.selectedCandidate)
@@ -725,9 +725,9 @@ func contextExactUpgradeRejectsStaleRequestAndGeneration() async throws {
     let betaDefinition = exactByteOffset(of: "beta() {}", in: source)
 
     model.tokenClicked(file: "main.rs", offset: alphaCall)
-    #expect(await exactWaitUntil { gate.count == 1 })
+    #expect(await testWaitUntil("gate.count == 1") { gate.count == 1 })
     model.tokenClicked(file: "main.rs", offset: betaCall)
-    #expect(await exactWaitUntil { gate.count == 2 })
+    #expect(await testWaitUntil("gate.count == 2") { gate.count == 2 })
     gate.complete(0, with: exactEntry(
         file: "main.rs",
         byteOffset: alphaDefinition
@@ -774,11 +774,11 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
         in: dependencySource
     )
     model.tokenClicked(file: "main.rs", offset: alphaCall)
-    #expect(await exactWaitUntil { model.candidateCount == 1 && gate.count == 1 })
+    #expect(await testWaitUntil("model.candidateCount == 1 && gate.count == 1") { model.candidateCount == 1 && gate.count == 1 })
     let original = try #require(model.selectedCandidate)
 
     model.setMode(.pinned)
-    #expect(await exactWaitUntil { gate.count == 2 })
+    #expect(await testWaitUntil("gate.count == 2") { gate.count == 2 })
     gate.complete(1, with: exactEntry(
         file: dependency.path,
         byteOffset: dependencyDefinition
@@ -791,12 +791,12 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
 
     model.setMode(.follow)
     model.setMode(.pinned)
-    #expect(await exactWaitUntil { gate.count == 3 })
+    #expect(await testWaitUntil("gate.count == 3") { gate.count == 3 })
     gate.complete(2, with: exactEntry(
         file: "main.rs",
         byteOffset: alphaDefinition
     ))
-    #expect(await exactWaitUntil { model.selectedCandidate?.certainty == .exact })
+    #expect(await testWaitUntil("model.selectedCandidate?.certainty == .exact") { model.selectedCandidate?.certainty == .exact })
     #expect(model.selectedCandidate?.symbol == original.symbol)
     #expect(model.selectedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
@@ -851,7 +851,7 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
         file: "main.rs",
         offset: exactByteOffset(of: "target();", in: source)
     )
-    #expect(await exactWaitUntil {
+    #expect(await testWaitUntil("model.selectedCandidate?.path == dependency.path") {
         model.selectedCandidate?.path == dependency.path
     })
 
@@ -1306,18 +1306,6 @@ private func exactReuseKey(
 private func exactSymbols(_ model: ContextWindowModel) -> [SymbolOccurrenceID] {
     guard case let .candidates(candidates, _) = model.stage else { return [] }
     return candidates.compactMap(\.symbol)
-}
-
-@MainActor
-private func exactWaitUntil(
-    _ condition: @MainActor () -> Bool
-) async -> Bool {
-    let deadline = ContinuousClock.now + .seconds(5)
-    while ContinuousClock.now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(1))
-    }
-    return condition()
 }
 
 private func exactTemporaryProject(_ files: [String: String]) throws -> URL {

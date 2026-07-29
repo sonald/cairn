@@ -18,7 +18,7 @@ func searchPanelDebouncesRapidQueries() async throws {
     model.setQuery("first")
     model.setQuery("second")
 
-    #expect(await searchWaitUntil { await counter.queries.count == 1 })
+    #expect(await testWaitUntil("await counter.queries.count == 1") { await counter.queries.count == 1 })
     #expect((await counter.queries).map(\.pattern) == ["second"])
     #expect((await counter.queries).map(\.caseSensitive) == [true])
     #expect((await counter.queries).map(\.isRegex) == [true])
@@ -34,16 +34,16 @@ func searchPanelDiscardsLateQueryResults() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setQuery("old")
-    #expect(await searchWaitUntil { await gate.isPending("old") })
+    #expect(await testWaitUntil("await gate.isPending(\"old\")") { await gate.isPending("old") })
     model.setQuery("new")
-    #expect(await searchWaitUntil { await gate.isPending("new") })
+    #expect(await testWaitUntil("await gate.isPending(\"new\")") { await gate.isPending("new") })
 
     await gate.release("new", batches: [SearchBatch(
         matchesByPath: [fixture.b: [searchMatch(path: fixture.b, offset: 2)]],
         isFinal: true,
         completeness: .complete
     )])
-    #expect(await searchWaitUntil { model.totalMatches == 1 })
+    #expect(await testWaitUntil("model.totalMatches == 1") { model.totalMatches == 1 })
     await gate.release("old", batches: [SearchBatch(
         matchesByPath: [fixture.a: [searchMatch(path: fixture.a, offset: 1)]],
         isFinal: true,
@@ -74,7 +74,7 @@ func searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() async throws {
         isFinal: false,
         completeness: .complete
     ))
-    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    #expect(await testWaitUntil("model.totalMatches == 2") { model.totalMatches == 2 })
     model.select(1)
 
     continuation.yield(SearchBatch(
@@ -87,7 +87,7 @@ func searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() async throws {
         completeness: .complete
     ))
     continuation.finish()
-    #expect(await searchWaitUntil { model.totalMatches == 5 })
+    #expect(await testWaitUntil("model.totalMatches == 5") { model.totalMatches == 5 })
 
     #expect(model.selectedIndex == 4)
     #expect(model.openSelection()?.path == "b.rs")
@@ -113,7 +113,7 @@ func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws 
         isFinal: false,
         completeness: .complete
     ))
-    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    #expect(await testWaitUntil("model.totalMatches == 2") { model.totalMatches == 2 })
     model.select(1)
 
     continuation.yield(SearchBatch(
@@ -124,7 +124,7 @@ func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws 
         completeness: .complete
     ))
     continuation.finish()
-    #expect(await searchWaitUntil { model.totalMatches == 3 })
+    #expect(await testWaitUntil("model.totalMatches == 3") { model.totalMatches == 3 })
 
     #expect(model.selectedIndex == 2)
     #expect(model.openSelection()?.path == "b.rs")
@@ -178,7 +178,7 @@ func searchPanelDoesNotBuildGroupsPastDisplayLimit() async throws {
     let model = SearchPanelModel { _, _, _ in stream(batches: batches) }
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setQuery("needle")
-    #expect(await searchWaitUntil {
+    #expect(await testWaitUntil("model.totalMatches == SearchPanelModel.displayLimit + 3") {
         model.totalMatches == SearchPanelModel.displayLimit + 3
     })
 
@@ -271,7 +271,7 @@ func searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() async throws {
         isFinal: false,
         completeness: .complete
     ))
-    #expect(await searchWaitUntil {
+    #expect(await testWaitUntil("model.totalMatches == SearchPanelModel.displayLimit") {
         model.totalMatches == SearchPanelModel.displayLimit
     })
     model.select(1_234)
@@ -287,7 +287,7 @@ func searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() async throws {
         completeness: .complete
     ))
     continuation.finish()
-    #expect(await searchWaitUntil {
+    #expect(await testWaitUntil("model.totalMatches == SearchPanelModel.displayLimit + 1_000") {
         model.totalMatches == SearchPanelModel.displayLimit + 1_000
     })
 
@@ -330,12 +330,12 @@ func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
     }
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setQuery("old")
-    #expect(await searchWaitUntil { model.totalMatches == 5 })
+    #expect(await testWaitUntil("model.totalMatches == 5") { model.totalMatches == 5 })
     model.select(4)
     let selectedMatch = model.groups[0].matches[4]
 
     model.setQuery("new")
-    #expect(await searchWaitUntil { model.totalMatches == 2 })
+    #expect(await testWaitUntil("model.totalMatches == 2") { model.totalMatches == 2 })
     model.reconcileSelection(
         preserving: selectedMatch,
         fallbackIndex: 4
@@ -371,7 +371,7 @@ func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
     let model = SearchPanelModel { _, _, _ in stream(batches: batches) }
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setQuery("needle")
-    #expect(await searchWaitUntil { model.totalMatches == 3 })
+    #expect(await testWaitUntil("model.totalMatches == 3") { model.totalMatches == 3 })
 
     #expect(model.groups.map(\.path) == ["a.rs", "b.rs"])
     #expect(model.groups[0].matches.map(\.value.byteRange.lowerBound) == [10, 20])
@@ -530,22 +530,11 @@ private func searchPanelModel(
     )]) }
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setQuery("needle")
-    #expect(await searchWaitUntil { model.totalMatches == matchCount })
+    #expect(await testWaitUntil("model.totalMatches == matchCount") { model.totalMatches == matchCount })
     return model
 }
 
 @MainActor
 private func displayedMatches(in model: SearchPanelModel) -> Int {
     model.groups.reduce(0) { $0 + $1.matches.count }
-}
-
-@MainActor
-private func searchWaitUntil(
-    _ condition: @escaping @MainActor () async -> Bool
-) async -> Bool {
-    for _ in 0..<200 {
-        if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(5))
-    }
-    return false
 }

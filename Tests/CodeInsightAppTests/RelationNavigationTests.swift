@@ -146,7 +146,7 @@ struct RelationUXTests {
             blockedSubjectLoad: gate
         )
         defer { fixture.close() }
-        try #require(await waitUntilAsync { await gate.started })
+        try #require(await relationTestWaitUntil("await gate.started") { await gate.started })
         let staleRoot = try #require(fixture.model.root)
         var treeChanges = 0
         fixture.controller.onTreeChange = { treeChanges += 1 }
@@ -155,7 +155,7 @@ struct RelationUXTests {
             target: .engine(fixture.firstSymbol),
             direction: .calls
         )
-        try #require(await waitUntil {
+        try #require(await relationTestWaitUntil("fixture.model.root?.title == \"first\" && fixture.controller.selfTestVisibleEdgeTitles( inGroup: \"Strong\" ) == [\"first\", \"second\"]") {
             fixture.model.root?.title == "first"
                 && fixture.controller.selfTestVisibleEdgeTitles(
                     inGroup: "Strong"
@@ -163,12 +163,9 @@ struct RelationUXTests {
         })
         let changesBeforeStaleReturn = treeChanges
         await gate.release()
-        try #require(await waitUntilAsync { await gate.finished })
+        try #require(await relationTestWaitUntil("await gate.finished") { await gate.finished })
         await pumpRunLoop()
-        _ = await waitUntilAsync({
-            treeChanges > changesBeforeStaleReturn
-                || fixture.model.root?.title != "first"
-        }, timeout: 0.5)
+        try? await Task.sleep(for: .milliseconds(500))
         _ = staleRoot.children
 
         #expect(fixture.model.root?.title == "first")
@@ -197,22 +194,22 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
     let a = fixture.root.appendingPathComponent("a.rs")
     let b = fixture.root.appendingPathComponent("b.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
     fixture.controller.openFileInNewTabForSelfTest(a)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == a.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == a.standardizedFileURL
     })
     fixture.controller.openFileInNewTabForSelfTest(b)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == b.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == b.standardizedFileURL
     })
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -222,7 +219,7 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && referenceEdge(path: \"b.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).count >= 2") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
             && referenceEdge(path: "b.rs", in: fixture.model) != nil
             && fixture.controller.selfTestVisibleRelationEdgeTitles(
@@ -245,7 +242,7 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
     ] {
         let beforeNavigation = fixture.model.navigationGeneration
         #expect(fixture.controller.selfTestSelectRelationEdge(titled: edge.title))
-        try #require(await waitUntil {
+        try #require(await relationTestWaitUntil("fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL && fixture.model.selectedByteOffset == edge.target?.byteOffset && fixture.controller.displayedReaderFile?.standardizedFileURL == file.standar...") {
             fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL
                 && fixture.model.selectedByteOffset == edge.target?.byteOffset
                 && fixture.controller.displayedReaderFile?.standardizedFileURL
@@ -273,7 +270,7 @@ func relationSymbolSingleClicksDoNotNavigate() async throws {
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -299,7 +296,7 @@ func relationSymbolSingleClicksDoNotNavigate() async throws {
         ),
     ] {
         fixture.controller.selfTestReaderRelation(offset: offset, direction: direction)
-        try #require(await waitUntil {
+        try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.title == rootTitle && relationEdge(titled: edgeTitle, in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"Strong\" ).contains(edgeTitle)") {
             fixture.model.relationTree.root?.title == rootTitle
                 && relationEdge(titled: edgeTitle, in: fixture.model) != nil
                 && fixture.controller.selfTestVisibleRelationEdgeTitles(
@@ -324,14 +321,14 @@ func rightClickRelationsUsePagedContextCandidateInAllDirections() async throws {
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
     let offset = byteOffset(of: "value.close();", in: fixture.mainSource)
         + UInt32("value.".utf8.count)
     fixture.controller.selfTestReaderClick(offset: offset, commandClick: false)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.contextWindow.candidateCount == 2") {
         fixture.model.contextWindow.candidateCount == 2
     })
     let first = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
@@ -347,7 +344,7 @@ func rightClickRelationsUsePagedContextCandidateInAllDirections() async throws {
     ] {
         let generation = fixture.model.relationTree.generation
         fixture.controller.selfTestReaderRelation(offset: offset, direction: direction)
-        try #require(await waitUntil {
+        try #require(await relationTestWaitUntil("fixture.model.relationTree.generation > generation && fixture.model.relationTree.direction == direction") {
             fixture.model.relationTree.generation > generation
                 && fixture.model.relationTree.direction == direction
         })
@@ -365,7 +362,7 @@ func rightClickRelationReparsesAStaleContextSelection() async throws {
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -375,7 +372,7 @@ func rightClickRelationReparsesAStaleContextSelection() async throws {
         offset: ambiguousOffset,
         commandClick: false
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.contextWindow.candidateCount == 2") {
         fixture.model.contextWindow.candidateCount == 2
     })
     fixture.model.contextWindow.selectNext()
@@ -392,7 +389,7 @@ func rightClickRelationReparsesAStaleContextSelection() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .callers
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.symbol == target") {
         fixture.model.relationTree.root?.symbol == target
     })
     #expect(fixture.model.relationTree.root?.symbol == target)
@@ -409,14 +406,14 @@ func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
     let pinnedOffset = byteOffset(of: "value.close();", in: fixture.mainSource)
         + UInt32("value.".utf8.count)
     fixture.controller.selfTestReaderClick(offset: pinnedOffset, commandClick: false)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.contextWindow.candidateCount == 2") {
         fixture.model.contextWindow.candidateCount == 2
     })
     fixture.model.contextWindow.selectNext()
@@ -434,7 +431,7 @@ func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .callers
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.symbol == target") {
         fixture.model.relationTree.root?.symbol == target
     })
     #expect(fixture.model.relationTree.root?.symbol == target)
@@ -444,7 +441,7 @@ func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
         offset: pinnedOffset,
         direction: .callers
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.symbol != target") {
         fixture.model.relationTree.root?.symbol != target
     })
     #expect(fixture.model.relationTree.root?.symbol == pinned)
@@ -463,7 +460,7 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
     let main = fixture.root.appendingPathComponent("main.rs")
     let a = fixture.root.appendingPathComponent("a.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -471,7 +468,7 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
         offset: byteOffset(of: "target();", in: fixture.mainSource),
         commandClick: false
     )
-    try #require(await waitUntil { fixture.model.contextWindow.selectedCandidate != nil })
+    try #require(await relationTestWaitUntil("fixture.model.contextWindow.selectedCandidate != nil") { fixture.model.contextWindow.selectedCandidate != nil })
     fixture.controller.selfTestSetContextPinned(true)
     let pinnedCandidate = try #require(fixture.model.contextWindow.selectedCandidate)
     let pinnedRequest = fixture.model.contextWindow.requestID
@@ -480,7 +477,7 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).contains { $0.hasPrefix(\"a.rs:\") }") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
             && fixture.controller.selfTestVisibleRelationEdgeTitles(
                 inGroup: "References"
@@ -488,7 +485,7 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
     })
     let edge = try #require(referenceEdge(path: "a.rs", in: fixture.model))
     #expect(fixture.controller.selfTestSelectRelationEdge(titled: edge.title))
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL && fixture.model.selectedByteOffset == edge.target?.byteOffset") {
         fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL
             && fixture.model.selectedByteOffset == edge.target?.byteOffset
     })
@@ -514,7 +511,7 @@ func relationProgrammaticRootDirectionAndReloadChangesDoNotNavigate() async thro
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -524,14 +521,14 @@ func relationProgrammaticRootDirectionAndReloadChangesDoNotNavigate() async thro
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .callers
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.title == \"target\" && fixture.model.relationTree.direction == .callers") {
         fixture.model.relationTree.root?.title == "target"
             && fixture.model.relationTree.direction == .callers
     })
     #expect(fixture.model.navigationGeneration == beforeNavigation)
 
     fixture.controller.selfTestChangeRelationDirection(.calls)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.title == \"target\" && fixture.model.relationTree.direction == .calls") {
         fixture.model.relationTree.root?.title == "target"
             && fixture.model.relationTree.direction == .calls
     })
@@ -541,7 +538,7 @@ func relationProgrammaticRootDirectionAndReloadChangesDoNotNavigate() async thro
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.relationTree.root?.title == \"target\" && referenceEdge(path: \"a.rs\", in: fixture.model) != nil") {
         fixture.model.relationTree.root?.title == "target"
             && referenceEdge(path: "a.rs", in: fixture.model) != nil
     })
@@ -561,7 +558,7 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     let main = fixture.root.appendingPathComponent("main.rs")
     let a = fixture.root.appendingPathComponent("a.rs")
     fixture.controller.openFileForSelfTest(main)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
@@ -569,7 +566,7 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).contains { $0.hasPrefix(\"a.rs:\") }") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
             && fixture.controller.selfTestVisibleRelationEdgeTitles(
                 inGroup: "References"
@@ -583,7 +580,7 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(edge.symbol == nil)
 
     #expect(fixture.controller.selfTestSelectRelationEdge(titled: edge.title))
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL && fixture.model.selectedByteOffset == edge.target?.byteOffset") {
         fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL
             && fixture.model.selectedByteOffset == edge.target?.byteOffset
     })
@@ -602,7 +599,7 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(fixture.model.relationTree.generation == relationGeneration)
 
     fixture.controller.goBack(nil)
-    try #require(await waitUntil {
+    try #require(await relationTestWaitUntil("fixture.model.selectedFile?.standardizedFileURL == main.standardizedFileURL && fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL") {
         fixture.model.selectedFile?.standardizedFileURL == main.standardizedFileURL
             && fixture.controller.displayedReaderFile?.standardizedFileURL
                 == main.standardizedFileURL
@@ -662,10 +659,13 @@ private func makeRelationNavigationFixture() async throws -> (
         offscreen: true
     )
     controller.openProject(root: root)
-    guard await waitUntil({
-        model.snapshotPhase == .fullReady
-            && model.fileTree?.root.standardizedFileURL == root.standardizedFileURL
-    }, timeout: 10) else {
+    guard await relationTestWaitUntil(
+        "model.snapshotPhase == .fullReady and file tree matches project root",
+        {
+            model.snapshotPhase == .fullReady
+                && model.fileTree?.root.standardizedFileURL == root.standardizedFileURL
+        }
+    ) else {
         controller.close()
         try? FileManager.default.removeItem(at: root)
         let details = "state=\(model.projectState), "
@@ -700,19 +700,6 @@ private func referenceEdge(
 private func byteOffset(of needle: String, in source: String) -> UInt32 {
     let range = source.range(of: needle)!
     return UInt32(source[..<range.lowerBound].utf8.count)
-}
-
-@MainActor
-private func waitUntil(
-    _ condition: () -> Bool,
-    timeout: TimeInterval = 5
-) async -> Bool {
-    let deadline = Date(timeIntervalSinceNow: timeout)
-    while Date() < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(10))
-    }
-    return condition()
 }
 
 @MainActor
@@ -879,7 +866,7 @@ private func makeRelationUXFixture(
     window.displayIfNeeded()
     controller.setRoot(target: .engine(subject), direction: direction)
     if blockedSubjectLoad == nil {
-        try #require(await waitUntil {
+        try #require(await relationTestWaitUntil("if includesExactMatch { return controller.selfTestVisibleEdgeTitles(inGroup: \"Exact\") == [\"first\"] } let group = direction == .references ? \"References\" : \"Strong\" return controller.selfTestVisibleEdgeTitles(inGroup: ...") {
             if includesExactMatch {
                 return controller.selfTestVisibleEdgeTitles(inGroup: "Exact")
                     == ["first"]
@@ -918,16 +905,24 @@ private actor RelationLoadGate {
 }
 
 @MainActor
-private func waitUntilAsync(
+private func relationTestWaitUntil(
+    _ description: String,
     _ condition: @escaping @MainActor () async -> Bool,
-    timeout: TimeInterval = 5
 ) async -> Bool {
-    let deadline = Date(timeIntervalSinceNow: timeout)
-    while Date() < deadline {
+    // This wall-clock bound is only a hang fuse; performance has separate budget tests.
+    let deadline = ContinuousClock.now + .seconds(120)
+    while ContinuousClock.now < deadline {
         if await condition() { return true }
-        try? await Task.sleep(for: .milliseconds(10))
+        do {
+            try await Task.sleep(for: .milliseconds(10))
+        } catch {
+            Issue.record("Cancelled while waiting for: \(description)")
+            return false
+        }
     }
-    return await condition()
+    if await condition() { return true }
+    Issue.record("Hang fuse expired while waiting for: \(description)")
+    return false
 }
 
 private func relationLocation(
