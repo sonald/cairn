@@ -136,7 +136,13 @@ public final class ContextWindowModel {
         if enteringPin {
             requestID &+= 1
             pendingToken = nil
-            locatedToken = nil
+            let hasDisplayedLocatedToken = if let displayedToken, let locatedToken {
+                locatedToken.file == displayedToken.file
+                    && locatedToken.range.contains(displayedToken.offset)
+            } else {
+                false
+            }
+            if !hasDisplayedLocatedToken { locatedToken = nil }
         }
         self.mode = mode
         if enteringPin,
@@ -218,9 +224,14 @@ public final class ContextWindowModel {
     }
 
     public func resolvedCandidate(file: String, offset: UInt32) async -> Candidate? {
-        guard case let .ready(session, context) = projectState,
-              let pathID = pathID(file, in: session)
-        else { return nil }
+        guard case let .ready(session, context) = projectState else { return nil }
+        if let locatedToken,
+           locatedToken.file == file,
+           locatedToken.range.contains(offset)
+        {
+            return selectedCandidate
+        }
+        guard let pathID = pathID(file, in: session) else { return nil }
         return try? await resolveCandidates(
             session: session,
             pathID: pathID,

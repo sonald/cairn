@@ -316,6 +316,144 @@ func relationSymbolSingleClicksDoNotNavigate() async throws {
 
 @MainActor
 @Test
+func rightClickRelationsUsePagedContextCandidateInAllDirections() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await waitUntil {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    let offset = byteOffset(of: "value.close();", in: fixture.mainSource)
+        + UInt32("value.".utf8.count)
+    fixture.controller.selfTestReaderClick(offset: offset, commandClick: false)
+    try #require(await waitUntil {
+        fixture.model.contextWindow.candidateCount == 2
+    })
+    let first = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    fixture.model.contextWindow.selectNext()
+    let selected = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    #expect(selected != first)
+
+    for direction in [
+        RelationTreeModel.Direction.callers,
+        .calls,
+        .implementations,
+        .references,
+    ] {
+        let generation = fixture.model.relationTree.generation
+        fixture.controller.selfTestReaderRelation(offset: offset, direction: direction)
+        try #require(await waitUntil {
+            fixture.model.relationTree.generation > generation
+                && fixture.model.relationTree.direction == direction
+        })
+        #expect(fixture.model.relationTree.root?.symbol == selected)
+    }
+}
+
+@MainActor
+@Test
+func rightClickRelationReparsesAStaleContextSelection() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await waitUntil {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    let ambiguousOffset = byteOffset(of: "value.close();", in: fixture.mainSource)
+        + UInt32("value.".utf8.count)
+    fixture.controller.selfTestReaderClick(
+        offset: ambiguousOffset,
+        commandClick: false
+    )
+    try #require(await waitUntil {
+        fixture.model.contextWindow.candidateCount == 2
+    })
+    fixture.model.contextWindow.selectNext()
+    let stale = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    guard case let .ready(session, context) = fixture.model.projectState else {
+        Issue.record("project is not ready")
+        return
+    }
+    let target = try #require(
+        session.definitions(of: "target", context: context).first?.0
+    )
+
+    fixture.controller.selfTestReaderRelation(
+        offset: byteOffset(of: "target() {}", in: fixture.mainSource),
+        direction: .callers
+    )
+    try #require(await waitUntil {
+        fixture.model.relationTree.root?.symbol == target
+    })
+    #expect(fixture.model.relationTree.root?.symbol == target)
+    #expect(fixture.model.relationTree.root?.symbol != stale)
+}
+
+@MainActor
+@Test
+func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await waitUntil {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    let pinnedOffset = byteOffset(of: "value.close();", in: fixture.mainSource)
+        + UInt32("value.".utf8.count)
+    fixture.controller.selfTestReaderClick(offset: pinnedOffset, commandClick: false)
+    try #require(await waitUntil {
+        fixture.model.contextWindow.candidateCount == 2
+    })
+    fixture.model.contextWindow.selectNext()
+    let pinned = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    fixture.controller.selfTestSetContextPinned(true)
+    guard case let .ready(session, context) = fixture.model.projectState else {
+        Issue.record("project is not ready")
+        return
+    }
+    let target = try #require(
+        session.definitions(of: "target", context: context).first?.0
+    )
+
+    fixture.controller.selfTestReaderRelation(
+        offset: byteOffset(of: "target() {}", in: fixture.mainSource),
+        direction: .callers
+    )
+    try #require(await waitUntil {
+        fixture.model.relationTree.root?.symbol == target
+    })
+    #expect(fixture.model.relationTree.root?.symbol == target)
+    #expect(fixture.model.relationTree.root?.symbol != pinned)
+
+    fixture.controller.selfTestReaderRelation(
+        offset: pinnedOffset,
+        direction: .callers
+    )
+    try #require(await waitUntil {
+        fixture.model.relationTree.root?.symbol != target
+    })
+    #expect(fixture.model.relationTree.root?.symbol == pinned)
+    #expect(fixture.model.contextWindow.mode == .pinned)
+    #expect(fixture.model.contextWindow.selectedCandidate?.symbol == pinned)
+}
+
+@MainActor
+@Test
 func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
     let fixture = try await makeRelationNavigationFixture()
     defer {
@@ -491,6 +629,11 @@ private func makeRelationNavigationFixture() async throws -> (
         trait Render {}
         struct Widget;
         impl Render for Widget {}
+        struct AlphaCloser;
+        impl AlphaCloser { fn close(&self) {} }
+        struct BetaCloser;
+        impl BetaCloser { fn close(&self) {} }
+        fn close_unknown<T>(value: T) { value.close(); }
         """
     let aSource = "fn ca() { target(); }\n"
     let bSource = "fn cb() { target(); }\n"
