@@ -2542,7 +2542,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let mixedReferenceGroupCountsHonest =
             exactReferenceRowCount > 0
             && fuzzyReferenceRowCount > 0
-            && exactReferenceGroup?.title == "Exact"
+            && exactReferenceGroup?.title == "Exact (\(exactReferenceRowCount))"
             && exactReferenceTitles.count == exactReferenceRowCount
             && fuzzyReferenceTitles.count == fuzzyReferenceRowCount
             && fuzzyReferenceGroup?.subtitle
@@ -2800,7 +2800,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ).contains("exact_dependency_caller")
         })
         let contextAndRelationsReadyMS = milliseconds(since: reprofiledAt)
-        let exactGroupHeaderHonest = windowController.selfTestExactGroupTitle == "Exact"
+        let exactGroupRowCount = windowController.selfTestExactGroupRowCount
+        let exactGroupHeaderHonest =
+            exactGroupRowCount > 0
+            && windowController.selfTestExactGroupTitle
+                == "Exact (\(exactGroupRowCount))"
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
             && windowController.selfTestExactStatusVisible
@@ -3275,6 +3279,37 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ]
         )
 
+        let fullZeroTitle = runExactZeroCoverageVariant(
+            root: projectRoot,
+            coverage: .full
+        )
+        let partialZeroTitle = runExactZeroCoverageVariant(
+            root: projectRoot,
+            coverage: .partial
+        )
+        let offlineZeroTitle = runExactZeroCoverageVariant(
+            root: projectRoot,
+            coverage: .dependenciesUnavailableOffline
+        )
+        let exactZeroFullCopyHonest =
+            fullZeroTitle == "Exact (0): no references"
+        let exactZeroPartialCopyHonest =
+            partialZeroTitle == "Exact incomplete (0 shown): partial coverage"
+        let exactZeroOfflineCopyHonest =
+            offlineZeroTitle == "Exact unavailable: deps unavailable (offline)"
+        let exactZeroCoverageCopyDistinct =
+            Set([fullZeroTitle, partialZeroTitle, offlineZeroTitle]).count == 3
+        emitExactStep(
+            "relation-zero-coverage",
+            variant: "fake",
+            controller: windowController,
+            extra: [
+                "full": fullZeroTitle ?? "",
+                "partial": partialZeroTitle ?? "",
+                "offline": offlineZeroTitle ?? "",
+            ]
+        )
+
         let trustRevoke = runTrustRevokeExactVariant()
         let real = runRealExactVariant(root: root)
         let realOffline = runRealOfflineCoverageVariant(root: root)
@@ -3286,6 +3321,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "pinnedTargetStable": pinnedStable,
             "exactGroupVisible": exactGroupVisible,
             "exactGroupHeaderHonest": exactGroupHeaderHonest,
+            "exactGroupCountMatchesRows": exactGroupHeaderHonest,
             "exactCallerVisible": exactCallerVisible,
             "exactCallerCallSitesHonest": exactCallerCallSitesHonest,
             "exactOnlyExpansionStarted": exactOnlyExpansionStarted,
@@ -3329,6 +3365,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 exactReferencesDeclarationExcluded,
             "mixedReferenceGroupCountsHonest":
                 mixedReferenceGroupCountsHonest,
+            "exactZeroFullCopyHonest": exactZeroFullCopyHonest,
+            "exactZeroPartialCopyHonest": exactZeroPartialCopyHonest,
+            "exactZeroOfflineCopyHonest": exactZeroOfflineCopyHonest,
+            "exactZeroCoverageCopyDistinct": exactZeroCoverageCopyDistinct,
             "referenceSingleClickSelected": referenceSingleClickSelected,
             "referenceSingleClickNavigated": referenceSingleClickNavigated,
             "referenceSingleClickExactlyOnce": referenceSingleClickExactlyOnce,
@@ -3438,6 +3478,63 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             realOfflineCoverage: realOffline.status,
             error: nil
         )
+    }
+
+    private func runExactZeroCoverageVariant(
+        root: URL,
+        coverage: ExactCoverage
+    ) -> String? {
+        let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightExactZeroCoverageSelfTest-\(UUID().uuidString)",
+            isDirectory: true
+        )
+        defer { try? FileManager.default.removeItem(at: cache) }
+        let coordinator = ExactCoordinator(
+            providerFactory: { _ in
+                InProcessExactProvider(
+                    location: nil,
+                    capabilities: [.references],
+                    referenceLocations: [],
+                    coverage: coverage
+                )
+            },
+            snapshotFactory: { root, _ in
+                try ExactSelfTestDirectorySnapshot(root: root)
+            },
+            sandboxAvailable: { true },
+            trustRegistry: TrustRegistry(
+                fileURL: cache.appendingPathComponent("trust.json")
+            )
+        )
+        defer { coordinator.shutdown() }
+        let variant = AppModel(
+            indexService: ExactSelfTestIndexService(),
+            exactCoordinator: coordinator
+        )
+        variant.openProject(root: root)
+        guard waitUntil(timeout: 5, condition: {
+            guard case .ready = variant.projectState else { return false }
+            return coordinator.readiness == .ready
+                && coordinator.coverage == coverage
+        }), case let .ready(session, context) = variant.projectState,
+        let symbol = try? session.definitions(
+            of: "answer",
+            context: context
+        ).first?.0
+        else { return nil }
+
+        variant.relationTree.setRoot(
+            target: .engine(symbol),
+            direction: .references
+        )
+        guard waitUntil(timeout: 5, condition: {
+            variant.relationTree.root?.children?.contains {
+                $0.kind == .loading
+            } == false
+        }) else { return nil }
+        return variant.relationTree.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Exact")
+        }?.title
     }
 
     private func runTrustRevokeExactVariant() -> [String: Bool] {
@@ -5576,6 +5673,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
     private let externalOffset: Int?
     private let externalLocation: ExactLocation?
     private let state: ExactSelfTestProviderState?
+    private let coverage: ExactCoverage?
 
     init(
         location: ExactLocation?,
@@ -5589,7 +5687,8 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         externalFile: String? = nil,
         externalOffset: Int? = nil,
         externalLocation: ExactLocation? = nil,
-        state: ExactSelfTestProviderState? = nil
+        state: ExactSelfTestProviderState? = nil,
+        coverage: ExactCoverage? = nil
     ) {
         self.location = location
         self.capabilities = capabilities
@@ -5603,6 +5702,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         self.externalOffset = externalOffset
         self.externalLocation = externalLocation
         self.state = state
+        self.coverage = coverage
     }
 
     func prepare(
@@ -5633,7 +5733,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
                 featureSelection: profile.featureSelection,
                 trustMode: trustMode,
                 generatedAt: Date(timeIntervalSince1970: 0),
-                coverage: trustMode == .safe ? .partial : .full
+                coverage: coverage ?? (trustMode == .safe ? .partial : .full)
             ),
             ordinal: ordinal,
             state: state

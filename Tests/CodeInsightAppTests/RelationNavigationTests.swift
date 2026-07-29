@@ -713,7 +713,7 @@ private func makeRelationUXFixture(
         },
         exactRelationsResolver: { _, _, _, _, _ in
             includesExactMatch
-                ? .relations([exact], origin: .worktree)
+                ? .relations([exact], origin: .worktree, coverage: .full)
                 : .unsupported
         }
     )

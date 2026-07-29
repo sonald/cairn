@@ -227,7 +227,7 @@ func relationTreeConsumesExactReferences() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree)
+            ], origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -237,7 +237,7 @@ func relationTreeConsumesExactReferences() async throws {
         direction: .references
     )?.value
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
     #expect(exact.children?.map { $0.target?.path } == [exactLocation.file])
     #expect(exact.children?.map { $0.target?.byteOffset } == [12])
 }
@@ -289,7 +289,7 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree)
+            ], origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -299,7 +299,7 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
         direction: .references
     )?.value
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (2)", in: model.root)
     let fuzzy = try relationGroup("References", in: model.root)
     #expect(exact.children?.count == 2)
     #expect(exact.children?.filter {
@@ -465,15 +465,25 @@ func relationTreeCompleteReferenceCountsStayWithinEachSource() async throws {
     #expect(fuzzyOnly.referenceSubtitle == "2 references")
     #expect(fuzzyOnly.referenceRowCount == 2)
 
-    #expect(exactOnly.exactTitle == "Exact")
+    #expect(exactOnly.exactTitle == "Exact (2)")
     #expect(exactOnly.exactRowCount == 2)
     #expect(exactOnly.referenceSubtitle == "0 references")
     #expect(exactOnly.referenceRowCount == 0)
 
-    #expect(mixed.exactTitle == "Exact")
+    #expect(mixed.exactTitle == "Exact (2)")
     #expect(mixed.exactRowCount == 2)
     #expect(mixed.referenceSubtitle == "1 references")
     #expect(mixed.referenceRowCount == 1)
+    let mixedExactDisplayedCount = Int(
+        mixed.exactTitle.dropFirst("Exact (".count).prefix { $0.isNumber }
+    )
+    let mixedReferenceDisplayedCount = Int(
+        mixed.referenceSubtitle?.prefix { $0.isNumber } ?? ""
+    )
+    #expect(mixedExactDisplayedCount == mixed.exactRowCount)
+    #expect(mixedReferenceDisplayedCount == mixed.referenceRowCount)
+    #expect(mixedExactDisplayedCount != mixed.exactRowCount + mixed.referenceRowCount)
+    #expect(mixedReferenceDisplayedCount != mixed.exactRowCount + mixed.referenceRowCount)
 }
 
 @MainActor
@@ -553,13 +563,13 @@ func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
     let dependencyCaller = try #require(exact.children?.first)
 
     #expect(dependencyCaller.symbol == nil)
     #expect(dependencyCaller.isExpandable)
     await model.expand(dependencyCaller)
-    let secondLevel = try relationGroup("Exact", in: dependencyCaller)
+    let secondLevel = try relationGroup("Exact (1)", in: dependencyCaller)
     #expect(secondLevel.children?.map(\.title) == ["top_level_caller"])
 }
 
@@ -605,12 +615,125 @@ func exactCoordinatorRequestsReferencesWithoutTheDeclaration() async throws {
         generation: fixture.context.generation
     )
 
-    guard case let .relations(relations, _) = result else {
+    guard case let .relations(relations, _, coverage) = result else {
         Issue.record("expected exact references")
         return
     }
     #expect(relations.map(\.location) == [location])
+    #expect(coverage == .full)
     #expect(session.referenceIncludeDeclarations == [false])
+}
+
+@MainActor
+@Test
+func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+
+    func title(for coverage: ExactCoverage) async throws -> String {
+        let session = RelationHierarchyExactSession(referenceLocations: [])
+        let coordinator = try relationExactCoordinator(
+            fixture: fixture,
+            provider: RelationHierarchyExactProvider(
+                session: session,
+                coverage: coverage
+            )
+        )
+        coordinator.prepare(
+            projectURL: fixture.root,
+            revision: nil,
+            generation: fixture.context.generation
+        )
+        #expect(await relationWaitUntilSlow {
+            coordinator.readiness == .ready && coordinator.coverage == coverage
+        })
+        let model = RelationTreeModel()
+        model.attachExactCoordinator(coordinator)
+        model.updateProjectState(.ready(fixture.session, fixture.context))
+        await model.setRoot(
+            target: .engine(fixture.a),
+            direction: .references
+        )?.value
+        let title = try #require(model.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Exact")
+        }?.title)
+        coordinator.shutdown()
+        return title
+    }
+
+    let full = try await title(for: .full)
+    let partial = try await title(for: .partial)
+    let offline = try await title(for: .dependenciesUnavailableOffline)
+
+    #expect(full == "Exact (0): no references")
+    #expect(partial == "Exact incomplete (0 shown): partial coverage")
+    #expect(offline == "Exact unavailable: deps unavailable (offline)")
+    #expect(partial != "Exact (0): no references")
+    #expect(offline != "Exact (0): no references")
+    #expect(Set([full, partial, offline]).count == 3)
+}
+
+@MainActor
+@Test
+func relationTreeExactGroupsCountTheirOwnRowsInAllDirections() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let traitRoot = try relationTemporaryProject([
+        "main.rs": "trait Render { fn render(&self); }",
+    ])
+    defer { try? FileManager.default.removeItem(at: traitRoot) }
+    let traitSession = try ProjectIndexer().index(root: traitRoot)
+    let traitContext = relationQueryContext(for: traitSession)
+    let trait = try #require(
+        traitSession.definitions(of: "Render", context: traitContext).first?.0
+    )
+    let relations = [
+        ExactCoordinator.Relation(
+            name: "first",
+            location: relationExactLocation(file: "first.rs", offset: 10),
+            item: nil,
+            callSites: []
+        ),
+        ExactCoordinator.Relation(
+            name: "second",
+            location: relationExactLocation(file: "second.rs", offset: 20),
+            item: nil,
+            callSites: []
+        ),
+    ]
+    let cases: [
+        (
+            RelationTreeModel.Direction,
+            EngineSession,
+            QueryContext,
+            SymbolOccurrenceID
+        )
+    ] = [
+        (.callers, fixture.session, fixture.context, fixture.a),
+        (.calls, fixture.session, fixture.context, fixture.a),
+        (.implementations, traitSession, traitContext, trait),
+        (.references, fixture.session, fixture.context, fixture.a),
+    ]
+
+    for (direction, session, context, symbol) in cases {
+        let model = RelationTreeModel(
+            loader: { _, _, _, _ in
+                .init(edges: [], isTruncated: false)
+            },
+            exactRelationsResolver: { _, _, _, _, _ in
+                .relations(relations, origin: .worktree, coverage: .full)
+            }
+        )
+        model.updateProjectState(.ready(session, context))
+        await model.setRoot(target: .engine(symbol), direction: direction)?.value
+        let group = try #require(model.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Exact")
+        })
+        let displayedCount = group.title
+            .dropFirst("Exact (".count)
+            .prefix { $0.isNumber }
+        #expect(Int(displayedCount) == group.children?.count)
+    }
 }
 
 @MainActor
@@ -945,14 +1068,14 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
                     item: item,
                     callSites: callSites
                 ),
-            ], origin: .worktree)
+            ], origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     let edge = try #require(exact.children?.first)
 
@@ -995,7 +1118,7 @@ func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws
                     item: b,
                     callSites: []
                 )
-            return .relations([relation], origin: .worktree)
+            return .relations([relation], origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1003,11 +1126,11 @@ func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
     let first = try #require(
-        try relationGroup("Exact", in: model.root).children?.first
+        try relationGroup("Exact (1)", in: model.root).children?.first
     )
     await model.expand(first)
     let cycle = try #require(
-        try relationGroup("Exact", in: first).children?.first
+        try relationGroup("Exact (1)", in: first).children?.first
     )
 
     #expect(cycle.title == "a")
@@ -1039,7 +1162,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .callers,
-        result: .relations([], origin: .worktree)
+        result: .relations([], origin: .worktree, coverage: .full)
     )
 
     let traitRoot = try relationTemporaryProject([
@@ -1063,7 +1186,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: traitContext,
         symbol: trait,
         direction: .implementations,
-        result: .relations([], origin: .worktree)
+        result: .relations([], origin: .worktree, coverage: .full)
     )
 
     #expect(callersUnsupported
@@ -1107,7 +1230,7 @@ func relationTreeUsesFourDistinctExactReferenceStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .references,
-        result: .relations([], origin: .worktree)
+        result: .relations([], origin: .worktree, coverage: .full)
     )
     let legacyModel = RelationTreeModel(loader: { _, _, _, _ in
         .init(edges: [], isTruncated: false)
@@ -1195,14 +1318,14 @@ func relationTreeShowsExactOnlyImplementations() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree)
+            ], origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(session, context))
 
     model.setRoot(target: .engine(trait), direction: .implementations)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
 
     #expect(exact.children?.map(\.title) == ["view.rs:1"])
     #expect(exact.children?.first?.target?.path == dependency.file)
@@ -1237,7 +1360,10 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact (0)", in: model.root)
+    let exact = try relationGroup(
+        "Exact unavailable: no exact session",
+        in: model.root
+    )
     let strong = try relationGroup("Strong", in: model.root)
     let probable = try relationGroup("Probable", in: model.root)
     let possible = try relationGroup("Possible", in: model.root)
@@ -1379,7 +1505,7 @@ func relationTreePromotesOnlyMatchingExactDefinitions() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     #expect(exact.children?.map(\.title) == ["matching"])
     #expect(exact.children?.first?.badge == "Exact · lsp · hist")
@@ -1434,7 +1560,7 @@ func relationTreeDemotesProviderProvenExternalNameOnlyCalls() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (1)", in: model.root)
     let strong = try relationGroup("Strong", in: model.root)
     let probable = try relationGroup("Probable", in: model.root)
     #expect(exact.children?.map(\.title) == ["matching"])
@@ -1945,7 +2071,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
             .init(edges: [], isTruncated: false)
         },
         exactRelationsResolver: { _, _, _, _, _ in
-            .relations(relations, origin: .worktree)
+            .relations(relations, origin: .worktree, coverage: .full)
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1953,7 +2079,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await relationWaitUntil { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact", in: model.root)
+    let exact = try relationGroup("Exact (500)", in: model.root)
     #expect(exact.children?.count == 500)
     #expect(model.root?.children?.last?.kind == .truncated)
     #expect(model.root?.children?.last?.title
@@ -2022,9 +2148,14 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
     let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-hierarchy-fake-1"
     private let session: RelationHierarchyExactSession
+    private let coverage: ExactCoverage
 
-    init(session: RelationHierarchyExactSession) {
+    init(
+        session: RelationHierarchyExactSession,
+        coverage: ExactCoverage = .full
+    ) {
         self.session = session
+        self.coverage = coverage
     }
 
     func prepare(
@@ -2040,7 +2171,7 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
             featureSelection: profile.featureSelection,
             trustMode: trustMode,
             generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .full
+            coverage: coverage
         )
         return session
     }
@@ -2412,7 +2543,7 @@ private func relationProjectReferenceStatus(
     }
     let exactResolver: RelationTreeModel.ExactRelationsResolver = {
         _, _, _, _, _ in
-        .relations(exact, origin: .worktree)
+        .relations(exact, origin: .worktree, coverage: .full)
     }
     let model = RelationTreeModel(
         loader: { _, _, _, _ in

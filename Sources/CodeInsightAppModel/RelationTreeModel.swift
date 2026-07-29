@@ -149,7 +149,7 @@ public final class RelationTreeModel {
         case legacy
         case unsupported
         case notApplicable
-        case queried
+        case queried(ExactCoverage)
     }
 
     struct LoadResult: Sendable {
@@ -593,7 +593,7 @@ public final class RelationTreeModel {
                 isTruncated: loaded.isTruncated,
                 exactState: .notApplicable
             )
-        case let .relations(relations, origin):
+        case let .relations(relations, origin, coverage):
             var exactEdges = relations.compactMap { relation -> LoadedEdge? in
                 guard let byteOffset = UInt32(exactly: relation.location.byteOffset),
                       let line = UInt32(exactly: relation.location.line),
@@ -644,7 +644,7 @@ public final class RelationTreeModel {
                     return !exactKeys.contains(key)
                 },
                 isTruncated: loaded.isTruncated,
-                exactState: .queried
+                exactState: .queried(coverage)
             )
         }
     }
@@ -761,32 +761,36 @@ public final class RelationTreeModel {
         count: Int,
         direction: Direction
     ) -> String {
-        guard count == 0 else { return "Exact" }
+        guard count == 0 else { return "Exact (\(count))" }
         return switch (state, direction) {
         case (.unsupported, .callers), (.unsupported, .calls):
             "Exact unavailable: server does not support call hierarchy"
         case (.notApplicable, .callers), (.notApplicable, .calls):
             "Exact unavailable here: not a callable symbol"
-        case (.queried, .callers):
+        case (.queried(.full), .callers):
             "Exact (0): no callers"
-        case (.queried, .calls):
+        case (.queried(.full), .calls):
             "Exact (0): no calls"
         case (.unsupported, .implementations):
             "Exact unavailable: server does not support implementations"
-        case (.queried, .implementations):
+        case (.queried(.full), .implementations):
             "Exact (0): no implementations"
         case (.notApplicable, .implementations):
-            "Exact (0): no implementations"
+            "Exact unavailable here: implementations not applicable"
         case (.unsupported, .references):
             "Exact unavailable: server does not support references"
         case (.notApplicable, .references):
             "Exact unavailable here: references not applicable"
-        case (.queried, .references):
+        case (.queried(.full), .references):
             "Exact (0): no references"
+        case (.queried(.partial), _):
+            "Exact incomplete (0 shown): partial coverage"
+        case (.queried(.dependenciesUnavailableOffline), _):
+            "Exact unavailable: deps unavailable (offline)"
         case (.legacy, .references):
             "Exact unavailable: no exact session"
         case (.legacy, _):
-            "Exact (0)"
+            "Exact unavailable: no exact session"
         }
     }
 

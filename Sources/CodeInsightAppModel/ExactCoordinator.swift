@@ -104,7 +104,11 @@ public final class ExactCoordinator {
     enum RelationQueryResult: Sendable {
         case unsupported
         case notApplicable
-        case relations([Relation], origin: ExactOrigin)
+        case relations(
+            [Relation],
+            origin: ExactOrigin,
+            coverage: ExactCoverage
+        )
     }
 
     struct Relation: Sendable {
@@ -494,6 +498,7 @@ public final class ExactCoordinator {
             )
             active = restarted
             observeCoverage(from: restarted)
+            coverage = newSession.attribution.coverage
             Task.detached { previous.session.close() }
 
             do {
@@ -628,6 +633,7 @@ public final class ExactCoordinator {
             )
             active = restarted
             observeCoverage(from: restarted)
+            coverage = newSession.attribution.coverage
             Task.detached { previous.session.close() }
 
             do {
@@ -661,7 +667,7 @@ public final class ExactCoordinator {
     ) -> ExactOverlay.Entry? {
         guard isCurrent(source) else { return nil }
         readiness = .ready
-        coverage = source.session.attribution.coverage
+        coverage = coverage ?? source.session.attribution.coverage
         guard let location else { return nil }
         let mappedLocation = mapped(location, from: source.materializedRoot)
         let entry = ExactOverlay.Entry(
@@ -681,7 +687,8 @@ public final class ExactCoordinator {
     ) -> RelationQueryResult? {
         guard isCurrent(source) else { return nil }
         readiness = .ready
-        coverage = source.session.attribution.coverage
+        let resultCoverage = coverage ?? source.session.attribution.coverage
+        coverage = resultCoverage
         let origin: ExactOrigin = source.materializedRoot != nil
             ? .materialized(commitOID: source.key.versionIdentity)
             : .worktree
@@ -703,7 +710,7 @@ public final class ExactCoordinator {
                         mapped($0, from: source.materializedRoot)
                     }
                 )
-            }, origin: origin)
+            }, origin: origin, coverage: resultCoverage)
         case .locations(let locations):
             .relations(locations.map {
                 Relation(
@@ -712,7 +719,7 @@ public final class ExactCoordinator {
                     item: nil,
                     callSites: []
                 )
-            }, origin: origin)
+            }, origin: origin, coverage: resultCoverage)
         }
     }
 
