@@ -1888,6 +1888,168 @@ func relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() async throw
 
 @MainActor
 @Test
+func relationTreeValidatesLargePossibleResultsInBoundedStableBatches()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let possibleCount = 215
+    let edges = (0..<possibleCount).map { index in
+        RelationTreeModel.LoadedEdge(
+            title: "possible-\(index)",
+            certainty: .possible,
+            dispatch: .direct,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: UInt32(index),
+            line: 1,
+            evidence: [],
+            exactQuery: ("main.rs", UInt32(index), 1),
+            fuzzyTarget: ("main.rs", UInt32(index))
+        )
+    }
+    var definitionRequests = 0
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: edges, isTruncated: false)
+        },
+        exactResolver: { file, offset, _, _ in
+            definitionRequests += 1
+            return relationExactEntry(file: file, byteOffset: offset)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
+    #expect(await testWaitUntil("the large Possible result is published") {
+        relationTreeFinishedLoading(model.root)
+    })
+    let rows = try relationPossibleRows(in: model.root)
+    let originalIDs = rows.map(ObjectIdentifier.init)
+    let originalTitles = rows.map(\.title)
+    let batchSize = RelationTreeModel.possibleValidationBatchSize
+    let firstBatchStart = ContinuousClock.now
+
+    #expect((20...50).contains(batchSize))
+    #expect(definitionRequests == 0)
+    model.validatePossible(rows)
+    for _ in 0..<100 {
+        if definitionRequests >= batchSize { break }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    try #require(definitionRequests == batchSize)
+    for _ in 0..<100 {
+        if rows.filter({ $0.badge == "Verified" }).count >= batchSize {
+            break
+        }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    try #require(rows.filter { $0.badge == "Verified" }.count == batchSize)
+    let firstBatchDuration = firstBatchStart.duration(to: .now)
+    let firstBatchMilliseconds =
+        Double(firstBatchDuration.components.seconds) * 1_000
+        + Double(firstBatchDuration.components.attoseconds)
+            / 1_000_000_000_000_000
+
+    #expect(definitionRequests < possibleCount)
+    var batches = 1
+    for lowerBound in stride(
+        from: batchSize,
+        to: possibleCount,
+        by: batchSize
+    ) {
+        let upperBound = min(lowerBound + batchSize, possibleCount)
+        model.validatePossible(Array(rows[lowerBound..<upperBound]))
+        batches += 1
+        #expect(await testWaitUntil(
+            "Possible batch \(batches) is upgraded"
+        ) {
+            definitionRequests == upperBound
+                && rows.prefix(upperBound).allSatisfy {
+                    $0.badge == "Verified"
+                }
+        })
+    }
+
+    print(
+        "large possible validation requests=\(definitionRequests)"
+            + " batches=\(batches)"
+            + " batchSize=\(batchSize)"
+            + " firstBatchMs=\(firstBatchMilliseconds)"
+    )
+    #expect(definitionRequests == possibleCount)
+    #expect(batches == 7)
+    #expect(rows.map(ObjectIdentifier.init) == originalIDs)
+    #expect(rows.map(\.title) == originalTitles)
+    #expect(rows.allSatisfy { $0.badge == "Verified" })
+}
+
+@MainActor
+@Test
+func relationTreeSwitchStopsQueuedPossibleValidationBeforeProviderEntry()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let edges = (0..<64).map { index in
+        RelationTreeModel.LoadedEdge(
+            title: "possible-\(index)",
+            certainty: .possible,
+            dispatch: .direct,
+            symbol: fixture.b,
+            path: "main.rs",
+            byteOffset: UInt32(index),
+            line: 1,
+            evidence: [],
+            exactQuery: ("main.rs", UInt32(index), 1),
+            fuzzyTarget: ("main.rs", UInt32(index))
+        )
+    }
+    let receiver = QueuedPossibleDefinitionReceiver()
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: edges, isTruncated: false)
+        },
+        exactResolver: { file, offset, _, batch in
+            await receiver.definition(
+                file: file,
+                byteOffset: offset,
+                batch: batch
+            )
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
+    #expect(await testWaitUntil("Possible rows are published before validation") {
+        relationTreeFinishedLoading(model.root)
+    })
+    let rows = try relationPossibleRows(in: model.root)
+
+    model.validatePossible(rows)
+    #expect(await testWaitUntil("one Possible request enters the fake provider") {
+        await receiver.actualRequestCount == 1
+    })
+    model.setRoot(target: .engine(fixture.b), direction: .callers)
+    await receiver.release()
+    #expect(await testWaitUntil("the stale Possible batch drains") {
+        await receiver.completedCount
+            == RelationTreeModel.possibleValidationBatchSize
+    })
+    let countAfterSwitch = await receiver.actualRequestCount
+    try? await Task.sleep(for: .milliseconds(50))
+
+    print(
+        "cancelled possible batch attempts=\(await receiver.attemptCount)"
+            + " actualAtSwitch=\(countAfterSwitch)"
+            + " actualAfterDrain=\(await receiver.actualRequestCount)"
+    )
+    #expect(await receiver.attemptCount
+        == RelationTreeModel.possibleValidationBatchSize)
+    #expect(countAfterSwitch == 1)
+    #expect(await receiver.actualRequestCount == countAfterSwitch)
+}
+
+@MainActor
+@Test
 func relationTreeStartsHeuristicAndRootExactQueriesConcurrently() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -3145,6 +3307,49 @@ private final class QueuedRelationExactProvider: ExactProvider, @unchecked Senda
         trustMode: TrustMode
     ) throws -> any ExactSession {
         session
+    }
+}
+
+private actor QueuedPossibleDefinitionReceiver {
+    private var operationActive = false
+    private var released = false
+    private var attempts = 0
+    private var actualRequests = 0
+    private var completed = 0
+
+    var attemptCount: Int { attempts }
+    var actualRequestCount: Int { actualRequests }
+    var completedCount: Int { completed }
+
+    func definition(
+        file: String,
+        byteOffset: UInt32,
+        batch: ExactRequestBatch
+    ) async -> ExactOverlay.Entry? {
+        attempts += 1
+        let deadline = ContinuousClock.now + .seconds(120)
+        while operationActive,
+              batch.isCurrent,
+              ContinuousClock.now < deadline
+        {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        guard batch.isCurrent else {
+            completed += 1
+            return nil
+        }
+        operationActive = true
+        actualRequests += 1
+        while batch.isCurrent, !released, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        operationActive = false
+        completed += 1
+        return nil
+    }
+
+    func release() {
+        released = true
     }
 }
 

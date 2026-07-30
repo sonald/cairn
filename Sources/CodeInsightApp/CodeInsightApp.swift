@@ -3268,6 +3268,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             let possibleRowRetained =
                 windowController.selfTestPossibleRelationDisclosureTitle
                     == "Show 1 possible matches"
+            let possibleExpanded =
+                windowController.selfTestExpandPossibleRelations()
+            let onDemandDefinitionValidation = waitUntil(
+                timeout: 5,
+                condition: {
+                    (exactSelfTestProviderState?.definitionRequestCount ?? -1)
+                        - definitionRequestsBefore == 1
+                }
+            )
+            let expandedDefinitionValidationRequests =
+                (exactSelfTestProviderState?.definitionRequestCount ?? -1)
+                    - definitionRequestsBefore
             emitExactStep(
                 "relation-first-batch",
                 variant: "blocked-root-exact-fake",
@@ -3280,6 +3292,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     "defaultDefinitionPromotionRequests":
                         defaultDefinitionPromotionRequests,
                     "possibleRowRetained": possibleRowRetained,
+                    "possibleExpanded": possibleExpanded,
+                    "expandedDefinitionValidationRequests":
+                        expandedDefinitionValidationRequests,
                 ]
             )
             checksAfterFirstBatch = [
@@ -3290,6 +3305,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "defaultDefinitionPromotionSkipped":
                     defaultDefinitionPromotionSkipped,
                 "possibleRowRetainedWithoutPromotion": possibleRowRetained,
+                "possibleExpandedForValidation": possibleExpanded,
+                "expandedDefinitionValidationOnDemand":
+                    onDemandDefinitionValidation,
             ]
         } else {
             checksAfterFirstBatch = [
@@ -3298,6 +3316,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "bothRelationQueriesFinished": false,
                 "defaultDefinitionPromotionSkipped": false,
                 "possibleRowRetainedWithoutPromotion": false,
+                "possibleExpandedForValidation": false,
+                "expandedDefinitionValidationOnDemand": false,
             ]
         }
         let relationFileRestoredAfterDependency =

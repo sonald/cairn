@@ -239,6 +239,19 @@ final class RelationWindowController: NSViewController,
         return outlineView.isItemExpanded(item)
     }
 
+    func selfTestScrollPossibleMatchToVisible(at index: Int) -> Bool {
+        guard let item = selfTestPossibleDisclosureItem,
+              let children = item.children,
+              children.indices.contains(index)
+        else { return false }
+        let row = outlineView.row(forItem: children[index])
+        guard row >= 0 else { return false }
+        outlineView.scrollRowToVisible(row)
+        validateVisiblePossibleRows()
+        return outlineView.rect(ofRow: row)
+            .intersects(scrollView.contentView.documentVisibleRect)
+    }
+
     func selfTestVisibleText() -> [String] {
         guard isViewLoaded else { return [] }
         return (0..<outlineView.numberOfRows).compactMap { row in
@@ -346,6 +359,10 @@ final class RelationWindowController: NSViewController,
     }
 
     private var selfTestPossibleDisclosureItem: RelationTreeModel.Node? {
+        possibleDisclosureItem
+    }
+
+    private var possibleDisclosureItem: RelationTreeModel.Node? {
         guard isViewLoaded else { return nil }
         return model.root?.children?.first {
             $0.kind == .group && $0.title.hasPrefix("Show ")
@@ -502,6 +519,13 @@ final class RelationWindowController: NSViewController,
         scrollView.borderType = .noBorder
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.contentView.postsBoundsChangedNotifications = true
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(visibleBoundsChanged(_:)),
+            name: NSView.boundsDidChangeNotification,
+            object: scrollView.contentView
+        )
 
         placeholderLabel.font = .systemFont(ofSize: 11)
         placeholderLabel.textColor = .secondaryLabelColor
@@ -678,6 +702,57 @@ final class RelationWindowController: NSViewController,
             reloadNode(node)
             onTreeChange?()
         }
+    }
+
+    func outlineViewItemDidExpand(_ notification: Notification) {
+        guard let node = notification.userInfo?["NSObject"]
+                as? RelationTreeModel.Node,
+              node.kind == .group,
+              node.title.hasPrefix("Show ")
+        else { return }
+        validateVisiblePossibleRows()
+    }
+
+    func outlineViewItemDidCollapse(_ notification: Notification) {
+        guard let node = notification.userInfo?["NSObject"]
+                as? RelationTreeModel.Node,
+              node.kind == .group,
+              node.title.hasPrefix("Show ")
+        else { return }
+        model.cancelPossibleValidation()
+    }
+
+    @objc private func visibleBoundsChanged(_ notification: Notification) {
+        validateVisiblePossibleRows()
+    }
+
+    private func validateVisiblePossibleRows() {
+        guard let disclosure = possibleDisclosureItem,
+              outlineView.isItemExpanded(disclosure)
+        else { return }
+        let rows = disclosure.children ?? []
+        let visibleRect = scrollView.contentView.documentVisibleRect
+        let visibleIndexes = rows.indices.filter { index in
+            let row = outlineView.row(forItem: rows[index])
+            guard row >= 0 else { return false }
+            let intersection = outlineView.rect(ofRow: row)
+                .intersection(visibleRect)
+            return intersection.width > 0 && intersection.height > 0
+        }
+        guard let firstVisible = visibleIndexes.first,
+              let lastVisible = visibleIndexes.last
+        else { return }
+        var prioritized = visibleIndexes.map { rows[$0] }
+        if prioritized.count < RelationTreeModel.possibleValidationBatchSize {
+            let nearby = rows.indices.filter { $0 > lastVisible }
+                + rows.indices.reversed().filter { $0 < firstVisible }
+            prioritized += nearby.map { rows[$0] }
+        }
+        model.validatePossible(
+            Array(prioritized.prefix(
+                RelationTreeModel.possibleValidationBatchSize
+            ))
+        )
     }
 
     @objc private func directionChanged(_ sender: NSSegmentedControl) {

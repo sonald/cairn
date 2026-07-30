@@ -108,6 +108,86 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func relationPossibleExpansionStartsExactValidationOnDemand() async throws {
+        var definitionRequests = 0
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            expandPossible: false,
+            exactResolver: { file, offset, _, _ in
+                definitionRequests += 1
+                return relationUXExactEntry(file: file, byteOffset: offset)
+            }
+        )
+        defer { fixture.close() }
+
+        #expect(definitionRequests == 0)
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        await pumpRunLoop()
+
+        #expect(definitionRequests == 2)
+    }
+
+    @MainActor
+    @Test
+    func relationPossibleValidationFollowsTheVisibleViewportInBatches()
+        async throws
+    {
+        var requestedOffsets: [UInt32] = []
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            expandPossible: false,
+            possibleMatchCount: 64,
+            exactResolver: { file, offset, _, _ in
+                requestedOffsets.append(offset)
+                return relationUXExactEntry(file: file, byteOffset: offset)
+            }
+        )
+        defer { fixture.close() }
+        let possible = try #require(fixture.model.root?.children?.first {
+            $0.kind == .group && $0.title == "Show 64 possible matches"
+        }?.children)
+        let firstBatchOffsets = Set(
+            possible.prefix(RelationTreeModel.possibleValidationBatchSize)
+                .compactMap { $0.target?.byteOffset }
+        )
+
+        #expect(requestedOffsets.isEmpty)
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        for _ in 0..<100 {
+            if requestedOffsets.count
+                == RelationTreeModel.possibleValidationBatchSize
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(
+            requestedOffsets.count
+                == RelationTreeModel.possibleValidationBatchSize
+        )
+        #expect(Set(requestedOffsets) == firstBatchOffsets)
+        #expect(requestedOffsets.count < possible.count)
+
+        #expect(
+            fixture.controller.selfTestScrollPossibleMatchToVisible(
+                at: possible.count - 1
+            )
+        )
+        for _ in 0..<100 {
+            if requestedOffsets.count == possible.count { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        print(
+            "possible viewport requests first="
+                + "\(RelationTreeModel.possibleValidationBatchSize)"
+                + " afterScroll=\(requestedOffsets.count)"
+        )
+        #expect(requestedOffsets.count == possible.count)
+        #expect(Set(requestedOffsets).count == possible.count)
+    }
+
+    @MainActor
+    @Test
     func relationOutlineKeyboardPreservesReferenceConsumptionRules()
         async throws
     {
@@ -871,7 +951,9 @@ private func makeRelationUXFixture(
     includesExactMatch: Bool = true,
     blockedSubjectLoad: RelationLoadGate? = nil,
     blockedExactLoad: RelationLoadGate? = nil,
-    expandPossible: Bool = true
+    expandPossible: Bool = true,
+    possibleMatchCount: Int = 2,
+    exactResolver: RelationTreeModel.ExactResolver? = nil
 ) async throws -> RelationUXFixture {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -882,11 +964,14 @@ private func makeRelationUXFixture(
         at: root,
         withIntermediateDirectories: true
     )
-    try Data("""
+    let possibleNames = ["first", "second"] + (2..<possibleMatchCount).map {
+        "possible\($0)"
+    }
+    let source = """
         fn subject() {}
-        fn first() { subject(); }
-        fn second() { subject(); }
-        """.utf8).write(to: root.appendingPathComponent("main.rs"))
+        \(possibleNames.map { "fn \($0)() { subject(); }" }.joined(separator: "\n"))
+        """
+    try Data(source.utf8).write(to: root.appendingPathComponent("main.rs"))
     let session = try await Task.detached {
         try ProjectIndexer().index(root: root)
     }.value
@@ -898,18 +983,17 @@ private func makeRelationUXFixture(
     let subject = try #require(
         session.definitions(of: "subject", context: context).first?.0
     )
-    let first = try #require(
-        session.definitions(of: "first", context: context).first?.0
-    )
-    let second = try #require(
-        session.definitions(of: "second", context: context).first?.0
-    )
+    let possibleSymbols = try possibleNames.map { name in
+        try #require(session.definitions(of: name, context: context).first?.0)
+    }
+    let first = possibleSymbols[0]
+    let second = possibleSymbols[1]
     let firstLocation = try #require(relationLocation(for: first, in: session))
     let secondLocation = try #require(relationLocation(for: second, in: session))
-    let fuzzyLocations = [
-        ("first", firstLocation),
-        ("second", secondLocation),
-    ]
+    let fuzzyLocations = try zip(possibleNames, possibleSymbols).map {
+        name, symbol in
+        (name, try #require(relationLocation(for: symbol, in: session)))
+    }
     let exact = ExactCoordinator.Relation(
         name: "first",
         location: ExactLocation(
@@ -962,12 +1046,19 @@ private func makeRelationUXFixture(
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: []
+                        evidence: [],
+                        exactQuery: exactResolver == nil
+                            ? nil
+                            : (location.path, location.byteOffset, location.line),
+                        fuzzyTarget: exactResolver == nil
+                            ? nil
+                            : (location.path, location.byteOffset)
                     )
                 },
                 isTruncated: false
             )
         },
+        exactResolver: exactResolver,
         exactRelationsResolver: { _, _, _, _, _, _ in
             if let blockedExactLoad {
                 await blockedExactLoad.wait("root Exact relation release")
@@ -1017,12 +1108,12 @@ private func makeRelationUXFixture(
             }
             if direction == .references {
                 guard controller.selfTestPossibleDisclosureTitle
-                    == "Show 2 possible matches"
+                    == "Show \(possibleMatchCount) possible matches"
                 else { return false }
                 if !expandPossible { return true }
                 return controller.selfTestExpandPossibleMatches()
                     && controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
-                        == ["first", "second"]
+                        == possibleNames
             }
             return controller.selfTestVisibleEdgeTitles(inGroup: "Strong")
                 == ["first", "second"]
@@ -1036,6 +1127,30 @@ private func makeRelationUXFixture(
         firstLocation: firstLocation,
         secondLocation: secondLocation,
         firstSymbol: first
+    )
+}
+
+private func relationUXExactEntry(
+    file: String,
+    byteOffset: UInt32
+) -> ExactOverlay.Entry {
+    ExactOverlay.Entry(
+        location: ExactLocation(
+            file: file,
+            byteOffset: Int(byteOffset),
+            line: 1,
+            column: Int(byteOffset) + 1
+        ),
+        attribution: ExactAttribution(
+            provider: "fake-exact",
+            toolVersion: "fake-1",
+            configFingerprint: "config",
+            environmentFingerprint: "environment",
+            trustMode: .safe,
+            generatedAt: Date(timeIntervalSince1970: 0),
+            coverage: .partial
+        ),
+        origin: .worktree
     )
 }
 

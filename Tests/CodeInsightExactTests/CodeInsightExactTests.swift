@@ -874,9 +874,10 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
         }
     ) { session in
         let staleBatch = ExactRequestBatch()
+        let staleFanout = 32
         let started = DispatchSemaphore(value: 0)
         let staleDone = DispatchGroup()
-        for _ in 0..<ExactRequestBatch.maximumConcurrentRequests {
+        for _ in 0..<staleFanout {
             staleDone.enter()
             Thread.detachNewThread {
                 defer { staleDone.leave() }
@@ -888,7 +889,7 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
                 )
             }
         }
-        for _ in 0..<ExactRequestBatch.maximumConcurrentRequests {
+        for _ in 0..<staleFanout {
             #expect(started.wait(timeout: .now() + 1) == .success)
         }
         #expect(waitUntil(timeout: 1) { responses.count == 1 })
@@ -896,6 +897,9 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
 
         session.cancel(batch: staleBatch)
         #expect(staleDone.wait(timeout: .now() + 3) == .success)
+        let staleRequestsAfterCancel = responses.count
+        Thread.sleep(forTimeInterval: 0.05)
+        #expect(responses.count == staleRequestsAfterCancel)
         let current = try session.definition(
             file: "src/main.rs",
             byteOffset: 0,
@@ -903,10 +907,12 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
         )
 
         print(
-            "cancelled batch provider requests staleQueued=4"
-                + " actual=\(responses.count)"
+            "cancelled batch provider requests staleQueued=\(staleFanout)"
+                + " staleActual=\(staleRequestsAfterCancel)"
+                + " totalAfterCurrent=\(responses.count)"
         )
         #expect(current != nil)
+        #expect(staleRequestsAfterCancel == 1)
         #expect(responses.count == 2)
     }
 }

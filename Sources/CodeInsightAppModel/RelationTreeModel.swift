@@ -56,6 +56,7 @@ public final class RelationTreeModel {
         fileprivate var nextCallSiteIndex = 0
         fileprivate var loadRequestID: UInt64?
         fileprivate var loadTask: Task<Void, Never>?
+        fileprivate var loadedEdge: LoadedEdge?
 
         fileprivate init(
             kind: Kind,
@@ -73,7 +74,8 @@ public final class RelationTreeModel {
             evidence: [ResolutionEvidence] = [],
             cycleKey: CycleKey? = nil,
             queryTarget: (path: String, byteOffset: UInt32)? = nil,
-            callSites: [ExactLocation] = []
+            callSites: [ExactLocation] = [],
+            loadedEdge: LoadedEdge? = nil
         ) {
             self.kind = kind
             self.title = title
@@ -91,6 +93,7 @@ public final class RelationTreeModel {
             self.cycleKey = cycleKey
             self.queryTarget = queryTarget
             self.callSites = callSites
+            self.loadedEdge = loadedEdge
         }
     }
 
@@ -185,6 +188,7 @@ public final class RelationTreeModel {
     public private(set) var generation: UInt64 = 0
     public private(set) var requestID: UInt64 = 0
     public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
+    public static let possibleValidationBatchSize = 32
     public var onSelect: @MainActor (Node) -> Void = { _ in }
     public var onNodeChange: @MainActor (Node) -> Void = { _ in }
     public var hasTruncatedResults: Bool {
@@ -196,6 +200,8 @@ public final class RelationTreeModel {
     private var exactResolver: ExactResolver?
     private var exactRelationsResolver: ExactRelationsResolver?
     private var exactBatch: ExactRequestBatch?
+    private var possibleValidationBatch: ExactRequestBatch?
+    private var scheduledPossibleRows: Set<ObjectIdentifier> = []
     private var cancelExactBatch: (@MainActor (ExactRequestBatch) -> Void)?
     private var session: EngineSession?
     private var context: QueryContext?
@@ -432,7 +438,69 @@ public final class RelationTreeModel {
         selectedRelationSymbol = nil
     }
 
+    public func validatePossible(_ nodes: [Node]) {
+        guard exactResolver != nil, let context else { return }
+        let candidates = nodes.compactMap { node -> (Node, LoadedEdge)? in
+            guard node.kind == .edge,
+                  let edge = node.loadedEdge,
+                  edge.certainty == .probable || edge.certainty == .possible,
+                  edge.exactQuery != nil,
+                  edge.fuzzyTarget != nil,
+                  !scheduledPossibleRows.contains(ObjectIdentifier(node))
+            else { return nil }
+            return (node, edge)
+        }.prefix(Self.possibleValidationBatchSize)
+        guard !candidates.isEmpty, let parent = candidates.first?.0.parent else {
+            return
+        }
+        scheduledPossibleRows.formUnion(
+            candidates.map { ObjectIdentifier($0.0) }
+        )
+        let batch = possibleValidationBatch ?? ExactRequestBatch()
+        possibleValidationBatch = batch
+        let currentGeneration = generation
+        let direction = direction
+        let rows = candidates.map(\.0)
+        let loaded = LoadResult(
+            edges: candidates.map(\.1),
+            isTruncated: false
+        )
+        Task { [weak self, weak parent] in
+            guard let self, let parent else { return }
+            let promoted = await promoteExactEdges(
+                loaded,
+                direction: direction,
+                generation: context.generation,
+                batch: batch
+            )
+            guard batch.isCurrent,
+                  possibleValidationBatch === batch,
+                  generation == currentGeneration
+            else { return }
+            for (row, edge) in zip(rows, promoted.edges) {
+                guard row.parent === parent,
+                      let current = makeRows(
+                          [edge],
+                          under: parent,
+                          direction: direction
+                      ).first
+                else { continue }
+                updatePublishedRow(row, from: current, parent: parent)
+            }
+            onNodeChange(parent)
+        }
+    }
+
+    public func cancelPossibleValidation() {
+        guard let possibleValidationBatch else { return }
+        possibleValidationBatch.cancel()
+        cancelExactBatch?(possibleValidationBatch)
+        self.possibleValidationBatch = nil
+        scheduledPossibleRows.removeAll()
+    }
+
     private func cancelLoads() {
+        cancelPossibleValidation()
         if let exactBatch {
             exactBatch.cancel()
             cancelExactBatch?(exactBatch)
@@ -969,6 +1037,7 @@ public final class RelationTreeModel {
         previous.parent = parent
         previous.evidence = current.evidence
         previous.callSites = current.callSites
+        previous.loadedEdge = current.loadedEdge
         if !loadedChildren {
             previous.children = current.children
         }
@@ -1043,7 +1112,8 @@ public final class RelationTreeModel {
                     edge.identityTarget?.file ?? edge.path,
                     edge.identityTarget?.byteOffset ?? edge.byteOffset
                 ),
-                callSites: edge.callSites
+                callSites: edge.callSites,
+                loadedEdge: edge
             )
         }
     }
