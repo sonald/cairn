@@ -240,6 +240,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private var state: ExactReadiness = .preparing
     private var openedFiles: Set<String> = []
     private var cancelled = false
+    private var activeBatch: ExactRequestBatch?
     private var didRestart = false
     private let baseAttribution: ExactAttribution
     private var currentCoverage: ExactCoverage
@@ -358,6 +359,20 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         )
     }
 
+    func definition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactLocation? {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/definition",
+            batch: batch,
+            parse: parseDefinition
+        )
+    }
+
     func implementations(
         file: String,
         byteOffset: Int
@@ -369,6 +384,23 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/implementation",
+            parse: parseLocations
+        )
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.implementations) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/implementation",
+            batch: batch,
             parse: parseLocations
         )
     }
@@ -390,11 +422,31 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         )
     }
 
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]? {
+        guard negotiatedCapabilities.contains(.references) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/references",
+            includeDeclaration: includeDeclaration,
+            batch: batch,
+            parse: parseLocations
+        )
+    }
+
     private func requestLocations<Result>(
         file: String,
         byteOffset: Int,
         method: String,
         includeDeclaration: Bool? = nil,
+        batch: ExactRequestBatch? = nil,
         parse: (Any) throws -> Result?
     ) throws -> Result? {
         let path = try relativePath(file)
@@ -427,6 +479,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             beforeRequest: { client in
                 try self.open(path: path, bytes: bytes, client: client)
             },
+            batch: batch,
             parse: parse
         )
     }
@@ -435,56 +488,112 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         method: String,
         params: Any,
         beforeRequest: (LSPClient) throws -> Void,
+        batch: ExactRequestBatch? = nil,
         parse: (Any) throws -> Result?
     ) throws -> Result? {
-        operationLock.lock()
-        defer { operationLock.unlock() }
-
-        stateLock.lock()
-        cancelled = false
-        stateLock.unlock()
-        var activeClient = try clientForRequest()
+        guard batch?.acquire() != false else { return nil }
+        defer { batch?.release() }
+        var activeClient: LSPClient?
         var retriedAfterCrash = false
+        var attempt = 0
         while true {
-            do {
-                try beforeRequest(activeClient)
-                for attempt in 0..<3 {
-                    try throwIfCancelled(method)
-                    do {
-                        let response = try activeClient.request(
-                            method,
-                            params: params,
-                            timeout: requestTimeout
-                        )
-                        if let result = try parse(response) {
-                            markReady()
-                            return result
-                        }
-                        markPreparing()
-                    } catch LSPError.requestFailed(let code, _)
-                        where code == -32801 && attempt < 2
-                    {
-                        // rust-analyzer reports content-modified while its
-                        // workspace snapshot catches up.
-                        markPreparing()
-                    }
-                    guard attempt < 2 else {
-                        markReady()
-                        return nil
-                    }
-                    Thread.sleep(
-                        forTimeInterval: Double(attempt + 1)
-                    )
+            let outcome: (
+                result: Result?,
+                retryDelay: TimeInterval?,
+                restarted: Bool
+            ) = try withOperationLock(batch: batch) {
+                stateLock.lock()
+                cancelled = false
+                activeBatch = batch
+                stateLock.unlock()
+                guard batch?.isCurrent != false else {
+                    return (nil, nil, false)
                 }
-                return nil
-            } catch LSPError.processExited where !retriedAfterCrash {
-                activeClient = try restartAfterCrash()
-                retriedAfterCrash = true
-            } catch LSPError.connectionClosed where !retriedAfterCrash {
-                activeClient = try restartAfterCrash()
-                retriedAfterCrash = true
+
+                if activeClient == nil {
+                    activeClient = try clientForRequest()
+                }
+                guard let currentClient = activeClient else {
+                    return (nil, nil, false)
+                }
+                do {
+                    try beforeRequest(currentClient)
+                    try throwIfCancelled(method)
+                    let response = try currentClient.request(
+                        method,
+                        params: params,
+                        timeout: requestTimeout,
+                        shouldStart: {
+                            batch?.isCurrent != false
+                        }
+                    )
+                    if let result = try parse(response) {
+                        markReady()
+                        return (result, nil, false)
+                    }
+                    markPreparing()
+                } catch LSPError.requestFailed(let code, _)
+                    where code == -32801 && attempt < 2
+                {
+                    // rust-analyzer reports content-modified while its
+                    // workspace snapshot catches up.
+                    markPreparing()
+                } catch LSPError.processExited where !retriedAfterCrash {
+                    activeClient = try restartAfterCrash()
+                    retriedAfterCrash = true
+                    attempt = 0
+                    return (nil, nil, true)
+                } catch LSPError.connectionClosed where !retriedAfterCrash {
+                    activeClient = try restartAfterCrash()
+                    retriedAfterCrash = true
+                    attempt = 0
+                    return (nil, nil, true)
+                }
+                guard attempt < 2 else {
+                    markReady()
+                    return (nil, nil, false)
+                }
+                return (nil, Double(attempt + 1), false)
             }
+            if outcome.restarted { continue }
+            if let result = outcome.result { return result }
+            guard let retryDelay = outcome.retryDelay else { return nil }
+            guard batch?.isCurrent != false else { return nil }
+            Thread.sleep(forTimeInterval: retryDelay)
+            guard batch?.isCurrent != false else { return nil }
+            attempt += 1
         }
+    }
+
+    private func withOperationLock<Result>(
+        batch: ExactRequestBatch?,
+        _ operation: () throws -> Result
+    ) throws -> Result {
+        if let batch {
+            while batch.isCurrent {
+                if operationLock.lock(
+                    before: Date().addingTimeInterval(0.01)
+                ) {
+                    guard batch.isCurrent else {
+                        operationLock.unlock()
+                        throw CancellationError()
+                    }
+                    break
+                }
+            }
+            guard batch.isCurrent else { throw CancellationError() }
+        } else {
+            operationLock.lock()
+        }
+        defer {
+            stateLock.lock()
+            if let batch, activeBatch === batch {
+                activeBatch = nil
+            }
+            stateLock.unlock()
+            operationLock.unlock()
+        }
+        return try operation()
     }
 
     func prepareCallHierarchy(
@@ -498,6 +607,23 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/prepareCallHierarchy",
+            parse: parseCallHierarchyItems
+        )
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallHierarchyItem]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/prepareCallHierarchy",
+            batch: batch,
             parse: parseCallHierarchyItems
         )
     }
@@ -516,6 +642,22 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         )
     }
 
+    func incomingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestCallRelations(
+            item: item,
+            method: "callHierarchy/incomingCalls",
+            itemKey: "from",
+            callSiteURI: { $0.uri },
+            batch: batch
+        )
+    }
+
     func outgoingCalls(
         item: ExactCallHierarchyItem
     ) throws -> [ExactCallRelation]? {
@@ -530,11 +672,28 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         )
     }
 
+    func outgoingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]? {
+        guard negotiatedCapabilities.contains(.callHierarchy) else {
+            return nil
+        }
+        return try requestCallRelations(
+            item: item,
+            method: "callHierarchy/outgoingCalls",
+            itemKey: "to",
+            callSiteURI: { _ in item.uri },
+            batch: batch
+        )
+    }
+
     private func requestCallRelations(
         item: ExactCallHierarchyItem,
         method: String,
         itemKey: String,
-        callSiteURI: @escaping (ExactCallHierarchyItem) -> String
+        callSiteURI: @escaping (ExactCallHierarchyItem) -> String,
+        batch: ExactRequestBatch? = nil
     ) throws -> [ExactCallRelation]? {
         try request(
             method: method,
@@ -542,6 +701,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             beforeRequest: { client in
                 try self.open(item: item, client: client)
             },
+            batch: batch,
             parse: {
                 try self.parseCallRelations(
                     $0,
@@ -550,6 +710,18 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 )
             }
         )
+    }
+
+    func cancel(batch: ExactRequestBatch) {
+        batch.cancel()
+        stateLock.lock()
+        guard activeBatch === batch else {
+            stateLock.unlock()
+            return
+        }
+        let activeClient = client
+        stateLock.unlock()
+        activeClient.cancelOutstandingRequests()
     }
 
     func cancel() {

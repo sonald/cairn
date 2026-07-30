@@ -222,7 +222,7 @@ func relationTreeConsumesExactReferences() async throws {
         loader: { _, _, _, _ in
             .init(edges: [], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, direction, _ in
+        exactRelationsResolver: { _, _, _, direction, _, _ in
             #expect(direction == .references)
             return .relations([
                 .init(
@@ -279,7 +279,7 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
                 fuzzyOnly,
             ], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations([
                 .init(
                     name: nil,
@@ -714,7 +714,7 @@ func relationTreeVerifiedBadgesCountExactRowsInAllDirections() async throws {
             loader: { _, _, _, _ in
                 .init(edges: [], isTruncated: false)
             },
-            exactRelationsResolver: { _, _, _, _, _ in
+            exactRelationsResolver: { _, _, _, _, _, _ in
                 .relations(relations, origin: .worktree, coverage: .full)
             }
         )
@@ -1051,7 +1051,7 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
                 ),
             ], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations([
                 .init(
                     name: "b",
@@ -1117,7 +1117,7 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
                 isTruncated: false
             )
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             await exact.wait()
             return .relations(
                 [
@@ -1263,7 +1263,7 @@ func relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections()
                     ),
                 ], isTruncated: false)
             },
-            exactRelationsResolver: { _, _, _, _, _ in
+            exactRelationsResolver: { _, _, _, _, _, _ in
                 await exact.wait()
                 return .relations([
                     .init(
@@ -1321,7 +1321,7 @@ func relationTreeDoesNotExposeExactRelationSublayers() async throws {
         loader: { _, _, _, _ in
             .init(edges: [], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, item, _, _ in
+        exactRelationsResolver: { _, _, item, _, _, _ in
             let relation = item?.name == "b"
                 ? ExactCoordinator.Relation(
                     name: "a",
@@ -1518,7 +1518,7 @@ func relationTreeShowsExactOnlyImplementations() async throws {
         loader: { _, _, _, _ in
             .init(edges: [], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations([
                 .init(
                     name: nil,
@@ -1635,7 +1635,7 @@ func relationRowsExposeVerifiedAndInferredBadges() async throws {
                 ),
             ], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations([
                 .init(
                     name: "verified",
@@ -1868,7 +1868,7 @@ func relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() async throw
         loader: { _, _, _, _ in
             .init(edges: edges, isTruncated: false)
         },
-        exactResolver: { _, _, _ in
+        exactResolver: { _, _, _, _ in
             definitionRequests += 1
             return nil
         }
@@ -1900,7 +1900,7 @@ func relationTreeStartsHeuristicAndRootExactQueriesConcurrently() async throws {
     let exact = RelationAsyncGate()
     let model = RelationTreeModel(
         loader: loader.load,
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             await exact.wait()
             return .unsupported
         }
@@ -1950,7 +1950,7 @@ func relationTreeLoadReturnsWhenGenerationChangesWithBothQueriesPending()
     let exact = RelationAsyncGate()
     let model = RelationTreeModel(
         loader: loader.load,
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             await exact.wait()
             return .unsupported
         }
@@ -1992,7 +1992,7 @@ func relationTreeKeepsFastRowsAndReturnsAtTheQueryDeadline() async throws {
                 ),
             ], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             await exact.wait()
             return .unsupported
         },
@@ -2038,7 +2038,7 @@ func relationTreePublishesHeuristicRowsBeforeRootExactFinishes() async throws {
                 ),
             ], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             await exact.wait()
             return .unsupported
         }
@@ -2106,7 +2106,7 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
     )
     let model = RelationTreeModel(
         loader: loader.load,
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations([
                 .init(
                     name: "B",
@@ -2173,7 +2173,7 @@ func relationTreeDefaultLoadDoesNotDemoteNameOnlyCallsThroughDefinitions()
         loader: { _, _, _, _ in
             .init(edges: edges, isTruncated: false)
         },
-        exactResolver: { _, _, _ in
+        exactResolver: { _, _, _, _ in
             definitionRequests += 1
             return nil
         }
@@ -2244,7 +2244,7 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
                 ),
             ], isTruncated: false)
         },
-        exactResolver: { _, _, _ in
+        exactResolver: { _, _, _, _ in
             definitionRequests += 1
             return relationExactEntry(
                 file: dependency.path,
@@ -2602,6 +2602,72 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
 
 @MainActor
 @Test
+func relationTreeSwitchingRootsStopsStaleExactRequestsBeforeProviderEntry()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let session = QueuedRelationExactSession()
+    defer { session.releaseFirstRequest() }
+    let coordinator = try relationExactCoordinator(
+        fixture: fixture,
+        provider: QueuedRelationExactProvider(session: session)
+    )
+    coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        generation: fixture.context.generation
+    )
+    #expect(await testWaitUntil("coordinator.readiness == .ready") {
+        coordinator.readiness == .ready
+    })
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [], isTruncated: false)
+    })
+    model.attachExactCoordinator(coordinator)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
+    #expect(await testWaitUntil("first Exact request entered the provider") {
+        session.actualRequestCount == 1
+    })
+    model.setRoot(target: .engine(fixture.b), direction: .callers)
+    #expect(await testWaitUntil("second Exact batch reached the provider boundary") {
+        session.attemptCount == 2
+    })
+    model.setRoot(target: .engine(fixture.a), direction: .callers)
+    #expect(await testWaitUntil("third Exact batch reached the provider boundary") {
+        session.attemptCount == 3
+    })
+    let finalLoad = model.setRoot(
+        target: .engine(fixture.b),
+        direction: .callers
+    )
+    #expect(await testWaitUntil("fourth Exact batch reached the provider boundary") {
+        session.attemptCount == 4
+    })
+
+    session.releaseFirstRequest()
+    await finalLoad?.value
+    #expect(await testWaitUntil("only the current Exact batch enters the provider") {
+        session.activeAttemptCount == 0
+    })
+
+    print(
+        "relation batch requests switches=3"
+            + " attempts=\(session.attemptCount)"
+            + " actual=\(session.actualRequestCount)"
+            + " maxConcurrent=\(session.maximumActiveAttemptCount)"
+    )
+    #expect(session.actualRequestCount == 2)
+    #expect(
+        session.maximumActiveAttemptCount
+            <= ExactRequestBatch.maximumConcurrentRequests
+    )
+}
+
+@MainActor
+@Test
 func relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -2683,7 +2749,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
         loader: { _, _, _, _ in
             .init(edges: [], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             .relations(relations, origin: .worktree, coverage: .full)
         }
     )
@@ -2960,6 +3026,128 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
     }
 }
 
+private final class QueuedRelationExactSession: ExactSession, @unchecked Sendable {
+    let negotiatedCapabilities: ExactCapabilities = [.callHierarchy]
+    let readiness: ExactReadiness = .ready
+    var attribution = relationExactAttribution()
+
+    private let stateLock = NSLock()
+    private let operationLock = NSLock()
+    private let firstRequestCondition = NSCondition()
+    private var firstRequestReleased = false
+    private var attempts = 0
+    private var actualRequests = 0
+    private var activeAttempts = 0
+    private var maximumActiveAttempts = 0
+
+    var attemptCount: Int { locked { attempts } }
+    var actualRequestCount: Int { locked { actualRequests } }
+    var activeAttemptCount: Int { locked { activeAttempts } }
+    var maximumActiveAttemptCount: Int { locked { maximumActiveAttempts } }
+
+    func definition(file: String, byteOffset: Int) throws -> ExactLocation? { nil }
+    func implementations(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactLocation]? { nil }
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool
+    ) throws -> [ExactLocation]? { nil }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int
+    ) throws -> [ExactCallHierarchyItem]? {
+        prepareCallHierarchy(while: { !Task.isCancelled })
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallHierarchyItem]? {
+        prepareCallHierarchy(while: { batch.isCurrent })
+    }
+
+    private func prepareCallHierarchy(
+        while isCurrent: () -> Bool
+    ) -> [ExactCallHierarchyItem]? {
+        locked {
+            attempts += 1
+            activeAttempts += 1
+            maximumActiveAttempts = max(maximumActiveAttempts, activeAttempts)
+        }
+        defer { locked { activeAttempts -= 1 } }
+
+        var acquired = false
+        while isCurrent(), !acquired {
+            acquired = operationLock.lock(
+                before: Date().addingTimeInterval(0.01)
+            )
+        }
+        guard acquired else { return nil }
+        defer { operationLock.unlock() }
+        guard isCurrent() else { return nil }
+
+        let request = locked {
+            actualRequests += 1
+            return actualRequests
+        }
+        if request == 1 {
+            firstRequestCondition.lock()
+            let deadline = Date().addingTimeInterval(120)
+            while !firstRequestReleased,
+                  firstRequestCondition.wait(until: deadline)
+            {}
+            firstRequestCondition.unlock()
+        }
+        return []
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? { nil }
+    func outgoingCalls(
+        item: ExactCallHierarchyItem
+    ) throws -> [ExactCallRelation]? { nil }
+
+    func releaseFirstRequest() {
+        firstRequestCondition.lock()
+        firstRequestReleased = true
+        firstRequestCondition.broadcast()
+        firstRequestCondition.unlock()
+    }
+
+    func cancel() {}
+    func close() { releaseFirstRequest() }
+
+    private func locked<T>(_ operation: () -> T) -> T {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return operation()
+    }
+}
+
+private final class QueuedRelationExactProvider: ExactProvider, @unchecked Sendable {
+    let capabilities: ExactCapabilities = [.callHierarchy]
+    let toolVersion = "queued-relation-fake-1"
+    private let session: QueuedRelationExactSession
+
+    init(session: QueuedRelationExactSession) {
+        self.session = session
+    }
+
+    func prepare(
+        snapshot: any Snapshot,
+        profile: ExactProfileKey,
+        trustMode: TrustMode
+    ) throws -> any ExactSession {
+        session
+    }
+}
+
 private final class RelationExactSnapshot: Snapshot, @unchecked Sendable {
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
@@ -3176,7 +3364,7 @@ private func relationExactEmptyTitle(
         loader: { _, _, _, _ in
             .init(edges: [], isTruncated: false)
         },
-        exactRelationsResolver: { _, _, _, _, _ in result }
+        exactRelationsResolver: { _, _, _, _, _, _ in result }
     )
     model.updateProjectState(.ready(session, context))
     model.setRoot(target: .engine(symbol), direction: direction)
@@ -3221,7 +3409,7 @@ private func relationProjectReferenceStatus(
         )
     }
     let exactResolver: RelationTreeModel.ExactRelationsResolver = {
-        _, _, _, _, _ in
+        _, _, _, _, _, _ in
         .relations(exact, origin: .worktree, coverage: .full)
     }
     let model = RelationTreeModel(

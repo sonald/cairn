@@ -185,6 +185,51 @@ public protocol ExactProvider: Sendable {
     ) throws -> any ExactSession
 }
 
+public final class ExactRequestBatch: @unchecked Sendable {
+    public static let maximumConcurrentRequests = 4
+
+    private let condition = NSCondition()
+    private var current = true
+    private var activeRequests = 0
+
+    public init() {}
+
+    public var isCurrent: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return current
+    }
+
+    public func cancel() {
+        condition.lock()
+        current = false
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func acquire() -> Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        while current,
+              activeRequests >= Self.maximumConcurrentRequests
+        {
+            _ = condition.wait(
+                until: Date().addingTimeInterval(0.01)
+            )
+        }
+        guard current else { return false }
+        activeRequests += 1
+        return true
+    }
+
+    func release() {
+        condition.lock()
+        activeRequests -= 1
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
 public protocol ExactSession: AnyObject, Sendable {
     var negotiatedCapabilities: ExactCapabilities { get }
     var readiness: ExactReadiness { get }
@@ -211,6 +256,36 @@ public protocol ExactSession: AnyObject, Sendable {
     func outgoingCalls(
         item: ExactCallHierarchyItem
     ) throws -> [ExactCallRelation]?
+    func definition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactLocation?
+    func implementations(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]?
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]?
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallHierarchyItem]?
+    func incomingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]?
+    func outgoingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]?
+    func cancel(batch: ExactRequestBatch)
     func cancel()
     func close()
 }
@@ -219,6 +294,77 @@ public extension ExactSession {
     var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
         get { nil }
         set {}
+    }
+
+    func definition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactLocation? {
+        try inBatch(batch) { try definition(file: file, byteOffset: byteOffset) }
+    }
+
+    func implementations(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]? {
+        try inBatch(batch) {
+            try implementations(file: file, byteOffset: byteOffset)
+        }
+    }
+
+    func references(
+        file: String,
+        byteOffset: Int,
+        includeDeclaration: Bool,
+        batch: ExactRequestBatch
+    ) throws -> [ExactLocation]? {
+        try inBatch(batch) {
+            try references(
+                file: file,
+                byteOffset: byteOffset,
+                includeDeclaration: includeDeclaration
+            )
+        }
+    }
+
+    func prepareCallHierarchy(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallHierarchyItem]? {
+        try inBatch(batch) {
+            try prepareCallHierarchy(file: file, byteOffset: byteOffset)
+        }
+    }
+
+    func incomingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]? {
+        try inBatch(batch) { try incomingCalls(item: item) }
+    }
+
+    func outgoingCalls(
+        item: ExactCallHierarchyItem,
+        batch: ExactRequestBatch
+    ) throws -> [ExactCallRelation]? {
+        try inBatch(batch) { try outgoingCalls(item: item) }
+    }
+
+    func cancel(batch: ExactRequestBatch) {
+        batch.cancel()
+    }
+
+    private func inBatch<Result>(
+        _ batch: ExactRequestBatch,
+        _ request: () throws -> Result?
+    ) throws -> Result? {
+        guard batch.acquire() else { return nil }
+        defer { batch.release() }
+        guard batch.isCurrent else { return nil }
+        return try request()
     }
 }
 

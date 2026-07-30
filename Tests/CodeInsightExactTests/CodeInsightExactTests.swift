@@ -786,6 +786,132 @@ func rustAnalyzerDoesNotNegotiateMissingCallHierarchyProvider() throws {
 }
 
 @Test
+func rustAnalyzerRetryDelayDoesNotHoldTheOperationLock() throws {
+    let responses = RetryResponseState()
+    try withFakeRustAnalyzerSession(
+        requestResponder: { method, _ in
+            guard method == "textDocument/definition" else {
+                return .useDefault
+            }
+            return responses.next()
+        }
+    ) { session in
+        let firstDone = DispatchSemaphore(value: 0)
+        let secondDone = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            _ = try? session.definition(file: "src/main.rs", byteOffset: 0)
+            firstDone.signal()
+        }
+        #expect(waitUntil(timeout: 1) { responses.count == 1 })
+
+        Thread.detachNewThread {
+            _ = try? session.definition(file: "src/main.rs", byteOffset: 0)
+            secondDone.signal()
+        }
+        let secondEnteredDuringRetry =
+            secondDone.wait(timeout: .now() + 0.5) == .success
+        #expect(firstDone.wait(timeout: .now() + 3) == .success)
+        #expect(
+            secondEnteredDuringRetry
+                || secondDone.wait(timeout: .now() + 3) == .success
+        )
+
+        print(
+            "retry lock releasedDuringDelay=\(secondEnteredDuringRetry)"
+                + " requests=\(responses.count)"
+        )
+        #expect(secondEnteredDuringRetry)
+    }
+}
+
+@Test
+func exactRequestBatchCapsProviderBoundaryConcurrency() {
+    let expectedLimit = 4
+    #expect(ExactRequestBatch.maximumConcurrentRequests == expectedLimit)
+    let batch = ExactRequestBatch()
+    let probe = BatchConcurrencyProbe()
+    let workersDone = DispatchGroup()
+    for _ in 0..<12 {
+        workersDone.enter()
+        Thread.detachNewThread {
+            defer { workersDone.leave() }
+            guard batch.acquire() else { return }
+            probe.enter()
+            probe.waitForRelease()
+            probe.leave()
+            batch.release()
+        }
+    }
+
+    #expect(waitUntil(timeout: 1) {
+        probe.active == expectedLimit
+    })
+    probe.release()
+    #expect(workersDone.wait(timeout: .now() + 3) == .success)
+
+    print(
+        "batch concurrency limit=\(ExactRequestBatch.maximumConcurrentRequests)"
+            + " maxInFlight=\(probe.maximumActive)"
+    )
+    #expect(probe.maximumActive == expectedLimit)
+}
+
+@Test
+func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
+    throws
+{
+    let responses = CancellationResponseState(
+        successURI: exactFixtureURL()
+            .appendingPathComponent("src/lib.rs")
+            .absoluteString
+    )
+    try withFakeRustAnalyzerSession(
+        requestResponder: { method, _ in
+            guard method == "textDocument/definition" else {
+                return .useDefault
+            }
+            return responses.next()
+        }
+    ) { session in
+        let staleBatch = ExactRequestBatch()
+        let started = DispatchSemaphore(value: 0)
+        let staleDone = DispatchGroup()
+        for _ in 0..<ExactRequestBatch.maximumConcurrentRequests {
+            staleDone.enter()
+            Thread.detachNewThread {
+                defer { staleDone.leave() }
+                started.signal()
+                _ = try? session.definition(
+                    file: "src/main.rs",
+                    byteOffset: 0,
+                    batch: staleBatch
+                )
+            }
+        }
+        for _ in 0..<ExactRequestBatch.maximumConcurrentRequests {
+            #expect(started.wait(timeout: .now() + 1) == .success)
+        }
+        #expect(waitUntil(timeout: 1) { responses.count == 1 })
+        Thread.sleep(forTimeInterval: 0.05)
+
+        session.cancel(batch: staleBatch)
+        #expect(staleDone.wait(timeout: .now() + 3) == .success)
+        let current = try session.definition(
+            file: "src/main.rs",
+            byteOffset: 0,
+            batch: ExactRequestBatch()
+        )
+
+        print(
+            "cancelled batch provider requests staleQueued=4"
+                + " actual=\(responses.count)"
+        )
+        #expect(current != nil)
+        #expect(responses.count == 2)
+    }
+}
+
+@Test
 func diagnosticObserverFiresForStderrOutsideClientLock() async throws {
     let client = try LSPClient(
         executableURL: URL(fileURLWithPath: "/bin/sh"),
@@ -1593,6 +1719,122 @@ private func waitForFile(_ url: URL, timeout: TimeInterval) -> Bool {
     return FileManager.default.fileExists(atPath: url.path)
 }
 
+private func waitUntil(
+    timeout: TimeInterval,
+    _ predicate: () -> Bool
+) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if predicate() { return true }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    return predicate()
+}
+
+private enum PipeFakeRequestResponse {
+    case useDefault
+    case result(Any)
+    case error(code: Int, message: String)
+    case noResponse
+}
+
+private final class RetryResponseState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var responses = 0
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return responses
+    }
+
+    func next() -> PipeFakeRequestResponse {
+        lock.lock()
+        defer { lock.unlock() }
+        responses += 1
+        return responses == 1
+            ? .error(code: -32801, message: "content modified")
+            : .useDefault
+    }
+}
+
+private final class CancellationResponseState: @unchecked Sendable {
+    private let lock = NSLock()
+    private let successURI: String
+    private var responses = 0
+
+    init(successURI: String) {
+        self.successURI = successURI
+    }
+
+    var count: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return responses
+    }
+
+    func next() -> PipeFakeRequestResponse {
+        lock.lock()
+        defer { lock.unlock() }
+        responses += 1
+        guard responses > 1 else { return .noResponse }
+        return .result([
+            "uri": successURI,
+            "range": [
+                "start": ["line": 0, "character": 7],
+                "end": ["line": 0, "character": 13],
+            ],
+        ])
+    }
+}
+
+private final class BatchConcurrencyProbe: @unchecked Sendable {
+    private let condition = NSCondition()
+    private var released = false
+    private var activeCount = 0
+    private var maximumActiveCount = 0
+
+    var active: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return activeCount
+    }
+
+    var maximumActive: Int {
+        condition.lock()
+        defer { condition.unlock() }
+        return maximumActiveCount
+    }
+
+    func enter() {
+        condition.lock()
+        activeCount += 1
+        maximumActiveCount = max(maximumActiveCount, activeCount)
+        condition.broadcast()
+        condition.unlock()
+    }
+
+    func leave() {
+        condition.lock()
+        activeCount -= 1
+        condition.unlock()
+    }
+
+    func waitForRelease() {
+        condition.lock()
+        let deadline = Date().addingTimeInterval(120)
+        while !released, condition.wait(until: deadline) {}
+        condition.unlock()
+    }
+
+    func release() {
+        condition.lock()
+        released = true
+        condition.broadcast()
+        condition.unlock()
+    }
+}
+
 private final class PipeFakeLSPServer: @unchecked Sendable {
     private let input: FileHandle
     private let output: FileHandle
@@ -1615,6 +1857,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private let outgoingCallResult: Any
     private let referencesProvider: Any?
     private let referenceResult: Any
+    private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
     private var _error: Error?
 
     var requestMethods: [String] { locked { _requestMethods } }
@@ -1649,6 +1892,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         outgoingCallResult: Any = NSNull(),
         referencesProvider: Any? = true,
         referenceResult: Any = NSNull(),
+        requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
         done: @escaping () -> Void
     ) {
         self.input = input
@@ -1661,6 +1905,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         self.outgoingCallResult = outgoingCallResult
         self.referencesProvider = referencesProvider
         self.referenceResult = referenceResult
+        self.requestResponder = requestResponder
         self.done = done
     }
 
@@ -1690,6 +1935,23 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                 locked {
                     _requestMethods.append(method)
                     _requestIDs.append(id)
+                }
+                switch requestResponder?(method, id) ?? .useDefault {
+                case .useDefault:
+                    break
+                case .result(let result):
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": result,
+                    ])
+                    return false
+                case let .error(code, message):
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "error": ["code": code, "message": message],
+                    ])
+                    return false
+                case .noResponse:
+                    return false
                 }
                 switch method {
                 case "initialize":
@@ -1839,6 +2101,7 @@ private func withFakeRustAnalyzerSession<T>(
     outgoingCallResult: Any = NSNull(),
     referencesProvider: Any? = true,
     referenceResult: Any = NSNull(),
+    requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
     serverCheck: ((PipeFakeLSPServer) -> Void)? = nil,
     body: (any ExactSession) throws -> T
 ) throws -> T {
@@ -1857,6 +2120,7 @@ private func withFakeRustAnalyzerSession<T>(
         outgoingCallResult: outgoingCallResult,
         referencesProvider: referencesProvider,
         referenceResult: referenceResult,
+        requestResponder: requestResponder,
         done: { done.signal() }
     )
     server.start()

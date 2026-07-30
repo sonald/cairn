@@ -260,17 +260,18 @@ public final class LSPClient: @unchecked Sendable {
     public func request(
         _ method: String,
         params: Any? = nil,
-        timeout: TimeInterval
+        timeout: TimeInterval,
+        shouldStart: @Sendable () -> Bool = { true }
     ) throws -> Any {
         condition.lock()
-        guard !closed else {
+        guard !closed, shouldStart() else {
             condition.unlock()
-            throw LSPError.connectionClosed
+            if closed { throw LSPError.connectionClosed }
+            throw LSPError.cancelled(method)
         }
         let id = nextID
         nextID += 1
         pendingRequestIDs.insert(id)
-        condition.unlock()
 
         var message: [String: Any] = [
             "jsonrpc": "2.0", "id": id, "method": method,
@@ -279,14 +280,12 @@ public final class LSPClient: @unchecked Sendable {
         do {
             try send(message)
         } catch {
-            condition.lock()
             pendingRequestIDs.remove(id)
             condition.unlock()
             throw error
         }
 
         let deadline = Date().addingTimeInterval(max(0, timeout))
-        condition.lock()
         defer {
             pendingRequestIDs.remove(id)
             cancelledRequestIDs.remove(id)

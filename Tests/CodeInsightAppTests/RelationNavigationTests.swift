@@ -968,7 +968,7 @@ private func makeRelationUXFixture(
                 isTruncated: false
             )
         },
-        exactRelationsResolver: { _, _, _, _, _ in
+        exactRelationsResolver: { _, _, _, _, _, _ in
             if let blockedExactLoad {
                 await blockedExactLoad.wait("root Exact relation release")
             }

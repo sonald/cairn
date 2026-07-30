@@ -168,14 +168,16 @@ public final class RelationTreeModel {
     typealias ExactResolver = @MainActor @Sendable (
         String,
         UInt32,
-        UInt64
+        UInt64,
+        ExactRequestBatch
     ) async -> ExactOverlay.Entry?
     typealias ExactRelationsResolver = @MainActor @Sendable (
         String,
         UInt32,
         ExactCallHierarchyItem?,
         Direction,
-        UInt64
+        UInt64,
+        ExactRequestBatch
     ) async -> ExactCoordinator.RelationQueryResult?
 
     public private(set) var root: Node?
@@ -193,6 +195,8 @@ public final class RelationTreeModel {
     private let queryTimeout: Duration
     private var exactResolver: ExactResolver?
     private var exactRelationsResolver: ExactRelationsResolver?
+    private var exactBatch: ExactRequestBatch?
+    private var cancelExactBatch: (@MainActor (ExactRequestBatch) -> Void)?
     private var session: EngineSession?
     private var context: QueryContext?
 
@@ -223,22 +227,27 @@ public final class RelationTreeModel {
     }
 
     func attachExactCoordinator(_ coordinator: ExactCoordinator) {
-        exactResolver = { [weak coordinator] file, offset, generation in
+        exactResolver = { [weak coordinator] file, offset, generation, batch in
             await coordinator?.definition(
                 file: file,
                 byteOffset: offset,
-                generation: generation
+                generation: generation,
+                batch: batch
             )
         }
         exactRelationsResolver = {
-            [weak coordinator] file, offset, item, direction, generation in
+            [weak coordinator] file, offset, item, direction, generation, batch in
             await coordinator?.relations(
                 file: file,
                 byteOffset: offset,
                 item: item,
                 direction: direction,
-                generation: generation
+                generation: generation,
+                batch: batch
             )
+        }
+        cancelExactBatch = { [weak coordinator] batch in
+            coordinator?.cancel(batch: batch)
         }
     }
 
@@ -356,6 +365,7 @@ public final class RelationTreeModel {
         )
         if !node.isExpandable { node.children = [] }
         root = node
+        exactBatch = ExactRequestBatch()
         return expansionTask(for: node)
     }
 
@@ -423,6 +433,11 @@ public final class RelationTreeModel {
     }
 
     private func cancelLoads() {
+        if let exactBatch {
+            exactBatch.cancel()
+            cancelExactBatch?(exactBatch)
+            self.exactBatch = nil
+        }
         func cancel(_ node: Node) {
             node.loadTask?.cancel()
             for child in node.children ?? [] { cancel(child) }
@@ -432,7 +447,8 @@ public final class RelationTreeModel {
 
     private func expansionTask(for node: Node) -> Task<Void, Never>? {
         guard node.isExpandable, node.children == nil,
-              let identity = node.expansionIdentity, let session, let context
+              let identity = node.expansionIdentity, let session, let context,
+              let exactBatch
         else { return nil }
 
         requestID &+= 1
@@ -492,7 +508,8 @@ public final class RelationTreeModel {
                             query.byteOffset,
                             exactItem,
                             direction,
-                            context.generation
+                            context.generation,
+                            exactBatch
                         ),
                         false,
                         false
@@ -604,7 +621,8 @@ public final class RelationTreeModel {
     private func promoteExactEdges(
         _ loaded: LoadResult,
         direction: Direction,
-        generation: UInt64
+        generation: UInt64,
+        batch: ExactRequestBatch
     ) async -> LoadResult {
         guard let exactResolver else { return loaded }
         var edges = loaded.edges
@@ -617,7 +635,8 @@ public final class RelationTreeModel {
                     let exact = await exactResolver(
                         query.file,
                         query.byteOffset,
-                        generation
+                        generation,
+                        batch
                     )
                     return (index, exact)
                 }

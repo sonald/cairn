@@ -217,6 +217,11 @@ public final class ExactCoordinator {
         trustMode = nil
     }
 
+    func cancel(batch: ExactRequestBatch) {
+        batch.cancel()
+        active?.session.cancel(batch: batch)
+    }
+
     public func prepare(
         projectURL: URL,
         revision: String?,
@@ -378,10 +383,12 @@ public final class ExactCoordinator {
     public func definition(
         file: String,
         byteOffset: UInt32,
-        generation: UInt64
+        generation: UInt64,
+        batch: ExactRequestBatch? = nil
     ) async -> ExactOverlay.Entry? {
         if let prepareTask { await prepareTask.value }
-        guard expectedGeneration == generation,
+        guard batch?.isCurrent != false,
+              expectedGeneration == generation,
               let current = active,
               current.generation == generation
         else { return nil }
@@ -398,8 +405,10 @@ public final class ExactCoordinator {
             let location = try await request(
                 session: current.session,
                 file: file,
-                byteOffset: offset
+                byteOffset: offset,
+                batch: batch
             )
+            guard batch?.isCurrent != false else { return nil }
             return publish(
                 location,
                 from: current,
@@ -412,7 +421,8 @@ public final class ExactCoordinator {
             return await restartOnce(
                 current,
                 file: file,
-                byteOffset: offset
+                byteOffset: offset,
+                batch: batch
             )
         } catch {
             guard isCurrent(current) else { return nil }
@@ -428,10 +438,12 @@ public final class ExactCoordinator {
         byteOffset: UInt32,
         item: ExactCallHierarchyItem?,
         direction: RelationTreeModel.Direction,
-        generation: UInt64
+        generation: UInt64,
+        batch: ExactRequestBatch? = nil
     ) async -> RelationQueryResult? {
         if let prepareTask { await prepareTask.value }
-        guard expectedGeneration == generation,
+        guard batch?.isCurrent != false,
+              expectedGeneration == generation,
               let current = active,
               current.generation == generation
         else { return nil }
@@ -442,8 +454,10 @@ public final class ExactCoordinator {
                 file: file,
                 byteOffset: Int(byteOffset),
                 item: item,
-                direction: direction
+                direction: direction,
+                batch: batch
             )
+            guard batch?.isCurrent != false else { return nil }
             return publish(result, from: current)
         } catch where isHelperCrash(error)
             && !isUnavailable(current.session.readiness)
@@ -453,7 +467,8 @@ public final class ExactCoordinator {
                 file: file,
                 byteOffset: Int(byteOffset),
                 item: item,
-                direction: direction
+                direction: direction,
+                batch: batch
             )
         } catch {
             guard isCurrent(current) else { return nil }
@@ -467,12 +482,13 @@ public final class ExactCoordinator {
     private func restartOnce(
         _ previous: Active,
         file: String,
-        byteOffset: Int
+        byteOffset: Int,
+        batch: ExactRequestBatch?
     ) async -> ExactOverlay.Entry? {
-        guard isCurrent(previous) else { return nil }
+        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
         readiness = .preparing
         try? await Task.sleep(for: .milliseconds(100))
-        guard isCurrent(previous) else { return nil }
+        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
 
         do {
             let newSession = try await Task.detached(priority: .utility) {
@@ -482,7 +498,7 @@ public final class ExactCoordinator {
                     trustMode: previous.trustMode
                 )
             }.value
-            guard isCurrent(previous) else {
+            guard batch?.isCurrent != false, isCurrent(previous) else {
                 Task.detached { newSession.close() }
                 return nil
             }
@@ -505,8 +521,10 @@ public final class ExactCoordinator {
                 let location = try await request(
                     session: newSession,
                     file: file,
-                    byteOffset: byteOffset
+                    byteOffset: byteOffset,
+                    batch: batch
                 )
+                guard batch?.isCurrent != false else { return nil }
                 return publish(
                     location,
                     from: restarted,
@@ -514,14 +532,16 @@ public final class ExactCoordinator {
                     byteOffset: byteOffset
                 )
             } catch {
-                guard isCurrent(restarted) else { return nil }
+                guard batch?.isCurrent != false, isCurrent(restarted) else {
+                    return nil
+                }
                 readiness = .unavailable(
                     "exact helper restart exhausted: \(error)"
                 )
                 return nil
             }
         } catch {
-            guard isCurrent(previous) else { return nil }
+            guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
             readiness = .unavailable("exact helper restart failed: \(error)")
             return nil
         }
@@ -530,10 +550,19 @@ public final class ExactCoordinator {
     private func request(
         session: any ExactSession,
         file: String,
-        byteOffset: Int
+        byteOffset: Int,
+        batch: ExactRequestBatch?
     ) async throws -> ExactLocation? {
         try await Task.detached(priority: .userInitiated) {
-            try session.definition(file: file, byteOffset: byteOffset)
+            if let batch {
+                try session.definition(
+                    file: file,
+                    byteOffset: byteOffset,
+                    batch: batch
+                )
+            } else {
+                try session.definition(file: file, byteOffset: byteOffset)
+            }
         }.value
     }
 
@@ -542,29 +571,45 @@ public final class ExactCoordinator {
         file: String,
         byteOffset: Int,
         item: ExactCallHierarchyItem?,
-        direction: RelationTreeModel.Direction
+        direction: RelationTreeModel.Direction,
+        batch: ExactRequestBatch?
     ) async throws -> RawRelationQueryResult {
         try await Task.detached(priority: .userInitiated) {
             switch direction {
             case .references:
                 guard session.negotiatedCapabilities.contains(.references)
                 else { return .unsupported }
-                return .locations(
+                let locations = if let batch {
+                    try session.references(
+                        file: file,
+                        byteOffset: byteOffset,
+                        includeDeclaration: false,
+                        batch: batch
+                    ) ?? []
+                } else {
                     try session.references(
                         file: file,
                         byteOffset: byteOffset,
                         includeDeclaration: false
                     ) ?? []
-                )
+                }
+                return .locations(locations)
             case .implementations:
                 guard session.negotiatedCapabilities.contains(.implementations)
                 else { return .unsupported }
-                return .locations(
+                let locations = if let batch {
+                    try session.implementations(
+                        file: file,
+                        byteOffset: byteOffset,
+                        batch: batch
+                    ) ?? []
+                } else {
                     try session.implementations(
                         file: file,
                         byteOffset: byteOffset
                     ) ?? []
-                )
+                }
+                return .locations(locations)
             case .callers, .calls:
                 guard session.negotiatedCapabilities.contains(.callHierarchy)
                 else { return .unsupported }
@@ -572,10 +617,19 @@ public final class ExactCoordinator {
                 if let item {
                     items = [item]
                 } else {
-                    guard let prepared = try session.prepareCallHierarchy(
-                        file: file,
-                        byteOffset: byteOffset
-                    ), !prepared.isEmpty
+                    let prepared = if let batch {
+                        try session.prepareCallHierarchy(
+                            file: file,
+                            byteOffset: byteOffset,
+                            batch: batch
+                        )
+                    } else {
+                        try session.prepareCallHierarchy(
+                            file: file,
+                            byteOffset: byteOffset
+                        )
+                    }
+                    guard let prepared, !prepared.isEmpty
                     else { return .notApplicable }
                     items = prepared
                 }
@@ -583,9 +637,23 @@ public final class ExactCoordinator {
                 for item in items {
                     switch direction {
                     case .callers:
-                        relations += try session.incomingCalls(item: item) ?? []
+                        if let batch {
+                            relations += try session.incomingCalls(
+                                item: item,
+                                batch: batch
+                            ) ?? []
+                        } else {
+                            relations += try session.incomingCalls(item: item) ?? []
+                        }
                     case .calls:
-                        relations += try session.outgoingCalls(item: item) ?? []
+                        if let batch {
+                            relations += try session.outgoingCalls(
+                                item: item,
+                                batch: batch
+                            ) ?? []
+                        } else {
+                            relations += try session.outgoingCalls(item: item) ?? []
+                        }
                     case .implementations:
                         break
                     case .references:
@@ -602,12 +670,13 @@ public final class ExactCoordinator {
         file: String,
         byteOffset: Int,
         item: ExactCallHierarchyItem?,
-        direction: RelationTreeModel.Direction
+        direction: RelationTreeModel.Direction,
+        batch: ExactRequestBatch?
     ) async -> RelationQueryResult? {
-        guard isCurrent(previous) else { return nil }
+        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
         readiness = .preparing
         try? await Task.sleep(for: .milliseconds(100))
-        guard isCurrent(previous) else { return nil }
+        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
 
         do {
             let newSession = try await Task.detached(priority: .utility) {
@@ -617,7 +686,7 @@ public final class ExactCoordinator {
                     trustMode: previous.trustMode
                 )
             }.value
-            guard isCurrent(previous) else {
+            guard batch?.isCurrent != false, isCurrent(previous) else {
                 Task.detached { newSession.close() }
                 return nil
             }
@@ -642,18 +711,22 @@ public final class ExactCoordinator {
                     file: file,
                     byteOffset: byteOffset,
                     item: item,
-                    direction: direction
+                    direction: direction,
+                    batch: batch
                 )
+                guard batch?.isCurrent != false else { return nil }
                 return publish(result, from: restarted)
             } catch {
-                guard isCurrent(restarted) else { return nil }
+                guard batch?.isCurrent != false, isCurrent(restarted) else {
+                    return nil
+                }
                 readiness = .unavailable(
                     "exact helper restart exhausted: \(error)"
                 )
                 return nil
             }
         } catch {
-            guard isCurrent(previous) else { return nil }
+            guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
             readiness = .unavailable("exact helper restart failed: \(error)")
             return nil
         }
