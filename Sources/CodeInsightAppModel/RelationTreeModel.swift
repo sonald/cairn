@@ -575,7 +575,12 @@ public final class RelationTreeModel {
                     }
                     node.children = preservingPublishedRows(
                         children,
-                        from: node.children
+                        from: node.children,
+                        emptyExactTitle: exactGroupTitle(
+                            state: displayed.exactState,
+                            count: 0,
+                            direction: direction
+                        )
                     )
                     onNodeChange(node)
                     if pendingQueryCount == 0 { break }
@@ -890,7 +895,8 @@ public final class RelationTreeModel {
 
     private func preservingPublishedRows(
         _ children: [Node],
-        from previousChildren: [Node]?
+        from previousChildren: [Node]?,
+        emptyExactTitle: String
     ) -> [Node] {
         let previousGroups = (previousChildren ?? []).filter {
             $0.kind == .group && $0.children?.isEmpty == false
@@ -950,10 +956,11 @@ public final class RelationTreeModel {
             } else if isFinalBatch,
                       !existingGroupNames.contains(
                           Self.stableGroupName(child.title)
-                      ),
-                      !(child.title.hasPrefix("Exact (")
-                          && child.title.hasSuffix(")"))
+                      )
             {
+                if child.title.hasPrefix("Exact") {
+                    child.title = emptyExactTitle
+                }
                 result.append(child)
             }
         }

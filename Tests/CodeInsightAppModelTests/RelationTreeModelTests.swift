@@ -1194,6 +1194,128 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
 
 @MainActor
 @Test
+func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let traitRoot = try relationTemporaryProject([
+        "main.rs": "trait Render { fn render(&self); }",
+    ])
+    defer { try? FileManager.default.removeItem(at: traitRoot) }
+    let traitSession = try ProjectIndexer().index(root: traitRoot)
+    let traitContext = relationQueryContext(for: traitSession)
+    let trait = try #require(
+        traitSession.definitions(of: "Render", context: traitContext).first?.0
+    )
+    let cases: [
+        (
+            label: String,
+            direction: RelationTreeModel.Direction,
+            session: EngineSession,
+            context: QueryContext,
+            symbol: SymbolOccurrenceID,
+            expectedTitle: String
+        )
+    ] = [
+        (
+            "callers",
+            .callers,
+            fixture.session,
+            fixture.context,
+            fixture.a,
+            "Exact (0): no callers"
+        ),
+        (
+            "calls",
+            .calls,
+            fixture.session,
+            fixture.context,
+            fixture.a,
+            "Exact (0): no calls"
+        ),
+        (
+            "implementations",
+            .implementations,
+            traitSession,
+            traitContext,
+            trait,
+            "Exact (0): no implementations"
+        ),
+        (
+            "references",
+            .references,
+            fixture.session,
+            fixture.context,
+            fixture.a,
+            "Exact (0): no references"
+        ),
+    ]
+
+    for testCase in cases {
+        let exact = RelationAsyncGate()
+        let model = RelationTreeModel(
+            loader: { _, _, _, _ in
+                .init(edges: [
+                    .init(
+                        title: "heuristic-first",
+                        certainty: .strong,
+                        dispatch: .direct,
+                        symbol: nil,
+                        path: "main.rs",
+                        byteOffset: 20,
+                        line: 1,
+                        evidence: []
+                    ),
+                ], isTruncated: false)
+            },
+            exactRelationsResolver: { _, _, _, _, _ in
+                await exact.wait()
+                return .relations([
+                    .init(
+                        name: "heuristic-first",
+                        location: relationExactLocation(
+                            file: "main.rs",
+                            offset: 20
+                        ),
+                        item: nil,
+                        callSites: []
+                    ),
+                ], origin: .worktree, coverage: .full)
+            }
+        )
+        model.updateProjectState(.ready(testCase.session, testCase.context))
+
+        let load = model.setRoot(
+            target: .engine(testCase.symbol),
+            direction: testCase.direction
+        )
+        try #require(await testWaitUntil(
+            "\(testCase.label) publishes heuristic rows while Exact is pending"
+        ) {
+            exact.isPending
+                && relationVisibleEdgeRows(model.root).map(\.title)
+                    == ["heuristic-first"]
+        })
+        let firstTitles = model.root?.children?.map(\.title) ?? []
+        let firstRow = try #require(relationVisibleEdgeRows(model.root).first)
+        #expect(!firstTitles.contains { $0.hasPrefix("Exact") })
+
+        exact.release()
+        await load?.value
+        let exactGroup = model.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Exact")
+        }
+
+        #expect(relationVisibleEdgeRows(model.root).first === firstRow)
+        #expect(firstRow.badge == "Exact · lsp")
+        #expect(exactGroup?.children?.isEmpty == true)
+        #expect(exactGroup?.title == testCase.expectedTitle)
+    }
+}
+
+@MainActor
+@Test
 func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }

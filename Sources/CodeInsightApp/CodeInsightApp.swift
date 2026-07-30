@@ -2209,6 +2209,108 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "profileTitle": windowController.selfTestProfileTitle,
             ]
         )
+        let relationTimingFileVisible = waitUntil(timeout: 5, condition: {
+            windowController.selectFileInSidebar(target.relationFile)
+        }) && waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.relationFile.standardizedFileURL
+        })
+        let relationSessionCountBefore =
+            exactSelfTestProviderState?.trustModes.count ?? 0
+        var relationColdTiming = (
+            relationFirstActionableMS: 0.0,
+            relationAllResultsMS: 0.0,
+            relationFirstActionableKind: "",
+            relationFirstActionableTitle: ""
+        )
+        var relationWarmTiming = relationColdTiming
+        if relationTimingFileVisible {
+            exactSelfTestProviderState?.delayNextRelation(by: 0.25)
+            relationColdTiming = measureRelationTiming(
+                model: model,
+                controller: windowController,
+                offset: target.relationCallOffset,
+                direction: .callers,
+                timeout: 5
+            )
+            exactSelfTestProviderState?.delayNextRelation(by: 0.25)
+            relationWarmTiming = measureRelationTiming(
+                model: model,
+                controller: windowController,
+                offset: target.relationCallOffset,
+                direction: .callers,
+                timeout: 5
+            )
+        }
+        let relationSessionCountAfter =
+            exactSelfTestProviderState?.trustModes.count ?? 0
+        let relationColdFirstActionableSelectable =
+            !relationColdTiming.relationFirstActionableTitle.isEmpty
+            && windowController.selfTestSelectRelationEdge(
+                titled: relationColdTiming.relationFirstActionableTitle
+            )
+            && windowController.selfTestSelectedRelationEdgeTitle
+                == relationColdTiming.relationFirstActionableTitle
+        let relationWarmFirstActionableSelectable =
+            !relationWarmTiming.relationFirstActionableTitle.isEmpty
+            && windowController.selfTestSelectRelationEdge(
+                titled: relationWarmTiming.relationFirstActionableTitle
+            )
+            && windowController.selfTestSelectedRelationEdgeTitle
+                == relationWarmTiming.relationFirstActionableTitle
+        windowController.selfTestDeselectRelation()
+        let relationColdTimingFieldsValid =
+            relationColdTiming.relationFirstActionableMS > 0
+            && relationColdTiming.relationAllResultsMS
+                >= relationColdTiming.relationFirstActionableMS
+            && ["heuristic", "exact"].contains(
+                relationColdTiming.relationFirstActionableKind
+            )
+        let relationWarmTimingFieldsValid =
+            relationWarmTiming.relationFirstActionableMS > 0
+            && relationWarmTiming.relationAllResultsMS
+                >= relationWarmTiming.relationFirstActionableMS
+            && ["heuristic", "exact"].contains(
+                relationWarmTiming.relationFirstActionableKind
+            )
+        let relationTimingSameSession =
+            relationSessionCountBefore > 0
+            && relationSessionCountAfter == relationSessionCountBefore
+        emitExactStep(
+            "relation-timing",
+            variant: "delayed-exact-fake",
+            controller: windowController,
+            extra: [
+                "measurementScope": "instrumentation-only; not real rust-analyzer",
+                "thresholdBasis":
+                    "structural-only; real threshold pending host measurement",
+                "cold": [
+                    "relationFirstActionableMS":
+                        relationColdTiming.relationFirstActionableMS,
+                    "relationAllResultsMS":
+                        relationColdTiming.relationAllResultsMS,
+                    "relationFirstActionableKind":
+                        relationColdTiming.relationFirstActionableKind,
+                    "relationFirstActionableTitle":
+                        relationColdTiming.relationFirstActionableTitle,
+                ],
+                "warm": [
+                    "relationFirstActionableMS":
+                        relationWarmTiming.relationFirstActionableMS,
+                    "relationAllResultsMS":
+                        relationWarmTiming.relationAllResultsMS,
+                    "relationFirstActionableKind":
+                        relationWarmTiming.relationFirstActionableKind,
+                    "relationFirstActionableTitle":
+                        relationWarmTiming.relationFirstActionableTitle,
+                ],
+                "sameSession": relationTimingSameSession,
+                "coldFirstActionableSelectable":
+                    relationColdFirstActionableSelectable,
+                "warmFirstActionableSelectable":
+                    relationWarmFirstActionableSelectable,
+            ]
+        )
         guard waitUntil(timeout: 5, condition: {
                   windowController.selectFileInSidebar(target.file)
               }),
@@ -2530,17 +2632,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && model.relationTree.root?.children?.contains {
                     $0.kind == .loading
                 } == false
-                && projectReferenceRows().contains {
-                    $0.badge?.hasPrefix("Exact") == true
-                        && $0.title.hasPrefix("main.rs:")
+                && exactRelationEdges(in: model).contains {
+                    $0.title.hasPrefix("main.rs:")
                 }
         })
         let projectReferenceNodes = projectReferenceRows()
-        let exactReferenceNodes = projectReferenceNodes.filter {
-            $0.badge?.hasPrefix("Exact") == true
-        }
+        let exactReferenceNodes = exactRelationEdges(in: model)
         let fuzzyReferenceNodes = projectReferenceNodes.filter {
-            $0.badge?.hasPrefix("Exact") != true
+            $0.subtitle?.hasPrefix("Exact") != true
         }
         let exactReferenceTitles = exactReferenceNodes.map(\.title)
         let fuzzyReferenceTitles = fuzzyReferenceNodes.map(\.title)
@@ -2815,9 +2914,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactGroupVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.direction == .callers
                 && model.relationTree.root?.title == "answer"
-                && windowController.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "Exact"
-                ).contains("exact_dependency_caller")
+                && exactRelationEdges(in: model).contains {
+                    $0.title == "exact_dependency_caller"
+                }
         })
         let contextAndRelationsReadyMS = milliseconds(since: reprofiledAt)
         let exactGroupRowCount = windowController.selfTestExactGroupRowCount
@@ -2828,14 +2927,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
             && windowController.selfTestExactStatusVisible
-        let exactCallerVisible = windowController.selfTestVisibleRelationEdgeTitles(
-            inGroup: "Exact"
-        ).contains("exact_dependency_caller")
+        let exactCaller = exactRelationEdges(in: model).first {
+            $0.title == "exact_dependency_caller"
+        }
+        let exactCallerVisible = exactCaller != nil
         let exactCallerCallSitesHonest =
-            windowController.selfTestVisibleRelationEdgeSubtitle(
-                titled: "exact_dependency_caller",
-                inGroup: "Exact"
-            )?.contains("2 call sites") == true
+            exactCaller?.subtitle?.contains("2 call sites") == true
         let exactOnlyExpansionStarted = exactCallerVisible
             && windowController.selfTestExpandRelationEdge(
                 titled: "exact_dependency_caller"
@@ -3375,6 +3472,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "initialStatusSafeBeforeClick": initialStatusSafe,
             "initialProfileVisible": initialProfileVisible,
             "initialProfileTitleSafe": initialProfileTitleSafe,
+            "relationTimingFileVisible": relationTimingFileVisible,
+            "relationColdTimingFieldsValid": relationColdTimingFieldsValid,
+            "relationWarmTimingFieldsValid": relationWarmTimingFieldsValid,
+            "relationTimingSameSession": relationTimingSameSession,
+            "relationColdFirstActionableSelectable":
+                relationColdFirstActionableSelectable,
+            "relationWarmFirstActionableSelectable":
+                relationWarmFirstActionableSelectable,
+            "relationColdHeuristicFirst":
+                relationColdTiming.relationFirstActionableKind == "heuristic",
+            "relationWarmHeuristicFirst":
+                relationWarmTiming.relationFirstActionableKind == "heuristic",
             "featureProbeFileVisible": featureProbeFileVisible,
             "featureMenuActionTriggered": menuActionTriggered,
             "featurePrepared": featurePrepared,
@@ -3942,6 +4051,125 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return ("failed:initial-status", false, [:])
         }
 
+        guard let definitionOffset = UInt32(exactly: target.definition.byteOffset)
+        else {
+            return ("failed:fixture", false, [:])
+        }
+        let realRelationTimingFileVisible =
+            controller.selectFileInSidebar(target.relationFile)
+            && waitUntil(timeout: 5, condition: {
+                controller.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            })
+        var realRelationColdTiming = (
+            relationFirstActionableMS: 0.0,
+            relationAllResultsMS: 0.0,
+            relationFirstActionableKind: "",
+            relationFirstActionableTitle: ""
+        )
+        var realRelationWarmTiming = realRelationColdTiming
+        if realRelationTimingFileVisible {
+            realRelationColdTiming = measureRelationTiming(
+                model: realModel,
+                controller: controller,
+                offset: definitionOffset,
+                direction: .callers,
+                timeout: 45
+            )
+            realRelationWarmTiming = measureRelationTiming(
+                model: realModel,
+                controller: controller,
+                offset: definitionOffset,
+                direction: .callers,
+                timeout: 45
+            )
+        }
+        let realRelationColdSelectable =
+            !realRelationColdTiming.relationFirstActionableTitle.isEmpty
+            && controller.selfTestSelectRelationEdge(
+                titled: realRelationColdTiming.relationFirstActionableTitle
+            )
+            && controller.selfTestSelectedRelationEdgeTitle
+                == realRelationColdTiming.relationFirstActionableTitle
+        let realRelationWarmSelectable =
+            !realRelationWarmTiming.relationFirstActionableTitle.isEmpty
+            && controller.selfTestSelectRelationEdge(
+                titled: realRelationWarmTiming.relationFirstActionableTitle
+            )
+            && controller.selfTestSelectedRelationEdgeTitle
+                == realRelationWarmTiming.relationFirstActionableTitle
+        controller.selfTestDeselectRelation()
+        let realRelationColdTimingFieldsValid =
+            realRelationColdTiming.relationFirstActionableMS > 0
+            && realRelationColdTiming.relationAllResultsMS
+                >= realRelationColdTiming.relationFirstActionableMS
+            && ["heuristic", "exact"].contains(
+                realRelationColdTiming.relationFirstActionableKind
+            )
+        let realRelationWarmTimingFieldsValid =
+            realRelationWarmTiming.relationFirstActionableMS > 0
+            && realRelationWarmTiming.relationAllResultsMS
+                >= realRelationWarmTiming.relationFirstActionableMS
+            && ["heuristic", "exact"].contains(
+                realRelationWarmTiming.relationFirstActionableKind
+            )
+        var reachedChecks = [
+            "realRelationTimingFileVisible": realRelationTimingFileVisible,
+            "realRelationColdTimingFieldsValid":
+                realRelationColdTimingFieldsValid,
+            "realRelationWarmTimingFieldsValid":
+                realRelationWarmTimingFieldsValid,
+            "realRelationColdFirstActionableSelectable":
+                realRelationColdSelectable,
+            "realRelationWarmFirstActionableSelectable":
+                realRelationWarmSelectable,
+        ]
+        emitExactStep(
+            "relation-timing",
+            variant: "rust-analyzer",
+            controller: controller,
+            extra: [
+                "measurementScope": "real rust-analyzer",
+                "thresholdBasis":
+                    "structural-only; threshold pending host measurement",
+                "cold": [
+                    "relationFirstActionableMS":
+                        realRelationColdTiming.relationFirstActionableMS,
+                    "relationAllResultsMS":
+                        realRelationColdTiming.relationAllResultsMS,
+                    "relationFirstActionableKind":
+                        realRelationColdTiming.relationFirstActionableKind,
+                    "relationFirstActionableTitle":
+                        realRelationColdTiming.relationFirstActionableTitle,
+                ],
+                "warm": [
+                    "relationFirstActionableMS":
+                        realRelationWarmTiming.relationFirstActionableMS,
+                    "relationAllResultsMS":
+                        realRelationWarmTiming.relationAllResultsMS,
+                    "relationFirstActionableKind":
+                        realRelationWarmTiming.relationFirstActionableKind,
+                    "relationFirstActionableTitle":
+                        realRelationWarmTiming.relationFirstActionableTitle,
+                ],
+                "coldHeuristicFirstObserved":
+                    realRelationColdTiming.relationFirstActionableKind
+                        == "heuristic",
+                "warmHeuristicFirstObserved":
+                    realRelationWarmTiming.relationFirstActionableKind
+                        == "heuristic",
+            ]
+        )
+        guard reachedChecks.values.allSatisfy({ $0 }),
+              controller.selectFileInSidebar(target.file),
+              waitUntil(timeout: 5, condition: {
+                  controller.displayedReaderFile?.standardizedFileURL
+                      == target.file.standardizedFileURL
+              })
+        else {
+            return ("failed:relation-timing", false, reachedChecks)
+        }
+
         controller.selfTestReaderClick(offset: target.clickOffset, commandClick: false)
         let fuzzyVisible = waitUntil(timeout: 5, condition: {
             controller.selfTestContextCandidateCount >= 1
@@ -3993,7 +4221,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             controller: controller
         )
         guard exactVisible && fuzzyRetained,
-              let definitionOffset = UInt32(exactly: target.definition.byteOffset),
               let signatureTraitOffset = target.signatureTraitOffset,
               let relationRootOffset = target.relationRootOffset,
               controller.selectFileInSidebar(target.relationFile),
@@ -4006,12 +4233,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
 
         func exactEdges() -> [(symbol: String, file: String)] {
-            realModel.relationTree.root?.children?.first {
-                $0.kind == .group && $0.title.hasPrefix("Exact")
-            }?.children?.compactMap {
-                guard let file = $0.target?.path else { return nil }
+            exactRelationEdges(in: realModel).compactMap {
+                guard let file = $0.target?.path
+                else { return nil }
                 return ($0.title, file)
-            } ?? []
+            }
         }
 
         controller.selfTestReaderRelation(
@@ -4036,9 +4262,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 },
             ]
         )
-        var reachedChecks = [
-            "textDocumentImplementationReached": implementationReached,
-        ]
+        reachedChecks["textDocumentImplementationReached"] =
+            implementationReached
         guard implementationReached else {
             return ("failed:implementations", false, reachedChecks)
         }
@@ -4108,9 +4333,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         let exactReferencesVisible = waitUntil(timeout: 45, condition: {
             realModel.relationTree.direction == .references
-                && controller.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "Exact"
-                ).contains { $0.hasPrefix("main.rs:") }
+                && exactEdges().contains { $0.symbol.hasPrefix("main.rs:") }
         })
         emitExactStep(
             exactReferencesVisible ? "real-references" : "failed",
@@ -4265,6 +4488,99 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             extra: ["noDefinitionRequest": true]
         )
         return (passed ? "passed" : "failed:coverage", passed)
+    }
+
+    private func measureRelationTiming(
+        model: AppModel,
+        controller: MainWindowController,
+        offset: UInt32,
+        direction: RelationTreeModel.Direction,
+        timeout: TimeInterval
+    ) -> (
+        relationFirstActionableMS: Double,
+        relationAllResultsMS: Double,
+        relationFirstActionableKind: String,
+        relationFirstActionableTitle: String
+    ) {
+        let previousGeneration = model.relationTree.generation
+        let startedAt = ContinuousClock.now
+        controller.selfTestReaderRelation(offset: offset, direction: direction)
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        var firstMS = 0.0
+        var firstKind = ""
+        var firstTitle = ""
+        var allResultsMS = 0.0
+        while Date() < deadline {
+            if model.relationTree.generation > previousGeneration {
+                if firstMS == 0,
+                   let first = firstActionableRelation(
+                       model: model,
+                       controller: controller
+                   )
+                {
+                    firstMS = milliseconds(since: startedAt)
+                    firstKind = first.kind
+                    firstTitle = first.title
+                }
+                if firstMS > 0,
+                   let children = model.relationTree.root?.children,
+                   !children.contains(where: { $0.kind == .loading })
+                {
+                    allResultsMS = milliseconds(since: startedAt)
+                    break
+                }
+            }
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
+        }
+        return (firstMS, allResultsMS, firstKind, firstTitle)
+    }
+
+    private func exactRelationEdges(
+        in model: AppModel
+    ) -> [RelationTreeModel.Node] {
+        model.relationTree.root?.children?
+            .filter { $0.kind == .group }
+            .flatMap { $0.children ?? [] }
+            .filter {
+                $0.kind == .edge
+                    && $0.subtitle?.hasPrefix("Exact") == true
+            } ?? []
+    }
+
+    private func firstActionableRelation(
+        model: AppModel,
+        controller: MainWindowController
+    ) -> (kind: String, title: String)? {
+        guard controller.selfTestRelationsTreeVisible,
+              let groups = model.relationTree.root?.children
+        else { return nil }
+        let visibleRect = controller.selfTestRelationsVisibleRect
+        for group in groups where group.kind == .group {
+            let titles = controller.selfTestVisibleRelationEdgeTitles(
+                inGroup: group.title
+            )
+            let frames = controller.selfTestVisibleRelationEdgeFrames(
+                inGroup: group.title
+            )
+            for (title, frame) in zip(titles, frames) {
+                let visibleFrame = visibleRect.intersection(frame)
+                guard frame.width > 0,
+                      frame.height > 0,
+                      visibleFrame.width > 0,
+                      visibleFrame.height > 0,
+                      group.children?.contains(where: {
+                          $0.kind == .edge
+                              && $0.title == title
+                              && $0.target != nil
+                      }) == true
+                else { continue }
+                return (
+                    group.title.hasPrefix("Exact") ? "exact" : "heuristic",
+                    title
+                )
+            }
+        }
+        return nil
     }
 
     private func emitExactStep(
@@ -5805,6 +6121,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         guard negotiatedCapabilities.contains(.callHierarchy) else {
             return nil
         }
+        state?.waitForNextRelationDelay()
         let wasBlocked = state?.waitIfRelationIsBlocked() == true
         defer {
             if wasBlocked { state?.recordBlockedRelationReturned() }
@@ -5818,6 +6135,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         guard negotiatedCapabilities.contains(.callHierarchy) else {
             return nil
         }
+        state?.waitForNextRelationDelay()
         let wasBlocked = state?.waitIfRelationIsBlocked() == true
         defer {
             if wasBlocked { state?.recordBlockedRelationReturned() }
@@ -5838,6 +6156,7 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
     private var storedFeatureSelections: [FeatureSelection] = []
     private var storedClosedSessions: Set<Int> = []
     private var storedDefinitionRequestCount = 0
+    private var nextRelationDelay: TimeInterval = 0
     private let definitionCondition = NSCondition()
     private var shouldBlockNextDefinition = false
     private var blockedDefinition = false
@@ -5888,6 +6207,20 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
         lock.lock()
         storedDefinitionRequestCount += 1
         lock.unlock()
+    }
+
+    func delayNextRelation(by delay: TimeInterval) {
+        lock.lock()
+        nextRelationDelay = min(max(delay, 0), 1)
+        lock.unlock()
+    }
+
+    func waitForNextRelationDelay() {
+        lock.lock()
+        let delay = nextRelationDelay
+        nextRelationDelay = 0
+        lock.unlock()
+        if delay > 0 { Thread.sleep(forTimeInterval: delay) }
     }
 
     var definitionIsBlocked: Bool {
