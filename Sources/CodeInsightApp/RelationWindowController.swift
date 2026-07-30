@@ -28,6 +28,8 @@ final class RelationWindowController: NSViewController,
     private var currentDocument: ReaderDocument?
     private var layoutPassCount = 0
     private var selfTestOpenSelectionCount = 0
+    private var wholeTreeReloadCount = 0
+    private var nodeReloadCount = 0
 
     var selfTestPlaceholderText: String? {
         loadViewIfNeeded()
@@ -211,6 +213,8 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestLayoutPasses: Int { layoutPassCount }
+    var selfTestWholeTreeReloads: Int { wholeTreeReloadCount }
+    var selfTestNodeReloads: Int { nodeReloadCount }
 
     func selfTestSelectEdge(titled title: String) -> Bool {
         guard isViewLoaded else { return false }
@@ -395,6 +399,11 @@ final class RelationWindowController: NSViewController,
     init(model: RelationTreeModel) {
         self.model = model
         super.init(nibName: nil, bundle: nil)
+        model.onNodeChange = { [weak self] node in
+            guard let self else { return }
+            reloadNode(node)
+            onTreeChange?()
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -516,8 +525,7 @@ final class RelationWindowController: NSViewController,
                   model.generation == generation,
                   model.root === root
             else { return }
-            reloadWholeTree()
-            expandLoadedGroups(under: root)
+            reloadNode(root)
             onTreeChange?()
         }
     }
@@ -602,13 +610,11 @@ final class RelationWindowController: NSViewController,
             let expansion = Task { await model.expand(node) }
             await Task.yield()
             guard model.generation == generation else { return }
-            outlineView.reloadItem(node, reloadChildren: true)
-            outlineView.expandItem(node)
+            reloadNode(node)
             onTreeChange?()
             await expansion.value
             guard model.generation == generation else { return }
-            outlineView.reloadItem(node, reloadChildren: true)
-            expandLoadedGroups(under: node)
+            reloadNode(node)
             onTreeChange?()
         }
     }
@@ -666,12 +672,34 @@ final class RelationWindowController: NSViewController,
 
     private func reloadWholeTree() {
         guard isViewLoaded else { return }
+        wholeTreeReloadCount += 1
         outlineView.reloadData()
         fitOutlineWidthToVisibleRect()
         if let root = model.root { outlineView.expandItem(root) }
         let isEmpty = model.root == nil
         placeholderLabel.isHidden = !isEmpty
         scrollView.isHidden = isEmpty
+    }
+
+    private func reloadNode(_ node: RelationTreeModel.Node) {
+        guard isViewLoaded else { return }
+        let selectedItem = outlineView.item(atRow: outlineView.selectedRow)
+            as? RelationTreeModel.Node
+        let visibleOrigin = scrollView.contentView.bounds.origin
+        nodeReloadCount += 1
+        outlineView.reloadItem(node, reloadChildren: true)
+        expandLoadedGroups(under: node)
+        if let selectedItem {
+            let row = outlineView.row(forItem: selectedItem)
+            if row >= 0 {
+                outlineView.selectRowIndexes(
+                    IndexSet(integer: row),
+                    byExtendingSelection: false
+                )
+            }
+        }
+        scrollView.contentView.scroll(to: visibleOrigin)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func expandLoadedGroups(under node: RelationTreeModel.Node) {

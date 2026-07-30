@@ -685,6 +685,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestRelationOpenCount: Int {
         relationController.selfTestOpenCount
     }
+    var selfTestRelationWholeTreeReloads: Int {
+        relationController.selfTestWholeTreeReloads
+    }
+    var selfTestRelationNodeReloads: Int {
+        relationController.selfTestNodeReloads
+    }
     func selfTestPressRelationKey(_ keyCode: UInt16) -> Bool {
         relationController.selfTestPressKey(keyCode)
     }

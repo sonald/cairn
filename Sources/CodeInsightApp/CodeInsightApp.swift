@@ -2520,45 +2520,63 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 direction: .references
             )
         }
+        func projectReferenceRows() -> [RelationTreeModel.Node] {
+            model.relationTree.root?.children?
+                .flatMap { $0.children ?? [] }
+                .filter { $0.kind == .edge } ?? []
+        }
         let exactReferencesVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.direction == .references
-                && windowController.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "Exact"
-                ).contains { $0.hasPrefix("main.rs:") }
+                && model.relationTree.root?.children?.contains {
+                    $0.kind == .loading
+                } == false
+                && projectReferenceRows().contains {
+                    $0.badge?.hasPrefix("Exact") == true
+                        && $0.title.hasPrefix("main.rs:")
+                }
         })
-        let exactReferenceTitles = windowController
-            .selfTestVisibleRelationEdgeTitles(inGroup: "Exact")
-        let fuzzyReferenceTitles = windowController.selfTestVisibleRelationEdgeTitles(
-            inGroup: "References"
-        )
+        let projectReferenceNodes = projectReferenceRows()
+        let exactReferenceNodes = projectReferenceNodes.filter {
+            $0.badge?.hasPrefix("Exact") == true
+        }
+        let fuzzyReferenceNodes = projectReferenceNodes.filter {
+            $0.badge?.hasPrefix("Exact") != true
+        }
+        let exactReferenceTitles = exactReferenceNodes.map(\.title)
+        let fuzzyReferenceTitles = fuzzyReferenceNodes.map(\.title)
         let exactReferenceGroup = model.relationTree.root?.children?.first {
             $0.kind == .group && $0.title.hasPrefix("Exact")
         }
         let fuzzyReferenceGroup = model.relationTree.root?.children?.first {
             $0.kind == .group && $0.title == "References"
         }
-        let exactReferenceRowCount = exactReferenceGroup?.children?.count ?? 0
-        let fuzzyReferenceRowCount = fuzzyReferenceGroup?.children?.count ?? 0
+        let exactReferenceRowCount = exactReferenceNodes.count
+        let fuzzyReferenceRowCount = fuzzyReferenceNodes.count
+        let visibleReferenceGroupRowCount = model.relationTree.root?.children?
+            .filter { $0.kind == .group }
+            .reduce(into: 0) { $0 += $1.children?.count ?? 0 } ?? 0
+        let exactHeaderCountHonest = exactReferenceGroup.map {
+            $0.children?.isEmpty == true
+                || $0.title == "Exact (\($0.children?.count ?? 0))"
+        } ?? true
+        let referenceHeaderCountHonest = fuzzyReferenceGroup.map {
+            $0.subtitle == "\($0.children?.count ?? 0) references"
+        } ?? false
         let mixedReferenceGroupCountsHonest =
             exactReferenceRowCount > 0
             && fuzzyReferenceRowCount > 0
-            && exactReferenceGroup?.title == "Exact (\(exactReferenceRowCount))"
-            && exactReferenceTitles.count == exactReferenceRowCount
-            && fuzzyReferenceTitles.count == fuzzyReferenceRowCount
-            && fuzzyReferenceGroup?.subtitle
-                == "\(fuzzyReferenceRowCount) references"
-        let projectReferenceTitles = exactReferenceTitles + fuzzyReferenceTitles
+            && visibleReferenceGroupRowCount == projectReferenceNodes.count
+            && exactHeaderCountHonest
+            && referenceHeaderCountHonest
+        let projectReferenceTitles = projectReferenceNodes.map(\.title)
         let projectReferencesVisible = exactReferencesVisible
             && !projectReferenceTitles.isEmpty
         let projectReferencesCrossFile = projectReferenceTitles.contains {
             $0.hasPrefix("main.rs:")
         }
         let exactReferencesHeuristicProvenanceRetained =
-            exactReferenceTitles.contains { title in
-                windowController.selfTestVisibleRelationEdgeSubtitle(
-                    titled: title,
-                    inGroup: "Exact"
-                )?.contains("heuristic also matched") == true
+            exactReferenceNodes.contains {
+                $0.subtitle?.contains("heuristic also matched") == true
             }
         let exactReferencesDeclarationExcluded =
             !(model.relationTree.root?.children?
@@ -2568,24 +2586,25 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         && $0.target?.byteOffset
                             == UInt32(target.definition.byteOffset)
                 } ?? false)
-        let projectReferenceNodes = model.relationTree.root?.children?
-            .flatMap { $0.children ?? [] } ?? []
         let projectReferenceNode = projectReferenceNodes.first {
             $0.kind == .edge
                 && $0.title.hasPrefix("main.rs:")
                 && $0.symbol == nil
                 && $0.target != nil
         }
-        let exactReferenceAXTitle = exactReferenceTitles.first { title in
-            windowController.selfTestVisibleRelationEdgeSubtitle(
-                titled: title,
-                inGroup: "Exact"
-            )?.contains("heuristic also matched") == true
+        let exactReferenceAXNode = exactReferenceNodes.first {
+            $0.subtitle?.contains("heuristic also matched") == true
         }
-        let projectReferenceAccessibility = exactReferenceAXTitle.flatMap {
+        let exactReferenceAXGroup = exactReferenceAXNode.flatMap { row in
+            model.relationTree.root?.children?.first {
+                $0.kind == .group
+                    && $0.children?.contains { $0 === row } == true
+            }?.title
+        }
+        let projectReferenceAccessibility = exactReferenceAXNode.flatMap {
             windowController.selfTestRelationAccessibility(
-                titled: $0,
-                inGroup: "Exact"
+                titled: $0.title,
+                inGroup: exactReferenceAXGroup ?? ""
             )
         }
         let projectReferenceAXProvenanceReachable =
@@ -2614,7 +2633,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     && windowController.selfTestRelationsVisibleRect.contains($0)
             }
         let projectReferenceGroupsDoNotOverlap =
-            windowController.selfTestExactAndReferenceGroupsDoNotOverlap
+            exactReferenceGroup == nil
+                || windowController.selfTestExactAndReferenceGroupsDoNotOverlap
         let projectReferenceResultsAndControlsDoNotOverlap =
             windowController
                 .selfTestRelationResultsAndDirectionControlDoNotOverlap
@@ -2710,9 +2730,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         var referenceKeyboardEnterOpened = false
         var referenceKeyboardKeypadEnterOpened = false
         var referenceKeyboardRestoredRelationFile = false
-        if exactReferenceTitles.count >= 2 {
-            let firstTitle = exactReferenceTitles[0]
-            let secondTitle = exactReferenceTitles[1]
+        if projectReferenceTitles.count >= 2 {
+            let firstTitle = projectReferenceTitles[0]
+            let secondTitle = projectReferenceTitles[1]
             let selectedFirst =
                 windowController.selfTestSelectRelationEdge(titled: firstTitle)
             let navigationBeforeDown = model.navigationGeneration
@@ -3080,130 +3100,90 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 windowController.displayedReaderFile?.standardizedFileURL
                     == target.relationFile.standardizedFileURL
             })
+        var checksAfterFirstBatch: [String: Bool]
         if externalDemotionFileVisible,
            let externalRootOffset = target.externalRootOffset
         {
+            exactSelfTestProviderState?.blockNextRelation()
+            let definitionRequestsBefore =
+                exactSelfTestProviderState?.definitionRequestCount ?? -1
+            let nodeReloadsBefore =
+                windowController.selfTestRelationNodeReloads
             windowController.selfTestReaderRelation(
                 offset: externalRootOffset,
                 direction: .calls
             )
-        }
-        let providerProvenExternalDemoted = waitUntil(timeout: 5, condition: {
-            model.relationTree.root?.title == "dependency_call"
-                && windowController.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "External / Unresolved"
-                ).contains("len")
-                && !windowController.selfTestVisibleRelationEdgeTitles(
+            let heuristicPublishedWhileExactBlocked = waitUntil(
+                timeout: 5,
+                condition: {
+                    exactSelfTestProviderState?.relationIsBlocked == true
+                        && model.relationTree.root?.title == "dependency_call"
+                        && windowController.selfTestVisibleRelationEdgeTitles(
+                            inGroup: "Possible"
+                        ).contains("len")
+                }
+            )
+            let firstBatchUsedNodeReload =
+                windowController.selfTestRelationNodeReloads > nodeReloadsBefore
+            exactSelfTestProviderState?.releaseBlockedRelation()
+            let bothRelationQueriesFinished = waitUntil(
+                timeout: 5,
+                condition: {
+                    model.relationTree.root?.children?.contains {
+                        $0.kind == .loading
+                    } == false
+                }
+            )
+            let defaultDefinitionPromotionRequests =
+                (exactSelfTestProviderState?.definitionRequestCount ?? -1)
+                    - definitionRequestsBefore
+            let defaultDefinitionPromotionSkipped =
+                defaultDefinitionPromotionRequests == 0
+            let possibleRowRetained =
+                windowController.selfTestVisibleRelationEdgeTitles(
                     inGroup: "Possible"
                 ).contains("len")
-        })
-        let externalDemotionSubtitle =
-            windowController.selfTestVisibleRelationEdgeSubtitle(
-                titled: "len",
-                inGroup: "External / Unresolved"
+            emitExactStep(
+                "relation-first-batch",
+                variant: "blocked-root-exact-fake",
+                controller: windowController,
+                extra: [
+                    "heuristicPublishedWhileExactBlocked":
+                        heuristicPublishedWhileExactBlocked,
+                    "firstBatchUsedNodeReload": firstBatchUsedNodeReload,
+                    "bothQueriesFinished": bothRelationQueriesFinished,
+                    "defaultDefinitionPromotionRequests":
+                        defaultDefinitionPromotionRequests,
+                    "possibleRowRetained": possibleRowRetained,
+                ]
             )
-        let externalDemotionSubtitleHonest =
-            externalDemotionSubtitle
-                == "External · in dependency (rust-analyzer)"
-        emitExactStep(
-            "relation-external-demotion",
-            variant: "external-demotion-fake",
-            controller: windowController,
-            extra: [
-                "externalTitles": windowController
-                    .selfTestVisibleRelationEdgeTitles(
-                        inGroup: "External / Unresolved"
-                    ),
-                "possibleTitles": windowController
-                    .selfTestVisibleRelationEdgeTitles(inGroup: "Possible"),
-                "subtitle": externalDemotionSubtitle ?? "",
+            checksAfterFirstBatch = [
+                "heuristicPublishedWhileExactBlocked":
+                    heuristicPublishedWhileExactBlocked,
+                "firstBatchUsedNodeReload": firstBatchUsedNodeReload,
+                "bothRelationQueriesFinished": bothRelationQueriesFinished,
+                "defaultDefinitionPromotionSkipped":
+                    defaultDefinitionPromotionSkipped,
+                "possibleRowRetainedWithoutPromotion": possibleRowRetained,
             ]
-        )
-
-        windowController.selfTestSetContextPinned(false)
-        let selectedDependencyEdge = providerProvenExternalDemoted
-            && windowController.selfTestSelectRelationEdge(titled: "len")
-        let dependencyContextVisible = selectedDependencyEdge
-            && waitUntil(timeout: 5, condition: {
-                windowController.selfTestContextSummary?.hasPrefix(
-                    target.dependencyFile.path + ":"
-                ) == true
-                    && windowController.selfTestContextProvenance?
-                        .contains("External · in dependency") == true
-            })
-        let dependencyCardVisibleWithGeometry = dependencyContextVisible
-            && windowController.selfTestContextCandidateVisibleWithGeometry
-        let dependencyDoubleClickOpenInstalled =
-            windowController.selfTestContextHasDoubleClickOpen
-        let dependencyCrateHonest = windowController.selfTestContextProvenance?
-            .contains("dependency-fixture") == true
-        let dependencyExactBadgeComplete = [
-            "fake-exact",
-            "in-process-fake-1",
-            "coverage: partial",
-        ].allSatisfy {
-            windowController.selfTestContextProvenance?.contains($0) == true
+        } else {
+            checksAfterFirstBatch = [
+                "heuristicPublishedWhileExactBlocked": false,
+                "firstBatchUsedNodeReload": false,
+                "bothRelationQueriesFinished": false,
+                "defaultDefinitionPromotionSkipped": false,
+                "possibleRowRetainedWithoutPromotion": false,
+            ]
         }
-        emitExactStep(
-            "dependency-context",
-            variant: "external-demotion-fake",
-            controller: windowController,
-            extra: [
-                "selectedDependencyEdge": selectedDependencyEdge,
-                "cardVisibleWithGeometry": dependencyCardVisibleWithGeometry,
-                "doubleClickOpenInstalled":
-                    dependencyDoubleClickOpenInstalled,
-                "crateHonest": dependencyCrateHonest,
-                "exactBadgeComplete": dependencyExactBadgeComplete,
-            ]
-        )
-
-        if dependencyContextVisible {
-            windowController.selfTestOpenContextSelection()
-        }
-        let dependencyOpenedReadOnly = waitUntil(timeout: 5, condition: {
-            windowController.displayedReaderFile?.standardizedFileURL
-                == target.dependencyFile.standardizedFileURL
-                && windowController.selfTestLeftReaderBytes
-                    == target.dependencyBytes
-                && !windowController.selfTestLeftReaderIsEditable
-        })
-        let dependencyFileTreeUnlinked =
-            windowController.selectedSidebarFile == nil
-        windowController.goBack(nil)
-        let dependencyHistoryBack = waitUntil(timeout: 5, condition: {
-            windowController.displayedReaderFile?.standardizedFileURL
-                == target.relationFile.standardizedFileURL
-        })
-        windowController.goForward(nil)
-        let dependencyHistoryForward = waitUntil(timeout: 5, condition: {
-            windowController.displayedReaderFile?.standardizedFileURL
-                == target.dependencyFile.standardizedFileURL
-                && windowController.selfTestLeftReaderBytes
-                    == target.dependencyBytes
-                && !windowController.selfTestLeftReaderIsEditable
-        })
-        emitExactStep(
-            "dependency-open",
-            variant: "external-demotion-fake",
-            controller: windowController,
-            extra: [
-                "bytesEqual": windowController.selfTestLeftReaderBytes
-                    == target.dependencyBytes,
-                "isEditable": windowController.selfTestLeftReaderIsEditable,
-                "fileTreeUnlinked": dependencyFileTreeUnlinked,
-                "historyBack": dependencyHistoryBack,
-                "historyForward": dependencyHistoryForward,
-            ]
-        )
-        windowController.goBack(nil)
-        let relationFileRestoredAfterDependency = waitUntil(
-            timeout: 5,
-            condition: {
-                windowController.displayedReaderFile?.standardizedFileURL
-                    == target.relationFile.standardizedFileURL
-            }
-        )
+        let relationFileRestoredAfterDependency =
+            windowController.selectFileInSidebar(target.relationFile)
+            && waitUntil(
+                timeout: 5,
+                condition: {
+                    windowController.displayedReaderFile?.standardizedFileURL
+                        == target.relationFile.standardizedFileURL
+                }
+            )
 
         func receiverRelationCheck(
             offset: UInt32?,
@@ -3434,20 +3414,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "externalGroupVisible": externalGroupVisible,
             "externalGroupHeaderHonest": externalGroupHeaderHonest,
             "externalDemotionFileVisible": externalDemotionFileVisible,
-            "providerProvenExternalDemoted": providerProvenExternalDemoted,
-            "externalDemotionSubtitleHonest": externalDemotionSubtitleHonest,
-            "selectedDependencyEdge": selectedDependencyEdge,
-            "dependencyContextVisible": dependencyContextVisible,
-            "dependencyCardVisibleWithGeometry":
-                dependencyCardVisibleWithGeometry,
-            "dependencyDoubleClickOpenInstalled":
-                dependencyDoubleClickOpenInstalled,
-            "dependencyCrateHonest": dependencyCrateHonest,
-            "dependencyExactBadgeComplete": dependencyExactBadgeComplete,
-            "dependencyOpenedReadOnly": dependencyOpenedReadOnly,
-            "dependencyFileTreeUnlinked": dependencyFileTreeUnlinked,
-            "dependencyHistoryBack": dependencyHistoryBack,
-            "dependencyHistoryForward": dependencyHistoryForward,
             "relationFileRestoredAfterDependency":
                 relationFileRestoredAfterDependency,
             "typedReceiverStrong": typedReceiver.present,
@@ -3469,6 +3435,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "uiPathIsRepoRelative": historical.uiPathIsRepoRelative,
             "historicalProvenanceAttributed": historical.provenanceAttributed,
         ]
+        for (key, value) in checksAfterFirstBatch { checks[key] = value }
         for (key, value) in trustRevoke { checks[key] = value }
         for (key, value) in real.reachedChecks { checks[key] = value }
         finishExactSelfTest(
@@ -5789,6 +5756,7 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
 
     func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
         guard negotiatedCapabilities.contains(.definition) else { return nil }
+        state?.recordDefinitionRequest()
         let wasBlocked = state?.waitIfDefinitionIsBlocked() == true
         defer {
             if wasBlocked { state?.recordBlockedDefinitionReturned() }
@@ -5869,6 +5837,7 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
     private var storedTrustModes: [String] = []
     private var storedFeatureSelections: [FeatureSelection] = []
     private var storedClosedSessions: Set<Int> = []
+    private var storedDefinitionRequestCount = 0
     private let definitionCondition = NSCondition()
     private var shouldBlockNextDefinition = false
     private var blockedDefinition = false
@@ -5907,6 +5876,18 @@ final class ExactSelfTestProviderState: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return storedFeatureSelections
+    }
+
+    var definitionRequestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedDefinitionRequestCount
+    }
+
+    func recordDefinitionRequest() {
+        lock.lock()
+        storedDefinitionRequestCount += 1
+        lock.unlock()
     }
 
     var definitionIsBlocked: Bool {

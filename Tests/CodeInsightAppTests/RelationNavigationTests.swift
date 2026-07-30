@@ -157,10 +157,14 @@ struct RelationUXTests {
         )
         try #require(await relationTestWaitUntil("fixture.model.root?.title == \"first\" && fixture.controller.selfTestVisibleEdgeTitles( inGroup: \"Strong\" ) == [\"first\", \"second\"]") {
             fixture.model.root?.title == "first"
+                && fixture.model.root?.children?.contains {
+                    $0.kind == .loading
+                } == false
                 && fixture.controller.selfTestVisibleEdgeTitles(
                     inGroup: "Strong"
                 ) == ["first", "second"]
         })
+        await pumpRunLoop()
         let changesBeforeStaleReturn = treeChanges
         await gate.release()
         try #require(await relationTestWaitUntil("await gate.finished") { await gate.finished })
@@ -179,6 +183,62 @@ struct RelationUXTests {
             ).contains("stale-reference") == false
         )
         #expect(treeChanges == changesBeforeStaleReturn)
+    }
+
+    @MainActor
+    @Test
+    func relationIncrementalPublicationReloadsOnlyTheChangedNode() async throws {
+        let heuristic = RelationLoadGate()
+        let exact = RelationLoadGate()
+        let fixture = try await makeRelationUXFixture(
+            direction: .calls,
+            blockedSubjectLoad: heuristic,
+            blockedExactLoad: exact
+        )
+        defer { fixture.close() }
+        try #require(await relationTestWaitUntil(
+            "heuristic and root Exact relation loads have both started"
+        ) {
+            let heuristicStarted = await heuristic.started
+            let exactStarted = await exact.started
+            return heuristicStarted && exactStarted
+        })
+        await pumpRunLoop()
+        let wholeReloadsBeforeBatch = fixture.controller.selfTestWholeTreeReloads
+        let nodeReloadsBeforeBatch = fixture.controller.selfTestNodeReloads
+
+        await exact.release()
+        let exactPublished = await relationTestWaitUntil(
+            "the exact-first relation batch is visible"
+        ) {
+            fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Exact")
+                == ["first"]
+        }
+        let wholeReloadsAfterBatch = fixture.controller.selfTestWholeTreeReloads
+        let nodeReloadsAfterBatch = fixture.controller.selfTestNodeReloads
+        let selectedFirstBatchRow = exactPublished
+            && fixture.controller.selfTestSelectEdge(titled: "first")
+        await heuristic.release()
+        try #require(await relationTestWaitUntil(
+            "the heuristic relation load has finished"
+        ) {
+            await heuristic.finished
+        })
+        try #require(await relationTestWaitUntil(
+            "all relation batches have finished loading"
+        ) {
+            fixture.model.root?.children?.contains {
+                $0.kind == .loading
+            } == false
+        })
+        await pumpRunLoop()
+
+        #expect(exactPublished)
+        #expect(wholeReloadsAfterBatch == wholeReloadsBeforeBatch)
+        #expect(nodeReloadsAfterBatch == nodeReloadsBeforeBatch + 1)
+        #expect(selectedFirstBatchRow)
+        #expect(fixture.controller.selfTestSelectedEdgeTitle == "first")
+        #expect(fixture.controller.selfTestWholeTreeReloads == wholeReloadsAfterBatch)
     }
 }
 
@@ -757,7 +817,8 @@ private final class RelationUXFixture {
 private func makeRelationUXFixture(
     direction: RelationTreeModel.Direction = .references,
     includesExactMatch: Bool = true,
-    blockedSubjectLoad: RelationLoadGate? = nil
+    blockedSubjectLoad: RelationLoadGate? = nil,
+    blockedExactLoad: RelationLoadGate? = nil
 ) async throws -> RelationUXFixture {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -817,11 +878,24 @@ private func makeRelationUXFixture(
         line: firstLocation.line,
         evidence: []
     )
+    let exactFirstGate =
+        includesExactMatch
+            && blockedSubjectLoad == nil
+            && blockedExactLoad == nil
+        ? RelationLoadGate()
+        : nil
     let model = RelationTreeModel(
         loader: { _, _, symbol, loadDirection in
             if symbol == subject, let blockedSubjectLoad {
-                await blockedSubjectLoad.wait()
+                await blockedSubjectLoad.wait(
+                    "stale heuristic relation load release"
+                )
                 return .init(edges: [stale], isTruncated: false)
+            }
+            if symbol == subject, let exactFirstGate {
+                await exactFirstGate.wait(
+                    "heuristic relation load release"
+                )
             }
             return .init(
                 edges: fuzzyLocations.map { title, location in
@@ -842,7 +916,10 @@ private func makeRelationUXFixture(
             )
         },
         exactRelationsResolver: { _, _, _, _, _ in
-            includesExactMatch
+            if let blockedExactLoad {
+                await blockedExactLoad.wait("root Exact relation release")
+            }
+            return includesExactMatch
                 ? .relations([exact], origin: .worktree, coverage: .full)
                 : .unsupported
         }
@@ -865,8 +942,22 @@ private func makeRelationUXFixture(
     contentView.layoutSubtreeIfNeeded()
     window.displayIfNeeded()
     controller.setRoot(target: .engine(subject), direction: direction)
-    if blockedSubjectLoad == nil {
-        try #require(await relationTestWaitUntil("if includesExactMatch { return controller.selfTestVisibleEdgeTitles(inGroup: \"Exact\") == [\"first\"] } let group = direction == .references ? \"References\" : \"Strong\" return controller.selfTestVisibleEdgeTitles(inGroup: ...") {
+    if let exactFirstGate {
+        let exactPublished = await relationTestWaitUntil(
+            "the exact-first fixture batch is visible"
+        ) {
+            controller.selfTestVisibleEdgeTitles(inGroup: "Exact") == ["first"]
+        }
+        await exactFirstGate.release()
+        try #require(exactPublished)
+    }
+    if blockedSubjectLoad == nil && blockedExactLoad == nil {
+        try #require(await relationTestWaitUntil(
+            "the relation fixture has finished its initial load"
+        ) {
+            guard model.root?.children?.contains(where: {
+                $0.kind == .loading
+            }) == false else { return false }
             if includesExactMatch {
                 return controller.selfTestVisibleEdgeTitles(inGroup: "Exact")
                     == ["first"]
@@ -888,19 +979,27 @@ private func makeRelationUXFixture(
 }
 
 private actor RelationLoadGate {
-    private var continuation: CheckedContinuation<Void, Never>?
+    private var isReleased = false
     private(set) var started = false
     private(set) var finished = false
 
-    func wait() async {
+    func wait(_ waitingFor: String = "relation load release") async {
         started = true
-        await withCheckedContinuation { continuation = $0 }
+        let deadline = ContinuousClock.now + .seconds(120)
+        while !isReleased,
+              !Task.isCancelled,
+              ContinuousClock.now < deadline
+        {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        if !isReleased, !Task.isCancelled {
+            Issue.record("Timed out waiting for \(waitingFor)")
+        }
         finished = true
     }
 
     func release() {
-        continuation?.resume()
-        continuation = nil
+        isReleased = true
     }
 }
 

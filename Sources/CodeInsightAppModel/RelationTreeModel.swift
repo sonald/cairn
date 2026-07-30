@@ -37,24 +37,25 @@ public final class RelationTreeModel {
         }
 
         public let kind: Kind
-        public let title: String
-        public let subtitle: String?
-        public let badge: String?
+        public fileprivate(set) var title: String
+        public fileprivate(set) var subtitle: String?
+        public fileprivate(set) var badge: String?
         public fileprivate(set) var target: (path: String, byteOffset: UInt32)?
         public fileprivate(set) var line: UInt32?
-        public let symbol: SymbolOccurrenceID?
+        public fileprivate(set) var symbol: SymbolOccurrenceID?
         public let representsLocation: Bool
-        public let expansionIdentity: ExpansionIdentity?
+        public fileprivate(set) var expansionIdentity: ExpansionIdentity?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
         fileprivate weak var parent: Node?
-        fileprivate let evidence: [ResolutionEvidence]
+        fileprivate var evidence: [ResolutionEvidence]
         fileprivate let cycleKey: CycleKey?
-        let queryTarget: (path: String, byteOffset: UInt32)?
-        fileprivate let callSites: [ExactLocation]
+        fileprivate(set) var queryTarget: (path: String, byteOffset: UInt32)?
+        fileprivate var callSites: [ExactLocation]
         fileprivate var nextCallSiteIndex = 0
         fileprivate var loadRequestID: UInt64?
+        fileprivate var loadTask: Task<Void, Never>?
 
         fileprivate init(
             kind: Kind,
@@ -183,11 +184,13 @@ public final class RelationTreeModel {
     public private(set) var requestID: UInt64 = 0
     public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
     public var onSelect: @MainActor (Node) -> Void = { _ in }
+    public var onNodeChange: @MainActor (Node) -> Void = { _ in }
     public var hasTruncatedResults: Bool {
         root.map(Self.containsTruncatedNode) ?? false
     }
 
     private let loader: Loader
+    private let queryTimeout: Duration
     private var exactResolver: ExactResolver?
     private var exactRelationsResolver: ExactRelationsResolver?
     private var session: EngineSession?
@@ -202,6 +205,7 @@ public final class RelationTreeModel {
                 direction: direction
             )
         }
+        queryTimeout = .seconds(30)
         exactResolver = nil
         exactRelationsResolver = nil
     }
@@ -209,9 +213,11 @@ public final class RelationTreeModel {
     init(
         loader: @escaping Loader,
         exactResolver: ExactResolver? = nil,
-        exactRelationsResolver: ExactRelationsResolver? = nil
+        exactRelationsResolver: ExactRelationsResolver? = nil,
+        queryTimeout: Duration = .seconds(30)
     ) {
         self.loader = loader
+        self.queryTimeout = queryTimeout
         self.exactResolver = exactResolver
         self.exactRelationsResolver = exactRelationsResolver
     }
@@ -237,6 +243,7 @@ public final class RelationTreeModel {
     }
 
     public func updateProjectState(_ state: ProjectState) {
+        cancelLoads()
         generation &+= 1
         requestID &+= 1
         root = nil
@@ -261,6 +268,7 @@ public final class RelationTreeModel {
         direction: Direction,
         document: ReaderDocument? = nil
     ) -> Task<Void, Never>? {
+        cancelLoads()
         generation &+= 1
         self.direction = direction
         selectedRelationSymbol = nil
@@ -420,6 +428,14 @@ public final class RelationTreeModel {
         selectedRelationSymbol = nil
     }
 
+    private func cancelLoads() {
+        func cancel(_ node: Node) {
+            node.loadTask?.cancel()
+            for child in node.children ?? [] { cancel(child) }
+        }
+        if let root { cancel(root) }
+    }
+
     private func expansionTask(for node: Node) -> Task<Void, Never>? {
         guard node.isExpandable, node.children == nil,
               let identity = node.expansionIdentity, let session, let context
@@ -434,68 +450,144 @@ public final class RelationTreeModel {
         let loader = self.loader
         let exactRelationsResolver = self.exactRelationsResolver
         let direction = self.direction
-        return Task { [weak self, weak node] in
+        let queryTimeout = self.queryTimeout
+        let task = Task { [weak self, weak node] in
+            guard let self, let node else { return }
             var loaded = LoadResult(edges: [], isTruncated: false)
             var engineLoadFailed = false
-            if case let .engine(symbol) = identity {
-                let result = await Task.detached(priority: .userInitiated) {
-                    try await loader(session, context, symbol, direction)
-                }.result
-                switch result {
-                case .success(let value):
-                    loaded = value
-                case .failure:
-                    engineLoadFailed = true
-                }
-            }
-            guard let self, let node,
-                  generation == currentGeneration,
-                  node.loadRequestID == currentRequestID,
-                  self.session === session
-            else { return }
-
-            if case .engine = identity,
-               !engineLoadFailed,
-               direction != .references
-            {
-                loaded = await promoteExactEdges(
-                    loaded,
-                    direction: direction,
-                    generation: context.generation
-                )
-            }
+            var exactResult: ExactCoordinator.RelationQueryResult?
+            var hasEngineResult = false
+            var pendingQueryCount = 0
             let exactItem: ExactCallHierarchyItem? = if case let .exact(item) = identity {
                 item
             } else {
                 nil
             }
-            let exactResult: ExactCoordinator.RelationQueryResult?
-            if let exactRelationsResolver,
-               let query = node.queryTarget ?? node.target
-            {
-                exactResult = await exactRelationsResolver(
-                    query.path,
-                    query.byteOffset,
-                    exactItem,
-                    direction,
-                    context.generation
-                )
-            } else {
-                exactResult = nil
+            let query = node.queryTarget ?? node.target
+            let (updates, continuation) = AsyncStream<(
+                loaded: LoadResult?,
+                exact: ExactCoordinator.RelationQueryResult?,
+                engineFailed: Bool,
+                timedOut: Bool
+            )>.makeStream()
+            var queryTasks: [Task<Void, Never>] = []
+            if case let .engine(symbol) = identity {
+                pendingQueryCount += 1
+                queryTasks.append(Task.detached(priority: .userInitiated) {
+                    guard !Task.isCancelled else { return }
+                    do {
+                        continuation.yield((
+                            try await loader(session, context, symbol, direction),
+                            nil,
+                            false,
+                            false
+                        ))
+                    } catch {
+                        continuation.yield((nil, nil, true, false))
+                    }
+                })
             }
-            guard generation == currentGeneration,
+            if let exactRelationsResolver, let query {
+                pendingQueryCount += 1
+                queryTasks.append(Task { @MainActor in
+                    guard !Task.isCancelled else { return }
+                    continuation.yield((
+                        nil,
+                        await exactRelationsResolver(
+                            query.path,
+                            query.byteOffset,
+                            exactItem,
+                            direction,
+                            context.generation
+                        ),
+                        false,
+                        false
+                    ))
+                })
+            }
+            if pendingQueryCount == 0 { continuation.finish() }
+            let timeoutTask = Task.detached {
+                do {
+                    try await Task.sleep(for: queryTimeout)
+                } catch {
+                    return
+                }
+                continuation.yield((nil, nil, false, true))
+                continuation.finish()
+            }
+            defer {
+                timeoutTask.cancel()
+                queryTasks.forEach { $0.cancel() }
+                continuation.finish()
+            }
+
+            await withTaskCancellationHandler {
+                for await result in updates {
+                    if result.timedOut {
+                        pendingQueryCount = 0
+                        if !hasEngineResult { engineLoadFailed = true }
+                    } else {
+                        pendingQueryCount -= 1
+                    }
+                    guard generation == currentGeneration,
+                          node.loadRequestID == currentRequestID,
+                          self.session === session
+                    else {
+                        return
+                    }
+                    if let engineResult = result.loaded {
+                        loaded = engineResult
+                        hasEngineResult = true
+                    } else if result.engineFailed {
+                        engineLoadFailed = true
+                    } else {
+                        exactResult = result.exact
+                    }
+                    guard hasEngineResult || exactResult != nil else {
+                        if pendingQueryCount == 0 { break }
+                        continue
+                    }
+                    let displayed = if let exactResult {
+                        mergeExact(
+                            exactResult,
+                            into: loaded,
+                            direction: direction,
+                            session: session
+                        )
+                    } else {
+                        loaded
+                    }
+                    var children = makeChildren(
+                        from: displayed,
+                        under: node,
+                        direction: direction,
+                        session: session
+                    )
+                    if pendingQueryCount > 0 {
+                        children.removeAll {
+                            $0.kind == .group && $0.children?.isEmpty == true
+                        }
+                        children.append(Node(
+                            kind: .loading,
+                            title: "Loading…",
+                            parent: node
+                        ))
+                    }
+                    node.children = preservingPublishedRows(
+                        children,
+                        from: node.children
+                    )
+                    onNodeChange(node)
+                    if pendingQueryCount == 0 { break }
+                }
+            } onCancel: {
+                continuation.finish()
+            }
+            guard !Task.isCancelled,
+                  generation == currentGeneration,
                   node.loadRequestID == currentRequestID,
                   self.session === session
             else { return }
-
-            if let exactResult {
-                loaded = mergeExact(
-                    exactResult,
-                    into: loaded,
-                    direction: direction,
-                    session: session
-                )
-            }
             if (engineLoadFailed && exactResult == nil)
                 || (exactItem != nil && exactResult == nil)
             {
@@ -506,15 +598,11 @@ public final class RelationTreeModel {
                         parent: node
                     ),
                 ] + evidenceNodes(node.evidence, parent: node)
-                return
+                onNodeChange(node)
             }
-            node.children = makeChildren(
-                from: loaded,
-                under: node,
-                direction: direction,
-                session: session
-            )
         }
+        node.loadTask = task
+        return task
     }
 
     private func promoteExactEdges(
@@ -629,20 +717,26 @@ public final class RelationTreeModel {
                 )
             }
             exactEdges = Self.deduplicateExact(exactEdges)
-            let exactKeys = Set(exactEdges.compactMap(Self.relationKey))
-            let heuristicKeys = Set(loaded.edges.compactMap(Self.relationKey))
+            var exactIndexes: [CycleKey: Int] = [:]
             for index in exactEdges.indices {
-                if let key = Self.relationKey(exactEdges[index]),
-                   heuristicKeys.contains(key)
-                {
-                    exactEdges[index].alsoHeuristic = true
+                if let key = Self.relationKey(exactEdges[index]) {
+                    exactIndexes[key] = index
                 }
             }
+            var matchedExactIndexes: Set<Int> = []
+            var edges = loaded.edges.map { heuristic in
+                guard let key = Self.relationKey(heuristic),
+                      let index = exactIndexes[key]
+                else { return heuristic }
+                matchedExactIndexes.insert(index)
+                exactEdges[index].alsoHeuristic = true
+                return exactEdges[index]
+            }
+            edges += exactEdges.indices.compactMap {
+                matchedExactIndexes.contains($0) ? nil : exactEdges[$0]
+            }
             return LoadResult(
-                edges: exactEdges + loaded.edges.filter {
-                    guard let key = Self.relationKey($0) else { return true }
-                    return !exactKeys.contains(key)
-                },
+                edges: edges,
                 isTruncated: loaded.isTruncated,
                 exactState: .queried(coverage)
             )
@@ -792,6 +886,113 @@ public final class RelationTreeModel {
         case (.legacy, _):
             "Exact unavailable: no exact session"
         }
+    }
+
+    private func preservingPublishedRows(
+        _ children: [Node],
+        from previousChildren: [Node]?
+    ) -> [Node] {
+        let previousGroups = (previousChildren ?? []).filter {
+            $0.kind == .group && $0.children?.isEmpty == false
+        }
+        guard !previousGroups.isEmpty else { return children }
+
+        var currentRows: [CycleKey: Node] = [:]
+        for group in children where group.kind == .group {
+            for row in group.children ?? [] where row.kind == .edge {
+                if let key = row.cycleKey { currentRows[key] = row }
+            }
+        }
+        var consumed: Set<CycleKey> = []
+        for group in previousGroups {
+            group.children = group.children?.compactMap { previous in
+                guard let key = previous.cycleKey,
+                      let current = currentRows[key]
+                else { return nil }
+                consumed.insert(key)
+                updatePublishedRow(previous, from: current, parent: group)
+                return previous
+            }
+            group.isExpandable = group.children?.isEmpty == false
+            if group.title.hasPrefix("Exact (") {
+                group.title = "Exact (\(group.children?.count ?? 0))"
+            }
+            if group.title == "References",
+               let current = children.first(where: {
+                   $0.kind == .group && $0.title == "References"
+               })
+            {
+                group.subtitle = current.subtitle == nil
+                    ? nil
+                    : "\(group.children?.count ?? 0) references"
+            }
+        }
+
+        let isFinalBatch = children.contains { $0.kind == .loading } == false
+        var result = previousGroups
+        let existingGroupNames = Set(previousGroups.map {
+            Self.stableGroupName($0.title)
+        })
+        for child in children {
+            guard child.kind == .group else {
+                if isFinalBatch { result.append(child) }
+                continue
+            }
+            child.children = child.children?.filter { row in
+                guard let key = row.cycleKey else { return true }
+                return !consumed.contains(key)
+            }
+            if child.children?.isEmpty == false {
+                if child.title.hasPrefix("Exact (") {
+                    child.title = "Exact (\(child.children?.count ?? 0))"
+                }
+                result.append(child)
+            } else if isFinalBatch,
+                      !existingGroupNames.contains(
+                          Self.stableGroupName(child.title)
+                      ),
+                      !(child.title.hasPrefix("Exact (")
+                          && child.title.hasSuffix(")"))
+            {
+                result.append(child)
+            }
+        }
+        if !isFinalBatch {
+            result.append(Node(
+                kind: .loading,
+                title: "Loading…",
+                parent: previousGroups[0].parent
+            ))
+        }
+        return result
+    }
+
+    private func updatePublishedRow(
+        _ previous: Node,
+        from current: Node,
+        parent: Node
+    ) {
+        let loadedChildren = previous.isExpandable
+            && previous.children?.isEmpty == false
+        previous.title = current.title
+        previous.subtitle = current.subtitle
+        previous.badge = current.badge
+        previous.target = current.target
+        previous.line = current.line
+        previous.symbol = current.symbol
+        previous.expansionIdentity = current.expansionIdentity
+        previous.queryTarget = current.queryTarget
+        previous.isExpandable = current.isExpandable
+        previous.parent = parent
+        previous.evidence = current.evidence
+        previous.callSites = current.callSites
+        if !loadedChildren {
+            previous.children = current.children
+        }
+    }
+
+    private nonisolated static func stableGroupName(_ title: String) -> String {
+        title.hasPrefix("Exact") ? "Exact" : title
     }
 
     private func makeGroup(
