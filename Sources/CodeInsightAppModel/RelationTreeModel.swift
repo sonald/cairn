@@ -188,6 +188,7 @@ public final class RelationTreeModel {
     public private(set) var generation: UInt64 = 0
     public private(set) var requestID: UInt64 = 0
     public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
+    public private(set) var heuristicCandidateCount = 0
     public static let possibleValidationBatchSize = 32
     public var onSelect: @MainActor (Node) -> Void = { _ in }
     public var onNodeChange: @MainActor (Node) -> Void = { _ in }
@@ -263,6 +264,7 @@ public final class RelationTreeModel {
         requestID &+= 1
         root = nil
         selectedRelationSymbol = nil
+        heuristicCandidateCount = 0
         switch state {
         case let .ready(session, context):
             self.session = session
@@ -287,6 +289,7 @@ public final class RelationTreeModel {
         generation &+= 1
         self.direction = direction
         selectedRelationSymbol = nil
+        heuristicCandidateCount = 0
         switch target {
         case let .localBinding(pathID, bindingIndex):
             guard direction == .references,
@@ -617,6 +620,7 @@ public final class RelationTreeModel {
                     if let engineResult = result.loaded {
                         loaded = engineResult
                         hasEngineResult = true
+                        heuristicCandidateCount = engineResult.edges.count
                     } else if result.engineFailed {
                         engineLoadFailed = true
                     } else {

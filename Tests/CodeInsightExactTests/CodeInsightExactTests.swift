@@ -802,7 +802,9 @@ func rustAnalyzerRetryDelayDoesNotHoldTheOperationLock() throws {
             _ = try? session.definition(file: "src/main.rs", byteOffset: 0)
             firstDone.signal()
         }
-        #expect(waitUntil(timeout: 1) { responses.count == 1 })
+        #expect(waitUntil("first retry request reaches the provider", timeout: 1) {
+            responses.count == 1
+        })
 
         Thread.detachNewThread {
             _ = try? session.definition(file: "src/main.rs", byteOffset: 0)
@@ -843,7 +845,7 @@ func exactRequestBatchCapsProviderBoundaryConcurrency() {
         }
     }
 
-    #expect(waitUntil(timeout: 1) {
+    #expect(waitUntil("provider batch reaches its concurrency cap", timeout: 1) {
         probe.active == expectedLimit
     })
     probe.release()
@@ -892,7 +894,9 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
         for _ in 0..<staleFanout {
             #expect(started.wait(timeout: .now() + 1) == .success)
         }
-        #expect(waitUntil(timeout: 1) { responses.count == 1 })
+        #expect(waitUntil("first stale-batch request reaches the provider", timeout: 1) {
+            responses.count == 1
+        })
         Thread.sleep(forTimeInterval: 0.05)
 
         session.cancel(batch: staleBatch)
@@ -1604,7 +1608,9 @@ private func runDefinition(
             byteOffset: source[..<call.lowerBound].utf8.count
         ))
     if let marker {
-        try #require(waitForFile(marker, timeout: 30))
+        // Cargo/build-script completion is asynchronous; this is a hang fuse,
+        // not a performance budget.
+        try #require(waitForFile(marker, timeout: 120))
     }
     return location
 }
@@ -1717,24 +1723,33 @@ private enum MaterializerTestError: Error {
 }
 
 private func waitForFile(_ url: URL, timeout: TimeInterval) -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = ContinuousClock.now + .seconds(timeout)
+    while ContinuousClock.now < deadline {
         if FileManager.default.fileExists(atPath: url.path) { return true }
         Thread.sleep(forTimeInterval: 0.05)
     }
-    return FileManager.default.fileExists(atPath: url.path)
+    if FileManager.default.fileExists(atPath: url.path) { return true }
+    FileHandle.standardError.write(Data(
+        "Hang fuse expired while waiting for file: \(url.path)\n".utf8
+    ))
+    return false
 }
 
 private func waitUntil(
+    _ description: String,
     timeout: TimeInterval,
     _ predicate: () -> Bool
 ) -> Bool {
-    let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    let deadline = ContinuousClock.now + .seconds(timeout)
+    while ContinuousClock.now < deadline {
         if predicate() { return true }
         Thread.sleep(forTimeInterval: 0.01)
     }
-    return predicate()
+    if predicate() { return true }
+    FileHandle.standardError.write(Data(
+        "Timed out after \(timeout)s waiting for: \(description)\n".utf8
+    ))
+    return false
 }
 
 private enum PipeFakeRequestResponse {

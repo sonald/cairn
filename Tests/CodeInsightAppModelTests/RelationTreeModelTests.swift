@@ -2892,6 +2892,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     #expect(model.root?.children?.last?.title
         == "Showing first 500 of 501 relations")
     #expect(model.hasTruncatedResults)
+    #expect(model.heuristicCandidateCount == 501)
 }
 
 @MainActor

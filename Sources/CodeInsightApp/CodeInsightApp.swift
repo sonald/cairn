@@ -32,12 +32,60 @@ private struct DiffSelfTestTarget {
     let expected: DiffCore.Result
 }
 
+private func relationTimingArguments(
+    _ arguments: [String]
+) -> (
+    root: URL,
+    file: URL,
+    relativeFile: String,
+    offset: UInt32,
+    provider: String
+)? {
+    guard let index = arguments.firstIndex(of: "--self-test-relation-timing"),
+          arguments.indices.contains(index + 4),
+          let offset = UInt32(arguments[index + 3]),
+          ["fake", "real"].contains(arguments[index + 4])
+    else { return nil }
+    let root = URL(
+        fileURLWithPath: arguments[index + 1],
+        isDirectory: true
+    ).resolvingSymlinksInPath().standardizedFileURL
+    let relativeFile = arguments[index + 2]
+    guard !relativeFile.hasPrefix("/") else { return nil }
+    let file = root.appendingPathComponent(relativeFile)
+        .resolvingSymlinksInPath().standardizedFileURL
+    var isDirectory: ObjCBool = false
+    guard file.path.hasPrefix(root.path + "/"),
+          FileManager.default.fileExists(
+              atPath: root.path,
+              isDirectory: &isDirectory
+          ),
+          isDirectory.boolValue,
+          let bytes = try? Data(contentsOf: file),
+          Int(offset) < bytes.count
+    else { return nil }
+    return (root, file, relativeFile, offset, arguments[index + 4])
+}
+
 @main
 private struct CodeInsightApplication {
     @MainActor
     static func main() {
         let startedAt = ContinuousClock.now
         let arguments = Array(CommandLine.arguments.dropFirst())
+        let relationTimingRequested =
+            arguments.contains("--self-test-relation-timing")
+        let relationTimingTarget = relationTimingArguments(arguments)
+        if relationTimingRequested, relationTimingTarget == nil {
+            FileHandle.standardError.write(Data(
+                (
+                    "usage: codeinsight-app --self-test-relation-timing "
+                        + "<project-root> <relative-file> <utf8-byte-offset> "
+                        + "<fake|real>\n"
+                ).utf8
+            ))
+            Darwin.exit(2)
+        }
         if let index = arguments.firstIndex(of: "--self-test-switch"),
            arguments.indices.contains(index + 1)
         {
@@ -52,7 +100,70 @@ private struct CodeInsightApplication {
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
         let delegate: AppDelegate
-        if let exactRoot {
+        if let relationTimingTarget {
+            let temporaryRoot = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "CodeInsightRelationTiming-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            let trustRegistry = TrustRegistry(
+                fileURL: temporaryRoot.appendingPathComponent("trust.json")
+            )
+            let providerState: ExactSelfTestProviderState?
+            let coordinator: ExactCoordinator
+            if relationTimingTarget.provider == "fake" {
+                let state = ExactSelfTestProviderState()
+                let location = ExactLocation(
+                    file: relationTimingTarget.relativeFile,
+                    byteOffset: Int(relationTimingTarget.offset),
+                    line: 1,
+                    column: 1
+                )
+                let item = exactSelfTestCallItem(
+                    name: "relation-timing-target",
+                    uri: relationTimingTarget.file,
+                    location: location
+                )
+                let provider = InProcessExactProvider(
+                    location: nil,
+                    capabilities: [.callHierarchy],
+                    callHierarchyItems: [item],
+                    incomingRelations: [],
+                    state: state
+                )
+                providerState = state
+                coordinator = ExactCoordinator(
+                    providerFactory: { _ in provider },
+                    sandboxAvailable: { true },
+                    trustRegistry: trustRegistry
+                )
+            } else {
+                providerState = nil
+                coordinator = ExactCoordinator(
+                    providerFactory: { projectURL in
+                        guard let executable = RustAnalyzerProvider.findExecutable()
+                        else {
+                            throw ExactError.unavailable(
+                                "rust-analyzer is not installed"
+                            )
+                        }
+                        return try RustAnalyzerProvider(
+                            projectURL: projectURL,
+                            executableURL: executable,
+                            requestTimeout: 30,
+                            closeGrace: 2
+                        )
+                    },
+                    trustRegistry: trustRegistry
+                )
+            }
+            delegate = AppDelegate(
+                startedAt: startedAt,
+                model: AppModel(exactCoordinator: coordinator),
+                exactSelfTestProviderState: providerState,
+                relationTimingTemporaryRoot: temporaryRoot
+            )
+        } else if let exactRoot {
             let fixtureRoot = exactSelfTestFixtureRoot(root: exactRoot)
             let target = exactSelfTestTarget(root: fixtureRoot)
             let providerState = ExactSelfTestProviderState()
@@ -128,7 +239,15 @@ private struct CodeInsightApplication {
         }
         app.delegate = delegate
         withExtendedLifetime(delegate) {
-            if let exactRoot {
+            if let relationTimingTarget {
+                delegate.runRelationTimingSelfTest(
+                    root: relationTimingTarget.root,
+                    file: relationTimingTarget.file,
+                    relativeFile: relationTimingTarget.relativeFile,
+                    offset: relationTimingTarget.offset,
+                    provider: relationTimingTarget.provider
+                )
+            } else if let exactRoot {
                 delegate.runExactSelfTest(root: exactRoot)
             } else if arguments.contains("--self-test-search") {
                 delegate.runSearchSelfTest()
@@ -186,6 +305,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private let startedAt: ContinuousClock.Instant
     private let model: AppModel
     private let exactSelfTestProviderState: ExactSelfTestProviderState?
+    private let relationTimingTemporaryRoot: URL?
     private let recentProjectsStore = RecentProjectsStore()
     private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
@@ -194,11 +314,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     init(
         startedAt: ContinuousClock.Instant,
         model: AppModel = AppModel(),
-        exactSelfTestProviderState: ExactSelfTestProviderState? = nil
+        exactSelfTestProviderState: ExactSelfTestProviderState? = nil,
+        relationTimingTemporaryRoot: URL? = nil
     ) {
         self.startedAt = startedAt
         self.model = model
         self.exactSelfTestProviderState = exactSelfTestProviderState
+        self.relationTimingTemporaryRoot = relationTimingTemporaryRoot
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -2169,6 +2291,166 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runRelationTimingSelfTest(
+        root: URL,
+        file: URL,
+        relativeFile: String,
+        offset: UInt32,
+        provider: String
+    ) -> Never {
+        launch(offscreen: true)
+        guard let controller = windowController else {
+            Self.writeJSON([
+                "step": "summary",
+                "passed": false,
+                "error": "window unavailable",
+            ])
+            Self.exitSelfTest(channel: "relation-timing", status: 1)
+        }
+
+        func finish(_ result: [String: Any], status: Int32) -> Never {
+            controller.close()
+            model.exactCoordinator.shutdown()
+            if let relationTimingTemporaryRoot {
+                try? FileManager.default.removeItem(at: relationTimingTemporaryRoot)
+            }
+            Self.writeJSON(result)
+            Self.exitSelfTest(channel: "relation-timing", status: status)
+        }
+
+        controller.window?.setContentSize(
+            NSSize(width: 1_600, height: 1_000)
+        )
+        pumpRunLoop()
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 120, condition: {
+                  if case .failed = self.model.projectState { return true }
+                  if case .ready = self.model.projectState {
+                      return self.model.snapshotPhase == .fullReady
+                  }
+                  return false
+              }),
+              case .ready = model.projectState,
+              model.snapshotPhase == .fullReady
+        else {
+            finish([
+                "step": "summary",
+                "passed": false,
+                "error": "project index did not reach fullReady",
+            ], status: 1)
+        }
+
+        if provider == "real" {
+            Task { try? await model.grantCurrentRepositoryTrust() }
+            guard waitUntil(timeout: 120, condition: {
+                      self.model.exactCoordinator.readiness == .ready
+                          && self.model.exactCoordinator.trustMode == .trusted
+                  })
+            else {
+                finish([
+                    "step": "summary",
+                    "passed": false,
+                    "error": "rust-analyzer did not become ready in Trusted mode",
+                ], status: 1)
+            }
+        }
+
+        guard waitUntil(timeout: 30, condition: {
+                  controller.selectFileInSidebar(file)
+              }),
+              waitUntil(timeout: 30, condition: {
+                  controller.displayedReaderFile?.standardizedFileURL
+                      == file.standardizedFileURL
+              })
+        else {
+            finish([
+                "step": "summary",
+                "passed": false,
+                "error": "target file unavailable",
+            ], status: 1)
+        }
+
+        exactSelfTestProviderState?.delayNextRelation(by: 0.25)
+        let cold = measureRelationTiming(
+            model: model,
+            controller: controller,
+            offset: offset,
+            direction: .callers,
+            timeout: 120
+        )
+        let coldSelectable =
+            !cold.relationFirstActionableTitle.isEmpty
+            && controller.selfTestSelectRelationEdge(
+                titled: cold.relationFirstActionableTitle
+            )
+            && controller.selfTestSelectedRelationEdgeTitle
+                == cold.relationFirstActionableTitle
+        controller.selfTestDeselectRelation()
+
+        exactSelfTestProviderState?.delayNextRelation(by: 0.25)
+        let warm = measureRelationTiming(
+            model: model,
+            controller: controller,
+            offset: offset,
+            direction: .callers,
+            timeout: 120
+        )
+        let warmSelectable =
+            !warm.relationFirstActionableTitle.isEmpty
+            && controller.selfTestSelectRelationEdge(
+                titled: warm.relationFirstActionableTitle
+            )
+            && controller.selfTestSelectedRelationEdgeTitle
+                == warm.relationFirstActionableTitle
+        let fieldsValid = [cold, warm].allSatisfy {
+            $0.relationFirstActionableMS > 0
+                && $0.relationAllResultsMS >= $0.relationFirstActionableMS
+                && ["heuristic", "exact"].contains(
+                    $0.relationFirstActionableKind
+                )
+                && $0.relationCandidateEdgeCount > 0
+        }
+        let passed = fieldsValid && coldSelectable && warmSelectable
+        finish([
+            "step": "summary",
+            "variant": provider == "real" ? "rust-analyzer" : "fake",
+            "measurementScope": provider == "real"
+                ? "real rust-analyzer"
+                : "instrumentation-only; not real rust-analyzer",
+            "projectRoot": root.path,
+            "file": relativeFile,
+            "utf8ByteOffset": Int(offset),
+            "indexHot": true,
+            "cold": [
+                "relationFirstActionableMS":
+                    cold.relationFirstActionableMS,
+                "relationAllResultsMS":
+                    cold.relationAllResultsMS,
+                "relationFirstActionableKind":
+                    cold.relationFirstActionableKind,
+                "relationFirstActionableTitle":
+                    cold.relationFirstActionableTitle,
+                "relationCandidateEdgeCount":
+                    cold.relationCandidateEdgeCount,
+            ],
+            "warm": [
+                "relationFirstActionableMS":
+                    warm.relationFirstActionableMS,
+                "relationAllResultsMS":
+                    warm.relationAllResultsMS,
+                "relationFirstActionableKind":
+                    warm.relationFirstActionableKind,
+                "relationFirstActionableTitle":
+                    warm.relationFirstActionableTitle,
+                "relationCandidateEdgeCount":
+                    warm.relationCandidateEdgeCount,
+            ],
+            "coldFirstActionableSelectable": coldSelectable,
+            "warmFirstActionableSelectable": warmSelectable,
+            "passed": passed,
+        ], status: passed ? 0 : 1)
+    }
+
     func runExactSelfTest(root: URL) -> Never {
         launch(offscreen: true)
         let projectRoot = exactSelfTestFixtureRoot(root: root)
@@ -2237,7 +2519,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             relationFirstActionableMS: 0.0,
             relationAllResultsMS: 0.0,
             relationFirstActionableKind: "",
-            relationFirstActionableTitle: ""
+            relationFirstActionableTitle: "",
+            relationCandidateEdgeCount: 0
         )
         var relationWarmTiming = relationColdTiming
         if relationTimingFileVisible {
@@ -2309,6 +2592,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         relationColdTiming.relationFirstActionableKind,
                     "relationFirstActionableTitle":
                         relationColdTiming.relationFirstActionableTitle,
+                    "relationCandidateEdgeCount":
+                        relationColdTiming.relationCandidateEdgeCount,
                 ],
                 "warm": [
                     "relationFirstActionableMS":
@@ -2319,6 +2604,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         relationWarmTiming.relationFirstActionableKind,
                     "relationFirstActionableTitle":
                         relationWarmTiming.relationFirstActionableTitle,
+                    "relationCandidateEdgeCount":
+                        relationWarmTiming.relationCandidateEdgeCount,
                 ],
                 "sameSession": relationTimingSameSession,
                 "coldFirstActionableSelectable":
@@ -4123,7 +4410,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             relationFirstActionableMS: 0.0,
             relationAllResultsMS: 0.0,
             relationFirstActionableKind: "",
-            relationFirstActionableTitle: ""
+            relationFirstActionableTitle: "",
+            relationCandidateEdgeCount: 0
         )
         var realRelationWarmTiming = realRelationColdTiming
         if realRelationTimingFileVisible {
@@ -4199,6 +4487,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         realRelationColdTiming.relationFirstActionableKind,
                     "relationFirstActionableTitle":
                         realRelationColdTiming.relationFirstActionableTitle,
+                    "relationCandidateEdgeCount":
+                        realRelationColdTiming.relationCandidateEdgeCount,
                 ],
                 "warm": [
                     "relationFirstActionableMS":
@@ -4209,6 +4499,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         realRelationWarmTiming.relationFirstActionableKind,
                     "relationFirstActionableTitle":
                         realRelationWarmTiming.relationFirstActionableTitle,
+                    "relationCandidateEdgeCount":
+                        realRelationWarmTiming.relationCandidateEdgeCount,
                 ],
                 "coldHeuristicFirstObserved":
                     realRelationColdTiming.relationFirstActionableKind
@@ -4558,17 +4850,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         relationFirstActionableMS: Double,
         relationAllResultsMS: Double,
         relationFirstActionableKind: String,
-        relationFirstActionableTitle: String
+        relationFirstActionableTitle: String,
+        relationCandidateEdgeCount: Int
     ) {
         let previousGeneration = model.relationTree.generation
         let startedAt = ContinuousClock.now
         controller.selfTestReaderRelation(offset: offset, direction: direction)
-        let deadline = Date(timeIntervalSinceNow: timeout)
+        let deadline = ContinuousClock.now + .seconds(timeout)
         var firstMS = 0.0
         var firstKind = ""
         var firstTitle = ""
         var allResultsMS = 0.0
-        while Date() < deadline {
+        while ContinuousClock.now < deadline {
             if model.relationTree.generation > previousGeneration {
                 if firstMS == 0,
                    let first = firstActionableRelation(
@@ -4590,7 +4883,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             }
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.01))
         }
-        return (firstMS, allResultsMS, firstKind, firstTitle)
+        return (
+            firstMS,
+            allResultsMS,
+            firstKind,
+            firstTitle,
+            model.relationTree.heuristicCandidateCount
+        )
     }
 
     private func exactRelationEdges(
