@@ -664,6 +664,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     ) -> [NSRect] {
         relationController.selfTestVisibleEdgeFrames(inGroup: titlePrefix)
     }
+    var selfTestPossibleRelationDisclosureTitle: String? {
+        relationController.selfTestPossibleDisclosureTitle
+    }
+    var selfTestPossibleRelationDisclosureFrame: NSRect {
+        relationController.selfTestPossibleDisclosureFrame
+    }
+    func selfTestExpandPossibleRelations() -> Bool {
+        relationController.selfTestExpandPossibleMatches()
+    }
+    var selfTestVisibleRelationText: [String] {
+        relationController.selfTestVisibleText()
+    }
+    func selfTestRelationBadgeFrame(titled title: String) -> NSRect {
+        relationController.selfTestBadgeFrame(titled: title)
+    }
+    func selfTestRelationBadgeToolTip(titled title: String) -> String? {
+        relationController.selfTestBadgeToolTip(titled: title)
+    }
     var selfTestExactAndReferenceGroupsDoNotOverlap: Bool {
         relationController.selfTestExactAndReferenceGroupsDoNotOverlap
     }

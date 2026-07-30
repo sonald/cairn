@@ -28,7 +28,12 @@ struct RelationUXTests {
         #expect(
             [accessibility.label, accessibility.value]
                 .joined(separator: " ")
-                .contains("Exact · heuristic also matched")
+                .contains("Verified")
+        )
+        #expect(accessibility.value.contains("heuristic also matched"))
+        #expect(
+            fixture.controller.selfTestBadgeToolTip(titled: title)
+                == "Verified by rust-analyzer"
         )
         #expect(accessibility.role != NSAccessibility.Role.textField.rawValue)
         #expect(accessibility.valueSettable == false)
@@ -48,28 +53,57 @@ struct RelationUXTests {
         let contentBounds = fixture.controller.view.bounds
         let layoutPassesBeforeReads = fixture.controller.selfTestLayoutPasses
         let visibleRect = fixture.controller.selfTestRelationsVisibleRect
-        let exactFrame = fixture.controller.selfTestExactGroupFrame
-        let referenceFrame = fixture.controller.selfTestReferenceGroupFrame
-        let exactRows = fixture.controller.selfTestVisibleEdgeFrames(
+        let verifiedRows = fixture.controller.selfTestVisibleEdgeFrames(
             inGroup: "Exact"
         )
-        let referenceRows = fixture.controller.selfTestVisibleEdgeFrames(
-            inGroup: "References"
-        )
-        let groupsDoNotOverlap =
-            fixture.controller.selfTestExactAndReferenceGroupsDoNotOverlap
+        let verifiedFrame = try #require(verifiedRows.first)
+        let disclosureFrame = fixture.controller.selfTestPossibleDisclosureFrame
+        let badgeFrame = fixture.controller.selfTestBadgeFrame(titled: "first")
         let panelDoesNotOverlapControl =
             fixture.controller.selfTestResultsAndDirectionControlDoNotOverlap
         let layoutPassesAfterReads = fixture.controller.selfTestLayoutPasses
         #expect(contentBounds.size == contentSize)
-        #expect(exactFrame.width > 0 && exactFrame.height > 0)
-        #expect(referenceFrame.width > 0 && referenceFrame.height > 0)
-        #expect((exactRows + referenceRows).allSatisfy {
+        #expect(verifiedFrame.width > 0 && verifiedFrame.height > 0)
+        #expect(disclosureFrame.width > 0 && disclosureFrame.height > 0)
+        #expect([verifiedFrame, disclosureFrame, badgeFrame].allSatisfy {
             $0.width > 0 && $0.height > 0 && visibleRect.contains($0)
         })
-        #expect(groupsDoNotOverlap)
+        #expect(verifiedFrame.contains(badgeFrame))
+        #expect(verifiedFrame.intersection(disclosureFrame).isEmpty)
         #expect(panelDoesNotOverlapControl)
         #expect(layoutPassesAfterReads == layoutPassesBeforeReads)
+    }
+
+    @MainActor
+    @Test
+    func relationPossibleMatchesAreCollapsedThenExpandInPlace() async throws {
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            expandPossible: false
+        )
+        defer { fixture.close() }
+
+        #expect(
+            fixture.controller.selfTestPossibleDisclosureTitle
+                == "Show 2 possible matches"
+        )
+        #expect(
+            fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
+                .isEmpty
+        )
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        #expect(
+            fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
+                == ["first", "second"]
+        )
+        let visibleText = fixture.controller.selfTestVisibleText()
+            .joined(separator: "\n")
+        #expect(!visibleText.contains("Probable"))
+        #expect(!visibleText.split(separator: "\n").contains("Strong"))
+        #expect(!visibleText.split(separator: "\n").contains("Possible"))
+        #expect(relationEdges(in: fixture.model.root).allSatisfy {
+            !$0.isExpandable && $0.children?.isEmpty == true
+        })
     }
 
     @MainActor
@@ -279,12 +313,15 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && referenceEdge(path: \"b.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).count >= 2") {
+    try #require(await relationTestWaitUntil("reference rows are loaded") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
             && referenceEdge(path: "b.rs", in: fixture.model) != nil
-            && fixture.controller.selfTestVisibleRelationEdgeTitles(
-                inGroup: "References"
-            ).count >= 2
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    try #require(await relationTestWaitUntil("reference rows are visible") {
+        fixture.controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).count >= 2
     })
     let first = try #require(referenceEdge(path: "a.rs", in: fixture.model))
     let second = try #require(referenceEdge(path: "b.rs", in: fixture.model))
@@ -537,11 +574,14 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).contains { $0.hasPrefix(\"a.rs:\") }") {
+    try #require(await relationTestWaitUntil("a.rs reference is loaded") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
-            && fixture.controller.selfTestVisibleRelationEdgeTitles(
-                inGroup: "References"
-            ).contains { $0.hasPrefix("a.rs:") }
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    try #require(await relationTestWaitUntil("a.rs reference is visible") {
+        fixture.controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).contains { $0.hasPrefix("a.rs:") }
     })
     let edge = try #require(referenceEdge(path: "a.rs", in: fixture.model))
     #expect(fixture.controller.selfTestSelectRelationEdge(titled: edge.title))
@@ -626,11 +666,14 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
         offset: byteOffset(of: "target() {}", in: fixture.mainSource),
         direction: .references
     )
-    try #require(await relationTestWaitUntil("referenceEdge(path: \"a.rs\", in: fixture.model) != nil && fixture.controller.selfTestVisibleRelationEdgeTitles( inGroup: \"References\" ).contains { $0.hasPrefix(\"a.rs:\") }") {
+    try #require(await relationTestWaitUntil("a.rs reference is loaded") {
         referenceEdge(path: "a.rs", in: fixture.model) != nil
-            && fixture.controller.selfTestVisibleRelationEdgeTitles(
-                inGroup: "References"
-            ).contains { $0.hasPrefix("a.rs:") }
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    try #require(await relationTestWaitUntil("a.rs reference is visible") {
+        fixture.controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).contains { $0.hasPrefix("a.rs:") }
     })
     let edge = try #require(referenceEdge(path: "a.rs", in: fixture.model))
     let relationRoot = try #require(fixture.model.relationTree.root)
@@ -742,8 +785,7 @@ private func relationEdge(
     titled title: String,
     in model: AppModel
 ) -> RelationTreeModel.Node? {
-    model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
+    relationEdges(in: model.relationTree.root)
         .first { $0.kind == .edge && $0.title == title }
 }
 
@@ -752,9 +794,19 @@ private func referenceEdge(
     path: String,
     in model: AppModel
 ) -> RelationTreeModel.Node? {
-    model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
+    relationEdges(in: model.relationTree.root)
         .first { $0.kind == .edge && $0.target?.path == path }
+}
+
+@MainActor
+private func relationEdges(
+    in root: RelationTreeModel.Node?
+) -> [RelationTreeModel.Node] {
+    root?.children?.flatMap { child in
+        child.kind == .edge
+            ? [child]
+            : (child.children ?? []).filter { $0.kind == .edge }
+    } ?? []
 }
 
 private func byteOffset(of needle: String, in source: String) -> UInt32 {
@@ -818,7 +870,8 @@ private func makeRelationUXFixture(
     direction: RelationTreeModel.Direction = .references,
     includesExactMatch: Bool = true,
     blockedSubjectLoad: RelationLoadGate? = nil,
-    blockedExactLoad: RelationLoadGate? = nil
+    blockedExactLoad: RelationLoadGate? = nil,
+    expandPossible: Bool = true
 ) async throws -> RelationUXFixture {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -962,8 +1015,16 @@ private func makeRelationUXFixture(
                 return controller.selfTestVisibleEdgeTitles(inGroup: "Exact")
                     == ["first"]
             }
-            let group = direction == .references ? "References" : "Strong"
-            return controller.selfTestVisibleEdgeTitles(inGroup: group)
+            if direction == .references {
+                guard controller.selfTestPossibleDisclosureTitle
+                    == "Show 2 possible matches"
+                else { return false }
+                if !expandPossible { return true }
+                return controller.selfTestExpandPossibleMatches()
+                    && controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
+                        == ["first", "second"]
+            }
+            return controller.selfTestVisibleEdgeTitles(inGroup: "Strong")
                 == ["first", "second"]
         })
     }

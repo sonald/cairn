@@ -45,31 +45,36 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestExactGroupTitle: String? {
-        selfTestExactGroupItem?.title
+        nil
     }
 
     var selfTestExactGroupRowCount: Int {
-        guard let group = selfTestExactGroupItem else { return 0 }
-        return group.children?.filter { outlineView.row(forItem: $0) >= 0 }.count ?? 0
+        selfTestVisibleEdgeNodes(inGroup: "Exact").count
     }
 
     var selfTestExactGroupFrame: NSRect {
-        selfTestGroupFrame(titlePrefix: "Exact")
+        selfTestVisibleEdgeFrames(inGroup: "Exact").first ?? .zero
     }
 
     var selfTestHeuristicGroupFrame: NSRect {
-        selfTestGroupFrame(titlePrefix: "Strong")
+        selfTestVisibleEdgeFrames(inGroup: "Strong").first ?? .zero
     }
 
     var selfTestReferenceGroupTitle: String? {
-        guard let row = selfTestGroupRow(titlePrefix: "References"),
-              let item = outlineView.item(atRow: row) as? RelationTreeModel.Node
-        else { return nil }
-        return item.title
+        if let row = selfTestGroupRow(titlePrefix: "References"),
+           let node = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        {
+            return node.title
+        }
+        return selfTestPossibleDisclosureItem?.title
     }
 
     var selfTestReferenceGroupFrame: NSRect {
-        selfTestGroupFrame(titlePrefix: "References")
+        let group = selfTestGroupFrame(titlePrefix: "References")
+        if group != .zero { return group }
+        let disclosure = selfTestPossibleDisclosureFrame
+        if disclosure != .zero { return disclosure }
+        return selfTestVisibleEdgeFrames(inGroup: "References").first ?? .zero
     }
 
     var selfTestDirectionSegmentFrames: [NSRect] {
@@ -82,11 +87,7 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestExactGroupVisibleWithGeometry: Bool {
-        let frame = selfTestExactGroupFrame
-        return !scrollView.isHidden
-            && frame.width > 0
-            && frame.height > 0
-            && selfTestRelationsVisibleRect.contains(frame)
+        selfTestFrameIsVisible(selfTestExactGroupFrame)
     }
 
     var selfTestExactAndHeuristicGroupsDoNotOverlap: Bool {
@@ -98,11 +99,7 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestReferenceGroupVisibleWithGeometry: Bool {
-        let frame = selfTestReferenceGroupFrame
-        return !scrollView.isHidden
-            && frame.width > 0
-            && frame.height > 0
-            && selfTestRelationsVisibleRect.contains(frame)
+        selfTestFrameIsVisible(selfTestReferenceGroupFrame)
     }
 
     var selfTestReferenceSegmentVisibleWithGeometry: Bool {
@@ -129,38 +126,22 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestExternalGroupTitle: String? {
-        guard let row = selfTestGroupRow(titlePrefix: "External / Unresolved"),
-              let cell = outlineView.view(
-                  atColumn: 0,
-                  row: row,
-                  makeIfNecessary: true
-              ) as? NSTableCellView
-        else { return nil }
-        return cell.textField?.stringValue
+        selfTestVisibleEdgeNodes(inGroup: "").first {
+            $0.subtitle?.hasPrefix("Unresolved") == true
+                || $0.subtitle?.hasPrefix("External · in dependency") == true
+        }?.subtitle
     }
 
     func selfTestVisibleEdgeTitles(inGroup titlePrefix: String) -> [String] {
-        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
-              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
-        else { return [] }
-        return group.children?.compactMap { child in
-            guard child.kind == .edge, outlineView.row(forItem: child) >= 0
-            else { return nil }
-            return child.title
-        } ?? []
+        selfTestVisibleEdgeNodes(inGroup: titlePrefix).map(\.title)
     }
 
     func selfTestVisibleEdgeSubtitle(
         titled title: String,
         inGroup titlePrefix: String
     ) -> String? {
-        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
-              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
-        else { return nil }
-        return group.children?.first {
-            $0.kind == .edge
-                && $0.title == title
-                && outlineView.row(forItem: $0) >= 0
+        selfTestVisibleEdgeNodes(inGroup: titlePrefix).first {
+            $0.title == title
         }?.subtitle
     }
 
@@ -186,15 +167,10 @@ final class RelationWindowController: NSViewController,
     }
 
     func selfTestVisibleEdgeFrames(inGroup titlePrefix: String) -> [NSRect] {
-        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
-              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
-        else { return [] }
-        return group.children?.compactMap {
+        selfTestVisibleEdgeNodes(inGroup: titlePrefix).compactMap {
             let row = outlineView.row(forItem: $0)
-            return $0.kind == .edge && row >= 0
-                ? outlineView.rect(ofRow: row)
-                : nil
-        } ?? []
+            return row >= 0 ? outlineView.rect(ofRow: row) : nil
+        }
     }
 
     var selfTestExactAndReferenceGroupsDoNotOverlap: Bool {
@@ -245,6 +221,45 @@ final class RelationWindowController: NSViewController,
             return true
         }
         return false
+    }
+
+    var selfTestPossibleDisclosureTitle: String? {
+        selfTestPossibleDisclosureItem?.title
+    }
+
+    var selfTestPossibleDisclosureFrame: NSRect {
+        guard let item = selfTestPossibleDisclosureItem else { return .zero }
+        let row = outlineView.row(forItem: item)
+        return row >= 0 ? outlineView.rect(ofRow: row) : .zero
+    }
+
+    func selfTestExpandPossibleMatches() -> Bool {
+        guard let item = selfTestPossibleDisclosureItem else { return false }
+        outlineView.expandItem(item)
+        return outlineView.isItemExpanded(item)
+    }
+
+    func selfTestVisibleText() -> [String] {
+        guard isViewLoaded else { return [] }
+        return (0..<outlineView.numberOfRows).compactMap { row in
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node
+            else { return nil }
+            return [node.title, node.subtitle, node.badge]
+                .compactMap { $0 }
+                .joined(separator: " ")
+        }
+    }
+
+    func selfTestBadgeFrame(titled title: String) -> NSRect {
+        guard let cell = selfTestCell(titled: title, inGroup: "")
+            as? RelationCellView
+        else { return .zero }
+        return cell.selfTestBadgeFrame(in: outlineView)
+    }
+
+    func selfTestBadgeToolTip(titled title: String) -> String? {
+        (selfTestCell(titled: title, inGroup: "") as? RelationCellView)?
+            .selfTestBadgeToolTip
     }
 
     func selfTestVisibleChildEdgeTitles(ofEdge title: String) -> [String] {
@@ -330,9 +345,11 @@ final class RelationWindowController: NSViewController,
         openSelection(outlineView)
     }
 
-    private var selfTestExactGroupItem: RelationTreeModel.Node? {
-        guard let row = selfTestGroupRow(titlePrefix: "Exact") else { return nil }
-        return outlineView.item(atRow: row) as? RelationTreeModel.Node
+    private var selfTestPossibleDisclosureItem: RelationTreeModel.Node? {
+        guard isViewLoaded else { return nil }
+        return model.root?.children?.first {
+            $0.kind == .group && $0.title.hasPrefix("Show ")
+        }
     }
 
     private func selfTestGroupRow(titlePrefix: String) -> Int? {
@@ -355,13 +372,9 @@ final class RelationWindowController: NSViewController,
         titled title: String,
         inGroup titlePrefix: String
     ) -> NSTableCellView? {
-        guard let row = selfTestGroupRow(titlePrefix: titlePrefix),
-              let group = outlineView.item(atRow: row) as? RelationTreeModel.Node,
-              let child = group.children?.first(where: {
-                  $0.kind == .edge
-                      && $0.title == title
-                      && outlineView.row(forItem: $0) >= 0
-              })
+        guard let child = selfTestVisibleEdgeNodes(inGroup: titlePrefix).first(
+            where: { $0.title == title }
+        )
         else { return nil }
         let childRow = outlineView.row(forItem: child)
         return outlineView.view(
@@ -369,6 +382,45 @@ final class RelationWindowController: NSViewController,
             row: childRow,
             makeIfNecessary: true
         ) as? NSTableCellView
+    }
+
+    private func selfTestVisibleEdgeNodes(
+        inGroup titlePrefix: String
+    ) -> [RelationTreeModel.Node] {
+        guard isViewLoaded else { return [] }
+        if !titlePrefix.isEmpty,
+           let row = selfTestGroupRow(titlePrefix: titlePrefix),
+           let group = outlineView.item(atRow: row) as? RelationTreeModel.Node
+        {
+            return group.children?.filter {
+                $0.kind == .edge && outlineView.row(forItem: $0) >= 0
+            } ?? []
+        }
+        let possibleRows = Set(
+            (selfTestPossibleDisclosureItem?.children ?? []).map(ObjectIdentifier.init)
+        )
+        let directRows = Set(
+            (model.root?.children ?? [])
+                .filter { $0.kind == .edge }
+                .map(ObjectIdentifier.init)
+        )
+        return (0..<outlineView.numberOfRows).compactMap { row in
+            guard let node = outlineView.item(atRow: row)
+                    as? RelationTreeModel.Node,
+                  node.kind == .edge
+            else { return nil }
+            return switch titlePrefix {
+            case "Exact": node.badge == "Verified" ? node : nil
+            case "Strong":
+                node.badge == "Inferred"
+                    && directRows.contains(ObjectIdentifier(node)) ? node : nil
+            case "References":
+                model.direction == .references ? node : nil
+            case "Possible", "Probable":
+                possibleRows.contains(ObjectIdentifier(node)) ? node : nil
+            default: node
+            }
+        }
     }
 
     private var selfTestSegmentFrames: [NSRect] {
@@ -394,6 +446,15 @@ final class RelationWindowController: NSViewController,
         return window.convertToScreen(
             directionControl.convert(directionControl.bounds, to: nil)
         )
+    }
+
+    private func selfTestFrameIsVisible(_ frame: NSRect) -> Bool {
+        guard !scrollView.isHidden, frame.width > 0, frame.height > 0 else {
+            return false
+        }
+        let intersection = selfTestRelationsVisibleRect.intersection(frame)
+        return intersection.width > 0
+            && intersection.height >= frame.height - 0.5
     }
 
     init(model: RelationTreeModel) {
@@ -704,7 +765,9 @@ final class RelationWindowController: NSViewController,
 
     private func expandLoadedGroups(under node: RelationTreeModel.Node) {
         outlineView.expandItem(node)
-        for child in node.children ?? [] where child.kind == .group {
+        for child in node.children ?? []
+            where child.kind == .group && !child.title.hasPrefix("Show ")
+        {
             outlineView.expandItem(child)
         }
         fitOutlineWidthToVisibleRect()
@@ -828,7 +891,13 @@ private final class RelationCellView: NSTableCellView {
         spinner.isHidden = true
         subtitleLabel.isHidden = true
         badgeLabel.stringValue = node.badge ?? ""
-        badgeLabel.textColor = .systemOrange
+        badgeLabel.isHidden = node.badge == nil
+        badgeLabel.toolTip = switch node.badge {
+        case "Verified": "Verified by rust-analyzer"
+        case "Inferred": "Inferred from source structure"
+        default: nil
+        }
+        badgeLabel.textColor = node.badge == "Verified" ? .systemGreen : .systemBlue
         badgeLabel.font = .systemFont(ofSize: 12, weight: .semibold)
 
         switch node.kind {
@@ -876,6 +945,12 @@ private final class RelationCellView: NSTableCellView {
             [node.subtitle, node.badge].compactMap { $0 }.joined(separator: ", ")
         )
     }
+
+    func selfTestBadgeFrame(in view: NSView) -> NSRect {
+        badgeLabel.convert(badgeLabel.bounds, to: view)
+    }
+
+    var selfTestBadgeToolTip: String? { badgeLabel.toolTip }
 
     private func location(of node: RelationTreeModel.Node) -> String? {
         guard let target = node.target else { return nil }

@@ -729,10 +729,9 @@ func relationSelectionUpdatesContextUnlessPinned() async throws {
         direction: .calls
     )
     if let loadTask { await loadTask.value }
-    let strong = try #require(model.relationTree.root?.children?.first {
-        $0.kind == .group && $0.title == "Strong"
-    })
-    let edge = try #require(strong.children?.first { $0.title == "target" })
+    let edge = try #require(
+        appRelationRows(model.relationTree.root).first { $0.title == "target" }
+    )
 
     contextWindow.setMode(.pinned)
     model.relationTree.select(edge)
@@ -777,10 +776,9 @@ func relationSelectionUpdatesContextOnConsecutiveCallerRows() async throws {
         target: .engine(target),
         direction: .callers
     )?.value
-    let edges = model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
-    let first = try #require(edges?.first { $0.title == "first" })
-    let second = try #require(edges?.first { $0.title == "second" })
+    let edges = appRelationRows(model.relationTree.root)
+    let first = try #require(edges.first { $0.title == "first" })
+    let second = try #require(edges.first { $0.title == "second" })
 
     model.relationTree.select(first)
     #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
@@ -828,10 +826,9 @@ func relationSelectionUpdatesContextOnConsecutiveCallRows() async throws {
         target: .engine(rootSymbol),
         direction: .calls
     )?.value
-    let edges = model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
-    let first = try #require(edges?.first { $0.title == "first" })
-    let second = try #require(edges?.first { $0.title == "second" })
+    let edges = appRelationRows(model.relationTree.root)
+    let first = try #require(edges.first { $0.title == "first" })
+    let second = try #require(edges.first { $0.title == "second" })
 
     model.relationTree.select(first)
     #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
@@ -880,10 +877,9 @@ func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async thro
         target: .engine(trait),
         direction: .implementations
     )?.value
-    let edges = model.relationTree.root?.children?
-        .flatMap { $0.children ?? [] }
-    let first = try #require(edges?.first { $0.title == "First" })
-    let second = try #require(edges?.first { $0.title == "Second" })
+    let edges = appRelationRows(model.relationTree.root)
+    let first = try #require(edges.first { $0.title == "First" })
+    let second = try #require(edges.first { $0.title == "Second" })
 
     model.relationTree.select(first)
     #expect(await testWaitUntil("!requests.isEmpty") { !requests.isEmpty })
@@ -1137,6 +1133,16 @@ private func queryContext(for session: EngineSession) -> QueryContext {
         analysisProfileID: session.analysisProfile.id,
         generation: 1
     )
+}
+
+private func appRelationRows(
+    _ root: RelationTreeModel.Node?
+) -> [RelationTreeModel.Node] {
+    root?.children?.flatMap { child in
+        child.kind == .edge
+            ? [child]
+            : (child.children ?? []).filter { $0.kind == .edge }
+    } ?? []
 }
 
 private func pathID(_ path: String, in session: EngineSession) -> PathID? {

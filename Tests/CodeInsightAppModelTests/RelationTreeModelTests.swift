@@ -40,11 +40,16 @@ func relationTreeShowsSemanticLocalReferencesWithoutTheDeclaration() throws {
         document: document
     )
 
-    let references = try relationGroup("References (2)", in: model.root)
+    let references = model.root?.children?.filter { $0.kind == .edge }
     #expect(model.root?.subtitle == "Parameter")
-    #expect(references.children?.compactMap { $0.target?.byteOffset }
+    #expect(references?.compactMap { $0.target?.byteOffset }
         == [ranges[1].lowerBound, ranges[2].lowerBound])
-    #expect(references.children?.contains {
+    #expect(references?.allSatisfy {
+        $0.badge == "Inferred"
+            && $0.isExpandable == false
+            && $0.children?.isEmpty == true
+    } == true)
+    #expect(references?.contains {
         $0.target?.byteOffset == binding.binding.declarationRange.lowerBound
     } == false)
 }
@@ -196,12 +201,11 @@ func relationTreeEngineReferencesFindCrossFileTypeUses() async throws {
     if case .safe = session.analysisProfile.trustMode {} else {
         Issue.record("Fuzzy references fixture must stay in Safe/offline mode")
     }
-    let references = try relationGroup("References", in: model.root)
-    #expect(references.children?.count == 5)
-    #expect(Set(references.children?.compactMap { $0.target?.path } ?? []) == ["b.rs"])
-    #expect(references.subtitle == "5 references")
+    let references = try relationPossibleRows(in: model.root)
+    #expect(references.count == 5)
+    #expect(Set(references.compactMap { $0.target?.path }) == ["b.rs"])
     #expect(model.root?.children?.contains {
-        $0.title == "Exact unavailable: no exact session"
+        $0.title == "Verified unavailable: no rust-analyzer session"
     } == true)
 }
 
@@ -237,9 +241,9 @@ func relationTreeConsumesExactReferences() async throws {
         direction: .references
     )?.value
 
-    let exact = try relationGroup("Exact (1)", in: model.root)
-    #expect(exact.children?.map { $0.target?.path } == [exactLocation.file])
-    #expect(exact.children?.map { $0.target?.byteOffset } == [12])
+    let verified = relationRows(withBadge: "Verified", in: model.root)
+    #expect(verified.map { $0.target?.path } == [exactLocation.file])
+    #expect(verified.map { $0.target?.byteOffset } == [12])
 }
 
 @MainActor
@@ -304,17 +308,17 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
     #expect(rows.filter {
         $0.target?.path == overlap.file
             && $0.target?.byteOffset == UInt32(overlap.byteOffset)
-            && $0.subtitle == "Exact · heuristic also matched"
+            && $0.subtitle == "direct · heuristic also matched"
     }.count == 1)
     #expect(rows.contains {
         $0.target?.path == exactOnly.file
             && $0.target?.byteOffset == UInt32(exactOnly.byteOffset)
-            && $0.badge == "Exact · lsp"
+            && $0.badge == "Verified"
     } == true)
     #expect(rows.contains {
         $0.target?.path == fuzzyOnly.path
             && $0.target?.byteOffset == fuzzyOnly.byteOffset
-            && $0.badge == nil
+            && $0.badge == "Inferred"
     } == true)
 }
 
@@ -338,10 +342,10 @@ func relationTreeFuzzyReferencesExcludeOnlyTheDeclarationRange() async throws {
         direction: .references
     )?.value
 
-    let fuzzy = try relationGroup("References", in: model.root)
-    #expect(fuzzy.children?.map { $0.target?.byteOffset }
+    let fuzzy = try relationPossibleRows(in: model.root)
+    #expect(fuzzy.map { $0.target?.byteOffset }
         == [ranges[1].lowerBound])
-    #expect(fuzzy.children?.contains {
+    #expect(fuzzy.contains {
         $0.target?.byteOffset == ranges[0].lowerBound
     } == false)
 }
@@ -377,9 +381,9 @@ func relationTreeLocalReferencesDoNotMixSameNamedBindingsAcrossFiles() throws {
         document: document
     )
 
-    let references = try relationGroup("References (1)", in: model.root)
-    #expect(references.children?.map { $0.target?.path } == ["a.rs"])
-    #expect(references.children?.map { $0.target?.byteOffset }
+    let references = model.root?.children?.filter { $0.kind == .edge }
+    #expect(references?.map { $0.target?.path } == ["a.rs"])
+    #expect(references?.map { $0.target?.byteOffset }
         == [ranges[1].lowerBound])
 }
 
@@ -427,11 +431,11 @@ func relationTreeProjectReferenceCountCopyKeepsThreeCompletenessStates()
         exactCount: 1
     )
 
-    #expect(complete.referenceSubtitle == "2 references")
+    #expect(complete.possibleTitle == "Show 2 possible matches")
     #expect(complete.footerTitle == nil)
-    #expect(displayCap.referenceSubtitle == nil)
+    #expect(displayCap.possibleTitle == "Show 500 possible matches")
     #expect(displayCap.footerTitle == "Showing first 500 of 501 references")
-    #expect(servicePartial.referenceSubtitle == nil)
+    #expect(servicePartial.possibleTitle == "Show 7 possible matches")
     #expect(servicePartial.footerTitle == "8 verified references · partial")
     #expect(servicePartial.footerTitle?.contains(" of ") == false)
     #expect(servicePartial.footerTitle?.contains("999") == false)
@@ -461,30 +465,20 @@ func relationTreeCompleteReferenceCountsStayWithinEachSource() async throws {
         exactCount: 2
     )
 
-    #expect(fuzzyOnly.exactTitle == "Exact (0): no references")
-    #expect(fuzzyOnly.exactRowCount == 0)
-    #expect(fuzzyOnly.referenceSubtitle == "2 references")
-    #expect(fuzzyOnly.referenceRowCount == 2)
+    #expect(fuzzyOnly.verifiedStatus == "No verified references")
+    #expect(fuzzyOnly.verifiedRowCount == 0)
+    #expect(fuzzyOnly.possibleTitle == "Show 2 possible matches")
+    #expect(fuzzyOnly.possibleRowCount == 2)
 
-    #expect(exactOnly.exactTitle == "Exact (2)")
-    #expect(exactOnly.exactRowCount == 2)
-    #expect(exactOnly.referenceSubtitle == "0 references")
-    #expect(exactOnly.referenceRowCount == 0)
+    #expect(exactOnly.verifiedStatus == nil)
+    #expect(exactOnly.verifiedRowCount == 2)
+    #expect(exactOnly.possibleTitle == nil)
+    #expect(exactOnly.possibleRowCount == 0)
 
-    #expect(mixed.exactTitle == "Exact (2)")
-    #expect(mixed.exactRowCount == 2)
-    #expect(mixed.referenceSubtitle == "1 references")
-    #expect(mixed.referenceRowCount == 1)
-    let mixedExactDisplayedCount = Int(
-        mixed.exactTitle.dropFirst("Exact (".count).prefix { $0.isNumber }
-    )
-    let mixedReferenceDisplayedCount = Int(
-        mixed.referenceSubtitle?.prefix { $0.isNumber } ?? ""
-    )
-    #expect(mixedExactDisplayedCount == mixed.exactRowCount)
-    #expect(mixedReferenceDisplayedCount == mixed.referenceRowCount)
-    #expect(mixedExactDisplayedCount != mixed.exactRowCount + mixed.referenceRowCount)
-    #expect(mixedReferenceDisplayedCount != mixed.exactRowCount + mixed.referenceRowCount)
+    #expect(mixed.verifiedStatus == nil)
+    #expect(mixed.verifiedRowCount == 2)
+    #expect(mixed.possibleTitle == "Show 1 possible matches")
+    #expect(mixed.possibleRowCount == 1)
 }
 
 @MainActor
@@ -523,14 +517,14 @@ func relationTreeProjectReferencesReadHistoricalCommitSnapshot() async throws {
         if case .tracked = $0.sourceKind { return true }
         return false
     })
-    let references = try relationGroup("References", in: model.root)
-    #expect(references.children?.count == 2)
-    #expect(Set(references.children?.compactMap { $0.target?.path } ?? []) == ["b.rs"])
+    let references = try relationPossibleRows(in: model.root)
+    #expect(references.count == 2)
+    #expect(Set(references.compactMap { $0.target?.path }) == ["b.rs"])
 }
 
 @MainActor
 @Test
-func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
+func relationTreeConsumesExactCallersAsOneLevelRows() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
     try "[package]\nname='relation-test'\nversion='0.1.0'\n".write(
@@ -564,14 +558,15 @@ func relationTreeConsumesExactCallersAndExpandsAnExactOnlyNode() async throws {
 
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let exact = try relationGroup("Exact (1)", in: model.root)
-    let dependencyCaller = try #require(exact.children?.first)
+    let dependencyCaller = try #require(
+        relationRows(withBadge: "Verified", in: model.root).first
+    )
 
     #expect(dependencyCaller.symbol == nil)
-    #expect(dependencyCaller.isExpandable)
+    #expect(!dependencyCaller.isExpandable)
+    #expect(dependencyCaller.children?.isEmpty == true)
     await model.expand(dependencyCaller)
-    let secondLevel = try relationGroup("Exact (1)", in: dependencyCaller)
-    #expect(secondLevel.children?.map(\.title) == ["top_level_caller"])
+    #expect(dependencyCaller.children?.isEmpty == true)
 }
 
 @MainActor
@@ -655,9 +650,7 @@ func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
             target: .engine(fixture.a),
             direction: .references
         )?.value
-        let title = try #require(model.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Exact")
-        }?.title)
+        let title = try relationVerifiedStatus(in: model.root)
         coordinator.shutdown()
         return title
     }
@@ -666,17 +659,17 @@ func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
     let partial = try await title(for: .partial)
     let offline = try await title(for: .dependenciesUnavailableOffline)
 
-    #expect(full == "Exact (0): no references")
-    #expect(partial == "Exact incomplete (0 shown): partial coverage")
-    #expect(offline == "Exact unavailable: deps unavailable (offline)")
-    #expect(partial != "Exact (0): no references")
-    #expect(offline != "Exact (0): no references")
+    #expect(full == "No verified references")
+    #expect(partial == "Verified incomplete: partial coverage")
+    #expect(offline == "Verified unavailable: deps unavailable (offline)")
+    #expect(partial != "No verified references")
+    #expect(offline != "No verified references")
     #expect(Set([full, partial, offline]).count == 3)
 }
 
 @MainActor
 @Test
-func relationTreeExactGroupsCountTheirOwnRowsInAllDirections() async throws {
+func relationTreeVerifiedBadgesCountExactRowsInAllDirections() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
     let traitRoot = try relationTemporaryProject([
@@ -727,13 +720,10 @@ func relationTreeExactGroupsCountTheirOwnRowsInAllDirections() async throws {
         )
         model.updateProjectState(.ready(session, context))
         await model.setRoot(target: .engine(symbol), direction: direction)?.value
-        let group = try #require(model.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Exact")
-        })
-        let displayedCount = group.title
-            .dropFirst("Exact (".count)
-            .prefix { $0.isNumber }
-        #expect(Int(displayedCount) == group.children?.count)
+        #expect(relationRows(withBadge: "Verified", in: model.root).count == 2)
+        #expect(model.root?.children?.contains {
+            $0.kind == .group && $0.title.hasPrefix("Verified")
+        } == false)
     }
 }
 
@@ -1083,8 +1073,8 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
     let edge = try #require(matchingRows.first)
 
     #expect(matchingRows.count == 1)
-    #expect(edge.badge == "Exact · lsp")
-    #expect(edge.subtitle == "Exact · heuristic also matched · 2 call sites")
+    #expect(edge.badge == "Verified")
+    #expect(edge.subtitle == "direct · heuristic also matched · 2 call sites")
     var selectedOffsets: [UInt32] = []
     model.onSelect = { selectedOffsets.append($0.target?.byteOffset ?? .max) }
     model.select(edge)
@@ -1183,18 +1173,22 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
     #expect(finalRows.map(\.title) == ["A", "B", "C"])
     #expect(finalRows[0] === firstA && finalRows[1] === firstB)
     #expect(
-        finalRows[0].badge == "Exact · lsp"
+        finalRows[0].badge == "Verified"
             && finalRows[0].subtitle?.contains("heuristic also matched") == true
-            && finalRows[1].badge == "Exact · lsp"
+            && finalRows[1].badge == "Verified"
             && finalRows[1].subtitle?.contains("heuristic also matched") == true
     )
     #expect(finalRows.last?.title == "C")
-    #expect(model.root?.children?.last { $0.children?.isEmpty == false }?.title == "Exact (1)")
+    #expect(
+        model.root?.children?.first {
+            $0.kind == .group && $0.title == "Show 1 possible matches"
+        }?.children?.first === firstB
+    )
 }
 
 @MainActor
 @Test
-func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
+func relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections()
     async throws
 {
     let fixture = try RelationFixture()
@@ -1224,7 +1218,7 @@ func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
             fixture.session,
             fixture.context,
             fixture.a,
-            "Exact (0): no callers"
+            "No verified callers"
         ),
         (
             "calls",
@@ -1232,7 +1226,7 @@ func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
             fixture.session,
             fixture.context,
             fixture.a,
-            "Exact (0): no calls"
+            "No verified calls"
         ),
         (
             "implementations",
@@ -1240,7 +1234,7 @@ func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
             traitSession,
             traitContext,
             trait,
-            "Exact (0): no implementations"
+            "No verified implementations"
         ),
         (
             "references",
@@ -1248,7 +1242,7 @@ func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
             fixture.session,
             fixture.context,
             fixture.a,
-            "Exact (0): no references"
+            "No verified references"
         ),
     ]
 
@@ -1303,20 +1297,19 @@ func relationTreeRetainsEmptyExactGroupAfterInPlaceUpgradeInAllDirections()
 
         exact.release()
         await load?.value
-        let exactGroup = model.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Exact")
-        }
-
         #expect(relationVisibleEdgeRows(model.root).first === firstRow)
-        #expect(firstRow.badge == "Exact · lsp")
-        #expect(exactGroup?.children?.isEmpty == true)
-        #expect(exactGroup?.title == testCase.expectedTitle)
+        #expect(firstRow.badge == "Verified")
+        #expect(model.root?.children?.contains {
+            $0.kind == .group
+                && ["Strong", "Probable", "Possible"].contains($0.title)
+        } == false)
+        #expect(!relationSurfaceText(model.root).contains(testCase.expectedTitle))
     }
 }
 
 @MainActor
 @Test
-func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws {
+func relationTreeDoesNotExposeExactRelationSublayers() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
     let index = try #require(relationContentIndex(at: fixture.a.pathID, in: fixture.session))
@@ -1350,16 +1343,13 @@ func relationTreeMarksAnExactSelectionRangeCycleAsAlreadyExpanded() async throws
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
     let first = try #require(
-        try relationGroup("Exact (1)", in: model.root).children?.first
+        relationRows(withBadge: "Verified", in: model.root).first
     )
     await model.expand(first)
-    let cycle = try #require(
-        try relationGroup("Exact (1)", in: first).children?.first
-    )
 
-    #expect(cycle.title == "a")
-    #expect(cycle.subtitle == "Exact · Already expanded")
-    #expect(!cycle.isExpandable)
+    #expect(first.title == "b")
+    #expect(!first.isExpandable)
+    #expect(first.children?.isEmpty == true)
 }
 
 @MainActor
@@ -1414,13 +1404,13 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
     )
 
     #expect(callersUnsupported
-        == "Exact unavailable: server does not support call hierarchy")
+        == "Verified unavailable: server does not support call hierarchy")
     #expect(callersNotApplicable
-        == "Exact unavailable here: not a callable symbol")
-    #expect(callersEmpty == "Exact (0): no callers")
+        == "Verified unavailable here: not a callable symbol")
+    #expect(callersEmpty == "No verified callers")
     #expect(implementationsUnsupported
-        == "Exact unavailable: server does not support implementations")
-    #expect(implementationsEmpty == "Exact (0): no implementations")
+        == "Verified unavailable: server does not support implementations")
+    #expect(implementationsEmpty == "No verified implementations")
     #expect(Set([
         callersUnsupported,
         callersNotApplicable,
@@ -1464,16 +1454,14 @@ func relationTreeUsesFourDistinctExactReferenceStates() async throws {
         target: .engine(fixture.a),
         direction: .references
     )?.value
-    let legacy = try #require(legacyModel.root?.children?.first {
-        $0.kind == .group && $0.title.hasPrefix("Exact")
-    }?.title)
+    let legacy = try relationVerifiedStatus(in: legacyModel.root)
 
     #expect(unsupported
-        == "Exact unavailable: server does not support references")
+        == "Verified unavailable: server does not support references")
     #expect(notApplicable
-        == "Exact unavailable here: references not applicable")
-    #expect(queried == "Exact (0): no references")
-    #expect(legacy == "Exact unavailable: no exact session")
+        == "Verified unavailable here: references not applicable")
+    #expect(queried == "No verified references")
+    #expect(legacy == "Verified unavailable: no rust-analyzer session")
     #expect(Set([unsupported, notApplicable, queried, legacy]).count == 4)
 }
 
@@ -1502,15 +1490,11 @@ func relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() async throws {
         direction: .references
     )?.value
 
-    let exact = try relationGroup(
-        "Exact unavailable: server does not support references",
-        in: model.root
-    )
-    let references = try relationGroup("References", in: model.root)
-    #expect(exact.children?.isEmpty == true)
-    #expect(references.children?.count == 1)
-    #expect(references.children?.first?.target?.path == "main.rs")
-    #expect(references.subtitle == "1 references")
+    let references = try relationPossibleRows(in: model.root)
+    #expect(try relationVerifiedStatus(in: model.root)
+        == "Verified unavailable: server does not support references")
+    #expect(references.count == 1)
+    #expect(references.first?.target?.path == "main.rs")
     #expect(exactSession.referenceIncludeDeclarations.isEmpty)
 }
 
@@ -1549,16 +1533,16 @@ func relationTreeShowsExactOnlyImplementations() async throws {
 
     model.setRoot(target: .engine(trait), direction: .implementations)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let exact = try relationGroup("Exact (1)", in: model.root)
+    let verified = relationRows(withBadge: "Verified", in: model.root)
 
-    #expect(exact.children?.map(\.title) == ["view.rs:1"])
-    #expect(exact.children?.first?.target?.path == dependency.file)
-    #expect(exact.children?.first?.symbol == nil)
+    #expect(verified.map(\.title) == ["view.rs:1"])
+    #expect(verified.first?.target?.path == dependency.file)
+    #expect(verified.first?.symbol == nil)
 }
 
 @MainActor
 @Test
-func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
+func relationTreeUsesBadgesAndOnePossibleDisclosure() async throws {
     let root = try relationTemporaryProject([
         "main.rs": """
             fn strong_target() {}
@@ -1584,21 +1568,200 @@ func relationTreeGroupsStrongProbableAndPossibleCandidates() async throws {
     model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup(
-        "Exact unavailable: no exact session",
-        in: model.root
-    )
-    let strong = try relationGroup("Strong", in: model.root)
-    let probable = try relationGroup("Probable", in: model.root)
-    let possible = try relationGroup("Possible", in: model.root)
-    #expect(exact.children?.isEmpty == true)
-    #expect(strong.children?.map(\.title) == ["strong_target"])
-    #expect(probable.children?.contains {
-        $0.title == "probable_target" && $0.subtitle == "Probable · direct"
-    } == true)
-    #expect(possible.children?.filter {
-        $0.title == "ambiguous_target" && $0.subtitle == "Possible · direct"
+    let direct = relationDirectRows(in: model.root)
+    let possible = try relationPossibleRows(in: model.root)
+    #expect(try relationVerifiedStatus(in: model.root)
+        == "Verified unavailable: no rust-analyzer session")
+    #expect(direct.contains {
+        $0.title == "strong_target"
+            && $0.badge == "Inferred"
+            && $0.subtitle == "direct"
+    })
+    #expect(possible.first {
+        $0.title == "probable_target"
+            && $0.badge == "Inferred"
+            && $0.subtitle == "direct"
+    } != nil)
+    #expect(possible.filter {
+        $0.title == "ambiguous_target"
+            && $0.badge == "Inferred"
+            && $0.subtitle == "direct"
     }.count == 2)
+}
+
+@MainActor
+@Test
+func relationSurfaceDoesNotExposeProbableText() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [
+            .init(
+                title: "probable",
+                certainty: .probable,
+                dispatch: .direct,
+                symbol: fixture.b,
+                path: "main.rs",
+                byteOffset: 15,
+                line: 1,
+                evidence: []
+            ),
+        ], isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(target: .engine(fixture.a), direction: .calls)?.value
+
+    #expect(!relationSurfaceText(model.root).contains("Probable"))
+}
+
+@MainActor
+@Test
+func relationRowsExposeVerifiedAndInferredBadges() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [
+                .init(
+                    title: "inferred",
+                    certainty: .strong,
+                    dispatch: .direct,
+                    symbol: fixture.b,
+                    path: "main.rs",
+                    byteOffset: 15,
+                    line: 1,
+                    evidence: []
+                ),
+            ], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _ in
+            .relations([
+                .init(
+                    name: "verified",
+                    location: relationExactLocation(file: "main.rs", offset: 30),
+                    item: nil,
+                    callSites: []
+                ),
+            ], origin: .worktree, coverage: .full)
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(target: .engine(fixture.a), direction: .callers)?.value
+    let rows = relationVisibleEdgeRows(model.root)
+
+    #expect(rows.first { $0.title == "verified" }?.badge == "Verified")
+    #expect(rows.first { $0.title == "inferred" }?.badge == "Inferred")
+}
+
+@MainActor
+@Test
+func relationVerifiedBadgeOnlyMarksExactRows() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [
+            .init(
+                title: "strong",
+                certainty: .strong,
+                dispatch: .direct,
+                symbol: fixture.a,
+                path: "main.rs",
+                byteOffset: 10,
+                line: 1,
+                evidence: []
+            ),
+            .init(
+                title: "probable",
+                certainty: .probable,
+                dispatch: .direct,
+                symbol: fixture.a,
+                path: "main.rs",
+                byteOffset: 11,
+                line: 1,
+                evidence: []
+            ),
+            .init(
+                title: "possible",
+                certainty: .possible,
+                dispatch: .direct,
+                symbol: fixture.a,
+                path: "main.rs",
+                byteOffset: 12,
+                line: 1,
+                evidence: []
+            ),
+            .init(
+                title: "unresolved",
+                certainty: .unresolved,
+                dispatch: .direct,
+                symbol: nil,
+                path: "main.rs",
+                byteOffset: 13,
+                line: 1,
+                evidence: []
+            ),
+            .init(
+                title: "exact",
+                certainty: .exact,
+                dispatch: .direct,
+                symbol: fixture.b,
+                path: "main.rs",
+                byteOffset: 14,
+                line: 1,
+                evidence: []
+            ),
+        ], isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(target: .engine(fixture.a), direction: .calls)?.value
+    let rows = relationVisibleEdgeRows(model.root)
+
+    #expect(rows.filter { $0.badge == "Verified" }.map(\.title) == ["exact"])
+    #expect(rows.filter { $0.title != "exact" }.allSatisfy {
+        $0.badge != "Verified"
+    })
+}
+
+@MainActor
+@Test
+func relationPossibleMatchesUseOneCollapsedDisclosure() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(edges: [
+            .init(
+                title: "probable",
+                certainty: .probable,
+                dispatch: .direct,
+                symbol: fixture.a,
+                path: "main.rs",
+                byteOffset: 10,
+                line: 1,
+                evidence: []
+            ),
+            .init(
+                title: "possible",
+                certainty: .possible,
+                dispatch: .dynamicDispatch,
+                symbol: fixture.b,
+                path: "main.rs",
+                byteOffset: 20,
+                line: 1,
+                evidence: []
+            ),
+        ], isTruncated: false)
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    await model.setRoot(target: .engine(fixture.a), direction: .calls)?.value
+    let disclosure = model.root?.children?.first {
+        $0.kind == .group && $0.title == "Show 2 possible matches"
+    }
+
+    #expect(disclosure?.children?.map(\.title) == ["probable", "possible"])
 }
 
 @MainActor
@@ -1663,25 +1826,17 @@ func relationTreeLabelsNameOnlyCallsHonestly() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let possible = try relationGroup("Possible", in: model.root)
-    let probable = try relationGroup("Probable", in: model.root)
-    let possibleSubtitles = Dictionary(
-        uniqueKeysWithValues: possible.children?.compactMap { node in
+    let rows = try relationPossibleRows(in: model.root)
+    let subtitles = Dictionary(
+        uniqueKeysWithValues: rows.compactMap { node in
             node.subtitle.map { (node.title, $0) }
-        } ?? []
+        }
     )
-    let probableSubtitles = Dictionary(
-        uniqueKeysWithValues: probable.children?.compactMap { node in
-            node.subtitle.map { (node.title, $0) }
-        } ?? []
-    )
-    #expect(possibleSubtitles == [
-        "possible-name-only": "Possible · dynamic · name match only",
-        "same-file": "Possible · dynamic",
-    ])
-    #expect(probableSubtitles == [
-        "probable-name-only": "Probable · dynamic · name match only",
-        "unique-import": "Probable · dynamic",
+    #expect(subtitles == [
+        "possible-name-only": "dynamic · name match only",
+        "same-file": "dynamic",
+        "probable-name-only": "dynamic · name match only",
+        "unique-import": "dynamic",
     ])
 }
 
@@ -1723,9 +1878,8 @@ func relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() async throw
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let strong = try relationGroup("Strong", in: model.root)
     #expect(definitionRequests == 0)
-    #expect(strong.children?.map(\.title) == [
+    #expect(relationDirectRows(in: model.root).map(\.title) == [
         "matching",
         "mismatching",
         "no exact",
@@ -1896,9 +2050,8 @@ func relationTreePublishesHeuristicRowsBeforeRootExactFinishes() async throws {
         "heuristic rows publish before root Exact finishes"
     ) {
         exact.isPending
-            && model.root?.children?.first {
-                $0.kind == .group && $0.title == "Strong"
-            }?.children?.map(\.title) == ["heuristic-first"]
+            && relationDirectRows(in: model.root).map(\.title)
+                == ["heuristic-first"]
     }
     exact.release()
     await load?.value
@@ -1977,16 +2130,15 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
         "exact-first rows preserve returned order while heuristic is pending"
     ) {
         await loader.isPending(fixture.a)
-            && model.root?.children?.first {
-                $0.kind == .group && $0.title == "Exact (2)"
-            }?.children?.map { $0.target?.byteOffset } == [20, 10]
+            && relationRows(withBadge: "Verified", in: model.root)
+                .map { $0.target?.byteOffset } == [20, 10]
     })
     await loader.release(fixture.a)
     await load?.value
-    let exact = try relationGroup("Exact (2)", in: model.root)
 
-    #expect(exact.children?.map { $0.target?.byteOffset } == [20, 10])
-    #expect(try relationGroup("Strong", in: model.root).children?.map(\.title) == ["D"])
+    #expect(relationRows(withBadge: "Verified", in: model.root)
+        .map { $0.target?.byteOffset } == [20, 10])
+    #expect(relationDirectRows(in: model.root).last?.title == "D")
 }
 
 @MainActor
@@ -2031,17 +2183,13 @@ func relationTreeDefaultLoadDoesNotDemoteNameOnlyCallsThroughDefinitions()
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let strong = try relationGroup("Strong", in: model.root)
-    let probable = try relationGroup("Probable", in: model.root)
-    let possible = try relationGroup("Possible", in: model.root)
     #expect(definitionRequests == 0)
-    #expect(strong.children?.map(\.title) == ["strong"])
-    #expect(probable.children?.map(\.title) == ["no exact"])
-    #expect(possible.children?.map(\.title) == ["external", "matching"])
-    #expect(
-        try relationGroup("External / Unresolved (0)", in: model.root)
-            .children?.isEmpty == true
-    )
+    #expect(relationDirectRows(in: model.root).map(\.title) == ["strong"])
+    #expect(try relationPossibleRows(in: model.root).map(\.title)
+        == ["no exact", "external", "matching"])
+    #expect(relationDirectRows(in: model.root).contains {
+        $0.subtitle == "Unresolved"
+    } == false)
 }
 
 @MainActor
@@ -2109,17 +2257,13 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
         target: .engine(fixture.a),
         direction: .calls
     )?.value
-    let possible = try relationGroup(
-        "Possible",
-        in: relationModel.root
-    )
+    let possible = try relationPossibleRows(in: relationModel.root)
 
     #expect(exactLocationIsInDependency(dependency.path))
     #expect(contextModel.selectedCandidate?.label == "External · in dependency")
     #expect(definitionRequests == 0)
     #expect(
-        possible.children?.first?.subtitle
-            == "Possible · dynamic · name match only"
+        possible.first?.subtitle == "dynamic · name match only"
     )
 }
 
@@ -2150,14 +2294,15 @@ func relationTreeShowsExternalCallsAsUnresolved() async throws {
     model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let external = try relationGroup("External / Unresolved", in: model.root)
-    #expect(external.children?.map(\.title) == ["post", "spawn"])
-    #expect(external.children?.allSatisfy { $0.subtitle == "Unresolved" } == true)
+    let external = relationDirectRows(in: model.root).filter {
+        $0.subtitle == "Unresolved"
+    }
+    #expect(external.map(\.title) == ["post", "spawn"])
 }
 
 @MainActor
 @Test
-func relationTreeShowsEmptyExternalCallsGroupForSignatureOnlyTrait() async throws {
+func relationTreeOmitsEmptyExternalCallsGroupForSignatureOnlyTrait() async throws {
     let root = try relationTemporaryProject([
         "main.rs": """
             trait Backend {
@@ -2177,8 +2322,9 @@ func relationTreeShowsEmptyExternalCallsGroupForSignatureOnlyTrait() async throw
     model.setRoot(target: .engine(symbol), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let external = try relationGroup("External / Unresolved (0)", in: model.root)
-    #expect(external.children?.isEmpty == true)
+    #expect(model.root?.children?.contains {
+        $0.kind == .group && $0.title.hasPrefix("External / Unresolved")
+    } == false)
 }
 
 @MainActor
@@ -2215,8 +2361,9 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let strong = try relationGroup("Strong", in: model.root)
-    let symbolEdge = try #require(strong.children?.first)
+    let symbolEdge = try #require(relationDirectRows(in: model.root).first {
+        $0.title == "b"
+    })
     model.select(symbolEdge)
     let generation = model.generation
 
@@ -2230,8 +2377,9 @@ func selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() async throws {
 
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let external = try relationGroup("External / Unresolved", in: model.root)
-    let unresolvedEdge = try #require(external.children?.first)
+    let unresolvedEdge = try #require(relationDirectRows(in: model.root).first {
+        $0.title == "external"
+    })
     model.select(unresolvedEdge)
     #expect(model.selectedRelationSymbol == nil)
 
@@ -2264,8 +2412,7 @@ func clearingRelationSelectionDoesNotNotifyContext() async throws {
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let strong = try relationGroup("Strong", in: model.root)
-    let child = try #require(strong.children?.first)
+    let child = try #require(relationDirectRows(in: model.root).first)
     var selectedTitles: [String] = []
     model.onSelect = { selectedTitles.append($0.title) }
     model.select(child)
@@ -2313,7 +2460,7 @@ func relationTreeShowsIndexBuildingPlaceholder() {
 
 @MainActor
 @Test
-func relationTreeMarksPathLocalCallerCycle() async throws {
+func relationTreeCallersStayOneLevelWithoutCycleExpansion() async throws {
     let root = try relationTemporaryProject([
         "main.rs": "fn a() { b(); }\nfn b() { a(); }",
     ])
@@ -2328,15 +2475,15 @@ func relationTreeMarksPathLocalCallerCycle() async throws {
 
     model.setRoot(target: .engine(symbol), direction: .callers)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let firstStrong = try relationGroup("Strong", in: model.root)
-    let callerB = try #require(firstStrong.children?.first { $0.title == "b" })
+    let callerB = try #require(relationDirectRows(in: model.root).first {
+        $0.title == "b"
+    })
 
     await model.expand(callerB)
-    let secondStrong = try relationGroup("Strong", in: callerB)
-    let callerA = try #require(secondStrong.children?.first { $0.title == "a" })
 
-    #expect(callerA.badge == "↻")
-    #expect(!callerA.isExpandable)
+    #expect(callerB.badge == "Inferred")
+    #expect(!callerB.isExpandable)
+    #expect(callerB.children?.isEmpty == true)
 }
 
 @MainActor
@@ -2370,15 +2517,15 @@ func relationTreeLoadsTraitImplementationsAndMethodOverrides() async throws {
 
     model.setRoot(target: .engine(trait.0), direction: .implementations)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let implementations = try relationGroup("Strong", in: model.root)
-    #expect(implementations.children?.map(\.title) == ["View"])
-    #expect(implementations.children?.first?.subtitle == "Strong · trait")
+    let implementations = relationDirectRows(in: model.root)
+    #expect(implementations.map(\.title) == ["View"])
+    #expect(implementations.first?.subtitle == "trait")
 
     model.setRoot(target: .engine(method), direction: .implementations)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let overrides = try relationGroup("Strong", in: model.root)
-    #expect(overrides.children?.map(\.title) == ["render"])
-    #expect(overrides.children?.first?.subtitle == "Strong · trait")
+    let overrides = relationDirectRows(in: model.root)
+    #expect(overrides.map(\.title) == ["render"])
+    #expect(overrides.first?.subtitle == "trait")
 }
 
 @MainActor
@@ -2443,16 +2590,14 @@ func relationTreeDiscardsLateResultAfterChangingRoot() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
     model.setRoot(target: .engine(fixture.b), direction: .calls)
-    #expect(await testWaitUntil("model.root?.children?.first { $0.kind == .group && $0.title == \"Strong\" }?.children?.first?.title == \"fresh\"") {
-        model.root?.children?.first {
-            $0.kind == .group && $0.title == "Strong"
-        }?.children?.first?.title == "fresh"
+    #expect(await testWaitUntil("relationDirectRows(in: model.root).first?.title == \"fresh\"") {
+        relationDirectRows(in: model.root).first?.title == "fresh"
     })
     await fake.release(fixture.a)
     for _ in 0..<10 { await Task.yield() }
 
     #expect(model.root?.title == "b")
-    #expect(try relationGroup("Strong", in: model.root).children?.first?.title == "fresh")
+    #expect(relationDirectRows(in: model.root).first?.title == "fresh")
 }
 
 @MainActor
@@ -2514,8 +2659,7 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let strong = try relationGroup("Strong", in: model.root)
-    #expect(strong.children?.count == 500)
+    #expect(relationDirectRows(in: model.root).count == 500)
     #expect(model.root?.children?.last?.kind == .truncated)
     #expect(model.root?.children?.last?.title
         == "Showing first 500 of 501 relations")
@@ -2548,8 +2692,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
     model.setRoot(target: .engine(fixture.a), direction: .callers)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
-    let exact = try relationGroup("Exact (500)", in: model.root)
-    #expect(exact.children?.count == 500)
+    #expect(relationRows(withBadge: "Verified", in: model.root).count == 500)
     #expect(model.root?.children?.last?.kind == .truncated)
     #expect(model.root?.children?.last?.title
         == "Showing first 500 of 501 relations")
@@ -2557,7 +2700,9 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
 
 @MainActor
 @Test
-func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws {
+func relationTreeKeepsEvidenceInternalAndSelectsOneLevelRowsByIdentity()
+    async throws
+{
     let fixture = try RelationFixture()
     defer { fixture.remove() }
     let edge = RelationTreeModel.LoadedEdge(
@@ -2585,23 +2730,11 @@ func relationTreeRendersEvidenceLinesAtTheEndAndSelectsByIdentity() async throws
     model.updateProjectState(.ready(fixture.session, fixture.context))
     model.setRoot(target: .engine(fixture.a), direction: .calls)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    let strong = try relationGroup("Strong", in: model.root)
-    let child = try #require(strong.children?.first)
+    let child = try #require(relationDirectRows(in: model.root).first)
 
     await model.expand(child)
-    let evidenceSnapshot = child.children?
-        .filter { $0.kind == .evidenceLine }
-        .map(\.title)
-        .joined(separator: "\n")
-    #expect(evidenceSnapshot == """
-        same file
-        via import
-        lexical binding
-        name match
-        method name match
-        receiver type
-        """)
-    #expect(child.children?.suffix(6).allSatisfy { $0.kind == .evidenceLine } == true)
+    #expect(child.children?.isEmpty == true)
+    #expect(!child.isExpandable)
 
     var selected: RelationTreeModel.Node?
     model.onSelect = { selected = $0 }
@@ -2910,9 +3043,18 @@ private actor FakeRelationLoader {
 private func relationVisibleEdgeRows(
     _ root: RelationTreeModel.Node?
 ) -> [RelationTreeModel.Node] {
-    root?.children?.flatMap {
-        ($0.children ?? []).filter { $0.kind == .edge }
+    root?.children?.flatMap { child in
+        child.kind == .edge
+            ? [child]
+            : (child.children ?? []).filter { $0.kind == .edge }
     } ?? []
+}
+
+private func relationSurfaceText(_ root: RelationTreeModel.Node?) -> String {
+    guard let root else { return "" }
+    return ([root.title, root.subtitle, root.badge].compactMap { $0 }
+        + (root.children ?? []).map(relationSurfaceText))
+        .joined(separator: "\n")
 }
 
 @MainActor
@@ -2971,6 +3113,48 @@ private func relationTreeFinishedLoading(_ root: RelationTreeModel.Node?) -> Boo
 }
 
 @MainActor
+private func relationDirectRows(
+    in parent: RelationTreeModel.Node?
+) -> [RelationTreeModel.Node] {
+    parent?.children?.filter { $0.kind == .edge } ?? []
+}
+
+@MainActor
+private func relationPossibleRows(
+    in parent: RelationTreeModel.Node?
+) throws -> [RelationTreeModel.Node] {
+    try #require(parent?.children?.first {
+        $0.kind == .group && $0.title.hasPrefix("Show ")
+    }?.children)
+}
+
+@MainActor
+private func relationRows(
+    withBadge badge: String,
+    in parent: RelationTreeModel.Node?
+) -> [RelationTreeModel.Node] {
+    relationVisibleEdgeRows(parent).filter { $0.badge == badge }
+}
+
+@MainActor
+private func relationVerifiedStatus(
+    in parent: RelationTreeModel.Node?
+) throws -> String {
+    try #require(relationVerifiedStatusTitle(in: parent))
+}
+
+@MainActor
+private func relationVerifiedStatusTitle(
+    in parent: RelationTreeModel.Node?
+) -> String? {
+    parent?.children?.first {
+        $0.kind == .truncated
+            && ($0.title.hasPrefix("Verified ")
+                || $0.title.hasPrefix("No verified "))
+    }?.title
+}
+
+@MainActor
 private func relationGroup(
     _ title: String,
     in parent: RelationTreeModel.Node?
@@ -2997,9 +3181,7 @@ private func relationExactEmptyTitle(
     model.updateProjectState(.ready(session, context))
     model.setRoot(target: .engine(symbol), direction: direction)
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
-    return try #require(model.root?.children?.first {
-        $0.kind == .group && $0.title.hasPrefix("Exact")
-    }?.title)
+    return try relationVerifiedStatus(in: model.root)
 }
 
 @MainActor
@@ -3009,10 +3191,10 @@ private func relationProjectReferenceStatus(
     isTruncated: Bool,
     exactCount: Int = 0
 ) async throws -> (
-    exactTitle: String,
-    exactRowCount: Int,
-    referenceSubtitle: String?,
-    referenceRowCount: Int,
+    verifiedStatus: String?,
+    verifiedRowCount: Int,
+    possibleTitle: String?,
+    possibleRowCount: Int,
     footerTitle: String?
 ) {
     let edges = (0..<edgeCount).map {
@@ -3053,16 +3235,19 @@ private func relationProjectReferenceStatus(
         target: .engine(fixture.a),
         direction: .references
     )?.value
-    let exactGroup = try #require(model.root?.children?.first {
-        $0.kind == .group && $0.title.hasPrefix("Exact")
-    })
-    let referenceGroup = try relationGroup("References", in: model.root)
+    let possible = model.root?.children?.first {
+        $0.kind == .group && $0.title.hasPrefix("Show ")
+    }
     return (
-        exactGroup.title,
-        exactGroup.children?.count ?? 0,
-        referenceGroup.subtitle,
-        referenceGroup.children?.count ?? 0,
-        model.root?.children?.first { $0.kind == .truncated }?.title
+        relationVerifiedStatusTitle(in: model.root),
+        relationRows(withBadge: "Verified", in: model.root).count,
+        possible?.title,
+        possible?.children?.count ?? 0,
+        model.root?.children?.first {
+            $0.kind == .truncated
+                && !$0.title.hasPrefix("Verified ")
+                && !$0.title.hasPrefix("No verified ")
+        }?.title
     )
 }
 
@@ -3161,12 +3346,9 @@ private func relationReferenceResult(
         direction: .references,
         document: document
     )
-    let group = try relationGroup(
-        "References (\(binding.references.count))",
-        in: model.root
-    )
+    let rows = model.root?.children?.filter { $0.kind == .edge } ?? []
     return (
-        group.children?.compactMap { $0.target?.byteOffset } ?? [],
+        rows.compactMap { $0.target?.byteOffset },
         model.root?.subtitle,
         ranges,
         binding.binding.declarationRange.lowerBound,

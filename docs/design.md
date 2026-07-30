@@ -139,15 +139,23 @@ Python、TypeScript 的整语言面（提取器 + 文件树/阅读 + exact）作
   Python `__call__`/property/descriptor/monkey patch/魔术方法；
   Rust `Deref`/运算符 desugar/宏展开内部调用；
   TS getter/decorator 触发/动态 import 执行/框架 DI 反射。
-- **F3.1（P0）Forward / F3.2（P0）Reverse Call Tree**：逐层懒展开/上溯。
+- **F3.1（P0）Forward / F3.2（P0）Reverse Call Tree**：一层列表只展示当前根的直接结果；
+  激活结果行（双击或 Enter）换根，返回沿用导航历史。**由 M8 于 2026-07-30 推翻**：
+  深树扰动选中、滚动与辅助功能焦点，而现有换根行为已覆盖继续探索。
 - **F3.3（P0）四维标注**：每条边 = certainty（Exact/Strong/Probable/Possible/Unresolved）
   × dispatch（direct/trait/interface/callback/dynamic/macroGenerated）
   × provenance（fuzzy/lsp/scip/languageProof）× completeness（complete/partial/truncated）。
-  UI 主分组按 certainty（**Exact / Strong / Possible**——不用 "Confirmed"，
-  启发式结果不冒充编译器事实），dispatch 作为边标签（如 `Exact · via trait Write`）。
+  四维内部模型保持不变；UI 不按 certainty 分组：Exact 行显示来源 badge `Verified`
+  （tooltip `Verified by rust-analyzer`），源码结构推断行显示 `Inferred`
+  （tooltip `Inferred from source structure`），dispatch 仍作边副标签。Probable 只参与内部
+  排序且排在 Possible 前，两者统一折叠为 `Show N possible matches`。
+  **由 M8 于 2026-07-30 推翻**：certainty 分组与原位 Exact 升级产生矛盾标签，并会在
+  增量结果到达时改变组高；稳定行 badge 能直接表达来源且不需要 scroll anchoring。
 - **F3.4（P0）调用者是执行区域**：caller 是 ExecutableRegion（函数/方法/闭包/模块体/
   类体/字段初始化器/装饰器应用/常量初始化器），不假设调用都在函数里（§4.1）。
-- **F3.5（P0）环检测**：按当前展开路径 path-local，递归标 `↻`。
+- **F3.5（P0）环检测**：一层列表不递归展开，因此不产生树内 path-local `↻`；
+  每次换根只查询新根的直接结果，返回由既有导航历史承担，不新增 breadcrumb 或环语义。
+  **由 M8 于 2026-07-30 推翻**：取消递归子层后，展开路径与树内环标记不再存在。
 - **F3.6（P1）图视图**：局部有向图，导出 SVG/PNG/Mermaid。
 - **F3.7（P1）引用列表**：走统一的 SnapshotSearchService（§12）候选召回 + tree-sitter 验证。
 - **F3.8（P1）实现关系**：trait/interface → impls、方法 → overrides；与 Call Tree 同级重要。

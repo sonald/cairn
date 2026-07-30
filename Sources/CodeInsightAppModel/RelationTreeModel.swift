@@ -366,15 +366,8 @@ public final class RelationTreeModel {
         under parent: Node,
         document: ReaderDocument
     ) -> [Node] {
-        let group = Node(
-            kind: .group,
-            title: "References (\(references.count))",
-            children: [],
-            isExpandable: !references.isEmpty,
-            parent: parent
-        )
         let label = bindingKind == .param ? "Parameter reference" : "Local reference"
-        group.children = references.prefix(500).compactMap { range in
+        let rows = references.prefix(500).compactMap { range -> Node? in
             guard let coordinate = document.lineTable.lineColumn(at: range.lowerBound)
             else { return nil }
             return Node(
@@ -382,17 +375,18 @@ public final class RelationTreeModel {
                 title: "\(URL(fileURLWithPath: path).lastPathComponent):"
                     + "\(coordinate.line):\(coordinate.column)",
                 subtitle: label,
+                badge: "Inferred",
                 target: (path, range.lowerBound),
                 line: coordinate.line,
                 children: [],
-                parent: group,
+                isExpandable: false,
+                parent: parent,
                 representsLocation: true,
                 cycleKey: Self.cycleKey(path: path, byteOffset: range.lowerBound)
             )
         }
-        guard references.count > 500 else { return [group] }
-        return [
-            group,
+        guard references.count > 500 else { return rows }
+        return rows + [
             Node(
                 kind: .truncated,
                 title: "Showing first 500 of \(references.count) references",
@@ -560,12 +554,14 @@ public final class RelationTreeModel {
                     var children = makeChildren(
                         from: displayed,
                         under: node,
-                        direction: direction,
-                        session: session
+                        direction: direction
                     )
                     if pendingQueryCount > 0 {
                         children.removeAll {
-                            $0.kind == .group && $0.children?.isEmpty == true
+                            ($0.kind == .group && $0.children?.isEmpty == true)
+                                || ($0.kind == .truncated
+                                    && ($0.title.hasPrefix("Verified ")
+                                        || $0.title.hasPrefix("No verified ")))
                         }
                         children.append(Node(
                             kind: .loading,
@@ -575,12 +571,7 @@ public final class RelationTreeModel {
                     }
                     node.children = preservingPublishedRows(
                         children,
-                        from: node.children,
-                        emptyExactTitle: exactGroupTitle(
-                            state: displayed.exactState,
-                            count: 0,
-                            direction: direction
-                        )
+                        from: node.children
                     )
                     onNodeChange(node)
                     if pendingQueryCount == 0 { break }
@@ -751,103 +742,54 @@ public final class RelationTreeModel {
     private func makeChildren(
         from loaded: LoadResult,
         under parent: Node,
-        direction: Direction,
-        session: EngineSession
+        direction: Direction
     ) -> [Node] {
-        if direction == .references {
-            let visible = Array(loaded.edges.prefix(500))
-            let exact = visible.filter { $0.certainty == .exact }
-            let references = visible.filter { $0.certainty != .exact }
-            let status = if loaded.isTruncated {
-                "\(loaded.edges.count) verified references · partial"
-            } else if loaded.edges.count > 500 {
-                "Showing first 500 of \(loaded.edges.count) references"
-            } else {
-                "\(loaded.edges.count) references"
-            }
-            let children = [
-                makeGroup(
-                    exactGroupTitle(
-                        state: loaded.exactState,
-                        count: exact.count,
-                        direction: direction
-                    ),
-                    edges: exact,
-                    under: parent,
-                    direction: direction,
-                    session: session
-                ),
-                makeGroup(
-                    "References",
-                    subtitle: loaded.isTruncated || loaded.edges.count > 500
-                        ? nil : "\(references.count) references",
-                    edges: references,
-                    under: parent,
-                    direction: direction,
-                    session: session
-                ),
-            ]
-            guard loaded.isTruncated || loaded.edges.count > 500 else {
-                return children
-            }
-            return children + [
-                Node(kind: .truncated, title: status, parent: parent),
-            ]
-        }
         let capped = Array(loaded.edges.prefix(500))
-        let exact = capped.filter { $0.certainty == .exact }
-        var children = [
-            makeGroup(
-                exactGroupTitle(
-                    state: loaded.exactState,
-                    count: exact.count,
-                    direction: direction
-                ),
-                edges: exact,
-                under: parent,
-                direction: direction,
-                session: session
-            ),
-            makeGroup(
-                "Strong",
-                edges: capped.filter { $0.certainty == .strong },
-                under: parent,
-                direction: direction,
-                session: session
-            ),
-            makeGroup(
-                "Probable",
-                edges: capped.filter { $0.certainty == .probable },
-                under: parent,
-                direction: direction,
-                session: session
-            ),
-            makeGroup(
-                "Possible",
-                edges: capped.filter { $0.certainty == .possible },
-                under: parent,
-                direction: direction,
-                session: session
-            ),
-        ]
-        let external = capped.filter { $0.certainty == .unresolved }
-        if direction == .calls {
-            children.append(makeGroup(
-                external.isEmpty
-                    ? "External / Unresolved (0)"
-                    : "External / Unresolved",
-                edges: external,
-                under: parent,
-                direction: direction,
-                session: session
-            ))
+        let possible = capped.filter { $0.certainty == .probable }
+            + capped.filter { $0.certainty == .possible }
+        var children = makeRows(
+            capped.filter {
+                $0.certainty != .probable && $0.certainty != .possible
+            },
+            under: parent,
+            direction: direction
+        )
+        if !possible.isEmpty {
+            let group = Node(
+                kind: .group,
+                title: "Show \(possible.count) possible matches",
+                children: [],
+                isExpandable: true,
+                parent: parent
+            )
+            group.children = makeRows(
+                possible,
+                under: group,
+                direction: direction
+            )
+            children.append(group)
+        }
+        if !capped.contains(where: { $0.certainty == .exact }),
+           let title = verifiedStatusTitle(
+               state: loaded.exactState,
+               direction: direction
+           )
+        {
+            children.append(Node(kind: .truncated, title: title, parent: parent))
         }
         if loaded.isTruncated || loaded.edges.count > 500 {
+            let title = if direction == .references {
+                loaded.isTruncated
+                    ? "\(loaded.edges.count) verified references · partial"
+                    : "Showing first 500 of \(loaded.edges.count) references"
+            } else {
+                loaded.edges.count > 500
+                    ? "Showing first 500 of \(loaded.edges.count) relations"
+                    : "Results truncated upstream"
+            }
             children.append(Node(
                 kind: .truncated,
-                title: loaded.edges.count > 500
-                    ? "Showing first 500 of \(loaded.edges.count) relations"
-                    : "Results truncated upstream",
+                title: title,
                 parent: parent
             ))
         }
@@ -855,120 +797,135 @@ public final class RelationTreeModel {
         return children
     }
 
-    private func exactGroupTitle(
+    private func verifiedStatusTitle(
         state: ExactState,
-        count: Int,
         direction: Direction
-    ) -> String {
-        guard count == 0 else { return "Exact (\(count))" }
+    ) -> String? {
         return switch (state, direction) {
         case (.unsupported, .callers), (.unsupported, .calls):
-            "Exact unavailable: server does not support call hierarchy"
+            "Verified unavailable: server does not support call hierarchy"
         case (.notApplicable, .callers), (.notApplicable, .calls):
-            "Exact unavailable here: not a callable symbol"
+            "Verified unavailable here: not a callable symbol"
         case (.queried(.full), .callers):
-            "Exact (0): no callers"
+            "No verified callers"
         case (.queried(.full), .calls):
-            "Exact (0): no calls"
+            "No verified calls"
         case (.unsupported, .implementations):
-            "Exact unavailable: server does not support implementations"
+            "Verified unavailable: server does not support implementations"
         case (.queried(.full), .implementations):
-            "Exact (0): no implementations"
+            "No verified implementations"
         case (.notApplicable, .implementations):
-            "Exact unavailable here: implementations not applicable"
+            "Verified unavailable here: implementations not applicable"
         case (.unsupported, .references):
-            "Exact unavailable: server does not support references"
+            "Verified unavailable: server does not support references"
         case (.notApplicable, .references):
-            "Exact unavailable here: references not applicable"
+            "Verified unavailable here: references not applicable"
         case (.queried(.full), .references):
-            "Exact (0): no references"
+            "No verified references"
         case (.queried(.partial), _):
-            "Exact incomplete (0 shown): partial coverage"
+            "Verified incomplete: partial coverage"
         case (.queried(.dependenciesUnavailableOffline), _):
-            "Exact unavailable: deps unavailable (offline)"
+            "Verified unavailable: deps unavailable (offline)"
         case (.legacy, .references):
-            "Exact unavailable: no exact session"
+            "Verified unavailable: no rust-analyzer session"
         case (.legacy, _):
-            "Exact unavailable: no exact session"
+            "Verified unavailable: no rust-analyzer session"
         }
     }
 
     private func preservingPublishedRows(
         _ children: [Node],
-        from previousChildren: [Node]?,
-        emptyExactTitle: String
+        from previousChildren: [Node]?
     ) -> [Node] {
-        let previousGroups = (previousChildren ?? []).filter {
-            $0.kind == .group && $0.children?.isEmpty == false
+        let previousPublished = (previousChildren ?? []).filter {
+            $0.kind == .edge
+                || ($0.kind == .group && $0.children?.contains {
+                    $0.kind == .edge
+                } == true)
         }
-        guard !previousGroups.isEmpty else { return children }
+        guard !previousPublished.isEmpty else { return children }
 
         var currentRows: [CycleKey: Node] = [:]
-        for group in children where group.kind == .group {
-            for row in group.children ?? [] where row.kind == .edge {
-                if let key = row.cycleKey { currentRows[key] = row }
+        for child in children {
+            if child.kind == .edge, let key = child.cycleKey {
+                currentRows[key] = child
+            }
+            if child.kind == .group {
+                for row in child.children ?? [] where row.kind == .edge {
+                    if let key = row.cycleKey { currentRows[key] = row }
+                }
             }
         }
         var consumed: Set<CycleKey> = []
-        for group in previousGroups {
-            group.children = group.children?.compactMap { previous in
+        var result: [Node] = []
+        for item in previousPublished {
+            if item.kind == .edge {
+                guard let key = item.cycleKey,
+                      let current = currentRows[key],
+                      let parent = item.parent ?? current.parent
+                else { continue }
+                consumed.insert(key)
+                updatePublishedRow(item, from: current, parent: parent)
+                result.append(item)
+                continue
+            }
+            item.children = item.children?.compactMap { previous in
                 guard let key = previous.cycleKey,
                       let current = currentRows[key]
                 else { return nil }
                 consumed.insert(key)
-                updatePublishedRow(previous, from: current, parent: group)
+                updatePublishedRow(previous, from: current, parent: item)
                 return previous
             }
-            group.isExpandable = group.children?.isEmpty == false
-            if group.title.hasPrefix("Exact (") {
-                group.title = "Exact (\(group.children?.count ?? 0))"
+            item.isExpandable = item.children?.isEmpty == false
+            if item.title.hasPrefix("Show ") {
+                item.title = "Show \(item.children?.count ?? 0) possible matches"
             }
-            if group.title == "References",
-               let current = children.first(where: {
-                   $0.kind == .group && $0.title == "References"
-               })
-            {
-                group.subtitle = current.subtitle == nil
-                    ? nil
-                    : "\(group.children?.count ?? 0) references"
-            }
+            if item.children?.isEmpty == false { result.append(item) }
         }
 
         let isFinalBatch = children.contains { $0.kind == .loading } == false
-        var result = previousGroups
-        let existingGroupNames = Set(previousGroups.map {
-            Self.stableGroupName($0.title)
-        })
         for child in children {
-            guard child.kind == .group else {
-                if isFinalBatch { result.append(child) }
+            if child.kind == .edge {
+                guard let key = child.cycleKey,
+                      !consumed.contains(key)
+                else { continue }
+                consumed.insert(key)
+                result.append(child)
                 continue
             }
-            child.children = child.children?.filter { row in
-                guard let key = row.cycleKey else { return true }
-                return !consumed.contains(key)
-            }
-            if child.children?.isEmpty == false {
-                if child.title.hasPrefix("Exact (") {
-                    child.title = "Exact (\(child.children?.count ?? 0))"
+            if child.kind == .group {
+                child.children = child.children?.filter { row in
+                    guard let key = row.cycleKey else { return true }
+                    return !consumed.contains(key)
                 }
-                result.append(child)
-            } else if isFinalBatch,
-                      !existingGroupNames.contains(
-                          Self.stableGroupName(child.title)
-                      )
-            {
-                if child.title.hasPrefix("Exact") {
-                    child.title = emptyExactTitle
+                guard child.children?.isEmpty == false else { continue }
+                if let existing = result.first(where: {
+                    $0.kind == .group
+                        && Self.stableGroupName($0.title)
+                            == Self.stableGroupName(child.title)
+                }) {
+                    existing.children?.append(contentsOf: child.children ?? [])
+                    existing.children?.forEach { $0.parent = existing }
+                    if existing.title.hasPrefix("Show ") {
+                        existing.title =
+                            "Show \(existing.children?.count ?? 0) possible matches"
+                    }
+                } else {
+                    result.append(child)
                 }
-                result.append(child)
+                for row in child.children ?? [] {
+                    if let key = row.cycleKey { consumed.insert(key) }
+                }
+                continue
             }
+            if isFinalBatch { result.append(child) }
         }
         if !isFinalBatch {
             result.append(Node(
                 kind: .loading,
                 title: "Loading…",
-                parent: previousGroups[0].parent
+                parent: previousPublished[0].parent
             ))
         }
         return result
@@ -999,27 +956,15 @@ public final class RelationTreeModel {
     }
 
     private nonisolated static func stableGroupName(_ title: String) -> String {
-        title.hasPrefix("Exact") ? "Exact" : title
+        title.hasPrefix("Show ") ? "Possible" : title
     }
 
-    private func makeGroup(
-        _ title: String,
-        subtitle: String? = nil,
-        edges: [LoadedEdge],
+    private func makeRows(
+        _ edges: [LoadedEdge],
         under parent: Node,
-        direction: Direction,
-        session: EngineSession
-    ) -> Node {
-        let group = Node(
-            kind: .group,
-            title: title,
-            subtitle: subtitle,
-            children: [],
-            isExpandable: !edges.isEmpty,
-            parent: parent
-        )
-        let ancestorKeys = cycleKeys(from: parent)
-        group.children = edges.map { edge in
+        direction: Direction
+    ) -> [Node] {
+        edges.map { edge in
             let identity: Node.ExpansionIdentity? = if let item = edge.exactItem {
                 .exact(item)
             } else if let symbol = edge.symbol {
@@ -1031,40 +976,17 @@ public final class RelationTreeModel {
                 path: edge.identityTarget?.file ?? edge.path,
                 byteOffset: edge.identityTarget?.byteOffset ?? edge.byteOffset
             )
-            let isCycle = ancestorKeys.contains(cycleKey)
-            let canExpand = !isCycle && {
-                switch identity {
-                case .exact:
-                    return direction != .implementations
-                case .engine(let symbol):
-                    return Self.canExpand(
-                        symbol,
-                        direction: direction,
-                        session: session
-                    )
-                case nil:
-                    return false
-                }
-            }()
-            let badge: String?
-            if edge.certainty == .exact {
-                var value = "Exact · lsp"
-                if case .some(.materialized) = edge.exactOrigin {
-                    value += " · hist"
-                }
-                if isCycle { value += " · ↻" }
-                badge = value
-            } else {
-                badge = isCycle ? "↻" : nil
+            let badge: String? = switch edge.certainty {
+            case .exact: "Verified"
+            case .unresolved: nil
+            case .strong, .probable, .possible: "Inferred"
             }
-            var subtitle = if edge.certainty == .exact {
-                "Exact"
-            } else if edge.certainty == .unresolved {
+            var subtitle = if edge.certainty == .unresolved {
                 edge.exactOrigin == nil
                     ? "Unresolved"
                     : "External · in dependency (rust-analyzer)"
             } else {
-                "\(resolutionCertaintyLabel(edge.certainty)) · \(resolutionDispatchLabel(edge.dispatch))"
+                resolutionDispatchLabel(edge.dispatch)
             }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
@@ -1083,19 +1005,16 @@ public final class RelationTreeModel {
                 subtitle += " · \(edge.callSites.count) call "
                     + (edge.callSites.count == 1 ? "site" : "sites")
             }
-            if isCycle {
-                subtitle += " · Already expanded"
-            }
-            let node = Node(
+            return Node(
                 kind: .edge,
                 title: edge.title,
                 subtitle: subtitle,
                 badge: badge,
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,
-                children: canExpand ? nil : [],
-                isExpandable: canExpand,
-                parent: group,
+                children: [],
+                isExpandable: false,
+                parent: parent,
                 symbol: edge.symbol,
                 representsLocation: direction == .references,
                 expansionIdentity: identity,
@@ -1107,22 +1026,7 @@ public final class RelationTreeModel {
                 ),
                 callSites: edge.callSites
             )
-            if !canExpand {
-                node.children = evidenceNodes(edge.evidence, parent: node)
-            }
-            return node
         }
-        return group
-    }
-
-    private func cycleKeys(from node: Node) -> Set<CycleKey> {
-        var result: Set<CycleKey> = []
-        var current: Node? = node
-        while let item = current {
-            if let key = item.cycleKey { result.insert(key) }
-            current = item.parent
-        }
-        return result
     }
 
     private nonisolated static func cycleKey(

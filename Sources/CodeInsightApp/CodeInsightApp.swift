@@ -1272,11 +1272,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             offset: referenceDeclarationRange.lowerBound,
             direction: .references
         )
-        let referenceResultVisible = waitUntil(timeout: 10, condition: {
-            controller.selfTestVisibleRelationEdgeTitles(
-                inGroup: "References"
-            ).count == referenceProbe.verifiedCount
+        let referenceDisclosureReady = waitUntil(timeout: 10, condition: {
+            controller.selfTestPossibleRelationDisclosureTitle
+                == "Show \(referenceProbe.verifiedCount) possible matches"
         })
+        let referencePossibleDefaultCollapsed =
+            referenceDisclosureReady
+            && controller.selfTestVisibleRelationEdgeTitles(
+                inGroup: "References"
+            ).isEmpty
+        let referenceResultVisible =
+            referencePossibleDefaultCollapsed
+            && controller.selfTestExpandPossibleRelations()
+            && waitUntil(timeout: 10, condition: {
+                controller.selfTestVisibleRelationEdgeTitles(
+                    inGroup: "References"
+                ).count == referenceProbe.verifiedCount
+            })
         let referenceResultTotalMS = milliseconds(
             since: referenceResultStartedAt
         )
@@ -1284,6 +1296,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             .selfTestVisibleRelationEdgeTitles(inGroup: "References").count
         let referenceFooter = model.relationTree.root?.children?.first {
             $0.kind == .truncated
+                && $0.title.hasSuffix("verified references · partial")
         }?.title
         let referenceResultVisibleWithGeometry =
             controller.selfTestReferenceGroupVisibleWithGeometry
@@ -1333,6 +1346,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "largeReferenceRowsVisible":
                 referenceResultVisible
                     && referenceVisibleRowCount == referenceProbe.verifiedCount,
+            "largeReferencePossibleDefaultCollapsed":
+                referencePossibleDefaultCollapsed,
             "largeReferenceServicePartialHonest":
                 referenceProbe.isTruncated
                     && referenceFooter
@@ -1359,6 +1374,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "serviceTotalMS": referenceProbe.totalMS,
             "resultTotalMS": referenceResultTotalMS,
             "visibleRowCount": referenceVisibleRowCount,
+            "possibleDefaultCollapsed": referencePossibleDefaultCollapsed,
             "serviceTruncated": referenceProbe.isTruncated,
             "footer": referenceFooter ?? "",
             "historyRecorded": referenceHistoryRecorded,
@@ -2526,15 +2542,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let localReferencesVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.direction == .references
-                && windowController.selfTestReferenceGroupTitle == "References (1)"
+                && windowController.selfTestReferenceGroupTitle == nil
                 && windowController.selfTestVisibleRelationEdgeTitles(
                     inGroup: "References"
                 ).count == 1
         })
         let localReferenceCountHonest =
-            windowController.selfTestReferenceGroupTitle == "References (1)"
+            windowController.selfTestVisibleRelationEdgeTitles(
+                inGroup: "References"
+            ).count == 1
         let localReferenceGroupVisibleWithGeometry =
             windowController.selfTestReferenceGroupVisibleWithGeometry
+        let localReferenceGroupFrame =
+            windowController.selfTestReferenceGroupFrame
+        let localReferenceVisibleRect =
+            windowController.selfTestRelationsVisibleRect
+        let localReferenceIntersection =
+            localReferenceVisibleRect.intersection(localReferenceGroupFrame)
         let referenceSegmentVisibleWithGeometry =
             windowController.selfTestReferenceSegmentVisibleWithGeometry
         let referenceSegmentDoesNotOverlapOtherDirections =
@@ -2586,11 +2610,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "direction": "\(model.relationTree.direction)",
                 "groupTitle": windowController.selfTestReferenceGroupTitle ?? "",
                 "groupFrame": NSStringFromRect(
-                    windowController.selfTestReferenceGroupFrame
+                    localReferenceGroupFrame
                 ),
                 "visibleRect": NSStringFromRect(
-                    windowController.selfTestRelationsVisibleRect
+                    localReferenceVisibleRect
                 ),
+                "intersection": NSStringFromRect(localReferenceIntersection),
+                "treeVisible": windowController.selfTestRelationsTreeVisible,
                 "segmentFrames":
                     windowController.selfTestDirectionSegmentFrames.map(
                         NSStringFromRect
@@ -2624,7 +2650,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         func projectReferenceRows() -> [RelationTreeModel.Node] {
             model.relationTree.root?.children?
-                .flatMap { $0.children ?? [] }
+                .flatMap { node in
+                    node.kind == .edge ? [node] : node.children ?? []
+                }
                 .filter { $0.kind == .edge } ?? []
         }
         let exactReferencesVisible = waitUntil(timeout: 5, condition: {
@@ -2636,37 +2664,38 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     $0.title.hasPrefix("main.rs:")
                 }
         })
+        _ = windowController.selfTestExpandPossibleRelations()
         let projectReferenceNodes = projectReferenceRows()
         let exactReferenceNodes = exactRelationEdges(in: model)
         let fuzzyReferenceNodes = projectReferenceNodes.filter {
-            $0.subtitle?.hasPrefix("Exact") != true
+            $0.badge != "Verified"
         }
         let exactReferenceTitles = exactReferenceNodes.map(\.title)
         let fuzzyReferenceTitles = fuzzyReferenceNodes.map(\.title)
-        let exactReferenceGroup = model.relationTree.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Exact")
-        }
-        let fuzzyReferenceGroup = model.relationTree.root?.children?.first {
-            $0.kind == .group && $0.title == "References"
-        }
         let exactReferenceRowCount = exactReferenceNodes.count
         let fuzzyReferenceRowCount = fuzzyReferenceNodes.count
-        let visibleReferenceGroupRowCount = model.relationTree.root?.children?
-            .filter { $0.kind == .group }
-            .reduce(into: 0) { $0 += $1.children?.count ?? 0 } ?? 0
-        let exactHeaderCountHonest = exactReferenceGroup.map {
-            $0.children?.isEmpty == true
-                || $0.title == "Exact (\($0.children?.count ?? 0))"
+        let possibleReferenceDisclosure = model.relationTree.root?.children?
+            .first {
+                $0.kind == .group && $0.title.hasPrefix("Show ")
+            }
+        let possibleReferenceCountHonest = possibleReferenceDisclosure.map {
+            $0.title == "Show \($0.children?.count ?? 0) possible matches"
         } ?? true
-        let referenceHeaderCountHonest = fuzzyReferenceGroup.map {
-            $0.subtitle == "\($0.children?.count ?? 0) references"
-        } ?? false
-        let mixedReferenceGroupCountsHonest =
+        let noCertaintyNamedReferenceGroups =
+            model.relationTree.root?.children?.allSatisfy {
+                $0.kind != .group
+                    || !["Exact", "Strong", "Probable", "Possible"]
+                        .contains($0.title)
+            } == true
+        let mixedReferencePresentationHonest =
             exactReferenceRowCount > 0
             && fuzzyReferenceRowCount > 0
-            && visibleReferenceGroupRowCount == projectReferenceNodes.count
-            && exactHeaderCountHonest
-            && referenceHeaderCountHonest
+            && exactReferenceRowCount + fuzzyReferenceRowCount
+                == projectReferenceNodes.count
+            && exactReferenceNodes.allSatisfy { $0.badge == "Verified" }
+            && fuzzyReferenceNodes.allSatisfy { $0.badge != "Verified" }
+            && possibleReferenceCountHonest
+            && noCertaintyNamedReferenceGroups
         let projectReferenceTitles = projectReferenceNodes.map(\.title)
         let projectReferencesVisible = exactReferencesVisible
             && !projectReferenceTitles.isEmpty
@@ -2678,13 +2707,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 $0.subtitle?.contains("heuristic also matched") == true
             }
         let exactReferencesDeclarationExcluded =
-            !(model.relationTree.root?.children?
-                .flatMap { $0.children ?? [] }
-                .contains {
+            !projectReferenceNodes.contains {
                     $0.target?.path == target.definition.file
                         && $0.target?.byteOffset
                             == UInt32(target.definition.byteOffset)
-                } ?? false)
+                }
         let projectReferenceNode = projectReferenceNodes.first {
             $0.kind == .edge
                 && $0.title.hasPrefix("main.rs:")
@@ -2694,22 +2721,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactReferenceAXNode = exactReferenceNodes.first {
             $0.subtitle?.contains("heuristic also matched") == true
         }
-        let exactReferenceAXGroup = exactReferenceAXNode.flatMap { row in
-            model.relationTree.root?.children?.first {
-                $0.kind == .group
-                    && $0.children?.contains { $0 === row } == true
-            }?.title
-        }
         let projectReferenceAccessibility = exactReferenceAXNode.flatMap {
             windowController.selfTestRelationAccessibility(
                 titled: $0.title,
-                inGroup: exactReferenceAXGroup ?? ""
+                inGroup: ""
             )
         }
         let projectReferenceAXProvenanceReachable =
             projectReferenceAccessibility.map {
                 [$0.label, $0.value].joined(separator: " ")
-                    .contains("Exact · heuristic also matched")
+                    .contains("Verified")
+                    && [$0.label, $0.value].joined(separator: " ")
+                        .contains("heuristic also matched")
             } == true
         let projectReferenceAXReadOnly =
             projectReferenceAccessibility.map {
@@ -2720,19 +2743,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestRelationLayoutPasses
         let projectReferenceEdgeFrames =
             windowController.selfTestVisibleRelationEdgeFrames(
-                inGroup: "Exact"
-            ) + windowController.selfTestVisibleRelationEdgeFrames(
-                inGroup: "References"
+                inGroup: ""
             )
+        let projectReferenceVisibleRect =
+            windowController.selfTestRelationsVisibleRect
         let projectReferenceRowsVisibleWithGeometry =
             !projectReferenceEdgeFrames.isEmpty
             && projectReferenceEdgeFrames.allSatisfy {
-                $0.width > 0
-                    && $0.height > 0
-                    && windowController.selfTestRelationsVisibleRect.contains($0)
+                guard $0.width > 0, $0.height > 0 else { return false }
+                let intersection = projectReferenceVisibleRect.intersection($0)
+                return intersection.width > 0
+                    && intersection.height >= $0.height - 0.5
             }
         let projectReferenceGroupsDoNotOverlap =
-            exactReferenceGroup == nil
+            possibleReferenceDisclosure == nil
                 || windowController.selfTestExactAndReferenceGroupsDoNotOverlap
         let projectReferenceResultsAndControlsDoNotOverlap =
             windowController
@@ -2753,8 +2777,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "fuzzyEdgeTitles": fuzzyReferenceTitles,
                 "exactRowCount": exactReferenceRowCount,
                 "fuzzyRowCount": fuzzyReferenceRowCount,
-                "fuzzySubtitle": fuzzyReferenceGroup?.subtitle ?? "",
-                "mixedGroupCountsHonest": mixedReferenceGroupCountsHonest,
+                "possibleDisclosure":
+                    possibleReferenceDisclosure?.title ?? "",
+                "mixedPresentationHonest":
+                    mixedReferencePresentationHonest,
                 "exactVisible": exactReferencesVisible,
                 "heuristicProvenanceRetained":
                     exactReferencesHeuristicProvenanceRetained,
@@ -2770,6 +2796,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "axReadOnly": projectReferenceAXReadOnly,
                 "rowsVisibleWithGeometry":
                     projectReferenceRowsVisibleWithGeometry,
+                "edgeFrames": projectReferenceEdgeFrames.map(
+                    NSStringFromRect
+                ),
+                "visibleRect": NSStringFromRect(
+                    projectReferenceVisibleRect
+                ),
                 "groupsDoNotOverlap":
                     projectReferenceGroupsDoNotOverlap,
                 "resultsAndControlsDoNotOverlap":
@@ -2911,7 +2943,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 direction: .callers
             )
         }
-        let exactGroupVisible = waitUntil(timeout: 5, condition: {
+        let verifiedRowsVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.direction == .callers
                 && model.relationTree.root?.title == "answer"
                 && exactRelationEdges(in: model).contains {
@@ -2919,11 +2951,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 }
         })
         let contextAndRelationsReadyMS = milliseconds(since: reprofiledAt)
-        let exactGroupRowCount = windowController.selfTestExactGroupRowCount
-        let exactGroupHeaderHonest =
-            exactGroupRowCount > 0
-            && windowController.selfTestExactGroupTitle
-                == "Exact (\(exactGroupRowCount))"
+        let verifiedRowCount = windowController.selfTestExactGroupRowCount
+        let verifiedBadgesHonest =
+            verifiedRowCount > 0
+            && exactRelationEdges(in: model).allSatisfy {
+                $0.badge == "Verified"
+            }
         let exactStatusVisible = windowController.selfTestExactStatusText
             .contains("Exact:")
             && windowController.selfTestExactStatusVisible
@@ -2933,19 +2966,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let exactCallerVisible = exactCaller != nil
         let exactCallerCallSitesHonest =
             exactCaller?.subtitle?.contains("2 call sites") == true
-        let exactOnlyExpansionStarted = exactCallerVisible
-            && windowController.selfTestExpandRelationEdge(
+        let exactCallerIsOneLevel = exactCallerVisible
+            && exactCaller?.isExpandable == false
+            && exactCaller?.children?.isEmpty == true
+            && !windowController.selfTestExpandRelationEdge(
                 titled: "exact_dependency_caller"
             )
-        let exactOnlySecondLevelVisible = exactOnlyExpansionStarted
-            && waitUntil(timeout: 5, condition: {
-                windowController.selfTestVisibleRelationChildEdgeTitles(
-                    ofEdge: "exact_dependency_caller"
-                ).contains("exact_dependency_caller")
-            })
-        let exactGroupVisibleWithGeometry =
+        let verifiedBadgeVisibleWithGeometry =
             windowController.selfTestExactGroupVisibleWithGeometry
-        let exactAndHeuristicGroupsDoNotOverlap =
+        let verifiedAndInferredRowsDoNotOverlap =
             windowController.selfTestExactAndHeuristicGroupsDoNotOverlap
         // metric-only：physicalFootprint 是进程级净指标，而本通道在同一进程里可能
         // 已经跑过真实 rust-analyzer 变体（RA 子进程 + 真实索引会把 footprint 抬到
@@ -2964,12 +2993,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "extracted": reprofileExtracted,
                 "exactCallerVisible": exactCallerVisible,
                 "exactCallerCallSitesHonest": exactCallerCallSitesHonest,
-                "exactOnlyExpansionStarted": exactOnlyExpansionStarted,
-                "exactOnlySecondLevelVisible": exactOnlySecondLevelVisible,
-                "exactGroupFrame": NSStringFromRect(
+                "exactCallerIsOneLevel": exactCallerIsOneLevel,
+                "verifiedRowFrame": NSStringFromRect(
                     windowController.selfTestExactGroupFrame
                 ),
-                "heuristicGroupFrame": NSStringFromRect(
+                "inferredRowFrame": NSStringFromRect(
                     windowController.selfTestHeuristicGroupFrame
                 ),
                 "relationsVisibleRect": NSStringFromRect(
@@ -3013,6 +3041,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             })
             ? windowController.selfTestContextSummary
             : nil
+        _ = windowController.selfTestExpandPossibleRelations()
         let selectedSecondFollowCaller =
             windowController.selfTestSelectRelationEdge(titled: "main")
         let relationRowsUpdateFollowContext = firstFollowSummary != nil
@@ -3133,6 +3162,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && model.relationTree.direction == .callers
                 && windowController.selfTestExactGroupRowCount > 0
         })
+        _ = windowController.selfTestExpandPossibleRelations()
         let selectedForOpen = answerCallersReady
             && windowController.selfTestSelectRelationEdge(titled: "main")
         let openGeneration = model.relationTree.generation
@@ -3174,11 +3204,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let externalGroupVisible = waitUntil(timeout: 5, condition: {
             model.relationTree.root?.title == "Backend"
-                && windowController.selfTestExternalGroupTitle != nil
+                && windowController.selfTestExternalGroupTitle == nil
         })
         let externalGroupHeaderHonest =
-            windowController.selfTestExternalGroupTitle
-                == "EXTERNAL / UNRESOLVED (0)"
+            windowController.selfTestExternalGroupTitle == nil
         emitExactStep(
             "relation-empty-external",
             variant: "fake",
@@ -3215,9 +3244,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 condition: {
                     exactSelfTestProviderState?.relationIsBlocked == true
                         && model.relationTree.root?.title == "dependency_call"
-                        && windowController.selfTestVisibleRelationEdgeTitles(
-                            inGroup: "Possible"
-                        ).contains("len")
+                        && windowController
+                            .selfTestPossibleRelationDisclosureTitle
+                            == "Show 1 possible matches"
                 }
             )
             let firstBatchUsedNodeReload =
@@ -3237,9 +3266,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             let defaultDefinitionPromotionSkipped =
                 defaultDefinitionPromotionRequests == 0
             let possibleRowRetained =
-                windowController.selfTestVisibleRelationEdgeTitles(
-                    inGroup: "Possible"
-                ).contains("len")
+                windowController.selfTestPossibleRelationDisclosureTitle
+                    == "Show 1 possible matches"
             emitExactStep(
                 "relation-first-batch",
                 variant: "blocked-root-exact-fake",
@@ -3297,8 +3325,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 offset: offset,
                 direction: .calls
             )
+            if expectedGroup == "Possible" {
+                _ = waitUntil(timeout: 5, condition: {
+                    windowController.selfTestPossibleRelationDisclosureTitle != nil
+                })
+                _ = windowController.selfTestExpandPossibleRelations()
+            }
             let present = waitUntil(timeout: 5, condition: {
-                model.relationTree.root?.title == rootTitle
+                if expectedGroup == "Possible" {
+                    _ = windowController.selfTestExpandPossibleRelations()
+                }
+                return model.relationTree.root?.title == rootTitle
                     && windowController.selfTestVisibleRelationEdgeTitles(
                         inGroup: expectedGroup
                     ).contains(edgeTitle)
@@ -3321,24 +3358,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             rootTitle: "typed_receiver_call",
             edgeTitle: "typed_edge",
             expectedGroup: "Strong",
-            expectedSubtitle: "Strong · direct",
-            absentGroups: ["Probable", "Possible"]
+            expectedSubtitle: "direct",
+            absentGroups: ["Possible"]
         )
         let inferredReceiver = receiverRelationCheck(
             offset: target.inferredReceiverRootOffset,
             rootTitle: "inferred_receiver_call",
             edgeTitle: "inferred_edge",
-            expectedGroup: "Probable",
-            expectedSubtitle: "Probable · direct",
-            absentGroups: ["Strong", "Possible"]
+            expectedGroup: "Possible",
+            expectedSubtitle: "direct",
+            absentGroups: ["Strong"]
         )
         let traitObjectReceiver = receiverRelationCheck(
             offset: target.traitObjectReceiverRootOffset,
             rootTitle: "trait_object_receiver_call",
             edgeTitle: "trait_object_edge",
             expectedGroup: "Possible",
-            expectedSubtitle: "Possible · dynamic · name match only",
-            absentGroups: ["Strong", "Probable"]
+            expectedSubtitle: "dynamic · name match only",
+            absentGroups: ["Strong"]
         )
         emitExactStep(
             "relation-receiver-types",
@@ -3369,11 +3406,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             coverage: .dependenciesUnavailableOffline
         )
         let exactZeroFullCopyHonest =
-            fullZeroTitle == "Exact (0): no references"
+            fullZeroTitle == "No verified references"
         let exactZeroPartialCopyHonest =
-            partialZeroTitle == "Exact incomplete (0 shown): partial coverage"
+            partialZeroTitle == "Verified incomplete: partial coverage"
         let exactZeroOfflineCopyHonest =
-            offlineZeroTitle == "Exact unavailable: deps unavailable (offline)"
+            offlineZeroTitle == "Verified unavailable: deps unavailable (offline)"
         let exactZeroCoverageCopyDistinct =
             Set([fullZeroTitle, partialZeroTitle, offlineZeroTitle]).count == 3
         emitExactStep(
@@ -3396,18 +3433,17 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "exactVisible": exactVisible,
             "fuzzyRetained": fuzzyRetained,
             "pinnedTargetStable": pinnedStable,
-            "exactGroupVisible": exactGroupVisible,
-            "exactGroupHeaderHonest": exactGroupHeaderHonest,
-            "exactGroupCountMatchesRows": exactGroupHeaderHonest,
+            "verifiedRowsVisible": verifiedRowsVisible,
+            "verifiedBadgesHonest": verifiedBadgesHonest,
             "exactCallerVisible": exactCallerVisible,
             "exactCallerCallSitesHonest": exactCallerCallSitesHonest,
-            "exactOnlyExpansionStarted": exactOnlyExpansionStarted,
-            "exactOnlySecondLevelVisible": exactOnlySecondLevelVisible,
+            "exactCallerIsOneLevel": exactCallerIsOneLevel,
             "exactImplementationsVisible": exactImplementationsVisible,
             "exactCallersRestored": exactCallersRestored,
-            "exactGroupVisibleWithGeometry": exactGroupVisibleWithGeometry,
-            "exactAndHeuristicGroupsDoNotOverlap":
-                exactAndHeuristicGroupsDoNotOverlap,
+            "verifiedBadgeVisibleWithGeometry":
+                verifiedBadgeVisibleWithGeometry,
+            "verifiedAndInferredRowsDoNotOverlap":
+                verifiedAndInferredRowsDoNotOverlap,
             "localReferencesVisible": localReferencesVisible,
             "localReferenceCountHonest": localReferenceCountHonest,
             "localReferenceGroupVisibleWithGeometry":
@@ -3440,8 +3476,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 relationGeometryReadDidNotForceLayout,
             "exactReferencesDeclarationExcluded":
                 exactReferencesDeclarationExcluded,
-            "mixedReferenceGroupCountsHonest":
-                mixedReferenceGroupCountsHonest,
+            "mixedReferencePresentationHonest":
+                mixedReferencePresentationHonest,
             "exactZeroFullCopyHonest": exactZeroFullCopyHonest,
             "exactZeroPartialCopyHonest": exactZeroPartialCopyHonest,
             "exactZeroOfflineCopyHonest": exactZeroOfflineCopyHonest,
@@ -3609,7 +3645,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             } == false
         }) else { return nil }
         return variant.relationTree.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Exact")
+            $0.kind == .truncated
+                && ($0.title.hasPrefix("Verified ")
+                    || $0.title.hasPrefix("No verified "))
         }?.title
     }
 
@@ -4538,13 +4576,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private func exactRelationEdges(
         in model: AppModel
     ) -> [RelationTreeModel.Node] {
-        model.relationTree.root?.children?
-            .filter { $0.kind == .group }
-            .flatMap { $0.children ?? [] }
-            .filter {
-                $0.kind == .edge
-                    && $0.subtitle?.hasPrefix("Exact") == true
-            } ?? []
+        guard let children = model.relationTree.root?.children else { return [] }
+        var rows: [RelationTreeModel.Node] = []
+        for child in children {
+            if child.kind == .edge {
+                rows.append(child)
+            } else {
+                rows += (child.children ?? []).filter { $0.kind == .edge }
+            }
+        }
+        return rows.filter { $0.badge == "Verified" }
     }
 
     private func firstActionableRelation(
@@ -4552,33 +4593,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller: MainWindowController
     ) -> (kind: String, title: String)? {
         guard controller.selfTestRelationsTreeVisible,
-              let groups = model.relationTree.root?.children
+              let root = model.relationTree.root
         else { return nil }
         let visibleRect = controller.selfTestRelationsVisibleRect
-        for group in groups where group.kind == .group {
-            let titles = controller.selfTestVisibleRelationEdgeTitles(
-                inGroup: group.title
+        let titles = controller.selfTestVisibleRelationEdgeTitles(inGroup: "")
+        let frames = controller.selfTestVisibleRelationEdgeFrames(inGroup: "")
+        let rows = root.children?.flatMap { child in
+            child.kind == .edge
+                ? [child]
+                : (child.children ?? []).filter { $0.kind == .edge }
+        } ?? []
+        for (title, frame) in zip(titles, frames) {
+            let visibleFrame = visibleRect.intersection(frame)
+            guard frame.width > 0,
+                  frame.height > 0,
+                  visibleFrame.width > 0,
+                  visibleFrame.height > 0,
+                  let row = rows.first(where: {
+                      $0.title == title && $0.target != nil
+                  })
+            else { continue }
+            return (
+                row.badge == "Verified" ? "exact" : "heuristic",
+                title
             )
-            let frames = controller.selfTestVisibleRelationEdgeFrames(
-                inGroup: group.title
-            )
-            for (title, frame) in zip(titles, frames) {
-                let visibleFrame = visibleRect.intersection(frame)
-                guard frame.width > 0,
-                      frame.height > 0,
-                      visibleFrame.width > 0,
-                      visibleFrame.height > 0,
-                      group.children?.contains(where: {
-                          $0.kind == .edge
-                              && $0.title == title
-                              && $0.target != nil
-                      }) == true
-                else { continue }
-                return (
-                    group.title.hasPrefix("Exact") ? "exact" : "heuristic",
-                    title
-                )
-            }
         }
         return nil
     }
