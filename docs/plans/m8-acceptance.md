@@ -79,13 +79,119 @@ TOKIO=…/scratchpad/corpora/tokio-tokio-1.47.1
 
 | # | 项 | 状态 |
 |---|---|---|
-| **N1** | **warm 的 `relationAllResultsMS` = 2,947 ms**，是 cold（416 ms）的 7 倍，而首行反而更快（337 vs 360） | **真实现象，原因未查**。不影响首屏结论（用户感知量是首行），但需要单独查 |
+| **N1** | **warm 的 `relationAllResultsMS` = 2,947 ms**，是 cold（416 ms）的 7 倍，而首行反而更快（337 vs 360） | **已查明，见 §4.1（2026-08-05）**。不是 warm 比 cold 慢，是**固定重试睡眠落在哪一相是随机的** |
 | **N2** | 压测**三次挂起 183s** 未解释 | 停止时点与监工清理残留空转 shell 重合，但那些是 0% CPU，**建立不了因果**。后续 5 次全部 39–53s 完成 |
 | **N3** | `real-references` **间歇** | 同一二进制第一次 `failed:references`，随后 3/3 `passed` |
 | **N4** | 12 通道跑的仍是 `exact_fixture` | tokio 规模的测量要手工跑 `--self-test-relation-timing`，**未进自动化门禁** |
 | **N5** | `real-implementations` 曾**静默坏掉** | M7-S6 在 `5a6e7e1` 实测四格全绿，到 `4a97884` 已红；中间无任何片声称改动它，也无守护发现——只有真机跑才会暴露 |
 | **N6** | a11y 仅 Relation 结果行做过 | M2 起的 backlog #11，挂了五个里程碑，另立专项 |
 | **N7** | 路径栏未做 | 一层列表的返回路径是否够用，待实测证据再定 |
+
+---
+
+## §4.1 N1 查明：不存在「warm 比 cold 慢」，是重试睡眠随机落相
+
+**调查日期** 2026-08-05，监工实测。**结论：M8 §0 表里那条「warm 是 cold 的 7 倍，
+而首行反而更快」是我把一次抛硬币读成了规律**——两相谁慢是随机的，且首行完全不受影响。
+
+### 机制（三步，逐步有直接证据）
+
+1. `relationAllResultsMS` 的判据是 `root.children` 里不再有 `Loading…`
+   （`CodeInsightApp.swift:4876-4882`），而 `Loading…` 由 `pendingQueryCount`
+   控制（`RelationTreeModel.swift:648`）。启发式与根 Exact 两条查询并行，
+   **所以这个量等于两者中慢的那条**——实测总是 Exact Call Hierarchy。
+2. rust-analyzer 在 workspace 快照就绪前，对首次
+   `textDocument/prepareCallHierarchy` **返回 `null`**。
+   四处 parse 都把 `null` 转成 `nil`（`RustAnalyzerProvider.swift:901/946/1009/1023`）。
+3. `request()` 把 **任何 `nil`** 一律当作「服务端没就绪」，
+   按 `Double(attempt + 1)` 睡 **1 秒、再 2 秒** 后重试（`:556`、`:562`）。
+   **多出来的那几秒是这个固定睡眠，不是 rust-analyzer 在算。**
+
+### 证据一：trace 直接看到睡眠
+
+`CAIRN_RA_TRACE=1` 探针（临时加在 `request()` 里，已撤回）打出的 cold 相：
+
+```
+[ratrace]        0.0 enter    textDocument/prepareCallHierarchy
+[ratrace]        0.8 response textDocument/prepareCallHierarchy attempt=0
+[ratrace]        0.9 emptyParse ...            ← RA 返回 null
+[ratrace]        0.9 sleep    ... delay=1.0    ← 固定睡眠开始
+[ratrace]     1003.2 lock     ... attempt=1
+[ratrace]     2205.3 response ... attempt=1    ← 这次才是真活，1,202 ms
+```
+
+**2,205 ms 里 1,002 ms 是纯睡眠。**
+
+### 证据二：改睡眠系数，多出来的秒数搬家（因果，非相关）
+
+把重试延迟乘以 0.02（1s/2s → 20ms/40ms），其余不动。
+语料：tokio 1.47.1 crate（154 条候选边，见下方口径说明）。
+
+| 配置 | 样本 | cold 首行 | cold 全部 | warm 首行 | warm 全部 |
+|---|---|---:|---:|---:|---:|
+| **基线**（1s/2s） | 5 | 347–381 | **2,006–2,550** | 292–330 | **292–330** |
+| **睡眠 ×0.02** | 3 | 358–372 | **404–438** | 297–343 | **1,458–1,708** |
+
+三件事同时成立，才构成因果：
+
+- cold 的多余秒数**消失**（2,006–2,550 → 404–438）
+- `emptyParse` 次数**没减少**（反而变多）——说明改的是睡眠，不是 RA 的行为
+- 那 ~1.2–1.4 秒的**真实首次开销守恒地搬到了 warm**（292–330 → 1,458–1,708）
+
+**所以 M8 那次 warm=2,947ms 与本次 cold≈2,200ms 是同一件事的两种落法。**
+1,000 + 2,000 = 3,000 ms 的睡眠上限，也正好解释 M8 的 2,947 ms。
+
+### 代价必须说清楚：睡眠不是纯浪费
+
+睡眠缩短后 cold 是快了，但**三次快速重试全部拿到 `null`，最终一条 exact 结果都没有**。
+那 1 秒实际起的作用是「等服务端热起来」。
+**所以修法不是删睡眠，而是换掉「靠盲睡猜就绪」这个机制**（见下）。
+
+### 顺带查出的两条（本报告新增，不在原 §4）
+
+- **`null` 与「没就绪」被混为一谈。** 光标停在真的没有调用层级/定义的位置时，
+  也会走满 1s + 2s 才返回空。**用户为一个必然为空的结果等 3 秒。**
+- **点结果行也踩同一个梯子。** 首次 trace 里，选中行触发的
+  `textDocument/definition` 拿到 `null` → 睡 1 秒 → 重试，
+  一直跑到 **6,564 ms**（测量早在 2,487 ms 结束）。
+  **点一行之后 Context 可能空好几秒**，这是首行指标覆盖不到的用户可感延迟。
+
+### 顺带复验：S2 的「睡眠移出锁」是真的
+
+trace 里 `definition` 处于睡眠窗口（2,297→3,301 ms）期间，
+`prepareCallHierarchy` 在 2,486 ms **拿到了 operationLock**。锁确实没被睡眠持有。
+
+### 结论不受影响的部分
+
+`relationFirstActionableMS` 在两种配置、8 次运行里始终是 **292–381 ms**。
+**M8 §0 的首屏结论（360 ms、启发式先出）成立，不需要改。**
+
+### 口径说明（不许当成同一语料）
+
+M8 用的 tokio **workspace**（731 文件、215 条边）语料位于 `/private/tmp/...`，
+**已被 macOS 临时目录清理器删除**（目录壳与 `.git` 均在，文件全空）。
+本次改用 `~/.cargo/registry` 里的 **tokio 1.47.1 crate**（350 个 `.rs`、154 条边，
+剥掉 dev-dependencies 后 `cargo metadata --offline` 通过，并 `git init`——
+非 git 目录 RA 起不来）。**规模不同，绝对毫秒数不可与 M8 相减**；
+但结论建立在 trace 与睡眠系数实验上，与语料规模无关。
+
+> **教训（接 §5.1）**：M8 那条「warm 反常」是**两个样本**（cold 一次、warm 一次）
+> 就写进报告的模式判断。§5.1 记了 3 次样本不足下结论，**这是第 4 次**，
+> 而且它已经印在结论表里了。
+
+### 建议的修法（未实施，待裁决）
+
+| 方案 | 说明 |
+|---|---|
+| **A. 用服务端就绪信号取代盲睡** | rust-analyzer 有 `experimental/serverStatus` 与 workDoneProgress；就绪后再发首个请求，比睡 1 秒准确 |
+| **B. 区分 `null` 与「没就绪」** | 只有 `-32801 content-modified` 才算没就绪；`null` 是合法的「这里没有」，直接返回空，不重试 |
+| **C. 退避从小开始** | 首次重试 50–100 ms，指数退避到 1s 上限；总等待不变但常见情况快一个数量级 |
+
+**B 最该先做**——它同时修掉「为必然为空的结果等 3 秒」这条独立缺陷。
+
+**复现探针**：在 `RustAnalyzerProvider.request()` 的 `parse` 返回处、
+`catch -32801` 处、`Thread.sleep` 前各加一行 stderr 打点，
+用环境变量开关；把 `Double(attempt + 1)` 换成可乘系数即可重做上面的实验。
 
 ---
 
