@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M9 · S5 Relations 排版原型</title>
+<style>
+
+* { box-sizing: border-box; }
+body { margin:0; padding:30px 26px 60px;
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  background:#eef0f3; color:#1c2024; }
+@media (prefers-color-scheme: dark){
+  body{background:#16181c;color:#e6e8eb;}
+  .lead p,.legend .lg-note{color:#a7adb5!important;}
+  .block>h2 small{color:#9aa0a8!important;}
+  .legend,.block>.block-note{background:#1f2227!important;border-color:#2c3037!important;}
+  .block>.block-note{color:#c4c9cf!important;}
+}
+.wrap{max-width:1180px;margin:0 auto;}
+.lead .kick{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:10px;}
+.lead h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
+.lead p{margin:0 0 4px;max-width:820px;color:#4b5563;}
+.lead code{font-family:ui-monospace,monospace;font-size:.92em;}
+
+.legend{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:center;margin:22px 0 26px;
+  padding:13px 18px;border:1px solid #dfe2e7;border-radius:12px;background:#fff;font-size:13px;}
+.legend .lg{display:flex;align-items:center;gap:8px;}
+.legend .lg-note{flex-basis:100%;font-size:12px;color:#6b7280;margin:0;}
+
+.block{margin:0 0 30px;}
+.block>h2{margin:0 0 3px;font-size:16px;display:flex;align-items:baseline;gap:10px;}
+.block>h2 .tag{font:700 11px/1 ui-monospace,monospace;color:#fff;padding:5px 7px;border-radius:6px;}
+.block>h2 .tag.before{background:#b0553a;} .block>h2 .tag.after{background:#2f8f4e;}
+.block>h2 small{font-weight:400;font-size:13px;color:#56606b;}
+.block>.block-note{margin:10px 0 0;padding:10px 13px;border:1px solid #e6d3c4;background:#fbf3ec;
+  border-radius:9px;font-size:12.5px;color:#7a4a2e;line-height:1.55;}
+.block>.block-note b{color:#a2401f;}
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:12px;}
+@media (max-width:760px){.panels{grid-template-columns:1fr;}}
+.panels.one{grid-template-columns:minmax(0,520px);}
+
+/* ---- panel (a mock Relations window) ---- */
+.panel{border-radius:11px;overflow:hidden;border:1px solid var(--bd);background:var(--bg);
+  box-shadow:0 1px 3px rgba(0,0,0,.08);color:var(--fg);font-size:12px;}
+.p-head{display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:8px 10px;background:var(--head);border-bottom:1px solid var(--bd);}
+.p-title{font-size:11px;font-weight:600;letter-spacing:.03em;color:var(--sec);white-space:nowrap;}
+.seg{display:flex;border:1px solid var(--bd);border-radius:6px;overflow:hidden;font-size:10.5px;}
+.seg span{padding:3px 7px;color:var(--sec);white-space:nowrap;border-left:1px solid var(--bd);}
+.seg span:first-child{border-left:0;}
+.seg span.on{background:var(--accent);color:#fff;}
+.p-body{padding:5px 0;}
+.p-foot{padding:8px 12px;border-top:1px solid var(--bd);font-size:11px;color:var(--sec);}
+
+.tri{display:inline-block;width:13px;text-align:center;color:var(--ter);font-size:9px;flex:none;}
+.tri.sp{visibility:hidden;}
+.strong{font-weight:600;}
+.path{font-family:ui-monospace,"SF Mono",Menlo,monospace;color:var(--sec);}
+.path.dim{color:var(--ter);}
+.chip{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--chipfg);background:var(--chipbg);
+  padding:1px 5px;border-radius:4px;white-space:nowrap;flex:none;}
+.mods{color:var(--ter);font-size:10.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:0 1 auto;}
+.badge{font-size:10px;font-weight:600;padding:1.5px 7px;border-radius:20px;white-space:nowrap;}
+.badge.verified{color:var(--grn);background:var(--grnbg);}
+.badge.inferred{color:var(--blu);background:var(--blubg);}
+.badge-bare{font-size:11px;font-weight:600;white-space:nowrap;}
+.badge-bare.verified{color:var(--grn);} .badge-bare.inferred{color:var(--blu);}
+.count{font-size:10px;font-weight:600;color:var(--sec);background:var(--chipbg);
+  padding:1px 7px;border-radius:20px;}
+.a-fold{color:var(--accent);font-weight:600;font-size:11.5px;}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;}
+.dot.verified{background:var(--grn);} .dot.inferred{background:var(--blu);}
+.dot.unresolved{background:transparent;box-shadow:inset 0 0 0 1.4px var(--ter);}
+.ext{font-style:italic;color:var(--sec);} .ext-meta{color:var(--ter);font-style:italic;}
+
+/* ---- BEFORE: faithful uneven rows, inline name+path ---- */
+.brow{display:flex;align-items:center;gap:5px;padding-right:8px;}
+.brow.root{height:32px;} .brow.edge{height:38px;} .brow.group,.brow.evidence{height:24px;}
+.brow.sel{background:var(--sel);}
+.b-title{font-size:12px;font-weight:500;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.b-title.strong{font-weight:600;}
+.b-loc{font-size:10px;color:var(--sec);font-family:ui-monospace,monospace;}
+.b-edgecol{display:flex;flex-direction:column;justify-content:center;gap:1px;min-width:0;flex:1;}
+.b-sub{font-size:10px;color:var(--sec);white-space:nowrap;}
+.b-group{font-size:10px;font-weight:600;letter-spacing:.04em;color:var(--sec);}
+.b-ev{font-size:10px;color:var(--ter);font-family:ui-monospace,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.brow .badge-bare{margin-left:auto;}
+
+/* ---- AFTER A: two-line, aligned secondary meta ---- */
+.arow{display:flex;align-items:center;gap:6px;padding-right:10px;min-height:26px;}
+.arow.root{padding-top:5px;padding-bottom:5px;}
+.arow.edge{padding-top:5px;padding-bottom:5px;min-height:44px;}
+.arow.sel{background:var(--sel);}
+.arow .a-main{display:flex;flex-direction:column;gap:2px;min-width:0;flex:1;}
+.a-name{font-size:12.5px;font-weight:500;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.a-name.strong{font-weight:600;} .a-name.ext{font-style:italic;color:var(--sec);}
+.a-meta{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:nowrap;overflow:hidden;}
+.a-meta .path{font-size:11px;flex:none;}
+.arow.fold{padding:5px 0;gap:7px;}
+.arow.evidence{padding:3px 0;gap:6px;font-size:11px;}
+.a-ev{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--ter);}
+.arow .badge{margin-left:auto;align-self:flex-start;margin-top:2px;}
+
+/* ---- AFTER B: single-line columnar grid ---- */
+.growp{display:grid;grid-template-columns:minmax(96px,1fr) 92px 56px 66px;align-items:center;
+  gap:6px;height:29px;padding:0 10px 0 6px;}
+.growp.root{height:31px;}
+.growp.sel{background:var(--sel);}
+.g-name{display:flex;align-items:center;gap:6px;min-width:0;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.g-name>span{overflow:hidden;text-overflow:ellipsis;}
+.g-path{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--sec);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.g-chip{display:flex;justify-content:flex-start;} .g-badge{display:flex;justify-content:flex-end;}
+.g-span{grid-column:1/-1;display:flex;align-items:center;gap:7px;min-width:0;}
+.growp.evidence,.growp.fold{height:26px;}
+.growp.evidence .g-span{font-size:11px;}
+
+
+.t-light{--bg:#FFFFFF;--head:#F7F8FA;--bd:#E4E7EC;--fg:#1F2328;--sec:#6B7280;--ter:#9AA0A8;
+  --grn:#1A7F37;--grnbg:rgba(26,127,55,.12);--blu:#175CD3;--blubg:rgba(23,92,211,.12);
+  --chipfg:#57606A;--chipbg:#EFF1F4;--sel:#E7F0FF;--accent:#3B6FD8;}
+.t-dark{--bg:#232528;--head:#2A2D30;--bd:#34383D;--fg:#E6E8EB;--sec:#9BA1A8;--ter:#6E747B;
+  --grn:#4EC777;--grnbg:rgba(78,199,119,.16);--blu:#7AA7FF;--blubg:rgba(122,167,255,.18);
+  --chipfg:#AAB1B8;--chipbg:#34383D;--sel:#2C3644;--accent:#3B6FD8;}
+
+</style></head><body>
+<div class="wrap">
+  <div class="lead">
+    <div class="kick">M9 v2 · S5 · Relations</div>
+    <h1>Relations 排版与可理解性 — 设计原型对照</h1>
+    <p>目标（§1.5）：不看文档也能回答“哪些行验证过 / 哪些是推断的、每行是什么符号、在哪个文件”，
+       并看不到空分组和占位噪声。语义保持 M8 不变：<code>Verified</code> 只来自 rust-analyzer、
+       <code>Inferred</code> 只表示源码结构推断。</p>
+    <p>示例数据 = tokio 中 <code>spawn</code> 的 <b>Callers</b>：含 direct/virtual 派发、
+       Verified/Inferred、外部未解析行、<code>Show N possible matches</code> 折叠、以及一条展开的证据行。</p>
+  </div>
+
+  <div class="legend">
+    <div class="lg"><span class="badge verified">Verified</span>rust-analyzer 验证</div>
+    <div class="lg"><span class="badge inferred">Inferred</span>源码结构推断</div>
+    <div class="lg"><span class="chip">direct</span>派发方式（direct/virtual/trait…）</div>
+    <div class="lg"><span class="dot unresolved" style="display:inline-block"></span>&nbsp;外部/未解析（无 badge）</div>
+    <p class="lg-note">下方 Before = 忠实当前 HEAD 画法。<b>After A（两行行式）已选</b>（计划 v2.2 裁决）；After B（单行列式）作宽窗密集档备选，<b>本轮不实现</b>。</p>
+  </div>
+
+  <div class="block">
+    <h2><span class="tag before">BEFORE</span>现状（忠实 HEAD）<small>名/路径混排 · 38pt 行错落 · 副标题弱 · badge 不成列</small></h2>
+    <div class="panels one">
+      <div class="panel t-light">
+  <div class="p-head"><span class="p-title">Relations · Callers of spawn</span><div class="seg"><span class="on">Callers</span><span>Calls</span><span>Implements</span><span>References</span></div></div>
+  <div class="p-body"><div class="brow root" style="padding-left:8px"><span class="tri">▾</span><span class="b-title strong">spawn<span class="b-loc">  …/task/spawn.rs:142</span></span></div>
+<div class="brow edge" style="padding-left:23px"><span class="tri">▾</span><span class="b-edgecol"><span class="b-title">Runtime::block_on<span class="b-loc">  …/runtime/runtime.rs:299</span></span><span class="b-sub">direct</span></span><span class="badge-bare verified">Verified</span></div>
+<div class="brow evidence" style="padding-left:38px"><span class="tri sp"></span><span class="b-ev">  block_on → spawn  …/runtime/runtime.rs:305</span></div>
+<div class="brow edge sel" style="padding-left:23px"><span class="tri sp"></span><span class="b-edgecol"><span class="b-title">JoinSet::spawn_on<span class="b-loc">  …/task/join_set.rs:210</span></span><span class="b-sub">direct · 3 call sites</span></span><span class="badge-bare verified">Verified</span></div>
+<div class="brow edge" style="padding-left:23px"><span class="tri sp"></span><span class="b-edgecol"><span class="b-title">LocalSet::spawn_local<span class="b-loc">  …/task/local.rs:333</span></span><span class="b-sub">virtual</span></span><span class="badge-bare verified">Verified</span></div>
+<div class="brow edge" style="padding-left:23px"><span class="tri sp"></span><span class="b-edgecol"><span class="b-title">‹external caller›</span><span class="b-sub">External · in dependency (rust-analyzer)</span></span></div>
+<div class="brow group" style="padding-left:23px"><span class="tri">▾</span><span class="b-group">SHOW 8 POSSIBLE MATCHES</span></div>
+<div class="brow edge" style="padding-left:38px"><span class="tri sp"></span><span class="b-edgecol"><span class="b-title">worker::run<span class="b-loc">  …/multi_thread/worker.rs:481</span></span><span class="b-sub">virtual · name match only</span></span><span class="badge-bare inferred">Inferred</span></div>
+<div class="brow edge" style="padding-left:38px"><span class="tri sp"></span><span class="b-edgecol"><span class="b-title">spawn_blocking_inner<span class="b-loc">  …/blocking/pool.rs:88</span></span><span class="b-sub">direct · heuristic also matched</span></span><span class="badge-bare inferred">Inferred</span></div></div>
+
+</div>
+    </div>
+    <div class="block-note"><b>并列问题：</b>① 符号名与 <code>path:line</code> 同行混排，难以扫读；② <code>.edge</code> 行 38pt，与 24pt 的折叠/证据行错落，节奏乱；③ dispatch/修饰词挤在灰色副标题里、容易忽略；④ badge 裸色文字、右侧不成列。另：用户 08-05 截图另见 <code>POSSIBLE / STRONG / PROBABLE</code> 空分组头——是否为 HEAD 残留由 <b>S0</b> 核实，若属实本轮一并删除空组渲染。</div>
+  </div>
+
+  <div class="block">
+    <h2><span class="tag after">AFTER · A</span>两行行式（path:line 作对齐次级行）<small>符号名主行 · 等宽路径+派发 chip 作次级行 · 行高统一 · 折叠行显式</small></h2>
+    <div class="panels">
+      <div class="panel t-light">
+  <div class="p-head"><span class="p-title">Relations · Callers of spawn</span><div class="seg"><span class="on">Callers</span><span>Calls</span><span>Implements</span><span>References</span></div></div>
+  <div class="p-body"><div class="arow root" style="padding-left:8px"><span class="tri">▾</span><div class="a-main"><div class="a-name strong">spawn</div><div class="a-meta"><span class="path" title="tokio/src/task/spawn.rs:142">…/task/spawn.rs:142</span></div></div></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri">▾</span><div class="a-main"><div class="a-name">Runtime::block_on</div><div class="a-meta"><span class="path" title="tokio/src/runtime/runtime.rs:299">…/runtime/runtime.rs:299</span><span class="chip">direct</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow evidence" style="padding-left:38px"><span class="tri sp"></span><span class="a-ev">block_on → spawn</span><span class="path dim" title="tokio/src/runtime/runtime.rs:305">…/runtime/runtime.rs:305</span></div>
+<div class="arow edge sel" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name">JoinSet::spawn_on</div><div class="a-meta"><span class="path" title="tokio/src/task/join_set.rs:210">…/task/join_set.rs:210</span><span class="chip">direct</span><span class="mods">3 call sites</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name">LocalSet::spawn_local</div><div class="a-meta"><span class="path" title="tokio/src/task/local.rs:333">…/task/local.rs:333</span><span class="chip">virtual</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name ext">‹external caller›</div><div class="a-meta"><span class="ext-meta">External · in dependency (rust-analyzer)</span></div></div></div>
+<div class="arow fold" style="padding-left:23px"><span class="tri">▾</span><span class="a-fold">Show possible matches</span><span class="count">8</span></div>
+<div class="arow edge" style="padding-left:38px"><span class="tri sp"></span><div class="a-main"><div class="a-name">worker::run</div><div class="a-meta"><span class="path" title="tokio/src/runtime/scheduler/multi_thread/worker.rs:481">…/multi_thread/worker.rs:481</span><span class="chip">virtual</span><span class="mods">name match only</span></div></div><span class="badge inferred" title="Inferred from source structure">Inferred</span></div>
+<div class="arow edge" style="padding-left:38px"><span class="tri sp"></span><div class="a-main"><div class="a-name">spawn_blocking_inner</div><div class="a-meta"><span class="path" title="tokio/src/runtime/blocking/pool.rs:88">…/blocking/pool.rs:88</span><span class="chip">direct</span><span class="mods">heuristic also matched</span></div></div><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div>
+
+</div>
+      <div class="panel t-dark">
+  <div class="p-head"><span class="p-title">Relations · Callers of spawn</span><div class="seg"><span class="on">Callers</span><span>Calls</span><span>Implements</span><span>References</span></div></div>
+  <div class="p-body"><div class="arow root" style="padding-left:8px"><span class="tri">▾</span><div class="a-main"><div class="a-name strong">spawn</div><div class="a-meta"><span class="path" title="tokio/src/task/spawn.rs:142">…/task/spawn.rs:142</span></div></div></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri">▾</span><div class="a-main"><div class="a-name">Runtime::block_on</div><div class="a-meta"><span class="path" title="tokio/src/runtime/runtime.rs:299">…/runtime/runtime.rs:299</span><span class="chip">direct</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow evidence" style="padding-left:38px"><span class="tri sp"></span><span class="a-ev">block_on → spawn</span><span class="path dim" title="tokio/src/runtime/runtime.rs:305">…/runtime/runtime.rs:305</span></div>
+<div class="arow edge sel" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name">JoinSet::spawn_on</div><div class="a-meta"><span class="path" title="tokio/src/task/join_set.rs:210">…/task/join_set.rs:210</span><span class="chip">direct</span><span class="mods">3 call sites</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name">LocalSet::spawn_local</div><div class="a-meta"><span class="path" title="tokio/src/task/local.rs:333">…/task/local.rs:333</span><span class="chip">virtual</span></div></div><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div>
+<div class="arow edge" style="padding-left:23px"><span class="tri sp"></span><div class="a-main"><div class="a-name ext">‹external caller›</div><div class="a-meta"><span class="ext-meta">External · in dependency (rust-analyzer)</span></div></div></div>
+<div class="arow fold" style="padding-left:23px"><span class="tri">▾</span><span class="a-fold">Show possible matches</span><span class="count">8</span></div>
+<div class="arow edge" style="padding-left:38px"><span class="tri sp"></span><div class="a-main"><div class="a-name">worker::run</div><div class="a-meta"><span class="path" title="tokio/src/runtime/scheduler/multi_thread/worker.rs:481">…/multi_thread/worker.rs:481</span><span class="chip">virtual</span><span class="mods">name match only</span></div></div><span class="badge inferred" title="Inferred from source structure">Inferred</span></div>
+<div class="arow edge" style="padding-left:38px"><span class="tri sp"></span><div class="a-main"><div class="a-name">spawn_blocking_inner</div><div class="a-meta"><span class="path" title="tokio/src/runtime/blocking/pool.rs:88">…/blocking/pool.rs:88</span><span class="chip">direct</span><span class="mods">heuristic also matched</span></div></div><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div>
+
+</div>
+    </div>
+  </div>
+
+  <div class="block">
+    <h2><span class="tag after">AFTER · B</span>单行列式（path:line 作对齐次级列）<small>状态点+符号名 · 右侧等宽路径/派发/badge 成列 · 更密、更易扫</small></h2>
+    <div class="panels">
+      <div class="panel t-light">
+  <div class="p-head"><span class="p-title">Relations · Callers of spawn</span><div class="seg"><span class="on">Callers</span><span>Calls</span><span>Implements</span><span>References</span></div></div>
+  <div class="p-body"><div class="growp root"><div class="g-name" style="padding-left:0px"><span class="tri">▾</span><span class="dot unresolved"></span><span class="strong">spawn</span></div><div class="g-path" title="tokio/src/task/spawn.rs:142">spawn.rs:142</div><div class="g-chip"></div><div class="g-badge"></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri">▾</span><span class="dot verified"></span><span>Runtime::block_on</span></div><div class="g-path" title="tokio/src/runtime/runtime.rs:299">runtime.rs:299</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp evidence"><div class="g-span" style="padding-left:30px"><span class="tri sp"></span><span class="a-ev">block_on → spawn</span><span class="path dim" title="tokio/src/runtime/runtime.rs:305">runtime.rs:305</span></div></div>
+<div class="growp edge sel"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot verified"></span><span>JoinSet::spawn_on</span></div><div class="g-path" title="tokio/src/task/join_set.rs:210">join_set.rs:210</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot verified"></span><span>LocalSet::spawn_local</span></div><div class="g-path" title="tokio/src/task/local.rs:333">local.rs:333</div><div class="g-chip"><span class="chip">virtual</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot unresolved"></span><span class="ext">‹external caller›</span></div><div class="g-path ext-meta">External · in dependency</div><div class="g-chip"></div><div class="g-badge"></div></div>
+<div class="growp fold"><div class="g-span" style="padding-left:15px"><span class="tri">▾</span><span class="a-fold">Show possible matches</span><span class="count">8</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:30px"><span class="tri sp"></span><span class="dot inferred"></span><span>worker::run</span></div><div class="g-path" title="tokio/src/runtime/scheduler/multi_thread/worker.rs:481">worker.rs:481</div><div class="g-chip"><span class="chip">virtual</span></div><div class="g-badge"><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:30px"><span class="tri sp"></span><span class="dot inferred"></span><span>spawn_blocking_inner</span></div><div class="g-path" title="tokio/src/runtime/blocking/pool.rs:88">pool.rs:88</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div></div>
+
+</div>
+      <div class="panel t-dark">
+  <div class="p-head"><span class="p-title">Relations · Callers of spawn</span><div class="seg"><span class="on">Callers</span><span>Calls</span><span>Implements</span><span>References</span></div></div>
+  <div class="p-body"><div class="growp root"><div class="g-name" style="padding-left:0px"><span class="tri">▾</span><span class="dot unresolved"></span><span class="strong">spawn</span></div><div class="g-path" title="tokio/src/task/spawn.rs:142">spawn.rs:142</div><div class="g-chip"></div><div class="g-badge"></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri">▾</span><span class="dot verified"></span><span>Runtime::block_on</span></div><div class="g-path" title="tokio/src/runtime/runtime.rs:299">runtime.rs:299</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp evidence"><div class="g-span" style="padding-left:30px"><span class="tri sp"></span><span class="a-ev">block_on → spawn</span><span class="path dim" title="tokio/src/runtime/runtime.rs:305">runtime.rs:305</span></div></div>
+<div class="growp edge sel"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot verified"></span><span>JoinSet::spawn_on</span></div><div class="g-path" title="tokio/src/task/join_set.rs:210">join_set.rs:210</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot verified"></span><span>LocalSet::spawn_local</span></div><div class="g-path" title="tokio/src/task/local.rs:333">local.rs:333</div><div class="g-chip"><span class="chip">virtual</span></div><div class="g-badge"><span class="badge verified" title="Verified by rust-analyzer">Verified</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:15px"><span class="tri sp"></span><span class="dot unresolved"></span><span class="ext">‹external caller›</span></div><div class="g-path ext-meta">External · in dependency</div><div class="g-chip"></div><div class="g-badge"></div></div>
+<div class="growp fold"><div class="g-span" style="padding-left:15px"><span class="tri">▾</span><span class="a-fold">Show possible matches</span><span class="count">8</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:30px"><span class="tri sp"></span><span class="dot inferred"></span><span>worker::run</span></div><div class="g-path" title="tokio/src/runtime/scheduler/multi_thread/worker.rs:481">worker.rs:481</div><div class="g-chip"><span class="chip">virtual</span></div><div class="g-badge"><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div>
+<div class="growp edge"><div class="g-name" style="padding-left:30px"><span class="tri sp"></span><span class="dot inferred"></span><span>spawn_blocking_inner</span></div><div class="g-path" title="tokio/src/runtime/blocking/pool.rs:88">pool.rs:88</div><div class="g-chip"><span class="chip">direct</span></div><div class="g-badge"><span class="badge inferred" title="Inferred from source structure">Inferred</span></div></div></div>
+
+</div>
+    </div>
+  </div>
+</div>
+</body></html>

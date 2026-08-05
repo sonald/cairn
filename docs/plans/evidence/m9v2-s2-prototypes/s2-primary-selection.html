@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>M9 · S2 主选中「包裹」效果原型</title>
+<style>
+
+:root { color-scheme: light dark; }
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 32px 28px 56px;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  background: #eef0f3; color: #1c2024;
+}
+@media (prefers-color-scheme: dark) {
+  body { background: #16181c; color: #e6e8eb; }
+  .page-head p, .legend .lg-note { color: #a7adb5 !important; }
+  .variant .vhead p { color: #9aa0a8 !important; }
+  .legend, .variant { background: #1f2227 !important; border-color: #2c3037 !important; }
+}
+.wrap { max-width: 1180px; margin: 0 auto; }
+.page-head h1 { margin: 0 0 6px; font-size: 22px; letter-spacing: -0.01em; }
+.page-head .kicker { font-size: 12px; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: #6b7280; margin-bottom: 10px; }
+.page-head p { margin: 0 0 4px; max-width: 780px; color: #4b5563; }
+
+.legend { display: flex; flex-wrap: wrap; gap: 18px 26px; align-items: center;
+  margin: 22px 0 30px; padding: 14px 18px; border: 1px solid #dfe2e7;
+  border-radius: 12px; background: #fff; }
+.legend .lg { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.legend .sw { width: 30px; height: 20px; border-radius: 5px; flex: none;
+  display: inline-block; }
+.legend .sw.l1 { background: #FFDD73; box-shadow: inset 0 0 0 1.6px #D8952A; }
+.legend .sw.l2 { background: #FFF1A8; }
+.legend .sw.l3 { background: #F3F6FA; border: 1px solid #e3e7ee; }
+.legend .lg-note { flex-basis: 100%; font-size: 12px; color: #6b7280; margin: 0; }
+
+.variant { border: 1px solid #dfe2e7; border-radius: 14px; background: #fff;
+  padding: 18px 18px 22px; margin-bottom: 22px; }
+.variant .vhead { margin-bottom: 14px; }
+.variant h2 { margin: 0 0 4px; font-size: 16px; display: flex; align-items: center; gap: 10px; }
+.variant h2 .vk { font: 700 12px/1 ui-monospace, monospace; color: #fff;
+  background: #3b6fd8; padding: 5px 7px; border-radius: 6px; }
+.variant .vhead p { margin: 0; font-size: 13px; color: #56606b; max-width: 860px; }
+
+.cells { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+@media (max-width: 860px) { .cells { grid-template-columns: 1fr; } }
+
+.cell { border-radius: 10px; overflow: hidden; border: 1px solid rgba(0,0,0,.16);
+  background: var(--bg); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+.cell .cbar { font-size: 11px; font-weight: 600; letter-spacing: .04em;
+  padding: 7px 11px; color: var(--fg); opacity: .72;
+  border-bottom: 1px solid rgba(128,128,128,.22);
+  display: flex; align-items: center; gap: 7px; }
+.cell .cbar .dot { width: 8px; height: 8px; border-radius: 50%;
+  background: var(--fn); opacity: .8; }
+
+.code { margin: 0; padding: 10px 12px 12px;
+  font: 12px/1.85 ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  color: var(--fg); overflow-x: auto; }
+.row { display: block; white-space: pre; }
+.row.cur { background: var(--cur); }
+.ln { display: inline-block; width: 2.1em; text-align: right; margin-right: 14px;
+  color: var(--ln); user-select: none; }
+.lc { }
+.t.kw { color: var(--kw); }
+.t.ty { color: var(--ty); }
+.t.fn { color: var(--fn); }
+.t.str { color: var(--str); }
+.t.num { color: var(--num); }
+.t.com { color: var(--com); font-style: italic; }
+.t.tgt { border-radius: 3px; padding: 0 1.5px; }
+.t.tgt.occ { background: var(--occ); }
+
+.theme-light { --bg:#FFFFFF; --fg:#1F2328; --ln:#8C959F; --cur:#F3F6FA; --occ:#FFF1A8; --kw:#9C36B5; --ty:#087E8B; --fn:#175CD3; --str:#B42318; --num:#7F56D9; --com:#4D7C0F; }
+.theme-dark { --bg:#1E1E1E; --fg:#D4D4D4; --ln:#858585; --cur:#2A2D2E; --occ:#4A4424; --kw:#E879F9; --ty:#67E8F9; --fn:#84ADFF; --str:#FDA29B; --num:#C4B5FD; --com:#A3E635; }
+.theme-si { --bg:#F5F0E6; --fg:#1F2733; --ln:#8B8272; --cur:#EDE6D8; --occ:#E2D3A6; --kw:#7A1F1F; --ty:#245B78; --fn:#163A5F; --str:#8A3C2E; --num:#6E3B6F; --com:#526B45; }
+.cell.var-a.theme-light .tgt.primary { background:#FFDD73; box-shadow: inset 0 0 0 1.6px #D8952A; border-radius:4px; }
+.cell.var-a.theme-dark .tgt.primary { background:#6E611F; box-shadow: inset 0 0 0 1.6px #DBB93F; border-radius:4px; }
+.cell.var-a.theme-si .tgt.primary { background:#E7C879; box-shadow: inset 0 0 0 1.6px #B08733; border-radius:4px; }
+.cell.var-b.theme-light .tgt.primary { background:rgba(23,92,211,0.13); box-shadow: inset 0 0 0 1.6px #175CD3; border-radius:4px; }
+.cell.var-b.theme-dark .tgt.primary { background:rgba(132,173,255,0.20); box-shadow: inset 0 0 0 1.6px #84ADFF; border-radius:4px; }
+.cell.var-b.theme-si .tgt.primary { background:rgba(22,58,95,0.12); box-shadow: inset 0 0 0 1.6px #163A5F; border-radius:4px; }
+.cell.var-c.theme-light .tgt.primary { background:#175CD3; color:#FFFFFF; box-shadow:none; border-radius:5px; font-weight:600; }
+.cell.var-c.theme-dark .tgt.primary { background:#3B82F6; color:#FFFFFF; box-shadow:none; border-radius:5px; font-weight:600; }
+.cell.var-c.theme-si .tgt.primary { background:#163A5F; color:#F5F0E6; box-shadow:none; border-radius:5px; font-weight:600; }
+.cell.var-d.theme-light .tgt.primary { background:transparent; box-shadow: inset 0 0 0 1.6px #D8952A; border-radius:4px; }
+.cell.var-d.theme-dark .tgt.primary { background:transparent; box-shadow: inset 0 0 0 1.6px #DBB93F; border-radius:4px; }
+.cell.var-d.theme-si .tgt.primary { background:transparent; box-shadow: inset 0 0 0 1.6px #B08733; border-radius:4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="page-head">
+    <div class="kicker">M9 v2 · S2 · Reader 主选中</div>
+    <h1>符号主选中「包裹」效果 — 设计原型对照</h1>
+    <p>目标（§1.1）：点击任意符号后，一眼看出“我选的是<strong>这一个</strong>”，
+       并与同名 occurrence、当前行背景三层清晰可辨、换主题不失效。</p>
+    <p>每个单元格都是同一段真实 Rust 代码，符号 <code>recursive</code> 出现 6 次：
+       <strong>1 个主选中</strong>（第 3 行 <code>self.recursive</code>）、其余为同名
+       occurrence，且第 3 行本身是当前行——三层在同一行内同时出现，便于比对对比度。
+       配色取自 <code>ReaderSettings.swift</code> 的真实主题值。</p>
+  </div>
+
+  <div class="legend">
+    <div class="lg"><span class="sw l1"></span>L1 主选中（本轮新增）</div>
+    <div class="lg"><span class="sw l2"></span>L2 同名 occurrence（现有）</div>
+    <div class="lg"><span class="sw l3"></span>L3 当前行背景（现有，第三层）</div>
+    <p class="lg-note">下面四种 A–D 是主选中层（L1）的候选画法；L2 / L3 在四种里保持一致。</p>
+  </div>
+
+<section class="variant">
+  <div class="vhead">
+    <h2><span class="vk">A</span>· 深填充 + 描边环</h2>
+    <p>同色系加深（琥珀）＋ 圆角描边。候选，<b>未选</b>：与同名 occurrence 同族，但色相不分层，
+       "我点的这一个"与其它匹配区分度不足（计划 v2.2 起选定 Variant B）。</p>
+  </div>
+  <div class="cells">
+<div class="cell var-a theme-light">
+  <div class="cbar"><span class="dot"></span>Light</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-a theme-dark">
+  <div class="cbar"><span class="dot"></span>Dark</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-a theme-si">
+  <div class="cbar"><span class="dot"></span>SI Classic</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+  </div>
+</section>
+<section class="variant">
+  <div class="vhead">
+    <h2><span class="vk">B</span>· 蓝色强调环</h2>
+    <p><b>已选（计划 v2.2 裁决，S2 阶段二样式）</b>：用主题的函数名蓝作强调，
+       以色相把“我点的这一个”（蓝）和“其它匹配”（琥珀）分开。</p>
+  </div>
+  <div class="cells">
+<div class="cell var-b theme-light">
+  <div class="cbar"><span class="dot"></span>Light</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-b theme-dark">
+  <div class="cbar"><span class="dot"></span>Dark</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-b theme-si">
+  <div class="cbar"><span class="dot"></span>SI Classic</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+  </div>
+</section>
+<section class="variant">
+  <div class="vhead">
+    <h2><span class="vk">C</span>· 实心药丸（token pill）</h2>
+    <p>实心强调填充＋反白文字。最强的“就是这一个”信号，但改变了文字颜色、视觉最重。</p>
+  </div>
+  <div class="cells">
+<div class="cell var-c theme-light">
+  <div class="cbar"><span class="dot"></span>Light</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-c theme-dark">
+  <div class="cbar"><span class="dot"></span>Dark</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-c theme-si">
+  <div class="cbar"><span class="dot"></span>SI Classic</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+  </div>
+</section>
+<section class="variant">
+  <div class="vhead">
+    <h2><span class="vk">D</span>· 描边环（透明填充）</h2>
+    <p>只有圆角描边、几乎不填充、文字不变色。最克制，最不打扰阅读流。</p>
+  </div>
+  <div class="cells">
+<div class="cell var-d theme-light">
+  <div class="cbar"><span class="dot"></span>Light</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-d theme-dark">
+  <div class="cbar"><span class="dot"></span>Dark</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+<div class="cell var-d theme-si">
+  <div class="cbar"><span class="dot"></span>SI Classic</div>
+  <div class="code"><span class="row"><span class="ln">1</span><span class="lc"><span class="t kw">impl</span> <span class="t ty">DirBuilder</span> {</span></span><span class="row"><span class="ln">2</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">fn</span> <span class="t tgt occ">recursive</span>(&amp;<span class="t kw">mut</span> <span class="t kw">self</span>, <span class="t tgt occ">recursive</span>: <span class="t ty">bool</span>) -&gt; &amp;<span class="t kw">mut</span> <span class="t ty">Self</span> {</span></span><span class="row cur"><span class="ln">3</span><span class="lc">        <span class="t kw">self</span>.<span class="t tgt primary">recursive</span> = <span class="t tgt occ">recursive</span>;</span></span><span class="row"><span class="ln">4</span><span class="lc">        <span class="t kw">self</span></span></span><span class="row"><span class="ln">5</span><span class="lc">    }</span></span><span class="row"><span class="ln">6</span><span class="lc">    <span class="t kw">pub</span> <span class="t kw">async</span> <span class="t kw">fn</span> <span class="t fn">create</span>(&amp;<span class="t kw">self</span>, path: &amp;<span class="t ty">Path</span>) -&gt; <span class="t ty">Result</span>&lt;()&gt; {</span></span><span class="row"><span class="ln">7</span><span class="lc">        <span class="t kw">let</span> <span class="t kw">mut</span> builder = <span class="t ty">fs</span>::<span class="t ty">DirBuilder</span>::<span class="t fn">new</span>();</span></span><span class="row"><span class="ln">8</span><span class="lc">        builder.<span class="t tgt occ">recursive</span>(<span class="t kw">self</span>.<span class="t tgt occ">recursive</span>);</span></span><span class="row"><span class="ln">9</span><span class="lc">        <span class="t fn">asyncify</span>(<span class="t kw">move</span> || builder.<span class="t fn">create</span>(path)).<span class="t kw">await</span></span></span><span class="row"><span class="ln">10</span><span class="lc">    }</span></span><span class="row"><span class="ln">11</span><span class="lc">}</span></span></div>
+</div>
+  </div>
+</section>
+</div>
+</body>
+</html>
