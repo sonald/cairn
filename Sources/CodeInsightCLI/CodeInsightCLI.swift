@@ -818,9 +818,11 @@ extension CodeInsight {
         @OptionGroup var global: GlobalOptions
 
         func run() throws {
+            let corpusURL = URL(fileURLWithPath: corpus, isDirectory: true)
+            try Self.validateCorpus(corpusURL)
             let report = try evaluateGoldSet(
                 at: URL(fileURLWithPath: goldFile),
-                corpus: URL(fileURLWithPath: corpus, isDirectory: true),
+                corpus: corpusURL,
                 persist: persist
             )
             if global.json {
@@ -829,6 +831,52 @@ extension CodeInsight {
                 printGoldSet(report)
             }
             if report.unexpectedFailures > 0 { throw ExitCode.failure }
+        }
+
+        private static func validateCorpus(_ url: URL) throws {
+            let fm = FileManager.default
+            var isDir: ObjCBool = false
+
+            guard fm.fileExists(atPath: url.path, isDirectory: &isDir),
+                  isDir.boolValue
+            else {
+                throw ValidationError(
+                    "corpus not found or not a directory: \(url.path)\n"
+                        + "Run: bash scripts/provision-corpora.sh"
+                )
+            }
+
+            let gitDir = url.appendingPathComponent(".git")
+            guard fm.fileExists(atPath: gitDir.path) else {
+                throw ValidationError(
+                    "corpus has no .git directory: \(url.path)\n"
+                        + "A git history is required for rust-analyzer readiness.\n"
+                        + "The directory may have been destroyed by the macOS "
+                        + "temp-file cleaner.\n"
+                        + "Run: bash scripts/provision-corpora.sh"
+                )
+            }
+
+            let headFile = gitDir.appendingPathComponent("HEAD")
+            guard fm.fileExists(atPath: headFile.path) else {
+                throw ValidationError(
+                    "corpus .git is corrupted (no HEAD): \(url.path)\n"
+                        + "Remove the directory and re-provision:\n"
+                        + "  rm -rf '\(url.path)'\n"
+                        + "  bash scripts/provision-corpora.sh"
+                )
+            }
+
+            let cargoToml = url.appendingPathComponent("Cargo.toml")
+            guard fm.fileExists(atPath: cargoToml.path) else {
+                throw ValidationError(
+                    "corpus has no Cargo.toml: \(url.path)\n"
+                        + "Source files may have been destroyed.\n"
+                        + "Remove the directory and re-provision:\n"
+                        + "  rm -rf '\(url.path)'\n"
+                        + "  bash scripts/provision-corpora.sh"
+                )
+            }
         }
     }
 }
