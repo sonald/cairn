@@ -221,6 +221,38 @@ func mismatchedStorageSkipsTypography() throws {
     #expect(reader.view.textLayoutManager?.renderingAttributesValidator == nil)
 }
 
+@MainActor
+@Test
+func activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() throws {
+    let source = "fn greet() { greet(); }\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let reader = ReaderTextView()
+    reader.display(document: ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    ))
+
+    let byteOffset = UInt32(try #require(source.range(of: "greet"))
+        .lowerBound.utf16Offset(in: source))
+    #expect(reader.activate(atByteOffset: byteOffset) == 2)
+    #expect(reader.primarySelectionRange?.length == 5)
+    #expect(reader.view.selectedRange().length == 5)
+    let selectedBackground = try #require(
+        reader.view.selectedTextAttributes[.backgroundColor] as? NSColor
+    )
+    #expect(selectedBackground.alphaComponent == 0)
+
+    reader.clearOccurrences()
+    #expect(reader.primarySelectionRange == nil)
+    #expect(reader.view.selectedRange().length == 0)
+    let restoredBackground = try #require(
+        reader.view.selectedTextAttributes[.backgroundColor] as? NSColor
+    )
+    #expect(restoredBackground.alphaComponent > 0)
+}
+
 private func highlightedDocument() throws -> ReaderDocument {
     let bytes = Array("fn greet() { // hi\n}\n".utf8)
     let highlighted = try RustHighlighter().highlight(bytes: bytes)

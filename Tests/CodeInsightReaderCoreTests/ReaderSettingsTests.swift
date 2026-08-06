@@ -147,6 +147,35 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
 }
 
 @Test
+func readerThemeProvidesChromeSurfacesForEveryExplicitTheme() {
+    let light = ReaderTheme(settings: ReaderSettings(theme: .light))
+    #expect(light.chromeSelectionRGB(isDark: false) == 0xE7F0FF)
+    #expect(light.chromeSecondaryRGB(isDark: false) == 0x5A6472)
+    #expect(light.verifiedRGB(isDark: false) == 0x1A7F37)
+    #expect(light.inferredRGB(isDark: false) == 0x175CD3)
+    #expect(light.chipBackgroundRGB(isDark: false) == 0xEFF1F4)
+    #expect(light.primarySelectionFillAlpha(isDark: false) == 0.13)
+
+    let dark = ReaderTheme(settings: ReaderSettings(theme: .dark))
+    #expect(dark.chromeRGB(isDark: true) == 0x252528)
+    #expect(dark.chromeHeaderRGB(isDark: true) == 0x2C2C30)
+    #expect(dark.chromeDividerRGB(isDark: true) == 0x34363B)
+    #expect(dark.accentRGB(isDark: true) == 0x84ADFF)
+    #expect(dark.verifiedRGB(isDark: true) == 0x4EC777)
+    #expect(dark.inferredFillAlpha(isDark: true) == 0.18)
+    #expect(dark.primarySelectionFillAlpha(isDark: true) == 0.20)
+
+    let classic = ReaderTheme(settings: ReaderSettings(theme: .siClassic))
+    #expect(classic.chromeRGB(isDark: false) == 0xEEE7D6)
+    #expect(classic.chromeHeaderRGB(isDark: false) == 0xE7DEC9)
+    #expect(classic.chromeSelectionRGB(isDark: false) == 0xE7DAB9)
+    #expect(classic.accentRGB(isDark: false) == 0x163A5F)
+    #expect(classic.chipForegroundRGB(isDark: false) == 0x6E6857)
+    #expect(classic.verifiedFillAlpha(isDark: false) == 0.15)
+    #expect(classic.primarySelectionFillAlpha(isDark: false) == 0.12)
+}
+
+@Test
 func readerThemeProvidesDistinctDiffColorsForEveryTheme() {
     for selection in ReaderSettings.Theme.allCases {
         let theme = ReaderTheme(settings: ReaderSettings(theme: selection))

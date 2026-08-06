@@ -1075,6 +1075,8 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
     #expect(matchingRows.count == 1)
     #expect(edge.badge == "Verified")
     #expect(edge.subtitle == "direct · heuristic also matched · 2 call sites")
+    #expect(edge.dispatchLabel == "direct")
+    #expect(edge.modifiers == ["heuristic also matched", "2 call sites"])
     var selectedOffsets: [UInt32] = []
     model.onSelect = { selectedOffsets.append($0.target?.byteOffset ?? .max) }
     model.select(edge)

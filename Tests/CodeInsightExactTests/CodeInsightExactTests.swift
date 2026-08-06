@@ -786,7 +786,88 @@ func rustAnalyzerDoesNotNegotiateMissingCallHierarchyProvider() throws {
 }
 
 @Test
-func rustAnalyzerRetryDelayDoesNotHoldTheOperationLock() throws {
+func lspClientWaitsForServerStatusQuiescent() throws {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        serverStatusQuiescent: false,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    defer {
+        client.close(grace: 1)
+        _ = done.wait(timeout: .now() + 1)
+    }
+
+    _ = try client.initialize(
+        rootURL: URL(fileURLWithPath: "/fixture", isDirectory: true),
+        timeout: 1
+    )
+    #expect(!client.isQuiescent)
+    Thread.detachNewThread {
+        Thread.sleep(forTimeInterval: 0.05)
+        try? server.sendServerStatus(quiescent: true)
+    }
+    try client.waitForQuiescence(method: "test/readiness", timeout: 1)
+
+    #expect(client.isQuiescent)
+    #expect(server.receivedServerStatusCapability)
+}
+
+@Test
+func rustAnalyzerReturnsReadyNullWithoutBlindRetry() throws {
+    try withFakeRustAnalyzerSession(
+        requestResponder: { method, _ in
+            method == "textDocument/definition" ? .result(NSNull()) : .useDefault
+        },
+        serverCheck: { server in
+            #expect(
+                server.requestMethods.filter { $0 == "textDocument/definition" }
+                    .count == 1
+            )
+            #expect(server.receivedServerStatusCapability)
+        }
+    ) { session in
+        let result = try session.definition(file: "src/main.rs", byteOffset: 0)
+        #expect(result == nil)
+    }
+}
+
+@Test
+func rustAnalyzerCancelledReadinessWaitDoesNotSendRequest() throws {
+    try withFakeRustAnalyzerSession(
+        serverStatusQuiescent: false,
+        serverCheck: { server in
+            #expect(
+                !server.requestMethods.contains("textDocument/definition")
+            )
+        }
+    ) { session in
+        let batch = ExactRequestBatch()
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            _ = try? session.definition(
+                file: "src/main.rs",
+                byteOffset: 0,
+                batch: batch
+            )
+            finished.signal()
+        }
+        Thread.sleep(forTimeInterval: 0.05)
+        session.cancel(batch: batch)
+        #expect(finished.wait(timeout: .now() + 1) == .success)
+    }
+}
+
+@Test
+func rustAnalyzerContentModifiedRetryDoesNotBlockOperationLock() throws {
     let responses = RetryResponseState()
     try withFakeRustAnalyzerSession(
         requestResponder: { method, _ in
@@ -802,8 +883,8 @@ func rustAnalyzerRetryDelayDoesNotHoldTheOperationLock() throws {
             _ = try? session.definition(file: "src/main.rs", byteOffset: 0)
             firstDone.signal()
         }
-        #expect(waitUntil("first retry request reaches the provider", timeout: 1) {
-            responses.count == 1
+        #expect(waitUntil("content-modified request reaches the provider", timeout: 1) {
+            responses.count >= 1
         })
 
         Thread.detachNewThread {
@@ -1162,7 +1243,7 @@ func sandboxDeniesProjectWrites() throws {
 
     #expect(result.status != 0)
     #expect(!FileManager.default.fileExists(atPath: denied.path))
-    #expect(sandbox.environment["CARGO_NET_OFFLINE"] == "1")
+    #expect(sandbox.environment["CARGO_NET_OFFLINE"] == "true")
     print("sandbox-semantics projectWrite=denied status=\(result.status)")
 }
 
@@ -1257,7 +1338,7 @@ func trustedSandboxAllowsTargetButStillDeniesNetwork() throws {
     if write.status != 0 { print("target-write output=\(write.output)") }
     #expect(write.status == 0)
     #expect(try String(contentsOf: allowed, encoding: .utf8) == "target")
-    #expect(writeSandbox.environment["CARGO_NET_OFFLINE"] == "1")
+    #expect(writeSandbox.environment["CARGO_NET_OFFLINE"] == "true")
 
     let (listener, port) = try localListener()
     defer { Darwin.close(listener) }
@@ -1869,6 +1950,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedImplementationCapability = false
     private var _receivedCallHierarchyCapability = false
     private var _receivedReferencesCapability = false
+    private var _receivedServerStatusCapability = false
     private var _referenceIncludeDeclarations: [Bool] = []
     private let implementationProvider: Any?
     private let implementationResult: Any
@@ -1878,6 +1960,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private let outgoingCallResult: Any
     private let referencesProvider: Any?
     private let referenceResult: Any
+    private let serverStatusQuiescent: Bool
     private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
     private var _error: Error?
 
@@ -1897,6 +1980,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     var receivedReferencesCapability: Bool {
         locked { _receivedReferencesCapability }
     }
+    var receivedServerStatusCapability: Bool {
+        locked { _receivedServerStatusCapability }
+    }
     var referenceIncludeDeclarations: [Bool] {
         locked { _referenceIncludeDeclarations }
     }
@@ -1913,6 +1999,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         outgoingCallResult: Any = NSNull(),
         referencesProvider: Any? = true,
         referenceResult: Any = NSNull(),
+        serverStatusQuiescent: Bool = true,
         requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
         done: @escaping () -> Void
     ) {
@@ -1926,6 +2013,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         self.outgoingCallResult = outgoingCallResult
         self.referencesProvider = referencesProvider
         self.referenceResult = referenceResult
+        self.serverStatusQuiescent = serverStatusQuiescent
         self.requestResponder = requestResponder
         self.done = done
     }
@@ -1980,6 +2068,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     let capabilities = params?["capabilities"] as? [String: Any]
                     let textDocument = capabilities?["textDocument"]
                         as? [String: Any]
+                    let experimental = capabilities?["experimental"]
+                        as? [String: Any]
                     locked {
                         _receivedImplementationCapability =
                             textDocument?["implementation"] != nil
@@ -1987,6 +2077,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                             textDocument?["callHierarchy"] != nil
                         _receivedReferencesCapability =
                             textDocument?["references"] != nil
+                        _receivedServerStatusCapability =
+                            experimental?["serverStatusNotification"] as? Bool
+                                == true
                     }
                     try write([
                         "jsonrpc": "2.0",
@@ -2020,6 +2113,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                             "capabilities": serverCapabilities,
                         ],
                     ])
+                    if serverStatusQuiescent {
+                        try sendServerStatus(quiescent: true)
+                    }
                 case "textDocument/definition":
                     try write([
                         "jsonrpc": "2.0", "id": id,
@@ -2092,6 +2188,14 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         return false
     }
 
+    func sendServerStatus(quiescent: Bool) throws {
+        try write([
+            "jsonrpc": "2.0",
+            "method": "experimental/serverStatus",
+            "params": ["health": "ok", "quiescent": quiescent],
+        ])
+    }
+
     private func write(_ message: [String: Any]) throws {
         try output.write(contentsOf: LSPFraming.encode(message))
     }
@@ -2122,6 +2226,7 @@ private func withFakeRustAnalyzerSession<T>(
     outgoingCallResult: Any = NSNull(),
     referencesProvider: Any? = true,
     referenceResult: Any = NSNull(),
+    serverStatusQuiescent: Bool = true,
     requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
     serverCheck: ((PipeFakeLSPServer) -> Void)? = nil,
     body: (any ExactSession) throws -> T
@@ -2141,6 +2246,7 @@ private func withFakeRustAnalyzerSession<T>(
         outgoingCallResult: outgoingCallResult,
         referencesProvider: referencesProvider,
         referenceResult: referenceResult,
+        serverStatusQuiescent: serverStatusQuiescent,
         requestResponder: requestResponder,
         done: { done.signal() }
     )

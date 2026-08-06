@@ -70,6 +70,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var lastOpenedProjectRoot: URL?
     private var pendingRecentProjectRoot: URL?
     private var pendingTabRestore: TabStripModel.Tab?
+    private var explicitNavigationInProgress = false
 
     init(
         model: AppModel,
@@ -86,6 +87,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         self.recordsRecentProjects = recordsRecentProjects
         self.onChooseProject = onChooseProject
         self.onShowSettings = onShowSettings
+        sidebarController.setSplitAutosaveName(
+            offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
+        )
         contextController = ContextWindowViewController(model: model.contextWindow)
         relationController = RelationWindowController(model: model.relationTree)
         relationController.view.frame.size.width = 300
@@ -274,10 +278,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 sidebarController.highlightOutline(at: offset)
             }
         }
-        readerController.onReadingPositionChange = { [weak self] offset in
-            guard let self else { return }
+        readerController.onReadingPositionChange = { [weak model] offset in
+            model?.tabStrip.updateActiveScroll(offset)
+        }
+        readerController.onOutlineFollowPositionChange = { [weak self] offset in
+            guard let self, !explicitNavigationInProgress else { return }
             sidebarController.highlightOutline(at: offset)
-            model.tabStrip.updateActiveScroll(offset)
+        }
+        readerController.onLiveScroll = { [weak self] in
+            self?.explicitNavigationInProgress = false
         }
         readerController.onSelectionChange = { [weak self] offset in
             guard let self else { return }
@@ -455,6 +464,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func selfTestActivateReading(at byteOffset: UInt32) -> Int {
         readerController.selfTestActivate(at: byteOffset)
     }
+    var selfTestPrimarySelectionRange: NSRange? {
+        readerController.selfTestPrimarySelectionRange
+    }
+    var selfTestSelectedOutlineRow: Int {
+        sidebarController.selfTestSelectedOutlineRow
+    }
+    func selfTestNavigate(to file: URL, byteOffset: UInt32) {
+        navigate(to: file, byteOffset: byteOffset)
+    }
+    func selfTestEmitOutlineFollow(at byteOffset: UInt32) {
+        readerController.selfTestEmitOutlineFollow(at: byteOffset)
+    }
+    func selfTestPostLiveScroll() {
+        readerController.selfTestPostLiveScroll()
+    }
 
     var selfTestReferenceScannedCount: Int {
         readerController.selfTestReferenceScannedCount
@@ -534,6 +558,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestSidebarDividerSurvivesPlaceholderRefresh: Bool {
         sidebarController.selfTestDividerSurvivesPlaceholderRefresh()
     }
+    var selfTestSidebarDividerPersistsAcrossRebuild: Bool {
+        sidebarController.selfTestDividerPersistsAcrossRebuild()
+    }
     var selfTestContextPlaceholderText: String? {
         contextController.selfTestPlaceholderText
     }
@@ -569,6 +596,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestStatusBarFrameInContentView: NSRect {
         guard let contentView = window?.contentView else { return .zero }
         return statusBar.convert(statusBar.bounds, to: contentView)
+    }
+    var selfTestStatusBarBackgroundColor: NSColor? {
+        statusBar.layer?.backgroundColor.flatMap(NSColor.init(cgColor:))
     }
     var selfTestStatusBarVisible: Bool {
         guard selfTestViewIsVisibleInWindow(statusBar) else { return false }
@@ -1027,8 +1057,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .light, .siClassic: NSAppearance(named: .aqua)
         case .auto: nil
         }
+        let theme = ReaderTheme(settings: settings)
+        window?.backgroundColor = theme.chromeColor
+        window?.titlebarAppearsTransparent = true
+        statusBar.wantsLayer = true
+        statusBar.layer?.backgroundColor = theme.chromeColor.cgColor
         readerController.apply(settings: settings)
         secondaryReaderController.apply(settings: settings)
+        sidebarController.apply(settings: settings)
+        relationController.apply(settings: settings)
         contextController.apply(settings: settings)
     }
 
@@ -1321,6 +1358,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 if let file = model.selectedFile,
                    let offset = model.selectedByteOffset
                 {
+                    explicitNavigationInProgress = true
                     readerController.navigate(
                         to: file,
                         byteOffset: offset,
@@ -1890,6 +1928,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func navigate(to file: URL, byteOffset: UInt32? = nil) {
+        if byteOffset != nil { explicitNavigationInProgress = true }
         let current = currentJumpRecord()
         captureActiveTabState()
         let existingTab = model.tabStrip.tabs.firstIndex(where: {
@@ -2003,6 +2042,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 }
 
 @MainActor
+final class ThemeSelectionRowView: NSTableRowView {
+    var selectionColor: NSColor = .selectedContentBackgroundColor {
+        didSet { needsDisplay = true }
+    }
+
+    override func drawSelection(in dirtyRect: NSRect) {
+        selectionColor.setFill()
+        bounds.fill()
+    }
+}
+
+@MainActor
 final class SidebarViewController: NSViewController,
     NSOutlineViewDataSource, NSOutlineViewDelegate, NSSplitViewDelegate
 {
@@ -2014,6 +2065,7 @@ final class SidebarViewController: NSViewController,
     private let fileOutlineView = NSOutlineView()
     private let symbolOutlineView = NSOutlineView()
     private let splitView = NSSplitView()
+    private let backgroundView = NSView()
     private let fileScrollView = NSScrollView()
     private let symbolScrollView = NSScrollView()
     private let filePlaceholder = NSStackView()
@@ -2027,6 +2079,50 @@ final class SidebarViewController: NSViewController,
     private var setInitialDivider = false
     private var isSynchronizingFileSelection = false
     private var hasSelectedFile = false
+    private var splitAutosaveName = "CodeInsightSidebarSplit"
+    private var theme = ReaderTheme(settings: ReaderSettings())
+    private var paneSurfaces: [(pane: NSView, header: NSView, label: NSTextField, divider: NSView)] = []
+
+    func setSplitAutosaveName(_ name: String) {
+        splitAutosaveName = name
+        if isViewLoaded { splitView.autosaveName = name }
+    }
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        guard isViewLoaded else { return }
+        backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
+        fileOutlineView.backgroundColor = theme.chromeColor
+        symbolOutlineView.backgroundColor = theme.chromeColor
+        for surface in paneSurfaces {
+            surface.pane.layer?.backgroundColor = theme.chromeColor.cgColor
+            surface.header.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+            surface.label.textColor = theme.accentColor
+            surface.divider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+        }
+        for outlineView in [fileOutlineView, symbolOutlineView] {
+            for row in 0..<outlineView.numberOfRows {
+                (outlineView.rowView(atRow: row, makeIfNecessary: false)
+                    as? ThemeSelectionRowView)?.selectionColor =
+                    theme.chromeSelectionColor
+                let cell = outlineView.view(
+                    atColumn: 0,
+                    row: row,
+                    makeIfNecessary: false
+                )
+                if let cell = cell as? NSTableCellView {
+                    cell.textField?.textColor = theme.foregroundColor
+                    cell.imageView?.contentTintColor = theme.chromeTertiaryColor
+                } else if let cell = cell as? NSStackView {
+                    (cell.arrangedSubviews.last as? NSTextField)?.textColor =
+                        theme.foregroundColor
+                    (cell.arrangedSubviews.first as? NSImageView)?.contentTintColor =
+                        theme.chromeTertiaryColor
+                }
+            }
+        }
+        view.needsDisplay = true
+    }
 
     var selfTestFilesPlaceholderText: String? {
         loadViewIfNeeded()
@@ -2108,6 +2204,57 @@ final class SidebarViewController: NSViewController,
         return survived
     }
 
+    func selfTestDividerPersistsAcrossRebuild() -> Bool {
+        let name = "\(splitAutosaveName).Persistence.\(UUID().uuidString)"
+        let defaults = UserDefaults.standard
+        func removeProbeDefaults() {
+            defaults.dictionaryRepresentation().keys
+                .filter { $0.contains(name) }
+                .forEach { defaults.removeObject(forKey: $0) }
+        }
+        removeProbeDefaults()
+        defer { removeProbeDefaults() }
+
+        func splitView() -> NSSplitView {
+            let split = NSSplitView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
+            split.isVertical = false
+            split.dividerStyle = .thin
+            split.addArrangedSubview(NSView(frame: .zero))
+            split.addArrangedSubview(NSView(frame: .zero))
+            split.autosaveName = name
+            return split
+        }
+
+        let writer = splitView()
+        let writerWindow = NSWindow(
+            contentRect: writer.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        writerWindow.contentView = writer
+        writerWindow.orderFront(nil)
+        writerWindow.displayIfNeeded()
+        writer.setPosition(310, ofDividerAt: 0)
+        writerWindow.displayIfNeeded()
+
+        let reader = splitView()
+        let readerWindow = NSWindow(
+            contentRect: reader.frame,
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        readerWindow.contentView = reader
+        readerWindow.orderFront(nil)
+        readerWindow.displayIfNeeded()
+        let restored = reader.arrangedSubviews.first?.frame.height ?? 0
+        let didStore = defaults.dictionaryRepresentation().keys.contains {
+            $0.contains(name)
+        }
+        return didStore && abs(restored - 310) <= 1
+    }
+
     override func loadView() {
         configure(fileOutlineView, column: "File")
         configure(symbolOutlineView, column: "Symbol")
@@ -2142,6 +2289,7 @@ final class SidebarViewController: NSViewController,
         configurePlaceholders()
         splitView.isVertical = false
         splitView.dividerStyle = .thin
+        splitView.autosaveName = splitAutosaveName
         splitView.delegate = self
         splitView.addArrangedSubview(pane(
             title: "Files",
@@ -2157,18 +2305,16 @@ final class SidebarViewController: NSViewController,
         ))
         splitView.translatesAutoresizingMaskIntoConstraints = false
 
-        let sidebar = NSVisualEffectView()
-        sidebar.material = .sidebar
-        sidebar.blendingMode = .behindWindow
-        sidebar.state = .followsWindowActiveState
-        sidebar.addSubview(splitView)
+        backgroundView.wantsLayer = true
+        backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
+        backgroundView.addSubview(splitView)
         NSLayoutConstraint.activate([
-            splitView.leadingAnchor.constraint(equalTo: sidebar.leadingAnchor),
-            splitView.trailingAnchor.constraint(equalTo: sidebar.trailingAnchor),
-            splitView.topAnchor.constraint(equalTo: sidebar.topAnchor),
-            splitView.bottomAnchor.constraint(equalTo: sidebar.bottomAnchor),
+            splitView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
+            splitView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
+            splitView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
+            splitView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
         ])
-        view = sidebar
+        view = backgroundView
         updateFilePlaceholder(isIndexing: false)
         updateOutlinePlaceholder()
     }
@@ -2275,7 +2421,15 @@ final class SidebarViewController: NSViewController,
         let row = symbolOutlineView.row(forItem: facetRows[index])
         guard row >= 0, symbolOutlineView.selectedRow != row else { return }
         symbolOutlineView.selectRowIndexes([row], byExtendingSelection: false)
-        symbolOutlineView.scrollRowToVisible(row)
+        let rowRect = symbolOutlineView.rect(ofRow: row)
+        if !symbolScrollView.contentView.documentVisibleRect.contains(rowRect) {
+            symbolOutlineView.scrollRowToVisible(row)
+        }
+    }
+
+    var selfTestSelectedOutlineRow: Int {
+        loadViewIfNeeded()
+        return symbolOutlineView.selectedRow
     }
 
     func outlineView(
@@ -2319,16 +2473,19 @@ final class SidebarViewController: NSViewController,
             as? NSTableCellView
         {
             cell.textField?.stringValue = node.name
+            cell.textField?.textColor = theme.foregroundColor
             cell.imageView?.image = fileIcon(isDirectory: node.isDirectory)
+            cell.imageView?.contentTintColor = theme.chromeTertiaryColor
             return cell
         }
         let cell = NSTableCellView()
         cell.identifier = identifier
         let image = NSImageView()
         image.image = fileIcon(isDirectory: node.isDirectory)
-        image.contentTintColor = .secondaryLabelColor
+        image.contentTintColor = theme.chromeTertiaryColor
         image.translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: node.name)
+        label.textColor = theme.foregroundColor
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.imageView = image
@@ -2345,6 +2502,18 @@ final class SidebarViewController: NSViewController,
             label.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
         return cell
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        rowViewForItem item: Any
+    ) -> NSTableRowView? {
+        let identifier = NSUserInterfaceItemIdentifier("ThemeSelectionRow")
+        let row = outlineView.makeView(withIdentifier: identifier, owner: self)
+            as? ThemeSelectionRowView ?? ThemeSelectionRowView()
+        row.identifier = identifier
+        row.selectionColor = theme.chromeSelectionColor
+        return row
     }
 
     func outlineViewSelectionDidChange(_ notification: Notification) {
@@ -2409,7 +2578,7 @@ final class SidebarViewController: NSViewController,
         outlineView.dataSource = self
         outlineView.delegate = self
         outlineView.rowSizeStyle = .default
-        outlineView.rowHeight = 24
+        outlineView.rowHeight = 22
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
         outlineView.usesAlternatingRowBackgroundColors = false
@@ -2422,18 +2591,17 @@ final class SidebarViewController: NSViewController,
         placeholder: NSView
     ) -> NSView {
         let label = NSTextField(labelWithString: title.uppercased())
-        label.attributedStringValue = NSAttributedString(
-            string: title.uppercased(),
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
-                .foregroundColor: NSColor.secondaryLabelColor,
-                .kern: 0.6,
-            ]
-        )
+        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.textColor = theme.accentColor
         label.translatesAutoresizingMaskIntoConstraints = false
-        let separator = NSBox()
-        separator.boxType = .separator
-        separator.translatesAutoresizingMaskIntoConstraints = false
+        let header = NSView()
+        header.wantsLayer = true
+        header.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        header.translatesAutoresizingMaskIntoConstraints = false
+        let divider = NSView()
+        divider.wantsLayer = true
+        divider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+        divider.translatesAutoresizingMaskIntoConstraints = false
 
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
@@ -2445,19 +2613,25 @@ final class SidebarViewController: NSViewController,
         placeholder.translatesAutoresizingMaskIntoConstraints = false
 
         let pane = NSView()
-        pane.addSubview(label)
-        pane.addSubview(separator)
+        pane.wantsLayer = true
+        pane.layer?.backgroundColor = theme.chromeColor.cgColor
+        pane.addSubview(header)
+        header.addSubview(label)
+        pane.addSubview(divider)
         pane.addSubview(scrollView)
         pane.addSubview(placeholder)
         NSLayoutConstraint.activate([
-            label.topAnchor.constraint(equalTo: pane.topAnchor, constant: 10),
-            label.leadingAnchor.constraint(equalTo: pane.leadingAnchor, constant: 8),
-            label.trailingAnchor.constraint(equalTo: pane.trailingAnchor, constant: -8),
-            separator.topAnchor.constraint(equalTo: label.bottomAnchor, constant: 6),
-            separator.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
-            separator.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            separator.heightAnchor.constraint(equalToConstant: 1),
-            scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor),
+            header.topAnchor.constraint(equalTo: pane.topAnchor),
+            header.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            header.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            header.heightAnchor.constraint(equalToConstant: 30),
+            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            divider.topAnchor.constraint(equalTo: header.bottomAnchor),
+            divider.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            divider.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            divider.heightAnchor.constraint(equalToConstant: 1),
+            scrollView.topAnchor.constraint(equalTo: divider.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
@@ -2472,6 +2646,7 @@ final class SidebarViewController: NSViewController,
                 constant: -8
             ),
         ])
+        paneSurfaces.append((pane, header, label, divider))
         return pane
     }
 
@@ -2554,6 +2729,8 @@ final class SidebarViewController: NSViewController,
         }
         let image = cell.arrangedSubviews[0] as! NSImageView
         let label = cell.arrangedSubviews[1] as! NSTextField
+        image.contentTintColor = theme.chromeTertiaryColor
+        label.textColor = theme.foregroundColor
         image.image = NSImage(
             systemSymbolName: symbolName(for: facet.kind),
             accessibilityDescription: facet.kind.rawValue
@@ -2587,7 +2764,7 @@ final class SidebarViewController: NSViewController,
         NSImage(
             systemSymbolName: isDirectory ? "folder" : "doc",
             accessibilityDescription: isDirectory ? "Folder" : "File"
-        )?.withSymbolConfiguration(.init(hierarchicalColor: .secondaryLabelColor))
+        )?.withSymbolConfiguration(.init(hierarchicalColor: theme.chromeTertiaryColor))
     }
 }
 
@@ -2726,6 +2903,8 @@ final class ReaderViewController: NSViewController {
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
     var onReadingPositionChange: ((UInt32) -> Void)?
+    var onOutlineFollowPositionChange: ((UInt32) -> Void)?
+    var onLiveScroll: (() -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
@@ -2751,6 +2930,7 @@ final class ReaderViewController: NSViewController {
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
     private var emptyStateView: EmptyStateView?
+    private var liveScrollObserver: NSObjectProtocol?
 
     init(showsCompareControls: Bool = false) {
         self.showsCompareControls = showsCompareControls
@@ -2770,6 +2950,15 @@ final class ReaderViewController: NSViewController {
         textView.view.frame = scrollView.contentView.bounds
         textView.configureGutter(in: scrollView, lineNumbers: true)
         scrollView.translatesAutoresizingMaskIntoConstraints = false
+        liveScrollObserver = NotificationCenter.default.addObserver(
+            forName: NSScrollView.didLiveScrollNotification,
+            object: scrollView,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.onLiveScroll?()
+            }
+        }
 
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
@@ -3188,6 +3377,19 @@ final class ReaderViewController: NSViewController {
     func selfTestActivate(at byteOffset: UInt32) -> Int {
         textView.activate(atByteOffset: byteOffset)
     }
+    var selfTestPrimarySelectionRange: NSRange? {
+        textView.primarySelectionRange
+    }
+    func selfTestEmitOutlineFollow(at byteOffset: UInt32) {
+        onOutlineFollowPositionChange?(byteOffset)
+    }
+    func selfTestPostLiveScroll() {
+        guard let scrollView else { return }
+        NotificationCenter.default.post(
+            name: NSScrollView.didLiveScrollNotification,
+            object: scrollView
+        )
+    }
     var selfTestReadingGeometry: (
         scrollFrame: NSRect,
         clipFrame: NSRect,
@@ -3296,6 +3498,8 @@ final class ReaderViewController: NSViewController {
     ) {
         display(file, snapshotID: snapshotID, source: source)
         textView.reveal(byteOffset: byteOffset)
+        _ = textView.activate(atByteOffset: byteOffset)
+        onSelectionChange?(byteOffset)
         onReadingPositionChange?(byteOffset)
     }
 
@@ -3359,6 +3563,9 @@ final class ReaderViewController: NSViewController {
             readingPositionTask = nil
             guard let offset = currentReadingPosition()?.byteOffset else { return }
             onReadingPositionChange?(offset)
+            if let anchor = textView.followAnchorByteOffset() {
+                onOutlineFollowPositionChange?(anchor)
+            }
         }
     }
 
@@ -3408,6 +3615,9 @@ final class ContextWindowViewController: NSViewController {
     )
     private let scrollView = NSScrollView()
     private let miniReader = ReaderTextView()
+    private let container = NSView()
+    private let headerSurface = NSView()
+    private var theme = ReaderTheme(settings: ReaderSettings())
 
     init(model: ContextWindowModel) {
         self.model = model
@@ -3419,7 +3629,13 @@ final class ContextWindowViewController: NSViewController {
     }
 
     func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
         miniReader.apply(settings: settings)
+        if isViewLoaded {
+            container.layer?.backgroundColor = theme.chromeColor.cgColor
+            headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+            view.needsDisplay = true
+        }
         applyBadgeStyle()
     }
 
@@ -3529,6 +3745,10 @@ final class ContextWindowViewController: NSViewController {
         header.alignment = .centerY
         header.spacing = 8
         header.translatesAutoresizingMaskIntoConstraints = false
+        headerSurface.wantsLayer = true
+        headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        headerSurface.translatesAutoresizingMaskIntoConstraints = false
+        headerSurface.addSubview(header)
 
         scrollView.documentView = miniReader.view
         scrollView.hasVerticalScroller = true
@@ -3543,19 +3763,20 @@ final class ContextWindowViewController: NSViewController {
         placeholderLabel.maximumNumberOfLines = 2
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSVisualEffectView()
-        container.material = .windowBackground
-        container.blendingMode = .withinWindow
-        container.state = .followsWindowActiveState
-        container.addSubview(header)
+        container.wantsLayer = true
+        container.layer?.backgroundColor = theme.chromeColor.cgColor
+        container.addSubview(headerSurface)
         container.addSubview(scrollView)
         container.addSubview(placeholderLabel)
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: container.topAnchor),
-            header.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
-            header.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
-            header.heightAnchor.constraint(equalToConstant: 30),
-            scrollView.topAnchor.constraint(equalTo: header.bottomAnchor),
+            headerSurface.topAnchor.constraint(equalTo: container.topAnchor),
+            headerSurface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            headerSurface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            headerSurface.heightAnchor.constraint(equalToConstant: 30),
+            header.leadingAnchor.constraint(equalTo: headerSurface.leadingAnchor, constant: 8),
+            header.trailingAnchor.constraint(equalTo: headerSurface.trailingAnchor, constant: -8),
+            header.centerYAnchor.constraint(equalTo: headerSurface.centerYAnchor),
+            scrollView.topAnchor.constraint(equalTo: headerSurface.bottomAnchor),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),

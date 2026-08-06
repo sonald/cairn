@@ -59,16 +59,25 @@ struct RelationUXTests {
         let verifiedFrame = try #require(verifiedRows.first)
         let disclosureFrame = fixture.controller.selfTestPossibleDisclosureFrame
         let badgeFrame = fixture.controller.selfTestBadgeFrame(titled: "first")
+        let badgeLabelFrame = fixture.controller.selfTestBadgeLabelFrame(
+            titled: "first"
+        )
         let panelDoesNotOverlapControl =
             fixture.controller.selfTestResultsAndDirectionControlDoNotOverlap
         let layoutPassesAfterReads = fixture.controller.selfTestLayoutPasses
         #expect(contentBounds.size == contentSize)
         #expect(verifiedFrame.width > 0 && verifiedFrame.height > 0)
+        #expect(verifiedFrame.height == 44)
         #expect(disclosureFrame.width > 0 && disclosureFrame.height > 0)
         #expect([verifiedFrame, disclosureFrame, badgeFrame].allSatisfy {
             $0.width > 0 && $0.height > 0 && visibleRect.contains($0)
         })
         #expect(verifiedFrame.contains(badgeFrame))
+        #expect((6...10).contains(badgeFrame.width - badgeLabelFrame.width))
+        #expect(abs(badgeLabelFrame.minY - badgeFrame.minY - 1) <= 0.5)
+        #expect(abs(badgeFrame.maxY - badgeLabelFrame.maxY - 1) <= 0.5)
+        #expect(fixture.controller.selfTestBadgeCornerRadius(titled: "first") == 4)
+        #expect(verifiedFrame.maxX - badgeFrame.maxX >= 10)
         #expect(verifiedFrame.intersection(disclosureFrame).isEmpty)
         #expect(panelDoesNotOverlapControl)
         #expect(layoutPassesAfterReads == layoutPassesBeforeReads)
@@ -86,6 +95,10 @@ struct RelationUXTests {
         #expect(
             fixture.controller.selfTestPossibleDisclosureTitle
                 == "Show 2 possible matches"
+        )
+        #expect(
+            fixture.controller.selfTestPossibleDisclosureDisplayText
+                == ["Show possible matches", "2"]
         )
         #expect(
             fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
@@ -354,6 +367,37 @@ struct RelationUXTests {
         #expect(fixture.controller.selfTestSelectedEdgeTitle == "first")
         #expect(fixture.controller.selfTestWholeTreeReloads == wholeReloadsAfterBatch)
     }
+}
+
+@MainActor
+@Test
+func siClassicThemesTheWholeWindowChrome() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    var settings = ReaderSettings()
+    settings.theme = .siClassic
+    fixture.controller.applyReaderSettings(settings)
+    let expected = try #require(
+        ReaderTheme(settings: settings).chromeColor.usingColorSpace(.sRGB)
+    )
+    let windowColor = try #require(
+        fixture.controller.window?.backgroundColor.usingColorSpace(.sRGB)
+    )
+    let statusColor = try #require(
+        fixture.controller.selfTestStatusBarBackgroundColor?
+            .usingColorSpace(.sRGB)
+    )
+
+    #expect(abs(windowColor.redComponent - expected.redComponent) < 0.001)
+    #expect(abs(windowColor.greenComponent - expected.greenComponent) < 0.001)
+    #expect(abs(windowColor.blueComponent - expected.blueComponent) < 0.001)
+    #expect(fixture.controller.window?.titlebarAppearsTransparent == true)
+    #expect(abs(statusColor.redComponent - expected.redComponent) < 0.001)
+    #expect(abs(statusColor.greenComponent - expected.greenComponent) < 0.001)
+    #expect(abs(statusColor.blueComponent - expected.blueComponent) < 0.001)
 }
 
 @MainActor

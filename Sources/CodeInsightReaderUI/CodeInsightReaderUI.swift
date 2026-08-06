@@ -31,18 +31,89 @@ public extension ReaderTheme {
         dynamicColor(occurrenceRGB(isDark:))
     }
 
+    var chromeColor: NSColor {
+        selection == .auto ? .windowBackgroundColor : dynamicColor(chromeRGB(isDark:))
+    }
+
+    var chromeHeaderColor: NSColor {
+        selection == .auto ? .controlBackgroundColor : dynamicColor(chromeHeaderRGB(isDark:))
+    }
+
+    var chromeDividerColor: NSColor {
+        selection == .auto ? .separatorColor : dynamicColor(chromeDividerRGB(isDark:))
+    }
+
+    var chromeSelectionColor: NSColor {
+        selection == .auto ? .selectedContentBackgroundColor : dynamicColor(chromeSelectionRGB(isDark:))
+    }
+
+    var accentColor: NSColor {
+        selection == .auto ? .controlAccentColor : dynamicColor(accentRGB(isDark:))
+    }
+
+    var chromeSecondaryColor: NSColor {
+        dynamicColor(chromeSecondaryRGB(isDark:))
+    }
+
+    var chromeTertiaryColor: NSColor {
+        dynamicColor(chromeTertiaryRGB(isDark:))
+    }
+
+    var verifiedColor: NSColor {
+        dynamicColor(verifiedRGB(isDark:))
+    }
+
+    var verifiedBackgroundColor: NSColor {
+        dynamicColor(
+            verifiedRGB(isDark:),
+            alpha: { CGFloat(verifiedFillAlpha(isDark: $0)) }
+        )
+    }
+
+    var inferredColor: NSColor {
+        dynamicColor(inferredRGB(isDark:))
+    }
+
+    var inferredBackgroundColor: NSColor {
+        dynamicColor(
+            inferredRGB(isDark:),
+            alpha: { CGFloat(inferredFillAlpha(isDark: $0)) }
+        )
+    }
+
+    var chipBackgroundColor: NSColor {
+        dynamicColor(chipBackgroundRGB(isDark:))
+    }
+
+    var chipForegroundColor: NSColor {
+        dynamicColor(chipForegroundRGB(isDark:))
+    }
+
+    var primarySelectionFillColor: NSColor {
+        dynamicColor(
+            accentRGB(isDark:),
+            alpha: { CGFloat(primarySelectionFillAlpha(isDark: $0)) }
+        )
+    }
+
     private func dynamicColor(
         _ value: @escaping @Sendable (Bool) -> UInt32
     ) -> NSColor {
+        dynamicColor(value, alpha: { _ in 1 })
+    }
+
+    private func dynamicColor(
+        _ value: @escaping @Sendable (Bool) -> UInt32,
+        alpha: @escaping @Sendable (Bool) -> CGFloat
+    ) -> NSColor {
         NSColor(name: nil) { appearance in
-            let rgb = value(
-                appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            )
+            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+            let rgb = value(isDark)
             return NSColor(
                 red: CGFloat((rgb >> 16) & 0xff) / 255,
                 green: CGFloat((rgb >> 8) & 0xff) / 255,
                 blue: CGFloat(rgb & 0xff) / 255,
-                alpha: 1
+                alpha: alpha(isDark)
             )
         }
     }
@@ -342,8 +413,10 @@ public final class ReaderTextView {
     private weak var ruler: NSRulerView?
     private var lineNumbers = true
     private var occurrenceSelectionByteOffset: UInt32?
+    private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
     public private(set) var currentLineNumber: Int?
     public private(set) var occurrenceCount = 0
+    public private(set) var primarySelectionRange: NSRange?
     public private(set) var visibleLineNumbers: [Int] = []
     public private(set) var visibleCurrentLineNumbers: [Int] = []
     public private(set) var visibleDeclarationMarkerLines: [Int] = []
@@ -356,6 +429,7 @@ public final class ReaderTextView {
         backingTextStorage = NSTextStorage()
         view.textContentStorage?.textStorage = backingTextStorage
         configure()
+        nativeSelectedTextAttributes = view.selectedTextAttributes
         applyThemeColors()
         textView.clickHandler = { [weak self] index, modifiers in
             self?.activate(atCharacterIndex: index)
@@ -365,10 +439,26 @@ public final class ReaderTextView {
             self?.onContextMenu?(index)
         }
         textView.selectionHandler = { [weak self] index in
-            guard let byteOffset = self?.byteOffset(forCharacterIndex: index) else {
+            guard let self,
+                  let byteOffset = byteOffset(forCharacterIndex: index)
+            else {
                 return
             }
-            self?.updateCurrentLine(byteOffset: byteOffset)
+            updateCurrentLine(byteOffset: byteOffset)
+            if let primarySelectionRange,
+               view.selectedRange() != primarySelectionRange
+            {
+                self.primarySelectionRange = nil
+                view.selectedTextAttributes = nativeSelectedTextAttributes
+                if let document = displayedDocument,
+                   let occurrenceSelectionByteOffset
+                {
+                    setOccurrences(occurrenceNSRanges(
+                        in: document,
+                        at: occurrenceSelectionByteOffset
+                    ))
+                }
+            }
         }
         textView.escapeHandler = { [weak self] in
             guard let self, occurrenceCount > 0 else { return false }
@@ -378,6 +468,7 @@ public final class ReaderTextView {
         textView.backgroundHandler = { [weak self, weak textView] rect in
             guard let self, let textView else { return }
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
+            self.drawPrimarySelection(in: textView, dirtyRect: rect)
         }
         textView.viewportChanged = { [weak self] in
             guard let self,
@@ -400,6 +491,8 @@ public final class ReaderTextView {
         diffMarkers = [:]
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
+        primarySelectionRange = nil
+        view.selectedTextAttributes = nativeSelectedTextAttributes
         currentLineNumber = nil
         occurrenceCount = 0
         visibleLineNumbers = []
@@ -433,6 +526,8 @@ public final class ReaderTextView {
         diffMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
+        primarySelectionRange = nil
+        view.selectedTextAttributes = nativeSelectedTextAttributes
         currentLineNumber = nil
         occurrenceCount = 0
         visibleLineNumbers = []
@@ -465,7 +560,9 @@ public final class ReaderTextView {
             )
             if ranges.isEmpty { self.occurrenceSelectionByteOffset = nil }
             occurrenceCount = ranges.count
-            renderingCoordinator.setOccurrences(ranges)
+            renderingCoordinator.setOccurrences(
+                ranges.filter { $0 != primarySelectionRange }
+            )
         }
         updateRulerThickness()
         ruler?.needsDisplay = true
@@ -669,12 +766,24 @@ public final class ReaderTextView {
         }
         let ranges = occurrenceNSRanges(in: document, at: byteOffset)
         occurrenceSelectionByteOffset = ranges.isEmpty ? nil : byteOffset
+        let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset))
+        let selected = location.flatMap { location in
+            ranges.first { NSLocationInRange(location, $0) }
+        }
+        primarySelectionRange = selected
+        view.selectedTextAttributes = selected == nil
+            ? nativeSelectedTextAttributes
+            : [.backgroundColor: NSColor.clear]
+        view.setSelectedRange(selected ?? NSRange(location: location ?? 0, length: 0))
         setOccurrences(ranges)
         return ranges.count
     }
 
     public func clearOccurrences() {
         occurrenceSelectionByteOffset = nil
+        primarySelectionRange = nil
+        view.selectedTextAttributes = nativeSelectedTextAttributes
+        view.setSelectedRange(NSRange(location: view.selectedRange().location, length: 0))
         setOccurrences([])
     }
 
@@ -759,6 +868,36 @@ public final class ReaderTextView {
             .flatMap(UInt32.init(exactly:))
     }
 
+    public func followAnchorByteOffset() -> UInt32? {
+        guard let layoutManager = view.textLayoutManager,
+              let content = layoutManager.textContentManager,
+              let viewportRange = layoutManager.textViewportLayoutController.viewportRange
+        else { return nil }
+        let anchorY = layoutManager.textViewportLayoutController.viewportBounds.minY
+            + layoutManager.textViewportLayoutController.viewportBounds.height * 0.25
+        var nearest: (distance: CGFloat, offset: UInt32)?
+        layoutManager.enumerateTextLayoutFragments(
+            from: viewportRange.location,
+            options: []
+        ) { fragment in
+            let frame = fragment.layoutFragmentFrame
+            let utf16Offset = content.offset(
+                from: content.documentRange.location,
+                to: fragment.rangeInElement.location
+            )
+            guard utf16Offset != NSNotFound,
+                  let byteOffset = self.byteUTF16Map?.byteOffset(forUTF16: utf16Offset),
+                  let offset = UInt32(exactly: byteOffset)
+            else { return true }
+            let candidate = (abs(frame.midY - anchorY), offset)
+            if nearest == nil || candidate.0 < nearest!.distance {
+                nearest = (candidate.0, candidate.1)
+            }
+            return frame.minY <= layoutManager.textViewportLayoutController.viewportBounds.maxY
+        }
+        return nearest?.offset
+    }
+
     private func activate(atCharacterIndex index: Int) {
         guard let byteOffset = byteOffset(forCharacterIndex: index) else {
             clearOccurrences()
@@ -769,7 +908,9 @@ public final class ReaderTextView {
 
     private func setOccurrences(_ ranges: [NSRange]) {
         occurrenceCount = ranges.count
-        renderingCoordinator.setOccurrences(ranges)
+        renderingCoordinator.setOccurrences(
+            ranges.filter { $0 != primarySelectionRange }
+        )
         guard let layoutManager = view.textLayoutManager else { return }
         installRenderingValidator(in: layoutManager)
         if let viewportRange =
@@ -917,6 +1058,44 @@ public final class ReaderTextView {
             theme.currentLineColor.setFill()
             rect.fill()
         }
+    }
+
+    private func drawPrimarySelection(
+        in textView: NSTextView,
+        dirtyRect: NSRect
+    ) {
+        guard let range = primarySelectionRange,
+              range.length > 0,
+              let window = textView.window
+        else { return }
+        let screenRect = textView.firstRect(
+            forCharacterRange: range,
+            actualRange: nil
+        )
+        guard !screenRect.isEmpty else { return }
+        var rect = textView.convert(
+            window.convertFromScreen(screenRect),
+            from: nil
+        )
+        rect = NSRect(
+            x: rect.minX - 1.5,
+            y: rect.minY,
+            width: rect.width + 3,
+            height: rect.height
+        )
+        guard rect.intersects(dirtyRect) else { return }
+
+        let outer = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
+        theme.primarySelectionFillColor.setFill()
+        outer.fill()
+        let stroke = NSBezierPath(
+            roundedRect: rect.insetBy(dx: 0.8, dy: 0.8),
+            xRadius: 3.2,
+            yRadius: 3.2
+        )
+        stroke.lineWidth = 1.6
+        theme.accentColor.setStroke()
+        stroke.stroke()
     }
 
     fileprivate func drawRuler(

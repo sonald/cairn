@@ -40,6 +40,8 @@ public final class RelationTreeModel {
         public fileprivate(set) var title: String
         public fileprivate(set) var subtitle: String?
         public fileprivate(set) var badge: String?
+        public fileprivate(set) var dispatchLabel: String?
+        public fileprivate(set) var modifiers: [String]
         public fileprivate(set) var target: (path: String, byteOffset: UInt32)?
         public fileprivate(set) var line: UInt32?
         public fileprivate(set) var symbol: SymbolOccurrenceID?
@@ -63,6 +65,8 @@ public final class RelationTreeModel {
             title: String,
             subtitle: String? = nil,
             badge: String? = nil,
+            dispatchLabel: String? = nil,
+            modifiers: [String] = [],
             target: (path: String, byteOffset: UInt32)? = nil,
             line: UInt32? = nil,
             children: [Node]? = [],
@@ -81,6 +85,8 @@ public final class RelationTreeModel {
             self.title = title
             self.subtitle = subtitle
             self.badge = badge
+            self.dispatchLabel = dispatchLabel
+            self.modifiers = modifiers
             self.target = target
             self.line = line
             self.children = children
@@ -1032,6 +1038,8 @@ public final class RelationTreeModel {
         previous.title = current.title
         previous.subtitle = current.subtitle
         previous.badge = current.badge
+        previous.dispatchLabel = current.dispatchLabel
+        previous.modifiers = current.modifiers
         previous.target = current.target
         previous.line = current.line
         previous.symbol = current.symbol
@@ -1073,12 +1081,13 @@ public final class RelationTreeModel {
             case .unresolved: nil
             case .strong, .probable, .possible: "Inferred"
             }
-            var subtitle = if edge.certainty == .unresolved {
-                edge.exactOrigin == nil
+            let dispatchLabel = edge.certainty == .unresolved ? nil
+                : resolutionDispatchLabel(edge.dispatch)
+            var modifiers: [String] = []
+            if edge.certainty == .unresolved {
+                modifiers.append(edge.exactOrigin == nil
                     ? "Unresolved"
-                    : "External · in dependency (rust-analyzer)"
-            } else {
-                resolutionDispatchLabel(edge.dispatch)
+                    : "External · in dependency (rust-analyzer)")
             }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
@@ -1088,20 +1097,24 @@ public final class RelationTreeModel {
                    return false
                })
             {
-                subtitle += " · name match only"
+                modifiers.append("name match only")
             }
             if edge.alsoHeuristic {
-                subtitle += " · heuristic also matched"
+                modifiers.append("heuristic also matched")
             }
             if !edge.callSites.isEmpty {
-                subtitle += " · \(edge.callSites.count) call "
-                    + (edge.callSites.count == 1 ? "site" : "sites")
+                modifiers.append("\(edge.callSites.count) call "
+                    + (edge.callSites.count == 1 ? "site" : "sites"))
             }
+            let subtitle = ([dispatchLabel] + modifiers).compactMap { $0 }
+                .joined(separator: " · ")
             return Node(
                 kind: .edge,
                 title: edge.title,
                 subtitle: subtitle,
                 badge: badge,
+                dispatchLabel: dispatchLabel,
+                modifiers: modifiers,
                 target: (edge.path, edge.byteOffset),
                 line: edge.line,
                 children: [],

@@ -497,71 +497,98 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         var retriedAfterCrash = false
         var attempt = 0
         while true {
-            let outcome: (
-                result: Result?,
-                retryDelay: TimeInterval?,
-                restarted: Bool
-            ) = try withOperationLock(batch: batch) {
+            let readyClient: LSPClient = try withOperationLock(batch: batch) {
                 stateLock.lock()
                 cancelled = false
                 activeBatch = batch
                 stateLock.unlock()
                 guard batch?.isCurrent != false else {
-                    return (nil, nil, false)
+                    throw LSPError.cancelled(method)
                 }
 
                 if activeClient == nil {
                     activeClient = try clientForRequest()
                 }
                 guard let currentClient = activeClient else {
-                    return (nil, nil, false)
+                    throw LSPError.cancelled(method)
+                }
+                try beforeRequest(currentClient)
+                try throwIfCancelled(method)
+                return currentClient
+            }
+            try readyClient.waitForQuiescence(
+                method: method,
+                timeout: requestTimeout,
+                shouldContinue: { [weak self] in
+                    guard let self else { return false }
+                    return batch?.isCurrent != false && !self.isCancelled
+                }
+            )
+            markReady()
+            let outcome: (
+                result: Result?,
+                retry: Bool,
+                countsTowardRetry: Bool,
+                restarted: Bool
+            ) = try withOperationLock(batch: batch) {
+                stateLock.lock()
+                activeBatch = batch
+                stateLock.unlock()
+                guard batch?.isCurrent != false else {
+                    return (nil, false, false, false)
+                }
+
+                if activeClient == nil {
+                    activeClient = try clientForRequest()
+                }
+                guard let currentClient = activeClient else {
+                    return (nil, false, false, false)
                 }
                 do {
-                    try beforeRequest(currentClient)
                     try throwIfCancelled(method)
+                    let requestWasReady = currentClient.isQuiescent
                     let response = try currentClient.request(
                         method,
                         params: params,
                         timeout: requestTimeout,
                         shouldStart: {
-                            batch?.isCurrent != false
+                            batch?.isCurrent != false && !self.isCancelled
                         }
                     )
                     if let result = try parse(response) {
                         markReady()
-                        return (result, nil, false)
+                        return (result, false, false, false)
+                    }
+                    if requestWasReady && currentClient.isQuiescent {
+                        markReady()
+                        return (nil, false, false, false)
                     }
                     markPreparing()
+                    return (nil, true, false, false)
                 } catch LSPError.requestFailed(let code, _)
                     where code == -32801 && attempt < 2
                 {
                     // rust-analyzer reports content-modified while its
                     // workspace snapshot catches up.
                     markPreparing()
+                    return (nil, true, true, false)
                 } catch LSPError.processExited where !retriedAfterCrash {
                     activeClient = try restartAfterCrash()
                     retriedAfterCrash = true
                     attempt = 0
-                    return (nil, nil, true)
+                    return (nil, false, false, true)
                 } catch LSPError.connectionClosed where !retriedAfterCrash {
                     activeClient = try restartAfterCrash()
                     retriedAfterCrash = true
                     attempt = 0
-                    return (nil, nil, true)
+                    return (nil, false, false, true)
                 }
-                guard attempt < 2 else {
-                    markReady()
-                    return (nil, nil, false)
-                }
-                return (nil, Double(attempt + 1), false)
             }
             if outcome.restarted { continue }
             if let result = outcome.result { return result }
-            guard let retryDelay = outcome.retryDelay else { return nil }
+            guard outcome.retry else { return nil }
             guard batch?.isCurrent != false else { return nil }
-            Thread.sleep(forTimeInterval: retryDelay)
-            guard batch?.isCurrent != false else { return nil }
-            attempt += 1
+            if outcome.countsTowardRetry { attempt += 1 }
         }
     }
 
@@ -1092,6 +1119,12 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         let wasCancelled = cancelled
         stateLock.unlock()
         if wasCancelled { throw LSPError.cancelled(method) }
+    }
+
+    private var isCancelled: Bool {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        return cancelled || state == .closed
     }
 
     private func markPreparing() {

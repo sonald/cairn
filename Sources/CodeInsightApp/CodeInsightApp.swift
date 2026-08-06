@@ -1648,6 +1648,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "referenceAttributeRunsWhenOff": referenceRunsWhenOff,
             "referenceStyledFragmentsWhenOff": referenceFragmentsWhenOff,
         ])
+        controller.selfTestNavigate(to: regular, byteOffset: UInt32(alphaOffset))
+        pumpRunLoop()
+        let primarySelectionRange = controller.selfTestPrimarySelectionRange
+        let explicitOutlineRow = controller.selfTestSelectedOutlineRow
+        controller.selfTestEmitOutlineFollow(at: UInt32(betaOffset))
+        pumpRunLoop()
+        let programmaticFollowIsBlocked = explicitOutlineRow >= 0
+            && controller.selfTestSelectedOutlineRow == explicitOutlineRow
+        controller.selfTestPostLiveScroll()
+        pumpRunLoop()
+        controller.selfTestEmitOutlineFollow(at: UInt32(betaOffset))
+        pumpRunLoop()
+        checks.merge([
+            "navigationSetsNativePrimarySelection":
+                primarySelectionRange?.length == "alpha".utf16.count,
+            "programmaticNavigationBlocksViewportFollow":
+                programmaticFollowIsBlocked,
+            "didLiveScrollResumesViewportFollow":
+                controller.selfTestSelectedOutlineRow >= 0
+                && controller.selfTestSelectedOutlineRow != explicitOutlineRow,
+        ]) { _, new in new }
         finish(checks: checks, metrics: metrics)
     }
 
@@ -2370,6 +2391,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ], status: 1)
         }
 
+        let contextStartedAt = ContinuousClock.now
+        controller.selfTestReaderClick(offset: offset, commandClick: false)
+        let contextVisible = waitUntil(timeout: 120, condition: {
+            controller.selfTestContextCandidateCount >= 1
+        })
+        let contextFirstActionableMS = contextVisible
+            ? milliseconds(since: contextStartedAt)
+            : 0
+        let contextExactVisible = contextVisible && waitUntil(timeout: 120, condition: {
+            controller.selfTestContextProvenance?.contains("Exact") == true
+        })
+        let contextExactMS = contextExactVisible
+            ? milliseconds(since: contextStartedAt)
+            : 0
+
         exactSelfTestProviderState?.delayNextRelation(by: 0.25)
         let cold = measureRelationTiming(
             model: model,
@@ -2447,6 +2483,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ],
             "coldFirstActionableSelectable": coldSelectable,
             "warmFirstActionableSelectable": warmSelectable,
+            "contextFirstActionableMS": contextFirstActionableMS,
+            "contextExactMS": contextExactMS,
+            "contextExactVisible": contextExactVisible,
             "passed": passed,
         ], status: passed ? 0 : 1)
     }
@@ -4520,18 +4559,24 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return ("failed:relation-timing", false, reachedChecks)
         }
 
+        let contextStartedAt = ContinuousClock.now
         controller.selfTestReaderClick(offset: target.clickOffset, commandClick: false)
-        let fuzzyVisible = waitUntil(timeout: 5, condition: {
+        let contextVisible = waitUntil(timeout: 5, condition: {
             controller.selfTestContextCandidateCount >= 1
-                && controller.selfTestContextProvenance?.contains("Exact") == false
         })
+        let contextFirstActionableMS = contextVisible
+            ? milliseconds(since: contextStartedAt)
+            : 0
+        let fuzzyVisible = contextVisible
+            && controller.selfTestContextProvenance?.contains("Exact") == false
         let fuzzyCount = controller.selfTestContextCandidateCount
         emitExactStep(
             "fuzzy",
             variant: "rust-analyzer",
-            controller: controller
+            controller: controller,
+            extra: ["fuzzyVisibleBeforeExact": fuzzyVisible]
         )
-        guard fuzzyVisible else { return ("failed:fuzzy", false, [:]) }
+        guard contextVisible else { return ("failed:context", false, [:]) }
 
         let finished = waitUntil(timeout: 45, condition: {
             if controller.selfTestContextProvenance?.contains("Exact") == true {
@@ -4564,11 +4609,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let exactVisible = finished
             && controller.selfTestContextProvenance?.contains("Exact") == true
+        let contextExactMS = exactVisible
+            ? milliseconds(since: contextStartedAt)
+            : 0
         let fuzzyRetained = controller.selfTestContextCandidateCount >= fuzzyCount
         emitExactStep(
             "exact",
             variant: "rust-analyzer",
-            controller: controller
+            controller: controller,
+            extra: [
+                "contextFirstActionableMS": contextFirstActionableMS,
+                "contextExactMS": contextExactMS,
+            ]
         )
         guard exactVisible && fuzzyRetained,
               let signatureTraitOffset = target.signatureTraitOffset,
@@ -5283,6 +5335,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 sidebar.outlinePlaceholderCenterOffset <= tolerance,
             "sidebarManualDividerSurvivesPlaceholderRefresh":
                 controller.selfTestSidebarDividerSurvivesPlaceholderRefresh,
+            "sidebarDividerPersistsAcrossRebuild":
+                controller.selfTestSidebarDividerPersistsAcrossRebuild,
         ]
         if statusBarOccupancyHeight > 0 {
             checks["statusBarPinnedToContentBottom"] =

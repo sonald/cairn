@@ -20,6 +20,8 @@ final class RelationWindowController: NSViewController,
     )
     private let outlineView = RelationOutlineView()
     private let scrollView = NSScrollView()
+    private let container = NSView()
+    private let headerSurface = NSView()
     private let placeholderLabel = NSTextField(
         labelWithString:
             "Right-click a symbol → Show Callers / Calls / Implements / References"
@@ -30,6 +32,26 @@ final class RelationWindowController: NSViewController,
     private var selfTestOpenSelectionCount = 0
     private var wholeTreeReloadCount = 0
     private var nodeReloadCount = 0
+    private var theme = ReaderTheme(settings: ReaderSettings())
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        guard isViewLoaded else { return }
+        container.layer?.backgroundColor = theme.chromeColor.cgColor
+        headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        directionControl.selectedSegmentBezelColor = theme.accentColor
+        outlineView.backgroundColor = theme.chromeColor
+        for row in 0..<outlineView.numberOfRows {
+            (outlineView.rowView(atRow: row, makeIfNecessary: false)
+                as? ThemeSelectionRowView)?.selectionColor = theme.chromeSelectionColor
+            guard let node = outlineView.item(atRow: row) as? RelationTreeModel.Node,
+                  let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                    as? RelationCellView
+            else { continue }
+            cell.display(node, theme: theme)
+        }
+        view.needsDisplay = true
+    }
 
     var selfTestPlaceholderText: String? {
         loadViewIfNeeded()
@@ -185,7 +207,9 @@ final class RelationWindowController: NSViewController,
         guard isViewLoaded else { return false }
         return scrollView.frame.width > 0
             && directionControl.frame.width > 0
-            && scrollView.frame.intersection(directionControl.frame).isEmpty
+            && scrollView.frame.intersection(
+                directionControl.convert(directionControl.bounds, to: view)
+            ).isEmpty
     }
 
     var selfTestLayoutPasses: Int { layoutPassCount }
@@ -225,6 +249,13 @@ final class RelationWindowController: NSViewController,
 
     var selfTestPossibleDisclosureTitle: String? {
         selfTestPossibleDisclosureItem?.title
+    }
+
+    var selfTestPossibleDisclosureDisplayText: [String] {
+        guard let item = selfTestPossibleDisclosureItem else { return [] }
+        let row = outlineView.row(forItem: item)
+        return (outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            as? RelationCellView)?.selfTestTitleAndCount ?? []
     }
 
     var selfTestPossibleDisclosureFrame: NSRect {
@@ -268,6 +299,18 @@ final class RelationWindowController: NSViewController,
             as? RelationCellView
         else { return .zero }
         return cell.selfTestBadgeFrame(in: outlineView)
+    }
+
+    func selfTestBadgeLabelFrame(titled title: String) -> NSRect {
+        guard let cell = selfTestCell(titled: title, inGroup: "")
+            as? RelationCellView
+        else { return .zero }
+        return cell.selfTestBadgeLabelFrame(in: outlineView)
+    }
+
+    func selfTestBadgeCornerRadius(titled title: String) -> CGFloat {
+        (selfTestCell(titled: title, inGroup: "") as? RelationCellView)?
+            .selfTestBadgeCornerRadius ?? 0
     }
 
     func selfTestBadgeToolTip(titled title: String) -> String? {
@@ -492,6 +535,7 @@ final class RelationWindowController: NSViewController,
         directionControl.selectedSegment = segment(for: model.direction)
         directionControl.target = self
         directionControl.action = #selector(directionChanged(_:))
+        directionControl.selectedSegmentBezelColor = theme.accentColor
         directionControl.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: .init("Relation"))
@@ -534,25 +578,31 @@ final class RelationWindowController: NSViewController,
         placeholderLabel.maximumNumberOfLines = 2
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        let container = NSVisualEffectView()
-        container.material = .windowBackground
-        container.blendingMode = .withinWindow
-        container.state = .followsWindowActiveState
-        container.addSubview(directionControl)
+        container.wantsLayer = true
+        container.layer?.backgroundColor = theme.chromeColor.cgColor
+        headerSurface.wantsLayer = true
+        headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        headerSurface.translatesAutoresizingMaskIntoConstraints = false
+        headerSurface.addSubview(directionControl)
+        container.addSubview(headerSurface)
         container.addSubview(scrollView)
         container.addSubview(placeholderLabel)
         NSLayoutConstraint.activate([
-            directionControl.topAnchor.constraint(equalTo: container.topAnchor, constant: 8),
+            headerSurface.topAnchor.constraint(equalTo: container.topAnchor),
+            headerSurface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            headerSurface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            directionControl.topAnchor.constraint(equalTo: headerSurface.topAnchor, constant: 8),
             directionControl.leadingAnchor.constraint(
-                equalTo: container.leadingAnchor,
+                equalTo: headerSurface.leadingAnchor,
                 constant: 8
             ),
             directionControl.trailingAnchor.constraint(
-                equalTo: container.trailingAnchor,
+                equalTo: headerSurface.trailingAnchor,
                 constant: -8
             ),
+            headerSurface.bottomAnchor.constraint(equalTo: directionControl.bottomAnchor, constant: 8),
             scrollView.topAnchor.constraint(
-                equalTo: directionControl.bottomAnchor,
+                equalTo: headerSurface.bottomAnchor,
                 constant: 6
             ),
             scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
@@ -651,8 +701,20 @@ final class RelationWindowController: NSViewController,
         let cell = outlineView.makeView(withIdentifier: identifier, owner: self)
             as? RelationCellView ?? RelationCellView()
         cell.identifier = identifier
-        cell.display(node)
+        cell.display(node, theme: theme)
         return cell
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
+        rowViewForItem item: Any
+    ) -> NSTableRowView? {
+        let identifier = NSUserInterfaceItemIdentifier("ThemeSelectionRow")
+        let row = outlineView.makeView(withIdentifier: identifier, owner: self)
+            as? ThemeSelectionRowView ?? ThemeSelectionRowView()
+        row.identifier = identifier
+        row.selectionColor = theme.chromeSelectionColor
+        return row
     }
 
     func outlineView(
@@ -661,9 +723,9 @@ final class RelationWindowController: NSViewController,
     ) -> CGFloat {
         guard let node = item as? RelationTreeModel.Node else { return 24 }
         return switch node.kind {
-        case .edge: 38
-        case .root: 32
-        case .group, .evidenceLine, .truncated, .loading, .error: 24
+        case .edge, .root: 44
+        case .group, .truncated, .loading, .error: 26
+        case .evidenceLine: 24
         }
     }
 
@@ -922,28 +984,79 @@ private final class RelationOutlineView: NSOutlineView {
 @MainActor
 private final class RelationCellView: NSTableCellView {
     private let titleLabel = NSTextField(labelWithString: "")
-    private let subtitleLabel = NSTextField(labelWithString: "")
+    private let countLabel = NSTextField(labelWithString: "")
+    private let countPill = NSStackView()
+    private let locationLabel = NSTextField(labelWithString: "")
+    private let dispatchLabel = NSTextField(labelWithString: "")
+    private let dispatchChip = NSStackView()
+    private let modifiersLabel = NSTextField(labelWithString: "")
     private let badgeLabel = NSTextField(labelWithString: "")
+    private let badgePill = NSStackView()
     private let spinner = NSProgressIndicator()
 
     init() {
         super.init(frame: .zero)
         titleLabel.lineBreakMode = .byTruncatingMiddle
         titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        subtitleLabel.lineBreakMode = .byTruncatingTail
-        subtitleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        locationLabel.lineBreakMode = .byTruncatingMiddle
+        locationLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        dispatchLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        modifiersLabel.lineBreakMode = .byTruncatingTail
+        modifiersLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         badgeLabel.setContentHuggingPriority(.required, for: .horizontal)
         spinner.style = .spinning
         spinner.controlSize = .small
         spinner.isDisplayedWhenStopped = false
 
-        let labels = NSStackView(views: [titleLabel, subtitleLabel])
+        dispatchChip.orientation = .horizontal
+        dispatchChip.alignment = .centerY
+        dispatchChip.edgeInsets = NSEdgeInsets(top: 1, left: 5, bottom: 1, right: 5)
+        dispatchChip.setContentHuggingPriority(.required, for: .horizontal)
+        dispatchChip.setContentCompressionResistancePriority(.required, for: .horizontal)
+        dispatchChip.wantsLayer = true
+        dispatchChip.layer?.cornerRadius = 4
+        dispatchChip.addArrangedSubview(dispatchLabel)
+        badgePill.orientation = .horizontal
+        badgePill.alignment = .centerY
+        badgePill.edgeInsets = NSEdgeInsets(top: 1, left: 5, bottom: 1, right: 5)
+        badgePill.setContentHuggingPriority(.required, for: .horizontal)
+        badgePill.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badgePill.wantsLayer = true
+        badgePill.layer?.cornerRadius = 4
+        badgePill.addArrangedSubview(badgeLabel)
+        NSLayoutConstraint.activate([
+            badgePill.widthAnchor.constraint(
+                equalTo: badgeLabel.widthAnchor,
+                constant: 10
+            ),
+            badgePill.heightAnchor.constraint(
+                equalTo: badgeLabel.heightAnchor,
+                constant: 2
+            ),
+        ])
+        countPill.orientation = .horizontal
+        countPill.alignment = .centerY
+        countPill.edgeInsets = NSEdgeInsets(top: 1, left: 7, bottom: 1, right: 7)
+        countPill.setContentHuggingPriority(.required, for: .horizontal)
+        countPill.setContentCompressionResistancePriority(.required, for: .horizontal)
+        countPill.wantsLayer = true
+        countPill.layer?.cornerRadius = 20
+        countPill.addArrangedSubview(countLabel)
+        let detail = NSStackView(views: [locationLabel, dispatchChip, modifiersLabel])
+        detail.orientation = .horizontal
+        detail.alignment = .centerY
+        detail.spacing = 5
+        let titleRow = NSStackView(views: [titleLabel, countPill])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 7
+        let labels = NSStackView(views: [titleRow, detail])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 1
-        let row = NSStackView(views: [spinner, labels, badgeLabel])
+        let row = NSStackView(views: [spinner, labels, badgePill])
         row.orientation = .horizontal
-        row.alignment = .centerY
+        row.alignment = .top
         row.spacing = 6
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
@@ -951,7 +1064,7 @@ private final class RelationCellView: NSTableCellView {
             spinner.widthAnchor.constraint(equalToConstant: 14),
             spinner.heightAnchor.constraint(equalToConstant: 14),
             row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -6),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             row.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
         textField = titleLabel
@@ -961,49 +1074,77 @@ private final class RelationCellView: NSTableCellView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func display(_ node: RelationTreeModel.Node) {
+    func display(_ node: RelationTreeModel.Node, theme: ReaderTheme) {
         spinner.stopAnimation(nil)
         spinner.isHidden = true
-        subtitleLabel.isHidden = true
+        locationLabel.isHidden = true
+        dispatchChip.isHidden = true
+        modifiersLabel.isHidden = true
+        countPill.isHidden = true
+        titleLabel.textColor = theme.foregroundColor
+        locationLabel.textColor = theme.chromeSecondaryColor
+        dispatchLabel.textColor = theme.chipForegroundColor
+        dispatchChip.layer?.backgroundColor = theme.chipBackgroundColor.cgColor
+        modifiersLabel.textColor = theme.chromeTertiaryColor
+        countLabel.textColor = theme.chromeSecondaryColor
+        countPill.layer?.backgroundColor = theme.chipBackgroundColor.cgColor
         badgeLabel.stringValue = node.badge ?? ""
-        badgeLabel.isHidden = node.badge == nil
+        badgePill.isHidden = node.badge == nil
         badgeLabel.toolTip = switch node.badge {
         case "Verified": "Verified by rust-analyzer"
         case "Inferred": "Inferred from source structure"
         default: nil
         }
-        badgeLabel.textColor = node.badge == "Verified" ? .systemGreen : .systemBlue
-        badgeLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        let verified = node.badge == "Verified"
+        badgeLabel.textColor = verified ? theme.verifiedColor : theme.inferredColor
+        badgePill.layer?.backgroundColor = (
+            verified ? theme.verifiedBackgroundColor : theme.inferredBackgroundColor
+        ).cgColor
+        badgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
 
         switch node.kind {
         case .root:
-            titleLabel.attributedStringValue = title(
-                node.title,
-                location: location(of: node),
-                weight: .semibold
-            )
+            titleLabel.stringValue = node.title
+            titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+            locationLabel.stringValue = location(of: node) ?? ""
+            locationLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            locationLabel.toolTip = location(of: node)
+            locationLabel.isHidden = locationLabel.stringValue.isEmpty
         case .group:
-            titleLabel.stringValue = node.title.uppercased()
-            titleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
-            titleLabel.textColor = .secondaryLabelColor
+            if node.title.hasPrefix("Show ") {
+                titleLabel.stringValue = "Show possible matches"
+                titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+                titleLabel.textColor = theme.accentColor
+                countLabel.stringValue = node.title.split(separator: " ")
+                    .dropFirst().first.map(String.init) ?? ""
+                countLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+                countPill.isHidden = countLabel.stringValue.isEmpty
+            } else {
+                titleLabel.stringValue = node.title.uppercased()
+                titleLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+                titleLabel.textColor = theme.chromeSecondaryColor
+            }
         case .edge:
-            titleLabel.attributedStringValue = title(
-                node.title,
-                location: location(of: node),
-                weight: .medium
-            )
-            subtitleLabel.stringValue = node.subtitle ?? ""
-            subtitleLabel.font = .systemFont(ofSize: 10)
-            subtitleLabel.textColor = .secondaryLabelColor
-            subtitleLabel.isHidden = false
+            titleLabel.stringValue = node.title
+            titleLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+            locationLabel.stringValue = location(of: node) ?? ""
+            locationLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            locationLabel.toolTip = location(of: node)
+            locationLabel.isHidden = locationLabel.stringValue.isEmpty
+            dispatchLabel.stringValue = node.dispatchLabel ?? ""
+            dispatchLabel.font = .monospacedSystemFont(ofSize: 9.5, weight: .medium)
+            dispatchChip.isHidden = dispatchLabel.stringValue.isEmpty
+            modifiersLabel.stringValue = node.modifiers.joined(separator: " · ")
+            modifiersLabel.font = .systemFont(ofSize: 10)
+            modifiersLabel.isHidden = modifiersLabel.stringValue.isEmpty
         case .evidenceLine:
             titleLabel.stringValue = "  \(node.title)"
-            titleLabel.font = .systemFont(ofSize: 10)
-            titleLabel.textColor = .tertiaryLabelColor
+            titleLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            titleLabel.textColor = theme.chromeTertiaryColor
         case .loading:
             titleLabel.stringValue = node.title
             titleLabel.font = .systemFont(ofSize: 11)
-            titleLabel.textColor = .secondaryLabelColor
+            titleLabel.textColor = theme.chromeSecondaryColor
             spinner.isHidden = false
             spinner.startAnimation(nil)
         case .truncated:
@@ -1015,44 +1156,29 @@ private final class RelationCellView: NSTableCellView {
             titleLabel.font = .systemFont(ofSize: 11)
             titleLabel.textColor = .systemRed
         }
-        setAccessibilityLabel(titleLabel.stringValue)
+        setAccessibilityLabel(node.title)
         setAccessibilityValue(
             [node.subtitle, node.badge].compactMap { $0 }.joined(separator: ", ")
         )
     }
 
     func selfTestBadgeFrame(in view: NSView) -> NSRect {
+        badgePill.convert(badgePill.bounds, to: view)
+    }
+
+    func selfTestBadgeLabelFrame(in view: NSView) -> NSRect {
         badgeLabel.convert(badgeLabel.bounds, to: view)
     }
 
     var selfTestBadgeToolTip: String? { badgeLabel.toolTip }
+    var selfTestBadgeCornerRadius: CGFloat { badgePill.layer?.cornerRadius ?? 0 }
+    var selfTestTitleAndCount: [String] {
+        [titleLabel.stringValue, countLabel.stringValue]
+    }
 
     private func location(of node: RelationTreeModel.Node) -> String? {
         guard let target = node.target else { return nil }
         return node.line.map { "\(target.path):\($0)" } ?? target.path
     }
 
-    private func title(
-        _ title: String,
-        location: String?,
-        weight: NSFont.Weight
-    ) -> NSAttributedString {
-        let result = NSMutableAttributedString(
-            string: title,
-            attributes: [
-                .font: NSFont.systemFont(ofSize: 12, weight: weight),
-                .foregroundColor: NSColor.labelColor,
-            ]
-        )
-        if let location {
-            result.append(NSAttributedString(
-                string: "  \(location)",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 10),
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                ]
-            ))
-        }
-        return result
-    }
 }

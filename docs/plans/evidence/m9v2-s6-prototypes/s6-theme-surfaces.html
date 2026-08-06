@@ -75,7 +75,7 @@ h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
 .chip{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--chipfg);background:var(--chipbg);
   padding:1px 5px;border-radius:4px;white-space:nowrap;flex:none;}
 .mods{color:var(--ter);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}
-.badge{font-size:10px;font-weight:600;padding:1.5px 7px;border-radius:20px;white-space:nowrap;margin-left:auto;align-self:flex-start;margin-top:2px;}
+.badge{font-size:10px;font-weight:600;padding:1px 5px;border-radius:4px;white-space:nowrap;margin-left:auto;align-self:flex-start;margin-top:2px;}
 .badge.verified{color:var(--grn);background:var(--grnbg);} .badge.inferred{color:var(--blu);background:var(--blubg);}
 .a-fold{color:var(--accent);font-weight:600;font-size:11.5px;}
 .count{font-size:10px;font-weight:600;color:var(--sec);background:var(--chipbg);padding:1px 7px;border-radius:20px;}
@@ -88,7 +88,7 @@ h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
   <h1>主题表面统一 — 整窗对照原型</h1>
   <p class="lead-p">目标（§1.4）：在 Light / Dark / SI Classic 下，<b>侧边栏 · Reader · Relations · Context</b>
      看起来属于同一个应用——同主题内背景、选中色、分隔线、文字层级协调。做法（§3.4）：把三区的
-     surface / selection / header / divider 色并入 <code>ReaderTheme</code>（每主题一组），替换对系统材质色的依赖；
+     surface / selection / header / divider 色并入 <code>ReaderTheme</code>（每主题一组），整窗 titlebar、status bar 与内容区共享同温度 chrome，替换对系统材质色的依赖；
      view 层不留裸 RGB。</p>
   <div class="note"><b>现状的割裂来源：</b>Reader 有四套主题、侧栏用 <code>NSVisualEffectView(.sidebar)</code> 系统冷灰、
      Relations 用 <code>.windowBackground</code> 系统色——于是 SI Classic 的<b>暖纸色 Reader</b> 旁边贴着一条<b>冷灰系统侧栏</b>，

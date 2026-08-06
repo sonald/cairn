@@ -264,10 +264,15 @@ func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
         #expect(renderedColors(in: reader, intersecting: range).contains {
             colorsEqual($0, theme.color(for: kind))
         })
-        #expect(renderedBackgroundColors(
+        let backgrounds = renderedBackgroundColors(
             in: reader,
             intersecting: range
-        ).contains { colorsEqual($0, theme.occurrenceColor) })
+        )
+        if range == declaration {
+            #expect(!backgrounds.contains { colorsEqual($0, theme.occurrenceColor) })
+        } else {
+            #expect(backgrounds.contains { colorsEqual($0, theme.occurrenceColor) })
+        }
     }
     #expect(renderedColors(
         in: reader,
@@ -363,10 +368,19 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
     }
 
     let paramByteOffset = highlighted.referencesByBinding[paramIndex][0].lowerBound
+    let otherParamReference = highlighted.referencesByBinding[paramIndex][1]
+    let otherParamRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(otherParamReference.lowerBound),
+        byteUpperBound: Int(otherParamReference.upperBound)
+    ))
     #expect(reader.activate(atByteOffset: paramByteOffset) == 3)
-    #expect(!renderedBackgroundColors(
+    #expect(renderedBackgroundColors(
         in: reader,
         intersecting: paramRange
+    ).isEmpty)
+    #expect(!renderedBackgroundColors(
+        in: reader,
+        intersecting: otherParamRange
     ).isEmpty)
     #expect(try #require(
         renderedColors(in: reader, intersecting: paramRange).first

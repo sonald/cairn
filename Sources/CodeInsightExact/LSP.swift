@@ -114,6 +114,7 @@ public final class LSPClient: @unchecked Sendable {
     private var responses: [Int: [String: Any]] = [:]
     private var stderr = Data()
     private var serverDiagnostics = ""
+    private var serverIsQuiescent = false
     private var readError: Error?
     private var reachedEOF = false
     private var closed = false
@@ -137,6 +138,12 @@ public final class LSPClient: @unchecked Sendable {
         condition.lock()
         defer { condition.unlock() }
         return diagnosticTextLocked
+    }
+
+    var isQuiescent: Bool {
+        condition.lock()
+        defer { condition.unlock() }
+        return serverIsQuiescent
     }
 
     private var diagnosticTextLocked: String {
@@ -243,6 +250,7 @@ public final class LSPClient: @unchecked Sendable {
                 ],
                 "window": ["workDoneProgress": true],
                 "workspace": ["configuration": true],
+                "experimental": ["serverStatusNotification": true],
             ],
             "initializationOptions": initializationOptions,
             "trace": "off",
@@ -317,6 +325,35 @@ public final class LSPClient: @unchecked Sendable {
             throw LSPError.processExited(process.terminationStatus, detail)
         }
         if reachedEOF { throw LSPError.connectionClosed }
+        throw LSPError.timeout(method)
+    }
+
+    func waitForQuiescence(
+        method: String,
+        timeout: TimeInterval,
+        shouldContinue: @Sendable () -> Bool = { true }
+    ) throws {
+        condition.lock()
+        let deadline = Date().addingTimeInterval(max(0, timeout))
+        while !serverIsQuiescent,
+              shouldContinue(),
+              readError == nil,
+              transportIsOpen,
+              Date() < deadline
+        {
+            _ = condition.wait(
+                until: min(deadline, Date().addingTimeInterval(0.01))
+            )
+        }
+        defer { condition.unlock() }
+        if serverIsQuiescent { return }
+        if !shouldContinue() { throw LSPError.cancelled(method) }
+        if let readError { throw readError }
+        if let process, !process.isRunning {
+            let detail = String(data: stderr, encoding: .utf8) ?? ""
+            throw LSPError.processExited(process.terminationStatus, detail)
+        }
+        if reachedEOF || closed { throw LSPError.connectionClosed }
         throw LSPError.timeout(method)
     }
 
@@ -431,16 +468,23 @@ public final class LSPClient: @unchecked Sendable {
                    let id = message["id"]
                 {
                     serverRequests.append((id, method, message["params"]))
-                } else if let method = message["method"] as? String,
-                          method == "window/showMessage"
-                            || method == "window/logMessage"
-                            || method.localizedCaseInsensitiveContains("status")
-                {
-                    serverDiagnostics += "\n\(method): \(String(describing: message["params"]))"
-                    if serverDiagnostics.utf8.count > 65_536 {
-                        serverDiagnostics = String(serverDiagnostics.suffix(32_768))
+                } else if let method = message["method"] as? String {
+                    if method == "experimental/serverStatus",
+                       let params = message["params"] as? [String: Any],
+                       let quiescent = params["quiescent"] as? Bool
+                    {
+                        serverIsQuiescent = quiescent
                     }
-                    diagnosticsChanged = true
+                    if method == "window/showMessage"
+                        || method == "window/logMessage"
+                        || method.localizedCaseInsensitiveContains("status")
+                    {
+                        serverDiagnostics += "\n\(method): \(String(describing: message["params"]))"
+                        if serverDiagnostics.utf8.count > 65_536 {
+                            serverDiagnostics = String(serverDiagnostics.suffix(32_768))
+                        }
+                        diagnosticsChanged = true
+                    }
                 } else if let id = (message["id"] as? NSNumber)?.intValue,
                           pendingRequestIDs.contains(id)
                 {

@@ -322,6 +322,118 @@ public struct ReaderTheme: Equatable, Sendable {
         }
     }
 
+    public func chromeRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x252528
+        case .siClassic: 0xEEE7D6
+        case .auto, .light: 0xF4F5F7
+        }
+    }
+
+    public func chromeHeaderRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x2C2C30
+        case .siClassic: 0xE7DEC9
+        case .auto, .light: 0xECEEF1
+        }
+    }
+
+    public func chromeDividerRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x34363B
+        case .siClassic: 0xDAD0B9
+        case .auto, .light: 0xE1E4EA
+        }
+    }
+
+    public func chromeSelectionRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x2C3644
+        case .siClassic: 0xE7DAB9
+        case .auto, .light: 0xE7F0FF
+        }
+    }
+
+    public func accentRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x84ADFF
+        case .siClassic: 0x163A5F
+        case .auto, .light: 0x175CD3
+        }
+    }
+
+    public func chromeSecondaryRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x9BA1A8
+        case .siClassic: 0x6E6857
+        case .auto, .light: 0x5A6472
+        }
+    }
+
+    public func chromeTertiaryRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x6E747B
+        case .siClassic: 0x8B8272
+        case .auto, .light: 0x8C959F
+        }
+    }
+
+    public func verifiedRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x4EC777
+        case .siClassic: 0x3F6B42
+        case .auto, .light: 0x1A7F37
+        }
+    }
+
+    public func inferredRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x7AA7FF
+        case .siClassic: 0x245B78
+        case .auto, .light: 0x175CD3
+        }
+    }
+
+    public func chipBackgroundRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x34383D
+        case .siClassic: 0xE3D8BE
+        case .auto, .light: 0xEFF1F4
+        }
+    }
+
+    public func chipForegroundRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xAAB1B8
+        case .siClassic: 0x6E6857
+        case .auto, .light: 0x57606A
+        }
+    }
+
+    public func primarySelectionFillAlpha(isDark: Bool) -> Double {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0.20
+        case .siClassic: 0.12
+        case .auto, .light: 0.13
+        }
+    }
+
+    public func verifiedFillAlpha(isDark: Bool) -> Double {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0.16
+        case .siClassic: 0.15
+        case .auto, .light: 0.12
+        }
+    }
+
+    public func inferredFillAlpha(isDark: Bool) -> Double {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0.18
+        case .siClassic: 0.13
+        case .auto, .light: 0.12
+        }
+    }
+
     private func resolvedSelection(isDark: Bool) -> ReaderSettings.Theme {
         selection == .auto ? (isDark ? .dark : .light) : selection
     }

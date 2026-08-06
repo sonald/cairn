@@ -48,7 +48,7 @@ struct Sandbox: Sendable {
         var environment = ProcessInfo.processInfo.environment
         environment["TMPDIR"] = temporary.path
         environment["XDG_CACHE_HOME"] = cache.path
-        environment["CARGO_NET_OFFLINE"] = "1"
+        environment["CARGO_NET_OFFLINE"] = "true"
 
         let profile = Self.profile(
             projectURLs: Self.aliases(project),
