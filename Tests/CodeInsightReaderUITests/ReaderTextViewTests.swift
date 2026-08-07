@@ -216,11 +216,12 @@ func gutterRepaintsItsBackgroundWhenThemeChanges() throws {
     reader.configureGutter(in: scrollView, lineNumbers: true)
     let ruler = try #require(scrollView.verticalRulerView)
     let rect = NSRect(x: 0, y: 0, width: 40, height: 40)
+    ruler.frame = rect
 
-    func renderedBackground() throws -> NSColor {
+    func renderedColors() throws -> (background: NSColor, outside: NSColor) {
         let bitmap = try #require(NSBitmapImageRep(
             bitmapDataPlanes: nil,
-            pixelsWide: 40,
+            pixelsWide: 80,
             pixelsHigh: 40,
             bitsPerSample: 8,
             samplesPerPixel: 4,
@@ -233,20 +234,33 @@ func gutterRepaintsItsBackgroundWhenThemeChanges() throws {
         let context = try #require(NSGraphicsContext(bitmapImageRep: bitmap))
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = context
-        reader.drawRuler(in: ruler, dirtyRect: rect)
+        NSColor.systemRed.setFill()
+        NSRect(x: 0, y: 0, width: 80, height: 40).fill()
+        reader.drawRuler(
+            in: ruler,
+            dirtyRect: NSRect(x: 0, y: 0, width: 80, height: 40)
+        )
         context.flushGraphics()
         NSGraphicsContext.restoreGraphicsState()
-        return try #require(bitmap.colorAt(x: 1, y: 1))
+        let outside = try #require(bitmap.colorAt(x: 60, y: 20))
+        return (
+            try #require(bitmap.colorAt(x: 1, y: 1)),
+            try #require(outside.usingColorSpace(.sRGB))
+        )
     }
 
-    let dark = try renderedBackground()
+    let dark = try renderedColors()
     reader.apply(settings: ReaderSettings(theme: .light))
-    let light = try renderedBackground()
+    let light = try renderedColors()
 
-    #expect(dark.alphaComponent > 0.99)
-    #expect(light.alphaComponent > 0.99)
-    #expect(dark.brightnessComponent < 0.2)
-    #expect(light.brightnessComponent > 0.9)
+    #expect(dark.background.alphaComponent > 0.99)
+    #expect(light.background.alphaComponent > 0.99)
+    #expect(dark.background.brightnessComponent < 0.2)
+    #expect(light.background.brightnessComponent > 0.9)
+    for outside in [dark.outside, light.outside] {
+        #expect(outside.redComponent > 0.9)
+        #expect(outside.greenComponent < 0.3)
+    }
 }
 
 @MainActor

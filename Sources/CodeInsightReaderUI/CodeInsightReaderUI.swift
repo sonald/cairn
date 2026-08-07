@@ -1126,7 +1126,7 @@ public final class ReaderTextView {
         dirtyRect: NSRect
     ) {
         theme.backgroundColor.setFill()
-        dirtyRect.fill()
+        dirtyRect.intersection(ruler.bounds).fill()
         var lines: [Int] = []
         let font = NSFont.monospacedDigitSystemFont(
             ofSize: 10,
