@@ -586,6 +586,7 @@ public final class AppModel {
             _ = readingTrail.recordNavigation(
                 from: current,
                 to: destination,
+                cause: request.cause,
                 explanation: request.explanation
             )
             currentTrailNodeID = currentTrailNodeID
@@ -677,6 +678,11 @@ public final class AppModel {
     public func goForward() {
         guard let record = navigationHistory.goForwardRecord() else { return }
         replay(record)
+    }
+
+    public func restoreTrailNode(_ id: TrailNodeID) {
+        guard let node = readingTrail.nodes[id] else { return }
+        replay(NavigationRecord(jump: node.jump, trailNodeID: id))
     }
 
     public func navigationExplanation(
@@ -964,12 +970,12 @@ public final class AppModel {
         guard let byteOffset = destination.byteOffset else { return nil }
         let file = destination.file.standardizedFileURL
         let path: String
-        if exactLocationIsInDependency(file.path) {
-            path = file.path
-        } else if let root = fileTree?.root,
-                  let relative = Self.relativePath(of: file, under: root)
+        if let root = fileTree?.root,
+           let relative = Self.relativePath(of: file, under: root)
         {
             path = relative
+        } else if exactLocationIsInDependency(file.path) {
+            path = file.path
         } else {
             return nil
         }
@@ -979,8 +985,9 @@ public final class AppModel {
             byteOffset: byteOffset,
             line: 1,
             column: 1,
-            symbolAnchor: nil,
-            snapshotID: currentSnapshotID
+            symbolAnchor: destination.symbolAnchor,
+            snapshotID: currentSnapshotID,
+            revision: currentRevision
         )
     }
 

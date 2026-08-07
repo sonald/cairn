@@ -228,6 +228,18 @@ func readingTrailBranchesFromRestoredHistoryIdentity() async throws {
         bNodeID,
         try #require(model.readingTrail.activeNodeID),
     ])
+    #expect(model.readingTrail.edges.map(\.cause) == [
+        .fileSelection,
+        .fileSelection,
+    ])
+
+    model.restoreTrailNode(bNodeID)
+    #expect(await testWaitUntil("trail node replay restores the selected visit") {
+        model.readingTrail.activeNodeID == bNodeID
+            && model.selectedFile == b
+    })
+    #expect(model.activeNavigationRequest?.cause == .historyReplay)
+    #expect(model.readingTrail.edges.count == 2)
 }
 
 @MainActor

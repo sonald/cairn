@@ -376,9 +376,12 @@ corrected 按 §3.15 交互。**验收**：[x] 陷阱 fixture 默认不显 Verif
 `ResolutionExplanationStore`（AppModel 会话级，§3.13）+ 清理规则；`ReadingTrail`/`TrailNode`/`TrailEdge`
 （存 `observedAtNavigation` 物化快照 + `currentExplanationID`）；`NavigationRecord.trailNodeID`（§3.12）；
 只记显式语义导航；Back 分支、点击恢复、切 snapshot 分段；worktree 恢复按 §3.14 拆合同；不做磁盘持久化、
-不引入非文件 tab。**验收**：[x] E0 导航任务全对；Trail 数据无 UI 依赖；trace 升级后 Inspector 从 store 读
-最新态而路径条快照不变；**换根后 conflict/candidate-only 解释仍可生成（不悬空）**；旧 worktree 恢复显示
-"replayed against current worktree"。**依赖**：N1、E1a。**范围**：M。
+不引入非文件 tab。UI 按 D4/D5 落为 32pt 常驻顶部 active-path breadcrumb + `⑂` / `⌥⌘T` 浮层 DAG；
+浮层左侧复用三值 badge、snapshot chip 与 git-log gutter，右侧显示导航原因、冻结态 / 当前态和恢复动作。
+**验收**：[x] E0 导航任务全对；Trail 数据无 UI 依赖；trace 升级后 Inspector 从 store 读最新态而路径条
+快照不变；**换根后 conflict/candidate-only 解释仍可生成（不悬空）**；旧 worktree 恢复显示
+"replayed against current worktree"；AppKit 几何 / AX / 三主题视觉与真实 tokio 分支恢复全 PASS。
+**依赖**：N1、E1a。**范围**：M。
 
 ### P0：Reading Set 原型（不进产品，可提前）
 两种原型（原地展开 / `Open as Reading Set` 新 tab），用固定 trace fixture。结论入

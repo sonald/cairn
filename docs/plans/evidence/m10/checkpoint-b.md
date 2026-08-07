@@ -87,6 +87,24 @@
 - AppModel/Snapshot/RelationUX 定向回归：178/178 PASS；`swift test --disable-sandbox`：427/427 PASS。
 - `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS，artifact `.build/self-test-run-20260807-111207-90422`。
 
+### 2026-08-07 Trail UI 纠错闭环
+
+此前本 Checkpoint 只验了 Trail 模型和 replay，却将 N2 记为 PASS；这不满足原型决策 D4/D5 的“常驻顶部条 +
+浮层 DAG”，该旧结论作废。纠正实现没有新增第二状态源：`ReadingTrailView` 直接投影 AppModel 的
+`ReadingTrail` / `ResolutionExplanationStore`，恢复继续调用既有 replay 管线。
+
+- 顶部 32pt 路径条在无项目时也可见；active path 的边显示 cause，`⑂` 显分支数并由 `⌥⌘T` / View 菜单唤起。
+- 浮层左侧为 git-log 式 DAG，复用 Relations 的 Verified / Inferred / Unresolved 与 snapshot chip；右侧显示
+  `NAVIGATED VIA`、`AT NAVIGATION`、`CURRENT` 和 `Restore this node`。
+- `semanticTrailKeepsBranchesVisibleAndRestorable` 固化 A→B、Back、A→C、选择 B、恢复 B 且边数不变；
+  `semanticTrailShowsSnapshotBoundaryAndNavigationCause` 固化 snapshot boundary、commit chip 与 search cause。
+- `relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns` 追加常驻条几何 / AX、浮层内容与 Inspector
+  可发现入口检查；模型测试同时锁定 edge cause 与 `.historyReplay` 恢复不增边。
+- 三主题证据：`semantic-trail-light.png`、`semantic-trail-dark.png`、`semantic-trail-si-classic.png`；真实 tokio
+  证据：`semantic-trail-live-tokio.png`。
+- 最终：435/435 tests PASS；独立 self-test 12/12 PASS（`.build/self-test-run-20260807-144721-57949`）；
+  stress 5/5、0 failure / hang / error（`.build/stress-test-20260807-143314-41932`）。
+
 ## 尚待本 Checkpoint 完成
 
 - [x] E1c call-site reconciliation 与 conflict 修复。

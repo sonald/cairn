@@ -52,6 +52,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let trailView = ReadingTrailView()
     private let statusBar = NSView()
     private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
     private let toolbar = NSToolbar(identifier: "MainToolbar")
@@ -188,7 +189,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         statusStack.alignment = .centerY
         statusStack.spacing = 12
         let contentStack = NSStackView(
-            views: [contentSplitController.view, statusBar]
+            views: [trailView, contentSplitController.view, statusBar]
         )
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
@@ -214,6 +215,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             contentSplitController.view.widthAnchor.constraint(
                 equalTo: contentStack.widthAnchor
             ),
+            trailView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
+            trailView.heightAnchor.constraint(equalToConstant: 32),
             statusBar.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 24),
             separator.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor),
@@ -326,6 +329,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         relationController.onTreeChange = { [weak self] in
             self?.renderStatusBar()
+            self?.renderTrail()
+        }
+        trailView.onRestore = { [weak model] id in
+            model?.restoreTrailNode(id)
         }
         profileButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -592,7 +599,62 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestRelationsTreeVisible: Bool {
         relationController.selfTestTreeVisible
     }
+    var selfTestResolutionInspectorVisible: Bool {
+        relationController.selfTestInspectorVisible
+    }
+    func selfTestCloseResolutionInspector() {
+        relationController.selfTestCloseInspector()
+    }
     var selfTestExactStatusText: String { exactLabel.stringValue }
+    var selfTestTrailBarVisible: Bool {
+        selfTestViewIsVisibleInWindow(trailView)
+    }
+    var selfTestTrailBreadcrumbTitles: [String] {
+        trailView.breadcrumbTitles
+    }
+    var selfTestTrailBreadcrumbText: String {
+        trailView.breadcrumbText
+    }
+    var selfTestTrailBranchCount: Int { trailView.branchCount }
+    var selfTestTrailBarAccessibility: (
+        label: String,
+        value: String,
+        role: String,
+        valueSettable: Bool
+    ) {
+        (
+            trailView.accessibilityLabel() ?? "",
+            trailView.accessibilityValue() as? String ?? "",
+            trailView.accessibilityRole()?.rawValue ?? "",
+            trailView.isAccessibilitySelectorAllowed(
+                NSSelectorFromString("setAccessibilityValue:")
+            )
+        )
+    }
+    var selfTestTrailBarFrameInContentView: NSRect {
+        guard let contentView = window?.contentView else { return .zero }
+        return trailView.convert(trailView.bounds, to: contentView)
+    }
+    var selfTestTrailPopoverVisible: Bool { trailView.isPopoverShown }
+    var selfTestTrailPopoverPaths: [String] { trailView.popoverPaths }
+    var selfTestTrailDetailText: String { trailView.detailValue }
+    var selfTestTrailSnapshotBoundaryCount: Int {
+        trailView.snapshotBoundaryCount
+    }
+    var selfTestTrailPopoverContentView: NSView? {
+        trailView.popoverContentView
+    }
+    var selfTestSelectedTrailNodeID: TrailNodeID? {
+        trailView.selectedTrailNodeID
+    }
+    func selfTestShowTrailPopover() { trailView.showPopover() }
+    func selfTestCloseTrailPopover() { trailView.closePopover() }
+    func selfTestSelectTrailNode(path: String) -> Bool {
+        trailView.selectNode(path: path)
+    }
+    func selfTestRestoreSelectedTrailNode() {
+        trailView.restoreSelectedNode()
+    }
     var selfTestContentSplitFrameInContentView: NSRect {
         guard let contentView = window?.contentView else { return .zero }
         return contentSplitController.view.convert(
@@ -1040,6 +1102,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.isCollapsed.toggle()
     }
 
+    var canShowResolutionInspector: Bool {
+        relationController.canInspectSelection
+    }
+
+    func showResolutionInspector() {
+        relationItem.isCollapsed = false
+        _ = relationController.showSelectedInspector()
+    }
+
+    var canShowReadingTrail: Bool {
+        !model.readingTrail.nodes.isEmpty
+    }
+
+    func showReadingTrail() {
+        trailView.showPopover()
+    }
+
     func applyPanelPreset(_ preset: PanelPresetModel) {
         panelPreset = preset
         let layout = preset.layout
@@ -1074,6 +1153,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.apply(settings: settings)
         relationController.apply(settings: settings)
         contextController.apply(settings: settings)
+        trailView.apply(settings: settings)
     }
 
     private func applyPanelSizes() {
@@ -1393,6 +1473,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderCommitButton()
         renderExactStatus()
         renderStatusBar()
+        renderTrail()
         relationController.refreshInspector()
 
         guard let toolbar = window?.toolbar else { return }
@@ -1679,6 +1760,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         truncatedLabel.isHidden = !model.relationTree.hasTruncatedResults
     }
 
+    private func renderTrail() {
+        trailView.display(
+            trail: model.readingTrail,
+            store: model.resolutionExplanations
+        )
+    }
+
     private func renderCommitButton() {
         guard let revision = model.currentRevision else {
             commitButton.title = switch model.commitPicker.currentBranchName {
@@ -1917,14 +2005,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         open(
             path: target.path,
             byteOffset: target.byteOffset,
-            explanation: model.navigationExplanation(for: node)
+            explanation: model.navigationExplanation(for: node),
+            symbolAnchor: node.title
         )
     }
 
     private func open(
         path: String,
         byteOffset: UInt32,
-        explanation: NavigationExplanation? = nil
+        explanation: NavigationExplanation? = nil,
+        symbolAnchor: String? = nil
     ) {
         guard let root = model.fileTree?.root else { return }
         let file = exactLocationIsInDependency(path)
@@ -1934,7 +2024,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             to: file,
             byteOffset: byteOffset,
             cause: .relation,
-            explanation: explanation
+            explanation: explanation,
+            symbolAnchor: symbolAnchor
         )
     }
 
@@ -1955,7 +2046,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         to file: URL,
         byteOffset: UInt32? = nil,
         cause: NavigationCause = .fileSelection,
-        explanation: NavigationExplanation? = nil
+        explanation: NavigationExplanation? = nil,
+        symbolAnchor: String? = nil
     ) {
         let current = currentJumpRecord()
         captureActiveTabState()
@@ -1966,7 +2058,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             && existingTab != nil
             && existingTab != model.tabStrip.activeIndex
         let request = NavigationRequest(
-            destination: SourceDestination(file: file, byteOffset: byteOffset),
+            destination: SourceDestination(
+                file: file,
+                byteOffset: byteOffset,
+                symbolAnchor: symbolAnchor
+            ),
             cause: cause,
             policy: byteOffset == nil ? .passive : .explicitSemantic,
             explanation: explanation
@@ -2044,7 +2140,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 line: 0,
                 column: 0,
                 symbolAnchor: nil,
-                snapshotID: model.currentSnapshotID
+                snapshotID: model.currentSnapshotID,
+                revision: model.currentRevision
             )
         }
         return JumpRecord(
@@ -2054,7 +2151,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             line: position.line,
             column: position.column,
             symbolAnchor: position.symbolAnchor,
-            snapshotID: model.currentSnapshotID
+            snapshotID: model.currentSnapshotID,
+            revision: model.currentRevision
         )
     }
 

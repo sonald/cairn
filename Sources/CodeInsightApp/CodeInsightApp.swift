@@ -370,6 +370,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
+        let relationsMenu = NSApplication.shared.mainMenu?.items
+            .compactMap(\.submenu).first { $0.title == "Relations" }
+        let viewMenu = NSApplication.shared.mainMenu?.items
+            .compactMap(\.submenu).first { $0.title == "View" }
+        let inspectorMenuItem = relationsMenu?.item(
+            withTitle: "Show Resolution Inspector"
+        )
+        let trailMenuItem = viewMenu?.item(withTitle: "Show Reading Trail")
         var checks = [
             "darkChromeMatchesTheme": darkChromeMatchesTheme,
             "lightChromeMatchesTheme": lightChromeMatchesTheme,
@@ -436,6 +444,20 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 !windowController.selfTestStatusBarVisible,
             "menuHasAboutCairn": appMenu?.item(withTitle: "About Cairn") != nil,
             "menuHasQuitCairn": appMenu?.item(withTitle: "Quit Cairn") != nil,
+            "relationsMenuExposesResolutionInspector":
+                inspectorMenuItem?.keyEquivalent == "i"
+                && inspectorMenuItem?.keyEquivalentModifierMask == .command
+                && inspectorMenuItem?.action
+                    == #selector(showResolutionInspector(_:))
+                && inspectorMenuItem?.target === self,
+            "viewMenuExposesReadingTrail":
+                trailMenuItem?.keyEquivalent == "t"
+                && trailMenuItem?.keyEquivalentModifierMask
+                    == [.command, .option]
+                && trailMenuItem?.action == #selector(showReadingTrail(_:))
+                && trailMenuItem?.target === self,
+            "readingTrailBarVisibleWithoutProject":
+                windowController.selfTestTrailBarVisible,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
         windowController.applyPanelPreset(.relations)
@@ -5312,6 +5334,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller.window?.displayIfNeeded()
         let contentFrame = controller.window?.contentView?.bounds ?? .zero
         let splitFrame = controller.selfTestContentSplitFrameInContentView
+        let trailFrame = controller.selfTestTrailBarFrameInContentView
         let statusFrame = controller.selfTestStatusBarFrameInContentView
         let sidebar = controller.selfTestSidebarGeometry
         let sidebarAvailableHeight =
@@ -5325,7 +5348,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "contentSplitHeightFillsAvailableContent":
                 abs(
                     splitFrame.height
-                        - (contentFrame.height - statusBarOccupancyHeight)
+                        - (
+                            contentFrame.height - statusBarOccupancyHeight
+                                - trailFrame.height
+                        )
                 ) <= tolerance,
             "sidebarFilesPaneIs65Percent":
                 sidebarAvailableHeight > 0
@@ -5370,6 +5396,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "sidebarOutlinePaneHeight": Double(sidebar.outlinePaneHeight),
                 "splitHeight": Double(splitFrame.height),
                 "splitMinY": Double(splitFrame.minY),
+                "trailBarHeight": Double(trailFrame.height),
                 "splitWidth": Double(splitFrame.width),
                 "statusBarHeight": Double(statusFrame.height),
                 "statusBarMinY": Double(statusFrame.minY),
@@ -5591,6 +5618,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showRelations(direction: .implementations)
     }
 
+    @objc private func showResolutionInspector(_ sender: Any?) {
+        windowController?.showResolutionInspector()
+    }
+
+    @objc private func showReadingTrail(_ sender: Any?) {
+        windowController?.showReadingTrail()
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(goBack(_:)):
@@ -5603,6 +5638,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
              #selector(showCalls(_:)),
              #selector(showImplementations(_:)):
             model.contextWindow.selectedCandidate != nil
+        case #selector(showResolutionInspector(_:)):
+            windowController?.canShowResolutionInspector == true
+        case #selector(showReadingTrail(_:)):
+            windowController?.canShowReadingTrail == true
         case #selector(trustThisRepository(_:)):
             model.canTrustCurrentRepository
         case #selector(openSelectedFileInNewTab(_:)):
@@ -5857,6 +5896,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
+        viewMenu.addItem(.separator())
+        let trailItem = NSMenuItem(
+            title: "Show Reading Trail",
+            action: #selector(showReadingTrail(_:)),
+            keyEquivalent: "t"
+        )
+        trailItem.keyEquivalentModifierMask = [.command, .option]
+        trailItem.target = self
+        viewMenu.addItem(trailItem)
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
@@ -5893,6 +5941,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         implementationsItem.target = self
         relationsMenu.addItem(implementationsItem)
+        relationsMenu.addItem(.separator())
+        let inspectorItem = NSMenuItem(
+            title: "Show Resolution Inspector",
+            action: #selector(showResolutionInspector(_:)),
+            keyEquivalent: "i"
+        )
+        inspectorItem.keyEquivalentModifierMask = .command
+        inspectorItem.target = self
+        relationsMenu.addItem(inspectorItem)
         relationsItem.submenu = relationsMenu
         mainMenu.addItem(relationsItem)
 

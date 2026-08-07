@@ -484,10 +484,16 @@ public enum TargetComparison: Equatable, Sendable {
 public struct SourceDestination: Sendable {
     public let file: URL
     public let byteOffset: UInt32?
+    public let symbolAnchor: String?
 
-    public init(file: URL, byteOffset: UInt32? = nil) {
+    public init(
+        file: URL,
+        byteOffset: UInt32? = nil,
+        symbolAnchor: String? = nil
+    ) {
         self.file = file
         self.byteOffset = byteOffset
+        self.symbolAnchor = symbolAnchor
     }
 }
 
@@ -566,6 +572,7 @@ public struct JumpRecord: Equatable, Sendable {
     public let column: UInt32
     public let symbolAnchor: String?
     public let snapshotID: SnapshotID?
+    public let revision: String?
 
     public init(
         path: String,
@@ -574,7 +581,8 @@ public struct JumpRecord: Equatable, Sendable {
         line: UInt32,
         column: UInt32,
         symbolAnchor: String?,
-        snapshotID: SnapshotID?
+        snapshotID: SnapshotID?,
+        revision: String? = nil
     ) {
         self.path = path
         self.contentID = contentID
@@ -583,6 +591,7 @@ public struct JumpRecord: Equatable, Sendable {
         self.column = column
         self.symbolAnchor = symbolAnchor
         self.snapshotID = snapshotID
+        self.revision = revision
     }
 }
 
@@ -617,17 +626,20 @@ public struct TrailNode: Sendable {
 public struct TrailEdge: Sendable {
     public let from: TrailNodeID
     public let to: TrailNodeID
+    public let cause: NavigationCause
     public let observedAtNavigation: ResolutionExplanationSnapshot?
     public let currentExplanationID: ResolutionExplanationID?
 
     public init(
         from: TrailNodeID,
         to: TrailNodeID,
+        cause: NavigationCause,
         observedAtNavigation: ResolutionExplanationSnapshot? = nil,
         currentExplanationID: ResolutionExplanationID? = nil
     ) {
         self.from = from
         self.to = to
+        self.cause = cause
         self.observedAtNavigation = observedAtNavigation
         self.currentExplanationID = currentExplanationID
     }
@@ -645,6 +657,7 @@ public final class ReadingTrail {
     public func recordNavigation(
         from current: JumpRecord?,
         to destination: JumpRecord,
+        cause: NavigationCause = .relation,
         explanation: NavigationExplanation? = nil
     ) -> TrailNodeID {
         let sourceID = activeNodeID ?? current.map { appendNode($0) }
@@ -659,6 +672,7 @@ public final class ReadingTrail {
             edges.append(TrailEdge(
                 from: sourceID,
                 to: destinationID,
+                cause: cause,
                 observedAtNavigation: explanation?.observedAtNavigation,
                 currentExplanationID: explanation?.explanationID
             ))

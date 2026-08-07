@@ -75,6 +75,10 @@ final class RelationWindowController: NSViewController,
         loadViewIfNeeded()
         return scrollView.selfTestIsVisibleInWindow
     }
+    var selfTestInspectorButtonTitle: String {
+        loadViewIfNeeded()
+        return inspectButton.title
+    }
 
     var selfTestExactGroupTitle: String? {
         nil
@@ -702,8 +706,11 @@ final class RelationWindowController: NSViewController,
             systemSymbolName: "info.circle",
             accessibilityDescription: "Show Resolution Inspector"
         )
+        inspectButton.title = "Inspector"
+        inspectButton.imagePosition = .imageLeading
+        inspectButton.font = .systemFont(ofSize: 11, weight: .semibold)
         inspectButton.bezelStyle = .accessoryBarAction
-        inspectButton.isBordered = false
+        inspectButton.isBordered = true
         inspectButton.toolTip = "Show Resolution Inspector (⌘I)"
         inspectButton.setAccessibilityLabel("Show Resolution Inspector")
         inspectButton.target = self
@@ -759,7 +766,7 @@ final class RelationWindowController: NSViewController,
             inspectButton.centerYAnchor.constraint(
                 equalTo: directionControl.centerYAnchor
             ),
-            inspectButton.widthAnchor.constraint(equalToConstant: 22),
+            inspectButton.widthAnchor.constraint(equalToConstant: 82),
             inspectButton.heightAnchor.constraint(equalToConstant: 22),
             headerSurface.bottomAnchor.constraint(equalTo: directionControl.bottomAnchor, constant: 8),
             contentSplit.topAnchor.constraint(
@@ -1031,6 +1038,24 @@ final class RelationWindowController: NSViewController,
         showInspector(for: node)
     }
 
+    var canInspectSelection: Bool {
+        guard outlineView.selectedRow >= 0,
+              let node = outlineView.item(atRow: outlineView.selectedRow)
+                as? RelationTreeModel.Node
+        else { return false }
+        return node.kind == .edge && node.explanation != nil
+    }
+
+    @discardableResult
+    func showSelectedInspector() -> Bool {
+        guard canInspectSelection,
+              let node = outlineView.item(atRow: outlineView.selectedRow)
+                as? RelationTreeModel.Node
+        else { return false }
+        showInspector(for: node)
+        return inspectorView.superview != nil
+    }
+
     private func showInspector(for node: RelationTreeModel.Node) {
         guard let explanation = node.explanation,
               let context = model.relationQueryContexts[explanation.contextID]
@@ -1259,7 +1284,7 @@ private final class InspectableBadgeView: NSStackView {
 }
 
 @MainActor
-private final class RelationChipView: NSStackView {
+final class RelationChipView: NSStackView {
     private let label = NSTextField(labelWithString: "")
     private let dashedBorder = CAShapeLayer()
 
@@ -1286,6 +1311,14 @@ private final class RelationChipView: NSStackView {
 
     var text: String { label.stringValue }
 
+    override var intrinsicContentSize: NSSize {
+        let size = label.intrinsicContentSize
+        return NSSize(
+            width: size.width + edgeInsets.left + edgeInsets.right,
+            height: size.height + edgeInsets.top + edgeInsets.bottom
+        )
+    }
+
     func display(
         _ text: String?,
         foreground: NSColor,
@@ -1301,6 +1334,7 @@ private final class RelationChipView: NSStackView {
         dashedBorder.strokeColor = border.cgColor
         dashedBorder.isHidden = !dashed
         isHidden = text == nil
+        invalidateIntrinsicContentSize()
     }
 
     override func layout() {

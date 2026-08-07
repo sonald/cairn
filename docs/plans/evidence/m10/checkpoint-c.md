@@ -2,6 +2,9 @@
 
 日期：2026-08-07。范围：E2 / E3 / P0 / V0 已完成。
 
+> 纠错说明：最初 V0 把“Trail 模型已实现”误判成“D4/D5 UI 已交付”。该结论曾是不完整的；本文件所述
+> V0 PASS 仅在补齐常驻路径条、浮层 DAG、真实 CUA 与三主题视觉复验后重新成立。
+
 ## E2 语言无关 clause 与英文 renderer
 
 - `NarrativeClause` 分离候选证据、候选生成完整性、source relation 结果集完整性和 exact 查询事实；verification-only 不生成 SOURCE clause。
@@ -24,6 +27,8 @@
 - 渐进披露固定为行级三值 badge → 一句 why → `Show full audit`；Inspector 将 `SOURCE` 与 `VERIFICATION` 分段，conflict 使用 `VERIFICATION CONFLICT`。
 - `VerificationAvailability` 单独显示 provider readiness；Safe / Trusted 与 limitations 放在独立 `ANALYSIS ENVIRONMENT` 区，不用环境限制否定 provider 正向目标。
 - badge 点击只选中并打开 Inspector；⌘I 重开当前选择。corrected 单击 / 双击均不导航，只有 `Open former candidate` 执行次级跳转。
+- Relations 顶部提供带文字的 `Inspector` 按钮，Relations 菜单提供 `Show Resolution Inspector`（⌘I）；不再要求
+  用户先知道“点击 badge 才能找到 Inspector”。
 - provider 主行显示 `corrected N` chip 和被替换候选标题；corrected 仍在列表尾单一 disclosure，Possible + Corrected 同层折叠组上限为 2。
 - Unresolved 迁入与 Verified / Inferred 相同 badge 通道，移除重复的 `Unresolved` subtitle；dependency scope 使用虚线 chip，name-only / corrected 使用 warning chip。
 
@@ -47,4 +52,6 @@
 
 - 自动化、CUA 两条阅读任务与陷阱任务、迁移清单、边界审计、真实 provider 限制和最终计划评审统一记录于 `m10-acceptance.md`。
 - 最终独立验收包使用临时 bundle id，确认真实 rust-analyzer `ready · Safe (limited)`；commit 切换后 `join_set.rs:449 abort_all` 精确位置保持。
+- 纠错复验包 `dev.cairn.CairnM10Trail` 在真实 tokio 上完成 `spawn → task_panics → Back → abort_all`；`⑂ 1`
+  浮层保留双分支，并从 abort_all 恢复 task_panics，路径和边未被覆盖。
 - V0 总结：PASS；sandbox 内真实 provider 启动单列 BLOCKED，不影响已取得的无 sandbox 真实 provider 证据。

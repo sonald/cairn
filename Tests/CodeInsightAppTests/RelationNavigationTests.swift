@@ -52,6 +52,7 @@ struct RelationUXTests {
         let text = fixture.controller.selfTestInspectorText
         let accessibility = fixture.controller.selfTestInspectorAccessibility
         #expect(fixture.controller.selfTestInspectorVisible)
+        #expect(fixture.controller.selfTestInspectorButtonTitle == "Inspector")
         #expect(opens == 0)
         #expect(text.contains("SOURCE"))
         #expect(text.contains("VERIFICATION"))
@@ -1036,6 +1037,32 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(fixture.model.resolutionExplanations.value(
         for: explanation.explanationID
     ) != nil)
+    #expect(fixture.controller.canShowResolutionInspector)
+    fixture.controller.selfTestCloseResolutionInspector()
+    #expect(!fixture.controller.selfTestResolutionInspectorVisible)
+    fixture.controller.showResolutionInspector()
+    #expect(fixture.controller.selfTestResolutionInspectorVisible)
+    fixture.controller.showWindow(nil)
+    fixture.controller.window?.displayIfNeeded()
+    #expect(fixture.controller.selfTestTrailBarVisible)
+    #expect(fixture.controller.selfTestTrailBreadcrumbTitles.count == 2)
+    #expect(fixture.controller.selfTestTrailBreadcrumbText.contains("relation"))
+    #expect(fixture.controller.selfTestTrailBarAccessibility.label
+        == "Reading Trail")
+    #expect(fixture.controller.selfTestTrailBarAccessibility.role
+        == NSAccessibility.Role.group.rawValue)
+    let trailFrame = fixture.controller.selfTestTrailBarFrameInContentView
+    let contentFrame = fixture.controller.selfTestContentSplitFrameInContentView
+    #expect(trailFrame.width > 0 && trailFrame.height >= 28)
+    #expect(trailFrame.intersection(contentFrame).isEmpty)
+    fixture.controller.selfTestShowTrailPopover()
+    #expect(fixture.controller.selfTestTrailPopoverVisible)
+    #expect(Set(fixture.controller.selfTestTrailPopoverPaths) == [
+        "main.rs", "a.rs",
+    ])
+    #expect(fixture.controller.selfTestTrailDetailText.contains("AT NAVIGATION"))
+    #expect(fixture.controller.selfTestTrailDetailText.contains("CURRENT"))
+    fixture.controller.selfTestCloseTrailPopover()
 
     fixture.controller.selfTestOpenRelationSelection()
     await pumpRunLoop()
@@ -1050,6 +1077,135 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
             && fixture.controller.displayedReaderFile?.standardizedFileURL
                 == main.standardizedFileURL
     })
+}
+
+@MainActor
+@Test
+func semanticTrailKeepsBranchesVisibleAndRestorable() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    let a = fixture.root.appendingPathComponent("a.rs")
+    let b = fixture.root.appendingPathComponent("b.rs")
+    fixture.controller.showWindow(nil)
+    fixture.controller.window?.displayIfNeeded()
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    fixture.controller.selfTestReaderRelation(
+        offset: byteOffset(of: "target() {}", in: fixture.mainSource),
+        direction: .references
+    )
+    try #require(await relationTestWaitUntil("reference edges are loaded") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+            && referenceEdge(path: "b.rs", in: fixture.model) != nil
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    let aEdge = try #require(referenceEdge(path: "a.rs", in: fixture.model))
+    let bEdge = try #require(referenceEdge(path: "b.rs", in: fixture.model))
+    #expect(fixture.controller.selfTestSelectRelationEdge(titled: aEdge.title))
+    try #require(await relationTestWaitUntil("a is selected") {
+        fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL
+    })
+    fixture.controller.goBack(nil)
+    try #require(await relationTestWaitUntil("back restores main") {
+        fixture.model.selectedFile?.standardizedFileURL == main.standardizedFileURL
+    })
+    #expect(fixture.controller.selfTestSelectRelationEdge(titled: bEdge.title))
+    try #require(await relationTestWaitUntil("b is selected") {
+        fixture.model.selectedFile?.standardizedFileURL == b.standardizedFileURL
+    })
+
+    #expect(fixture.model.readingTrail.nodes.count == 3)
+    #expect(fixture.model.readingTrail.edges.count == 2)
+    #expect(fixture.controller.selfTestTrailBranchCount == 1)
+    #expect(fixture.controller.selfTestTrailBreadcrumbTitles.last?.contains("b.rs") == true)
+    fixture.controller.selfTestShowTrailPopover()
+    #expect(
+        fixture.controller.selfTestTrailPopoverContentView?.bounds.width ?? 0
+            >= 790
+    )
+    #expect(fixture.controller.selfTestTrailPopoverPaths == [
+        "main.rs", "a.rs", "b.rs",
+    ])
+    #expect(fixture.controller.selfTestSelectTrailNode(path: "a.rs"))
+    #expect(fixture.controller.selfTestTrailDetailText.contains("a.rs"))
+    if let directory = ProcessInfo.processInfo.environment[
+        "CODEINSIGHT_M10_CAPTURE_DIR"
+    ] {
+        for (name, selection) in [
+            ("light", ReaderSettings.Theme.light),
+            ("dark", ReaderSettings.Theme.dark),
+            ("si-classic", ReaderSettings.Theme.siClassic),
+        ] {
+            var settings = ReaderSettings()
+            settings.theme = selection
+            fixture.controller.applyReaderSettings(settings)
+            fixture.controller.selfTestTrailPopoverContentView?
+                .layoutSubtreeIfNeeded()
+            if let view = fixture.controller.selfTestTrailPopoverContentView {
+                try capturePNG(
+                    view,
+                    at: URL(fileURLWithPath: directory)
+                        .appendingPathComponent("semantic-trail-\(name).png")
+                )
+            }
+        }
+    }
+    fixture.controller.selfTestRestoreSelectedTrailNode()
+    try #require(await relationTestWaitUntil("trail restore opens a") {
+        fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL
+            && fixture.model.readingTrail.activeNodeID
+                == fixture.controller.selfTestSelectedTrailNodeID
+    })
+    #expect(fixture.model.readingTrail.edges.count == 2)
+}
+
+@MainActor
+@Test
+func semanticTrailShowsSnapshotBoundaryAndNavigationCause() throws {
+    _ = NSApplication.shared
+    let trail = ReadingTrail()
+    let store = ResolutionExplanationStore()
+    let worktree = SnapshotID(rawValue: UUID())
+    let commit = SnapshotID(rawValue: UUID())
+    let root = JumpRecord(
+        path: "src/main.rs",
+        contentID: nil,
+        byteOffset: 4,
+        line: 1,
+        column: 5,
+        symbolAnchor: "main",
+        snapshotID: worktree
+    )
+    let destination = JumpRecord(
+        path: "src/lib.rs",
+        contentID: nil,
+        byteOffset: 12,
+        line: 3,
+        column: 2,
+        symbolAnchor: "run",
+        snapshotID: commit,
+        revision: "1234567890abcdef"
+    )
+    _ = trail.recordNavigation(
+        from: root,
+        to: destination,
+        cause: .search
+    )
+    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
+    view.display(trail: trail, store: store)
+
+    #expect(view.snapshotBoundaryCount == 1)
+    #expect(view.breadcrumbText == "main · search → run")
+    #expect(view.selectNode(path: "src/lib.rs"))
+    #expect(view.detailValue.contains("commit 1234567"))
+    #expect(view.detailValue.contains("search"))
 }
 
 @MainActor
