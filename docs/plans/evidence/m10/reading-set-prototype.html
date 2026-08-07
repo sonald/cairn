@@ -1,0 +1,192 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M10 · Reading Set 布局对比（P0 探索）</title><style>
+*{box-sizing:border-box;}
+body{margin:0;padding:30px 26px 70px;font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;background:#eef0f3;color:#1c2024;}
+@media (prefers-color-scheme:dark){body{background:#16181c;color:#e6e8eb;}.lead p{color:#a7adb5!important;}.pc,.dnote,.note{background:#1f2227!important;border-color:#2c3037!important;color:#c4c9cf!important;}.swbar button{background:#24272c;color:#c4c9cf;border-color:#33373d;}.swbar button.on{background:#2f5fd0;color:#fff;border-color:#2f5fd0;}figcaption{color:#c4c9cf!important;}.note b{color:#e6a06a!important;}}
+.wrap{max-width:1040px;margin:0 auto;}
+.kick{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:10px;}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
+.lead p{margin:0 0 4px;max-width:900px;color:#4b5563;}.lead code{font-family:ui-monospace,monospace;font-size:.92em;}
+.note{margin:16px 0 6px;padding:11px 14px;border:1px solid #e6d3c4;background:#fbf3ec;border-radius:10px;font-size:12.5px;color:#7a4a2e;line-height:1.55;}.note b{color:#a2401f;}
+.swbar{display:flex;gap:8px;align-items:center;margin:16px 0 10px;}.swbar span{font-size:12px;color:#6b7280;margin-right:4px;}
+.swbar button{font:600 12px/1 inherit;padding:7px 14px;border-radius:8px;border:1px solid #d3d8de;background:#fff;color:#3a4149;cursor:pointer;}
+.swbar button.on{background:#175CD3;color:#fff;border-color:#175CD3;}
+figure{margin:0 0 26px;}figcaption{font-size:13px;font-weight:700;color:#374151;margin:0 0 8px;}figcaption .n{color:#6b7280;font-weight:500;}
+.pc{margin:8px 0 0;padding:9px 13px;border:1px solid #dfe2e7;border-radius:9px;background:#fff;font-size:12px;line-height:1.55;color:#4b5563;}.pc b{color:#1a7f37;}.pc .con{color:#b54708;}
+
+.badge{font:600 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:20px;flex:none;}
+.badge.verified{background:var(--grnbg);color:var(--grn);}.badge.inferred{background:var(--blubg);color:var(--blu);}
+.chip{font:500 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:5px;flex:none;background:var(--chipbg);color:var(--chipfg);}
+.chip.scope{background:transparent;color:var(--sec);border:1px dashed var(--neubd);}
+.chip.commit{background:transparent;color:var(--accent);border:1px solid var(--accent);}
+.chip.caveat{background:var(--warnbg);color:var(--warn);border:1px solid var(--warnbd);}
+.act{font:500 10px/1 inherit;color:var(--accent);cursor:pointer;}
+
+.win{border-radius:11px;overflow:hidden;border:1px solid var(--divider);box-shadow:0 2px 8px rgba(0,0,0,.10);color:var(--fg);background:var(--content);}
+.code{font:11.5px/1.85 ui-monospace,"SF Mono",Menlo,monospace;white-space:pre;}
+.code .ln{color:var(--ter);margin-right:12px;user-select:none;}
+.kw{color:var(--kw);}.ty{color:var(--ty);}.fn{color:var(--fn);}.cm{color:var(--com);font-style:italic;}.st{color:var(--strc);}
+
+/* Layout A: reader + relations with inline expand */
+.winA{display:flex;height:340px;}
+.rd{flex:1;min-width:0;background:var(--content);padding:10px 13px;overflow:auto;}
+.rd-h{font-size:10px;font-weight:600;color:var(--sec);margin-bottom:7px;}
+.rel{width:250px;flex:none;background:var(--chrome);border-left:1px solid var(--divider);display:flex;flex-direction:column;}
+.rel-h{font:700 9px/1 ui-monospace,monospace;letter-spacing:.05em;color:var(--sec);padding:8px 11px;background:var(--chrome2);border-bottom:1px solid var(--divider);}
+.rel-b{overflow:auto;padding:3px 0;}
+.rr{padding:6px 11px;cursor:pointer;}.rr:hover{background:var(--cur);}
+.rr .r1{display:flex;align-items:center;gap:6px;}.rname{font-size:11.5px;font-weight:500;color:var(--fg);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.rr .r2{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--sec);margin-top:2px;}
+.rr.exp{background:var(--sel);}
+.inlineEx{margin:5px 9px 8px;border:1px solid var(--divider);border-radius:7px;background:var(--content);overflow:hidden;}
+.inlineEx .ehead{display:flex;align-items:center;gap:5px;flex-wrap:wrap;padding:5px 8px;background:var(--chrome2);border-bottom:1px solid var(--divider);font-size:9.5px;}
+.inlineEx .ebody{padding:6px 8px;overflow:auto;}
+.inlineEx .eacts{padding:4px 8px 6px;display:flex;gap:10px;}
+
+/* Layout B: reading set tab */
+.tabs{display:flex;align-items:stretch;background:var(--chrome2);border-bottom:1px solid var(--divider);}
+.tab{padding:8px 14px;font-size:11px;color:var(--sec);border-right:1px solid var(--divider);display:flex;align-items:center;gap:7px;cursor:pointer;}
+.tab.on{background:var(--content);color:var(--fg);font-weight:600;box-shadow:inset 0 -2px 0 var(--pstroke);}
+.tab .x{color:var(--ter);}
+.tab .star{color:var(--accent);}
+.rsbody{height:400px;overflow:auto;padding:12px 14px;background:var(--content);}
+.rstitle{font-size:14px;font-weight:700;color:var(--fg);margin:0 0 3px;}
+.rssub{font-size:11px;color:var(--sec);margin:0 0 13px;}
+.ex{border:1px solid var(--divider);border-radius:9px;margin-bottom:12px;overflow:hidden;background:var(--content);}
+.ex .h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 11px;background:var(--chrome);border-bottom:1px solid var(--divider);}
+.ex .role{font:700 9px/1 ui-monospace,monospace;letter-spacing:.05em;color:var(--sec);}
+.ex .esym{font:600 12px/1 ui-monospace,monospace;color:var(--fg);}
+.ex .epath{font-family:ui-monospace,monospace;font-size:10px;color:var(--sec);}
+.ex .b{padding:9px 12px;overflow:auto;}
+.ex .acts{padding:6px 12px 9px;display:flex;gap:14px;border-top:1px solid var(--divider);background:var(--content);}
+.spacer{flex:1;}
+
+.dnote{margin:24px 0 0;padding:14px 18px;border:1px solid #dfe2e7;background:#fff;border-radius:11px;font-size:12.5px;line-height:1.6;color:#374151;}
+.dnote h3{margin:0 0 8px;font-size:13px;}.dnote ul{margin:6px 0 0;padding-left:20px;}.dnote li{margin:3px 0;}
+.dnote code{font-family:ui-monospace,monospace;font-size:.9em;background:rgba(127,127,127,.12);padding:1px 4px;border-radius:3px;}
+.reco{margin-top:10px;padding:10px 13px;border-radius:9px;background:rgba(23,92,211,.07);border:1px solid rgba(23,92,211,.25);font-size:12.5px;color:#1a3f7a;}
+@media (prefers-color-scheme:dark){.reco{background:rgba(122,167,255,.10);border-color:rgba(122,167,255,.3);color:#a9c4f5;}}
+
+.win.t-light{ --content:#FFFFFF; --chrome:#F4F5F7; --chrome2:#ECEEF1; --divider:#E1E4EA; --sel:#E7F0FF; --accent:#175CD3; --fg:#1F2328; --sec:#5A6472; --ter:#8C959F; --cur:#F3F6FA; --grn:#1A7F37; --grnbg:rgba(26,127,55,.12); --blu:#175CD3; --blubg:rgba(23,92,211,.10); --chipbg:#EFF1F4; --chipfg:#57606A; --pstroke:#175CD3; --neubd:#C4CAD1; --warn:#B54708; --warnbg:rgba(181,71,8,.10); --warnbd:#EAAA7A; --kw:#9C36B5; --ty:#087E8B; --fn:#175CD3; --com:#4D7C0F; --strc:#B42318; }
+.win.t-dark{ --content:#1E1E1E; --chrome:#252528; --chrome2:#2C2C30; --divider:#34363B; --sel:#2C3644; --accent:#84ADFF; --fg:#D4D4D4; --sec:#9BA1A8; --ter:#6E747B; --cur:#2A2D2E; --grn:#4EC777; --grnbg:rgba(78,199,119,.16); --blu:#7AA7FF; --blubg:rgba(122,167,255,.16); --chipbg:#34383D; --chipfg:#AAB1B8; --pstroke:#84ADFF; --neubd:#4A4E54; --warn:#F0A868; --warnbg:rgba(240,168,104,.15); --warnbd:#6B5334; --kw:#E879F9; --ty:#67E8F9; --fn:#84ADFF; --com:#A3E635; --strc:#FDA29B; }
+.win.t-si{ --content:#F5F0E6; --chrome:#EEE7D6; --chrome2:#E7DEC9; --divider:#DAD0B9; --sel:#E7DAB9; --accent:#163A5F; --fg:#1F2733; --sec:#6E6857; --ter:#8B8272; --cur:#EDE6D8; --grn:#3F6B42; --grnbg:rgba(63,107,66,.15); --blu:#245B78; --blubg:rgba(36,91,120,.11); --chipbg:#E3D8BE; --chipfg:#6E6857; --pstroke:#163A5F; --neubd:#C4B79A; --warn:#8A5A2E; --warnbg:rgba(138,90,46,.12); --warnbd:#C7A574; --kw:#7A1F1F; --ty:#245B78; --fn:#163A5F; --com:#526B45; --strc:#8A3C2E; }
+</style></head><body>
+<div class="wrap">
+<div class="kick">M10 · Explainable Navigation — 界面原型 03（P0 探索，不进产品）</div>
+<h1>Reading Set — 把关系结果组织成连续可读材料</h1>
+<div class="lead">
+<p>读一个符号时把「定义 + Verified 调用者 + Inferred 调用者 + trait + 测试」摊成一条连续阅读流——每段仍是真实源码，但带出处头（path:line · Verified/Inferred · commit · 查看证据）。这是它区别于 Zed multibuffer 的地方：只读、绑快照、带可信度。</p>
+<p>固定 fixture：读 tokio <code>spawn</code>。对比两种布局，选一种在 M11 落地。</p>
+</div>
+<div class="note"><b>P0 定位：</b>本原型只为选布局，<b>不进 M10 产品</b>（M10 只做 Evidence + Trail）。Reading Set 实现顺延 M11。</div>
+
+<div class="swbar"><span>主题</span><button data-t="t-light" class="on">Light</button><button data-t="t-dark">Dark</button><button data-t="t-si">SI Classic</button></div>
+
+<figure>
+<figcaption>布局 A · Relations 行内原地展开 <span class="n">— 在窄面板里就地摊开片段</span></figcaption>
+<div class="win t-light winA">
+  <div class="rd">
+    <div class="rd-h">spawn.rs · 你正在读的文件</div>
+    <div class="code"><span class="ln">142</span><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;
+<span class="ln">143</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="kw">Send</span> + <span class="cm">'static</span>,
+<span class="ln">144</span>{
+<span class="ln">145</span>    <span class="fn">spawn_inner</span>(future, <span class="ty">SpawnMeta</span>::<span class="fn">new</span>(<span class="ty">None</span>))
+<span class="ln">146</span>}</div>
+  </div>
+  <div class="rel">
+    <div class="rel-h">RELATIONS · CALLED BY</div>
+    <div class="rel-b">
+      <div class="rr"><div class="r1"><span class="rname">Runtime::block_on</span><span class="badge verified">V</span></div><div class="r2">runtime/runtime.rs:347</div></div>
+      <div class="rr exp"><div class="r1"><span class="rname">▾ JoinSet::spawn_on</span><span class="badge inferred">I</span></div><div class="r2">runtime/task/join_set.rs:88</div></div>
+      <div class="inlineEx">
+        <div class="ehead"><span class="epath" style="font-family:ui-monospace,monospace;color:var(--sec)">join_set.rs:88</span><span class="badge inferred">I</span><span class="chip caveat">name match only</span></div>
+        <div class="ebody code"><span class="ln">88</span>    <span class="kw">self</span>.inner.<span class="fn">spawn</span>(future)</div>
+        <div class="eacts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+      </div>
+      <div class="rr"><div class="r1"><span class="rname">LocalSet::spawn_local</span><span class="badge inferred">I</span></div><div class="r2">runtime/task/local.rs:203</div></div>
+      <div class="rr"><div class="r1"><span class="rname">Handle::spawn</span><span class="badge verified">V</span></div><div class="r2">runtime/handle.rs:120</div></div>
+    </div>
+  </div>
+</div>
+<div class="pc"><b>优点</b>：不离开当前阅读位置、轻量 peek、就地看一眼调用点。<span class="con">代价</span>：~250px 窄宽挤压片段（多行/长签名读不下）；一次只适合展开一两段；无法把「定义+调用者+trait+测试」组成一条连续材料。适合快速瞄，不适合系统地读懂一个符号。</div>
+</figure>
+
+<figure>
+<figcaption>布局 B · 主区新开 Reading Set tab <span class="n">— File Tab | Reading Set Tab 并列，满宽连续阅读</span></figcaption>
+<div class="win t-light">
+  <div class="tabs">
+    <div class="tab"><span>spawn.rs</span><span class="x">×</span></div>
+    <div class="tab on"><span class="star">★</span><span>Reading Set: spawn</span><span class="x">×</span></div>
+    <div class="spacer"></div>
+  </div>
+  <div class="rsbody">
+    <div class="rstitle">Reading Set · spawn</div>
+    <div class="rssub">5 段 · snapshot 3a4f71c · default / Trusted · 由 Relations「Open as Reading Set」生成</div>
+
+    <div class="ex">
+      <div class="h"><span class="role">DEFINITION</span><span class="esym">spawn</span><span class="epath">runtime/task/spawn.rs:142</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">3a4f71c</span></div>
+      <div class="b code"><span class="ln">142</span><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;
+<span class="ln">143</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="kw">Send</span> + <span class="cm">'static</span>,
+<span class="ln">144</span>{
+<span class="ln">145</span>    <span class="fn">spawn_inner</span>(future, <span class="ty">SpawnMeta</span>::<span class="fn">new</span>(<span class="ty">None</span>))
+<span class="ln">146</span>}</div>
+      <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+    </div>
+
+    <div class="ex">
+      <div class="h"><span class="role">VERIFIED CALLER</span><span class="esym">Runtime::block_on</span><span class="epath">runtime/runtime.rs:347</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">3a4f71c</span></div>
+      <div class="b code"><span class="ln">347</span>    <span class="kw">let</span> handle = <span class="kw">self</span>.<span class="fn">spawn</span>(future);
+<span class="ln">348</span>    <span class="kw">self</span>.<span class="fn">block_on</span>(handle)</div>
+      <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+    </div>
+
+    <div class="ex">
+      <div class="h"><span class="role">INFERRED CALLER</span><span class="esym">JoinSet::spawn_on</span><span class="epath">runtime/task/join_set.rs:88</span><span class="spacer"></span><span class="badge inferred">INFERRED</span><span class="chip caveat">name match only</span></div>
+      <div class="b code"><span class="ln">88</span>    <span class="kw">self</span>.inner.<span class="fn">spawn</span>(future)   <span class="cm">// 仅方法名匹配</span></div>
+      <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+    </div>
+
+    <div class="ex">
+      <div class="h"><span class="role">TRAIT CONTRACT</span><span class="esym">Future</span><span class="epath">core/future/future.rs</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip scope">dependency</span></div>
+      <div class="b code"><span class="ln">100</span><span class="kw">pub trait</span> <span class="ty">Future</span> {
+<span class="ln">101</span>    <span class="kw">type</span> <span class="ty">Output</span>;
+<span class="ln">102</span>    <span class="kw">fn</span> <span class="fn">poll</span>(<span class="kw">self</span>: <span class="ty">Pin</span>&lt;&amp;<span class="kw">mut</span> Self&gt;, cx: &amp;<span class="kw">mut</span> <span class="ty">Context</span>) -&gt; <span class="ty">Poll</span>&lt;Self::Output&gt;;
+<span class="ln">103</span>}</div>
+      <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+    </div>
+
+    <div class="ex">
+      <div class="h"><span class="role">TEST</span><span class="esym">spawn_panic_propagation</span><span class="epath">tests/task_panic.rs:41</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">3a4f71c</span></div>
+      <div class="b code"><span class="ln">41</span><span class="st">#[tokio::test]</span>
+<span class="ln">42</span><span class="kw">async fn</span> <span class="fn">spawn_panic_propagation</span>() {
+<span class="ln">43</span>    <span class="kw">let</span> h = <span class="fn">spawn</span>(<span class="kw">async</span> { <span class="fn">panic!</span>() });
+<span class="ln">44</span>    <span class="fn">assert!</span>(h.<span class="fn">await</span>.is_err());
+<span class="ln">45</span>}</div>
+      <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+    </div>
+  </div>
+</div>
+<div class="pc"><b>优点</b>：满宽连续阅读、把散在多文件的上下文组成一份材料、每段带出处头（badge + commit + 查看证据）；File Tab / Reading Set Tab 并列，不新增固定窗口。<span class="con">代价</span>：需要主阅读区支持「非文件文档」原语（穿透 TabStrip/AppModel/Reader/状态恢复）——正是 M11 的真实成本，也是它顺延的原因。</div>
+</figure>
+
+<div class="dnote">
+<h3>我的倾向（供参考，最终你裁）</h3>
+<div class="reco"><b>布局 B（Reading Set tab）是 Canvas 想要的形态，但它属于 M11。</b> 理由：只有 B 能兑现「沿一条有证据的路径读懂一个符号」这个产品论点；A 的行内展开只是 peek，读不成连续材料。而 B 需要「非文件文档」原语（§2 已明确顺延 M11）。所以 P0 的结论应是：<b>选 B 作为 M11 Reading Set 的目标形态，A 的行内 peek 可作为 Relations 的轻量补充另算</b>。</div>
+<ul>
+<li><b>与 Trail 的衔接</b>：Trail 浮层（C）里点某节点可「Open as Reading Set」，与 B 是同一个非文件文档原语——M11 一次性引入，两处复用。</li>
+<li><b>出处头是硬要求</b>：每段的 <code>Verified/Inferred + commit + 查看证据</code> 不可省——这是 Cairn 区别于普通 multibuffer 的身份。「查看证据」直接开原型 01 的 Resolution Inspector。</li>
+<li><b>三主题都扫一眼</b>：SI 暖纸下多个 excerpt 卡片叠加会不会太素、Dark 下卡片边界够不够分明。</li>
+</ul>
+<p style="margin:8px 0 0;color:#6b7280;">若你认可「B 是目标形态、但 M10 不做」，那 P0 探索即收尾，M10 的三张核心原型（01 Inspector / 02+02b Trail / 本张定调）就齐了。</p>
+</div>
+</div>
+
+<script>
+document.querySelectorAll('.swbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.swbar button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  document.querySelectorAll('.win').forEach(w=>{ w.className=w.className.replace(/t-(light|dark|si)/,'').trim()+' '+b.dataset.t; });
+});
+</script>
+</body></html>

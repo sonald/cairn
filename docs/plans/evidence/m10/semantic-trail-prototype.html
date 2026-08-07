@@ -1,0 +1,214 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M10 · Semantic Trail 原型</title><style>
+*{box-sizing:border-box;}
+body{margin:0;padding:30px 26px 70px;
+  font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;
+  background:#eef0f3;color:#1c2024;}
+@media (prefers-color-scheme:dark){body{background:#16181c;color:#e6e8eb;}
+  .lead p{color:#a7adb5!important;} .legend,.note,.dnote{background:#1f2227!important;border-color:#2c3037!important;}
+  .note{color:#c4c9cf!important;} .dnote{color:#c4c9cf!important;} .legend .sub{color:#9aa0a8!important;}
+  .swbar button{background:#24272c;color:#c4c9cf;border-color:#33373d;} .swbar button.on{background:#2f5fd0;color:#fff;border-color:#2f5fd0;}}
+.wrap{max-width:1220px;margin:0 auto;}
+.kick{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:10px;}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
+.lead p{margin:0 0 4px;max-width:900px;color:#4b5563;} .lead code{font-family:ui-monospace,monospace;font-size:.92em;}
+.note{margin:16px 0 6px;padding:11px 14px;border:1px solid #e6d3c4;background:#fbf3ec;border-radius:10px;font-size:12.5px;color:#7a4a2e;line-height:1.55;} .note b{color:#a2401f;}
+.swbar{display:flex;gap:8px;align-items:center;margin:16px 0 6px;} .swbar span{font-size:12px;color:#6b7280;margin-right:4px;}
+.swbar button{font:600 12px/1 inherit;padding:7px 14px;border-radius:8px;border:1px solid #d3d8de;background:#fff;color:#3a4149;cursor:pointer;}
+.swbar button.on{background:#175CD3;color:#fff;border-color:#175CD3;}
+.legend{display:flex;flex-wrap:wrap;gap:10px 20px;align-items:center;margin:12px 0 6px;padding:12px 16px;border:1px solid #dfe2e7;border-radius:11px;background:#fff;font-size:12.5px;}
+.legend .lg{display:inline-flex;align-items:center;gap:7px;} .legend .sub{flex-basis:100%;font-size:12px;color:#6b7280;margin:2px 0 0;}
+
+.badge{font:600 10px/1 ui-monospace,monospace;padding:3px 8px;border-radius:20px;white-space:nowrap;flex:none;}
+.badge.verified{background:var(--grnbg);color:var(--grn);} .badge.inferred{background:var(--blubg);color:var(--blu);}
+.badge.unresolved{background:transparent;color:var(--neu);border:1px solid var(--neubd);}
+.chip{font:500 10px/1 ui-monospace,monospace;padding:2px 7px;border-radius:5px;white-space:nowrap;flex:none;background:var(--chipbg);color:var(--chipfg);}
+.chip.scope{background:transparent;color:var(--sec);border:1px dashed var(--neubd);}
+.chip.snap{background:transparent;color:var(--sec);border:1px solid var(--divider);}
+.chip.commit{color:var(--accent);border-color:var(--accent);}
+.cause{font:600 10px/1 ui-monospace,monospace;color:var(--accent);padding:1px 6px;border-radius:4px;background:var(--blubg);white-space:nowrap;}
+
+.win{display:flex;height:560px;border-radius:12px;overflow:hidden;border:1px solid var(--divider);box-shadow:0 2px 10px rgba(0,0,0,.12);color:var(--fg);margin-top:10px;}
+.pane-trail{width:56%;flex:none;background:var(--chrome);border-right:1px solid var(--divider);display:flex;flex-direction:column;}
+.pane-detail{flex:1;min-width:0;background:var(--content);display:flex;flex-direction:column;}
+.p-head{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--sec);padding:9px 13px;background:var(--chrome2);border-bottom:1px solid var(--divider);display:flex;justify-content:space-between;}
+.p-head b{color:var(--fg);}
+
+/* active-path breadcrumb (cairn trail) */
+.crumb{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:9px 13px;background:var(--chrome2);border-bottom:1px solid var(--divider);font-size:11px;}
+.crumb .cn{color:var(--fg);font-family:ui-monospace,monospace;font-weight:600;}
+.crumb .cnb{color:var(--fg);font-family:ui-monospace,monospace;font-weight:600;background:var(--sel);border-radius:5px;padding:2px 6px;}
+.crumb .ca{color:var(--sec);font-size:10px;}
+
+/* graph */
+.graph{overflow-y:auto;padding:8px 6px 8px 4px;flex:1;font-size:12.5px;}
+.gnode{display:flex;align-items:flex-start;gap:2px;padding:2px 0;cursor:pointer;border-radius:7px;}
+.gnode:hover .gcard{background:var(--cur);}
+.gutter{width:44px;flex:none;font-family:ui-monospace,monospace;font-size:13px;color:var(--ter);text-align:center;line-height:1.9;white-space:pre;user-select:none;padding-top:5px;}
+.gutter .on{color:var(--pstroke);font-weight:700;}
+.gcard{flex:1;min-width:0;padding:6px 10px;border-radius:8px;border:1px solid transparent;}
+.gnode.active .gcard{background:var(--sel);border-color:var(--pstroke);}
+.gnode.dim{opacity:.5;}
+.gc1{display:flex;align-items:center;gap:8px;}
+.gname{font-family:ui-monospace,monospace;font-weight:600;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0;}
+.gc2{display:flex;align-items:center;gap:6px;margin-top:4px;flex-wrap:wrap;}
+.fork{font:600 10px/1 inherit;color:var(--warn);}
+.now{font:600 10px/1 ui-monospace,monospace;color:var(--pstroke);}
+.seg{display:flex;align-items:center;gap:8px;margin:6px 0 6px 46px;color:var(--sec);font-size:10.5px;}
+.seg .ln{flex:1;height:0;border-top:1px dashed var(--neubd);}
+
+/* detail */
+.detail{flex:1;overflow-y:auto;padding:16px 18px;}
+.dname{font:600 15px/1.3 ui-monospace,monospace;color:var(--fg);}
+.drow{margin:12px 0;} .dl{font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--sec);margin-bottom:4px;}
+.dv{font-size:12.5px;color:var(--fg);line-height:1.5;}
+.frozen{padding:9px 12px;border-radius:8px;background:var(--cur);border:1px solid var(--divider);font-size:12px;line-height:1.5;}
+.frozen .tag{font:600 9px/1 ui-monospace,monospace;letter-spacing:.05em;color:var(--sec);display:block;margin-bottom:4px;}
+.diff{color:var(--warn);font-size:11px;margin-top:6px;}
+.restore{margin-top:14px;padding:8px 12px;border-radius:8px;border:1px solid var(--accent);color:var(--accent);font-size:11.5px;display:inline-block;font-weight:600;}
+.iph{color:var(--sec);font-size:12.5px;padding:24px 4px;text-align:center;}
+
+.win.t-light{ --content:#FFFFFF; --chrome:#F4F5F7; --chrome2:#ECEEF1; --divider:#E1E4EA; --sel:#E7F0FF; --accent:#175CD3; --fg:#1F2328; --sec:#5A6472; --ter:#8C959F; --cur:#F3F6FA; --grn:#1A7F37; --grnbg:rgba(26,127,55,.12); --blu:#175CD3; --blubg:rgba(23,92,211,.10); --chipbg:#EFF1F4; --chipfg:#57606A; --pstroke:#175CD3; --neu:#57606A; --neubd:#C4CAD1; --warn:#B54708; }
+.win.t-dark{ --content:#1E1E1E; --chrome:#252528; --chrome2:#2C2C30; --divider:#34363B; --sel:#2C3644; --accent:#84ADFF; --fg:#D4D4D4; --sec:#9BA1A8; --ter:#6E747B; --cur:#2A2D2E; --grn:#4EC777; --grnbg:rgba(78,199,119,.16); --blu:#7AA7FF; --blubg:rgba(122,167,255,.16); --chipbg:#34383D; --chipfg:#AAB1B8; --pstroke:#84ADFF; --neu:#AAB1B8; --neubd:#4A4E54; --warn:#F0A868; }
+.win.t-si{ --content:#F5F0E6; --chrome:#EEE7D6; --chrome2:#E7DEC9; --divider:#DAD0B9; --sel:#E7DAB9; --accent:#163A5F; --fg:#1F2733; --sec:#6E6857; --ter:#8B8272; --cur:#EDE6D8; --grn:#3F6B42; --grnbg:rgba(63,107,66,.15); --blu:#245B78; --blubg:rgba(36,91,120,.11); --chipbg:#E3D8BE; --chipfg:#6E6857; --pstroke:#163A5F; --neu:#6E6857; --neubd:#C4B79A; --warn:#8A5A2E; }
+
+.dnote{margin:22px 0 0;padding:14px 18px;border:1px solid #dfe2e7;background:#fff;border-radius:11px;font-size:12.5px;line-height:1.6;color:#374151;}
+.dnote h3{margin:0 0 8px;font-size:13px;} .dnote ul{margin:6px 0 0;padding-left:20px;} .dnote li{margin:3px 0;}
+.dnote code{font-family:ui-monospace,monospace;font-size:.9em;background:rgba(127,127,127,.12);padding:1px 4px;border-radius:3px;} .dnote .plan{color:#6b7280;}
+</style></head><body>
+<div class="wrap">
+<div class="kick">M10 · Explainable Navigation — 界面原型 02</div>
+<h1>Semantic Trail — 分叉阅读路径</h1>
+<div class="lead">
+<p>取代线性前进/后退历史：把用户走过的符号连成可见、可分叉的路径。边带导航原因（cause），返回分叉点走另一条会形成分支而非覆盖，切 snapshot 明确分段。</p>
+<p>点任意节点 → 右侧看它的身份、来路 cause，以及 §3.13 的关键：<b>导航当时冻结的解释</b> vs <b>该符号现在的解释</b>（可能已被 exact 升级）。</p>
+</div>
+
+<div class="note"><b>怎么读：</b>左侧是阅读路径 DAG，高亮的是当前活动路径。<b>spawn 是分叉点</b>——用户从它走过 <code>JoinSet::spawn_on</code>，返回后又走 <code>LocalSet::spawn_local</code>，两条都留着。点 <code>LocalSet::spawn_local</code> 看「冻结快照 vs 当前态」的差异（§3.13 为什么要两个都存）。</div>
+
+<div class="swbar"><span>主题</span>
+<button data-t="t-light" class="on">Light</button><button data-t="t-dark">Dark</button><button data-t="t-si">SI Classic</button></div>
+
+<div class="legend">
+  <span class="lg"><span class="cause">calls</span> 导航原因（边标注）</span>
+  <span class="lg"><span class="badge verified">VERIFIED</span> / <span class="badge inferred">INFERRED</span> 节点 epistemic（复用原型 01）</span>
+  <span class="lg"><span class="chip snap">worktree HEAD</span> / <span class="chip snap commit">commit 3a4f71c</span> 快照身份</span>
+  <span class="lg"><span class="fork">◀ 分叉点</span></span>
+  <p class="sub">线性 history 会在 Back 后删除 forward；Trail 保留分支（§3.11–3.12）。节点带 <code>trailNodeID</code>，故"同一个 spawn"的多次访问不混淆。</p>
+</div>
+
+<div class="win t-light" id="win">
+  <div class="pane-trail">
+    <div class="p-head"><b>Reading Trail</b><span>本次会话</span></div>
+    <div class="crumb" id="crumb"></div>
+    <div class="graph" id="graph"></div>
+  </div>
+  <div class="pane-detail">
+    <div class="p-head"><b>Trail Node</b><span id="dmeta"></span></div>
+    <div class="detail" id="detail"></div>
+  </div>
+</div>
+
+<div class="dnote">
+<h3>设计决策（映射到 v1.3.1）</h3>
+<ul>
+<li><b>分叉而非覆盖</b> <span class="plan">§3.11–3.12</span>：spawn 分叉点保留 <code>JoinSet::spawn_on</code> 与 <code>LocalSet::spawn_local</code> 两支。<code>NavigationRecord.trailNodeID</code> 让 Back 能精确回到"这一个 spawn"而非按 path/offset 猜。</li>
+<li><b>cause 标注的边</b> <span class="plan">§3.11</span>：每条边带 <code>NavigationCause</code>（calls / called by / definition / implementation / reference）。只有显式语义导航进 Trail；滚动、outline 自动跟随、tab 切换不进（<code>policy.recordInTrail</code>）。</li>
+<li><b>snapshot 分段</b> <span class="plan">§3.12/§3.14</span>：跨 snapshot 边界画分段线。commit 节点精确恢复；旧 worktree 节点 best-effort、显 "replayed against current worktree"。</li>
+<li><b>冻结快照 vs 当前态</b> <span class="plan">§3.13</span>：<code>LocalSet::spawn_local</code> 导航当时冻结为 <code>Inferred · method name only · verifying…</code>；exact 后来升级，<code>currentExplanationID</code> 读到 <code>Inferred · trait bound · not corroborated</code>。两个都存——审计快照不变，当前解释可更新。Store 只存物化数据、无 live ref。</li>
+<li><b>节点复用 epistemic badge</b>：Trail 节点直接挂原型 01 的三值 badge，视觉语言一致。</li>
+</ul>
+</div>
+
+<div class="dnote" style="margin-top:14px;">
+<h3>待裁决</h3>
+<ul>
+<li><b>Trail 的位置</b>：现做成独立面板（此原型）。计划 §3.11 允许「顶部路径条 / 浮层 / 可折叠面板」三选一——面板信息量最大但占宽，顶部路径条最轻。倾向哪个？</li>
+<li><b>分支的视觉</b>：现用 git-log 式缩进 + gutter 连线。是否够清楚，还是要更强的分叉指示（如彩色分支轨道）？</li>
+<li><b>下一张</b>：原型 03 Reading Set（P0 探索，两种布局对比）。</li>
+</ul>
+</div>
+</div>
+
+<script>
+// DAG：parent 指针 + 顺序渲染
+const N = [
+ {id:'main', name:'main', cause:null, snap:'worktree HEAD', badge:'verified', path:'runtime/mod.rs:12', depth:0},
+ {id:'block_on', name:'Runtime::block_on', cause:'calls', snap:'worktree HEAD', badge:'verified', path:'runtime/runtime.rs:347', depth:0},
+ {id:'sched', name:'Scheduler::block_on', cause:'calls', snap:'worktree HEAD', badge:'verified', path:'runtime/scheduler/mod.rs:91', depth:0},
+ {id:'spawn', name:'spawn', cause:'calls', snap:'worktree HEAD', badge:'verified', path:'runtime/task/spawn.rs:142', depth:0, fork:true},
+ {id:'joinset', name:'JoinSet::spawn_on', cause:'called by', snap:'worktree HEAD', badge:'inferred', path:'runtime/task/join_set.rs:88', depth:1, branch:true},
+ {id:'localset', name:'LocalSet::spawn_local', cause:'called by', snap:'worktree HEAD', badge:'inferred', path:'runtime/task/local.rs:203', depth:1, branch:true, current:true,
+    frozen:'Inferred · method name only · verifying…', now:'Inferred · trait bound · not corroborated', evolved:true},
+ {id:'poll', name:'Future::poll', cause:'definition', snap:'commit 3a4f71c', commit:true, badge:'verified', scope:'dependency', path:'core/future/future.rs', depth:1, segBefore:true, restoreNote:'commit 节点：精确恢复同一 commit。'},
+];
+// 活动路径：main→block_on→sched→spawn→localset→poll（默认当前 = localset）
+const ACTIVE = new Set(['main','block_on','sched','spawn','localset']);
+
+const graph=document.getElementById('graph'), crumb=document.getElementById('crumb'), detail=document.getElementById('detail'), dmeta=document.getElementById('dmeta');
+
+function badge(b){const m={verified:'VERIFIED',inferred:'INFERRED',unresolved:'UNRESOLVED'};return b?`<span class="badge ${b}">${m[b]}</span>`:'';}
+
+function gutterFor(n){
+  const on = ACTIVE.has(n.id)?'on':'';
+  if(n.depth===0) return `<span class="${on}">●</span>\n<span class="${ACTIVE.has(nextId(n))?'on':''}">│</span>`;
+  // branch node
+  const conn = n.id==='joinset' ? '├─' : '└─';
+  return `<span class="${on}">${conn}●</span>`;
+}
+function nextId(n){const i=N.findIndex(x=>x.id===n.id);return N[i+1]?N[i+1].id:'';}
+
+function render(){
+  let h='';
+  N.forEach(n=>{
+    if(n.segBefore) h+=`<div class="seg"><span>┄ snapshot 切换 → ${n.snap} ┄</span><span class="ln"></span></div>`;
+    const active = ACTIVE.has(n.id)?'active':(n.branch&&!ACTIVE.has(n.id)?'dim':'');
+    const marker = n.depth===0?'●':((n.id==='joinset'?'├─':'└─')+'●');
+    const gon = ACTIVE.has(n.id);
+    h+=`<div class="gnode ${active}" data-id="${n.id}">
+      <div class="gutter"><span class="${gon?'on':''}">${marker}</span></div>
+      <div class="gcard">
+        <div class="gc1"><span class="gname">${n.name}</span>${badge(n.badge)}${n.current?'<span class="now">● 当前</span>':''}</div>
+        <div class="gc2">
+          ${n.cause?`<span class="cause">${n.cause}</span>`:'<span class="chip">root</span>'}
+          <span class="chip snap ${n.commit?'commit':''}">${n.snap}</span>
+          ${n.scope?`<span class="chip scope">${n.scope}</span>`:''}
+          ${n.fork?'<span class="fork">◀ 分叉点</span>':''}
+        </div>
+      </div></div>`;
+  });
+  graph.innerHTML=h;
+  graph.querySelectorAll('.gnode').forEach(el=>el.onclick=()=>select(el.dataset.id));
+  // breadcrumb of active path
+  const ap=N.filter(n=>ACTIVE.has(n.id));
+  let cb='';
+  ap.forEach((n,i)=>{ if(i) cb+=`<span class="ca">─${n.cause}→</span>`; cb+=`<span class="${n.current?'cnb':'cn'}">${n.name.split('::').pop()}</span>`; });
+  crumb.innerHTML=cb;
+}
+
+function select(id){
+  const n=N.find(x=>x.id===id); if(!n) return;
+  document.querySelectorAll('.gnode').forEach(el=>el.classList.toggle('active',el.dataset.id===id));
+  dmeta.textContent=n.snap;
+  let h=`<div class="dname">${n.name}</div><div class="dv" style="font-family:ui-monospace,monospace;font-size:11px;color:var(--sec);margin-top:3px;">${n.path}</div>`;
+  h+=`<div class="drow"><div class="dl">SNAPSHOT</div><div class="dv"><span class="chip snap ${n.commit?'commit':''}">${n.snap}</span>${n.restoreNote?`　${n.restoreNote}`:'　worktree 节点：best-effort 重放，若内容已变会显 "replayed against current worktree"。'}</div></div>`;
+  h+=`<div class="drow"><div class="dl">NAVIGATED VIA</div><div class="dv">${n.cause?`<span class="cause">${n.cause}</span>　经共享导航入口进入 Trail`:'会话起点（root）'}</div></div>`;
+  if(n.frozen){
+    h+=`<div class="drow"><div class="dl">EXPLANATION（§3.13）</div>
+      <div class="frozen"><span class="tag">AT NAVIGATION · 冻结快照（observedAtNavigation）</span>${n.frozen}</div>
+      <div class="frozen" style="margin-top:8px;"><span class="tag">CURRENT · 读自 store（currentExplanationID）</span>${n.now}</div>
+      ${n.evolved?'<div class="diff">↑ 导航后 exact 升级了解释；冻结快照保持不变、当前态更新——两个都存的原因。</div>':''}</div>`;
+  }
+  h+=`<span class="restore">↩ Restore this node</span>`;
+  detail.innerHTML=h;
+}
+
+document.querySelectorAll('.swbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.swbar button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on'); document.getElementById('win').className='win '+b.dataset.t;
+});
+
+render(); select('localset');
+</script>
+</body></html>

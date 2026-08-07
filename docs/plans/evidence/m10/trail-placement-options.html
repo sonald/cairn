@@ -1,0 +1,171 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M10 · Trail 放置方案对比</title><style>
+*{box-sizing:border-box;}
+body{margin:0;padding:30px 26px 70px;font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;background:#eef0f3;color:#1c2024;}
+@media (prefers-color-scheme:dark){body{background:#16181c;color:#e6e8eb;}.lead p{color:#a7adb5!important;}.pc,.dnote{background:#1f2227!important;border-color:#2c3037!important;color:#c4c9cf!important;}.swbar button{background:#24272c;color:#c4c9cf;border-color:#33373d;}.swbar button.on{background:#2f5fd0;color:#fff;border-color:#2f5fd0;}figcaption{color:#c4c9cf!important;}}
+.wrap{max-width:1000px;margin:0 auto;}
+.kick{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:10px;}
+h1{margin:0 0 6px;font-size:22px;letter-spacing:-.01em;}
+.lead p{margin:0 0 4px;max-width:880px;color:#4b5563;}.lead code{font-family:ui-monospace,monospace;font-size:.92em;}
+.swbar{display:flex;gap:8px;align-items:center;margin:16px 0 10px;}.swbar span{font-size:12px;color:#6b7280;margin-right:4px;}
+.swbar button{font:600 12px/1 inherit;padding:7px 14px;border-radius:8px;border:1px solid #d3d8de;background:#fff;color:#3a4149;cursor:pointer;}
+.swbar button.on{background:#175CD3;color:#fff;border-color:#175CD3;}
+figure{margin:0 0 26px;} figcaption{font-size:13px;font-weight:700;color:#374151;margin:0 0 8px;}
+figcaption .n{color:#6b7280;font-weight:500;}
+.pc{margin:8px 0 0;padding:9px 13px;border:1px solid #dfe2e7;border-radius:9px;background:#fff;font-size:12px;line-height:1.55;color:#4b5563;}
+.pc b{color:#1a7f37;} .pc .con{color:#b54708;}
+
+/* shared tokens */
+.badge{font:600 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:20px;flex:none;}
+.badge.verified{background:var(--grnbg);color:var(--grn);} .badge.inferred{background:var(--blubg);color:var(--blu);}
+.cause{font:600 9px/1 ui-monospace,monospace;color:var(--accent);padding:1px 5px;border-radius:4px;background:var(--blubg);}
+.forkchip{font:600 10px/1 ui-monospace,monospace;color:var(--warn);background:var(--warnbg);border:1px solid var(--warnbd);border-radius:5px;padding:2px 7px;cursor:pointer;}
+
+.win{border-radius:11px;overflow:hidden;border:1px solid var(--divider);box-shadow:0 2px 8px rgba(0,0,0,.10);color:var(--fg);height:250px;display:flex;flex-direction:column;background:var(--content);}
+.reader{flex:1;overflow:auto;padding:11px 14px;font:12px/1.9 ui-monospace,"SF Mono",Menlo,monospace;background:var(--content);min-height:0;}
+.reader .ln{color:var(--ter);margin-right:14px;user-select:none;}
+.kw{color:var(--kw);}.ty{color:var(--ty);}.fn{color:var(--fn);}.cm{color:var(--com);font-style:italic;}
+.reader .hl{background:var(--sel);border-radius:3px;padding:0 2px;box-shadow:inset 0 0 0 1.4px var(--pstroke);}
+
+/* A: top bar */
+.topbar{display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding:8px 13px;background:var(--chrome2);border-bottom:1px solid var(--divider);font-size:11px;}
+.tb-lbl{font:700 9px/1 ui-monospace,monospace;letter-spacing:.06em;color:var(--sec);}
+.topbar .cn{font-family:ui-monospace,monospace;color:var(--sec);}
+.topbar .cnb{font-family:ui-monospace,monospace;font-weight:600;color:var(--fg);background:var(--sel);border-radius:5px;padding:2px 7px;}
+.topbar .ar{color:var(--ter);font-size:10px;}
+
+/* B: side panel */
+.win.b-row{flex-direction:row;}
+.tpanel{width:230px;flex:none;background:var(--chrome);border-left:1px solid var(--divider);display:flex;flex-direction:column;}
+.tp-head{font:700 9px/1 ui-monospace,monospace;letter-spacing:.06em;color:var(--sec);padding:8px 12px;background:var(--chrome2);border-bottom:1px solid var(--divider);}
+.dag{padding:8px 10px;font-size:11.5px;overflow:auto;}
+.dnode{display:flex;gap:6px;align-items:baseline;padding:3px 0;}
+.dg{font-family:ui-monospace,monospace;color:var(--ter);white-space:pre;flex:none;}
+.dg.on{color:var(--pstroke);font-weight:700;}
+.dn{font-family:ui-monospace,monospace;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dn.cur{font-weight:600;} .dnode.dim{opacity:.5;}
+.dc{font:600 8px/1 ui-monospace,monospace;color:var(--accent);flex:none;}
+
+/* C: overlay */
+.win.c-wrap{position:relative;}
+.overlay{position:absolute;left:14px;bottom:14px;width:270px;background:var(--content);border:1px solid var(--pstroke);
+  border-radius:10px;box-shadow:0 6px 22px rgba(0,0,0,.28);overflow:hidden;}
+.ov-head{display:flex;justify-content:space-between;align-items:center;font:700 9px/1 ui-monospace,monospace;letter-spacing:.05em;color:var(--sec);padding:8px 11px;background:var(--chrome2);border-bottom:1px solid var(--divider);}
+.ov-head .k{font-weight:500;color:var(--ter);}
+.scrim{position:absolute;inset:0;background:rgba(0,0,0,.04);pointer-events:none;}
+
+.dnote{margin:24px 0 0;padding:14px 18px;border:1px solid #dfe2e7;background:#fff;border-radius:11px;font-size:12.5px;line-height:1.6;color:#374151;}
+.dnote h3{margin:0 0 8px;font-size:13px;}.dnote ul{margin:6px 0 0;padding-left:20px;}.dnote li{margin:3px 0;}
+.dnote code{font-family:ui-monospace,monospace;font-size:.9em;background:rgba(127,127,127,.12);padding:1px 4px;border-radius:3px;}
+.reco{margin-top:10px;padding:10px 13px;border-radius:9px;background:rgba(23,92,211,.07);border:1px solid rgba(23,92,211,.25);font-size:12.5px;color:#1a3f7a;}
+@media (prefers-color-scheme:dark){.reco{background:rgba(122,167,255,.10);border-color:rgba(122,167,255,.3);color:#a9c4f5;}}
+
+.win.t-light{ --content:#FFFFFF; --chrome:#F4F5F7; --chrome2:#ECEEF1; --divider:#E1E4EA; --sel:#E7F0FF; --accent:#175CD3; --fg:#1F2328; --sec:#5A6472; --ter:#8C959F; --grn:#1A7F37; --grnbg:rgba(26,127,55,.12); --blu:#175CD3; --blubg:rgba(23,92,211,.10); --pstroke:#175CD3; --neubd:#C4CAD1; --warn:#B54708; --warnbg:rgba(181,71,8,.10); --warnbd:#EAAA7A; --kw:#9C36B5; --ty:#087E8B; --fn:#175CD3; --com:#4D7C0F; }
+.win.t-dark{ --content:#1E1E1E; --chrome:#252528; --chrome2:#2C2C30; --divider:#34363B; --sel:#2C3644; --accent:#84ADFF; --fg:#D4D4D4; --sec:#9BA1A8; --ter:#6E747B; --grn:#4EC777; --grnbg:rgba(78,199,119,.16); --blu:#7AA7FF; --blubg:rgba(122,167,255,.16); --pstroke:#84ADFF; --neubd:#4A4E54; --warn:#F0A868; --warnbg:rgba(240,168,104,.15); --warnbd:#6B5334; --kw:#E879F9; --ty:#67E8F9; --fn:#84ADFF; --com:#A3E635; }
+.win.t-si{ --content:#F5F0E6; --chrome:#EEE7D6; --chrome2:#E7DEC9; --divider:#DAD0B9; --sel:#E7DAB9; --accent:#163A5F; --fg:#1F2733; --sec:#6E6857; --ter:#8B8272; --grn:#3F6B42; --grnbg:rgba(63,107,66,.15); --blu:#245B78; --blubg:rgba(36,91,120,.11); --pstroke:#163A5F; --neubd:#C4B79A; --warn:#8A5A2E; --warnbg:rgba(138,90,46,.12); --warnbd:#C7A574; --kw:#7A1F1F; --ty:#245B78; --fn:#163A5F; --com:#526B45; }
+</style></head><body>
+<div class="wrap">
+<div class="kick">M10 · Explainable Navigation — 界面原型 02b</div>
+<h1>Semantic Trail · 放置方案对比</h1>
+<div class="lead"><p>同一份 trail（<code>main → block_on → spawn ⑂ → LocalSet::spawn_local</code>，spawn 分叉出 JoinSet 支）+ 同一段 reader 代码，放进 §3.11 的三种位置，直接比空间代价与分叉可读性。</p></div>
+
+<div class="swbar"><span>主题</span><button data-t="t-light" class="on">Light</button><button data-t="t-dark">Dark</button><button data-t="t-si">SI Classic</button></div>
+
+<figure>
+<figcaption>方案 A · 顶部路径条 <span class="n">— 一条薄横条，永远可见</span></figcaption>
+<div class="win t-light">
+  <div class="topbar">
+    <span class="tb-lbl">TRAIL</span>
+    <span class="cn">main</span><span class="ar">─calls→</span>
+    <span class="cn">Runtime::block_on</span><span class="ar">─calls→</span>
+    <span class="cn">spawn</span><span class="forkchip">⑂ 2 支</span><span class="ar">─called by→</span>
+    <span class="cnb">LocalSet::spawn_local</span>
+  </div>
+  <div class="reader">
+<div><span class="ln">201</span><span class="kw">pub fn</span> <span class="fn">spawn_local</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;</div>
+<div><span class="ln">202</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="cm">'static</span>,</div>
+<div><span class="ln">203</span>{</div>
+<div><span class="ln">204</span>    <span class="kw">let</span> handle = <span class="fn">context</span>::<span class="fn hl">current</span>();</div>
+<div><span class="ln">205</span>    handle.<span class="fn">spawn_local_inner</span>(future)</div>
+<div><span class="ln">206</span>}</div>
+  </div>
+</div>
+<div class="pc"><b>优点</b>：几乎不占空间、阅读时永远在视野内、切换分支一眼可见当前路径。<span class="con">代价</span>：分叉只能靠 <code>⑂ 2 支</code> 展开为下拉；路径长了要截断；只能看一条主线，看不到整棵 DAG。</div>
+</figure>
+
+<figure>
+<figcaption>方案 B · 可折叠侧面板 <span class="n">— 原型 02 的形态，DAG 常驻</span></figcaption>
+<div class="win t-light b-row">
+  <div class="reader">
+<div><span class="ln">201</span><span class="kw">pub fn</span> <span class="fn">spawn_local</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;</div>
+<div><span class="ln">202</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="cm">'static</span>,</div>
+<div><span class="ln">203</span>{</div>
+<div><span class="ln">204</span>    <span class="kw">let</span> handle = <span class="fn">context</span>::<span class="fn hl">current</span>();</div>
+<div><span class="ln">205</span>    handle.<span class="fn">spawn_local_inner</span>(future)</div>
+<div><span class="ln">206</span>}</div>
+  </div>
+  <div class="tpanel">
+    <div class="tp-head">READING TRAIL</div>
+    <div class="dag">
+      <div class="dnode"><span class="dg on">●</span><span class="dn">main</span></div>
+      <div class="dnode"><span class="dg on">│</span><span class="dc">calls</span></div>
+      <div class="dnode"><span class="dg on">●</span><span class="dn">Runtime::block_on</span><span class="badge verified">V</span></div>
+      <div class="dnode"><span class="dg on">│</span><span class="dc">calls</span></div>
+      <div class="dnode"><span class="dg on">●</span><span class="dn">spawn</span> <span style="color:var(--warn);font-size:10px;">⑂</span></div>
+      <div class="dnode dim"><span class="dg">├─○</span><span class="dn">JoinSet::spawn_on</span><span class="badge inferred">I</span></div>
+      <div class="dnode"><span class="dg on">└─●</span><span class="dn cur">LocalSet::spawn_local</span><span class="badge inferred">I</span></div>
+    </div>
+  </div>
+</div>
+<div class="pc"><b>优点</b>：整棵分叉 DAG 常驻可见、信息量最大、分支/snapshot 分段天然可画。<span class="con">代价</span>：永久占用横向宽度（~230px），窄窗口挤压 reader。可折叠成细轨缓解，但折叠后又看不到分支。</div>
+</figure>
+
+<figure>
+<figcaption>方案 C · 浮层 <span class="n">— 按 ⌘T 唤出，悬浮于 reader、Esc 关闭</span></figcaption>
+<div class="win t-light c-wrap">
+  <div class="reader">
+<div><span class="ln">201</span><span class="kw">pub fn</span> <span class="fn">spawn_local</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;</div>
+<div><span class="ln">202</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="cm">'static</span>,</div>
+<div><span class="ln">203</span>{</div>
+<div><span class="ln">204</span>    <span class="kw">let</span> handle = <span class="fn">context</span>::<span class="fn">current</span>();</div>
+<div><span class="ln">205</span>    handle.<span class="fn">spawn_local_inner</span>(future)</div>
+<div><span class="ln">206</span>}</div>
+  </div>
+  <div class="scrim"></div>
+  <div class="overlay">
+    <div class="ov-head"><span>READING TRAIL</span><span class="k">⌘T · Esc 关闭</span></div>
+    <div class="dag">
+      <div class="dnode"><span class="dg on">●</span><span class="dn">main</span></div>
+      <div class="dnode"><span class="dg on">│</span><span class="dc">calls</span></div>
+      <div class="dnode"><span class="dg on">●</span><span class="dn">spawn</span> <span style="color:var(--warn);font-size:10px;">⑂</span></div>
+      <div class="dnode dim"><span class="dg">├─○</span><span class="dn">JoinSet::spawn_on</span></div>
+      <div class="dnode"><span class="dg on">└─●</span><span class="dn cur">LocalSet::spawn_local</span></div>
+    </div>
+  </div>
+</div>
+<div class="pc"><b>优点</b>：零永久占用、唤出时看整棵 DAG、reader 平时满宽。<span class="con">代价</span>：非常驻=不可一瞥（glanceable 差）；打开时遮挡代码；多一步唤出/关闭交互。</div>
+</figure>
+
+<div class="dnote">
+<h3>我的倾向（供参考，最终你裁）</h3>
+<div class="reco"><b>A（顶部路径条）常驻 + C（浮层）唤出完整 DAG</b> 的组合，而不是三选一。理由：日常阅读要的是「我从哪来、现在在哪」这条主线（A 永远在视野、几乎零成本）；只有在分叉/回溯时才需要整棵树（C 按需唤出、不长期占宽）。B 的常驻面板信息量最大，但和「不再增加固定工具表面」的取舍冲突（现已有 Reader/Context/Relations/Search）。</div>
+<ul>
+<li><b>A 的分叉</b>：主线 breadcrumb 上 <code>spawn</code> 带 <code>⑂ 2 支</code> chip，点开下拉列两支——轻量，但确认这个下拉够不够用。</li>
+<li><b>C 的唤出键</b>：⌘T 是示意，实际键位待定；也可由 A 上的 <code>⑂</code> 直接唤出 C，让两者衔接。</li>
+<li>若你更看重「分支始终可见」，则选 B 常驻面板，接受横向成本。</li>
+</ul>
+<p style="margin:8px 0 0;color:#6b7280;">三主题都切一遍看：顶部条在 SI 暖纸下是否够清晰、浮层阴影在 Dark 下是否过重。</p>
+</div>
+</div>
+
+<script>
+document.querySelectorAll('.swbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.swbar button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  document.querySelectorAll('.win').forEach(w=>{
+    w.className = w.className.replace(/t-(light|dark|si)/,'').trim()+' '+b.dataset.t;
+  });
+});
+</script>
+</body></html>
