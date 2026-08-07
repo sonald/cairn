@@ -1722,17 +1722,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "valid": versionPickerGeometryValid,
         ])
 
-        let revision = model.commitPicker.commits[1].fullSHA
-        let snapshot: CommitSnapshot
-        let target: DiffSelfTestTarget
-        do {
-            snapshot = try CommitSnapshot(repositoryURL: root, revision: revision)
-            guard let found = diffSelfTestTarget(root: root, snapshot: snapshot) else {
-                finishDiffSelfTest(error: "no multi-line file differs from HEAD~1")
+        var selectedRevision: String?
+        var selectedTarget: DiffSelfTestTarget?
+        for commit in model.commitPicker.commits.dropFirst() {
+            guard let snapshot = try? CommitSnapshot(
+                repositoryURL: root,
+                revision: commit.fullSHA
+            ), let target = diffSelfTestTarget(root: root, snapshot: snapshot) else {
+                continue
             }
-            target = found
-        } catch {
-            finishDiffSelfTest(error: error.localizedDescription)
+            selectedRevision = commit.fullSHA
+            selectedTarget = target
+            break
+        }
+        guard let revision = selectedRevision, let target = selectedTarget else {
+            finishDiffSelfTest(error: "no earlier commit has a multi-line source diff")
         }
 
         controller.openFileForSelfTest(target.file)

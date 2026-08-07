@@ -247,12 +247,19 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
     model.navigate(to: a, byteOffset: 8)
     #expect(model.currentSnapshotID == worktree.snapshotID)
     #expect(model.selectedFile == a)
+    let worktreeTrailNodeID = model.readingTrail.activeNodeID
+    let trailEdgesBeforeSwitch = model.readingTrail.edges.count
 
     model.switchToCommit("C", leaving: worktreeA)
     #expect(model.navigationHistory.records.last?.snapshotID == worktree.snapshotID)
-    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
+    #expect(await testWaitUntil("commit restores the precise reading position") {
+        model.snapshotPhase == .fullReady
+            && model.selectedFile == a
+            && model.selectedByteOffset == 8
+    })
     #expect(model.currentSnapshotID == commit.snapshotID)
-    #expect(model.selectedFile == a)
+    #expect(model.readingTrail.activeNodeID == worktreeTrailNodeID)
+    #expect(model.readingTrail.edges.count == trailEdgesBeforeSwitch)
 
     model.navigate(to: b, byteOffset: 9, leaving: commitA)
     #expect(model.currentSnapshotID == commit.snapshotID)
@@ -288,6 +295,23 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
         model.selectedFile == b && model.selectedByteOffset == 9
     })
     #expect(model.navigationHistory.records.count == 2)
+
+    model.goBack(from: commitB)
+    #expect(await testWaitUntil("back to commit A before rapid forward") {
+        model.selectedFile == a && model.selectedByteOffset == 8
+    })
+    model.goBack(from: commitA)
+    #expect(await testWaitUntil("back to worktree A before rapid forward") {
+        model.currentSnapshotID == worktree.snapshotID
+            && model.selectedFile == a
+    })
+    model.goForward()
+    model.goForward()
+    #expect(await testWaitUntil("latest rapid forward wins") {
+        model.currentSnapshotID == commit.snapshotID
+            && model.selectedFile == b
+            && model.selectedByteOffset == 9
+    })
 }
 
 @MainActor

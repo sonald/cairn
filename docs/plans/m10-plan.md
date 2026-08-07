@@ -309,7 +309,7 @@ badge 仍 `Inferred` + `Conflict/Corrected` chip；不参与主关系计数；**
 ### G0：语义红线、§3.0 类型模型与视觉语法成文
 成文 §3.0 类型模型 + §3.3/3.6/3.9/3.10/3.14/3.15 入 `evidence/m10/semantics.md`；定
 `TargetScope`/`TargetAvailability`/`ExactAnalysisLimitation`/`TargetComparison` 与三值 badge 规格；
-裁决用户可见文案改名。**验收**：[ ] 八项修正各有条目；改名文案有诚实结论、受影响状态行入迁移清单。**范围**：S。
+裁决用户可见文案改名。**验收**：[x] 八项修正各有条目；改名文案有诚实结论、受影响状态行入迁移清单。**范围**：S。
 
 ### G1：视觉语义快照 + AX harness
 ①结构行为断言 ②视觉语义快照（先于 Inspector）；AX snapshot；PNG 只归档、无 SSIM。**依赖**：G0。**范围**：S–M。
@@ -320,28 +320,28 @@ Verified、默认行 `name match only`、Inspector 显 "relation result set trun
 文案无"解析到唯一目标"。`.partial` 分支改 synthetic 单测（E2）。宏样本 Safe/Trusted 各跑，**只验固定规则
 诚实、是否需加 limitation clause**（§3.9，非阻塞）。导航任务：`A→B→C`、Back 到 B、`B→D` 分支、切一次
 snapshot、**commit 节点精确恢复 / 旧 worktree 节点 best-effort 重放并明示**、replay 不产生重复 Trail 边。
-**验收**：[ ] fixture 与门禁落盘；宏诚实结论落盘。**依赖**：G0。**范围**：S–M。
+**验收**：[x] fixture 与门禁落盘；宏诚实结论落盘。**依赖**：G0。**范围**：S–M。
 
 ### E1a：§3.0 类型分层落地
-按 §3.0 落 Core/Exact/AppModel 类型。**验收**：[ ] 编译无循环依赖；observation 各持模块原生 target；
+按 §3.0 落 Core/Exact/AppModel 类型。**验收**：[x] 编译无循环依赖；observation 各持模块原生 target；
 `ObservedTarget` 仅展示层；`ResolutionExplanationSnapshot` 无 ID/ref。**依赖**：G0。**范围**：S–M。
 
 ### E1b：Exact definition case-specific 结果
 `ExactLocation?`→`ExactDefinitionQueryResult`；`parseDefinition` 不再只取 `array.first`；Coordinator 输出
 附 attribution/origin、过滤 stale、原样传 cancelled/unavailable；`.cancelled`/stale 不写 trace。**验收**：
-[ ] 多目标含 candidate 全保留；成功无结果≠unavailable≠cancelled；无 attribution 的 unavailable 可表达；
+[x] 多目标含 candidate 全保留；成功无结果≠unavailable≠cancelled；无 attribution 的 unavailable 可表达；
 fake provider 断言各态。**依赖**：E1a。**范围**：M。
 
 ### E1b0：ExactAnalysisEnvironment 迁移
 `ExactAttribution` 删 `trustMode`+`coverage`、加 `environment`（§3.6 唯一来源）；`onCoverageChange`→
 `onEnvironmentChange`；`ExactCoordinator.coverage`→`analysisEnvironment`；CLI/Context/Relations 状态文案
-迁移（Set 输出排序）；旧 coverage 测试进迁移清单。**验收**：[ ] Trusted+offline/Safe+offline 可表达；
+迁移（Set 输出排序）；旧 coverage 测试进迁移清单。**验收**：[x] Trusted+offline/Safe+offline 可表达；
 无双 trustMode；状态行诚实评审通过、旧断言逐条列旧/新/原因。**依赖**：E1b。**范围**：M。
 
 ### E1c：call-site reconciliation 与 conflict 修复
 `promoteExactEdges` 改 call-site 分组；实现 `compare()` + 路径归一化 + **逐 candidate 三分**（§3.8）；
 `CallSiteReconciliation`（含 `roles`）挂进 context、行 trace 用 `ReconciliationRef`；conflict 保留 RA 目标、
-corrected 按 call site 聚合折叠。**验收**：[ ] §3.8 三分用例（same/different/notComparable）全对——
+corrected 按 call site 聚合折叠。**验收**：[x] §3.8 三分用例（same/different/notComparable）全对——
 notComparable **继续 Inferred 不进 corrected**；多 candidate 共享 call site 只发一次 definition；provider
 多目标全不匹配全部去重显示 + candidates 进 corrected；conflict 不再压 `.unresolved`/丢位置。
 **依赖**：E1b（**不依赖 E0**；E0 宏样本非阻塞）。**范围**：M。
@@ -350,33 +350,33 @@ notComparable **继续 Inferred 不进 corrected**；多 candidate 共享 call s
 `mergeExact` fuzzy-only→`candidateOnly`（保持 Inferred、守 `RelationTreeModelTests.swift:251`；
 corroborate 与否看 context.exactQuery，§3.4）、exact-only→`verificationOnly`、重合→`corroborated`；补齐
 `LoadedEdge`/`Candidate` 缺字段（从 `ResolutionCandidate` 无损带出）；三合并点保留升级前 candidate 观察；
-`alsoHeuristic` 删除、由 `corroborated` 派生。**验收**：[ ] §0 三态合同全绿；升级前观察保留；
+`alsoHeuristic` 删除、由 `corroborated` 派生。**验收**：[x] §0 三态合同全绿；升级前观察保留；
 `alsoHeuristic` 删后等价。**依赖**：E1c。**范围**：M。
 
 ### E2：语言无关 clause + 英文 renderer
 `NarrativeClause` + `narrativeClauses(for:context:)` + `renderEnglish(_:)`；不变式测 clause（两级完整性各成
 clause、`.partial` 用 synthetic observation）；`name match only` 迁移用例带 completeness caveat；conflict
-clause ≠ not-corroborated clause ≠ inconclusive clause。**验收**：[ ] 不变式全绿；`receiverType+partial`
+clause ≠ not-corroborated clause ≠ inconclusive clause。**验收**：[x] 不变式全绿；`receiverType+partial`
 (synthetic) vs `+complete` 产不同 clause；视觉语义快照覆盖 renderer。**依赖**：E1d、G1。**范围**：S–M。
 
 ### E3：Resolution Inspector
 badge 单击/快捷键/disclosure；三层渐进；`SOURCE`/`VERIFICATION` 两段（conflict 修正轨迹、not-corroborated
 中性事实、inconclusive 中性）；复用 `evidenceLine`/tooltip/AX；`VerificationAvailability` 独立区显 readiness；
-corrected 按 §3.15 交互。**验收**：[ ] 陷阱 fixture 默认不显 Verified、Inspector 显结果集截断；conflict 主行
+corrected 按 §3.15 交互。**验收**：[x] 陷阱 fixture 默认不显 Verified、Inspector 显结果集截断；conflict 主行
 显 RA 目标 + 修正轨迹；corrected 双击不导航、不参与主计数；Relations 不退化深树、折叠组≤2；AX 不倒退。
 **依赖**：E1d、E2、G1。**范围**：M。
 
 ### N1：NavigationRequest / Cause / Policy + 仲裁拆分 + explanation 引用
 定 `SourceDestination`/`NavigationCause`/`NavigationPolicy`/`NavigationExplanation`（§3.0）；上两层入口收敛
 带 `NavigationRequest`；拆 `OutlineFollowArbitration`（`didLiveScroll` 只清仲裁）；Reader 显示原语不变。
-**验收**：[ ] 各入口带正确 cause/policy/explanation；outline 抑制走仲裁；M9 `didLiveScroll` self-test 继续
+**验收**：[x] 各入口带正确 cause/policy/explanation；outline 抑制走仲裁；M9 `didLiveScroll` self-test 继续
 通过；replay/tab activation 的 policy 正确。**依赖**：G0（弱依赖 E1a 的 explanation 类型）。**范围**：M。
 
 ### N2：Trail DAG + Explanation Store + worktree 合同
 `ResolutionExplanationStore`（AppModel 会话级，§3.13）+ 清理规则；`ReadingTrail`/`TrailNode`/`TrailEdge`
 （存 `observedAtNavigation` 物化快照 + `currentExplanationID`）；`NavigationRecord.trailNodeID`（§3.12）；
 只记显式语义导航；Back 分支、点击恢复、切 snapshot 分段；worktree 恢复按 §3.14 拆合同；不做磁盘持久化、
-不引入非文件 tab。**验收**：[ ] E0 导航任务全对；Trail 数据无 UI 依赖；trace 升级后 Inspector 从 store 读
+不引入非文件 tab。**验收**：[x] E0 导航任务全对；Trail 数据无 UI 依赖；trace 升级后 Inspector 从 store 读
 最新态而路径条快照不变；**换根后 conflict/candidate-only 解释仍可生成（不悬空）**；旧 worktree 恢复显示
 "replayed against current worktree"。**依赖**：N1、E1a。**范围**：M。
 
@@ -397,9 +397,9 @@ bash scripts/run-gold-gates.sh
 **真实体验（tokio，CUA 执行）**：重跑 E0 两条阅读任务 + 一条陷阱任务，记录完成时间、错误导航次数、Back
 次数、丢失位置次数、打开完整文件次数、能否说出每条关系依据、**有没有把一条误以为精确的推断当真**（盲测）。
 **迁移清单门禁**：既有测试不得静默删/弱化；因已批准语义变更（Unresolved 入 badge、conflict 行为、
-`ExactCoverage`→environment、`alsoHeuristic` 删除）改的断言，逐条列旧/新/原因。**边界审计**：[ ] canonical
-dump/`goldset/`/`RECORD` 零 diff；[ ] `Prototypes/`/`.zcache/`/`Fixtures/` 未意外改、P0 不在 `Sources/`；
-[ ] real provider 受限单列 BLOCKED；[ ] 交付 `m10-acceptance.md`：逐项 PASS/FAIL/BLOCKED + 迁移清单 +
+`ExactCoverage`→environment、`alsoHeuristic` 删除）改的断言，逐条列旧/新/原因。**边界审计**：[x] canonical
+dump/`goldset/`/`RECORD` 零 diff；[x] `Prototypes/`/`.zcache/`/`Fixtures/` 未意外改、P0 不在 `Sources/`；
+[x] real provider 受限单列 BLOCKED；[x] 交付 `m10-acceptance.md`：逐项 PASS/FAIL/BLOCKED + 迁移清单 +
 CUA 主观结论。**依赖**：G0–N2。**范围**：S。
 
 ---
@@ -419,16 +419,16 @@ CUA 主观结论。**依赖**：G0–N2。**范围**：S。
 | 6 | V0 | 总验收 | CUA 任务式 + 迁移清单 |
 
 ### Checkpoint A：G0 / G1 / E0 / N1 / E1a
-- [ ] §3.0 成文；视觉语义快照基线；陷阱 fixture（结果集截断）+ 宏诚实样本落盘；导航接口 + 仲裁拆分、
+- [x] §3.0 成文；视觉语义快照基线；陷阱 fixture（结果集截断）+ 宏诚实样本落盘；导航接口 + 仲裁拆分、
   M9 self-test 过；**E1a 编译无循环依赖**、`ResolutionExplanationSnapshot` 无 ID/ref。
 
 ### Checkpoint B：E1b / E1b0 / E1c / E1d / N2
-- [ ] definition case-specific（无 attribution 可表达、cancelled/stale 不写 trace）；环境迁移无双 trustMode；
+- [x] definition case-specific（无 attribution 可表达、cancelled/stale 不写 trace）；环境迁移无双 trustMode；
   **call-site 三分（notComparable 中性）**、conflict 修复；fuzzy-only 仍 Inferred、升级前观察保留、
   `alsoHeuristic` 删除；Explanation Store 换根不悬空、worktree best-effort、history 身份连接。
 
 ### Checkpoint C：E2 / E3 / P0 / V0
-- [ ] 诚实不变式全绿（两级完整性、synthetic partial、inconclusive clause）；Inspector 渐进披露 + conflict
+- [x] 诚实不变式全绿（两级完整性、synthetic partial、inconclusive clause）；Inspector 渐进披露 + conflict
   修正轨迹 + corrected 交互；Relations 不退化深树；Reading Set 原型出裁决；CUA 任务式验收 + 迁移清单交账。
 
 ---

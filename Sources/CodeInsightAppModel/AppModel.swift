@@ -501,10 +501,12 @@ public final class AppModel {
     ) {
         pendingReplay = nil
         if selectedFile != nil, let current {
-            navigationHistory.push(NavigationRecord(
+            let record = NavigationRecord(
                 jump: current,
                 trailNodeID: readingTrail.activeNodeID
-            ))
+            )
+            navigationHistory.push(record)
+            pendingReplay = (record, false)
         }
         switchSnapshot(revision: revision)
     }
@@ -512,10 +514,12 @@ public final class AppModel {
     public func switchToWorktree(leaving current: JumpRecord? = nil) {
         pendingReplay = nil
         if selectedFile != nil, let current {
-            navigationHistory.push(NavigationRecord(
+            let record = NavigationRecord(
                 jump: current,
                 trailNodeID: readingTrail.activeNodeID
-            ))
+            )
+            navigationHistory.push(record)
+            pendingReplay = (record, false)
         }
         switchSnapshot(revision: nil)
     }
@@ -1033,6 +1037,7 @@ public final class AppModel {
         else { return }
         let source = dependency ? nil : documentSource
         let replayGeneration = generation
+        navigationGeneration &+= 1
         let replayNavigationGeneration = navigationGeneration
         let replaySnapshotID = currentSnapshotID
         replayTask?.cancel()

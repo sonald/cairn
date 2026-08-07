@@ -1,6 +1,6 @@
 # M10 Checkpoint C 验收证据
 
-日期：2026-08-07。范围：E2 / E3 / P0 已完成；V0 待总验收补齐。
+日期：2026-08-07。范围：E2 / E3 / P0 / V0 已完成。
 
 ## E2 语言无关 clause 与英文 renderer
 
@@ -42,3 +42,9 @@
 - 固定 tokio `spawn` trace 对比 A（Relations 原地展开）与 B（`Open as Reading Set` 新 tab），证据内容不随布局变化。
 - 选择 B 作为 M11 目标形态；A 只作为独立轻量 peek，不替代 Reading Set。
 - 结论记录于 `reading-set-prototype.md`；P0 未增加 Reading Set 产品实体或修改 `Sources/`。
+
+## V0 总验收
+
+- 自动化、CUA 两条阅读任务与陷阱任务、迁移清单、边界审计、真实 provider 限制和最终计划评审统一记录于 `m10-acceptance.md`。
+- 最终独立验收包使用临时 bundle id，确认真实 rust-analyzer `ready · Safe (limited)`；commit 切换后 `join_set.rs:449 abort_all` 精确位置保持。
+- V0 总结：PASS；sandbox 内真实 provider 启动单列 BLOCKED，不影响已取得的无 sandbox 真实 provider 证据。
