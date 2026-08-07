@@ -292,6 +292,67 @@ func snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() async throws {
 
 @MainActor
 @Test
+func oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() async throws {
+    let files = ["a.rs": "fn a() {}\n", "b.rs": "fn b() {}\n"]
+    let root = try snapshotTemporaryProject(files)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let oldWorktree = TestSnapshot(
+        label: "old-worktree",
+        snapshotID: initial.snapshotID,
+        files: files
+    )
+    let currentWorktree = TestSnapshot(
+        label: "current-worktree",
+        files: [
+            "a.rs": "fn a() {} // changed\n",
+            "b.rs": "fn b() {}\n",
+        ]
+    )
+    let commit = TestSnapshot(label: "C", files: files)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        worktreeSnapshot: oldWorktree,
+        snapshots: ["C": commit]
+    )
+    let model = AppModel(indexService: service)
+    let a = root.appendingPathComponent("a.rs")
+    let oldJump = snapshotJumpRecord(
+        "a.rs",
+        offset: 3,
+        snapshotID: oldWorktree.snapshotID
+    )
+
+    model.openProject(root: root)
+    #expect(await testWaitUntil("initial worktree ready") {
+        model.snapshotPhase == .fullReady
+    })
+    model.navigate(to: a, byteOffset: 3)
+    let oldTrailNodeID = try #require(model.readingTrail.activeNodeID)
+    model.switchToCommit("C", leaving: oldJump)
+    #expect(await testWaitUntil("commit ready") {
+        model.snapshotPhase == .fullReady
+            && model.currentSnapshotID == commit.snapshotID
+    })
+    await service.setWorktreeSnapshot(currentWorktree)
+
+    model.goBack(from: snapshotJumpRecord(
+        "b.rs",
+        offset: 3,
+        snapshotID: commit.snapshotID
+    ))
+
+    #expect(await testWaitUntil("current worktree replay published") {
+        model.currentSnapshotID == currentWorktree.snapshotID
+            && model.selectedFile == a
+            && model.selectedByteOffset == 3
+            && model.replayNotice == "replayed against current worktree"
+    })
+    #expect(model.readingTrail.activeNodeID == oldTrailNodeID)
+}
+
+@MainActor
+@Test
 func snapshotSwitchDoesNotPushWithoutASelectedFile() async throws {
     let files = ["a.rs": "fn a() {}\n"]
     let root = try snapshotTemporaryProject(files)
@@ -549,7 +610,7 @@ private final class TestSnapshot: Snapshot, @unchecked Sendable {
 
 private actor ControlledSnapshotIndexService: IndexService {
     private let initialSession: EngineSession
-    private let worktreeSnapshot: TestSnapshot?
+    private var worktreeSnapshot: TestSnapshot?
     private let snapshots: [String: TestSnapshot]
     private let store = ProjectIndexStore()
     private var blockedCached: Set<String>
@@ -613,6 +674,9 @@ private actor ControlledSnapshotIndexService: IndexService {
 
     func releaseCached(_ label: String) { blockedCached.remove(label) }
     func releaseFull(_ label: String) { blockedFull.remove(label) }
+    func setWorktreeSnapshot(_ snapshot: TestSnapshot) {
+        worktreeSnapshot = snapshot
+    }
     func wasCancelled(_ label: String) -> Bool { cancelled.contains(label) }
     func snapshotID(for label: String) -> SnapshotID? { snapshots[label]?.snapshotID }
 

@@ -259,7 +259,11 @@ struct RelationUXTests {
         var referenceSelections: [String] = []
         var referenceOpens: [(String, UInt32)] = []
         references.model.onSelect = { referenceSelections.append($0.title) }
-        references.controller.onOpen = { referenceOpens.append(($0, $1)) }
+        references.controller.onOpen = {
+            if let target = $0.target {
+                referenceOpens.append((target.path, target.byteOffset))
+            }
+        }
         #expect(references.controller.selfTestSelectEdge(titled: "first"))
         referenceSelections.removeAll()
         referenceOpens.removeAll()
@@ -293,7 +297,11 @@ struct RelationUXTests {
         var symbolSelections: [String] = []
         var symbolOpens: [(String, UInt32)] = []
         symbols.model.onSelect = { symbolSelections.append($0.title) }
-        symbols.controller.onOpen = { symbolOpens.append(($0, $1)) }
+        symbols.controller.onOpen = {
+            if let target = $0.target {
+                symbolOpens.append((target.path, target.byteOffset))
+            }
+        }
         #expect(symbols.controller.selfTestSelectEdge(titled: "first"))
         symbolSelections.removeAll()
         symbolOpens.removeAll()
@@ -865,6 +873,14 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(historyAfterSingleClick == historyBeforeClick + 1)
     #expect(fixture.model.relationTree.root === relationRoot)
     #expect(fixture.model.relationTree.generation == relationGeneration)
+    let explanation = try #require(
+        fixture.model.activeNavigationRequest?.explanation
+    )
+    #expect(fixture.model.readingTrail.edges.last?.currentExplanationID
+        == explanation.explanationID)
+    #expect(fixture.model.resolutionExplanations.value(
+        for: explanation.explanationID
+    ) != nil)
 
     fixture.controller.selfTestOpenRelationSelection()
     await pumpRunLoop()

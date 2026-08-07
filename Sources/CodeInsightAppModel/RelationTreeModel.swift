@@ -48,6 +48,7 @@ public final class RelationTreeModel {
         public let representsLocation: Bool
         public fileprivate(set) var expansionIdentity: ExpansionIdentity?
         public fileprivate(set) var explanation: RelationRowExplanation?
+        public internal(set) var explanationID: ResolutionExplanationID?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
@@ -77,6 +78,7 @@ public final class RelationTreeModel {
             representsLocation: Bool = false,
             expansionIdentity: ExpansionIdentity? = nil,
             explanation: RelationRowExplanation? = nil,
+            explanationID: ResolutionExplanationID? = nil,
             evidence: [ResolutionEvidence] = [],
             cycleKey: CycleKey? = nil,
             queryTarget: (path: String, byteOffset: UInt32)? = nil,
@@ -98,6 +100,7 @@ public final class RelationTreeModel {
             self.representsLocation = representsLocation
             self.expansionIdentity = expansionIdentity
             self.explanation = explanation
+            self.explanationID = explanationID
             self.evidence = evidence
             self.cycleKey = cycleKey
             self.queryTarget = queryTarget
@@ -210,6 +213,8 @@ public final class RelationTreeModel {
     public static let possibleValidationBatchSize = 32
     public var onSelect: @MainActor (Node) -> Void = { _ in }
     public var onNodeChange: @MainActor (Node) -> Void = { _ in }
+    public var onExplanationChange: @MainActor (Node) -> Void = { _ in }
+    public var onContextsReset: @MainActor () -> Void = {}
     public var hasTruncatedResults: Bool {
         root.map(Self.containsTruncatedNode) ?? false
     }
@@ -284,6 +289,7 @@ public final class RelationTreeModel {
         selectedRelationSymbol = nil
         heuristicCandidateCount = 0
         relationQueryContexts.removeAll()
+        onContextsReset()
         switch state {
         case let .ready(session, context):
             self.session = session
@@ -310,6 +316,7 @@ public final class RelationTreeModel {
         selectedRelationSymbol = nil
         heuristicCandidateCount = 0
         relationQueryContexts.removeAll()
+        onContextsReset()
         switch target {
         case let .localBinding(pathID, bindingIndex):
             guard direction == .references,
@@ -537,6 +544,55 @@ public final class RelationTreeModel {
         cancelExactBatch?(possibleValidationBatch)
         self.possibleValidationBatch = nil
         scheduledPossibleRows.removeAll()
+    }
+
+    public func materializedExplanation(
+        for node: Node
+    ) -> MaterializedResolutionExplanation? {
+        guard let explanation = node.explanation else { return nil }
+        let context = relationQueryContexts[explanation.contextID]
+        let trace: MaterializedResolutionTrace
+        switch explanation.primaryTrace {
+        case .candidateOnly(let candidate):
+            trace = .candidateOnly(candidate)
+        case .verificationOnly(let verification):
+            trace = .verificationOnly(verification)
+        case .corroborated(let candidate, let verification):
+            trace = .corroborated(
+                candidate: candidate,
+                verification: verification
+            )
+        case .conflict(let candidate, let reference):
+            guard let reconciliation = context?
+                .reconciliations[reference.reconciliationID]
+            else { return nil }
+            trace = .conflict(
+                candidate: candidate,
+                reconciliation: ReconciliationSnapshot(reconciliation)
+            )
+        }
+        let candidateRelationSet: RelationSetObservation? = if case
+            .completed(let observation) = context?.candidateQuery
+        {
+            observation
+        } else {
+            nil
+        }
+        let relationQuery: RelationQueryObservation? = if case
+            .completed(let observation) = context?.exactQuery
+        {
+            observation
+        } else {
+            nil
+        }
+        let facts = context == nil ? nil : RelationFactsSnapshot(
+            candidateRelationSet: candidateRelationSet,
+            relationQuery: relationQuery
+        )
+        return MaterializedResolutionExplanation(
+            trace: trace,
+            relationFacts: facts
+        )
     }
 
     private func cancelLoads() {
@@ -1486,6 +1542,9 @@ public final class RelationTreeModel {
         previous.evidence = current.evidence
         previous.callSites = current.callSites
         previous.loadedEdge = current.loadedEdge
+        if previous.explanationID != nil {
+            onExplanationChange(previous)
+        }
         if !loadedChildren {
             previous.children = current.children
         }

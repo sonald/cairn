@@ -258,6 +258,44 @@ public struct ResolutionExplanationSnapshot: Sendable {
     }
 }
 
+@MainActor
+public final class ResolutionExplanationStore {
+    public private(set) var values: [
+        ResolutionExplanationID: MaterializedResolutionExplanation
+    ] = [:]
+
+    public init() {}
+
+    public func create(
+        _ explanation: MaterializedResolutionExplanation
+    ) -> ResolutionExplanationID {
+        let id = ResolutionExplanationID()
+        values[id] = explanation
+        return id
+    }
+
+    public func update(
+        _ id: ResolutionExplanationID,
+        to explanation: MaterializedResolutionExplanation
+    ) {
+        values[id] = explanation
+    }
+
+    public func value(
+        for id: ResolutionExplanationID
+    ) -> MaterializedResolutionExplanation? {
+        values[id]
+    }
+
+    public func retain(_ ids: Set<ResolutionExplanationID>) {
+        values = values.filter { ids.contains($0.key) }
+    }
+
+    public func removeAll() {
+        values.removeAll(keepingCapacity: true)
+    }
+}
+
 public struct NavigationExplanation: Sendable {
     public let explanationID: ResolutionExplanationID
     public let observedAtNavigation: ResolutionExplanationSnapshot
@@ -394,13 +432,116 @@ public struct JumpRecord: Equatable, Sendable {
     }
 }
 
+public struct TrailNodeID: Hashable, Sendable {
+    public let rawValue: UUID
+
+    public init(rawValue: UUID = UUID()) {
+        self.rawValue = rawValue
+    }
+}
+
+public struct NavigationRecord: Equatable, Sendable {
+    public let jump: JumpRecord
+    public let trailNodeID: TrailNodeID?
+
+    public init(jump: JumpRecord, trailNodeID: TrailNodeID? = nil) {
+        self.jump = jump
+        self.trailNodeID = trailNodeID
+    }
+}
+
+public struct TrailNode: Sendable {
+    public let id: TrailNodeID
+    public var jump: JumpRecord
+
+    public init(id: TrailNodeID = TrailNodeID(), jump: JumpRecord) {
+        self.id = id
+        self.jump = jump
+    }
+}
+
+public struct TrailEdge: Sendable {
+    public let from: TrailNodeID
+    public let to: TrailNodeID
+    public let observedAtNavigation: ResolutionExplanationSnapshot?
+    public let currentExplanationID: ResolutionExplanationID?
+
+    public init(
+        from: TrailNodeID,
+        to: TrailNodeID,
+        observedAtNavigation: ResolutionExplanationSnapshot? = nil,
+        currentExplanationID: ResolutionExplanationID? = nil
+    ) {
+        self.from = from
+        self.to = to
+        self.observedAtNavigation = observedAtNavigation
+        self.currentExplanationID = currentExplanationID
+    }
+}
+
+@MainActor
+public final class ReadingTrail {
+    public private(set) var nodes: [TrailNodeID: TrailNode] = [:]
+    public private(set) var edges: [TrailEdge] = []
+    public private(set) var activeNodeID: TrailNodeID?
+
+    public init() {}
+
+    @discardableResult
+    public func recordNavigation(
+        from current: JumpRecord?,
+        to destination: JumpRecord,
+        explanation: NavigationExplanation? = nil
+    ) -> TrailNodeID {
+        let sourceID = activeNodeID ?? current.map { appendNode($0) }
+        if let current, let sourceID,
+           nodes[sourceID]?.jump.path == current.path,
+           nodes[sourceID]?.jump.snapshotID == current.snapshotID
+        {
+            nodes[sourceID]?.jump = current
+        }
+        let destinationID = appendNode(destination)
+        if let sourceID {
+            edges.append(TrailEdge(
+                from: sourceID,
+                to: destinationID,
+                observedAtNavigation: explanation?.observedAtNavigation,
+                currentExplanationID: explanation?.explanationID
+            ))
+        }
+        activeNodeID = destinationID
+        return destinationID
+    }
+
+    public func restore(_ id: TrailNodeID?) {
+        activeNodeID = id.flatMap { nodes[$0] == nil ? nil : $0 }
+    }
+
+    public var referencedExplanationIDs: Set<ResolutionExplanationID> {
+        Set(edges.compactMap(\.currentExplanationID))
+    }
+
+    public func reset() {
+        nodes.removeAll(keepingCapacity: true)
+        edges.removeAll(keepingCapacity: true)
+        activeNodeID = nil
+    }
+
+    private func appendNode(_ jump: JumpRecord) -> TrailNodeID {
+        let node = TrailNode(jump: jump)
+        nodes[node.id] = node
+        return node.id
+    }
+}
+
 @MainActor
 public final class NavigationHistory {
-    public private(set) var records: [JumpRecord] = []
+    public private(set) var navigationRecords: [NavigationRecord] = []
+    public var records: [JumpRecord] { navigationRecords.map(\.jump) }
     public private(set) var cursor = 0
 
     private static let limit = 200
-    private var forwardRecord: JumpRecord?
+    private var forwardRecord: NavigationRecord?
 
     public init() {}
 
@@ -414,46 +555,62 @@ public final class NavigationHistory {
     }
 
     public func push(_ record: JumpRecord) {
+        push(NavigationRecord(jump: record))
+    }
+
+    public func push(_ record: NavigationRecord) {
         if cursor < records.count {
-            records.removeSubrange((cursor + 1)..<records.count)
-            if records.indices.contains(cursor), records[cursor].path == record.path {
-                records[cursor] = record
+            navigationRecords.removeSubrange((cursor + 1)..<records.count)
+            if records.indices.contains(cursor),
+               records[cursor].path == record.jump.path
+            {
+                navigationRecords[cursor] = record
                 forwardRecord = nil
                 cursor = records.count
                 return
             }
         }
         forwardRecord = nil
-        if records.last != record {
-            records.append(record)
+        if navigationRecords.last?.jump != record.jump
+            || navigationRecords.last?.trailNodeID != record.trailNodeID
+        {
+            navigationRecords.append(record)
         }
         if records.count > Self.limit {
-            records.removeFirst(records.count - Self.limit)
+            navigationRecords.removeFirst(records.count - Self.limit)
         }
         cursor = records.count
     }
 
     public func goBack(from current: JumpRecord) -> JumpRecord? {
+        goBack(from: NavigationRecord(jump: current))?.jump
+    }
+
+    public func goBack(from current: NavigationRecord) -> NavigationRecord? {
         guard canGoBack else { return nil }
         if cursor == records.count {
             forwardRecord = current
         }
         cursor -= 1
-        return records[cursor]
+        return navigationRecords[cursor]
     }
 
     public func goForward() -> JumpRecord? {
+        goForwardRecord()?.jump
+    }
+
+    public func goForwardRecord() -> NavigationRecord? {
         guard canGoForward else { return nil }
         if cursor + 1 < records.count {
             cursor += 1
-            return records[cursor]
+            return navigationRecords[cursor]
         }
         cursor += 1
         return forwardRecord
     }
 
     public func reset() {
-        records.removeAll(keepingCapacity: true)
+        navigationRecords.removeAll(keepingCapacity: true)
         cursor = 0
         forwardRecord = nil
     }

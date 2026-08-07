@@ -292,6 +292,7 @@ public final class AppModel {
     public private(set) var selectedByteOffset: UInt32?
     public private(set) var navigationGeneration: UInt64 = 0
     public private(set) var activeNavigationRequest: NavigationRequest?
+    public private(set) var replayNotice: String?
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
@@ -299,6 +300,8 @@ public final class AppModel {
     public let compare: CompareModel
     public let relationTree = RelationTreeModel()
     public let navigationHistory = NavigationHistory()
+    public let readingTrail = ReadingTrail()
+    public let resolutionExplanations = ResolutionExplanationStore()
     public let tabStrip = TabStripModel()
 
     public var canTrustCurrentRepository: Bool {
@@ -339,7 +342,10 @@ public final class AppModel {
     @ObservationIgnored private var snapshotDestinations: [
         SnapshotID: SnapshotDestination
     ] = [:]
-    @ObservationIgnored private var pendingReplay: JumpRecord?
+    @ObservationIgnored private var pendingReplay: (
+        record: NavigationRecord,
+        replayedAgainstCurrentWorktree: Bool
+    )?
 
     public init(
         indexService: any IndexService = ProjectIndexService(),
@@ -357,6 +363,12 @@ public final class AppModel {
         self.navigationSink = navigationSink
         contextWindow.attachExactCoordinator(exactCoordinator)
         relationTree.attachExactCoordinator(exactCoordinator)
+        relationTree.onContextsReset = { [weak self] in
+            self?.retainTrailExplanations()
+        }
+        relationTree.onExplanationChange = { [weak self] node in
+            self?.refreshExplanation(for: node)
+        }
         relationTree.onSelect = { [weak self] node in
             guard let self,
                   contextWindow.mode != .pinned,
@@ -398,6 +410,9 @@ public final class AppModel {
         selectedByteOffset = nil
         navigationGeneration &+= 1
         navigationHistory.reset()
+        readingTrail.reset()
+        resolutionExplanations.removeAll()
+        replayNotice = nil
         tabStrip.reset()
 
         snapshotTask = Task { [weak self, indexService] in
@@ -485,13 +500,23 @@ public final class AppModel {
         leaving current: JumpRecord? = nil
     ) {
         pendingReplay = nil
-        if selectedFile != nil, let current { navigationHistory.push(current) }
+        if selectedFile != nil, let current {
+            navigationHistory.push(NavigationRecord(
+                jump: current,
+                trailNodeID: readingTrail.activeNodeID
+            ))
+        }
         switchSnapshot(revision: revision)
     }
 
     public func switchToWorktree(leaving current: JumpRecord? = nil) {
         pendingReplay = nil
-        if selectedFile != nil, let current { navigationHistory.push(current) }
+        if selectedFile != nil, let current {
+            navigationHistory.push(NavigationRecord(
+                jump: current,
+                trailNodeID: readingTrail.activeNodeID
+            ))
+        }
         switchSnapshot(revision: nil)
     }
 
@@ -549,7 +574,25 @@ public final class AppModel {
         leaving current: JumpRecord? = nil
     ) {
         replayTask?.cancel()
-        if let current { navigationHistory.push(current) }
+        if request.cause != .historyReplay { replayNotice = nil }
+        var currentTrailNodeID = readingTrail.activeNodeID
+        if request.policy.recordInTrail,
+           let destination = trailJump(for: request.destination)
+        {
+            _ = readingTrail.recordNavigation(
+                from: current,
+                to: destination,
+                explanation: request.explanation
+            )
+            currentTrailNodeID = currentTrailNodeID
+                ?? readingTrail.edges.last?.from
+        }
+        if let current {
+            navigationHistory.push(NavigationRecord(
+                jump: current,
+                trailNodeID: currentTrailNodeID
+            ))
+        }
         activeNavigationRequest = request
         tabStrip.open(
             request.destination.file,
@@ -620,13 +663,37 @@ public final class AppModel {
     }
 
     public func goBack(from current: JumpRecord) {
-        guard let record = navigationHistory.goBack(from: current) else { return }
+        guard let record = navigationHistory.goBack(from: NavigationRecord(
+            jump: current,
+            trailNodeID: readingTrail.activeNodeID
+        )) else { return }
         replay(record)
     }
 
     public func goForward() {
-        guard let record = navigationHistory.goForward() else { return }
+        guard let record = navigationHistory.goForwardRecord() else { return }
         replay(record)
+    }
+
+    public func navigationExplanation(
+        for node: RelationTreeModel.Node
+    ) -> NavigationExplanation? {
+        guard let materialized = relationTree.materializedExplanation(for: node)
+        else { return nil }
+        let id: ResolutionExplanationID
+        if let existing = node.explanationID {
+            resolutionExplanations.update(existing, to: materialized)
+            id = existing
+        } else {
+            id = resolutionExplanations.create(materialized)
+            node.explanationID = id
+        }
+        return NavigationExplanation(
+            explanationID: id,
+            observedAtNavigation: ResolutionExplanationSnapshot(
+                explanation: materialized
+            )
+        )
     }
 
     @discardableResult
@@ -796,9 +863,14 @@ public final class AppModel {
             }.count
         )
         navigationGeneration &+= 1
-        if let record = pendingReplay {
+        if let pending = pendingReplay {
             pendingReplay = nil
-            replayWithinCurrentSnapshot(record)
+            replayWithinCurrentSnapshot(
+                pending.record,
+                replayedAgainstCurrentWorktree:
+                    pending.replayedAgainstCurrentWorktree
+                        && pending.record.jump.snapshotID != currentSnapshotID
+            )
         }
     }
 
@@ -882,8 +954,45 @@ public final class AppModel {
             .joined(separator: "/")
     }
 
-    private func replay(_ record: JumpRecord) {
-        guard let targetSnapshotID = record.snapshotID,
+    private func trailJump(
+        for destination: SourceDestination
+    ) -> JumpRecord? {
+        guard let byteOffset = destination.byteOffset else { return nil }
+        let file = destination.file.standardizedFileURL
+        let path: String
+        if exactLocationIsInDependency(file.path) {
+            path = file.path
+        } else if let root = fileTree?.root,
+                  let relative = Self.relativePath(of: file, under: root)
+        {
+            path = relative
+        } else {
+            return nil
+        }
+        return JumpRecord(
+            path: path,
+            contentID: nil,
+            byteOffset: byteOffset,
+            line: 1,
+            column: 1,
+            symbolAnchor: nil,
+            snapshotID: currentSnapshotID
+        )
+    }
+
+    private func refreshExplanation(for node: RelationTreeModel.Node) {
+        guard let id = node.explanationID,
+              let materialized = relationTree.materializedExplanation(for: node)
+        else { return }
+        resolutionExplanations.update(id, to: materialized)
+    }
+
+    private func retainTrailExplanations() {
+        resolutionExplanations.retain(readingTrail.referencedExplanationIDs)
+    }
+
+    private func replay(_ record: NavigationRecord) {
+        guard let targetSnapshotID = record.jump.snapshotID,
               targetSnapshotID != currentSnapshotID
         else {
             replayWithinCurrentSnapshot(record)
@@ -896,7 +1005,12 @@ public final class AppModel {
             }
             return
         }
-        pendingReplay = record
+        let replaysWorktree: Bool = if case .worktree = destination {
+            true
+        } else {
+            false
+        }
+        pendingReplay = (record, replaysWorktree)
         switch destination {
         case .worktree:
             switchSnapshot(revision: nil)
@@ -905,12 +1019,16 @@ public final class AppModel {
         }
     }
 
-    private func replayWithinCurrentSnapshot(_ record: JumpRecord) {
+    private func replayWithinCurrentSnapshot(
+        _ record: NavigationRecord,
+        replayedAgainstCurrentWorktree: Bool = false
+    ) {
         guard let root = fileTree?.root else { return }
-        let dependency = exactLocationIsInDependency(record.path)
+        let jump = record.jump
+        let dependency = exactLocationIsInDependency(jump.path)
         let file = dependency
-            ? URL(fileURLWithPath: record.path).standardizedFileURL
-            : root.appendingPathComponent(record.path).standardizedFileURL
+            ? URL(fileURLWithPath: jump.path).standardizedFileURL
+            : root.appendingPathComponent(jump.path).standardizedFileURL
         guard dependency || file.pathComponents.starts(with: root.pathComponents)
         else { return }
         let source = dependency ? nil : documentSource
@@ -922,7 +1040,7 @@ public final class AppModel {
             let offset: UInt32
             do {
                 offset = try await detachedValue {
-                    try Self.replayOffset(record, file: file, source: source)
+                    try Self.replayOffset(jump, file: file, source: source)
                 }
                 try Task.checkCancellation()
             } catch {
@@ -933,6 +1051,10 @@ public final class AppModel {
                   navigationGeneration == replayNavigationGeneration,
                   currentSnapshotID == replaySnapshotID
             else { return }
+            readingTrail.restore(record.trailNodeID)
+            replayNotice = replayedAgainstCurrentWorktree
+                ? "replayed against current worktree"
+                : nil
             navigate(
                 NavigationRequest(
                     destination: SourceDestination(

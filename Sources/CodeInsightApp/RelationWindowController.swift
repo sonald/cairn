@@ -8,7 +8,7 @@ import Observation
 final class RelationWindowController: NSViewController,
     NSOutlineViewDataSource, NSOutlineViewDelegate
 {
-    var onOpen: ((String, UInt32) -> Void)?
+    var onOpen: ((RelationTreeModel.Node) -> Void)?
     var onTreeChange: (() -> Void)?
 
     private let model: RelationTreeModel
@@ -752,8 +752,8 @@ final class RelationWindowController: NSViewController,
             return
         }
         model.select(node)
-        guard node.representsLocation, let target = node.target else { return }
-        onOpen?(target.path, target.byteOffset)
+        guard node.representsLocation, node.target != nil else { return }
+        onOpen?(node)
     }
 
     func outlineViewItemWillExpand(_ notification: Notification) {
@@ -845,11 +845,11 @@ final class RelationWindowController: NSViewController,
               let node = outlineView.item(atRow: outlineView.selectedRow)
                 as? RelationTreeModel.Node,
               node.kind == .edge,
-              let target = node.target
+              node.target != nil
         else { return }
         if !node.representsLocation || sender == nil {
             selfTestOpenSelectionCount += 1
-            onOpen?(target.path, target.byteOffset)
+            onOpen?(node)
         }
         guard let symbol = node.symbol,
               symbol.localKind == .declarationFacet

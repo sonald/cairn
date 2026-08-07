@@ -316,8 +316,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.onOpen = { [weak self] candidate in
             self?.open(candidate)
         }
-        relationController.onOpen = { [weak self] path, offset in
-            self?.open(path: path, byteOffset: offset)
+        relationController.onOpen = { [weak self] node in
+            self?.open(node)
         }
         relationController.onTreeChange = { [weak self] in
             self?.renderStatusBar()
@@ -1280,6 +1280,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.fileTree
             _ = model.selectedFile
             _ = model.navigationGeneration
+            _ = model.replayNotice
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.currentBranchName
             _ = model.commitPicker.isLoading
@@ -1664,7 +1665,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let coverageStatus = model.coverage.statusText(
             for: model.snapshotPhase ?? .firstPaint
         )
-        let indexStatus = [initialIndexStatus, coverageStatus]
+        let indexStatus = [initialIndexStatus, coverageStatus, model.replayNotice]
             .compactMap { $0 }
             .joined(separator: " · ")
         indexLabel.stringValue = indexStatus
@@ -1905,7 +1906,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         open(path: candidate.path, byteOffset: candidate.targetByteOffset)
     }
 
-    private func open(path: String, byteOffset: UInt32) {
+    private func open(_ node: RelationTreeModel.Node) {
+        guard let target = node.target else { return }
+        open(
+            path: target.path,
+            byteOffset: target.byteOffset,
+            explanation: model.navigationExplanation(for: node)
+        )
+    }
+
+    private func open(
+        path: String,
+        byteOffset: UInt32,
+        explanation: NavigationExplanation? = nil
+    ) {
         guard let root = model.fileTree?.root else { return }
         let file = exactLocationIsInDependency(path)
             ? URL(fileURLWithPath: path)
@@ -1913,7 +1927,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         navigate(
             to: file,
             byteOffset: byteOffset,
-            cause: .relation
+            cause: .relation,
+            explanation: explanation
         )
     }
 

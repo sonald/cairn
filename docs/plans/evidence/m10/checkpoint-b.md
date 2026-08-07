@@ -1,4 +1,4 @@
-# M10 Checkpoint B 验收证据（进行中）
+# M10 Checkpoint B 验收证据
 
 日期：2026-08-07。范围：E1b / E1b0 / E1c / E1d / N2。
 
@@ -68,8 +68,27 @@
 - RelationTree 定向测试：52/52 PASS；`swift test --disable-sandbox`：423/423 PASS。
 - `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS，artifact `.build/self-test-run-20260807-105533-48304`。
 
+## N2：Trail DAG、Explanation Store 与 worktree replay
+
+- `NavigationHistory` 的单一存储改为 `NavigationRecord(jump, trailNodeID)`，兼容读视图仍投影为原 `JumpRecord`；Back/Forward 按 `trailNodeID` 恢复具体访问节点，同位置的不同访问路径不再混同。
+- `ReadingTrail` 只记录 `NavigationPolicy.recordInTrail` 的显式语义导航；Back 后新跳转保留旧边并从恢复节点生成新分支。节点直接持 `JumpRecord.snapshotID`，跨 snapshot 路径自然分段，不引入伪稳定 symbol ID。
+- `TrailEdge` 固定保存导航时物化快照与 `currentExplanationID`；`ResolutionExplanationStore` 只存 `MaterializedResolutionExplanation`。Exact 原位更新复用行上的同一 ID，路径快照不变、当前解释可更新。
+- Relations 行首次导航时先物化 live context/ref；换根、snapshot/profile 切换仅保留 Trail 引用的解释，未引用解释清理；新项目全清。Store 内没有 live `RelationQueryContextID` / `ReconciliationRef`。
+- 旧 worktree snapshot 无法精确重建时，在当前 worktree 上按 `JumpRecord` 弱锚点重放；AppModel 发布并在状态栏显示 `replayed against current worktree`。若 snapshot ID 仍存活并匹配，则不显示该提示。
+- 未增加磁盘持久化、非文件 tab 或 Reading Set 产品实体。
+
+门禁：
+
+- `readingTrailBranchesFromRestoredHistoryIdentity`：A→B、Back 到 A、A→C 形成保留双边的 DAG；history record 恢复 A 的节点身份。
+- `trailExplanationSnapshotStaysFixedWhileStoreAdvances`：edge 快照保持 Possible，Store 同 ID 更新到 Strong。
+- `relationRootResetRetainsTrailMaterializationsWithoutLiveReferences`：旧 query context 清除后 candidate-only 与内联 reconciliation 的 conflict 均可从 Store 读取。
+- `oldWorktreeReplayUsesCurrentWorktreeAndSaysSo`：重捕获 worktree 得到新 snapshot ID，弱锚点恢复位置、Trail 身份，并发布明确提示。
+- AppKit `relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns`：真实 Relations 单击把物化 explanation ID 同时写入 NavigationRequest、Trail edge 与 Store；双击去重和 Back 行为不变。
+- AppModel/Snapshot/RelationUX 定向回归：178/178 PASS；`swift test --disable-sandbox`：427/427 PASS。
+- `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS，artifact `.build/self-test-run-20260807-111207-90422`。
+
 ## 尚待本 Checkpoint 完成
 
 - [x] E1c call-site reconciliation 与 conflict 修复。
 - [x] E1d 完整 trace 投影与 `alsoHeuristic` 删除。
-- [ ] N2 Trail DAG、Explanation Store 与 worktree best-effort replay。
+- [x] N2 Trail DAG、Explanation Store 与 worktree best-effort replay。

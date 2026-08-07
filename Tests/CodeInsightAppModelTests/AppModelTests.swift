@@ -188,6 +188,203 @@ func navigationRequestKeepsCausePolicyAndReplaySemantics() async throws {
 
 @MainActor
 @Test
+func readingTrailBranchesFromRestoredHistoryIdentity() async throws {
+    let root = try temporaryProject([
+        "a.rs": "fn a() {}\n",
+        "b.rs": "fn b() {}\n",
+        "c.rs": "fn c() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: FailingIndexService())
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") {
+        model.fileTree != nil
+    })
+    let a = root.appendingPathComponent("a.rs")
+    let b = root.appendingPathComponent("b.rs")
+    let c = root.appendingPathComponent("c.rs")
+    let aJump = jumpRecord("a.rs", offset: 3)
+    let bJump = jumpRecord("b.rs", offset: 3)
+
+    model.navigate(to: a, byteOffset: 3)
+    let aNodeID = try #require(model.readingTrail.activeNodeID)
+    model.navigate(to: b, byteOffset: 3, leaving: aJump)
+    let bNodeID = try #require(model.readingTrail.activeNodeID)
+    #expect(model.readingTrail.edges.map(\.from) == [aNodeID])
+    #expect(model.readingTrail.edges.map(\.to) == [bNodeID])
+    #expect(model.navigationHistory.navigationRecords.first?.trailNodeID == aNodeID)
+
+    model.goBack(from: bJump)
+    #expect(await testWaitUntil("trail restores the prior visit identity") {
+        model.readingTrail.activeNodeID == aNodeID
+            && model.selectedFile == a
+    })
+    model.navigate(to: c, byteOffset: 3, leaving: aJump)
+
+    #expect(model.readingTrail.nodes.count == 3)
+    #expect(model.readingTrail.edges.count == 2)
+    #expect(model.readingTrail.edges.allSatisfy { $0.from == aNodeID })
+    #expect(Set(model.readingTrail.edges.map(\.to)) == [
+        bNodeID,
+        try #require(model.readingTrail.activeNodeID),
+    ])
+}
+
+@MainActor
+@Test
+func trailExplanationSnapshotStaysFixedWhileStoreAdvances() throws {
+    let store = ResolutionExplanationStore()
+    let trail = ReadingTrail()
+    let candidate = CandidateObservation(
+        target: .unresolved(UnresolvedSymbolRef(
+            nameID: NameID(rawValue: 1),
+            hintKind: .unqualified
+        )),
+        certainty: .possible,
+        dispatch: .direct,
+        provenance: .fuzzyResolver,
+        completeness: .partial,
+        evidence: []
+    )
+    let observed = MaterializedResolutionExplanation(
+        trace: .candidateOnly(candidate)
+    )
+    let explanationID = store.create(observed)
+    let navigationExplanation = NavigationExplanation(
+        explanationID: explanationID,
+        observedAtNavigation: ResolutionExplanationSnapshot(
+            explanation: observed,
+            capturedAt: Date(timeIntervalSince1970: 1)
+        )
+    )
+    let a = jumpRecord("a.rs", offset: 1)
+    let b = jumpRecord("b.rs", offset: 2)
+    _ = trail.recordNavigation(
+        from: a,
+        to: b,
+        explanation: navigationExplanation
+    )
+    let upgradedCandidate = CandidateObservation(
+        target: candidate.target,
+        certainty: .strong,
+        dispatch: candidate.dispatch,
+        provenance: candidate.provenance,
+        completeness: .complete,
+        evidence: candidate.evidence
+    )
+    store.update(explanationID, to: MaterializedResolutionExplanation(
+        trace: .candidateOnly(upgradedCandidate)
+    ))
+
+    let edge = try #require(trail.edges.first)
+    guard case .candidateOnly(let observedCandidate) =
+        edge.observedAtNavigation?.explanation.trace,
+          case .candidateOnly(let currentCandidate) =
+            store.value(for: explanationID)?.trace
+    else {
+        Issue.record("expected materialized candidate-only traces")
+        return
+    }
+    #expect(edge.currentExplanationID == explanationID)
+    #expect(observedCandidate.certainty == .possible)
+    #expect(currentCandidate.certainty == .strong)
+}
+
+@MainActor
+@Test
+func relationRootResetRetainsTrailMaterializationsWithoutLiveReferences()
+    async throws
+{
+    let root = try temporaryProject([
+        "main.rs": "fn b() {}\nfn a() { b(); }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let a = try #require(
+        session.definitions(of: "a", context: context).first?.0
+    )
+    let model = AppModel(indexService: FailingIndexService())
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(session, context)))
+    await model.relationTree.setRoot(
+        target: .engine(a),
+        direction: .calls
+    )?.value
+    let children = model.relationTree.root?.children ?? []
+    let rows = children.flatMap {
+        $0.kind == .group ? $0.children ?? [] : [$0]
+    }
+    let row = try #require(rows.first {
+        $0.kind == .edge && $0.title == "b"
+    })
+    let candidateNavigation = try #require(
+        model.navigationExplanation(for: row)
+    )
+    let oldContextID = try #require(row.explanation?.contextID)
+    let source = jumpRecord(
+        "main.rs",
+        offset: 14,
+        snapshotID: session.snapshotID
+    )
+    let destination = jumpRecord(
+        "main.rs",
+        offset: 3,
+        snapshotID: session.snapshotID
+    )
+    _ = model.readingTrail.recordNavigation(
+        from: source,
+        to: destination,
+        explanation: candidateNavigation
+    )
+
+    guard case .candidateOnly(let candidate) =
+        candidateNavigation.observedAtNavigation.explanation.trace
+    else {
+        Issue.record("expected a candidate-only relation trace")
+        return
+    }
+    let conflict = MaterializedResolutionExplanation(trace: .conflict(
+        candidate: candidate,
+        reconciliation: ReconciliationSnapshot(CallSiteReconciliation(
+            querySite: SourceLocation(path: "main.rs", byteOffset: 18),
+            candidates: [candidate],
+            providerTargets: [],
+            roles: [.correctedCandidate(candidateIndex: 0)]
+        ))
+    ))
+    let conflictID = model.resolutionExplanations.create(conflict)
+    _ = model.readingTrail.recordNavigation(
+        from: destination,
+        to: source,
+        explanation: NavigationExplanation(
+            explanationID: conflictID,
+            observedAtNavigation: ResolutionExplanationSnapshot(
+                explanation: conflict
+            )
+        )
+    )
+
+    model.relationTree.setRoot(target: .engine(a), direction: .callers)
+
+    #expect(model.relationTree.relationQueryContexts[oldContextID] == nil)
+    #expect(model.resolutionExplanations.value(
+        for: candidateNavigation.explanationID
+    ) != nil)
+    guard case .conflict = model.resolutionExplanations.value(
+        for: conflictID
+    )?.trace else {
+        Issue.record("materialized conflict must survive without a live context")
+        return
+    }
+}
+
+@MainActor
+@Test
 func outlineFollowArbitrationClearsOnlyOnLiveScroll() {
     var arbitration = OutlineFollowArbitration()
     arbitration.apply(NavigationRequest(
