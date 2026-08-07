@@ -1,6 +1,6 @@
 # M10 Checkpoint C 验收证据
 
-日期：2026-08-07。范围：E2 / E3 已完成；P0 / V0 待后续阶段补齐。
+日期：2026-08-07。范围：E2 / E3 / P0 已完成；V0 待总验收补齐。
 
 ## E2 语言无关 clause 与英文 renderer
 
@@ -36,3 +36,9 @@
 - `ambiguityTrapInspectorSeparatesCandidateAndResultSetCompleteness`：默认 Inferred + `name match only`；candidate complete、relation set truncated、verifying 三事实并存，无 `unique target`。
 - `swift test --disable-sandbox`：433 / 433 PASS；`scripts/run-self-tests.sh`：12 / 12 PASS，artifact `.build/self-test-run-20260807-114052-42772`。
 - `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；真实 rust-analyzer Safe / offline 仍因 `sandbox-exec: sandbox_apply: Operation not permitted` 为 BLOCKED，未以 fake 结果替代。
+
+## P0 Reading Set 原型
+
+- 固定 tokio `spawn` trace 对比 A（Relations 原地展开）与 B（`Open as Reading Set` 新 tab），证据内容不随布局变化。
+- 选择 B 作为 M11 目标形态；A 只作为独立轻量 peek，不替代 Reading Set。
+- 结论记录于 `reading-set-prototype.md`；P0 未增加 Reading Set 产品实体或修改 `Sources/`。
