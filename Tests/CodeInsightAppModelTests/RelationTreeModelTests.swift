@@ -3304,6 +3304,171 @@ func m10AmbiguityTrapKeepsNameOnlyTruncatedCandidateInferred() async throws {
     #expect(!surface.localizedCaseInsensitiveContains("unique target"))
 }
 
+@Test
+func m10NarrativeKeepsBothCompletenessLevelsIndependent() throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let contextID = RelationQueryContextID()
+    func clauses(_ completeness: Completeness) -> [NarrativeClause] {
+        let candidate = CandidateObservation(
+            target: .occurrence(fixture.a),
+            certainty: .probable,
+            dispatch: .direct,
+            provenance: .fuzzyResolver,
+            completeness: completeness,
+            evidence: [.receiverType(nameID: fixture.session.names.intern("Self"))]
+        )
+        return narrativeClauses(
+            for: RelationRowExplanation(
+                primaryTrace: .candidateOnly(candidate),
+                contextID: contextID
+            ),
+            context: RelationQueryContext(
+                candidateQuery: .completed(RelationSetObservation(
+                    completeness: .complete,
+                    returnedCount: 1
+                )),
+                exactQuery: .pending
+            )
+        )
+    }
+
+    let partial = clauses(.partial)
+    let complete = clauses(.complete)
+    #expect(partial.count == 4)
+    #expect(complete.count == 4)
+    #expect(partial.contains {
+        if case .candidateCompleteness(.partial) = $0 { return true }
+        return false
+    })
+    #expect(complete.contains {
+        if case .candidateCompleteness(.complete) = $0 { return true }
+        return false
+    })
+    #expect(partial.contains {
+        if case .candidateRelationSet(let observation) = $0,
+           case .complete = observation.completeness
+        {
+            return true
+        }
+        return false
+    })
+    #expect(partial.map(renderEnglish) != complete.map(renderEnglish))
+}
+
+@Test
+func m10NarrativeDistinguishesConflictNonCorroborationAndInconclusive()
+    throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let contextID = RelationQueryContextID()
+    let reconciliationID = ReconciliationID()
+    let candidate = CandidateObservation(
+        target: .occurrence(fixture.a),
+        certainty: .possible,
+        dispatch: .dynamicDispatch,
+        provenance: .fuzzyResolver,
+        completeness: .complete,
+        evidence: []
+    )
+    let context = RelationQueryContext(
+        candidateQuery: .completed(RelationSetObservation(
+            completeness: .complete,
+            returnedCount: 1
+        )),
+        exactQuery: .completed(.completed(
+            attribution: relationExactAttribution(),
+            origin: .worktree,
+            exhaustiveness: .bestEffort
+        ))
+    )
+    func reference(_ role: ReconciliationRole) -> ReconciliationRef {
+        ReconciliationRef(
+            contextID: contextID,
+            reconciliationID: reconciliationID,
+            role: role
+        )
+    }
+    let conflictRef = reference(.correctedCandidate(candidateIndex: 0))
+    let conflict = narrativeClauses(
+        for: RelationRowExplanation(
+            primaryTrace: .conflict(
+                candidate: candidate,
+                reconciliation: conflictRef
+            ),
+            contextID: contextID,
+            reconciliationRefs: [conflictRef]
+        ),
+        context: context
+    )
+    let notCorroborated = narrativeClauses(
+        for: RelationRowExplanation(
+            primaryTrace: .candidateOnly(candidate),
+            contextID: contextID
+        ),
+        context: context
+    )
+    let inconclusiveRef = reference(.inconclusiveCandidate(candidateIndex: 0))
+    let inconclusive = narrativeClauses(
+        for: RelationRowExplanation(
+            primaryTrace: .candidateOnly(candidate),
+            contextID: contextID,
+            reconciliationRefs: [inconclusiveRef]
+        ),
+        context: context
+    )
+
+    #expect(conflict.contains { if case .conflict = $0 { true } else { false } })
+    #expect(notCorroborated.contains {
+        if case .notCorroborated = $0 { true } else { false }
+    })
+    #expect(inconclusive.contains {
+        if case .inconclusive = $0 { true } else { false }
+    })
+    #expect(Set([
+        conflict.map(renderEnglish).last,
+        notCorroborated.map(renderEnglish).last,
+        inconclusive.map(renderEnglish).last,
+    ].compactMap { $0 }).count == 3)
+}
+
+@Test
+func m10NarrativeEnglishSnapshotKeepsNameOnlyCompletenessCaveat() throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let contextID = RelationQueryContextID()
+    let candidate = CandidateObservation(
+        target: .occurrence(fixture.a),
+        certainty: .possible,
+        dispatch: .dynamicDispatch,
+        provenance: .fuzzyResolver,
+        completeness: .complete,
+        evidence: [.methodNameOnly(nameID: fixture.session.names.intern("poll"))]
+    )
+    let clauses = narrativeClauses(
+        for: RelationRowExplanation(
+            primaryTrace: .candidateOnly(candidate),
+            contextID: contextID
+        ),
+        context: RelationQueryContext(
+            candidateQuery: .completed(RelationSetObservation(
+                completeness: .truncated,
+                returnedCount: 500,
+                totalCount: 1_900
+            )),
+            exactQuery: .pending
+        )
+    )
+
+    #expect(clauses.map(renderEnglish) == [
+        "Matched by method name only.",
+        "Candidate generation was complete.",
+        "The source relation result set was truncated after 500 of about 1900 results.",
+        "Exact verification is in progress.",
+    ])
+}
+
 @MainActor
 @Test
 func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {

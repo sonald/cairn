@@ -176,6 +176,160 @@ public struct RelationRowExplanation: Sendable {
     }
 }
 
+public enum NarrativeClause: Sendable {
+    case sourceEvidence([ResolutionEvidence])
+    case candidateCompleteness(Completeness)
+    case candidateRelationSet(RelationSetObservation)
+    case verified(origin: ExactOrigin)
+    case corroborated
+    case exactNotStarted
+    case exactPending
+    case notCorroborated(
+        exhaustiveness: QueryExhaustiveness,
+        origin: ExactOrigin
+    )
+    case exactUnsupported
+    case exactNotApplicable
+    case conflict
+    case inconclusive
+}
+
+public func narrativeClauses(
+    for explanation: RelationRowExplanation,
+    context: RelationQueryContext
+) -> [NarrativeClause] {
+    let trace = explanation.primaryTrace
+    var clauses: [NarrativeClause] = []
+    let candidate: CandidateObservation? = switch trace {
+    case .candidateOnly(let candidate), .conflict(let candidate, _): candidate
+    case .corroborated(let candidate, _): candidate
+    case .verificationOnly: nil
+    }
+    if let candidate {
+        if !candidate.evidence.isEmpty {
+            clauses.append(.sourceEvidence(candidate.evidence))
+        }
+        clauses.append(.candidateCompleteness(candidate.completeness))
+        if case .completed(let observation) = context.candidateQuery {
+            clauses.append(.candidateRelationSet(observation))
+        }
+    }
+
+    switch trace {
+    case .verificationOnly(let verification):
+        clauses.append(.verified(origin: verification.origin))
+    case .corroborated(_, let verification):
+        clauses.append(.verified(origin: verification.origin))
+        clauses.append(.corroborated)
+    case .conflict:
+        clauses.append(.conflict)
+    case .candidateOnly:
+        if explanation.reconciliationRefs.contains(where: {
+            if case .inconclusiveCandidate = $0.role { return true }
+            return false
+        }) {
+            clauses.append(.inconclusive)
+            return clauses
+        }
+        switch context.exactQuery {
+        case .notStarted:
+            clauses.append(.exactNotStarted)
+        case .pending:
+            clauses.append(.exactPending)
+        case .completed(.completed(
+            _, let origin, let exhaustiveness
+        )):
+            clauses.append(.notCorroborated(
+                exhaustiveness: exhaustiveness,
+                origin: origin
+            ))
+        case .completed(.unsupported):
+            clauses.append(.exactUnsupported)
+        case .completed(.notApplicable):
+            clauses.append(.exactNotApplicable)
+        }
+    }
+    return clauses
+}
+
+public func renderEnglish(_ clause: NarrativeClause) -> String {
+    switch clause {
+    case .sourceEvidence(let evidence):
+        return evidence.map { item in
+            switch item {
+            case .lexicalBinding: "Matched a lexical binding."
+            case .uniqueImport: "Matched an import binding with no competing source match."
+            case .sameFile: "Matched a declaration in the same file."
+            case .nameOnly: "Matched by name only."
+            case .methodNameOnly: "Matched by method name only."
+            case .receiverType: "Receiver type narrowed the candidate."
+            }
+        }.joined(separator: " ")
+    case .candidateCompleteness(let completeness):
+        return "Candidate generation was \(completenessEnglish(completeness))."
+    case .candidateRelationSet(let observation):
+        let count = observation.returnedCount
+        let noun = count == 1 ? "result" : "results"
+        switch observation.completeness {
+        case .complete:
+            return "The source relation result set was complete with \(count) \(noun)."
+        case .partial:
+            return "The source relation result set was partial with \(count) \(noun) returned."
+        case .truncated:
+            if let total = observation.totalCount {
+                return "The source relation result set was truncated after \(count) of about \(total) results."
+            }
+            return "The source relation result set was truncated after \(count) \(noun)."
+        case .unknown:
+            return "The source relation result set completeness is unknown; \(count) \(noun) were returned."
+        }
+    case .verified(let origin):
+        return "rust-analyzer returned this target from \(originEnglish(origin))."
+    case .corroborated:
+        return "The source candidate and rust-analyzer target were corroborated."
+    case .exactNotStarted:
+        return "Exact verification was not attempted."
+    case .exactPending:
+        return "Exact verification is in progress."
+    case .notCorroborated(let exhaustiveness, let origin):
+        return "The \(exhaustivenessEnglish(exhaustiveness)) \(originEnglish(origin)) relation query did not corroborate this candidate; absence is not established."
+    case .exactUnsupported:
+        return "The provider does not support this exact relation query."
+    case .exactNotApplicable:
+        return "The exact relation query does not apply to this root."
+    case .conflict:
+        return "rust-analyzer returned a different target; this earlier candidate remains in the correction trail."
+    case .inconclusive:
+        return "The source candidate and rust-analyzer target could not be compared reliably."
+    }
+}
+
+private func completenessEnglish(_ completeness: Completeness) -> String {
+    switch completeness {
+    case .complete: "complete"
+    case .partial: "partial"
+    case .truncated: "truncated"
+    case .unknown: "of unknown completeness"
+    }
+}
+
+private func exhaustivenessEnglish(
+    _ exhaustiveness: QueryExhaustiveness
+) -> String {
+    switch exhaustiveness {
+    case .guaranteed: "exhaustive"
+    case .bestEffort: "best-effort"
+    case .unknown: "unknown-exhaustiveness"
+    }
+}
+
+private func originEnglish(_ origin: ExactOrigin) -> String {
+    switch origin {
+    case .worktree: "worktree"
+    case .materialized(let commitOID): "materialized commit \(commitOID)"
+    }
+}
+
 public struct LiveResolutionExplanation: Sendable {
     public let trace: ResolutionTrace
     public let contextID: RelationQueryContextID
