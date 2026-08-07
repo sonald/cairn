@@ -110,7 +110,7 @@ func exactCoordinatorMarksWorktreeOrigin() async throws {
         byteOffset: 0,
         generation: 1
     )
-    #expect(result?.origin == .worktree)
+    #expect(exactCompletedEntry(result)?.origin == .worktree)
 }
 
 @MainActor
@@ -151,7 +151,11 @@ func exactCoordinatorRestartsOneCrashThenBecomesUnavailable() async throws {
         generation: 1
     )
 
-    #expect(result == nil)
+    guard case .unavailable(let reason) = result else {
+        Issue.record("restart exhaustion did not publish unavailable")
+        return
+    }
+    #expect(reason.contains("restart exhausted"))
     #expect(state.prepareCount == 2)
     #expect(state.definitionCount == 2)
     guard case .unavailable = coordinator.readiness else {
@@ -256,9 +260,9 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     })
     let generation = model.generation
 
-    let safe = try #require(await coordinator.definition(
+    let safe = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
-    ))
+    )))
     #expect(safe.attribution.trustMode == .safe)
     #expect(safe.attribution.coverage == .partial)
     #expect(await coordinator.definition(
@@ -270,14 +274,14 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     #expect(await testWaitUntil("state.prepareCount == 2 && coordinator.readiness == .ready") {
         state.prepareCount == 2 && coordinator.readiness == .ready
     })
-    let trustedNew = try #require(await coordinator.definition(
+    let trustedNew = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 1, generation: generation
-    ))
+    )))
     #expect(trustedNew.attribution.trustMode == .trusted)
     #expect(trustedNew.attribution.coverage == .full)
-    let trustedOld = try #require(await coordinator.definition(
+    let trustedOld = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
-    ))
+    )))
     #expect(trustedOld.attribution.trustMode == .trusted)
     #expect(trustedOld.attribution.coverage == .full)
     #expect(await coordinator.definition(
@@ -289,9 +293,9 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     #expect(await testWaitUntil("state.prepareCount == 3 && coordinator.readiness == .ready") {
         state.prepareCount == 3 && coordinator.readiness == .ready
     })
-    let safeAgain = try #require(await coordinator.definition(
+    let safeAgain = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 1, generation: generation
-    ))
+    )))
     #expect(safeAgain.attribution.trustMode == .safe)
     #expect(safeAgain.attribution.coverage == .partial)
     #expect(await coordinator.definition(
@@ -480,11 +484,11 @@ func exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() {
             file: "main.rs",
             byteOffset: 0
         ) {
-            return cached
+            return cached.first
         }
         providerCallCount += 1
         let entry = exactEntry(file: "main.rs", byteOffset: 0)
-        overlay.store(entry, for: key, file: "main.rs", byteOffset: 0)
+        overlay.store([entry], for: key, file: "main.rs", byteOffset: 0)
         return entry
     }
 
@@ -578,8 +582,8 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
     #expect(providerRoot.value.contains(
         "materialized/\(snapshot.commitOID.hex)/"
     ))
-    #expect(result?.location.file == "src/lib.rs")
-    #expect(result?.origin == .materialized(
+    #expect(exactCompletedEntry(result)?.location.file == "src/lib.rs")
+    #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex
     ))
 }
@@ -836,13 +840,13 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
             try session.resolve(file: file, offset: offset, context: context)
         },
         exactResolver: { _, _, _ in
-            exactEntry(
+            .completed([exactEntry(
                 file: dependency.path,
                 byteOffset: exactByteOffset(
                     of: "unknown_dependency",
                     in: dependencySource
                 )
-            )
+            )])
         }
     )
     model.updateProjectState(.ready(session, context), root: root)
@@ -994,8 +998,15 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
         self.state = state
     }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
-        try state.define(ordinal: ordinal, file: file, byteOffset: byteOffset)
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
+        .completed(try state.define(
+            ordinal: ordinal,
+            file: file,
+            byteOffset: byteOffset
+        ).map { [ExactTarget(location: $0)] } ?? [])
     }
 
     func implementations(
@@ -1157,13 +1168,21 @@ private final class BlockingExactSession: ExactSession, @unchecked Sendable {
         return didStart
     }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
         condition.lock()
         didStart = true
         condition.broadcast()
         while !released { condition.wait() }
         condition.unlock()
-        return ExactLocation(file: file, byteOffset: 0, line: 1, column: 1)
+        return .completed([ExactTarget(location: ExactLocation(
+            file: file,
+            byteOffset: 0,
+            line: 1,
+            column: 1
+        ))])
     }
 
     func implementations(
@@ -1213,7 +1232,9 @@ private final class BlockingExactSession: ExactSession, @unchecked Sendable {
 
 @MainActor
 private final class ContextExactGate {
-    private var continuations: [Int: CheckedContinuation<ExactOverlay.Entry?, Never>] = [:]
+    private var continuations: [
+        Int: CheckedContinuation<ExactCoordinator.DefinitionResult?, Never>
+    ] = [:]
     private var nextID = 0
 
     var count: Int { nextID }
@@ -1222,14 +1243,16 @@ private final class ContextExactGate {
         file: String,
         offset: UInt32,
         generation: UInt64
-    ) async -> ExactOverlay.Entry? {
+    ) async -> ExactCoordinator.DefinitionResult? {
         let id = nextID
         nextID += 1
         return await withCheckedContinuation { continuations[id] = $0 }
     }
 
     func complete(_ id: Int, with entry: ExactOverlay.Entry?) {
-        continuations.removeValue(forKey: id)?.resume(returning: entry)
+        continuations.removeValue(forKey: id)?.resume(
+            returning: .completed(entry.map { [$0] } ?? [])
+        )
     }
 }
 
@@ -1376,6 +1399,13 @@ private func exactQueryContext(
 private func exactByteOffset(of needle: String, in source: String) -> UInt32 {
     let range = source.range(of: needle)!
     return UInt32(source[..<range.lowerBound].utf8.count)
+}
+
+private func exactCompletedEntry(
+    _ result: ExactCoordinator.DefinitionResult?
+) -> ExactOverlay.Entry? {
+    guard case .completed(let entries) = result else { return nil }
+    return entries.first
 }
 
 private enum ExactTestError: Error {

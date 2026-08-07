@@ -836,7 +836,38 @@ func rustAnalyzerReturnsReadyNullWithoutBlindRetry() throws {
         }
     ) { session in
         let result = try session.definition(file: "src/main.rs", byteOffset: 0)
-        #expect(result == nil)
+        guard case .completed(let targets) = result else {
+            Issue.record("expected completed empty definition result")
+            return
+        }
+        #expect(targets.isEmpty)
+    }
+}
+
+@Test
+func rustAnalyzerPreservesEveryDefinitionTarget() throws {
+    let targetURI = exactFixtureURL()
+        .appendingPathComponent("src/lib.rs")
+        .absoluteString
+    let targets: [[String: Any]] = [0, 2].map { line in
+        [
+            "targetUri": targetURI,
+            "targetRange": lspRange(line: line, character: 0),
+            "targetSelectionRange": lspRange(line: line, character: 7),
+        ]
+    }
+    try withFakeRustAnalyzerSession(
+        requestResponder: { method, _ in
+            method == "textDocument/definition"
+                ? .result(targets) : .useDefault
+        }
+    ) { session in
+        let result = try session.definition(file: "src/main.rs", byteOffset: 0)
+        guard case .completed(let parsed) = result else {
+            Issue.record("definition query did not complete")
+            return
+        }
+        #expect(parsed.map(\.location.line) == [1, 3])
     }
 }
 
@@ -996,7 +1027,11 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
                 + " staleActual=\(staleRequestsAfterCancel)"
                 + " totalAfterCurrent=\(responses.count)"
         )
-        #expect(current != nil)
+        if case .completed = current {
+            // expected
+        } else {
+            Issue.record("current definition request did not complete")
+        }
         #expect(staleRequestsAfterCancel == 1)
         #expect(responses.count == 2)
     }
@@ -1199,11 +1234,10 @@ func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
     )
     let byteOffset = source[..<call.lowerBound].utf8.count
 
-    let location = try #require(
-        try session.definition(
-            file: "src/main.rs",
-            byteOffset: byteOffset
-        ))
+    let location = try onlyDefinitionLocation(try session.definition(
+        file: "src/main.rs",
+        byteOffset: byteOffset
+    ))
 
     #expect(session.readiness == .ready)
     #expect(location.file == "src/lib.rs")
@@ -1683,11 +1717,10 @@ private func runDefinition(
     let bytes = try snapshot.readBytes(path: "src/main.rs")
     let source = try #require(String(data: Data(bytes), encoding: .utf8))
     let call = try #require(source.range(of: "answer();", options: .backwards))
-    let location = try #require(
-        try session.definition(
-            file: "src/main.rs",
-            byteOffset: source[..<call.lowerBound].utf8.count
-        ))
+    let location = try onlyDefinitionLocation(try session.definition(
+        file: "src/main.rs",
+        byteOffset: source[..<call.lowerBound].utf8.count
+    ))
     if let marker {
         // Cargo/build-script completion is asynchronous; this is a hang fuse,
         // not a performance budget.
@@ -1725,10 +1758,23 @@ private func materializedDefinition(
         encoding: .utf8
     ))
     let call = try #require(source.range(of: "answer();"))
-    return try #require(try session.definition(
+    return try onlyDefinitionLocation(try session.definition(
         file: "src/main.rs",
         byteOffset: source[..<call.lowerBound].utf8.count
     ))
+}
+
+private func onlyDefinitionLocation(
+    _ result: ExactDefinitionQueryResult
+) throws -> ExactLocation {
+    guard case .completed(let targets) = result else {
+        throw DefinitionTestError.notCompleted
+    }
+    return try #require(targets.first).location
+}
+
+private enum DefinitionTestError: Error {
+    case notCompleted
 }
 
 private func simpleMaterializerFixture() throws -> MaterializerGitFixture {

@@ -275,7 +275,10 @@ public protocol ExactSession: AnyObject, Sendable {
     var attribution: ExactAttribution { get }
     var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? { get set }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation?
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult
     func implementations(
         file: String,
         byteOffset: Int
@@ -299,7 +302,7 @@ public protocol ExactSession: AnyObject, Sendable {
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch
-    ) throws -> ExactLocation?
+    ) throws -> ExactDefinitionQueryResult
     func implementations(
         file: String,
         byteOffset: Int,
@@ -339,8 +342,11 @@ public extension ExactSession {
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch
-    ) throws -> ExactLocation? {
-        try inBatch(batch) { try definition(file: file, byteOffset: byteOffset) }
+    ) throws -> ExactDefinitionQueryResult {
+        guard batch.acquire() else { return .cancelled }
+        defer { batch.release() }
+        guard batch.isCurrent else { return .cancelled }
+        return try definition(file: file, byteOffset: byteOffset)
     }
 
     func implementations(

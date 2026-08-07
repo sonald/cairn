@@ -350,27 +350,30 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         return negotiated
     }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
         try requestLocations(
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/definition",
             parse: parseDefinition
-        )
+        ) ?? .cancelled
     }
 
     func definition(
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch
-    ) throws -> ExactLocation? {
+    ) throws -> ExactDefinitionQueryResult {
         try requestLocations(
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/definition",
             batch: batch,
             parse: parseDefinition
-        )
+        ) ?? .cancelled
     }
 
     func implementations(
@@ -1032,18 +1035,19 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         return ["start": point, "end": point]
     }
 
-    private func parseDefinition(_ value: Any) throws -> ExactLocation? {
-        if value is NSNull { return nil }
-        let object: [String: Any]
+    private func parseDefinition(_ value: Any) throws -> ExactDefinitionQueryResult {
+        if value is NSNull { return .completed([]) }
+        let objects: [[String: Any]]
         if let dictionary = value as? [String: Any] {
-            object = dictionary
+            objects = [dictionary]
         } else if let array = value as? [[String: Any]] {
-            guard let first = array.first else { return nil }
-            object = first
+            objects = array
         } else {
             throw ExactError.invalidDefinitionResponse(String(describing: value))
         }
-        return try parseLocation(object)
+        return .completed(try objects.map {
+            ExactTarget(location: try parseLocation($0))
+        })
     }
 
     private func parseLocations(_ value: Any) throws -> [ExactLocation]? {

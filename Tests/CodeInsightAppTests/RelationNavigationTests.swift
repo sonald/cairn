@@ -128,7 +128,9 @@ struct RelationUXTests {
             expandPossible: false,
             exactResolver: { file, offset, _, _ in
                 definitionRequests += 1
-                return relationUXExactEntry(file: file, byteOffset: offset)
+                return .completed([
+                    relationUXExactEntry(file: file, byteOffset: offset),
+                ])
             }
         )
         defer { fixture.close() }
@@ -152,7 +154,9 @@ struct RelationUXTests {
             possibleMatchCount: 64,
             exactResolver: { file, offset, _, _ in
                 requestedOffsets.append(offset)
-                return relationUXExactEntry(file: file, byteOffset: offset)
+                return .completed([
+                    relationUXExactEntry(file: file, byteOffset: offset),
+                ])
             }
         )
         defer { fixture.close() }

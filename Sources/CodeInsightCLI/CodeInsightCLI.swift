@@ -93,14 +93,23 @@ extension CodeInsight {
                 trustMode: .safe
             )
             defer { session.close() }
-            guard let location = try session.definition(
+            let result = try session.definition(
                 file: relative,
                 byteOffset: Int(byteOffset)
-            ) else {
+            )
+            let locations: [ExactTarget] = switch result {
+            case .completed(let targets): targets
+            case .cancelled: throw ValidationError("definition query cancelled")
+            case .unavailable(let reason): throw ValidationError(reason)
+            }
+            guard !locations.isEmpty else {
                 throw ValidationError("definition not found")
             }
 
-            print("\(location.file):\(location.line):\(location.column)")
+            for target in locations {
+                let location = target.location
+                print("\(location.file):\(location.line):\(location.column)")
+            }
             let attribution = session.attribution
             print(
                 "attribution provider=\(attribution.provider) "

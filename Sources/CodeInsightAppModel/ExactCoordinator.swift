@@ -60,7 +60,7 @@ public struct ExactOverlay: Sendable {
         let byteOffset: Int
     }
 
-    private var definitions: [ReuseKey: [Position: Entry]] = [:]
+    private var definitions: [ReuseKey: [Position: [Entry]]] = [:]
 
     public init() {}
 
@@ -68,12 +68,12 @@ public struct ExactOverlay: Sendable {
         for key: ReuseKey,
         file: String,
         byteOffset: Int
-    ) -> Entry? {
+    ) -> [Entry]? {
         definitions[key]?[Position(file: file, byteOffset: byteOffset)]
     }
 
     public mutating func store(
-        _ entry: Entry,
+        _ entries: [Entry],
         for key: ReuseKey,
         file: String,
         byteOffset: Int
@@ -81,7 +81,7 @@ public struct ExactOverlay: Sendable {
         definitions[key, default: [:]][Position(
             file: file,
             byteOffset: byteOffset
-        )] = entry
+        )] = entries
     }
 }
 
@@ -109,6 +109,12 @@ public final class ExactCoordinator {
             origin: ExactOrigin,
             coverage: ExactCoverage
         )
+    }
+
+    public enum DefinitionResult: Sendable {
+        case completed([ExactOverlay.Entry])
+        case cancelled
+        case unavailable(String)
     }
 
     struct Relation: Sendable {
@@ -385,32 +391,33 @@ public final class ExactCoordinator {
         byteOffset: UInt32,
         generation: UInt64,
         batch: ExactRequestBatch? = nil
-    ) async -> ExactOverlay.Entry? {
+    ) async -> DefinitionResult? {
         if let prepareTask { await prepareTask.value }
-        guard batch?.isCurrent != false,
-              expectedGeneration == generation,
-              let current = active,
-              current.generation == generation
-        else { return nil }
+        guard batch?.isCurrent != false else { return .cancelled }
+        guard expectedGeneration == generation else { return nil }
+        guard let current = active else {
+            return .unavailable(String(describing: readiness))
+        }
+        guard current.generation == generation else { return nil }
         let offset = Int(byteOffset)
         if let cached = overlay.definition(
             for: current.key,
             file: file,
             byteOffset: offset
         ) {
-            return cached
+            return .completed(cached)
         }
 
         do {
-            let location = try await request(
+            let result = try await request(
                 session: current.session,
                 file: file,
                 byteOffset: offset,
                 batch: batch
             )
-            guard batch?.isCurrent != false else { return nil }
+            guard batch?.isCurrent != false else { return .cancelled }
             return publish(
-                location,
+                result,
                 from: current,
                 file: file,
                 byteOffset: offset
@@ -429,7 +436,7 @@ public final class ExactCoordinator {
             if isUnavailable(current.session.readiness) {
                 readiness = .unavailable(String(describing: error))
             }
-            return nil
+            return .unavailable(String(describing: error))
         }
     }
 
@@ -484,11 +491,13 @@ public final class ExactCoordinator {
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch?
-    ) async -> ExactOverlay.Entry? {
-        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
+    ) async -> DefinitionResult? {
+        guard batch?.isCurrent != false else { return .cancelled }
+        guard isCurrent(previous) else { return nil }
         readiness = .preparing
         try? await Task.sleep(for: .milliseconds(100))
-        guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
+        guard batch?.isCurrent != false else { return .cancelled }
+        guard isCurrent(previous) else { return nil }
 
         do {
             let newSession = try await Task.detached(priority: .utility) {
@@ -500,7 +509,7 @@ public final class ExactCoordinator {
             }.value
             guard batch?.isCurrent != false, isCurrent(previous) else {
                 Task.detached { newSession.close() }
-                return nil
+                return batch?.isCurrent == false ? .cancelled : nil
             }
             let restarted = Active(
                 generation: previous.generation,
@@ -518,32 +527,32 @@ public final class ExactCoordinator {
             Task.detached { previous.session.close() }
 
             do {
-                let location = try await request(
+                let result = try await request(
                     session: newSession,
                     file: file,
                     byteOffset: byteOffset,
                     batch: batch
                 )
-                guard batch?.isCurrent != false else { return nil }
+                guard batch?.isCurrent != false else { return .cancelled }
                 return publish(
-                    location,
+                    result,
                     from: restarted,
                     file: file,
                     byteOffset: byteOffset
                 )
             } catch {
                 guard batch?.isCurrent != false, isCurrent(restarted) else {
-                    return nil
+                    return batch?.isCurrent == false ? .cancelled : nil
                 }
                 readiness = .unavailable(
                     "exact helper restart exhausted: \(error)"
                 )
-                return nil
+                return .unavailable("exact helper restart exhausted: \(error)")
             }
         } catch {
             guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
             readiness = .unavailable("exact helper restart failed: \(error)")
-            return nil
+            return .unavailable("exact helper restart failed: \(error)")
         }
     }
 
@@ -552,7 +561,7 @@ public final class ExactCoordinator {
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch?
-    ) async throws -> ExactLocation? {
+    ) async throws -> ExactDefinitionQueryResult {
         try await Task.detached(priority: .userInitiated) {
             if let batch {
                 try session.definition(
@@ -733,25 +742,28 @@ public final class ExactCoordinator {
     }
 
     private func publish(
-        _ location: ExactLocation?,
+        _ result: ExactDefinitionQueryResult,
         from source: Active,
         file: String,
         byteOffset: Int
-    ) -> ExactOverlay.Entry? {
+    ) -> DefinitionResult? {
         guard isCurrent(source) else { return nil }
+        if case .cancelled = result { return .cancelled }
+        if case .unavailable(let reason) = result { return .unavailable(reason) }
         readiness = .ready
         coverage = coverage ?? source.session.attribution.coverage
-        guard let location else { return nil }
-        let mappedLocation = mapped(location, from: source.materializedRoot)
-        let entry = ExactOverlay.Entry(
-            location: mappedLocation,
-            attribution: source.session.attribution,
-            origin: source.materializedRoot != nil
-                ? .materialized(commitOID: source.key.versionIdentity)
-                : .worktree
-        )
-        overlay.store(entry, for: source.key, file: file, byteOffset: byteOffset)
-        return entry
+        guard case .completed(let targets) = result else { return nil }
+        let entries = targets.map { target in
+            ExactOverlay.Entry(
+                location: mapped(target.location, from: source.materializedRoot),
+                attribution: source.session.attribution,
+                origin: source.materializedRoot != nil
+                    ? .materialized(commitOID: source.key.versionIdentity)
+                    : .worktree
+            )
+        }
+        overlay.store(entries, for: source.key, file: file, byteOffset: byteOffset)
+        return .completed(entries)
     }
 
     private func publish(

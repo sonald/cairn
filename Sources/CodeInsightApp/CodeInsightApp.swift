@@ -6481,8 +6481,13 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         self.state = state
     }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? {
-        guard negotiatedCapabilities.contains(.definition) else { return nil }
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
+        guard negotiatedCapabilities.contains(.definition) else {
+            return .unavailable("definition unsupported")
+        }
         state?.recordDefinitionRequest()
         let wasBlocked = state?.waitIfDefinitionIsBlocked() == true
         defer {
@@ -6490,9 +6495,11 @@ private final class InProcessExactSession: ExactSession, @unchecked Sendable {
         }
         Thread.sleep(forTimeInterval: 0.25)
         if file == externalFile, byteOffset == externalOffset {
-            return externalLocation
+            return .completed(externalLocation.map {
+                [ExactTarget(location: $0)]
+            } ?? [])
         }
-        return location
+        return .completed(location.map { [ExactTarget(location: $0)] } ?? [])
     }
 
     func implementations(

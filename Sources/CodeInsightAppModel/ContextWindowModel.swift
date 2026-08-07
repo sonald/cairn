@@ -61,7 +61,7 @@ public final class ContextWindowModel {
         String,
         UInt32,
         UInt64
-    ) async -> ExactOverlay.Entry?
+    ) async -> ExactCoordinator.DefinitionResult?
 
     public private(set) var mode: Mode = .follow
     public private(set) var stage: Stage = .idle
@@ -444,7 +444,7 @@ public final class ContextWindowModel {
         request: UInt64
     ) async {
         guard let exactResolver,
-              let exact = await exactResolver(
+              let result = await exactResolver(
                   token.file,
                   token.offset,
                   context.generation
@@ -454,7 +454,10 @@ public final class ContextWindowModel {
               currentContext.generation == context.generation,
               currentSession.snapshotID == session.snapshotID
         else { return }
-        await applyExact(exact, session: session)
+        guard case .completed(let entries) = result else { return }
+        for exact in entries {
+            await applyExact(exact, session: session)
+        }
     }
 
     private func applyExact(

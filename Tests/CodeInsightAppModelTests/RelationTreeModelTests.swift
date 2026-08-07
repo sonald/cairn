@@ -1872,7 +1872,7 @@ func relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() async throw
         },
         exactResolver: { _, _, _, _ in
             definitionRequests += 1
-            return nil
+            return .completed([])
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1917,7 +1917,9 @@ func relationTreeValidatesLargePossibleResultsInBoundedStableBatches()
         },
         exactResolver: { file, offset, _, _ in
             definitionRequests += 1
-            return relationExactEntry(file: file, byteOffset: offset)
+            return .completed([
+                relationExactEntry(file: file, byteOffset: offset),
+            ])
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2339,7 +2341,7 @@ func relationTreeDefaultLoadDoesNotDemoteNameOnlyCallsThroughDefinitions()
         },
         exactResolver: { _, _, _, _ in
             definitionRequests += 1
-            return nil
+            return .completed([])
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2374,10 +2376,10 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
             try session.resolve(file: file, offset: offset, context: context)
         },
         exactResolver: { _, _, _ in
-            relationExactEntry(
+            .completed([relationExactEntry(
                 file: dependency.path,
                 byteOffset: dependencyOffset
-            )
+            )])
         }
     )
     contextModel.updateProjectState(
@@ -2410,10 +2412,10 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
         },
         exactResolver: { _, _, _, _ in
             definitionRequests += 1
-            return relationExactEntry(
+            return .completed([relationExactEntry(
                 file: dependency.path,
                 byteOffset: dependencyOffset
-            )
+            )])
         }
     )
     relationModel.updateProjectState(.ready(fixture.session, fixture.context))
@@ -3137,7 +3139,10 @@ private final class RelationHierarchyExactSession: ExactSession, @unchecked Send
         return didStartReferences
     }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? { nil }
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult { .completed([]) }
 
     func implementations(
         file: String,
@@ -3247,7 +3252,10 @@ private final class QueuedRelationExactSession: ExactSession, @unchecked Sendabl
     var activeAttemptCount: Int { locked { activeAttempts } }
     var maximumActiveAttemptCount: Int { locked { maximumActiveAttempts } }
 
-    func definition(file: String, byteOffset: Int) throws -> ExactLocation? { nil }
+    func definition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult { .completed([]) }
     func implementations(
         file: String,
         byteOffset: Int
@@ -3365,7 +3373,7 @@ private actor QueuedPossibleDefinitionReceiver {
         file: String,
         byteOffset: UInt32,
         batch: ExactRequestBatch
-    ) async -> ExactOverlay.Entry? {
+    ) async -> ExactCoordinator.DefinitionResult? {
         attempts += 1
         let deadline = ContinuousClock.now + .seconds(120)
         while operationActive,
@@ -3376,7 +3384,7 @@ private actor QueuedPossibleDefinitionReceiver {
         }
         guard batch.isCurrent else {
             completed += 1
-            return nil
+            return .cancelled
         }
         operationActive = true
         actualRequests += 1
@@ -3385,7 +3393,7 @@ private actor QueuedPossibleDefinitionReceiver {
         }
         operationActive = false
         completed += 1
-        return nil
+        return batch.isCurrent ? .completed([]) : .cancelled
     }
 
     func release() {

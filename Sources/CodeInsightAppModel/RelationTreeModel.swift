@@ -179,7 +179,7 @@ public final class RelationTreeModel {
         UInt32,
         UInt64,
         ExactRequestBatch
-    ) async -> ExactOverlay.Entry?
+    ) async -> ExactCoordinator.DefinitionResult?
     typealias ExactRelationsResolver = @MainActor @Sendable (
         String,
         UInt32,
@@ -704,7 +704,9 @@ public final class RelationTreeModel {
     ) async -> LoadResult {
         guard let exactResolver else { return loaded }
         var edges = loaded.edges
-        await withTaskGroup(of: (Int, ExactOverlay.Entry?).self) { group in
+        await withTaskGroup(
+            of: (Int, ExactCoordinator.DefinitionResult?).self
+        ) { group in
             for (index, edge) in edges.prefix(500).enumerated() {
                 guard let query = edge.exactQuery,
                       edge.fuzzyTarget != nil
@@ -719,8 +721,10 @@ public final class RelationTreeModel {
                     return (index, exact)
                 }
             }
-            for await (index, exact) in group {
-                guard let exact else { continue }
+            for await (index, result) in group {
+                guard case .completed(let entries) = result,
+                      let exact = entries.first
+                else { continue }
                 let edge = edges[index]
                 if let fuzzyTarget = edge.fuzzyTarget,
                    exact.location.file == fuzzyTarget.file,
