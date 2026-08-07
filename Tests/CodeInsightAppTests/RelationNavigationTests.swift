@@ -12,6 +12,22 @@ import Testing
 struct RelationUXTests {
     @MainActor
     @Test
+    func mainWindowChromeStaysCompactWhenContentNarrows() {
+        let controller = MainWindowController(
+            model: AppModel(),
+            settings: ReaderSettings(),
+            offscreen: true
+        )
+        defer { controller.close() }
+
+        #expect(controller.selfTestExactStatusAllowsHorizontalCompression)
+        let rows = controller.selfTestSidebarRowGeometry
+        #expect(rows.height <= 20)
+        #expect(rows.spacing.height == 0)
+    }
+
+    @MainActor
+    @Test
     func relationReferenceRowsExposeProvenanceThroughAccessibility() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
@@ -95,10 +111,15 @@ struct RelationUXTests {
         fixture.controller.selfTestToggleInspectorAudit()
         #expect(fixture.controller.selfTestInspectorAuditVisible)
         #expect(fixture.controller.selfTestInspectorText.contains("Hide full audit"))
+        let openListWidth = fixture.controller.selfTestRelationListFrame.width
         fixture.controller.selfTestCloseInspector()
         #expect(!fixture.controller.selfTestInspectorVisible)
+        #expect(fixture.controller.selfTestRelationListFrame.width > openListWidth * 1.8)
         #expect(fixture.controller.selfTestPressInspectorShortcut())
         #expect(fixture.controller.selfTestInspectorVisible)
+        #expect(abs(
+            fixture.controller.selfTestRelationListFrame.width - openListWidth
+        ) <= 1)
         #expect(opens == 0)
     }
 

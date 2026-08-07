@@ -1121,10 +1121,12 @@ public final class ReaderTextView {
         stroke.stroke()
     }
 
-    fileprivate func drawRuler(
+    func drawRuler(
         in ruler: NSRulerView,
         dirtyRect: NSRect
     ) {
+        theme.backgroundColor.setFill()
+        dirtyRect.fill()
         var lines: [Int] = []
         let font = NSFont.monospacedDigitSystemFont(
             ofSize: 10,

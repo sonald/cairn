@@ -178,6 +178,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             truncatedLabel.heightAnchor.constraint(equalToConstant: 18),
         ])
         exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        exactLabel.lineBreakMode = .byTruncatingMiddle
+        exactLabel.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
         exactLabel.setAccessibilityLabel("Exact provider status")
 
         let statusStack = NSStackView()
@@ -689,6 +694,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         selfTestStatusBarVisible
             && exactLabel.isDescendant(of: statusBar)
             && selfTestViewIsVisibleInWindow(exactLabel)
+    }
+    var selfTestExactStatusAllowsHorizontalCompression: Bool {
+        exactLabel.contentCompressionResistancePriority(for: .horizontal)
+            < .defaultHigh
+            && exactLabel.lineBreakMode != .byClipping
+    }
+    var selfTestSidebarRowGeometry: (height: CGFloat, spacing: NSSize) {
+        sidebarController.selfTestRowGeometry
     }
     var selfTestExactGroupTitle: String? {
         relationController.selfTestExactGroupTitle
@@ -2319,6 +2332,14 @@ final class SidebarViewController: NSViewController,
         )
     }
 
+    var selfTestRowGeometry: (height: CGFloat, spacing: NSSize) {
+        loadViewIfNeeded()
+        return (
+            outlineView(fileOutlineView, heightOfRowByItem: NSObject()),
+            fileOutlineView.intercellSpacing
+        )
+    }
+
     func selfTestDividerSurvivesPlaceholderRefresh() -> Bool {
         loadViewIfNeeded()
         guard splitView.arrangedSubviews.count == 2 else { return false }
@@ -2589,6 +2610,13 @@ final class SidebarViewController: NSViewController,
 
     func outlineView(
         _ outlineView: NSOutlineView,
+        heightOfRowByItem item: Any
+    ) -> CGFloat {
+        20
+    }
+
+    func outlineView(
+        _ outlineView: NSOutlineView,
         viewFor tableColumn: NSTableColumn?,
         item: Any
     ) -> NSView? {
@@ -2708,8 +2736,6 @@ final class SidebarViewController: NSViewController,
         outlineView.headerView = nil
         outlineView.dataSource = self
         outlineView.delegate = self
-        outlineView.rowSizeStyle = .default
-        outlineView.rowHeight = 22
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
         outlineView.usesAlternatingRowBackgroundColors = false
@@ -2735,6 +2761,9 @@ final class SidebarViewController: NSViewController,
         divider.translatesAutoresizingMaskIntoConstraints = false
 
         scrollView.documentView = outlineView
+        outlineView.rowSizeStyle = .custom
+        outlineView.rowHeight = 20
+        outlineView.intercellSpacing = .zero
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay

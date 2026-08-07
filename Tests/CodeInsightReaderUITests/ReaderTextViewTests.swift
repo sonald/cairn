@@ -209,6 +209,48 @@ func everyThemeAppliesTypographyWithinStorageBounds() throws {
 
 @MainActor
 @Test
+func gutterRepaintsItsBackgroundWhenThemeChanges() throws {
+    let reader = ReaderTextView(settings: ReaderSettings(theme: .dark))
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 120))
+    scrollView.documentView = reader.view
+    reader.configureGutter(in: scrollView, lineNumbers: true)
+    let ruler = try #require(scrollView.verticalRulerView)
+    let rect = NSRect(x: 0, y: 0, width: 40, height: 40)
+
+    func renderedBackground() throws -> NSColor {
+        let bitmap = try #require(NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: 40,
+            pixelsHigh: 40,
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ))
+        let context = try #require(NSGraphicsContext(bitmapImageRep: bitmap))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = context
+        reader.drawRuler(in: ruler, dirtyRect: rect)
+        context.flushGraphics()
+        NSGraphicsContext.restoreGraphicsState()
+        return try #require(bitmap.colorAt(x: 1, y: 1))
+    }
+
+    let dark = try renderedBackground()
+    reader.apply(settings: ReaderSettings(theme: .light))
+    let light = try renderedBackground()
+
+    #expect(dark.alphaComponent > 0.99)
+    #expect(light.alphaComponent > 0.99)
+    #expect(dark.brightnessComponent < 0.2)
+    #expect(light.brightnessComponent > 0.9)
+}
+
+@MainActor
+@Test
 func mismatchedStorageSkipsTypography() throws {
     let reader = ReaderTextView()
     reader.display(document: try highlightedDocument())

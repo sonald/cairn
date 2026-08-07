@@ -396,7 +396,7 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestInspectorFrame: NSRect {
-        inspectorView.superview == nil
+        inspectorView.isHidden
             ? .zero : inspectorView.convert(inspectorView.bounds, to: view)
     }
 
@@ -725,6 +725,8 @@ final class RelationWindowController: NSViewController,
         contentSplit.layer?.backgroundColor = theme.chromeDividerColor.cgColor
         contentSplit.translatesAutoresizingMaskIntoConstraints = false
         contentSplit.addArrangedSubview(listPane)
+        contentSplit.addArrangedSubview(inspectorView)
+        inspectorView.isHidden = true
         listPane.wantsLayer = true
         listPane.layer?.backgroundColor = theme.chromeColor.cgColor
         inspectorView.widthAnchor.constraint(
@@ -1053,7 +1055,7 @@ final class RelationWindowController: NSViewController,
                 as? RelationTreeModel.Node
         else { return false }
         showInspector(for: node)
-        return inspectorView.superview != nil
+        return !inspectorView.isHidden
     }
 
     private func showInspector(for node: RelationTreeModel.Node) {
@@ -1061,10 +1063,8 @@ final class RelationWindowController: NSViewController,
               let context = model.relationQueryContexts[explanation.contextID]
         else { return }
         inspectedNode = node
-        if inspectorView.superview == nil {
-            contentSplit.addArrangedSubview(inspectorView)
-            view.layoutSubtreeIfNeeded()
-        }
+        inspectorView.isHidden = false
+        view.layoutSubtreeIfNeeded()
         inspectorView.display(
             node: node,
             clauses: narrativeClauses(for: explanation, context: context),
@@ -1095,9 +1095,9 @@ final class RelationWindowController: NSViewController,
 
     private func hideInspector() {
         inspectedNode = nil
-        guard inspectorView.superview != nil else { return }
-        contentSplit.removeArrangedSubview(inspectorView)
-        inspectorView.removeFromSuperview()
+        guard !inspectorView.isHidden else { return }
+        inspectorView.isHidden = true
+        view.layoutSubtreeIfNeeded()
     }
 
     private func openInspectedFormerCandidate() {
