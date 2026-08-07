@@ -394,6 +394,46 @@ public struct ReaderTheme: Equatable, Sendable {
         }
     }
 
+    public func unresolvedRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xAAB1B8
+        case .siClassic: 0x6E6857
+        case .auto, .light: 0x57606A
+        }
+    }
+
+    public func unresolvedBorderRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x4A4E54
+        case .siClassic: 0xC4B79A
+        case .auto, .light: 0xC4CAD1
+        }
+    }
+
+    public func warningRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xF0A868
+        case .siClassic: 0x8A5A2E
+        case .auto, .light: 0xB54708
+        }
+    }
+
+    public func warningBorderRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x6B5334
+        case .siClassic: 0xC7A574
+        case .auto, .light: 0xEAAA7A
+        }
+    }
+
+    public func warningFillAlpha(isDark: Bool) -> Double {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0.15
+        case .siClassic: 0.12
+        case .auto, .light: 0.10
+        }
+    }
+
     public func chipBackgroundRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
         case .dark: 0x34383D

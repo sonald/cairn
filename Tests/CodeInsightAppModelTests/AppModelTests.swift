@@ -157,6 +157,53 @@ func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async thr
 
 @MainActor
 @Test
+func navigationRequestKeepsCausePolicyAndReplaySemantics() async throws {
+    let root = try temporaryProject([
+        "a.rs": "fn a() {}\n",
+        "b.rs": "fn b() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: FailingIndexService())
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let request = NavigationRequest(
+        destination: SourceDestination(
+            file: root.appendingPathComponent("b.rs"),
+            byteOffset: 4
+        ),
+        cause: .relation,
+        policy: .explicitSemantic
+    )
+
+    model.navigate(request, leaving: jumpRecord("a.rs", offset: 0))
+
+    #expect(model.activeNavigationRequest?.cause == .relation)
+    #expect(model.activeNavigationRequest?.policy == .explicitSemantic)
+    model.goBack(from: jumpRecord("b.rs", offset: 4))
+    #expect(await testWaitUntil("replay request published") {
+        model.activeNavigationRequest?.cause == .historyReplay
+    })
+    #expect(model.activeNavigationRequest?.policy == .replay)
+}
+
+@MainActor
+@Test
+func outlineFollowArbitrationClearsOnlyOnLiveScroll() {
+    var arbitration = OutlineFollowArbitration()
+    arbitration.apply(NavigationRequest(
+        destination: SourceDestination(file: URL(fileURLWithPath: "/tmp/a.rs")),
+        cause: .outline,
+        policy: .explicitSemantic
+    ))
+    #expect(arbitration.suppressedBy == .outline)
+
+    arbitration.didLiveScroll()
+
+    #expect(arbitration.suppressedBy == nil)
+}
+
+@MainActor
+@Test
 func navigationHistoryReplaysAnAbsoluteDependencyPath() async throws {
     let root = try temporaryProject(["main.rs": "fn main() {}\n"])
     let dependencyRoot = try temporaryProject([

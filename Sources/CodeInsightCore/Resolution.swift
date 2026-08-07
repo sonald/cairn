@@ -115,3 +115,52 @@ public struct ResolutionCandidate: Sendable {
         self.evidence = evidence
     }
 }
+
+public struct SourceLocation: Hashable, Sendable {
+    public let path: String
+    public let byteOffset: UInt32
+    public let line: UInt32?
+    public let column: UInt32?
+
+    public init(
+        path: String,
+        byteOffset: UInt32,
+        line: UInt32? = nil,
+        column: UInt32? = nil
+    ) {
+        self.path = path
+        self.byteOffset = byteOffset
+        self.line = line
+        self.column = column
+    }
+}
+
+public enum CandidateEndpoint: Sendable {
+    case occurrence(SymbolOccurrenceID)
+    case unresolved(UnresolvedSymbolRef)
+}
+
+public struct CandidateObservation: Sendable {
+    public let target: CandidateEndpoint
+    public let certainty: Certainty
+    public let dispatch: DispatchKind
+    public let provenance: ResolutionProvenance
+    public let completeness: Completeness
+    public let evidence: [ResolutionEvidence]
+
+    public init(
+        target: CandidateEndpoint,
+        certainty: Certainty,
+        dispatch: DispatchKind,
+        provenance: ResolutionProvenance,
+        completeness: Completeness,
+        evidence: [ResolutionEvidence]
+    ) {
+        self.target = target
+        self.certainty = certainty
+        self.dispatch = dispatch
+        self.provenance = provenance
+        self.completeness = completeness
+        self.evidence = evidence
+    }
+}

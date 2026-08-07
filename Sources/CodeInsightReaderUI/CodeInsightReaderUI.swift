@@ -81,6 +81,29 @@ public extension ReaderTheme {
         )
     }
 
+    var unresolvedColor: NSColor {
+        dynamicColor(unresolvedRGB(isDark:))
+    }
+
+    var unresolvedBorderColor: NSColor {
+        dynamicColor(unresolvedBorderRGB(isDark:))
+    }
+
+    var warningColor: NSColor {
+        dynamicColor(warningRGB(isDark:))
+    }
+
+    var warningBackgroundColor: NSColor {
+        dynamicColor(
+            warningRGB(isDark:),
+            alpha: { CGFloat(warningFillAlpha(isDark: $0)) }
+        )
+    }
+
+    var warningBorderColor: NSColor {
+        dynamicColor(warningBorderRGB(isDark:))
+    }
+
     var chipBackgroundColor: NSColor {
         dynamicColor(chipBackgroundRGB(isDark:))
     }

@@ -291,6 +291,7 @@ public final class AppModel {
     public private(set) var selectedFile: URL?
     public private(set) var selectedByteOffset: UInt32?
     public private(set) var navigationGeneration: UInt64 = 0
+    public private(set) var activeNavigationRequest: NavigationRequest?
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
@@ -533,14 +534,32 @@ public final class AppModel {
         byteOffset: UInt32? = nil,
         leaving current: JumpRecord? = nil
     ) {
+        navigate(
+            NavigationRequest(
+                destination: SourceDestination(file: url, byteOffset: byteOffset),
+                cause: .fileSelection,
+                policy: byteOffset == nil ? .passive : .explicitSemantic
+            ),
+            leaving: current
+        )
+    }
+
+    public func navigate(
+        _ request: NavigationRequest,
+        leaving current: JumpRecord? = nil
+    ) {
         replayTask?.cancel()
         if let current { navigationHistory.push(current) }
+        activeNavigationRequest = request
         tabStrip.open(
-            url,
+            request.destination.file,
             inNewTab: false,
-            selectionByteOffset: byteOffset
+            selectionByteOffset: request.destination.byteOffset
         )
-        selectFile(url, byteOffset: byteOffset)
+        selectFile(
+            request.destination.file,
+            byteOffset: request.destination.byteOffset
+        )
     }
 
     public func openInNewTab(
@@ -560,6 +579,14 @@ public final class AppModel {
         guard tabStrip.tabs.indices.contains(index) else { return }
         tabStrip.activate(index)
         guard let tab = tabStrip.activeTab else { return }
+        activeNavigationRequest = NavigationRequest(
+            destination: SourceDestination(
+                file: tab.fileURL,
+                byteOffset: tab.selectionByteOffset
+            ),
+            cause: .tabActivation,
+            policy: .passive
+        )
         selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
     }
 
@@ -567,6 +594,14 @@ public final class AppModel {
         guard tabStrip.tabs.count > 1 else { return }
         tabStrip.selectRelative(delta)
         guard let tab = tabStrip.activeTab else { return }
+        activeNavigationRequest = NavigationRequest(
+            destination: SourceDestination(
+                file: tab.fileURL,
+                byteOffset: tab.selectionByteOffset
+            ),
+            cause: .tabActivation,
+            policy: .passive
+        )
         selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
     }
 
@@ -898,7 +933,16 @@ public final class AppModel {
                   navigationGeneration == replayNavigationGeneration,
                   currentSnapshotID == replaySnapshotID
             else { return }
-            navigate(to: file, byteOffset: offset)
+            navigate(
+                NavigationRequest(
+                    destination: SourceDestination(
+                        file: file,
+                        byteOffset: offset
+                    ),
+                    cause: .historyReplay,
+                    policy: .replay
+                )
+            )
         }
     }
 

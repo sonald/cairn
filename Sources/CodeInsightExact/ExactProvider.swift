@@ -43,6 +43,45 @@ public struct ExactLocation: Equatable, Sendable {
     }
 }
 
+public struct ExactTarget: Sendable {
+    public let location: ExactLocation
+
+    public init(location: ExactLocation) {
+        self.location = location
+    }
+}
+
+public enum ExactDefinitionQueryResult: Sendable {
+    case completed([ExactTarget])
+    case cancelled
+    case unavailable(String)
+}
+
+public enum ExactAnalysisLimitation: String, Hashable, Sendable {
+    case buildScriptsDisabled
+    case procMacrosDisabled
+    case dependenciesUnavailableOffline
+}
+
+public struct ExactAnalysisEnvironment: Sendable {
+    public let trustMode: TrustMode
+    public let limitations: Set<ExactAnalysisLimitation>
+
+    public init(
+        trustMode: TrustMode,
+        limitations: Set<ExactAnalysisLimitation> = []
+    ) {
+        self.trustMode = trustMode
+        self.limitations = limitations
+    }
+}
+
+public enum QueryExhaustiveness: Sendable {
+    case guaranteed
+    case bestEffort
+    case unknown
+}
+
 public struct ExactCallHierarchyItem: Sendable {
     public let name: String
     public let kind: Int

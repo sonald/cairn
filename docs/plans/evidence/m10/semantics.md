@@ -84,12 +84,12 @@
 
 ---
 
-## 4. 用户可见文案改名（§3.6，走诚实评审 — G0 实现时定稿）
+## 4. 用户可见文案改名（§3.6，G0 定稿）
 
 `ExactCoverage`（现 rawValue 已面向用户：`ContextWindowModel.swift:652`、`CodeInsightCLI.swift:112`）→ 正交化为 `ExactAnalysisEnvironment{trustMode, limitations}`。
 
-- **类型改名免费**；**case/文案属用户可见文本**，最终措辞走与 narrative clause 同一套诚实评审，G0 实现时对代码定稿。
-- **待补迁移清单**（需对代码逐条列旧/新/原因）：受影响的状态行与断言至少含 `RelationTreeModelTests.swift:664`（`Verified unavailable: deps unavailable (offline)`）、`MainWindowController.swift:1590`、`RelationTreeModel.swift:925`。E1b0 迁移 `onCoverageChange`→`onEnvironmentChange` observer 链。
+- **类型改名免费**；case/文案属用户可见文本，统一把「正向 provider 观察」与「分析环境限制」拆开。定稿：ready 状态为 `Exact: ready (<TrustMode>[; <sorted limitations>])`；空结果为 `No verified <relation>`；限制另列 `Analysis limited: build scripts disabled / proc macros disabled / dependencies unavailable offline`。不再用 `partial coverage` 把多个正交原因压成一个结论。
+- **迁移清单**：`Verified incomplete: partial coverage`→`Analysis limited: build scripts disabled; proc macros disabled`（Safe 的实际限制）；`Verified unavailable: deps unavailable (offline)`→`Analysis limited: dependencies unavailable offline`（环境限制不是对正向目标的否定）；status bar/CLI 的 `coverage.rawValue`→排序后的 limitation 列表；`onCoverageChange`→`onEnvironmentChange`。E1b0 实现时逐条回填具体测试位置，不静默删弱断言。
 - `alsoHeuristic` 删除、由 `corroborated` 派生；Unresolved 从 modifier 移入 badge 通道——均为**已批准语义变更**，进 V0 迁移清单（不追求「测试零改动」）。
 
 ---

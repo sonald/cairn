@@ -70,7 +70,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var lastOpenedProjectRoot: URL?
     private var pendingRecentProjectRoot: URL?
     private var pendingTabRestore: TabStripModel.Tab?
-    private var explicitNavigationInProgress = false
+    private var outlineFollowArbitration = OutlineFollowArbitration()
 
     init(
         model: AppModel,
@@ -266,7 +266,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         sidebarController.onOpenOutline = { [weak self] offset in
             guard let self, let file = model.selectedFile else { return }
-            navigate(to: file, byteOffset: offset)
+            navigate(to: file, byteOffset: offset, cause: .outline)
         }
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
@@ -282,11 +282,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model?.tabStrip.updateActiveScroll(offset)
         }
         readerController.onOutlineFollowPositionChange = { [weak self] offset in
-            guard let self, !explicitNavigationInProgress else { return }
+            guard let self, outlineFollowArbitration.suppressedBy == nil else {
+                return
+            }
             sidebarController.highlightOutline(at: offset)
         }
         readerController.onLiveScroll = { [weak self] in
-            self?.explicitNavigationInProgress = false
+            self?.outlineFollowArbitration.didLiveScroll()
         }
         readerController.onSelectionChange = { [weak self] offset in
             guard let self else { return }
@@ -976,7 +978,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func showSymbolSearch() {
         if symbolSearchPanel == nil {
             symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
-                self?.navigate(to: file, byteOffset: offset)
+                self?.navigate(to: file, byteOffset: offset, cause: .search)
             }
         }
         symbolSearchPanel?.show(relativeTo: window)
@@ -985,7 +987,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func showProjectSearch() {
         if searchPanel == nil {
             searchPanel = SearchPanel(appModel: model) { [weak self] file, offset in
-                self?.navigate(to: file, byteOffset: offset)
+                self?.navigate(to: file, byteOffset: offset, cause: .search)
             }
         }
         searchPanel?.show(relativeTo: window)
@@ -1358,7 +1360,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 if let file = model.selectedFile,
                    let offset = model.selectedByteOffset
                 {
-                    explicitNavigationInProgress = true
+                    if let request = model.activeNavigationRequest {
+                        outlineFollowArbitration.apply(request)
+                    }
                     readerController.navigate(
                         to: file,
                         byteOffset: offset,
@@ -1910,7 +1914,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             : root.appendingPathComponent(path)
         navigate(
             to: file,
-            byteOffset: byteOffset
+            byteOffset: byteOffset,
+            cause: .relation
         )
     }
 
@@ -1927,8 +1932,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    private func navigate(to file: URL, byteOffset: UInt32? = nil) {
-        if byteOffset != nil { explicitNavigationInProgress = true }
+    private func navigate(
+        to file: URL,
+        byteOffset: UInt32? = nil,
+        cause: NavigationCause = .fileSelection,
+        explanation: NavigationExplanation? = nil
+    ) {
         let current = currentJumpRecord()
         captureActiveTabState()
         let existingTab = model.tabStrip.tabs.firstIndex(where: {
@@ -1937,9 +1946,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let focusesExistingTab = byteOffset == nil
             && existingTab != nil
             && existingTab != model.tabStrip.activeIndex
+        let request = NavigationRequest(
+            destination: SourceDestination(file: file, byteOffset: byteOffset),
+            cause: cause,
+            policy: byteOffset == nil ? .passive : .explicitSemantic,
+            explanation: explanation
+        )
         model.navigate(
-            to: file,
-            byteOffset: byteOffset,
+            request,
             leaving: current
         )
         if focusesExistingTab { pendingTabRestore = model.tabStrip.activeTab }

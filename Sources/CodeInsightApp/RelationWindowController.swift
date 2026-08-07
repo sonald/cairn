@@ -1093,13 +1093,24 @@ private final class RelationCellView: NSTableCellView {
         badgeLabel.toolTip = switch node.badge {
         case "Verified": "Verified by rust-analyzer"
         case "Inferred": "Inferred from source structure"
+        case "Unresolved": "Unresolved source target"
         default: nil
         }
-        let verified = node.badge == "Verified"
-        badgeLabel.textColor = verified ? theme.verifiedColor : theme.inferredColor
-        badgePill.layer?.backgroundColor = (
-            verified ? theme.verifiedBackgroundColor : theme.inferredBackgroundColor
-        ).cgColor
+        switch node.badge {
+        case "Verified":
+            badgeLabel.textColor = theme.verifiedColor
+            badgePill.layer?.backgroundColor = theme.verifiedBackgroundColor.cgColor
+            badgePill.layer?.borderWidth = 0
+        case "Unresolved":
+            badgeLabel.textColor = theme.unresolvedColor
+            badgePill.layer?.backgroundColor = NSColor.clear.cgColor
+            badgePill.layer?.borderColor = theme.unresolvedBorderColor.cgColor
+            badgePill.layer?.borderWidth = 1
+        default:
+            badgeLabel.textColor = theme.inferredColor
+            badgePill.layer?.backgroundColor = theme.inferredBackgroundColor.cgColor
+            badgePill.layer?.borderWidth = 0
+        }
         badgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
 
         switch node.kind {

@@ -2899,6 +2899,43 @@ func relationTreeCapsEachExpansionAtFiveHundredEdges() async throws {
 
 @MainActor
 @Test
+func m10AmbiguityTrapKeepsNameOnlyTruncatedCandidateInferred() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let methodName = fixture.session.names.intern("poll")
+    let model = RelationTreeModel(loader: { _, _, _, _ in
+        .init(
+            edges: [RelationTreeModel.LoadedEdge(
+                title: "poll",
+                certainty: .possible,
+                dispatch: .dynamicDispatch,
+                symbol: nil,
+                path: "src/task.rs",
+                byteOffset: 7,
+                line: 1,
+                evidence: [.methodNameOnly(nameID: methodName)]
+            )],
+            isTruncated: true
+        )
+    })
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
+    #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") {
+        relationTreeFinishedLoading(model.root)
+    })
+    let candidate = try #require(relationVisibleEdgeRows(model.root).first)
+    let surface = relationSurfaceText(model.root)
+
+    #expect(candidate.badge == "Inferred")
+    #expect(candidate.subtitle == "dynamic · name match only")
+    #expect(surface.contains("Results truncated upstream"))
+    #expect(relationVisibleEdgeRows(model.root).allSatisfy { $0.badge != "Verified" })
+    #expect(!surface.localizedCaseInsensitiveContains("unique target"))
+}
+
+@MainActor
+@Test
 func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
