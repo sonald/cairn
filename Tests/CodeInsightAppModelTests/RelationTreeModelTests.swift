@@ -2829,9 +2829,10 @@ func relationTreeShowsExternalCallsAsUnresolved() async throws {
     #expect(await testWaitUntil("relationTreeFinishedLoading(model.root)") { relationTreeFinishedLoading(model.root) })
 
     let external = relationDirectRows(in: model.root).filter {
-        $0.subtitle == "Unresolved"
+        $0.badge == "Unresolved"
     }
     #expect(external.map(\.title) == ["post", "spawn"])
+    #expect(external.allSatisfy { $0.subtitle?.contains("Unresolved") == false })
 }
 
 @MainActor

@@ -1574,16 +1574,14 @@ public final class RelationTreeModel {
             )
             let badge: String? = switch edge.certainty {
             case .exact: "Verified"
-            case .unresolved: nil
+            case .unresolved: "Unresolved"
             case .strong, .probable, .possible: "Inferred"
             }
             let dispatchLabel = edge.certainty == .unresolved ? nil
                 : resolutionDispatchLabel(edge.dispatch)
             var modifiers: [String] = []
-            if edge.certainty == .unresolved {
-                modifiers.append(edge.exactOrigin == nil
-                    ? "Unresolved"
-                    : "External · in dependency (rust-analyzer)")
+            if edge.certainty == .unresolved, edge.exactOrigin != nil {
+                modifiers.append("External · in dependency (rust-analyzer)")
             }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
@@ -1595,8 +1593,20 @@ public final class RelationTreeModel {
             {
                 modifiers.append("name match only")
             }
+            if edge.exactOrigin != nil,
+               (edge.identityTarget?.file ?? edge.path).hasPrefix("/")
+            {
+                modifiers.append("dependency")
+            }
             if case .corroborated = edge.explanation?.primaryTrace {
                 modifiers.append("heuristic also matched")
+            }
+            let correctedCount = edge.explanation?.reconciliationRefs.filter {
+                if case .correctedCandidate = $0.role { return true }
+                return false
+            }.count ?? 0
+            if edge.certainty == .exact, correctedCount > 0 {
+                modifiers.append("corrected \(correctedCount)")
             }
             if edge.isCorrectedCandidate {
                 modifiers.append("Conflict/Corrected")

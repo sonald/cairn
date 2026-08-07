@@ -91,8 +91,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
         )
         contextController = ContextWindowViewController(model: model.contextWindow)
-        relationController = RelationWindowController(model: model.relationTree)
-        relationController.view.frame.size.width = 300
+        relationController = RelationWindowController(
+            model: model.relationTree,
+            verificationReadiness: { [weak model] in
+                model?.exactCoordinator.readiness ?? .off("no project")
+            }
+        )
+        relationController.view.frame.size.width = 500
         relationItem = NSSplitViewItem(viewController: relationController)
         sidebarItem = NSSplitViewItem(
             sidebarWithViewController: sidebarController
@@ -124,7 +129,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerGroupItem.minimumThickness = 300
         readerGroupItem.canCollapse = false
         relationItem.minimumThickness = 220
-        relationItem.maximumThickness = 500
+        relationItem.maximumThickness = 560
         relationItem.canCollapse = true
         upperSplitController.addSplitViewItem(sidebarItem)
         upperSplitController.addSplitViewItem(readerGroupItem)
@@ -1388,6 +1393,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderCommitButton()
         renderExactStatus()
         renderStatusBar()
+        relationController.refreshInspector()
 
         guard let toolbar = window?.toolbar else { return }
         renderProfileItem(in: toolbar)

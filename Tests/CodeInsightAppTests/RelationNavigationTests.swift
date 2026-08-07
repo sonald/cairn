@@ -41,6 +41,161 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func resolutionInspectorMatchesProgressiveDisclosureAndAX() async throws {
+        let fixture = try await makeRelationUXFixture()
+        defer { fixture.close() }
+        var opens = 0
+        fixture.controller.onOpen = { _ in opens += 1 }
+
+        #expect(fixture.controller.selfTestClickBadge(titled: "first"))
+        await pumpRunLoop()
+        let text = fixture.controller.selfTestInspectorText
+        let accessibility = fixture.controller.selfTestInspectorAccessibility
+        #expect(fixture.controller.selfTestInspectorVisible)
+        #expect(opens == 0)
+        #expect(text.contains("SOURCE"))
+        #expect(text.contains("VERIFICATION"))
+        #expect(text.contains("VERIFICATION AVAILABILITY"))
+        #expect(text.contains { $0.contains("Candidate generation was complete") })
+        #expect(text.contains { $0.contains("rust-analyzer returned this target") })
+        #expect(text.contains { $0.contains("Safe") })
+        #expect(!fixture.controller.selfTestInspectorAuditVisible)
+        #expect(text.contains("Show full audit"))
+        #expect(accessibility.0 == "Resolution Inspector for first")
+        #expect(accessibility.1.contains("Verified"))
+        #expect(accessibility.2 == NSAccessibility.Role.group.rawValue)
+        #expect(accessibility.3 == false)
+        let listFrame = fixture.controller.selfTestRelationListFrame
+        let inspectorFrame = fixture.controller.selfTestInspectorFrame
+        #expect(listFrame.width > 0 && inspectorFrame.width > 0)
+        #expect(listFrame.intersection(inspectorFrame).isEmpty)
+        if let directory = ProcessInfo.processInfo.environment[
+            "CODEINSIGHT_M10_CAPTURE_DIR"
+        ] {
+            for (name, selection) in [
+                ("light", ReaderSettings.Theme.light),
+                ("dark", ReaderSettings.Theme.dark),
+                ("si-classic", ReaderSettings.Theme.siClassic),
+            ] {
+                var settings = ReaderSettings()
+                settings.theme = selection
+                fixture.controller.apply(settings: settings)
+                fixture.controller.view.layoutSubtreeIfNeeded()
+                try capturePNG(
+                    fixture.controller.view,
+                    at: URL(fileURLWithPath: directory)
+                        .appendingPathComponent(
+                            "resolution-inspector-\(name).png"
+                        )
+                )
+            }
+        }
+
+        fixture.controller.selfTestToggleInspectorAudit()
+        #expect(fixture.controller.selfTestInspectorAuditVisible)
+        #expect(fixture.controller.selfTestInspectorText.contains("Hide full audit"))
+        fixture.controller.selfTestCloseInspector()
+        #expect(!fixture.controller.selfTestInspectorVisible)
+        #expect(fixture.controller.selfTestPressInspectorShortcut())
+        #expect(fixture.controller.selfTestInspectorVisible)
+        #expect(opens == 0)
+    }
+
+    @MainActor
+    @Test
+    func correctedCandidateOnlyNavigatesThroughExplicitInspectorAction()
+        async throws
+    {
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            expandPossible: false,
+            exactResolver: { _, _, _, _ in
+                .completed([
+                    relationUXExactEntry(file: "main.rs", byteOffset: 3),
+                ])
+            }
+        )
+        defer { fixture.close() }
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        try #require(await relationTestWaitUntil(
+            "corrected candidates are published"
+        ) {
+            fixture.controller.selfTestCorrectedDisclosureDisplayText
+                == ["Show corrected candidates", "2"]
+        })
+        #expect((fixture.model.root?.children ?? []).filter {
+            $0.kind == .group && $0.title.hasPrefix("Show ")
+        }.count <= 2)
+        var opens: [String] = []
+        fixture.controller.onOpen = { opens.append($0.title) }
+
+        #expect(fixture.controller.selfTestSelectCorrectedCandidate(titled: "first"))
+        #expect(opens.isEmpty)
+        #expect(fixture.controller.selfTestInspectorText.contains(
+            "VERIFICATION CONFLICT"
+        ))
+        #expect(fixture.controller.selfTestInspectorText.contains(
+            "Open former candidate"
+        ))
+        fixture.controller.selfTestOpenSelection()
+        fixture.controller.selfTestOpenSelection()
+        #expect(opens.isEmpty)
+        fixture.controller.selfTestOpenFormerCandidate()
+        #expect(opens == ["first"])
+
+        let provider = try #require(fixture.model.root?.children?.first {
+            $0.kind == .edge && $0.badge == "Verified"
+        })
+        #expect(provider.modifiers.contains("corrected 2"))
+        #expect(fixture.controller.selfTestClickBadge(titled: provider.title))
+        #expect(fixture.controller.selfTestInspectorText.contains {
+            $0.contains("replaced earlier source candidates: first, second")
+        })
+    }
+
+    @MainActor
+    @Test
+    func ambiguityTrapInspectorSeparatesCandidateAndResultSetCompleteness()
+        async throws
+    {
+        let exactGate = RelationLoadGate()
+        let fixture = try await makeRelationUXFixture(
+            direction: .calls,
+            includesExactMatch: false,
+            blockedExactLoad: exactGate,
+            expandPossible: false,
+            sourceResultIsTruncated: true,
+            usesMethodNameOnlyEvidence: true
+        )
+        defer {
+            Task { await exactGate.release() }
+            fixture.close()
+        }
+        try #require(await relationTestWaitUntil("trap candidate is visible") {
+            fixture.controller.selfTestPossibleDisclosureTitle
+                == "Show 2 possible matches"
+        })
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        #expect(fixture.controller.selfTestClickBadge(titled: "first"))
+        let text = fixture.controller.selfTestInspectorText.joined(separator: " ")
+        let accessibility = try #require(
+            fixture.controller.selfTestAccessibility(
+                titled: "first",
+                inGroup: "Possible"
+            )
+        )
+        #expect(accessibility.value.contains("Inferred"))
+        #expect(!accessibility.value.contains("Verified"))
+        #expect(accessibility.value.contains("name match only"))
+        #expect(text.contains("Matched by method name only"))
+        #expect(text.contains("Candidate generation was complete"))
+        #expect(text.contains("source relation result set was truncated"))
+        #expect(text.contains("Exact verification is in progress"))
+        #expect(!text.localizedCaseInsensitiveContains("unique target"))
+    }
+
+    @MainActor
+    @Test
     func relationReferenceGeometryReadsDoNotForceLayout() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
@@ -1061,7 +1216,9 @@ private func makeRelationUXFixture(
     blockedExactLoad: RelationLoadGate? = nil,
     expandPossible: Bool = true,
     possibleMatchCount: Int = 2,
-    exactResolver: RelationTreeModel.ExactResolver? = nil
+    exactResolver: RelationTreeModel.ExactResolver? = nil,
+    sourceResultIsTruncated: Bool = false,
+    usesMethodNameOnlyEvidence: Bool = false
 ) async throws -> RelationUXFixture {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1133,6 +1290,9 @@ private func makeRelationUXFixture(
             && blockedExactLoad == nil
         ? RelationLoadGate()
         : nil
+    let methodNameEvidence: [ResolutionEvidence] = usesMethodNameOnlyEvidence
+        ? [.methodNameOnly(nameID: session.names.intern("first"))]
+        : []
     let model = RelationTreeModel(
         loader: { _, _, symbol, loadDirection in
             if symbol == subject, let blockedSubjectLoad {
@@ -1151,6 +1311,7 @@ private func makeRelationUXFixture(
                     RelationTreeModel.LoadedEdge(
                         title: title,
                         certainty: loadDirection == .references
+                            || usesMethodNameOnlyEvidence
                             ? .possible
                             : .strong,
                         dispatch: .direct,
@@ -1158,16 +1319,17 @@ private func makeRelationUXFixture(
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: [],
+                        evidence: methodNameEvidence,
                         candidate: CandidateObservation(
                             target: .occurrence(symbol),
                             certainty: loadDirection == .references
+                                || usesMethodNameOnlyEvidence
                                 ? .possible
                                 : .strong,
                             dispatch: .direct,
                             provenance: .fuzzyResolver,
                             completeness: .complete,
-                            evidence: []
+                            evidence: methodNameEvidence
                         ),
                         exactQuery: exactResolver == nil
                             ? nil
@@ -1177,7 +1339,7 @@ private func makeRelationUXFixture(
                             : (location.path, location.byteOffset)
                     )
                 },
-                isTruncated: false
+                isTruncated: sourceResultIsTruncated
             )
         },
         exactResolver: exactResolver,
@@ -1195,7 +1357,10 @@ private func makeRelationUXFixture(
         }
     )
     model.updateProjectState(.ready(session, context))
-    let controller = RelationWindowController(model: model)
+    let controller = RelationWindowController(
+        model: model,
+        verificationReadiness: { .ready }
+    )
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1_600, height: 1_000),
         styleMask: [.titled, .resizable],
@@ -1288,6 +1453,20 @@ private func relationUXExactAttribution(
         ),
         generatedAt: Date(timeIntervalSince1970: 0)
     )
+}
+
+@MainActor
+private func capturePNG(_ view: NSView, at url: URL) throws {
+    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+    else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    guard let data = bitmap.representation(using: .png, properties: [:])
+    else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    try data.write(to: url)
 }
 
 private actor RelationLoadGate {
