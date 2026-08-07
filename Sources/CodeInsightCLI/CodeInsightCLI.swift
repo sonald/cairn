@@ -111,14 +111,22 @@ extension CodeInsight {
                 print("\(location.file):\(location.line):\(location.column)")
             }
             let attribution = session.attribution
+            let limitations = attribution.environment.limitations
+                .map(\.rawValue)
+                .sorted()
+                .joined(separator: ",")
+            let trustMode = switch attribution.environment.trustMode {
+            case .safe: "safe"
+            case .trusted: "trusted"
+            }
             print(
                 "attribution provider=\(attribution.provider) "
                     + "toolVersion=\(attribution.toolVersion) "
                     + "configFingerprint=\(attribution.configFingerprint) "
                     + "environmentFingerprint=\(attribution.environmentFingerprint) "
-                    + "trustMode=safe "
+                    + "trustMode=\(trustMode) "
                     + "generatedAt=\(ISO8601DateFormatter().string(from: attribution.generatedAt)) "
-                    + "coverage=\(attribution.coverage.rawValue)"
+                    + "limitations=\(limitations.isEmpty ? "none" : limitations)"
             )
         }
     }

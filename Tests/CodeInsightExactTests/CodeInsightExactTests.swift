@@ -147,14 +147,18 @@ func rustAnalyzerMapsFeatureSelectionsToInitializationOptions() {
 func dependencyFreeProjectIgnoresGenericOfflineFailure() {
     let diagnostic = "workspace loading failed; --offline was specified"
 
-    #expect(rustAnalyzerCoverage(
-        base: .partial,
+    let base = ExactAnalysisEnvironment(
+        trustMode: .safe,
+        limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+    )
+    #expect(rustAnalyzerEnvironment(
+        base: base,
         diagnostic: diagnostic
-    ) == .partial)
+    ).limitations == base.limitations)
 }
 
 @Test
-func explicitOfflineDependencyFailureDowngradesCoverage() {
+func explicitOfflineDependencyFailureAddsLimitation() {
     let diagnostic = """
         error: failed to get `codeinsight-definitely-missing-offline-dependency` \
         as a dependency of package `exact_fixture`
@@ -164,12 +168,29 @@ func explicitOfflineDependencyFailureDowngradesCoverage() {
         provided string was not `true` or `false`
         """
 
-    #expect(rustAnalyzerCoverage(
-        base: .partial,
+    let environment = rustAnalyzerEnvironment(
+        base: ExactAnalysisEnvironment(
+            trustMode: .trusted,
+            limitations: []
+        ),
         diagnostic: diagnostic
-    ) == .dependenciesUnavailableOffline)
-    #expect(ExactCoverage.dependenciesUnavailableOffline.rawValue
-        == "deps unavailable (offline)")
+    )
+    #expect(environment.trustMode == .trusted)
+    #expect(environment.limitations == [.dependenciesUnavailableOffline])
+
+    let safeEnvironment = rustAnalyzerEnvironment(
+        base: ExactAnalysisEnvironment(
+            trustMode: .safe,
+            limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+        ),
+        diagnostic: diagnostic
+    )
+    #expect(safeEnvironment.trustMode == .safe)
+    #expect(safeEnvironment.limitations == [
+        .buildScriptsDisabled,
+        .procMacrosDisabled,
+        .dependenciesUnavailableOffline,
+    ])
 }
 
 @Test
@@ -1244,12 +1265,11 @@ func rustAnalyzerFindsCrossFileDefinitionWhenInstalled() throws {
     #expect(location.line == 1)
     #expect(location.column == 8)
     // This fixture's build.rs makes Cargo load its cc toolchain dependency.
-    // Safe mode is offline: cached cc is partial; a missing cache is honest
-    // dependenciesUnavailableOffline coverage.
-    #expect(
-        session.attribution.coverage == .partial
-            || session.attribution.coverage == .dependenciesUnavailableOffline
-    )
+    // Safe limitations remain explicit; an offline miss is an additional,
+    // orthogonal limitation.
+    #expect(session.attribution.environment.trustMode == .safe)
+    #expect(session.attribution.environment.limitations.contains(.buildScriptsDisabled))
+    #expect(session.attribution.environment.limitations.contains(.procMacrosDisabled))
     #expect(session.attribution.configFingerprint.count == 64)
     #expect(session.attribution.environmentFingerprint.count == 64)
 }
@@ -2317,9 +2337,11 @@ private func withFakeRustAnalyzerSession<T>(
             toolVersion: "fake",
             configFingerprint: "config",
             environmentFingerprint: "",
-            trustMode: .safe,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .partial
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         )
     )
     defer {

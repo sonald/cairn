@@ -107,7 +107,7 @@ public final class ExactCoordinator {
         case relations(
             [Relation],
             origin: ExactOrigin,
-            coverage: ExactCoverage
+            environment: ExactAnalysisEnvironment
         )
     }
 
@@ -147,7 +147,7 @@ public final class ExactCoordinator {
     }
 
     public private(set) var readiness: Readiness = .off("no project")
-    public private(set) var coverage: ExactCoverage?
+    public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
     public private(set) var trustMode: TrustMode?
     public private(set) var trustedRepositories: [TrustedRepository] = []
     public var attribution: ExactAttribution? { active?.session.attribution }
@@ -206,7 +206,7 @@ public final class ExactCoordinator {
             Task.detached { oldSession.close() }
         }
         readiness = .preparing
-        coverage = nil
+        analysisEnvironment = nil
         trustMode = nil
     }
 
@@ -219,7 +219,7 @@ public final class ExactCoordinator {
         oldSession?.cancel()
         oldSession?.close()
         readiness = .off("application terminating")
-        coverage = nil
+        analysisEnvironment = nil
         trustMode = nil
     }
 
@@ -319,8 +319,8 @@ public final class ExactCoordinator {
                     return
                 }
                 active = prepared.active
-                observeCoverage(from: prepared.active)
-                coverage = prepared.active.session.attribution.coverage
+                observeEnvironment(from: prepared.active)
+                analysisEnvironment = prepared.active.session.attribution.environment
                 switch prepared.active.session.readiness {
                 case .unavailable(let reason):
                     readiness = .unavailable(reason)
@@ -372,7 +372,7 @@ public final class ExactCoordinator {
         active = nil
         oldSession?.cancel()
         readiness = .off("materialized cache cleared")
-        coverage = nil
+        analysisEnvironment = nil
         trustMode = nil
         let materializer = materializer
         try await Task.detached(priority: .utility) {
@@ -522,8 +522,8 @@ public final class ExactCoordinator {
                 materializedRoot: previous.materializedRoot
             )
             active = restarted
-            observeCoverage(from: restarted)
-            coverage = newSession.attribution.coverage
+            observeEnvironment(from: restarted)
+            analysisEnvironment = newSession.attribution.environment
             Task.detached { previous.session.close() }
 
             do {
@@ -710,8 +710,8 @@ public final class ExactCoordinator {
                 materializedRoot: previous.materializedRoot
             )
             active = restarted
-            observeCoverage(from: restarted)
-            coverage = newSession.attribution.coverage
+            observeEnvironment(from: restarted)
+            analysisEnvironment = newSession.attribution.environment
             Task.detached { previous.session.close() }
 
             do {
@@ -751,7 +751,8 @@ public final class ExactCoordinator {
         if case .cancelled = result { return .cancelled }
         if case .unavailable(let reason) = result { return .unavailable(reason) }
         readiness = .ready
-        coverage = coverage ?? source.session.attribution.coverage
+        analysisEnvironment = analysisEnvironment
+            ?? source.session.attribution.environment
         guard case .completed(let targets) = result else { return nil }
         let entries = targets.map { target in
             ExactOverlay.Entry(
@@ -772,8 +773,9 @@ public final class ExactCoordinator {
     ) -> RelationQueryResult? {
         guard isCurrent(source) else { return nil }
         readiness = .ready
-        let resultCoverage = coverage ?? source.session.attribution.coverage
-        coverage = resultCoverage
+        let environment = analysisEnvironment
+            ?? source.session.attribution.environment
+        analysisEnvironment = environment
         let origin: ExactOrigin = source.materializedRoot != nil
             ? .materialized(commitOID: source.key.versionIdentity)
             : .worktree
@@ -795,7 +797,7 @@ public final class ExactCoordinator {
                         mapped($0, from: source.materializedRoot)
                     }
                 )
-            }, origin: origin, coverage: resultCoverage)
+            }, origin: origin, environment: environment)
         case .locations(let locations):
             .relations(locations.map {
                 Relation(
@@ -804,14 +806,14 @@ public final class ExactCoordinator {
                     item: nil,
                     callSites: []
                 )
-            }, origin: origin, coverage: resultCoverage)
+            }, origin: origin, environment: environment)
         }
     }
 
-    private func observeCoverage(from source: Active) {
+    private func observeEnvironment(from source: Active) {
         let generation = source.generation
         let sessionID = ObjectIdentifier(source.session)
-        source.session.onCoverageChange = { [weak self] coverage in
+        source.session.onEnvironmentChange = { [weak self] environment in
             Task { @MainActor [weak self] in
                 guard let self,
                       expectedGeneration == generation,
@@ -819,7 +821,7 @@ public final class ExactCoordinator {
                       active.generation == generation,
                       ObjectIdentifier(active.session) == sessionID
                 else { return }
-                self.coverage = coverage
+                self.analysisEnvironment = environment
             }
         }
     }

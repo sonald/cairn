@@ -1112,7 +1112,14 @@ private func makeRelationUXFixture(
                 await blockedExactLoad.wait("root Exact relation release")
             }
             return includesExactMatch
-                ? .relations([exact], origin: .worktree, coverage: .full)
+                ? .relations(
+                    [exact],
+                    origin: .worktree,
+                    environment: ExactAnalysisEnvironment(
+                        trustMode: .safe,
+                        limitations: []
+                    )
+                )
                 : .unsupported
         }
     )
@@ -1194,9 +1201,11 @@ private func relationUXExactEntry(
             toolVersion: "fake-1",
             configFingerprint: "config",
             environmentFingerprint: "environment",
-            trustMode: .safe,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .partial
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         ),
         origin: .worktree
     )

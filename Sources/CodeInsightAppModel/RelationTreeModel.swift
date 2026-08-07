@@ -159,7 +159,7 @@ public final class RelationTreeModel {
         case legacy
         case unsupported
         case notApplicable
-        case queried(ExactCoverage)
+        case queried(ExactAnalysisEnvironment)
     }
 
     struct LoadResult: Sendable {
@@ -656,7 +656,8 @@ public final class RelationTreeModel {
                             ($0.kind == .group && $0.children?.isEmpty == true)
                                 || ($0.kind == .truncated
                                     && ($0.title.hasPrefix("Verified ")
-                                        || $0.title.hasPrefix("No verified ")))
+                                        || $0.title.hasPrefix("No verified ")
+                                        || $0.title.hasPrefix("Analysis limited:")))
                         }
                         children.append(Node(
                             kind: .loading,
@@ -778,7 +779,7 @@ public final class RelationTreeModel {
                 isTruncated: loaded.isTruncated,
                 exactState: .notApplicable
             )
-        case let .relations(relations, origin, coverage):
+        case let .relations(relations, origin, environment):
             var exactEdges = relations.compactMap { relation -> LoadedEdge? in
                 guard let byteOffset = UInt32(exactly: relation.location.byteOffset),
                       let line = UInt32(exactly: relation.location.line),
@@ -835,7 +836,7 @@ public final class RelationTreeModel {
             return LoadResult(
                 edges: edges,
                 isTruncated: loaded.isTruncated,
-                exactState: .queried(coverage)
+                exactState: .queried(environment)
             )
         }
     }
@@ -902,35 +903,40 @@ public final class RelationTreeModel {
         state: ExactState,
         direction: Direction
     ) -> String? {
+        if case .queried(let environment) = state {
+            if !environment.limitations.isEmpty {
+                let limitations = environment.limitations
+                    .sorted { $0.rawValue < $1.rawValue }
+                    .map(\.displayName)
+                    .joined(separator: "; ")
+                return "Analysis limited: \(limitations)"
+            }
+            return switch direction {
+            case .callers: "No verified callers"
+            case .calls: "No verified calls"
+            case .implementations: "No verified implementations"
+            case .references: "No verified references"
+            }
+        }
         return switch (state, direction) {
         case (.unsupported, .callers), (.unsupported, .calls):
             "Verified unavailable: server does not support call hierarchy"
         case (.notApplicable, .callers), (.notApplicable, .calls):
             "Verified unavailable here: not a callable symbol"
-        case (.queried(.full), .callers):
-            "No verified callers"
-        case (.queried(.full), .calls):
-            "No verified calls"
         case (.unsupported, .implementations):
             "Verified unavailable: server does not support implementations"
-        case (.queried(.full), .implementations):
-            "No verified implementations"
         case (.notApplicable, .implementations):
             "Verified unavailable here: implementations not applicable"
         case (.unsupported, .references):
             "Verified unavailable: server does not support references"
         case (.notApplicable, .references):
             "Verified unavailable here: references not applicable"
-        case (.queried(.full), .references):
-            "No verified references"
-        case (.queried(.partial), _):
-            "Verified incomplete: partial coverage"
-        case (.queried(.dependenciesUnavailableOffline), _):
-            "Verified unavailable: deps unavailable (offline)"
         case (.legacy, .references):
             "Verified unavailable: no rust-analyzer session"
         case (.legacy, _):
             "Verified unavailable: no rust-analyzer session"
+        case (.queried, _):
+            nil
         }
     }
 

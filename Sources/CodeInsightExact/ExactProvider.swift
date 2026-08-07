@@ -16,12 +16,6 @@ public struct ExactCapabilities: OptionSet, Sendable {
     public static let references = ExactCapabilities(rawValue: 1 << 3)
 }
 
-public enum ExactCoverage: String, Equatable, Sendable {
-    case full
-    case partial
-    case dependenciesUnavailableOffline = "deps unavailable (offline)"
-}
-
 public enum ExactReadiness: Equatable, Sendable {
     case preparing
     case ready
@@ -61,6 +55,14 @@ public enum ExactAnalysisLimitation: String, Hashable, Sendable {
     case buildScriptsDisabled
     case procMacrosDisabled
     case dependenciesUnavailableOffline
+
+    public var displayName: String {
+        switch self {
+        case .buildScriptsDisabled: "build scripts disabled"
+        case .procMacrosDisabled: "proc macros disabled"
+        case .dependenciesUnavailableOffline: "dependencies unavailable offline"
+        }
+    }
 }
 
 public struct ExactAnalysisEnvironment: Sendable {
@@ -188,9 +190,8 @@ public struct ExactAttribution: Sendable {
     public let configFingerprint: String
     public let environmentFingerprint: String
     public let featureSelection: FeatureSelection
-    public let trustMode: TrustMode
+    public let environment: ExactAnalysisEnvironment
     public let generatedAt: Date
-    public let coverage: ExactCoverage
 
     public init(
         provider: String,
@@ -198,18 +199,16 @@ public struct ExactAttribution: Sendable {
         configFingerprint: String,
         environmentFingerprint: String,
         featureSelection: FeatureSelection = .defaultFeatures,
-        trustMode: TrustMode,
-        generatedAt: Date,
-        coverage: ExactCoverage
+        environment: ExactAnalysisEnvironment,
+        generatedAt: Date
     ) {
         self.provider = provider
         self.toolVersion = toolVersion
         self.configFingerprint = configFingerprint
         self.environmentFingerprint = environmentFingerprint
         self.featureSelection = featureSelection
-        self.trustMode = trustMode
+        self.environment = environment
         self.generatedAt = generatedAt
-        self.coverage = coverage
     }
 }
 
@@ -273,7 +272,9 @@ public protocol ExactSession: AnyObject, Sendable {
     var negotiatedCapabilities: ExactCapabilities { get }
     var readiness: ExactReadiness { get }
     var attribution: ExactAttribution { get }
-    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? { get set }
+    var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
+        get set
+    }
 
     func definition(
         file: String,
@@ -333,7 +334,7 @@ public protocol ExactSession: AnyObject, Sendable {
 }
 
 public extension ExactSession {
-    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+    var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get { nil }
         set {}
     }

@@ -107,10 +107,10 @@
 
 ---
 
-## 6. G0 剩余（进入实现时完成，非本文档能定）
+## 6. G0 实现状态
 
-- [ ] `ExactCoverage`→`ExactAnalysisEnvironment` 用户可见 case 文案的最终措辞（诚实评审）。
-- [ ] 完整迁移清单：对代码枚举所有受改名/语义变更影响的测试与状态行，逐条列旧/新/原因。
+- [x] `ExactCoverage`→`ExactAnalysisEnvironment` 用户可见文案已按本节定稿；实现与验证见 `checkpoint-b.md`。
+- [x] E1b0 迁移清单已逐条记录于 `checkpoint-b.md`；后续 E1d 的 `alsoHeuristic` 清单继续在该文件追加。
 - [ ] `TargetScope`/`TargetAvailability`/`TargetComparison` 的完整 case 与 `availability(of:)` 计算契约落到代码 doc-comment。
 
 以上三项需对 HEAD 代码逐一核，属 G0 实现动作；本规格文档为其提供裁决依据与视觉/语义合同。

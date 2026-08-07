@@ -3741,22 +3741,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
         let fullZeroTitle = runExactZeroCoverageVariant(
             root: projectRoot,
-            coverage: .full
+            limitations: []
         )
         let partialZeroTitle = runExactZeroCoverageVariant(
             root: projectRoot,
-            coverage: .partial
+            limitations: [.buildScriptsDisabled, .procMacrosDisabled]
         )
         let offlineZeroTitle = runExactZeroCoverageVariant(
             root: projectRoot,
-            coverage: .dependenciesUnavailableOffline
+            limitations: [.dependenciesUnavailableOffline]
         )
         let exactZeroFullCopyHonest =
             fullZeroTitle == "No verified references"
         let exactZeroPartialCopyHonest =
-            partialZeroTitle == "Verified incomplete: partial coverage"
+            partialZeroTitle
+                == "Analysis limited: build scripts disabled; proc macros disabled"
         let exactZeroOfflineCopyHonest =
-            offlineZeroTitle == "Verified unavailable: deps unavailable (offline)"
+            offlineZeroTitle == "Analysis limited: dependencies unavailable offline"
         let exactZeroCoverageCopyDistinct =
             Set([fullZeroTitle, partialZeroTitle, offlineZeroTitle]).count == 3
         emitExactStep(
@@ -3940,7 +3941,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     private func runExactZeroCoverageVariant(
         root: URL,
-        coverage: ExactCoverage
+        limitations: Set<ExactAnalysisLimitation>
     ) -> String? {
         let cache = FileManager.default.temporaryDirectory.appendingPathComponent(
             "CodeInsightExactZeroCoverageSelfTest-\(UUID().uuidString)",
@@ -3953,7 +3954,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     location: nil,
                     capabilities: [.references],
                     referenceLocations: [],
-                    coverage: coverage
+                    limitations: limitations
                 )
             },
             snapshotFactory: { root, _ in
@@ -3973,7 +3974,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         guard waitUntil(timeout: 5, condition: {
             guard case .ready = variant.projectState else { return false }
             return coordinator.readiness == .ready
-                && coordinator.coverage == coverage
+                && coordinator.analysisEnvironment?.limitations == limitations
         }), case let .ready(session, context) = variant.projectState,
         let symbol = try? session.definitions(
             of: "answer",
@@ -3993,7 +3994,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         return variant.relationTree.root?.children?.first {
             $0.kind == .truncated
                 && ($0.title.hasPrefix("Verified ")
-                    || $0.title.hasPrefix("No verified "))
+                    || $0.title.hasPrefix("No verified ")
+                    || $0.title.hasPrefix("Analysis limited:"))
         }?.title
     }
 
@@ -4851,7 +4853,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return ("failed:readiness-timeout", false)
         }
         let coverageObserved = waitUntil(timeout: 15, condition: {
-            coordinator.coverage == .dependenciesUnavailableOffline
+            coordinator.analysisEnvironment?.limitations.contains(
+                .dependenciesUnavailableOffline
+            ) == true
         })
         guard coverageObserved else {
             let diagnostic = observedDiagnostic.withLock { $0.lowercased() }
@@ -6367,7 +6371,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
     private let externalOffset: Int?
     private let externalLocation: ExactLocation?
     private let state: ExactSelfTestProviderState?
-    private let coverage: ExactCoverage?
+    private let limitations: Set<ExactAnalysisLimitation>?
 
     init(
         location: ExactLocation?,
@@ -6382,7 +6386,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         externalOffset: Int? = nil,
         externalLocation: ExactLocation? = nil,
         state: ExactSelfTestProviderState? = nil,
-        coverage: ExactCoverage? = nil
+        limitations: Set<ExactAnalysisLimitation>? = nil
     ) {
         self.location = location
         self.capabilities = capabilities
@@ -6396,7 +6400,7 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
         self.externalOffset = externalOffset
         self.externalLocation = externalLocation
         self.state = state
-        self.coverage = coverage
+        self.limitations = limitations
     }
 
     func prepare(
@@ -6425,9 +6429,13 @@ final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
                 configFingerprint: profile.configFingerprint,
                 environmentFingerprint: profile.environmentFingerprint,
                 featureSelection: profile.featureSelection,
-                trustMode: trustMode,
-                generatedAt: Date(timeIntervalSince1970: 0),
-                coverage: coverage ?? (trustMode == .safe ? .partial : .full)
+                environment: ExactAnalysisEnvironment(
+                    trustMode: trustMode,
+                    limitations: limitations ?? (trustMode == .safe
+                        ? [.buildScriptsDisabled, .procMacrosDisabled]
+                        : [])
+                ),
+                generatedAt: Date(timeIntervalSince1970: 0)
             ),
             ordinal: ordinal,
             state: state

@@ -637,7 +637,7 @@ public final class ContextWindowModel {
         attribution: ExactAttribution,
         origin: ExactOrigin
     ) -> String {
-        let trust = switch attribution.trustMode {
+        let trust = switch attribution.environment.trustMode {
         case .safe: "Safe"
         case .trusted: "Trusted"
         }
@@ -652,7 +652,14 @@ public final class ContextWindowModel {
         case .allFeatures: "all"
         case .noDefaultFeatures: "no-default"
         }
-        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · coverage: \(attribution.coverage.rawValue)\(source) · features: \(features)"
+        let limitations = attribution.environment.limitations
+            .sorted { $0.rawValue < $1.rawValue }
+            .map(\.displayName)
+            .joined(separator: "; ")
+        let environment = limitations.isEmpty
+            ? "no known limitations"
+            : "limitations: \(limitations)"
+        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source) · features: \(features)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {

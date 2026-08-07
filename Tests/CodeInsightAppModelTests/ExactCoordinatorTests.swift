@@ -115,20 +115,31 @@ func exactCoordinatorMarksWorktreeOrigin() async throws {
 
 @MainActor
 @Test
-func exactCoordinatorRefreshesCoverageWithoutAQuery() async throws {
+func exactCoordinatorRefreshesEnvironmentWithoutAQuery() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
     let state = ExactProviderState()
     let coordinator = fixture.coordinator(state: state)
     coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
-    #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.coverage == .partial") {
-        coordinator.readiness == .ready && coordinator.coverage == .partial
+    #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.analysisEnvironment != nil") {
+        coordinator.readiness == .ready
+            && coordinator.analysisEnvironment?.limitations
+                == [.buildScriptsDisabled, .procMacrosDisabled]
     })
 
-    state.publishCoverage(.dependenciesUnavailableOffline)
+    state.publishEnvironment(ExactAnalysisEnvironment(
+        trustMode: .safe,
+        limitations: [
+            .buildScriptsDisabled,
+            .procMacrosDisabled,
+            .dependenciesUnavailableOffline,
+        ]
+    ))
 
-    #expect(await testWaitUntil("coordinator.coverage == .dependenciesUnavailableOffline") {
-        coordinator.coverage == .dependenciesUnavailableOffline
+    #expect(await testWaitUntil("coordinator environment includes offline limitation") {
+        coordinator.analysisEnvironment?.limitations.contains(
+            .dependenciesUnavailableOffline
+        ) == true
     })
     #expect(state.definitionCount == 0)
 }
@@ -263,8 +274,9 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     let safe = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
     )))
-    #expect(safe.attribution.trustMode == .safe)
-    #expect(safe.attribution.coverage == .partial)
+    #expect(safe.attribution.environment.trustMode == .safe)
+    #expect(safe.attribution.environment.limitations
+        == [.buildScriptsDisabled, .procMacrosDisabled])
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
     ) != nil)
@@ -277,13 +289,13 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     let trustedNew = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 1, generation: generation
     )))
-    #expect(trustedNew.attribution.trustMode == .trusted)
-    #expect(trustedNew.attribution.coverage == .full)
+    #expect(trustedNew.attribution.environment.trustMode == .trusted)
+    #expect(trustedNew.attribution.environment.limitations.isEmpty)
     let trustedOld = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
     )))
-    #expect(trustedOld.attribution.trustMode == .trusted)
-    #expect(trustedOld.attribution.coverage == .full)
+    #expect(trustedOld.attribution.environment.trustMode == .trusted)
+    #expect(trustedOld.attribution.environment.limitations.isEmpty)
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: generation
     ) != nil)
@@ -296,8 +308,9 @@ func exactOverlaySeparatesTrustModesAndReusesWithinEachMode() async throws {
     let safeAgain = try #require(exactCompletedEntry(await coordinator.definition(
         file: "main.rs", byteOffset: 1, generation: generation
     )))
-    #expect(safeAgain.attribution.trustMode == .safe)
-    #expect(safeAgain.attribution.coverage == .partial)
+    #expect(safeAgain.attribution.environment.trustMode == .safe)
+    #expect(safeAgain.attribution.environment.limitations
+        == [.buildScriptsDisabled, .procMacrosDisabled])
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 1, generation: generation
     ) != nil)
@@ -631,7 +644,8 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     #expect(Set(exactSymbols(model)) == Set(fuzzySymbols))
     #expect(model.selectedCandidate?.targetByteOffset == secondDefinition)
     #expect(model.selectedCandidate?.certainty == .exact)
-    #expect(model.selectedCandidate?.exactAttribution?.coverage == .partial)
+    #expect(model.selectedCandidate?.exactAttribution?.environment.limitations
+        == [.buildScriptsDisabled, .procMacrosDisabled])
     #expect(model.selectedCandidate?.exactOrigin == .worktree)
     #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == false)
     #expect(model.selectedCandidate?.provenanceBadge.contains(
@@ -704,7 +718,9 @@ func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
     #expect(candidate.provenanceBadge.contains("dependency-fixture"))
     #expect(candidate.provenanceBadge.contains("fake-exact"))
     #expect(candidate.provenanceBadge.contains("fake-1"))
-    #expect(candidate.provenanceBadge.contains("coverage: partial"))
+    #expect(candidate.provenanceBadge.contains(
+        "limitations: build scripts disabled; proc macros disabled"
+    ))
 }
 
 @MainActor
@@ -884,9 +900,13 @@ private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
                 configFingerprint: profile.configFingerprint,
                 environmentFingerprint: profile.environmentFingerprint,
                 featureSelection: profile.featureSelection,
-                trustMode: trustMode,
-                generatedAt: Date(timeIntervalSince1970: 0),
-                coverage: trustMode == .safe ? .partial : .full
+                environment: ExactAnalysisEnvironment(
+                    trustMode: trustMode,
+                    limitations: trustMode == .safe
+                        ? [.buildScriptsDisabled, .procMacrosDisabled]
+                        : []
+                ),
+                generatedAt: Date(timeIntervalSince1970: 0)
             )
         )
     }
@@ -921,7 +941,7 @@ private final class ExactProviderState: @unchecked Sendable {
     func makeSession(attribution: ExactAttribution) -> ExactStateSession {
         let ordinal = locked {
             prepares += 1
-            let mode = switch attribution.trustMode {
+            let mode = switch attribution.environment.trustMode {
             case .safe: "safe"
             case .trusted: "trusted"
             }
@@ -947,8 +967,8 @@ private final class ExactProviderState: @unchecked Sendable {
         _ = locked { closed.insert(ordinal) }
     }
 
-    func publishCoverage(_ coverage: ExactCoverage) {
-        locked { latestSession }?.publishCoverage(coverage)
+    func publishEnvironment(_ environment: ExactAnalysisEnvironment) {
+        locked { latestSession }?.publishEnvironment(environment)
     }
 
     private func locked<T>(_ body: () -> T) -> T {
@@ -963,7 +983,7 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
     let readiness: ExactReadiness = .ready
     private let lock = NSLock()
     private var storedAttribution: ExactAttribution
-    private var coverageObserver: (@Sendable (ExactCoverage) -> Void)?
+    private var environmentObserver: (@Sendable (ExactAnalysisEnvironment) -> Void)?
     private let ordinal: Int
     private let state: ExactProviderState
 
@@ -973,18 +993,18 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
         return storedAttribution
     }
 
-    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+    var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get {
             lock.lock()
             defer { lock.unlock() }
-            return coverageObserver
+            return environmentObserver
         }
         set {
             lock.lock()
-            coverageObserver = newValue
-            let coverage = storedAttribution.coverage
+            environmentObserver = newValue
+            let environment = storedAttribution.environment
             lock.unlock()
-            newValue?(coverage)
+            newValue?(environment)
         }
     }
 
@@ -1043,7 +1063,7 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
         nil
     }
 
-    func publishCoverage(_ coverage: ExactCoverage) {
+    func publishEnvironment(_ environment: ExactAnalysisEnvironment) {
         lock.lock()
         storedAttribution = ExactAttribution(
             provider: storedAttribution.provider,
@@ -1051,13 +1071,12 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
             configFingerprint: storedAttribution.configFingerprint,
             environmentFingerprint: storedAttribution.environmentFingerprint,
             featureSelection: storedAttribution.featureSelection,
-            trustMode: storedAttribution.trustMode,
-            generatedAt: storedAttribution.generatedAt,
-            coverage: coverage
+            environment: environment,
+            generatedAt: storedAttribution.generatedAt
         )
-        let observer = coverageObserver
+        let observer = environmentObserver
         lock.unlock()
-        observer?(coverage)
+        observer?(environment)
     }
 
     func cancel() {}
@@ -1146,9 +1165,11 @@ private final class BlockingExactProvider: ExactProvider, @unchecked Sendable {
             configFingerprint: profile.configFingerprint,
             environmentFingerprint: profile.environmentFingerprint,
             featureSelection: profile.featureSelection,
-            trustMode: trustMode,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .partial
+            environment: ExactAnalysisEnvironment(
+                trustMode: trustMode,
+                limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         )
         return session
     }
@@ -1307,9 +1328,11 @@ private func exactAttribution() -> ExactAttribution {
         toolVersion: "fake-1",
         configFingerprint: "config",
         environmentFingerprint: "environment",
-        trustMode: .safe,
-        generatedAt: Date(timeIntervalSince1970: 0),
-        coverage: .partial
+        environment: ExactAnalysisEnvironment(
+            trustMode: .safe,
+            limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+        ),
+        generatedAt: Date(timeIntervalSince1970: 0)
     )
 }
 

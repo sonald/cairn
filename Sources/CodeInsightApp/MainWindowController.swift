@@ -1291,7 +1291,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.compare.isLoading
             _ = model.compare.errorMessage
             _ = model.exactCoordinator.readiness
-            _ = model.exactCoordinator.coverage
+            _ = model.exactCoordinator.analysisEnvironment
             _ = model.exactCoordinator.trustMode
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
@@ -1578,7 +1578,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func renderExactStatus() {
         let coordinator = model.exactCoordinator
-        let trust: String? = switch coordinator.trustMode {
+        let environment = coordinator.analysisEnvironment
+        let activeTrust = environment?.trustMode ?? coordinator.trustMode
+        let trust: String? = switch activeTrust {
         case .safe: "Safe"
         case .trusted: "Trusted"
         case nil: nil
@@ -1589,18 +1591,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let statusDetail: String?
         switch coordinator.readiness {
         case .ready:
-            switch coordinator.coverage {
-            case .dependenciesUnavailableOffline:
+            if environment?.limitations.contains(.dependenciesUnavailableOffline) == true {
                 status = "Exact: deps unavailable (offline)\(trustSuffix)"
                 color = .systemOrange
-            case .partial:
-                status = "Exact: ready\(trustSuffix) (partial)"
+            } else if environment?.limitations.isEmpty == false {
+                status = "Exact: ready\(trustSuffix) (limited)"
                 color = .systemOrange
-            case .full:
+            } else if environment != nil {
                 status = "Exact: ready\(trustSuffix)"
                 color = .systemGreen
-            case nil:
-                status = "Exact: ready\(trustSuffix) (coverage unknown)"
+            } else {
+                status = "Exact: ready\(trustSuffix) (environment unknown)"
                 color = .systemOrange
             }
             statusDetail = nil
@@ -1621,23 +1622,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             color = .systemOrange
             statusDetail = reason
         }
-        let coverageMeaning = switch coordinator.coverage {
-        case .full:
-            "full — dependency, build-script, and proc-macro coverage is enabled."
-        case .partial:
-            "partial — Safe mode disables build scripts and proc macros."
-        case .dependenciesUnavailableOffline:
-            "deps unavailable (offline) — dependency analysis is incomplete because network access is disabled."
-        case nil:
-            "not available yet."
-        }
+        let limitations = environment?.limitations
+            .sorted { $0.rawValue < $1.rawValue }
+            .map(\.displayName)
+            .joined(separator: "; ")
+        let limitationMeaning = limitations.map {
+            $0.isEmpty ? "none known." : $0
+        } ?? "not available yet."
         let detail: String?
         if let attribution = coordinator.attribution {
             var lines = [
                 "Provider: \(attribution.provider)",
                 "Tool version: \(attribution.toolVersion)",
                 "Trust: \(trust ?? "Unknown")",
-                "Coverage: \(coverageMeaning)",
+                "Limitations: \(limitationMeaning)",
                 "Features: \(Self.displayName(for: attribution.featureSelection))",
             ]
             if let statusDetail { lines.append(statusDetail) }

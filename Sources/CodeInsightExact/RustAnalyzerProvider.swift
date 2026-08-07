@@ -79,13 +79,12 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             trustMode: trustMode,
             featureSelection: profile.featureSelection
         )
-        let coverage: ExactCoverage
-        switch trustMode {
-        case .safe:
-            coverage = .partial
-        case .trusted:
-            coverage = .full
-        }
+        let environment = ExactAnalysisEnvironment(
+            trustMode: trustMode,
+            limitations: trustMode == .safe
+                ? [.buildScriptsDisabled, .procMacrosDisabled]
+                : []
+        )
 
         let launch = try Sandbox(
             projectURL: projectURL,
@@ -122,9 +121,8 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
                     configFingerprint: profile.configFingerprint,
                     environmentFingerprint: profile.environmentFingerprint,
                     featureSelection: profile.featureSelection,
-                    trustMode: trustMode,
-                    generatedAt: Date(),
-                    coverage: coverage
+                    environment: environment,
+                    generatedAt: Date()
                 )
             )
         } catch {
@@ -213,7 +211,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
     var attribution: ExactAttribution {
         stateLock.lock()
-        let coverage = currentCoverage
+        let environment = currentEnvironment
         stateLock.unlock()
         return ExactAttribution(
             provider: baseAttribution.provider,
@@ -221,9 +219,8 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             configFingerprint: baseAttribution.configFingerprint,
             environmentFingerprint: baseAttribution.environmentFingerprint,
             featureSelection: baseAttribution.featureSelection,
-            trustMode: baseAttribution.trustMode,
-            generatedAt: baseAttribution.generatedAt,
-            coverage: coverage
+            environment: environment,
+            generatedAt: baseAttribution.generatedAt
         )
     }
 
@@ -243,8 +240,8 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private var activeBatch: ExactRequestBatch?
     private var didRestart = false
     private let baseAttribution: ExactAttribution
-    private var currentCoverage: ExactCoverage
-    private var coverageObserver: (@Sendable (ExactCoverage) -> Void)?
+    private var currentEnvironment: ExactAnalysisEnvironment
+    private var environmentObserver: (@Sendable (ExactAnalysisEnvironment) -> Void)?
 
     var readiness: ExactReadiness {
         stateLock.lock()
@@ -252,18 +249,18 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         return state
     }
 
-    var onCoverageChange: (@Sendable (ExactCoverage) -> Void)? {
+    var onEnvironmentChange: (@Sendable (ExactAnalysisEnvironment) -> Void)? {
         get {
             stateLock.lock()
             defer { stateLock.unlock() }
-            return coverageObserver
+            return environmentObserver
         }
         set {
             stateLock.lock()
-            coverageObserver = newValue
-            let coverage = currentCoverage
+            environmentObserver = newValue
+            let environment = currentEnvironment
             stateLock.unlock()
-            newValue?(coverage)
+            newValue?(environment)
         }
     }
 
@@ -321,7 +318,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         self.closeGrace = closeGrace
         self.diagnosticObserver = diagnosticObserver
         baseAttribution = attribution
-        currentCoverage = attribution.coverage
+        currentEnvironment = attribution.environment
         observe(client)
     }
 
@@ -862,9 +859,9 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         observedClient.observeDiagnostics { [weak self, weak observedClient] diagnostic in
             guard let self, let observedClient else { return }
             diagnosticObserver?(diagnostic)
-            publishCoverage(
-                rustAnalyzerCoverage(
-                    base: baseAttribution.coverage,
+            publishEnvironment(
+                rustAnalyzerEnvironment(
+                    base: baseAttribution.environment,
                     diagnostic: diagnostic
                 ),
                 from: observedClient
@@ -872,22 +869,22 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         }
     }
 
-    private func publishCoverage(
-        _ coverage: ExactCoverage,
+    private func publishEnvironment(
+        _ environment: ExactAnalysisEnvironment,
         from observedClient: LSPClient
     ) {
         stateLock.lock()
         guard state != .closed,
               client === observedClient,
-              currentCoverage != coverage
+              currentEnvironment.limitations != environment.limitations
         else {
             stateLock.unlock()
             return
         }
-        currentCoverage = coverage
-        let observer = coverageObserver
+        currentEnvironment = environment
+        let observer = environmentObserver
         stateLock.unlock()
-        observer?(coverage)
+        observer?(environment)
     }
 
     private func open(
@@ -1145,10 +1142,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
 }
 
-func rustAnalyzerCoverage(
-    base: ExactCoverage,
+func rustAnalyzerEnvironment(
+    base: ExactAnalysisEnvironment,
     diagnostic: String
-) -> ExactCoverage {
+) -> ExactAnalysisEnvironment {
     let diagnostic = diagnostic.lowercased()
     let offline = diagnostic.contains("--offline")
         || diagnostic.contains("offline mode")
@@ -1162,5 +1159,10 @@ func rustAnalyzerCoverage(
     guard offline,
           dependencyFailure
     else { return base }
-    return .dependenciesUnavailableOffline
+    var limitations = base.limitations
+    limitations.insert(.dependenciesUnavailableOffline)
+    return ExactAnalysisEnvironment(
+        trustMode: base.trustMode,
+        limitations: limitations
+    )
 }

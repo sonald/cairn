@@ -231,7 +231,7 @@ func relationTreeConsumesExactReferences() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -293,7 +293,7 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -611,28 +611,30 @@ func exactCoordinatorRequestsReferencesWithoutTheDeclaration() async throws {
         generation: fixture.context.generation
     )
 
-    guard case let .relations(relations, _, coverage) = result else {
+    guard case let .relations(relations, _, environment) = result else {
         Issue.record("expected exact references")
         return
     }
     #expect(relations.map(\.location) == [location])
-    #expect(coverage == .full)
+    #expect(environment.limitations.isEmpty)
     #expect(session.referenceIncludeDeclarations == [false])
 }
 
 @MainActor
 @Test
-func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
+func relationTreeExactZeroCopyDistinguishesLimitations() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
 
-    func title(for coverage: ExactCoverage) async throws -> String {
+    func title(
+        for limitations: Set<ExactAnalysisLimitation>
+    ) async throws -> String {
         let session = RelationHierarchyExactSession(referenceLocations: [])
         let coordinator = try relationExactCoordinator(
             fixture: fixture,
             provider: RelationHierarchyExactProvider(
                 session: session,
-                coverage: coverage
+                environment: exactTestEnvironment(limitations: limitations)
             )
         )
         coordinator.prepare(
@@ -640,8 +642,9 @@ func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
             revision: nil,
             generation: fixture.context.generation
         )
-        #expect(await testWaitUntil("coordinator.readiness == .ready && coordinator.coverage == coverage") {
-            coordinator.readiness == .ready && coordinator.coverage == coverage
+        #expect(await testWaitUntil("coordinator environment matches limitations") {
+            coordinator.readiness == .ready
+                && coordinator.analysisEnvironment?.limitations == limitations
         })
         let model = RelationTreeModel()
         model.attachExactCoordinator(coordinator)
@@ -655,13 +658,17 @@ func relationTreeExactZeroCopyDistinguishesCoverage() async throws {
         return title
     }
 
-    let full = try await title(for: .full)
-    let partial = try await title(for: .partial)
-    let offline = try await title(for: .dependenciesUnavailableOffline)
+    let full = try await title(for: [])
+    let partial = try await title(for: [
+        .buildScriptsDisabled,
+        .procMacrosDisabled,
+    ])
+    let offline = try await title(for: [.dependenciesUnavailableOffline])
 
     #expect(full == "No verified references")
-    #expect(partial == "Verified incomplete: partial coverage")
-    #expect(offline == "Verified unavailable: deps unavailable (offline)")
+    #expect(partial
+        == "Analysis limited: build scripts disabled; proc macros disabled")
+    #expect(offline == "Analysis limited: dependencies unavailable offline")
     #expect(partial != "No verified references")
     #expect(offline != "No verified references")
     #expect(Set([full, partial, offline]).count == 3)
@@ -715,7 +722,7 @@ func relationTreeVerifiedBadgesCountExactRowsInAllDirections() async throws {
                 .init(edges: [], isTruncated: false)
             },
             exactRelationsResolver: { _, _, _, _, _, _ in
-                .relations(relations, origin: .worktree, coverage: .full)
+                .relations(relations, origin: .worktree, environment: exactTestEnvironment())
             }
         )
         model.updateProjectState(.ready(session, context))
@@ -1059,7 +1066,7 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
                     item: item,
                     callSites: callSites
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1152,7 +1159,7 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
                     ),
                 ],
                 origin: .worktree,
-                coverage: .full
+                environment: exactTestEnvironment()
             )
         }
     )
@@ -1277,7 +1284,7 @@ func relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections()
                         item: nil,
                         callSites: []
                     ),
-                ], origin: .worktree, coverage: .full)
+                ], origin: .worktree, environment: exactTestEnvironment())
             }
         )
         model.updateProjectState(.ready(testCase.session, testCase.context))
@@ -1337,7 +1344,7 @@ func relationTreeDoesNotExposeExactRelationSublayers() async throws {
                     item: b,
                     callSites: []
                 )
-            return .relations([relation], origin: .worktree, coverage: .full)
+            return .relations([relation], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1378,7 +1385,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .callers,
-        result: .relations([], origin: .worktree, coverage: .full)
+        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
     )
 
     let traitRoot = try relationTemporaryProject([
@@ -1402,7 +1409,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: traitContext,
         symbol: trait,
         direction: .implementations,
-        result: .relations([], origin: .worktree, coverage: .full)
+        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
     )
 
     #expect(callersUnsupported
@@ -1446,7 +1453,7 @@ func relationTreeUsesFourDistinctExactReferenceStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .references,
-        result: .relations([], origin: .worktree, coverage: .full)
+        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
     )
     let legacyModel = RelationTreeModel(loader: { _, _, _, _ in
         .init(edges: [], isTruncated: false)
@@ -1528,7 +1535,7 @@ func relationTreeShowsExactOnlyImplementations() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(session, context))
@@ -1645,7 +1652,7 @@ func relationRowsExposeVerifiedAndInferredBadges() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2286,7 +2293,7 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, coverage: .full)
+            ], origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2954,7 +2961,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
             .init(edges: [], isTruncated: false)
         },
         exactRelationsResolver: { _, _, _, _, _, _ in
-            .relations(relations, origin: .worktree, coverage: .full)
+            .relations(relations, origin: .worktree, environment: exactTestEnvironment())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -3020,14 +3027,14 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
     let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-hierarchy-fake-1"
     private let session: RelationHierarchyExactSession
-    private let coverage: ExactCoverage
+    private let environment: ExactAnalysisEnvironment
 
     init(
         session: RelationHierarchyExactSession,
-        coverage: ExactCoverage = .full
+        environment: ExactAnalysisEnvironment = exactTestEnvironment()
     ) {
         self.session = session
-        self.coverage = coverage
+        self.environment = environment
     }
 
     func prepare(
@@ -3041,9 +3048,11 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
             configFingerprint: profile.configFingerprint,
             environmentFingerprint: profile.environmentFingerprint,
             featureSelection: profile.featureSelection,
-            trustMode: trustMode,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: coverage
+            environment: ExactAnalysisEnvironment(
+                trustMode: trustMode,
+                limitations: environment.limitations
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         )
         return session
     }
@@ -3082,9 +3091,11 @@ private final class RelationRotatingExactProvider: ExactProvider, @unchecked Sen
             configFingerprint: profile.configFingerprint,
             environmentFingerprint: profile.environmentFingerprint,
             featureSelection: profile.featureSelection,
-            trustMode: trustMode,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .full
+            environment: ExactAnalysisEnvironment(
+                trustMode: trustMode,
+                limitations: []
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         )
         return session
     }
@@ -3591,7 +3602,8 @@ private func relationVerifiedStatusTitle(
     parent?.children?.first {
         $0.kind == .truncated
             && ($0.title.hasPrefix("Verified ")
-                || $0.title.hasPrefix("No verified "))
+                || $0.title.hasPrefix("No verified ")
+                || $0.title.hasPrefix("Analysis limited:"))
     }?.title
 }
 
@@ -3663,7 +3675,7 @@ private func relationProjectReferenceStatus(
     }
     let exactResolver: RelationTreeModel.ExactRelationsResolver = {
         _, _, _, _, _, _ in
-        .relations(exact, origin: .worktree, coverage: .full)
+        .relations(exact, origin: .worktree, environment: exactTestEnvironment())
     }
     let model = RelationTreeModel(
         loader: { _, _, _, _ in
@@ -3688,6 +3700,7 @@ private func relationProjectReferenceStatus(
             $0.kind == .truncated
                 && !$0.title.hasPrefix("Verified ")
                 && !$0.title.hasPrefix("No verified ")
+                && !$0.title.hasPrefix("Analysis limited:")
         }?.title
     )
 }
@@ -3851,9 +3864,10 @@ private func relationExactEntry(
             toolVersion: "fake-1",
             configFingerprint: "config",
             environmentFingerprint: "environment",
-            trustMode: .safe,
-            generatedAt: Date(timeIntervalSince1970: 0),
-            coverage: .partial
+            environment: exactTestEnvironment(
+                limitations: [.buildScriptsDisabled, .procMacrosDisabled]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
         ),
         origin: origin
     )
@@ -3887,8 +3901,14 @@ private func relationExactAttribution() -> ExactAttribution {
         toolVersion: "relation-hierarchy-fake-1",
         configFingerprint: "config",
         environmentFingerprint: "environment",
-        trustMode: .safe,
-        generatedAt: Date(timeIntervalSince1970: 0),
-        coverage: .full
+        environment: exactTestEnvironment(),
+        generatedAt: Date(timeIntervalSince1970: 0)
     )
+}
+
+private func exactTestEnvironment(
+    trustMode: TrustMode = .safe,
+    limitations: Set<ExactAnalysisLimitation> = []
+) -> ExactAnalysisEnvironment {
+    ExactAnalysisEnvironment(trustMode: trustMode, limitations: limitations)
 }
