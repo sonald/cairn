@@ -47,6 +47,7 @@ public final class RelationTreeModel {
         public fileprivate(set) var symbol: SymbolOccurrenceID?
         public let representsLocation: Bool
         public fileprivate(set) var expansionIdentity: ExpansionIdentity?
+        public fileprivate(set) var explanation: RelationRowExplanation?
         public fileprivate(set) var children: [Node]?
         public fileprivate(set) var isExpandable: Bool
 
@@ -75,6 +76,7 @@ public final class RelationTreeModel {
             symbol: SymbolOccurrenceID? = nil,
             representsLocation: Bool = false,
             expansionIdentity: ExpansionIdentity? = nil,
+            explanation: RelationRowExplanation? = nil,
             evidence: [ResolutionEvidence] = [],
             cycleKey: CycleKey? = nil,
             queryTarget: (path: String, byteOffset: UInt32)? = nil,
@@ -95,6 +97,7 @@ public final class RelationTreeModel {
             self.symbol = symbol
             self.representsLocation = representsLocation
             self.expansionIdentity = expansionIdentity
+            self.explanation = explanation
             self.evidence = evidence
             self.cycleKey = cycleKey
             self.queryTarget = queryTarget
@@ -112,6 +115,7 @@ public final class RelationTreeModel {
         let byteOffset: UInt32
         let line: UInt32
         let evidence: [ResolutionEvidence]
+        let candidate: CandidateObservation?
         let exactQuery: (file: String, byteOffset: UInt32, line: UInt32)?
         let fuzzyTarget: (file: String, byteOffset: UInt32)?
         let identityTarget: (file: String, byteOffset: UInt32)?
@@ -119,6 +123,8 @@ public final class RelationTreeModel {
         var callSites: [ExactLocation]
         var alsoHeuristic: Bool
         var exactOrigin: ExactOrigin?
+        var explanation: RelationRowExplanation?
+        var isCorrectedCandidate: Bool
 
         init(
             title: String,
@@ -129,13 +135,16 @@ public final class RelationTreeModel {
             byteOffset: UInt32,
             line: UInt32,
             evidence: [ResolutionEvidence],
+            candidate: CandidateObservation? = nil,
             exactQuery: (file: String, byteOffset: UInt32, line: UInt32)? = nil,
             fuzzyTarget: (file: String, byteOffset: UInt32)? = nil,
             identityTarget: (file: String, byteOffset: UInt32)? = nil,
             exactItem: ExactCallHierarchyItem? = nil,
             callSites: [ExactLocation] = [],
             alsoHeuristic: Bool = false,
-            exactOrigin: ExactOrigin? = nil
+            exactOrigin: ExactOrigin? = nil,
+            explanation: RelationRowExplanation? = nil,
+            isCorrectedCandidate: Bool = false
         ) {
             self.title = title
             self.certainty = certainty
@@ -145,6 +154,7 @@ public final class RelationTreeModel {
             self.byteOffset = byteOffset
             self.line = line
             self.evidence = evidence
+            self.candidate = candidate
             self.exactQuery = exactQuery
             self.fuzzyTarget = fuzzyTarget
             self.identityTarget = identityTarget
@@ -152,6 +162,8 @@ public final class RelationTreeModel {
             self.callSites = callSites
             self.alsoHeuristic = alsoHeuristic
             self.exactOrigin = exactOrigin
+            self.explanation = explanation
+            self.isCorrectedCandidate = isCorrectedCandidate
         }
     }
 
@@ -195,6 +207,9 @@ public final class RelationTreeModel {
     public private(set) var requestID: UInt64 = 0
     public private(set) var selectedRelationSymbol: SymbolOccurrenceID?
     public private(set) var heuristicCandidateCount = 0
+    public private(set) var relationQueryContexts: [
+        RelationQueryContextID: RelationQueryContext
+    ] = [:]
     public static let possibleValidationBatchSize = 32
     public var onSelect: @MainActor (Node) -> Void = { _ in }
     public var onNodeChange: @MainActor (Node) -> Void = { _ in }
@@ -271,6 +286,7 @@ public final class RelationTreeModel {
         root = nil
         selectedRelationSymbol = nil
         heuristicCandidateCount = 0
+        relationQueryContexts.removeAll()
         switch state {
         case let .ready(session, context):
             self.session = session
@@ -296,6 +312,7 @@ public final class RelationTreeModel {
         self.direction = direction
         selectedRelationSymbol = nil
         heuristicCandidateCount = 0
+        relationQueryContexts.removeAll()
         switch target {
         case let .localBinding(pathID, bindingIndex):
             guard direction == .references,
@@ -486,17 +503,34 @@ public final class RelationTreeModel {
                   possibleValidationBatch === batch,
                   generation == currentGeneration
             else { return }
-            for (row, edge) in zip(rows, promoted.edges) {
-                guard row.parent === parent,
-                      let current = makeRows(
-                          [edge],
-                          under: parent,
-                          direction: direction
-                      ).first
-                else { continue }
-                updatePublishedRow(row, from: current, parent: parent)
+            let container = parent.kind == .group ? parent.parent : parent
+            guard let container else { return }
+            let selectedIDs = Dictionary(
+                uniqueKeysWithValues: zip(rows, promoted.edges.prefix(rows.count))
+                    .map { (ObjectIdentifier($0.0), $0.1) }
+            )
+            var combined = relationEdgeRows(in: container).compactMap { row in
+                selectedIDs[ObjectIdentifier(row)] ?? row.loadedEdge
             }
-            onNodeChange(parent)
+            combined += promoted.edges.dropFirst(rows.count)
+            let wasTruncated = container.children?.contains {
+                $0.kind == .truncated
+                    && $0.title == "Results truncated upstream"
+            } == true
+            let children = makeChildren(
+                from: LoadResult(
+                    edges: Self.deduplicateExact(combined),
+                    isTruncated: wasTruncated
+                ),
+                under: container,
+                direction: direction
+            )
+            container.children = reusingPublishedRows(
+                children,
+                from: container.children ?? [],
+                parent: container
+            )
+            onNodeChange(container)
         }
     }
 
@@ -703,61 +737,281 @@ public final class RelationTreeModel {
         generation: UInt64,
         batch: ExactRequestBatch
     ) async -> LoadResult {
-        guard let exactResolver else { return loaded }
+        guard let exactResolver, let session else { return loaded }
         var edges = loaded.edges
+        var grouped: [SourceLocation: [Int]] = [:]
+        var groupOrder: [SourceLocation] = []
+        for (index, edge) in edges.prefix(500).enumerated() {
+            guard let query = edge.exactQuery,
+                  edge.fuzzyTarget != nil,
+                  candidateObservation(for: edge) != nil
+            else { continue }
+            let site = SourceLocation(
+                path: query.file,
+                byteOffset: query.byteOffset,
+                line: query.line
+            )
+            if grouped[site] == nil { groupOrder.append(site) }
+            grouped[site, default: []].append(index)
+        }
+        guard !groupOrder.isEmpty else { return loaded }
+
+        var results: [SourceLocation: ExactCoordinator.DefinitionResult] = [:]
         await withTaskGroup(
-            of: (Int, ExactCoordinator.DefinitionResult?).self
+            of: (SourceLocation, ExactCoordinator.DefinitionResult?).self
         ) { group in
-            for (index, edge) in edges.prefix(500).enumerated() {
-                guard let query = edge.exactQuery,
-                      edge.fuzzyTarget != nil
-                else { continue }
+            for site in groupOrder {
                 group.addTask {
                     let exact = await exactResolver(
-                        query.file,
-                        query.byteOffset,
+                        site.path,
+                        site.byteOffset,
                         generation,
                         batch
                     )
-                    return (index, exact)
+                    return (site, exact)
                 }
             }
-            for await (index, result) in group {
-                guard case .completed(let entries) = result,
-                      let exact = entries.first
-                else { continue }
-                let edge = edges[index]
-                if let fuzzyTarget = edge.fuzzyTarget,
-                   exact.location.file == fuzzyTarget.file,
-                   exact.location.byteOffset == Int(fuzzyTarget.byteOffset)
-                {
-                    edges[index].certainty = .exact
-                    edges[index].exactOrigin = exact.origin
-                } else if direction == .calls,
-                          exactLocationIsInDependency(exact.location.file),
-                          edge.certainty == .probable || edge.certainty == .possible,
-                          !edge.evidence.isEmpty,
-                          edge.evidence.allSatisfy({
-                              if case .methodNameOnly = $0 { return true }
-                              return false
-                          }),
-                          let query = edge.exactQuery
-                {
-                    edges[index] = LoadedEdge(
-                        title: edge.title,
-                        certainty: .unresolved,
-                        dispatch: edge.dispatch,
-                        symbol: nil,
-                        path: query.file,
-                        byteOffset: query.byteOffset,
-                        line: query.line,
-                        evidence: edge.evidence,
-                        exactOrigin: exact.origin
-                    )
-                }
+            for await (site, result) in group {
+                if let result { results[site] = result }
             }
         }
+
+        let contextID = RelationQueryContextID()
+        var context = RelationQueryContext(candidateQuery: .completed(
+            RelationSetObservation(
+                completeness: loaded.isTruncated ? .truncated : .complete,
+                returnedCount: loaded.edges.count,
+                totalCount: loaded.isTruncated ? nil : loaded.edges.count
+            )
+        ))
+        var additions: [LoadedEdge] = []
+        for site in groupOrder {
+            guard case .completed(let entries) = results[site],
+                  let indexes = grouped[site]
+            else { continue }
+            let candidatePairs = indexes.compactMap { index in
+                candidateObservation(for: edges[index]).map { (index, $0) }
+            }
+            let candidates = candidatePairs.map(\.1)
+            let providerTargets: [VerificationObservation] = entries.compactMap {
+                entry in
+                guard UInt32(exactly: entry.location.byteOffset) != nil,
+                      UInt32(exactly: entry.location.line).map({ $0 > 0 }) == true
+                else { return nil }
+                return VerificationObservation(
+                    target: ExactTarget(location: entry.location),
+                    attribution: entry.attribution,
+                    origin: entry.origin
+                )
+            }
+            var roles: [ReconciliationRole] = []
+            var matchedTargets: Set<Int> = []
+            var candidateRoles: [Int: ReconciliationRole] = [:]
+            for (candidateIndex, candidate) in candidates.enumerated() {
+                let edge = edges[candidatePairs[candidateIndex].0]
+                let comparisons = providerTargets.map {
+                    Self.compare(
+                        candidate: .candidate(candidate.target),
+                        exact: $0.target,
+                        candidateLocation: edge.fuzzyTarget,
+                        in: session
+                    )
+                }
+                let role: ReconciliationRole
+                if let targetIndex = comparisons.firstIndex(where: {
+                    if case .same = $0 { return true }
+                    return false
+                }) {
+                    role = .corroborated(
+                        candidateIndex: candidateIndex,
+                        targetIndex: targetIndex
+                    )
+                    matchedTargets.insert(targetIndex)
+                } else if comparisons.isEmpty {
+                    role = .notCorroboratedCandidate(
+                        candidateIndex: candidateIndex
+                    )
+                } else if comparisons.allSatisfy({
+                    if case .different = $0 { return true }
+                    return false
+                }) {
+                    role = .correctedCandidate(candidateIndex: candidateIndex)
+                } else {
+                    role = .inconclusiveCandidate(candidateIndex: candidateIndex)
+                }
+                roles.append(role)
+                candidateRoles[candidateIndex] = role
+            }
+            for targetIndex in providerTargets.indices
+                where !matchedTargets.contains(targetIndex)
+            {
+                roles.append(.providerOnly(targetIndex: targetIndex))
+            }
+            let reconciliation = CallSiteReconciliation(
+                querySite: site,
+                candidates: candidates,
+                providerTargets: providerTargets,
+                roles: roles
+            )
+            context.reconciliations[reconciliation.id] = reconciliation
+            let refs = roles.map {
+                ReconciliationRef(
+                    contextID: contextID,
+                    reconciliationID: reconciliation.id,
+                    role: $0
+                )
+            }
+
+            for (candidateIndex, pair) in candidatePairs.enumerated() {
+                let (edgeIndex, candidate) = pair
+                guard let role = candidateRoles[candidateIndex] else { continue }
+                let ref = ReconciliationRef(
+                    contextID: contextID,
+                    reconciliationID: reconciliation.id,
+                    role: role
+                )
+                switch role {
+                case .corroborated(_, let targetIndex):
+                    edges[edgeIndex] = verificationEdge(
+                        providerTargets[targetIndex],
+                        replacing: edges[edgeIndex],
+                        direction: direction,
+                        explanation: RelationRowExplanation(
+                            primaryTrace: .corroborated(
+                                candidate: candidate,
+                                verification: providerTargets[targetIndex]
+                            ),
+                            contextID: contextID,
+                            reconciliationRefs: refs
+                        )
+                    )
+                case .correctedCandidate:
+                    edges[edgeIndex].isCorrectedCandidate = true
+                    edges[edgeIndex].explanation = RelationRowExplanation(
+                        primaryTrace: .conflict(
+                            candidate: candidate,
+                            reconciliation: ref
+                        ),
+                        contextID: contextID,
+                        reconciliationRefs: [ref]
+                    )
+                case .inconclusiveCandidate, .notCorroboratedCandidate:
+                    edges[edgeIndex].explanation = RelationRowExplanation(
+                        primaryTrace: .candidateOnly(candidate),
+                        contextID: contextID,
+                        reconciliationRefs: [ref]
+                    )
+                case .providerOnly:
+                    break
+                }
+            }
+            for targetIndex in providerTargets.indices
+                where !matchedTargets.contains(targetIndex)
+            {
+                let exemplar = edges[candidatePairs.first?.0 ?? indexes[0]]
+                additions.append(verificationEdge(
+                    providerTargets[targetIndex],
+                    replacing: exemplar,
+                    direction: direction,
+                    providerOnly: true,
+                    explanation: RelationRowExplanation(
+                        primaryTrace: .verificationOnly(
+                            providerTargets[targetIndex]
+                        ),
+                        contextID: contextID,
+                        reconciliationRefs: refs
+                    )
+                ))
+            }
+        }
+        if !context.reconciliations.isEmpty {
+            relationQueryContexts[contextID] = context
+        }
+        edges += additions
         return LoadResult(edges: edges, isTruncated: loaded.isTruncated)
+    }
+
+    private func candidateObservation(
+        for edge: LoadedEdge
+    ) -> CandidateObservation? {
+        if let candidate = edge.candidate { return candidate }
+        guard let symbol = edge.symbol else { return nil }
+        return CandidateObservation(
+            target: .occurrence(symbol),
+            certainty: edge.certainty,
+            dispatch: edge.dispatch,
+            provenance: .fuzzyResolver,
+            completeness: .unknown,
+            evidence: edge.evidence
+        )
+    }
+
+    nonisolated static func compare(
+        candidate: ObservedTarget,
+        exact: ExactTarget,
+        in session: EngineSession
+    ) -> TargetComparison {
+        guard case .candidate(.occurrence(let candidateID)) = candidate,
+              let candidateLocation = location(for: candidateID, in: session)
+        else { return .notComparable }
+        if let exactID = symbol(at: exact.location, in: session) {
+            return exactID == candidateID ? .same : .different
+        }
+        guard normalizedPath(candidateLocation.path)
+                == normalizedPath(exact.location.file),
+              candidateLocation.byteOffset
+                == UInt32(exactly: exact.location.byteOffset)
+        else { return .notComparable }
+        return .same
+    }
+
+    private nonisolated static func compare(
+        candidate: ObservedTarget,
+        exact: ExactTarget,
+        candidateLocation: (file: String, byteOffset: UInt32)?,
+        in session: EngineSession
+    ) -> TargetComparison {
+        if let candidateLocation,
+              normalizedPath(candidateLocation.file)
+                == normalizedPath(exact.location.file),
+              candidateLocation.byteOffset
+                == UInt32(exactly: exact.location.byteOffset)
+        {
+            return .same
+        }
+        return compare(candidate: candidate, exact: exact, in: session)
+    }
+
+    private func verificationEdge(
+        _ verification: VerificationObservation,
+        replacing edge: LoadedEdge,
+        direction: Direction,
+        providerOnly: Bool = false,
+        explanation: RelationRowExplanation
+    ) -> LoadedEdge {
+        let location = verification.target.location
+        let byteOffset = UInt32(location.byteOffset)
+        let line = UInt32(location.line)
+        let symbol = session.flatMap { Self.symbol(at: location, in: $0) }
+        return LoadedEdge(
+            title: providerOnly
+                ? symbol.flatMap { symbol in
+                    session.flatMap { Self.symbolTitle(symbol, in: $0) }
+                } ?? Self.locationTitle(location)
+                : edge.title,
+            certainty: .exact,
+            dispatch: direction == .implementations
+                ? .traitDispatch
+                : edge.dispatch,
+            symbol: symbol,
+            path: location.file,
+            byteOffset: byteOffset,
+            line: line,
+            evidence: [],
+            identityTarget: (location.file, byteOffset),
+            exactOrigin: verification.origin,
+            explanation: explanation
+        )
     }
 
     private func mergeExact(
@@ -847,10 +1101,12 @@ public final class RelationTreeModel {
         direction: Direction
     ) -> [Node] {
         let capped = Array(loaded.edges.prefix(500))
-        let possible = capped.filter { $0.certainty == .probable }
-            + capped.filter { $0.certainty == .possible }
+        let corrected = capped.filter(\.isCorrectedCandidate)
+        let main = capped.filter { !$0.isCorrectedCandidate }
+        let possible = main.filter { $0.certainty == .probable }
+            + main.filter { $0.certainty == .possible }
         var children = makeRows(
-            capped.filter {
+            main.filter {
                 $0.certainty != .probable && $0.certainty != .possible
             },
             under: parent,
@@ -871,7 +1127,22 @@ public final class RelationTreeModel {
             )
             children.append(group)
         }
-        if !capped.contains(where: { $0.certainty == .exact }),
+        if !corrected.isEmpty {
+            let group = Node(
+                kind: .group,
+                title: "Show corrected candidates (\(corrected.count))",
+                children: [],
+                isExpandable: true,
+                parent: parent
+            )
+            group.children = makeRows(
+                corrected,
+                under: group,
+                direction: direction
+            )
+            children.append(group)
+        }
+        if !main.contains(where: { $0.certainty == .exact }),
            let title = verifiedStatusTitle(
                state: loaded.exactState,
                direction: direction
@@ -985,7 +1256,9 @@ public final class RelationTreeModel {
                 return previous
             }
             item.isExpandable = item.children?.isEmpty == false
-            if item.title.hasPrefix("Show ") {
+            if item.title.hasPrefix("Show corrected candidates") {
+                item.title = "Show corrected candidates (\(item.children?.count ?? 0))"
+            } else if item.title.hasPrefix("Show ") {
                 item.title = "Show \(item.children?.count ?? 0) possible matches"
             }
             if item.children?.isEmpty == false { result.append(item) }
@@ -1014,7 +1287,9 @@ public final class RelationTreeModel {
                 }) {
                     existing.children?.append(contentsOf: child.children ?? [])
                     existing.children?.forEach { $0.parent = existing }
-                    if existing.title.hasPrefix("Show ") {
+                    if existing.title.hasPrefix("Show corrected candidates") {
+                        existing.title = "Show corrected candidates (\(existing.children?.count ?? 0))"
+                    } else if existing.title.hasPrefix("Show ") {
                         existing.title =
                             "Show \(existing.children?.count ?? 0) possible matches"
                     }
@@ -1038,6 +1313,58 @@ public final class RelationTreeModel {
         return result
     }
 
+    private func relationEdgeRows(in parent: Node) -> [Node] {
+        (parent.children ?? []).flatMap { child in
+            child.kind == .group
+                ? child.children?.filter { $0.kind == .edge } ?? []
+                : child.kind == .edge ? [child] : []
+        }
+    }
+
+    private func reusingPublishedRows(
+        _ children: [Node],
+        from previous: [Node],
+        parent: Node
+    ) -> [Node] {
+        let previousRows = Dictionary(
+            previous.flatMap { child in
+                child.kind == .group ? child.children ?? [] : [child]
+            }.compactMap { row in
+                row.cycleKey.map { ($0, row) }
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        let previousGroups = Dictionary(
+            previous.filter { $0.kind == .group }.map {
+                (Self.stableGroupName($0.title), $0)
+            },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return children.map { child in
+            if child.kind == .edge,
+               let key = child.cycleKey,
+               let old = previousRows[key]
+            {
+                updatePublishedRow(old, from: child, parent: parent)
+                return old
+            }
+            guard child.kind == .group else { return child }
+            let group = previousGroups[Self.stableGroupName(child.title)] ?? child
+            group.title = child.title
+            group.isExpandable = child.isExpandable
+            group.parent = parent
+            group.children = child.children?.map { row in
+                guard let key = row.cycleKey,
+                      let old = previousRows[key]
+                else { return row }
+                updatePublishedRow(old, from: row, parent: group)
+                return old
+            }
+            group.children?.forEach { $0.parent = group }
+            return group
+        }
+    }
+
     private func updatePublishedRow(
         _ previous: Node,
         from current: Node,
@@ -1054,6 +1381,7 @@ public final class RelationTreeModel {
         previous.line = current.line
         previous.symbol = current.symbol
         previous.expansionIdentity = current.expansionIdentity
+        previous.explanation = current.explanation
         previous.queryTarget = current.queryTarget
         previous.isExpandable = current.isExpandable
         previous.parent = parent
@@ -1066,7 +1394,8 @@ public final class RelationTreeModel {
     }
 
     private nonisolated static func stableGroupName(_ title: String) -> String {
-        title.hasPrefix("Show ") ? "Possible" : title
+        if title.hasPrefix("Show corrected candidates") { return "Corrected" }
+        return title.hasPrefix("Show ") ? "Possible" : title
     }
 
     private func makeRows(
@@ -1112,6 +1441,9 @@ public final class RelationTreeModel {
             if edge.alsoHeuristic {
                 modifiers.append("heuristic also matched")
             }
+            if edge.isCorrectedCandidate {
+                modifiers.append("Conflict/Corrected")
+            }
             if !edge.callSites.isEmpty {
                 modifiers.append("\(edge.callSites.count) call "
                     + (edge.callSites.count == 1 ? "site" : "sites"))
@@ -1133,6 +1465,7 @@ public final class RelationTreeModel {
                 symbol: edge.symbol,
                 representsLocation: direction == .references,
                 expansionIdentity: identity,
+                explanation: edge.explanation,
                 evidence: edge.evidence,
                 cycleKey: cycleKey,
                 queryTarget: (
@@ -1169,6 +1502,10 @@ public final class RelationTreeModel {
         var result: [LoadedEdge] = []
         var indexes: [CycleKey: Int] = [:]
         for edge in edges {
+            guard edge.certainty == .exact else {
+                result.append(edge)
+                continue
+            }
             guard let key = relationKey(edge) else {
                 result.append(edge)
                 continue
@@ -1185,6 +1522,21 @@ public final class RelationTreeModel {
                         path: normalizedPath($0.file),
                         identity: "selection:\($0.byteOffset)"
                     )).inserted
+                }
+                if let existing = result[index].explanation,
+                   let added = edge.explanation
+                {
+                    var refs = existing.reconciliationRefs
+                    for ref in added.reconciliationRefs where !refs.contains(ref) {
+                        refs.append(ref)
+                    }
+                    result[index].explanation = RelationRowExplanation(
+                        primaryTrace: existing.primaryTrace,
+                        contextID: existing.contextID,
+                        reconciliationRefs: refs
+                    )
+                } else if result[index].explanation == nil {
+                    result[index].explanation = edge.explanation
                 }
             } else {
                 indexes[key] = result.count
@@ -1280,6 +1632,14 @@ public final class RelationTreeModel {
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: caller.evidence,
+                        candidate: CandidateObservation(
+                            target: .occurrence(symbol),
+                            certainty: caller.certainty,
+                            dispatch: caller.dispatch,
+                            provenance: caller.provenance,
+                            completeness: caller.completeness,
+                            evidence: caller.evidence
+                        ),
                         exactQuery: (
                             location.path,
                             location.byteOffset,
@@ -1317,6 +1677,14 @@ public final class RelationTreeModel {
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: candidate.evidence,
+                        candidate: CandidateObservation(
+                            target: .occurrence(candidate.target),
+                            certainty: candidate.certainty,
+                            dispatch: candidate.dispatch,
+                            provenance: candidate.provenance,
+                            completeness: candidate.completeness,
+                            evidence: candidate.evidence
+                        ),
                         exactQuery: callSite.map {
                             ($0.path, $0.byteOffset, $0.line)
                         },

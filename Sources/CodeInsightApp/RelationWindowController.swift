@@ -258,6 +258,16 @@ final class RelationWindowController: NSViewController,
             as? RelationCellView)?.selfTestTitleAndCount ?? []
     }
 
+    var selfTestCorrectedDisclosureDisplayText: [String] {
+        guard let item = model.root?.children?.first(where: {
+            $0.kind == .group
+                && $0.title.hasPrefix("Show corrected candidates")
+        }) else { return [] }
+        let row = outlineView.row(forItem: item)
+        return (outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
+            as? RelationCellView)?.selfTestTitleAndCount ?? []
+    }
+
     var selfTestPossibleDisclosureFrame: NSRect {
         guard let item = selfTestPossibleDisclosureItem else { return .zero }
         let row = outlineView.row(forItem: item)
@@ -408,7 +418,9 @@ final class RelationWindowController: NSViewController,
     private var possibleDisclosureItem: RelationTreeModel.Node? {
         guard isViewLoaded else { return nil }
         return model.root?.children?.first {
-            $0.kind == .group && $0.title.hasPrefix("Show ")
+            $0.kind == .group
+                && $0.title.hasPrefix("Show ")
+                && !$0.title.hasPrefix("Show corrected candidates")
         }
     }
 
@@ -1122,7 +1134,14 @@ private final class RelationCellView: NSTableCellView {
             locationLabel.toolTip = location(of: node)
             locationLabel.isHidden = locationLabel.stringValue.isEmpty
         case .group:
-            if node.title.hasPrefix("Show ") {
+            if node.title.hasPrefix("Show corrected candidates") {
+                titleLabel.stringValue = "Show corrected candidates"
+                titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
+                titleLabel.textColor = theme.warningColor
+                countLabel.stringValue = "\(node.children?.count ?? 0)"
+                countLabel.font = .systemFont(ofSize: 10, weight: .semibold)
+                countPill.isHidden = false
+            } else if node.title.hasPrefix("Show ") {
                 titleLabel.stringValue = "Show possible matches"
                 titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
                 titleLabel.textColor = theme.accentColor

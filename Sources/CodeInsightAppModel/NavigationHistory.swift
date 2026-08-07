@@ -283,7 +283,7 @@ public enum TargetAvailability: Sendable {
     case unavailable
 }
 
-public enum TargetComparison: Sendable {
+public enum TargetComparison: Equatable, Sendable {
     case same
     case different
     case notComparable

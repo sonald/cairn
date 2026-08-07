@@ -144,6 +144,37 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func relationCorrectedCandidatesUseTheirOwnWarningDisclosure() async throws {
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            expandPossible: false,
+            exactResolver: { _, _, _, _ in
+                .completed([
+                    relationUXExactEntry(file: "main.rs", byteOffset: 3),
+                ])
+            }
+        )
+        defer { fixture.close() }
+
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        for _ in 0..<100 {
+            if fixture.controller.selfTestCorrectedDisclosureDisplayText
+                == ["Show corrected candidates", "2"]
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(fixture.controller.selfTestCorrectedDisclosureDisplayText
+            == ["Show corrected candidates", "2"])
+        #expect(fixture.controller.selfTestPossibleDisclosureTitle == nil)
+        #expect(relationEdges(in: fixture.model.root).filter {
+            $0.badge == "Verified"
+        }.count == 1)
+    }
+
+    @MainActor
+    @Test
     func relationPossibleValidationFollowsTheVisibleViewportInBatches()
         async throws
     {
@@ -185,11 +216,24 @@ struct RelationUXTests {
         #expect(Set(requestedOffsets) == firstBatchOffsets)
         #expect(requestedOffsets.count < possible.count)
 
-        #expect(
-            fixture.controller.selfTestScrollPossibleMatchToVisible(
-                at: possible.count - 1
-            )
-        )
+        for _ in 0..<100 {
+            let count = fixture.model.root?.children?.first {
+                $0.kind == .group
+                    && $0.title.hasSuffix("possible matches")
+            }?.children?.count
+            if count == possible.count - requestedOffsets.count { break }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let remainingPossible = try #require(fixture.model.root?.children?.first {
+            $0.kind == .group
+                && $0.title.hasSuffix("possible matches")
+        }?.children)
+        #expect(remainingPossible.count == possible.count - requestedOffsets.count)
+        #expect(fixture.controller.selfTestExpandPossibleMatches())
+        await pumpRunLoop()
+        #expect(fixture.controller.selfTestScrollPossibleMatchToVisible(
+            at: remainingPossible.count - 1
+        ))
         for _ in 0..<100 {
             if requestedOffsets.count == possible.count { break }
             try? await Task.sleep(for: .milliseconds(10))
@@ -1040,7 +1084,11 @@ private func makeRelationUXFixture(
     let secondLocation = try #require(relationLocation(for: second, in: session))
     let fuzzyLocations = try zip(possibleNames, possibleSymbols).map {
         name, symbol in
-        (name, try #require(relationLocation(for: symbol, in: session)))
+        (
+            name,
+            symbol,
+            try #require(relationLocation(for: symbol, in: session))
+        )
     }
     let exact = ExactCoordinator.Relation(
         name: "first",
@@ -1083,7 +1131,7 @@ private func makeRelationUXFixture(
                 )
             }
             return .init(
-                edges: fuzzyLocations.map { title, location in
+                edges: fuzzyLocations.map { title, symbol, location in
                     RelationTreeModel.LoadedEdge(
                         title: title,
                         certainty: loadDirection == .references
@@ -1095,6 +1143,16 @@ private func makeRelationUXFixture(
                         byteOffset: location.byteOffset,
                         line: location.line,
                         evidence: [],
+                        candidate: CandidateObservation(
+                            target: .occurrence(symbol),
+                            certainty: loadDirection == .references
+                                ? .possible
+                                : .strong,
+                            dispatch: .direct,
+                            provenance: .fuzzyResolver,
+                            completeness: .complete,
+                            evidence: []
+                        ),
                         exactQuery: exactResolver == nil
                             ? nil
                             : (location.path, location.byteOffset, location.line),

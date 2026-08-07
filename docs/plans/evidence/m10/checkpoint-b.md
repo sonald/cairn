@@ -33,8 +33,27 @@
 - `swift test --disable-sandbox`：418/418 PASS。
 - `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS；exact 通道包含三种 limitation 空结果文案。真实 rust-analyzer 仍受宿主 `sandbox-exec: sandbox_apply: Operation not permitted` 限制，按 BLOCKED 记载，不以 fake 结果替代。
 
+## E1c：call-site reconciliation
+
+- definition 验证按 `SourceLocation` 分组；同一 call site 的多个 candidate 只发一次请求。
+- `compare` 只在同 semantic identity 或 canonical location 完全相同时给 `.same`；只有两边都归一为明确且不同的 `SymbolOccurrenceID` 才给 `.different`；其余均为 `.notComparable`。
+- `.completed([])` 为中性 not-corroborated；非空结果逐 candidate 生成 corroborated / corrected / inconclusive，provider 目标逐 identity 去重显示。
+- 每次 reconciliation 写入 `RelationQueryContext`；provider 主行持全部 reconciliation refs，corrected 行保留原目标位置并进入单一 `Show corrected candidates (N)` disclosure。
+- Possible 与 corrected 最多两个同层 disclosure；批量验证重建组时复用 Node/group 身份，展开与 viewport 验证可继续。
+
+门禁：
+
+- `relationTargetComparisonIsConservative`：same / different / notComparable 三分 PASS。
+- `relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles`：A=same、B=different、C=notComparable；一次请求、一个 provider 主行、一个 corrected、C 继续 Inferred，主行 refs 完整。
+- `relationTreeEmptyDefinitionIsNeutralForEveryCandidate`：空结果不生成 conflict/corrected，所有 candidate 继续 Inferred。
+- `relationTreeShowsEveryDistinctProviderTargetForAConflict`：重复 provider location 去重；全部不匹配目标仍完整显示，candidate 折入 corrected。
+- AppKit `relationCorrectedCandidatesUseTheirOwnWarningDisclosure`：warning 色 corrected disclosure 显 `Show corrected candidates` + 独立计数，不冒充 Possible。
+- viewport 迁移：验证后的 Verified 行离开 Possible 组，因此旧测试“Possible 永远保持 64 行”改为“首批后剩 32 行，滚动剩余组后请求总数 64”；节点身份、批量上限与展开状态未弱化。
+- `swift test --disable-sandbox`：423/423 PASS。
+- `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS。
+
 ## 尚待本 Checkpoint 完成
 
-- [ ] E1c call-site reconciliation 与 conflict 修复。
+- [x] E1c call-site reconciliation 与 conflict 修复。
 - [ ] E1d 完整 trace 投影与 `alsoHeuristic` 删除。
 - [ ] N2 Trail DAG、Explanation Store 与 worktree best-effort replay。

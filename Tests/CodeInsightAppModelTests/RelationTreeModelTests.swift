@@ -1996,6 +1996,276 @@ func relationTreeValidatesLargePossibleResultsInBoundedStableBatches()
 
 @MainActor
 @Test
+func relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let queryOffset: UInt32 = 10
+    let unresolved = UnresolvedSymbolRef(
+        nameID: fixture.session.names.intern("unknown"),
+        hintKind: .member
+    )
+    func edge(
+        _ title: String,
+        target: CandidateEndpoint,
+        fuzzyOffset: UInt32
+    ) -> RelationTreeModel.LoadedEdge {
+        let candidate = CandidateObservation(
+            target: target,
+            certainty: .possible,
+            dispatch: .dynamicDispatch,
+            provenance: .fuzzyResolver,
+            completeness: .complete,
+            evidence: []
+        )
+        return RelationTreeModel.LoadedEdge(
+            title: title,
+            certainty: .possible,
+            dispatch: .dynamicDispatch,
+            symbol: nil,
+            path: "main.rs",
+            byteOffset: fuzzyOffset,
+            line: 1,
+            evidence: [],
+            candidate: candidate,
+            exactQuery: ("main.rs", queryOffset, 1),
+            fuzzyTarget: ("main.rs", fuzzyOffset)
+        )
+    }
+    var definitionRequests = 0
+    let loadedEdges = [
+        edge("same", target: .occurrence(fixture.a), fuzzyOffset: 3),
+        edge("different", target: .occurrence(fixture.b), fuzzyOffset: 19),
+        edge("inconclusive", target: .unresolved(unresolved), fuzzyOffset: 30),
+    ]
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: loadedEdges, isTruncated: false)
+        },
+        exactResolver: { _, _, _, _ in
+            definitionRequests += 1
+            return .completed([
+                relationExactEntry(file: "main.rs", byteOffset: 3),
+            ])
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
+    #expect(await testWaitUntil("candidate rows published") {
+        relationTreeFinishedLoading(model.root)
+    })
+    let candidates = try relationPossibleRows(in: model.root)
+    model.validatePossible(candidates)
+    #expect(await testWaitUntil("three-way reconciliation published") {
+        relationDirectRows(in: model.root).contains { $0.title == "same" }
+            && model.root?.children?.contains {
+                $0.kind == .group
+                    && $0.title == "Show corrected candidates (1)"
+            } == true
+    })
+
+    let direct = relationDirectRows(in: model.root)
+    let possible = try relationPossibleRows(in: model.root)
+    let corrected = try #require(model.root?.children?.first {
+        $0.kind == .group && $0.title == "Show corrected candidates (1)"
+    }?.children)
+    let reconciliation = try #require(
+        model.relationQueryContexts.values.first?.reconciliations.values.first
+    )
+    #expect(definitionRequests == 1)
+    #expect(direct.map(\.title) == ["same"])
+    #expect(direct.first?.badge == "Verified")
+    #expect(direct.first?.explanation?.reconciliationRefs.count == 3)
+    #expect(possible.map(\.title) == ["inconclusive"])
+    #expect(possible.first?.badge == "Inferred")
+    #expect(corrected.map(\.title) == ["different"])
+    #expect(corrected.first?.modifiers.contains("Conflict/Corrected") == true)
+    #expect(reconciliation.roles.count == 3)
+    #expect(reconciliation.roles.contains {
+        if case .corroborated(candidateIndex: 0, targetIndex: 0) = $0 {
+            return true
+        }
+        return false
+    })
+    #expect(reconciliation.roles.contains {
+        if case .correctedCandidate(candidateIndex: 1) = $0 { return true }
+        return false
+    })
+    #expect(reconciliation.roles.contains {
+        if case .inconclusiveCandidate(candidateIndex: 2) = $0 { return true }
+        return false
+    })
+}
+
+@Test
+func relationTargetComparisonIsConservative() throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    #expect(RelationTreeModel.compare(
+        candidate: .candidate(.occurrence(fixture.a)),
+        exact: ExactTarget(location: relationExactLocation(
+            file: "main.rs",
+            offset: 3
+        )),
+        in: fixture.session
+    ) == .same)
+    #expect(RelationTreeModel.compare(
+        candidate: .candidate(.occurrence(fixture.a)),
+        exact: ExactTarget(location: relationExactLocation(
+            file: "main.rs",
+            offset: 19
+        )),
+        in: fixture.session
+    ) == .different)
+    #expect(RelationTreeModel.compare(
+        candidate: .candidate(.occurrence(fixture.a)),
+        exact: ExactTarget(location: relationExactLocation(
+            file: "/dependency/src/lib.rs",
+            offset: 3
+        )),
+        in: fixture.session
+    ) == .notComparable)
+}
+
+@MainActor
+@Test
+func relationTreeEmptyDefinitionIsNeutralForEveryCandidate() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    var definitionRequests = 0
+    let edges = [fixture.a, fixture.b].enumerated().map { index, symbol in
+        RelationTreeModel.LoadedEdge(
+            title: "candidate-\(index)",
+            certainty: .possible,
+            dispatch: .direct,
+            symbol: symbol,
+            path: "main.rs",
+            byteOffset: UInt32(index + 3),
+            line: 1,
+            evidence: [],
+            candidate: CandidateObservation(
+                target: .occurrence(symbol),
+                certainty: .possible,
+                dispatch: .direct,
+                provenance: .fuzzyResolver,
+                completeness: .complete,
+                evidence: []
+            ),
+            exactQuery: ("main.rs", 10, 1),
+            fuzzyTarget: ("main.rs", UInt32(index + 3))
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: edges, isTruncated: false) },
+        exactResolver: { _, _, _, _ in
+            definitionRequests += 1
+            return .completed([])
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.setRoot(target: .engine(fixture.a), direction: .calls)
+    #expect(await testWaitUntil("candidate rows published") {
+        relationTreeFinishedLoading(model.root)
+    })
+    model.validatePossible(try relationPossibleRows(in: model.root))
+    #expect(await testWaitUntil("empty definition reconciliation published") {
+        model.relationQueryContexts.values.first?.reconciliations.isEmpty == false
+    })
+
+    let possible = try relationPossibleRows(in: model.root)
+    let roles = try #require(
+        model.relationQueryContexts.values.first?.reconciliations.values.first
+    ).roles
+    #expect(definitionRequests == 1)
+    #expect(possible.map(\.badge) == ["Inferred", "Inferred"])
+    #expect(model.root?.children?.contains {
+        $0.title.hasPrefix("Show corrected candidates")
+    } == false)
+    #expect(roles.count == 2)
+    #expect(roles.allSatisfy {
+        if case .notCorroboratedCandidate = $0 { return true }
+        return false
+    })
+}
+
+@MainActor
+@Test
+func relationTreeShowsEveryDistinctProviderTargetForAConflict() async throws {
+    let root = try relationTemporaryProject([
+        "main.rs": "fn a() {}\nfn b() {}\nfn c() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = relationQueryContext(for: session)
+    let a = try #require(session.definitions(of: "a", context: context).first?.0)
+    let c = try #require(session.definitions(of: "c", context: context).first?.0)
+    let candidate = CandidateObservation(
+        target: .occurrence(c),
+        certainty: .possible,
+        dispatch: .direct,
+        provenance: .fuzzyResolver,
+        completeness: .complete,
+        evidence: []
+    )
+    let edge = RelationTreeModel.LoadedEdge(
+        title: "c",
+        certainty: .possible,
+        dispatch: .direct,
+        symbol: c,
+        path: "main.rs",
+        byteOffset: 23,
+        line: 3,
+        evidence: [],
+        candidate: candidate,
+        exactQuery: ("main.rs", 30, 3),
+        fuzzyTarget: ("main.rs", 23)
+    )
+    var definitionRequests = 0
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: [edge], isTruncated: false) },
+        exactResolver: { _, _, _, _ in
+            definitionRequests += 1
+            return .completed([
+                relationExactEntry(file: "main.rs", byteOffset: 3),
+                relationExactEntry(file: "main.rs", byteOffset: 3),
+                relationExactEntry(file: "main.rs", byteOffset: 13),
+            ])
+        }
+    )
+    model.updateProjectState(.ready(session, context))
+    model.setRoot(target: .engine(a), direction: .calls)
+    #expect(await testWaitUntil("candidate row published") {
+        relationTreeFinishedLoading(model.root)
+    })
+    model.validatePossible(try relationPossibleRows(in: model.root))
+    #expect(await testWaitUntil("provider targets and corrected group published") {
+        relationDirectRows(in: model.root).count == 2
+            && model.root?.children?.contains {
+                $0.title == "Show corrected candidates (1)"
+            } == true
+    })
+
+    #expect(definitionRequests == 1)
+    #expect(Set(relationDirectRows(in: model.root).map(\.title)) == ["a", "b"])
+    #expect(model.root?.children?.first {
+        $0.title == "Show corrected candidates (1)"
+    }?.children?.map(\.title) == ["c"])
+    let roles = try #require(
+        model.relationQueryContexts.values.first?.reconciliations.values.first
+    ).roles
+    #expect(roles.contains {
+        if case .correctedCandidate(candidateIndex: 0) = $0 { return true }
+        return false
+    })
+    #expect(roles.filter {
+        if case .providerOnly = $0 { return true }
+        return false
+    }.count == 3)
+}
+
+@MainActor
+@Test
 func relationTreeSwitchStopsQueuedPossibleValidationBeforeProviderEntry()
     async throws
 {
