@@ -115,13 +115,12 @@ public final class RelationTreeModel {
         let byteOffset: UInt32
         let line: UInt32
         let evidence: [ResolutionEvidence]
-        let candidate: CandidateObservation?
+        var candidate: CandidateObservation?
         let exactQuery: (file: String, byteOffset: UInt32, line: UInt32)?
         let fuzzyTarget: (file: String, byteOffset: UInt32)?
         let identityTarget: (file: String, byteOffset: UInt32)?
         let exactItem: ExactCallHierarchyItem?
         var callSites: [ExactLocation]
-        var alsoHeuristic: Bool
         var exactOrigin: ExactOrigin?
         var explanation: RelationRowExplanation?
         var isCorrectedCandidate: Bool
@@ -141,7 +140,6 @@ public final class RelationTreeModel {
             identityTarget: (file: String, byteOffset: UInt32)? = nil,
             exactItem: ExactCallHierarchyItem? = nil,
             callSites: [ExactLocation] = [],
-            alsoHeuristic: Bool = false,
             exactOrigin: ExactOrigin? = nil,
             explanation: RelationRowExplanation? = nil,
             isCorrectedCandidate: Bool = false
@@ -160,7 +158,6 @@ public final class RelationTreeModel {
             self.identityTarget = identityTarget
             self.exactItem = exactItem
             self.callSites = callSites
-            self.alsoHeuristic = alsoHeuristic
             self.exactOrigin = exactOrigin
             self.explanation = explanation
             self.isCorrectedCandidate = isCorrectedCandidate
@@ -579,6 +576,12 @@ public final class RelationTreeModel {
             var exactResult: ExactCoordinator.RelationQueryResult?
             var hasEngineResult = false
             var pendingQueryCount = 0
+            let relationContextID = RelationQueryContextID()
+            let hasCandidateQuery: Bool = if case .engine = identity {
+                true
+            } else {
+                false
+            }
             let exactItem: ExactCallHierarchyItem? = if case let .exact(item) = identity {
                 item
             } else {
@@ -627,6 +630,17 @@ public final class RelationTreeModel {
                     ))
                 })
             }
+            relationQueryContexts[relationContextID] = RelationQueryContext(
+                candidateQuery: hasCandidateQuery
+                    ? .pending
+                    : .completed(RelationSetObservation(
+                        completeness: .complete,
+                        returnedCount: 0
+                    )),
+                exactQuery: exactRelationsResolver != nil && query != nil
+                    ? .pending
+                    : .notStarted
+            )
             if pendingQueryCount == 0 { continuation.finish() }
             let timeoutTask = Task.detached {
                 do {
@@ -661,10 +675,22 @@ public final class RelationTreeModel {
                         loaded = engineResult
                         hasEngineResult = true
                         heuristicCandidateCount = engineResult.edges.count
+                        relationQueryContexts[relationContextID]?.candidateQuery =
+                            .completed(RelationSetObservation(
+                                completeness: engineResult.isTruncated
+                                    ? .truncated
+                                    : .complete,
+                                returnedCount: engineResult.edges.count
+                            ))
                     } else if result.engineFailed {
                         engineLoadFailed = true
+                        relationQueryContexts[relationContextID]?.candidateQuery = .failed
                     } else {
                         exactResult = result.exact
+                        if let exactResult {
+                            relationQueryContexts[relationContextID]?.exactQuery =
+                                .completed(Self.relationQueryObservation(exactResult))
+                        }
                     }
                     guard hasEngineResult || exactResult != nil else {
                         if pendingQueryCount == 0 { break }
@@ -675,10 +701,18 @@ public final class RelationTreeModel {
                             exactResult,
                             into: loaded,
                             direction: direction,
-                            session: session
+                            session: session,
+                            contextID: relationContextID
                         )
                     } else {
-                        loaded
+                        LoadResult(
+                            edges: candidateOnlyEdges(
+                                loaded.edges,
+                                contextID: relationContextID
+                            ),
+                            isTruncated: loaded.isTruncated,
+                            exactState: loaded.exactState
+                        )
                     }
                     var children = makeChildren(
                         from: displayed,
@@ -1018,22 +1052,23 @@ public final class RelationTreeModel {
         _ result: ExactCoordinator.RelationQueryResult,
         into loaded: LoadResult,
         direction: Direction,
-        session: EngineSession
+        session: EngineSession,
+        contextID: RelationQueryContextID
     ) -> LoadResult {
         switch result {
         case .unsupported:
             return LoadResult(
-                edges: loaded.edges,
+                edges: candidateOnlyEdges(loaded.edges, contextID: contextID),
                 isTruncated: loaded.isTruncated,
                 exactState: .unsupported
             )
         case .notApplicable:
             return LoadResult(
-                edges: loaded.edges,
+                edges: candidateOnlyEdges(loaded.edges, contextID: contextID),
                 isTruncated: loaded.isTruncated,
                 exactState: .notApplicable
             )
-        case let .relations(relations, origin, environment):
+        case let .relations(relations, origin, attribution):
             var exactEdges = relations.compactMap { relation -> LoadedEdge? in
                 guard let byteOffset = UInt32(exactly: relation.location.byteOffset),
                       let line = UInt32(exactly: relation.location.line),
@@ -1042,6 +1077,11 @@ public final class RelationTreeModel {
                 let symbol = Self.symbol(
                     at: relation.location,
                     in: session
+                )
+                let verification = VerificationObservation(
+                    target: ExactTarget(location: relation.location),
+                    attribution: attribution,
+                    origin: origin
                 )
                 return LoadedEdge(
                     title: relation.name
@@ -1065,7 +1105,11 @@ public final class RelationTreeModel {
                         UInt32(exactly: $0.byteOffset) != nil
                             && UInt32(exactly: $0.line).map { $0 > 0 } == true
                     },
-                    exactOrigin: origin
+                    exactOrigin: origin,
+                    explanation: RelationRowExplanation(
+                        primaryTrace: .verificationOnly(verification),
+                        contextID: contextID
+                    )
                 )
             }
             exactEdges = Self.deduplicateExact(exactEdges)
@@ -1079,9 +1123,30 @@ public final class RelationTreeModel {
             var edges = loaded.edges.map { heuristic in
                 guard let key = Self.relationKey(heuristic),
                       let index = exactIndexes[key]
-                else { return heuristic }
+                else {
+                    var candidateOnly = heuristic
+                    if let candidate = candidateObservation(for: heuristic) {
+                        candidateOnly.explanation = RelationRowExplanation(
+                            primaryTrace: .candidateOnly(candidate),
+                            contextID: contextID
+                        )
+                    }
+                    return candidateOnly
+                }
                 matchedExactIndexes.insert(index)
-                exactEdges[index].alsoHeuristic = true
+                if let candidate = candidateObservation(for: heuristic),
+                   case .verificationOnly(let verification) =
+                    exactEdges[index].explanation?.primaryTrace
+                {
+                    exactEdges[index].candidate = candidate
+                    exactEdges[index].explanation = RelationRowExplanation(
+                        primaryTrace: .corroborated(
+                            candidate: candidate,
+                            verification: verification
+                        ),
+                        contextID: contextID
+                    )
+                }
                 return exactEdges[index]
             }
             edges += exactEdges.indices.compactMap {
@@ -1090,7 +1155,40 @@ public final class RelationTreeModel {
             return LoadResult(
                 edges: edges,
                 isTruncated: loaded.isTruncated,
-                exactState: .queried(environment)
+                exactState: .queried(attribution.environment)
+            )
+        }
+    }
+
+    private func candidateOnlyEdges(
+        _ edges: [LoadedEdge],
+        contextID: RelationQueryContextID
+    ) -> [LoadedEdge] {
+        edges.map { edge in
+            var edge = edge
+            if let candidate = candidateObservation(for: edge) {
+                edge.explanation = RelationRowExplanation(
+                    primaryTrace: .candidateOnly(candidate),
+                    contextID: contextID
+                )
+            }
+            return edge
+        }
+    }
+
+    private nonisolated static func relationQueryObservation(
+        _ result: ExactCoordinator.RelationQueryResult
+    ) -> RelationQueryObservation {
+        switch result {
+        case .unsupported:
+            .unsupported
+        case .notApplicable:
+            .notApplicable
+        case .relations(_, let origin, let attribution):
+            .completed(
+                attribution: attribution,
+                origin: origin,
+                exhaustiveness: .bestEffort
             )
         }
     }
@@ -1438,7 +1536,7 @@ public final class RelationTreeModel {
             {
                 modifiers.append("name match only")
             }
-            if edge.alsoHeuristic {
+            if case .corroborated = edge.explanation?.primaryTrace {
                 modifiers.append("heuristic also matched")
             }
             if edge.isCorrectedCandidate {
@@ -1694,6 +1792,13 @@ public final class RelationTreeModel {
                 if !appendedCandidate,
                    let location = location(for: outgoing.callSite, in: session)
                 {
+                    let hintKind: UnresolvedSymbolHintKind = switch
+                        outgoing.call.syntacticKind
+                    {
+                    case .methodCall: .member
+                    case .qualifiedCall: .qualified
+                    default: .unqualified
+                    }
                     edges.append(LoadedEdge(
                         title: outgoing.calleeName,
                         certainty: .unresolved,
@@ -1702,7 +1807,18 @@ public final class RelationTreeModel {
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: []
+                        evidence: [],
+                        candidate: CandidateObservation(
+                            target: .unresolved(UnresolvedSymbolRef(
+                                nameID: outgoing.call.nameID,
+                                hintKind: hintKind
+                            )),
+                            certainty: .unresolved,
+                            dispatch: .direct,
+                            provenance: .fuzzyResolver,
+                            completeness: result.completeness,
+                            evidence: []
+                        )
                     ))
                 }
             }
@@ -1734,7 +1850,15 @@ public final class RelationTreeModel {
                             path: location.path,
                             byteOffset: location.byteOffset,
                             line: location.line,
-                            evidence: implementation.traitDefinitions.flatMap(\.evidence)
+                            evidence: implementation.traitDefinitions.flatMap(\.evidence),
+                            candidate: CandidateObservation(
+                                target: .occurrence(implementation.implementation),
+                                certainty: implementation.certainty,
+                                dispatch: .traitDispatch,
+                                provenance: .languageProof,
+                                completeness: .complete,
+                                evidence: implementation.traitDefinitions.flatMap(\.evidence)
+                            )
                         )
                     },
                     isTruncated: false
@@ -1763,7 +1887,15 @@ public final class RelationTreeModel {
                         path: location.path,
                         byteOffset: location.byteOffset,
                         line: location.line,
-                        evidence: candidate.evidence
+                        evidence: candidate.evidence,
+                        candidate: CandidateObservation(
+                            target: .occurrence(candidate.target),
+                            certainty: candidate.certainty,
+                            dispatch: candidate.dispatch,
+                            provenance: candidate.provenance,
+                            completeness: candidate.completeness,
+                            evidence: candidate.evidence
+                        )
                     )
                 },
                 isTruncated: false
@@ -1798,7 +1930,18 @@ public final class RelationTreeModel {
                             path: path,
                             byteOffset: $0.byteRange.lowerBound,
                             line: $0.line,
-                            evidence: [.nameOnly(nameID: facet.nameID)]
+                            evidence: [.nameOnly(nameID: facet.nameID)],
+                            candidate: CandidateObservation(
+                                target: .unresolved(UnresolvedSymbolRef(
+                                    nameID: facet.nameID,
+                                    hintKind: .unqualified
+                                )),
+                                certainty: .possible,
+                                dispatch: .direct,
+                                provenance: .fuzzyResolver,
+                                completeness: batch.completeness,
+                                evidence: [.nameOnly(nameID: facet.nameID)]
+                            )
                         )
                     }
                 }

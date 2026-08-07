@@ -52,8 +52,24 @@
 - `swift test --disable-sandbox`：423/423 PASS。
 - `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS。
 
+## E1d：完整 trace 投影与旧状态保留
+
+- 每个 Relations expansion 建立一个 `RelationQueryContext`；Engine/Exact 并发到达分别更新 `pending / completed / failed`，Exact-first 发布时不会把尚未到达的 candidate 误判成空结果。
+- `mergeExact` 现在完整投影三态：fuzzy-only 保留 `candidateOnly` 与 Inferred，exact-only 保留 `verificationOnly` 与 Verified，重合行持 `corroborated(candidate, verification)`。
+- relation query 结果直接携带完整 `ExactAttribution`，因此 verification trace 不再从 environment 反推或伪造 provider 信息；RA call hierarchy 的查询穷尽性明确记录为 `.bestEffort`。
+- callers/calls/implementations/references 的候选观察均携带原 certainty、dispatch、provenance、completeness、evidence；未解析 call 与文本 reference 使用已有 `UnresolvedSymbolRef`，未增加并行 endpoint 类型。
+- `LoadedEdge.alsoHeuristic` 已删除；原 `heuristic also matched` UI/AX 文案只从 `.corroborated` 派生。
+
+门禁：
+
+- `relationTreeReferenceMergeKeepsAllThreeEvidenceCases`：三态 trace、升级前 observation、查询级 completed facts 全部断言 PASS。
+- `relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives`：Exact-first 时 candidate=`pending`、exact=`completed`、行=`verificationOnly`；Engine 到达后原位升级为 `corroborated`，fuzzy-only 保持 `candidateOnly`。
+- `rg alsoHeuristic Sources Tests`：零命中；既有 UI/AX 文案断言继续 PASS。
+- RelationTree 定向测试：52/52 PASS；`swift test --disable-sandbox`：423/423 PASS。
+- `CODEX_SANDBOX=1 bash scripts/run-self-tests.sh ...`：12/12 PASS，artifact `.build/self-test-run-20260807-105533-48304`。
+
 ## 尚待本 Checkpoint 完成
 
 - [x] E1c call-site reconciliation 与 conflict 修复。
-- [ ] E1d 完整 trace 投影与 `alsoHeuristic` 删除。
+- [x] E1d 完整 trace 投影与 `alsoHeuristic` 删除。
 - [ ] N2 Trail DAG、Explanation Store 与 worktree best-effort replay。

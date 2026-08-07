@@ -107,7 +107,7 @@ public final class ExactCoordinator {
         case relations(
             [Relation],
             origin: ExactOrigin,
-            environment: ExactAnalysisEnvironment
+            attribution: ExactAttribution
         )
     }
 
@@ -797,7 +797,7 @@ public final class ExactCoordinator {
                         mapped($0, from: source.materializedRoot)
                     }
                 )
-            }, origin: origin, environment: environment)
+            }, origin: origin, attribution: source.session.attribution)
         case .locations(let locations):
             .relations(locations.map {
                 Relation(
@@ -806,7 +806,7 @@ public final class ExactCoordinator {
                     item: nil,
                     callSites: []
                 )
-            }, origin: origin, environment: environment)
+            }, origin: origin, attribution: source.session.attribution)
         }
     }
 

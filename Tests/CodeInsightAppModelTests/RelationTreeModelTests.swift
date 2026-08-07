@@ -231,7 +231,7 @@ func relationTreeConsumesExactReferences() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -261,7 +261,15 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
         path: "fuzzy-only.rs",
         byteOffset: 20,
         line: 1,
-        evidence: []
+        evidence: [],
+        candidate: CandidateObservation(
+            target: .occurrence(fixture.b),
+            certainty: .possible,
+            dispatch: .direct,
+            provenance: .fuzzyResolver,
+            completeness: .complete,
+            evidence: []
+        )
     )
     let model = RelationTreeModel(
         loader: { _, _, _, _ in
@@ -274,7 +282,15 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
                     path: overlap.file,
                     byteOffset: UInt32(overlap.byteOffset),
                     line: 1,
-                    evidence: []
+                    evidence: [],
+                    candidate: CandidateObservation(
+                        target: .occurrence(fixture.b),
+                        certainty: .possible,
+                        dispatch: .direct,
+                        provenance: .fuzzyResolver,
+                        completeness: .complete,
+                        evidence: []
+                    )
                 ),
                 fuzzyOnly,
             ], isTruncated: false)
@@ -293,7 +309,7 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -320,6 +336,47 @@ func relationTreeReferenceMergeKeepsAllThreeEvidenceCases() async throws {
             && $0.target?.byteOffset == fuzzyOnly.byteOffset
             && $0.badge == "Inferred"
     } == true)
+    let overlapRow = try #require(rows.first {
+        $0.target?.path == overlap.file
+            && $0.target?.byteOffset == UInt32(overlap.byteOffset)
+    })
+    let exactOnlyRow = try #require(rows.first {
+        $0.target?.path == exactOnly.file
+    })
+    let fuzzyOnlyRow = try #require(rows.first {
+        $0.target?.path == fuzzyOnly.path
+    })
+    guard case .corroborated(let candidate, let verification) =
+        overlapRow.explanation?.primaryTrace
+    else {
+        Issue.record("overlap must preserve both observations")
+        return
+    }
+    #expect(candidate.certainty == .possible)
+    #expect(verification.target.location == overlap)
+    guard case .verificationOnly(let exactObservation) =
+        exactOnlyRow.explanation?.primaryTrace
+    else {
+        Issue.record("exact-only row must retain its verification observation")
+        return
+    }
+    #expect(exactObservation.target.location == exactOnly)
+    guard case .candidateOnly(let fuzzyObservation) =
+        fuzzyOnlyRow.explanation?.primaryTrace
+    else {
+        Issue.record("fuzzy-only row must retain its candidate observation")
+        return
+    }
+    #expect(fuzzyObservation.certainty == .possible)
+    let queryContext = try #require(model.relationQueryContexts.values.first)
+    guard case .completed(let candidateSet) = queryContext.candidateQuery,
+          case .completed(.completed(_, .worktree, .bestEffort)) =
+            queryContext.exactQuery
+    else {
+        Issue.record("relation query states must record both completed sources")
+        return
+    }
+    #expect(candidateSet.returnedCount == 2)
 }
 
 @MainActor
@@ -611,12 +668,12 @@ func exactCoordinatorRequestsReferencesWithoutTheDeclaration() async throws {
         generation: fixture.context.generation
     )
 
-    guard case let .relations(relations, _, environment) = result else {
+    guard case let .relations(relations, _, attribution) = result else {
         Issue.record("expected exact references")
         return
     }
     #expect(relations.map(\.location) == [location])
-    #expect(environment.limitations.isEmpty)
+    #expect(attribution.environment.limitations.isEmpty)
     #expect(session.referenceIncludeDeclarations == [false])
 }
 
@@ -722,7 +779,7 @@ func relationTreeVerifiedBadgesCountExactRowsInAllDirections() async throws {
                 .init(edges: [], isTruncated: false)
             },
             exactRelationsResolver: { _, _, _, _, _, _ in
-                .relations(relations, origin: .worktree, environment: exactTestEnvironment())
+                .relations(relations, origin: .worktree, attribution: relationExactAttribution())
             }
         )
         model.updateProjectState(.ready(session, context))
@@ -1066,7 +1123,7 @@ func relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() async throws 
                     item: item,
                     callSites: callSites
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1159,7 +1216,7 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
                     ),
                 ],
                 origin: .worktree,
-                environment: exactTestEnvironment()
+                attribution: relationExactAttribution()
             )
         }
     )
@@ -1284,7 +1341,7 @@ func relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections()
                         item: nil,
                         callSites: []
                     ),
-                ], origin: .worktree, environment: exactTestEnvironment())
+                ], origin: .worktree, attribution: relationExactAttribution())
             }
         )
         model.updateProjectState(.ready(testCase.session, testCase.context))
@@ -1344,7 +1401,7 @@ func relationTreeDoesNotExposeExactRelationSublayers() async throws {
                     item: b,
                     callSites: []
                 )
-            return .relations([relation], origin: .worktree, environment: exactTestEnvironment())
+            return .relations([relation], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -1385,7 +1442,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .callers,
-        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
+        result: .relations([], origin: .worktree, attribution: relationExactAttribution())
     )
 
     let traitRoot = try relationTemporaryProject([
@@ -1409,7 +1466,7 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
         context: traitContext,
         symbol: trait,
         direction: .implementations,
-        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
+        result: .relations([], origin: .worktree, attribution: relationExactAttribution())
     )
 
     #expect(callersUnsupported
@@ -1453,7 +1510,7 @@ func relationTreeUsesFourDistinctExactReferenceStates() async throws {
         context: fixture.context,
         symbol: fixture.a,
         direction: .references,
-        result: .relations([], origin: .worktree, environment: exactTestEnvironment())
+        result: .relations([], origin: .worktree, attribution: relationExactAttribution())
     )
     let legacyModel = RelationTreeModel(loader: { _, _, _, _ in
         .init(edges: [], isTruncated: false)
@@ -1535,7 +1592,7 @@ func relationTreeShowsExactOnlyImplementations() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(session, context))
@@ -1652,7 +1709,7 @@ func relationRowsExposeVerifiedAndInferredBadges() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2071,7 +2128,7 @@ func relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles()
         $0.kind == .group && $0.title == "Show corrected candidates (1)"
     }?.children)
     let reconciliation = try #require(
-        model.relationQueryContexts.values.first?.reconciliations.values.first
+        relationFirstReconciliation(in: model)
     )
     #expect(definitionRequests == 1)
     #expect(direct.map(\.title) == ["same"])
@@ -2170,12 +2227,12 @@ func relationTreeEmptyDefinitionIsNeutralForEveryCandidate() async throws {
     })
     model.validatePossible(try relationPossibleRows(in: model.root))
     #expect(await testWaitUntil("empty definition reconciliation published") {
-        model.relationQueryContexts.values.first?.reconciliations.isEmpty == false
+        relationFirstReconciliation(in: model) != nil
     })
 
     let possible = try relationPossibleRows(in: model.root)
     let roles = try #require(
-        model.relationQueryContexts.values.first?.reconciliations.values.first
+        relationFirstReconciliation(in: model)
     ).roles
     #expect(definitionRequests == 1)
     #expect(possible.map(\.badge) == ["Inferred", "Inferred"])
@@ -2252,7 +2309,7 @@ func relationTreeShowsEveryDistinctProviderTargetForAConflict() async throws {
         $0.title == "Show corrected candidates (1)"
     }?.children?.map(\.title) == ["c"])
     let roles = try #require(
-        model.relationQueryContexts.values.first?.reconciliations.values.first
+        relationFirstReconciliation(in: model)
     ).roles
     #expect(roles.contains {
         if case .correctedCandidate(candidateIndex: 0) = $0 { return true }
@@ -2539,7 +2596,15 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
                         path: "main.rs",
                         byteOffset: 40,
                         line: 1,
-                        evidence: []
+                        evidence: [],
+                        candidate: CandidateObservation(
+                            target: .occurrence(fixture.b),
+                            certainty: .strong,
+                            dispatch: .direct,
+                            provenance: .fuzzyResolver,
+                            completeness: .complete,
+                            evidence: []
+                        )
                     ),
                 ],
                 isTruncated: false
@@ -2563,7 +2628,7 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
                     item: nil,
                     callSites: []
                 ),
-            ], origin: .worktree, environment: exactTestEnvironment())
+            ], origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -2576,12 +2641,38 @@ func relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() async throws {
             && relationRows(withBadge: "Verified", in: model.root)
                 .map { $0.target?.byteOffset } == [20, 10]
     })
+    let exactFirstContext = try #require(
+        model.relationQueryContexts.values.first
+    )
+    guard case .pending = exactFirstContext.candidateQuery,
+          case .completed(.completed(_, .worktree, .bestEffort)) =
+            exactFirstContext.exactQuery
+    else {
+        Issue.record("Exact-first publication must retain pending candidate state")
+        return
+    }
+    #expect(relationRows(withBadge: "Verified", in: model.root).allSatisfy {
+        if case .verificationOnly = $0.explanation?.primaryTrace { return true }
+        return false
+    })
     await loader.release(fixture.a)
     await load?.value
 
     #expect(relationRows(withBadge: "Verified", in: model.root)
         .map { $0.target?.byteOffset } == [20, 10])
     #expect(relationDirectRows(in: model.root).last?.title == "D")
+    #expect(relationRows(withBadge: "Verified", in: model.root).allSatisfy {
+        if case .corroborated = $0.explanation?.primaryTrace { return true }
+        return false
+    })
+    #expect({
+        if case .candidateOnly = relationDirectRows(in: model.root).last?
+            .explanation?.primaryTrace
+        {
+            return true
+        }
+        return false
+    }())
 }
 
 @MainActor
@@ -3231,7 +3322,7 @@ func relationTreeCapsExactRelationsAndReportsTheirTrueTotal() async throws {
             .init(edges: [], isTruncated: false)
         },
         exactRelationsResolver: { _, _, _, _, _, _ in
-            .relations(relations, origin: .worktree, environment: exactTestEnvironment())
+            .relations(relations, origin: .worktree, attribution: relationExactAttribution())
         }
     )
     model.updateProjectState(.ready(fixture.session, fixture.context))
@@ -3851,6 +3942,15 @@ private func relationPossibleRows(
 }
 
 @MainActor
+private func relationFirstReconciliation(
+    in model: RelationTreeModel
+) -> CallSiteReconciliation? {
+    model.relationQueryContexts.values.lazy.compactMap {
+        $0.reconciliations.values.first
+    }.first
+}
+
+@MainActor
 private func relationRows(
     withBadge badge: String,
     in parent: RelationTreeModel.Node?
@@ -3945,7 +4045,7 @@ private func relationProjectReferenceStatus(
     }
     let exactResolver: RelationTreeModel.ExactRelationsResolver = {
         _, _, _, _, _, _ in
-        .relations(exact, origin: .worktree, environment: exactTestEnvironment())
+        .relations(exact, origin: .worktree, attribution: relationExactAttribution())
     }
     let model = RelationTreeModel(
         loader: { _, _, _, _ in

@@ -1173,10 +1173,7 @@ private func makeRelationUXFixture(
                 ? .relations(
                     [exact],
                     origin: .worktree,
-                    environment: ExactAnalysisEnvironment(
-                        trustMode: .safe,
-                        limitations: []
-                    )
+                    attribution: relationUXExactAttribution()
                 )
                 : .unsupported
         }
@@ -1254,18 +1251,26 @@ private func relationUXExactEntry(
             line: 1,
             column: Int(byteOffset) + 1
         ),
-        attribution: ExactAttribution(
-            provider: "fake-exact",
-            toolVersion: "fake-1",
-            configFingerprint: "config",
-            environmentFingerprint: "environment",
-            environment: ExactAnalysisEnvironment(
-                trustMode: .safe,
-                limitations: [.buildScriptsDisabled, .procMacrosDisabled]
-            ),
-            generatedAt: Date(timeIntervalSince1970: 0)
+        attribution: relationUXExactAttribution(
+            limitations: [.buildScriptsDisabled, .procMacrosDisabled]
         ),
         origin: .worktree
+    )
+}
+
+private func relationUXExactAttribution(
+    limitations: Set<ExactAnalysisLimitation> = []
+) -> ExactAttribution {
+    ExactAttribution(
+        provider: "fake-exact",
+        toolVersion: "fake-1",
+        configFingerprint: "config",
+        environmentFingerprint: "environment",
+        environment: ExactAnalysisEnvironment(
+            trustMode: .safe,
+            limitations: limitations
+        ),
+        generatedAt: Date(timeIntervalSince1970: 0)
     )
 }
 
