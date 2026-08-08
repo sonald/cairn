@@ -104,6 +104,7 @@ run_case project-non-git --self-test-project "$non_git_root"
 run_case tabs --self-test-tabs
 run_case search --self-test-search
 run_case reading --self-test-reading
+run_case projector --self-test-projector
 run_case diff --self-test-diff "$git_repo"
 run_case pin --self-test-pin "$git_repo"
 run_case history --self-test-history "$git_repo"

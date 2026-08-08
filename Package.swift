@@ -159,7 +159,7 @@ let package = Package(
         ),
         .target(
             name: "CodeInsightReaderUI",
-            dependencies: ["CodeInsightReaderCore"]
+            dependencies: ["CodeInsightCore", "CodeInsightReaderCore"]
         ),
         .executableTarget(
             name: "CodeInsightApp",
@@ -236,6 +236,7 @@ let package = Package(
         .testTarget(
             name: "CodeInsightReaderUITests",
             dependencies: [
+                "CodeInsightCore",
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
             ]

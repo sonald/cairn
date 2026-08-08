@@ -1,8 +1,145 @@
 import AppKit
+import CodeInsightCore
 import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightReaderUI
+
+@Test
+func displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() throws {
+    let source = "α\nfn outer() {\n    let emoji = \"😀é\";\n}\nω\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlightWithFolds(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        contentID: nil,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        foldRegions: highlighted.folds,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let fold = try #require(highlighted.folds.first { $0.kind == .declaration })
+    let map = try #require(DisplayMap(
+        document: document,
+        renderedFoldIDs: [fold.id]
+    ))
+    let placeholder = (map.projectedString as NSString).range(of: "\u{FFFC}")
+    let before = UInt32(source.utf8.distance(
+        from: source.utf8.startIndex,
+        to: try #require(source.utf8.firstIndex(of: UInt8(ascii: "f")))
+    ))
+
+    guard case .visible(let displayBefore) = map.displayPosition(ofByte: before),
+          case .source(let sourceBefore) = map.sourcePosition(ofDisplay: displayBefore)
+    else {
+        Issue.record("visible source did not round-trip")
+        return
+    }
+    #expect(sourceBefore == before)
+    #expect(map.displayPosition(ofByte: fold.bodyRange.lowerBound) == .hidden(fold.id))
+    #expect(map.sourcePosition(ofDisplay: placeholder.location) == .placeholder(fold.id))
+    #expect(map.sourceRanges(forDisplay: placeholder) == [fold.bodyRange])
+    #expect(map.visibleSourceRanges(forDisplay: placeholder) == [])
+
+    let projected = try #require(map.project(byteRange: ByteRange(
+        lowerBound: 0,
+        upperBound: UInt32(bytes.count)
+    )))
+    #expect(projected.folds == [fold.id])
+    #expect(projected.visible.count == 2)
+    #expect(projected.visible[0].location == 0)
+    #expect(NSMaxRange(projected.visible[1]) == map.projectedUTF16Length)
+    #expect(map.sourceRanges(forDisplay: NSRange(
+        location: 0,
+        length: map.projectedUTF16Length
+    )) == [ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count))])
+    let visible = try #require(map.visibleSourceRanges(forDisplay: NSRange(
+        location: 0,
+        length: map.projectedUTF16Length
+    )))
+    #expect(visible.count == 2)
+    #expect(visible.allSatisfy { !$0.overlaps(fold.bodyRange) })
+
+    let emojiUTF16 = (source as NSString).range(of: "😀")
+    let identity = try #require(DisplayMap(document: document, renderedFoldIDs: []))
+    #expect(identity.sourcePosition(ofDisplay: emojiUTF16.location + 1) == nil)
+    #expect(identity.sourceRanges(forDisplay: NSRange(
+        location: emojiUTF16.location,
+        length: 1
+    )) == nil)
+    let emojiByte = UInt32(source.utf8.distance(
+        from: source.utf8.startIndex,
+        to: try #require(source.range(of: "😀")?.lowerBound).samePosition(
+            in: source.utf8
+        )!
+    ))
+    #expect(identity.displayPosition(ofByte: emojiByte + 1) == nil)
+    #expect(identity.sourcePosition(ofDisplay: -1) == nil)
+    #expect(identity.sourcePosition(ofDisplay: identity.projectedUTF16Length + 1) == nil)
+    #expect(identity.project(byteRange: ByteRange(
+        lowerBound: 0,
+        upperBound: UInt32(bytes.count + 1)
+    ))?.visible == nil)
+    #expect(identity.sourceRanges(forDisplay: NSRange(
+        location: identity.projectedUTF16Length + 1,
+        length: 0
+    )) == nil)
+}
+
+@Test
+func identityDisplayMapMatchesEveryExistingCoordinateFamily() throws {
+    let source = "fn greet(name: &str) {\n    let value = name;\n    greet(value);\n}\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlightWithFolds(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        contentID: nil,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        foldRegions: highlighted.folds,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+    let map = try #require(DisplayMap(document: document, renderedFoldIDs: []))
+    let legacy = document.byteUTF16Map
+
+    #expect(map.projectedString == source)
+    #expect(map.projectedUTF16Length == legacy.utf16Count)
+    for byte in 0...bytes.count {
+        let old = legacy.utf16Offset(forByte: byte)
+        let new = map.displayPosition(ofByte: UInt32(byte))
+        #expect(new == old.map(DisplayPosition.visible))
+    }
+    for display in 0...legacy.utf16Count {
+        let old = legacy.byteOffset(forUTF16: display).flatMap(UInt32.init(exactly:))
+        let new = map.sourcePosition(ofDisplay: display)
+        #expect(new == old.map(SourcePosition.source))
+    }
+
+    var coordinateRanges = highlighted.spans.map(\.range)
+    coordinateRanges.append(contentsOf: highlighted.outlineFacets.flatMap {
+        [$0.range, $0.nameRange]
+    })
+    coordinateRanges.append(contentsOf: highlighted.referencesByBinding.flatMap { $0 })
+    coordinateRanges.append(contentsOf: document.lineTable.lineStarts.map {
+        ByteRange(lowerBound: $0, upperBound: $0)
+    })
+    for range in coordinateRanges {
+        let legacyRange = legacy.nsRange(
+            byteLowerBound: Int(range.lowerBound),
+            byteUpperBound: Int(range.upperBound)
+        )
+        let projected = try #require(map.project(byteRange: range))
+        #expect(projected.folds.isEmpty)
+        let expected = legacyRange.map { $0.length == 0 ? [] : [$0] } ?? []
+        #expect(projected.visible == expected)
+    }
+}
 
 @MainActor
 @Test
@@ -15,7 +152,7 @@ func structAndTraitDeclarationNamesUsePrimaryTypography() throws {
 
     ReaderTextView.applyTypography(
         highlighted.spans,
-        map: ByteUTF16Map(validUTF8: bytes),
+        map: try identityDisplayMap(bytes: bytes),
         to: attributed,
         theme: theme
     )
@@ -45,7 +182,7 @@ func humanistCommentsKeepASCIIFiguresMonospaced() throws {
 
     ReaderTextView.applyTypography(
         highlighted.spans,
-        map: ByteUTF16Map(validUTF8: bytes),
+        map: try identityDisplayMap(bytes: bytes),
         to: attributed,
         theme: theme
     )
@@ -72,7 +209,7 @@ func secondaryDeclarationsAreSemiboldWithoutScaling() throws {
 
     ReaderTextView.applyTypography(
         highlighted.spans,
-        map: ByteUTF16Map(validUTF8: bytes),
+        map: try identityDisplayMap(bytes: bytes),
         to: attributed,
         theme: theme
     )
@@ -107,7 +244,7 @@ func disabledSyntaxFormattingLeavesOnlyTheBaseFontMetrics() throws {
 
     ReaderTextView.applyTypography(
         highlighted.spans,
-        map: ByteUTF16Map(validUTF8: bytes),
+        map: try identityDisplayMap(bytes: bytes),
         to: attributed,
         theme: theme
     )
@@ -317,6 +454,13 @@ private func highlightedDocument() throws -> ReaderDocument {
         highlightSpans: highlighted.spans,
         outlineFacets: highlighted.outlineFacets
     )
+}
+
+private func identityDisplayMap(bytes: [UInt8]) throws -> DisplayMap {
+    try #require(DisplayMap(
+        document: ReaderDocument(bytes: bytes),
+        renderedFoldIDs: []
+    ))
 }
 
 private func attributedSource(

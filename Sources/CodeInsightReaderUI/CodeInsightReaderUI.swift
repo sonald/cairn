@@ -154,15 +154,23 @@ public final class RenderingAttributesCoordinator {
     private var spans: [HighlightSpan] = []
     private var occurrenceRanges: [NSRange] = []
     private var document: ReaderDocument?
-    private var map: ByteUTF16Map?
+    private var map: DisplayMap?
     private var theme = ReaderTheme(settings: ReaderSettings())
 
     public init() {}
 
     public func update(document: ReaderDocument, theme: ReaderTheme) {
+        guard let map = DisplayMap(document: document, renderedFoldIDs: []) else {
+            clear()
+            return
+        }
+        update(document: document, map: map, theme: theme)
+    }
+
+    func update(document: ReaderDocument, map: DisplayMap, theme: ReaderTheme) {
         spans = document.highlightSpans
         self.document = document
-        map = document.byteUTF16Map
+        self.map = map
         self.theme = theme
         styledFragmentCount = 0
         referenceStyledFragmentCount = 0
@@ -219,56 +227,60 @@ public final class RenderingAttributesCoordinator {
         guard
             start != NSNotFound,
             end != NSNotFound,
-            let lowerByte = map.byteOffset(forUTF16: start),
-            let upperByte = map.byteOffset(forUTF16: end),
-            let lower = UInt32(exactly: lowerByte),
-            let upper = UInt32(exactly: upperByte)
+            start <= end,
+            let sourceRanges = map.visibleSourceRanges(
+                forDisplay: NSRange(location: start, length: end - start)
+            )
         else { return }
 
-        let visibleSpans = ViewportGating.spans(
-            spans,
-            intersectingBytes: lower..<upper,
-            buffer: 0
-        )
+        var visibleSpans: [HighlightSpan] = []
+        for sourceRange in sourceRanges {
+            visibleSpans.append(contentsOf: ViewportGating.spans(
+                spans,
+                intersectingBytes: sourceRange.lowerBound..<sourceRange.upperBound,
+                buffer: 0
+            ))
+        }
         let fragmentNSRange = NSRange(location: start, length: end - start)
         var syntaxRanges: [(range: NSRange, kind: HighlightKind)] = []
         syntaxRanges.reserveCapacity(visibleSpans.count)
         for span in visibleSpans {
-            guard let globalRange = map.nsRange(
-                byteLowerBound: Int(span.range.lowerBound),
-                byteUpperBound: Int(span.range.upperBound)
-            ) else { continue }
-            let intersection = NSIntersectionRange(globalRange, fragmentNSRange)
-            guard intersection.length > 0 else { continue }
-            syntaxRanges.append((intersection, span.kind))
+            guard let projected = map.project(byteRange: span.range) else { continue }
+            for globalRange in projected.visible {
+                let intersection = NSIntersectionRange(globalRange, fragmentNSRange)
+                guard intersection.length > 0 else { continue }
+                syntaxRanges.append((intersection, span.kind))
+            }
         }
         var referenceRanges: [(range: NSRange, isParameter: Bool)] = []
         if theme.syntaxFormatting, let document {
-            let references = document.localReferences(
-                intersectingBytes: lower..<upper
-            )
-            referenceScannedCount += references.count
-            referenceRanges.reserveCapacity(references.count)
-            for reference in references {
-                let isParameter: Bool
-                switch reference.kind {
-                case .param:
-                    isParameter = true
-                case .letBinding:
-                    isParameter = false
-                default:
-                    continue
-                }
-                guard let globalRange = map.nsRange(
-                    byteLowerBound: Int(reference.range.lowerBound),
-                    byteUpperBound: Int(reference.range.upperBound)
-                ) else { continue }
-                let intersection = NSIntersectionRange(
-                    globalRange,
-                    fragmentNSRange
+            for sourceRange in sourceRanges {
+                let references = document.localReferences(
+                    intersectingBytes: sourceRange.lowerBound..<sourceRange.upperBound
                 )
-                guard intersection.length > 0 else { continue }
-                referenceRanges.append((intersection, isParameter))
+                referenceScannedCount += references.count
+                referenceRanges.reserveCapacity(referenceRanges.count + references.count)
+                for reference in references {
+                    let isParameter: Bool
+                    switch reference.kind {
+                    case .param:
+                        isParameter = true
+                    case .letBinding:
+                        isParameter = false
+                    default:
+                        continue
+                    }
+                    guard let projected = map.project(byteRange: reference.range)
+                    else { continue }
+                    for globalRange in projected.visible {
+                        let intersection = NSIntersectionRange(
+                            globalRange,
+                            fragmentNSRange
+                        )
+                        guard intersection.length > 0 else { continue }
+                        referenceRanges.append((intersection, isParameter))
+                    }
+                }
             }
         }
         var low = 0
@@ -427,7 +439,7 @@ public final class ReaderTextView {
     public var onContextMenu: ((Int) -> Void)?
     public var onViewportChange: (() -> Void)?
     private let backingTextStorage: NSTextStorage
-    private var byteUTF16Map: ByteUTF16Map?
+    private var displayMap: DisplayMap?
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
@@ -503,13 +515,70 @@ public final class ReaderTextView {
         }
     }
 
+    package static func projectorSelfTestChecks() -> [String: Bool] {
+        do {
+            let source = "fn outer() {\n    let emoji = \"😀\";\n}\n"
+            let bytes = Array(source.utf8)
+            let document = try DocumentLoader(source: { _ in bytes })
+                .load(file: URL(fileURLWithPath: "/projector-self-test.rs"))
+                .document
+            guard let fold = document.foldRegions.first(where: {
+                $0.kind == .declaration
+            }) else { return ["fixtureFoldExists": false] }
+            let reader = ReaderTextView()
+            guard let identity = project(
+                document: document,
+                renderedFoldIDs: [],
+                attributes: reader.baseAttributes,
+                theme: reader.theme
+            ),
+            let folded = project(
+                document: document,
+                renderedFoldIDs: [fold.id],
+                attributes: reader.baseAttributes,
+                theme: reader.theme
+            ) else { return ["projectionBuilds": false] }
+            let placeholder = (folded.attributed.string as NSString).range(
+                of: "\u{FFFC}"
+            )
+            let copied = folded.map.sourceRanges(forDisplay: placeholder)
+            let visible = folded.map.visibleSourceRanges(forDisplay: placeholder)
+            return [
+                "fixtureFoldExists": true,
+                "identityTextMatches": identity.attributed.string == source,
+                "identityLengthMatches": identity.attributed.length
+                    == identity.map.projectedUTF16Length,
+                "foldedLengthMatches": folded.attributed.length
+                    == folded.map.projectedUTF16Length,
+                "singlePlaceholder": placeholder.location != NSNotFound
+                    && (folded.attributed.string as NSString)
+                        .components(separatedBy: "\u{FFFC}").count == 2,
+                "hiddenMapsToFold": folded.map.displayPosition(
+                    ofByte: fold.bodyRange.lowerBound
+                ) == .hidden(fold.id),
+                "placeholderMapsToFold": folded.map.sourcePosition(
+                    ofDisplay: placeholder.location
+                ) == .placeholder(fold.id),
+                "copyExpandsHiddenSource": copied == [fold.bodyRange],
+                "viewportSkipsHiddenSource": visible == [],
+            ]
+        } catch {
+            return ["projectorSelfTestThrew": false]
+        }
+    }
+
     public func display(document: ReaderDocument) {
         guard
-            let source = String(bytes: document.bytes, encoding: .utf8),
+            let projection = Self.project(
+                document: document,
+                renderedFoldIDs: [],
+                attributes: baseAttributes,
+                theme: theme
+            ),
             let layoutManager = view.textLayoutManager
         else { return }
 
-        byteUTF16Map = document.byteUTF16Map
+        displayMap = projection.map
         displayedDocument = document
         diffMarkers = [:]
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
@@ -523,20 +592,14 @@ public final class ReaderTextView {
         visibleDeclarationMarkerLines = []
         renderingCoordinator.setOccurrences([])
         ruler?.needsDisplay = true
-        renderingCoordinator.update(document: document, theme: theme)
-        updateRulerThickness()
-        let attributed = NSMutableAttributedString(
-            string: source,
-            attributes: baseAttributes
-        )
-        Self.applyTypography(
-            document.highlightSpans,
-            map: document.byteUTF16Map,
-            to: attributed,
+        renderingCoordinator.update(
+            document: document,
+            map: projection.map,
             theme: theme
         )
+        updateRulerThickness()
         installRenderingValidator(in: layoutManager)
-        backingTextStorage.setAttributedString(attributed)
+        backingTextStorage.setAttributedString(projection.attributed)
         if renderingCoordinator.hasRenderingAttributes {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
@@ -545,7 +608,7 @@ public final class ReaderTextView {
     public func clear() {
         view.textLayoutManager?.renderingAttributesValidator = nil
         displayedDocument = nil
-        byteUTF16Map = nil
+        displayMap = nil
         diffMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
@@ -567,15 +630,28 @@ public final class ReaderTextView {
         guard
             let layoutManager = view.textLayoutManager
         else { return }
-        guard documentMatchesStorage(document) else {
+        guard let projection = Self.project(
+            document: document,
+            renderedFoldIDs: [],
+            attributes: baseAttributes,
+            theme: theme
+        ) else {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
+        guard projectionMatchesStorage(projection.map) else {
             layoutManager.renderingAttributesValidator = nil
             return
         }
 
-        byteUTF16Map = document.byteUTF16Map
+        displayMap = projection.map
         displayedDocument = document
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
-        renderingCoordinator.update(document: document, theme: theme)
+        renderingCoordinator.update(
+            document: document,
+            map: projection.map,
+            theme: theme
+        )
         if let occurrenceSelectionByteOffset {
             let ranges = occurrenceNSRanges(
                 in: document,
@@ -591,14 +667,7 @@ public final class ReaderTextView {
         ruler?.needsDisplay = true
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
-        backingTextStorage.beginEditing()
-        Self.applyTypography(
-            document.highlightSpans,
-            map: document.byteUTF16Map,
-            to: backingTextStorage,
-            theme: theme
-        )
-        backingTextStorage.endEditing()
+        backingTextStorage.setAttributedString(projection.attributed)
         installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
@@ -621,26 +690,29 @@ public final class ReaderTextView {
         guard let document = displayedDocument,
               let layoutManager = view.textLayoutManager
         else { return }
-        guard documentMatchesStorage(document) else {
+        guard let projection = Self.project(
+            document: document,
+            renderedFoldIDs: [],
+            attributes: baseAttributes,
+            theme: theme
+        ) else {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
+        guard projectionMatchesStorage(projection.map) else {
             layoutManager.renderingAttributesValidator = nil
             return
         }
 
-        renderingCoordinator.update(document: document, theme: theme)
-        let viewportRange = layoutManager.textViewportLayoutController.viewportRange
-        layoutManager.renderingAttributesValidator = nil
-        backingTextStorage.beginEditing()
-        backingTextStorage.setAttributes(
-            baseAttributes,
-            range: NSRange(location: 0, length: backingTextStorage.length)
-        )
-        Self.applyTypography(
-            document.highlightSpans,
-            map: document.byteUTF16Map,
-            to: backingTextStorage,
+        displayMap = projection.map
+        renderingCoordinator.update(
+            document: document,
+            map: projection.map,
             theme: theme
         )
-        backingTextStorage.endEditing()
+        let viewportRange = layoutManager.textViewportLayoutController.viewportRange
+        layoutManager.renderingAttributesValidator = nil
+        backingTextStorage.setAttributedString(projection.attributed)
         installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
@@ -650,7 +722,7 @@ public final class ReaderTextView {
     }
 
     public func reveal(byteOffset: UInt32) {
-        guard let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset)),
+        guard let location = visibleDisplayOffset(forByte: byteOffset),
               location <= backingTextStorage.length
         else { return }
         let lineRange = (backingTextStorage.string as NSString).lineRange(
@@ -666,9 +738,7 @@ public final class ReaderTextView {
         selectionByteOffset: UInt32?
     ) {
         if let selectionByteOffset,
-           let location = byteUTF16Map?.utf16Offset(
-               forByte: Int(selectionByteOffset)
-           ),
+           let location = visibleDisplayOffset(forByte: selectionByteOffset),
            location <= backingTextStorage.length
         {
             view.setSelectedRange(NSRange(location: location, length: 0))
@@ -686,10 +756,8 @@ public final class ReaderTextView {
         for _ in 0..<3 {
             guard candidateLine > 0,
                   document.lineTable.lineStarts.indices.contains(candidateLine - 1),
-                  let location = byteUTF16Map?.utf16Offset(
-                      forByte: Int(
-                          document.lineTable.lineStarts[candidateLine - 1]
-                      )
+                  let location = visibleDisplayOffset(
+                      forByte: document.lineTable.lineStarts[candidateLine - 1]
                   )
             else { return }
             let range = NSRange(location: location, length: 0)
@@ -789,7 +857,7 @@ public final class ReaderTextView {
         }
         let ranges = occurrenceNSRanges(in: document, at: byteOffset)
         occurrenceSelectionByteOffset = ranges.isEmpty ? nil : byteOffset
-        let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset))
+        let location = visibleDisplayOffset(forByte: byteOffset)
         let selected = location.flatMap { location in
             ranges.first { NSLocationInRange(location, $0) }
         }
@@ -829,8 +897,8 @@ public final class ReaderTextView {
         guard line > 0,
               let document = displayedDocument,
               document.lineTable.lineStarts.indices.contains(line - 1),
-              let location = byteUTF16Map?.utf16Offset(
-                  forByte: Int(document.lineTable.lineStarts[line - 1])
+              let location = visibleDisplayOffset(
+                  forByte: document.lineTable.lineStarts[line - 1]
               )
         else { return false }
         let range = (backingTextStorage.string as NSString).lineRange(
@@ -845,10 +913,9 @@ public final class ReaderTextView {
 
     public var selectedLineNumber: Int? {
         guard let document = displayedDocument,
-              let byteOffset = byteUTF16Map?.byteOffset(
-                  forUTF16: view.selectedRange().location
+              let byteOffset = sourceByteOffset(
+                  forDisplay: view.selectedRange().location
               ),
-              let byteOffset = UInt32(exactly: byteOffset),
               let position = document.lineTable.lineColumn(at: byteOffset)
         else { return nil }
         return Int(position.line)
@@ -857,7 +924,7 @@ public final class ReaderTextView {
     public var displayedBytes: [UInt8]? { displayedDocument?.bytes }
 
     package func font(atByteOffset byteOffset: UInt32) -> NSFont? {
-        guard let location = byteUTF16Map?.utf16Offset(forByte: Int(byteOffset)),
+        guard let location = visibleDisplayOffset(forByte: byteOffset),
               location < backingTextStorage.length
         else { return nil }
         return backingTextStorage.attribute(
@@ -868,7 +935,7 @@ public final class ReaderTextView {
     }
 
     public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
-        byteUTF16Map?.byteOffset(forUTF16: index).flatMap(UInt32.init(exactly:))
+        sourceByteOffset(forDisplay: index)
     }
 
     public func firstVisibleByteOffset() -> UInt32? {
@@ -887,8 +954,7 @@ public final class ReaderTextView {
         let lineStart = (backingTextStorage.string as NSString).lineRange(
             for: NSRange(location: location, length: 0)
         ).location
-        return byteUTF16Map?.byteOffset(forUTF16: lineStart)
-            .flatMap(UInt32.init(exactly:))
+        return sourceByteOffset(forDisplay: lineStart)
     }
 
     public func followAnchorByteOffset() -> UInt32? {
@@ -909,8 +975,7 @@ public final class ReaderTextView {
                 to: fragment.rangeInElement.location
             )
             guard utf16Offset != NSNotFound,
-                  let byteOffset = self.byteUTF16Map?.byteOffset(forUTF16: utf16Offset),
-                  let offset = UInt32(exactly: byteOffset)
+                  let offset = self.sourceByteOffset(forDisplay: utf16Offset)
             else { return true }
             let candidate = (abs(frame.midY - anchorY), offset)
             if nearest == nil || candidate.0 < nearest!.distance {
@@ -919,6 +984,19 @@ public final class ReaderTextView {
             return frame.minY <= layoutManager.textViewportLayoutController.viewportBounds.maxY
         }
         return nearest?.offset
+    }
+
+    private func visibleDisplayOffset(forByte byteOffset: UInt32) -> Int? {
+        guard case .visible(let offset) = displayMap?.displayPosition(ofByte: byteOffset)
+        else { return nil }
+        return offset
+    }
+
+    private func sourceByteOffset(forDisplay displayOffset: Int) -> UInt32? {
+        guard case .source(let offset) = displayMap?.sourcePosition(
+            ofDisplay: displayOffset
+        ) else { return nil }
+        return offset
     }
 
     private func activate(atCharacterIndex index: Int) {
@@ -949,11 +1027,9 @@ public final class ReaderTextView {
         in document: ReaderDocument,
         at byteOffset: UInt32
     ) -> [NSRange] {
-        document.identifierOccurrences(at: byteOffset).compactMap {
-            document.byteUTF16Map.nsRange(
-                byteLowerBound: Int($0.lowerBound),
-                byteUpperBound: Int($0.upperBound)
-            )
+        guard let displayMap else { return [] }
+        return document.identifierOccurrences(at: byteOffset).flatMap {
+            displayMap.project(byteRange: $0)?.visible ?? []
         }
     }
 
@@ -1043,10 +1119,7 @@ public final class ReaderTextView {
                 to: fragment.rangeInElement.location
             )
             guard utf16Offset != NSNotFound,
-                  let byteOffset = self.byteUTF16Map?.byteOffset(
-                      forUTF16: utf16Offset
-                  ),
-                  let byteOffset = UInt32(exactly: byteOffset),
+                  let byteOffset = self.sourceByteOffset(forDisplay: utf16Offset),
                   let line = document.lineTable.lineColumn(at: byteOffset)?.line
             else { return true }
             body(fragment, Int(line))
@@ -1255,9 +1328,32 @@ public final class ReaderTextView {
         view.backgroundColor = theme.backgroundColor
     }
 
-    // Defense-in-depth fuse only; clear() is the root fix for document/storage splits.
-    private func documentMatchesStorage(_ document: ReaderDocument) -> Bool {
-        let matches = document.byteUTF16Map.utf16Count == backingTextStorage.length
+    private static func project(
+        document: ReaderDocument,
+        renderedFoldIDs: Set<FoldID>,
+        attributes: [NSAttributedString.Key: Any],
+        theme: ReaderTheme
+    ) -> (attributed: NSMutableAttributedString, map: DisplayMap)? {
+        guard let map = DisplayMap(
+            document: document,
+            renderedFoldIDs: renderedFoldIDs
+        ) else { return nil }
+        let attributed = NSMutableAttributedString(
+            string: map.projectedString,
+            attributes: attributes
+        )
+        applyTypography(
+            document.highlightSpans,
+            map: map,
+            to: attributed,
+            theme: theme
+        )
+        return (attributed, map)
+    }
+
+    // Defense-in-depth fuse only; projection construction is the root consistency seam.
+    private func projectionMatchesStorage(_ map: DisplayMap) -> Bool {
+        let matches = map.projectedUTF16Length == backingTextStorage.length
 #if DEBUG
         // Unit tests have no app delegate so they can exercise the release fallback.
         if !matches, NSApp?.delegate != nil {
@@ -1269,54 +1365,53 @@ public final class ReaderTextView {
 
     static func applyTypography(
         _ spans: [HighlightSpan],
-        map: ByteUTF16Map,
+        map: DisplayMap,
         to attributed: NSMutableAttributedString,
         theme: ReaderTheme
     ) {
         guard theme.syntaxFormatting else { return }
         for span in spans {
-            guard let range = map.nsRange(
-                byteLowerBound: Int(span.range.lowerBound),
-                byteUpperBound: Int(span.range.upperBound)
-            ) else { continue }
-            guard range.location >= 0, range.location < attributed.length else {
-                continue
-            }
-            let safeRange = NSRange(
-                location: range.location,
-                length: min(range.length, attributed.length - range.location)
-            )
-            guard safeRange.length > 0 else { continue }
-            switch span.kind {
-            case .functionName, .declarationTitle:
-                attributed.addAttributes([
-                    .font: NSFont.monospacedSystemFont(
-                        ofSize: theme.functionNameFontSize,
-                        weight: NSFont.Weight(
-                            rawValue: theme.functionDeclarationFontWeight
-                        )
-                    ),
-                    .kern: 0.15,
-                ], range: safeRange)
-            case .declarationEmphasis:
-                attributed.addAttribute(
-                    .font,
-                    value: NSFont.monospacedSystemFont(
-                        ofSize: theme.fontSize,
-                        weight: NSFont.Weight(
-                            rawValue: theme.declarationEmphasisFontWeight
-                        )
-                    ),
-                    range: safeRange
+            guard let projected = map.project(byteRange: span.range) else { continue }
+            for range in projected.visible {
+                guard range.location >= 0, range.location < attributed.length else {
+                    continue
+                }
+                let safeRange = NSRange(
+                    location: range.location,
+                    length: min(range.length, attributed.length - range.location)
                 )
-            case .comment where theme.humanistComments:
-                attributed.addAttribute(
-                    .font,
-                    value: NSFont.systemFont(ofSize: theme.fontSize),
-                    range: safeRange
-                )
-            default:
-                break
+                guard safeRange.length > 0 else { continue }
+                switch span.kind {
+                case .functionName, .declarationTitle:
+                    attributed.addAttributes([
+                        .font: NSFont.monospacedSystemFont(
+                            ofSize: theme.functionNameFontSize,
+                            weight: NSFont.Weight(
+                                rawValue: theme.functionDeclarationFontWeight
+                            )
+                        ),
+                        .kern: 0.15,
+                    ], range: safeRange)
+                case .declarationEmphasis:
+                    attributed.addAttribute(
+                        .font,
+                        value: NSFont.monospacedSystemFont(
+                            ofSize: theme.fontSize,
+                            weight: NSFont.Weight(
+                                rawValue: theme.declarationEmphasisFontWeight
+                            )
+                        ),
+                        range: safeRange
+                    )
+                case .comment where theme.humanistComments:
+                    attributed.addAttribute(
+                        .font,
+                        value: NSFont.systemFont(ofSize: theme.fontSize),
+                        range: safeRange
+                    )
+                default:
+                    break
+                }
             }
         }
     }

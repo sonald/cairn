@@ -103,6 +103,22 @@ fi
 
 # ---------- build ----------
 
+if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
+    Sources/CodeInsightReaderUI/ \
+    --glob '!Sources/CodeInsightReaderUI/DisplayMap.swift' 2>&1); then
+    echo "$reader_map_hits"
+    echo "FAIL: 发现禁用 ByteUTF16Map 引用" >&2
+    exit 1
+else
+    reader_map_rc=$?
+    if [[ $reader_map_rc -eq 1 ]]; then
+        echo "PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift"
+    else
+        echo "FAIL: rg 基础设施错误 rc=$reader_map_rc" >&2
+        exit 1
+    fi
+fi
+
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$PWD/.build/swift-module-cache}"
 
@@ -119,6 +135,7 @@ fi
 
 swift build ${swift_options[@]+"${swift_options[@]}"}
 binary="$PWD/.build/debug/codeinsight"
+"$PWD/.build/debug/codeinsight-app" --self-test-projector
 
 # ---------- run gold gates ----------
 

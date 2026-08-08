@@ -21,6 +21,22 @@ fi
 swift build ${swift_options[@]+"${swift_options[@]}"}
 swift test ${swift_options[@]+"${swift_options[@]}"}
 
+if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
+    Sources/CodeInsightReaderUI/ \
+    --glob '!Sources/CodeInsightReaderUI/DisplayMap.swift' 2>&1); then
+    echo "$reader_map_hits"
+    echo "FAIL: 发现禁用 ByteUTF16Map 引用" >&2
+    exit 1
+else
+    reader_map_rc=$?
+    if [[ $reader_map_rc -eq 1 ]]; then
+        echo "PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift"
+    else
+        echo "FAIL: rg 基础设施错误 rc=$reader_map_rc" >&2
+        exit 1
+    fi
+fi
+
 if grep -rnE 'import AppKit|import SwiftUI' \
     Sources/CodeInsightCore Sources/TreeSitterKit \
     Sources/CodeInsightAppModel Sources/CodeInsightReaderCore \
@@ -53,3 +69,4 @@ fi
 .build/debug/codeinsight-app --self-test-exact .
 .build/debug/codeinsight-app --self-test-diff .
 .build/debug/codeinsight-app --self-test-reading
+.build/debug/codeinsight-app --self-test-projector

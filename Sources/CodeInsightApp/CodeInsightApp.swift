@@ -253,6 +253,8 @@ private struct CodeInsightApplication {
                 delegate.runSearchSelfTest()
             } else if arguments.contains("--self-test-reading") {
                 delegate.runReadingSelfTest()
+            } else if arguments.contains("--self-test-projector") {
+                delegate.runProjectorSelfTest()
             } else if arguments.contains("--self-test-tabs") {
                 delegate.runTabsSelfTest()
             } else if let index = arguments.firstIndex(of: "--self-test-diff"),
@@ -474,6 +476,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             checks: checks,
             enlargedWindowGeometry: layout.geometry
         )
+    }
+
+    func runProjectorSelfTest() -> Never {
+        let checks = ReaderTextView.projectorSelfTestChecks()
+        let passed = !checks.isEmpty && checks.values.allSatisfy { $0 }
+        do {
+            var object: [String: Any] = checks
+            object["channel"] = "projector"
+            object["passed"] = passed
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Self.exitSelfTest(channel: "projector", status: 1)
+        }
+        Self.exitSelfTest(channel: "projector", status: passed ? 0 : 1)
     }
 
     func runProjectSelfTest(root: URL) {
