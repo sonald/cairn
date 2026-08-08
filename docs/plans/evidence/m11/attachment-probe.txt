@@ -1,0 +1,8 @@
+A plain attachment(w=20): (frags: 1, lines: 2, providers: 0)
+B plain attachment(w=100): (frags: 1, lines: 2, providers: 0)
+   UTF-16 length A == B ? true (A=49 B=49)
+---
+无 bounds 无 image      : 整行排版宽度 = 34.3pt
+bounds w=20 无 image    : 整行排版宽度 = 34.3pt
+bounds w=200 无 image   : 整行排版宽度 = 34.3pt
+image w=200            : 整行排版宽度 = 233.3pt

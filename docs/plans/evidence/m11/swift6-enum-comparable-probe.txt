@@ -1,0 +1,3 @@
+# enum K: UInt8, Comparable
+cmpprobe.swift:1:6: error: type 'K' does not conform to protocol 'Comparable'
+  |      |- error: type 'K' does not conform to protocol 'Comparable'

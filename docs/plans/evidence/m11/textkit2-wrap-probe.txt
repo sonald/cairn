@@ -1,0 +1,3 @@
+wrap=false  layoutFragments=3  textLineFragments=4  perFragment=[1, 1, 2]
+wrap=true  layoutFragments=3  textLineFragments=17  perFragment=[14, 1, 2]
+源码行数(段落数)=3

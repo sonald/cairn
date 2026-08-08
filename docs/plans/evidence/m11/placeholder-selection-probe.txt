@@ -1,0 +1,5 @@
+A plain: placeholder run length = 14
+A plain: setSelectedRange(15,3) -> {15, 3}
+B attachment: attachment run length = 1
+B attachment: unichar ==U+FFFC ? true
+B attachment: whole-attachment select -> {11, 1}
