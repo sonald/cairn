@@ -27,6 +27,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() {
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
     let geometry = controller.selfTestVisualControlGeometry
 
+    #expect(controller.selfTestReaderToggleCount == 4)
     #expect(geometry.frames.count == 4)
     #expect(geometry.frames.allSatisfy {
         $0.width > 0 && $0.height > 0 && geometry.visibleFrame.contains($0)
@@ -40,4 +41,31 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() {
             !geometry.frames[index].intersects($0)
         })
     }
+}
+
+@MainActor
+@Test
+func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() {
+    _ = NSApplication.shared
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in throw CocoaError(.featureUnsupported) },
+        sandboxAvailable: { false }
+    )
+    defer { coordinator.shutdown() }
+    let controller = ReaderSettingsWindowController(
+        settings: ReaderSettings(fontSize: 13),
+        exactCoordinator: coordinator,
+        onRevoke: { _ in },
+        onChange: { _ in }
+    )
+    defer { controller.close() }
+
+    controller.showWindow(nil)
+    var changed = ReaderSettings(fontSize: 17)
+    changed.wrapLines = true
+    controller.update(settings: changed)
+
+    #expect(controller.currentSettings == changed)
+    #expect(controller.selfTestReaderToggleCount == 4)
+    #expect(controller.window?.contentViewController != nil)
 }

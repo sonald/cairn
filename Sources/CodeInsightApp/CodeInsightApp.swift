@@ -1198,6 +1198,55 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ).fontName
             && changedFunctionFontName != legacyFunctionFontName
 
+        let originalReaderSettings = readerSettings
+        var commandSettings = legacySettings
+        commandSettings.fontSize = 12
+        commitReaderSettings(commandSettings)
+        showSettings(nil)
+        settingsWindowController?.window?.setFrameOrigin(
+            NSPoint(x: -20_000, y: -20_000)
+        )
+        pumpRunLoop()
+        let viewMenu = NSApplication.shared.mainMenu?.items
+            .compactMap(\.submenu).first { $0.title == "View" }
+        let increaseFontItem = viewMenu?.item(withTitle: "Increase Font Size")
+        let decreaseFontItem = viewMenu?.item(withTitle: "Decrease Font Size")
+        let fontMenuUsesExactKeyEquivalents =
+            increaseFontItem?.keyEquivalent == "+"
+            && increaseFontItem?.keyEquivalentModifierMask == .command
+            && decreaseFontItem?.keyEquivalent == "-"
+            && decreaseFontItem?.keyEquivalentModifierMask == .command
+        increaseReaderFontSize(nil)
+        let firstIncrease = readerSettings.fontSize
+        increaseReaderFontSize(nil)
+        pumpRunLoop()
+        let secondIncrease = readerSettings.fontSize
+        let fontChangesByOnePoint = firstIncrease == 13 && secondIncrease == 14
+        let fileReaderFontUpdatesImmediately =
+            controller.selfTestLeftReaderFontSize(at: 0) == 14
+        let openSettingsWindowUpdatesImmediately =
+            settingsWindowController?.currentSettings.fontSize == 14
+        let defaultsRoundTripAfterMenuChange =
+            ReaderSettings(defaults: .standard) == readerSettings
+        while readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound {
+            increaseReaderFontSize(nil)
+        }
+        let upperBoundDisablesIncrease = increaseFontItem.map {
+            readerSettings.fontSize == 24 && !validateMenuItem($0)
+        } ?? false
+        increaseReaderFontSize(nil)
+        let upperBoundClamps = readerSettings.fontSize == 24
+        while readerSettings.fontSize > ReaderSettings.fontSizeRange.lowerBound {
+            decreaseReaderFontSize(nil)
+        }
+        let lowerBoundDisablesDecrease = decreaseFontItem.map {
+            readerSettings.fontSize == 10 && !validateMenuItem($0)
+        } ?? false
+        decreaseReaderFontSize(nil)
+        let lowerBoundClamps = readerSettings.fontSize == 10
+        settingsWindowController?.close()
+        commitReaderSettings(originalReaderSettings)
+
         let settingsController = ReaderSettingsWindowController(
             settings: legacySettings,
             exactCoordinator: model.exactCoordinator,
@@ -1249,6 +1298,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 blankCount == 0 && controller.selfTestOccurrenceCount == 0,
             "readerVisualSettingAppliedImmediately":
                 visualSettingAppliedImmediately,
+            "fontMenuUsesExactKeyEquivalents":
+                fontMenuUsesExactKeyEquivalents,
+            "fontMenuChangesByOnePoint": fontChangesByOnePoint,
+            "fontMenuUpperBoundDisabledAndClamped":
+                upperBoundDisablesIncrease && upperBoundClamps,
+            "fontMenuLowerBoundDisabledAndClamped":
+                lowerBoundDisablesDecrease && lowerBoundClamps,
+            "fontMenuPersistsUserDefaults": defaultsRoundTripAfterMenuChange,
+            "fontMenuUpdatesFileReaderImmediately":
+                fileReaderFontUpdatesImmediately,
+            "fontMenuUpdatesOpenSettingsImmediately":
+                openSettingsWindowUpdatesImmediately,
             "readerVisualControlsVisibleWithGeometry":
                 visualControlsVisible,
             "readerVisualControlsDoNotOverlap":
@@ -5527,11 +5588,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 }
             ) { [weak self] settings in
                 guard let self else { return }
-                readerSettings = settings
-                settings.save(to: .standard)
-                windowController?.applyReaderSettings(settings)
+                commitReaderSettings(settings)
             }
         }
+        settingsWindowController?.update(settings: readerSettings)
         settingsWindowController?.showWindow(nil)
         settingsWindowController?.window?.center()
         NSApplication.shared.activate(ignoringOtherApps: true)
@@ -5648,6 +5708,29 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showReadingTrail()
     }
 
+    @objc private func increaseReaderFontSize(_ sender: Any?) {
+        changeReaderFontSize(by: 1)
+    }
+
+    @objc private func decreaseReaderFontSize(_ sender: Any?) {
+        changeReaderFontSize(by: -1)
+    }
+
+    private func changeReaderFontSize(by delta: Double) {
+        var settings = readerSettings
+        let previous = settings.fontSize
+        settings.fontSize += delta
+        guard settings.fontSize != previous else { return }
+        commitReaderSettings(settings)
+    }
+
+    private func commitReaderSettings(_ settings: ReaderSettings) {
+        readerSettings = settings
+        settings.save(to: .standard)
+        windowController?.applyReaderSettings(settings)
+        settingsWindowController?.update(settings: settings)
+    }
+
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(goBack(_:)):
@@ -5664,6 +5747,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController?.canShowResolutionInspector == true
         case #selector(showReadingTrail(_:)):
             windowController?.canShowReadingTrail == true
+        case #selector(increaseReaderFontSize(_:)):
+            readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
+        case #selector(decreaseReaderFontSize(_:)):
+            readerSettings.fontSize > ReaderSettings.fontSizeRange.lowerBound
         case #selector(trustThisRepository(_:)):
             model.canTrustCurrentRepository
         case #selector(openSelectedFileInNewTab(_:)):
@@ -5918,6 +6005,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
+        viewMenu.addItem(.separator())
+        let increaseFontItem = NSMenuItem(
+            title: "Increase Font Size",
+            action: #selector(increaseReaderFontSize(_:)),
+            keyEquivalent: "+"
+        )
+        increaseFontItem.keyEquivalentModifierMask = .command
+        increaseFontItem.target = self
+        viewMenu.addItem(increaseFontItem)
+        let decreaseFontItem = NSMenuItem(
+            title: "Decrease Font Size",
+            action: #selector(decreaseReaderFontSize(_:)),
+            keyEquivalent: "-"
+        )
+        decreaseFontItem.keyEquivalentModifierMask = .command
+        decreaseFontItem.target = self
+        viewMenu.addItem(decreaseFontItem)
         viewMenu.addItem(.separator())
         let trailItem = NSMenuItem(
             title: "Show Reading Trail",

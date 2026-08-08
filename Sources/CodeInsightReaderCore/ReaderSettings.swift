@@ -61,6 +61,7 @@ public struct ReaderSettings: Equatable, Sendable {
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
     public var lineNumbers: Bool
+    package var wrapLines: Bool
 
     public init(
         lineHeightMultiple: Double = 1.25,
@@ -96,6 +97,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.syntaxFormatting = syntaxFormatting
         self.humanistComments = humanistComments
         self.lineNumbers = lineNumbers
+        wrapLines = false
     }
 
     public init(defaults: UserDefaults) {
@@ -138,10 +140,13 @@ public struct ReaderSettings: Equatable, Sendable {
                 .boolValue
                 ?? true
         )
+        wrapLines = (defaults.object(forKey: Keys.wrapLines) as? NSNumber)?
+            .boolValue
+            ?? false
     }
 
     public func save(to defaults: UserDefaults) {
-        let validated = ReaderSettings(
+        var validated = ReaderSettings(
             lineHeightMultiple: lineHeightMultiple,
             fontSize: fontSize,
             functionNameDelta: functionNameDelta,
@@ -154,6 +159,7 @@ public struct ReaderSettings: Equatable, Sendable {
             humanistComments: humanistComments,
             lineNumbers: lineNumbers
         )
+        validated.wrapLines = wrapLines
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -177,6 +183,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
         defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
+        defaults.set(validated.wrapLines, forKey: Keys.wrapLines)
     }
 
     private enum Keys {
@@ -193,6 +200,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let syntaxFormatting = "reader.syntaxFormatting"
         static let humanistComments = "reader.humanistComments"
         static let lineNumbers = "reader.lineNumbers"
+        static let wrapLines = "reader.wrapLines"
     }
 }
 

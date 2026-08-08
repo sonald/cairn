@@ -5,13 +5,23 @@ import SwiftUI
 
 @MainActor
 final class ReaderSettingsWindowController: NSWindowController {
+    private let hostingController: NSHostingController<SettingsView>
+    private let exactCoordinator: ExactCoordinator
+    private let onRevoke: @MainActor (URL) async -> Void
+    private let onChange: @MainActor (ReaderSettings) -> Void
+    private(set) var currentSettings: ReaderSettings
+
     init(
         settings: ReaderSettings,
         exactCoordinator: ExactCoordinator,
         onRevoke: @escaping @MainActor (URL) async -> Void,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
-        let hostingController = NSHostingController(
+        currentSettings = settings
+        self.exactCoordinator = exactCoordinator
+        self.onRevoke = onRevoke
+        self.onChange = onChange
+        hostingController = NSHostingController(
             rootView: SettingsView(
                 settings: settings,
                 exactCoordinator: exactCoordinator,
@@ -28,6 +38,16 @@ final class ReaderSettingsWindowController: NSWindowController {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(settings: ReaderSettings) {
+        currentSettings = settings
+        hostingController.rootView = SettingsView(
+            settings: settings,
+            exactCoordinator: exactCoordinator,
+            onRevoke: onRevoke,
+            onChange: onChange
+        )
     }
 
     var selfTestVisualControlGeometry: (
@@ -67,6 +87,16 @@ final class ReaderSettingsWindowController: NSWindowController {
             }.map(frame),
             contentView.bounds
         )
+    }
+
+    var selfTestReaderToggleCount: Int {
+        guard let contentView = window?.contentView else { return 0 }
+        func collect(_ view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap(collect)
+        }
+        return collect(contentView).count { view in
+            String(describing: type(of: view)) == "PlatformSwitch"
+        }
     }
 }
 
@@ -182,6 +212,8 @@ private struct ReaderSettingsView: View {
             Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
             Toggle("Use humanist font for comments", isOn: $settings.humanistComments)
             Toggle("Show line numbers", isOn: $settings.lineNumbers)
+            Toggle("Wrap lines", isOn: $settings.wrapLines)
+                .accessibilityLabel("Wrap lines")
         }
         .formStyle(.grouped)
         .padding()

@@ -447,6 +447,7 @@ public final class ReaderTextView {
     private weak var scrollView: NSScrollView?
     private weak var ruler: NSRulerView?
     private var lineNumbers = true
+    private var wrapLines: Bool
     private var occurrenceSelectionByteOffset: UInt32?
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
     public private(set) var currentLineNumber: Int?
@@ -459,6 +460,7 @@ public final class ReaderTextView {
     public init(settings: ReaderSettings = ReaderSettings()) {
         theme = ReaderTheme(settings: settings)
         lineNumbers = settings.lineNumbers
+        wrapLines = settings.wrapLines
         let textView = ClickTextView(usingTextLayoutManager: true)
         view = textView
         backingTextStorage = NSTextStorage()
@@ -682,6 +684,7 @@ public final class ReaderTextView {
     public func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
         lineNumbers = settings.lineNumbers
+        wrapLines = settings.wrapLines
         applyThemeColors()
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: settings.lineNumbers)
@@ -806,6 +809,7 @@ public final class ReaderTextView {
             ruler = nil
             view.textContainerInset.width = 12
             scrollView.tile()
+            configureWrapping(in: scrollView)
             return
         }
         let activeRuler: ReaderRulerView
@@ -820,6 +824,7 @@ public final class ReaderTextView {
         ruler = activeRuler
         updateRulerThickness()
         scrollView.tile()
+        configureWrapping(in: scrollView)
         activeRuler.needsDisplay = true
     }
 
@@ -1322,6 +1327,25 @@ public final class ReaderTextView {
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
+    }
+
+    private func configureWrapping(in scrollView: NSScrollView) {
+        let width = scrollView.contentView.bounds.width
+        scrollView.hasHorizontalScroller = !wrapLines
+        view.isHorizontallyResizable = !wrapLines
+        if wrapLines {
+            view.autoresizingMask.insert(.width)
+            view.setFrameSize(NSSize(width: width, height: view.frame.height))
+        } else {
+            view.autoresizingMask.remove(.width)
+        }
+        view.textContainer?.widthTracksTextView = wrapLines
+        view.textContainer?.containerSize = NSSize(
+            width: wrapLines ? width : CGFloat.greatestFiniteMagnitude,
+            height: CGFloat.greatestFiniteMagnitude
+        )
+        scrollView.tile()
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     }
 
     private func applyThemeColors() {

@@ -135,6 +135,114 @@ func readingGeometryUsesClipWidthWithLegacyScroller() {
 
 @MainActor
 @Test
+func wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() throws {
+    let longBody = Array(repeating: "value += compute(value);", count: 24)
+        .joined(separator: " ")
+    let source = "fn one() {}\nfn wrapped() { \(longBody) }\nfn three() {}\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    reader.setDiffMarkers([2: .changed])
+    reader.reveal(byteOffset: document.lineTable.lineStarts[1])
+
+    var wrappedSettings = ReaderSettings()
+    wrappedSettings.wrapLines = true
+    reader.apply(settings: wrappedSettings)
+    window.displayIfNeeded()
+    reader.captureVisibleDecorationState()
+
+    let manager = try #require(reader.view.textLayoutManager)
+    let content = try #require(manager.textContentManager)
+    var fragmentsByLine: [Int: [NSRect]] = [:]
+    manager.enumerateTextLayoutFragments(
+        from: content.documentRange.location,
+        options: [.ensuresLayout]
+    ) { fragment in
+        let display = content.offset(
+            from: content.documentRange.location,
+            to: fragment.rangeInElement.location
+        )
+        guard display != NSNotFound,
+              let byte = reader.byteOffset(forCharacterIndex: display),
+              let line = document.lineTable.lineColumn(at: byte)?.line
+        else { return true }
+        fragmentsByLine[Int(line), default: []].append(fragment.layoutFragmentFrame)
+        return true
+    }
+
+    let firstHeight = try #require(fragmentsByLine[1]?.first?.height)
+    let wrappedHeight = try #require(fragmentsByLine[2]?.first?.height)
+    #expect(fragmentsByLine.keys.sorted() == [1, 2, 3])
+    #expect(fragmentsByLine.values.allSatisfy { $0.count == 1 })
+    #expect(wrappedHeight > firstHeight * 2)
+    #expect(reader.visibleLineNumbers.filter { $0 == 2 }.count == 1)
+    #expect(reader.visibleCurrentLineNumbers == [2])
+    #expect(reader.visibleDeclarationMarkerLines.filter { $0 == 2 }.count == 1)
+    #expect(reader.diffMarkerCounts == [.changed: 1])
+    print(
+        "M11_WRAP_PROBE fragments=\(fragmentsByLine.values.reduce(0) { $0 + $1.count }) "
+            + "wrappedHeight=\(wrappedHeight) lineHeight=\(firstHeight) "
+            + "line2RulerCount=\(reader.visibleLineNumbers.filter { $0 == 2 }.count)"
+    )
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func wrapSettingReversesEveryTextKitAndScrollerProperty() {
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(
+        frame: NSRect(x: 0, y: 0, width: 480, height: 180)
+    )
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+
+    var wrappedSettings = ReaderSettings()
+    wrappedSettings.wrapLines = true
+    reader.apply(settings: wrappedSettings)
+    let wrappedWidth = scrollView.contentView.bounds.width
+
+    #expect(!scrollView.hasHorizontalScroller)
+    #expect(!reader.view.isHorizontallyResizable)
+    #expect(reader.view.autoresizingMask.contains(.width))
+    #expect(reader.view.textContainer?.widthTracksTextView == true)
+    #expect(reader.view.frame.width == wrappedWidth)
+    #expect(reader.view.textContainer?.containerSize.width == wrappedWidth)
+
+    window.setContentSize(NSSize(width: 360, height: 180))
+    scrollView.tile()
+    window.displayIfNeeded()
+    let resizedDocumentWidth = scrollView.contentView.frame.width
+        - (scrollView.verticalRulerView?.ruleThickness ?? 0)
+    #expect(reader.view.frame.width == resizedDocumentWidth)
+    #expect(reader.view.textContainer?.containerSize.width == (
+        resizedDocumentWidth - reader.view.textContainerInset.width * 2
+    ))
+
+    reader.apply(settings: ReaderSettings())
+    #expect(scrollView.hasHorizontalScroller)
+    #expect(reader.view.isHorizontallyResizable)
+    #expect(!reader.view.autoresizingMask.contains(.width))
+    #expect(reader.view.textContainer?.widthTracksTextView == false)
+    #expect(reader.view.textContainer?.containerSize.width == CGFloat.greatestFiniteMagnitude)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
 func lineNumberRulerDrawsOnlyVisibleKnownLinesAndCanBeDisabled() throws {
     let source = "fn one() {}\nfn two() {}\nfn three() {}"
     let bytes = Array(source.utf8)

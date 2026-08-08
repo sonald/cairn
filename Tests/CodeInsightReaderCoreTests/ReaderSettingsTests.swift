@@ -43,6 +43,7 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
     #expect(mutated.lineHeightMultiple == 2)
     #expect(mutated.fontSize == 10)
     #expect(mutated.functionNameDelta == 0)
+    #expect(!mutated.wrapLines)
 }
 
 @Test
@@ -98,7 +99,8 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
     #expect(missingKeys.declarationEmphasisFontWeight == 0.3)
     #expect(missingKeys.syntaxFormatting)
     #expect(missingKeys.lineNumbers)
-    let expected = ReaderSettings(
+    #expect(!missingKeys.wrapLines)
+    var expected = ReaderSettings(
         lineHeightMultiple: 1.6,
         fontSize: 17,
         functionNameDelta: 2,
@@ -111,6 +113,7 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
         humanistComments: true,
         lineNumbers: false
     )
+    expected.wrapLines = true
 
     expected.save(to: defaults)
 

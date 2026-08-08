@@ -834,6 +834,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func selfTestLeftReaderFontName(at byteOffset: UInt32) -> String? {
         readerController.selfTestFontName(at: byteOffset)
     }
+    func selfTestLeftReaderFontSize(at byteOffset: UInt32) -> CGFloat? {
+        readerController.selfTestFontSize(at: byteOffset)
+    }
     var selfTestRightReaderBytes: [UInt8]? { secondaryReaderController.displayedBytes }
     var selfTestLeftReaderIsEditable: Bool { readerController.isEditable }
     var selfTestGutterCounts: [DiffCore.MarkerKind: Int] {
@@ -3525,6 +3528,9 @@ final class ReaderViewController: NSViewController {
     }
     func selfTestFontName(at byteOffset: UInt32) -> String? {
         textView.font(atByteOffset: byteOffset)?.fontName
+    }
+    func selfTestFontSize(at byteOffset: UInt32) -> CGFloat? {
+        textView.font(atByteOffset: byteOffset)?.pointSize
     }
     var selfTestVisibleLineNumbers: [Int] {
         textView.captureVisibleDecorationState()

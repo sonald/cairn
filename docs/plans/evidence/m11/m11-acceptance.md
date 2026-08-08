@@ -84,3 +84,39 @@ F2 仍须在真实 reducer/projector 就位后补齐 `codeinsight-app` control/f
 
 本片不激活任何 rendered fold ID，故产品显示与 F0 前逐字节一致；附件、点击与视觉样式仍由 F2
 的真实 AppKit spike 和三主题验收负责。
+
+## R4：Settings 缓存、⌘± 与换行
+
+结论：PASS（R4 当前可实现域）；Reading Set 字号同步断言在 M11D 创建该文档类型后补跑，不能在
+其类型尚不存在时伪造通过。
+
+- 先在真实 `ReaderTextView` 复现 TextKit 2 换行：三条源码逻辑行仍恰好对应三个
+  `NSTextLayoutFragment`；长行 fragment 高 341.25pt、普通行高 21.25pt。第 2 行的 line number、
+  current-line、declaration marker 与 diff marker 均只出现一次。结论是 gutter 无缺陷；当前行背景
+  覆盖该逻辑行的全部视觉换行属于期望行为，不新增修复实体。
+- `ReaderSettings.wrapLines` 为 package 存储、默认 false；既有 public init 签名未增加参数。
+  缺 key 恢复 false，写入 true 后经注入的 UserDefaults 完整 round-trip。
+- wrap on 逐项实测：`widthTracksTextView=true`、有限 container width、
+  `isHorizontallyResizable=false`、水平滚动条关闭、document view 随窗口缩放；wrap off 对每一项
+  反向恢复，包括无限 container width 与水平滚动条重新出现。
+- Settings Reader 页新增可见且可访问的 `Wrap lines` toggle。新打包的
+  `.build/m11-r4-app/Cairn.app` 中，真实 AX 树同时报告 `static text Wrap lines` 与
+  `checkbox Wrap lines`；截图为 `r4-settings.png`。已有 Settings controller 每次 show 前注入当前
+  值，窗口打开期间通过重建既有 hosting root 即时更新；没有新增 observable settings module。
+- View 菜单的真实 AX 菜单项为 `Increase Font Size` / `Decrease Font Size`；屏幕中显示
+  `⌘+` / `⌘-`，AX command char 为 `+` / `-`、modifier 值为默认 Command、两项均可用。
+  `--self-test-reading` 进一步实测连续 12→13→14 每次恰好 1pt，24/10 边界禁用且额外调用不越界，
+  UserDefaults 回读一致，打开的文件 Reader 与 Settings window 都即时变为 14pt。
+- `swift test --disable-sandbox`：PASS，449 / 449。
+- `--self-test-reading`：PASS；新增 8 项 font-menu / persistence / immediate-apply 检查全部为 true。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；449 / 449、Exact、Diff、Reading、Projector
+  全部通过，ReaderUI 坐标门禁仍为零违规。
+- Release app bundle：`scripts/make-app.sh` PASS；Info.plist、严格 codesign 与指定要求校验通过。
+- `M11_BASE...HEAD`、index、worktree、untracked 四域的 protected deny-list 均为零命中；
+  `RECORD=UNSET`，`git diff --check` PASS。
+- 真实可视验收继续打开 Tokio 时，macOS 弹出 ChatGPT Apple Events 持久授权提示；未扩大授权。
+  因此未用桌面自动化重复长行测试，且不把这一权限阻塞描述成产品失败。产品行为由同一真实
+  `ReaderTextView` 的 offscreen AppKit 几何/绘制断言覆盖。
+
+M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set 的只读文本视图，并把
+“Reading Set 字号即时变化”加入既有 `--self-test-reading`；完成前 R4 不宣称该跨片条件已验证。
