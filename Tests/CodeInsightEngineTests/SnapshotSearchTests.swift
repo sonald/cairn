@@ -88,6 +88,7 @@ func snapshotSearchCapsAllFilesAtFiveThousandMatches() async throws {
     #expect(result.final.truncatedPathIDs.count == 1)
 }
 
+#if DEBUG
 @Test
 func snapshotReferenceSearchParsesUniqueContentOnceAndRejectsTokenSpoofs()
     async throws
@@ -123,6 +124,7 @@ func snapshotReferenceSearchParsesUniqueContentOnceAndRejectsTokenSpoofs()
     #expect(result.matches.allSatisfy { $0.line <= 2 })
     #expect(result.final.completeness == .complete)
 }
+#endif
 
 @Test
 func snapshotReferenceSearchAppliesCapsAfterIdentifierVerification() async throws {

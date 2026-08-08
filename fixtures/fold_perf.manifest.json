@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "seed": "m11-fold-perf-v1",
+  "fixtureSHA256": "86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578",
+  "byteCount": 3115800,
+  "newlineCount": 50000,
+  "lineCount": 50001,
+  "candidateCount": 8400,
+  "acceptedFoldCount": 8400,
+  "kindCounts": {
+    "cfgTest": 0,
+    "container": 200,
+    "declaration": 4000,
+    "block": 4000,
+    "comment": 0,
+    "imports": 200,
+    "attributes": 0
+  },
+  "depthCounts": {"0": 200, "1": 4200, "2": 4000},
+  "presets": {
+    "structure": {"logical": 4200, "rendered": 4200},
+    "overview": {"logical": 4400, "rendered": 200}
+  },
+  "perfPreset": "Overview"
+}

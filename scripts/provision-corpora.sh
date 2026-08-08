@@ -5,6 +5,7 @@
 #   bash scripts/provision-corpora.sh              # provision to default root
 #   bash scripts/provision-corpora.sh --check      # verify only, no downloads
 #   bash scripts/provision-corpora.sh --root DIR   # override root
+#   bash scripts/provision-corpora.sh --gen-fold-fixture FILE --manifest JSON
 #
 # Default root: $CAIRN_CORPUS_ROOT or ~/.cache/cairn-corpora
 #
@@ -28,11 +29,15 @@ readonly RIPGREP_REPO="https://github.com/BurntSushi/ripgrep.git"
 
 check_only=false
 root="${CAIRN_CORPUS_ROOT:-$HOME/.cache/cairn-corpora}"
+fold_fixture=""
+fold_manifest=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check)   check_only=true; shift ;;
         --root)    root="$2"; shift 2 ;;
+        --gen-fold-fixture) fold_fixture="$2"; shift 2 ;;
+        --manifest) fold_manifest="$2"; shift 2 ;;
         --help|-h)
             head -14 "$0" | tail -12 | sed 's/^# \?//'
             exit 0 ;;
@@ -43,6 +48,131 @@ while [[ $# -gt 0 ]]; do
 done
 
 errors=0
+
+# ---------- deterministic M11 fold fixture ----------
+
+validate_fold_fixture() {
+    local fixture="$1" manifest="$2"
+    local actual_sha actual_bytes actual_newlines
+    actual_sha="$(shasum -a 256 "$fixture" | awk '{print $1}')"
+    actual_bytes="$(wc -c < "$fixture" | tr -d ' ')"
+    actual_newlines="$(wc -l < "$fixture" | tr -d ' ')"
+
+    jq -e \
+        --arg sha "$actual_sha" \
+        --argjson bytes "$actual_bytes" \
+        --argjson newlines "$actual_newlines" \
+        '
+        .schemaVersion == 1 and
+        .seed == "m11-fold-perf-v1" and
+        .fixtureSHA256 == $sha and
+        .byteCount == $bytes and
+        .newlineCount == $newlines and
+        .newlineCount == 50000 and
+        .lineCount == 50001 and
+        .candidateCount == 8400 and
+        .acceptedFoldCount == 8400 and
+        .kindCounts == {
+            "cfgTest": 0,
+            "container": 200,
+            "declaration": 4000,
+            "block": 4000,
+            "comment": 0,
+            "imports": 200,
+            "attributes": 0
+        } and
+        .depthCounts == {"0": 200, "1": 4200, "2": 4000} and
+        .presets.structure == {"logical": 4200, "rendered": 4200} and
+        .presets.overview == {"logical": 4400, "rendered": 200} and
+        .perfPreset == "Overview"
+        ' "$manifest" >/dev/null
+    [[ "$actual_bytes" -ge 2097152 ]] || {
+        echo "FAIL  fold fixture: $actual_bytes bytes, expected at least 2097152" >&2
+        return 1
+    }
+    echo "  ok  fold fixture: sha=$actual_sha bytes=$actual_bytes newlines=$actual_newlines"
+}
+
+generate_fold_fixture() {
+    local fixture="$1" manifest="$2"
+    local fixture_dir manifest_dir fixture_tmp manifest_tmp
+    fixture_dir="$(dirname "$fixture")"
+    manifest_dir="$(dirname "$manifest")"
+    mkdir -p "$fixture_dir" "$manifest_dir"
+    fixture_tmp="$(mktemp "$fixture_dir/.fold_perf.rs.XXXXXX")"
+    manifest_tmp="$(mktemp "$manifest_dir/.fold_perf.manifest.XXXXXX")"
+    trap 'rm -f "$fixture_tmp" "$manifest_tmp"' RETURN
+
+    local module item filler ordinal
+    ordinal=0
+    for ((module = 0; module < 200; module++)); do
+        printf 'mod module_%03d {\n' "$module" >> "$fixture_tmp"
+        printf '    use crate::alpha;\n' >> "$fixture_tmp"
+        printf '    use crate::beta;\n' >> "$fixture_tmp"
+        printf '    use crate::gamma;\n' >> "$fixture_tmp"
+        for ((item = 0; item < 20; item++)); do
+            printf '    fn item_%03d_%02d() {\n' "$module" "$item" >> "$fixture_tmp"
+            printf '        if true {\n' >> "$fixture_tmp"
+            printf '            let payload_0 = "m11-fold-perf-v1 deterministic payload 0123456789abcdef";\n' >> "$fixture_tmp"
+            for ((filler = 1; filler <= 7; filler++)); do
+                printf '            let payload_%d = "m11-fold-perf-v1 deterministic payload 0123456789abcdef";\n' \
+                    "$filler" >> "$fixture_tmp"
+            done
+            if [[ "$ordinal" -lt 1000 ]]; then
+                printf '            let payload_8 = "m11-fold-perf-v1 deterministic payload 0123456789abcdef";\n' >> "$fixture_tmp"
+            fi
+            printf '        }\n' >> "$fixture_tmp"
+            printf '    }\n' >> "$fixture_tmp"
+            ordinal=$((ordinal + 1))
+        done
+        printf '}\n' >> "$fixture_tmp"
+    done
+
+    local sha bytes newlines
+    sha="$(shasum -a 256 "$fixture_tmp" | awk '{print $1}')"
+    bytes="$(wc -c < "$fixture_tmp" | tr -d ' ')"
+    newlines="$(wc -l < "$fixture_tmp" | tr -d ' ')"
+    cat > "$manifest_tmp" <<JSON
+{
+  "schemaVersion": 1,
+  "seed": "m11-fold-perf-v1",
+  "fixtureSHA256": "$sha",
+  "byteCount": $bytes,
+  "newlineCount": $newlines,
+  "lineCount": 50001,
+  "candidateCount": 8400,
+  "acceptedFoldCount": 8400,
+  "kindCounts": {
+    "cfgTest": 0,
+    "container": 200,
+    "declaration": 4000,
+    "block": 4000,
+    "comment": 0,
+    "imports": 200,
+    "attributes": 0
+  },
+  "depthCounts": {"0": 200, "1": 4200, "2": 4000},
+  "presets": {
+    "structure": {"logical": 4200, "rendered": 4200},
+    "overview": {"logical": 4400, "rendered": 200}
+  },
+  "perfPreset": "Overview"
+}
+JSON
+    mv "$fixture_tmp" "$fixture"
+    mv "$manifest_tmp" "$manifest"
+    trap - RETURN
+    validate_fold_fixture "$fixture" "$manifest"
+}
+
+if [[ -n "$fold_fixture" || -n "$fold_manifest" ]]; then
+    if [[ -z "$fold_fixture" || -z "$fold_manifest" || "$check_only" == true ]]; then
+        echo "--gen-fold-fixture FILE requires --manifest JSON and cannot combine with --check" >&2
+        exit 2
+    fi
+    generate_fold_fixture "$fold_fixture" "$fold_manifest"
+    exit 0
+fi
 
 # ---------- validation helpers ----------
 

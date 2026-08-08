@@ -184,6 +184,7 @@ func localReferenceIndexDistinguishesShadowedParameterFromLocal() throws {
     #expect(local.references == [ranges[4]])
 }
 
+#if DEBUG
 @Test
 func rustHighlighterBuildsMacroPartialLocalIndexWithOneParse() throws {
     let source = """
@@ -209,6 +210,7 @@ func rustHighlighterBuildsMacroPartialLocalIndexWithOneParse() throws {
     #expect(highlighted.bindings[0].declarationRange == visibleRanges[1])
     #expect(highlighted.referencesByBinding == [[visibleRanges[2]]])
 }
+#endif
 
 @Test
 func rustHighlighterProducesOutlineSnapshot() throws {
@@ -248,6 +250,322 @@ func rustHighlighterProducesOutlineSnapshot() throws {
         "1:typeAlias:Alias:232..<237",
         "0:fn:top:253..<256",
     ])
+}
+
+@Test
+func foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() throws {
+    let source = """
+        mod regular {
+            use crate::alpha;
+            use crate::beta;
+            use crate::gamma;
+
+            #[inline]
+            #[cold]
+            fn run(value: usize) {
+                if value > 0 {
+                    work();
+                    work();
+                }
+                match value {
+                    0 => {
+                        zero();
+                        zero();
+                    },
+                    _ => value,
+                }
+                let closure = |item| {
+                    consume(item);
+                    consume(item);
+                };
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            fn check() {
+                assert!(true);
+                assert!(true);
+            }
+        }
+
+        // first comment
+        // second comment
+        // third comment
+        """
+    let result = try RustHighlighter().highlightWithFolds(bytes: Array(source.utf8))
+    let folds = result.folds
+
+    #expect(Set(folds.map(\.kind)) == Set([
+        FoldKind.cfgTest, .container, .declaration, .block, .comment, .imports,
+        .attributes,
+    ]))
+    #expect(folds.map(\.id.rawValue) == Array(0..<UInt32(folds.count)))
+
+    let container = try #require(folds.first {
+        $0.kind == .container && text(in: source, range: $0.headerRange).contains("mod regular")
+    })
+    #expect(text(in: source, range: container.headerRange).hasSuffix("{"))
+    #expect(!text(in: source, range: container.bodyRange).contains("mod regular"))
+    #expect(container.summary.memberCounts[.fn] == 1)
+
+    let cfgTest = try #require(folds.first { $0.kind == .cfgTest })
+    #expect(text(in: source, range: cfgTest.headerRange).hasPrefix("#[cfg(test)]"))
+    #expect(text(in: source, range: cfgTest.headerRange).hasSuffix("{"))
+    #expect(!folds.contains {
+        $0.kind == .container && $0.bodyRange == cfgTest.bodyRange
+    })
+
+    let declaration = try #require(folds.first {
+        $0.kind == .declaration && text(in: source, range: $0.headerRange).contains("fn run")
+    })
+    #expect(text(in: source, range: declaration.headerRange).hasSuffix("{"))
+    #expect(declaration.summary.leadingText == "if value > 0 {")
+
+    let imports = try #require(folds.first { $0.kind == .imports })
+    #expect(text(in: source, range: imports.headerRange) == "use crate::alpha;")
+    #expect(text(in: source, range: imports.bodyRange).contains("use crate::gamma;"))
+    #expect(imports.summary.itemCount == 3)
+
+    let attributes = try #require(folds.first { $0.kind == .attributes })
+    #expect(text(in: source, range: attributes.headerRange) == "#[inline]")
+    #expect(text(in: source, range: attributes.bodyRange).contains("#[cold]"))
+    #expect(attributes.summary.itemCount == 2)
+
+    let comment = try #require(folds.first { $0.kind == .comment })
+    #expect(text(in: source, range: comment.headerRange) == "// first comment")
+    #expect(text(in: source, range: comment.bodyRange).contains("// third comment"))
+    #expect(comment.summary.leadingText == "// second comment")
+
+    let matchArm = try #require(folds.first {
+        $0.kind == .block && text(in: source, range: $0.headerRange).contains("0 =>")
+    })
+    #expect(text(in: source, range: matchArm.headerRange).hasSuffix("=>"))
+    #expect(!text(in: source, range: matchArm.bodyRange).hasSuffix(","))
+    #expect(foldsAreLaminar(folds))
+}
+
+@Test
+func foldExtractionRejectsEmptyAndSingleNodeRunsAndBracelessClosures() throws {
+    let source = """
+        use crate::{
+            alpha,
+            beta,
+        };
+        #[allow(
+            dead_code
+        )]
+        /* one block
+           comment */
+        mod empty {}
+        fn empty() {}
+        fn closure() {
+            let value = |item| item + 1;
+        }
+        """
+    let folds = try RustHighlighter().highlightWithFolds(
+        bytes: Array(source.utf8)
+    ).folds
+
+    #expect(!folds.contains { $0.kind == .imports })
+    #expect(!folds.contains { $0.kind == .attributes })
+    #expect(!folds.contains { $0.kind == .comment })
+    #expect(!folds.contains {
+        [.container, .declaration].contains($0.kind)
+            && text(in: source, range: $0.headerRange).contains("empty")
+    })
+    #expect(!folds.contains {
+        $0.kind == .block && text(in: source, range: $0.headerRange).contains("|item|")
+    })
+}
+
+@Test
+func foldResolverIsOrderIndependentAndHonorsConflictWinners() {
+    let summary = FoldSummary(hiddenLineCount: 8)
+    let cfg = foldCandidate(.cfgTest, header: 0..<10, body: 10..<100, summary: summary)
+    let container = foldCandidate(
+        .container,
+        header: 2..<10,
+        body: 10..<100,
+        summary: summary
+    )
+    let declaration = foldCandidate(
+        .declaration,
+        header: 110..<120,
+        body: 120..<220,
+        summary: FoldSummary(hiddenLineCount: 12)
+    )
+    let overlappingBlock = foldCandidate(
+        .block,
+        header: 190..<200,
+        body: 200..<260,
+        summary: FoldSummary(hiddenLineCount: 4)
+    )
+    let largerSameKind = foldCandidate(
+        .block,
+        header: 300..<310,
+        body: 310..<410,
+        summary: FoldSummary(hiddenLineCount: 10)
+    )
+    let smallerSameKind = foldCandidate(
+        .block,
+        header: 390..<400,
+        body: 400..<450,
+        summary: FoldSummary(hiddenLineCount: 5)
+    )
+    let nested = foldCandidate(
+        .block,
+        header: 130..<140,
+        body: 140..<180,
+        summary: FoldSummary(hiddenLineCount: 3)
+    )
+    let candidates = [
+        cfg, container, declaration, overlappingBlock, largerSameKind,
+        smallerSameKind, nested, nested,
+    ]
+    let expected = resolveFoldCandidates(candidates)
+
+    #expect(expected.map(\.kind) == [.cfgTest, .declaration, .block, .block])
+    #expect(expected.map(\.bodyRange) == [
+        byteRange(10..<100), byteRange(120..<220), byteRange(140..<180),
+        byteRange(310..<410),
+    ])
+    #expect(expected.map(\.id.rawValue) == [0, 1, 2, 3])
+    #expect(foldsAreLaminar(expected))
+    for seed in 1...8 {
+        #expect(resolveFoldCandidates(permuted(candidates, seed: UInt64(seed))) == expected)
+    }
+}
+
+@Test
+func foldResolverDeduplicatesTruthAndRejectsContradictorySummaries() {
+    let geometry = (
+        kind: FoldKind.declaration,
+        header: 0..<10,
+        body: 10..<40
+    )
+    let first = foldCandidate(
+        geometry.kind,
+        header: geometry.header,
+        body: geometry.body,
+        summary: FoldSummary(hiddenLineCount: 3, leadingText: "first")
+    )
+    let duplicate = first
+    let contradiction = foldCandidate(
+        geometry.kind,
+        header: geometry.header,
+        body: geometry.body,
+        summary: FoldSummary(hiddenLineCount: 4, leadingText: "different")
+    )
+
+    #expect(resolveFoldCandidates([first, duplicate]).count == 1)
+    #expect(resolveFoldCandidates([first, contradiction]).isEmpty)
+}
+
+@Test
+func foldTransportSeamKeepsPublicInitializationEmptyAndLoadsBothPaths() async throws {
+    let source = """
+        mod sample {
+            fn run() {
+                if true {
+                    work();
+                    work();
+                }
+            }
+        }
+        """
+    let bytes = Array(source.utf8)
+    #expect(ReaderDocument(bytes: bytes).foldRegions.isEmpty)
+
+    let samples = OSAllocatedUnfairLock(initialState: [(Double, Int, Int)]())
+    let loader = DocumentLoader(
+        source: { _ in bytes },
+        foldResolutionObserver: { milliseconds, candidates, accepted in
+            samples.withLock { $0.append((milliseconds, candidates, accepted)) }
+        }
+    )
+    let loaded = try loader.load(file: URL(fileURLWithPath: "/fixture.rs"))
+    #expect(!loaded.document.foldRegions.isEmpty)
+    #expect(samples.withLock { $0.count } == 1)
+
+    samples.withLock { $0.removeAll() }
+    let asyncResult = await withCheckedContinuation { continuation in
+        loader.loadSyntax(for: ReaderDocument(bytes: bytes)) { result in
+            let samplesAtCompletion = samples.withLock { $0 }
+            continuation.resume(returning: (result, samplesAtCompletion))
+        }
+    }
+    let asyncDocument = try asyncResult.0.get()
+    #expect(!asyncDocument.foldRegions.isEmpty)
+    #expect(asyncResult.1.count == 1)
+    #expect(asyncResult.1[0].0 >= 0)
+    #expect(asyncResult.1[0].1 == asyncResult.1[0].2)
+}
+
+#if DEBUG
+@Test
+func highlightWithFoldsUsesTheExistingSingleParse() throws {
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let result = try RustExtractor.$parseObserver.withValue({
+        parseCount.withLock { $0 += 1 }
+    }) {
+        try RustHighlighter().highlightWithFolds(bytes: Array("fn run() {\nwork();\n}".utf8))
+    }
+
+    #expect(parseCount.withLock { $0 } == 1)
+    #expect(result.folds.count == 1)
+}
+#endif
+
+@Test
+func foldPerformanceFixtureMatchesManifestAndResolutionBudget() throws {
+    let fixture = repositoryRoot.appendingPathComponent("fixtures/fold_perf.rs")
+    let manifestURL = repositoryRoot.appendingPathComponent(
+        "fixtures/fold_perf.manifest.json"
+    )
+    let bytes = Array(try Data(contentsOf: fixture))
+    let manifest = try #require(
+        JSONSerialization.jsonObject(with: Data(contentsOf: manifestURL))
+            as? [String: Any]
+    )
+    let sample = OSAllocatedUnfairLock(initialState: [(Double, Int, Int)]())
+    let highlighted = try RustHighlighter().highlightWithFolds(
+        bytes: bytes,
+        resolutionObserver: { milliseconds, candidates, accepted in
+            sample.withLock { $0.append((milliseconds, candidates, accepted)) }
+        }
+    )
+    let samples = sample.withLock { $0 }
+    #expect(samples.count == 1)
+    let observed = try #require(samples.first)
+    let sha = ContentID.sha256(of: bytes).bytes.map { String(format: "%02x", $0) }.joined()
+
+    #expect(manifest["fixtureSHA256"] as? String == sha)
+    #expect(manifest["byteCount"] as? Int == bytes.count)
+    #expect(bytes.lazy.filter { $0 == 0x0A }.count == 50_000)
+    #expect(observed.1 == 8_400)
+    #expect(observed.2 == 8_400)
+    #expect(highlighted.folds.count == 8_400)
+    #expect(Dictionary(grouping: highlighted.folds, by: \.kind).mapValues(\.count) == [
+        .container: 200,
+        .imports: 200,
+        .declaration: 4_000,
+        .block: 4_000,
+    ])
+    #expect(Dictionary(grouping: highlighted.folds, by: \.outlineDepth).mapValues(\.count) == [
+        0: 200,
+        1: 4_200,
+        2: 4_000,
+    ])
+    #expect(highlighted.folds.map(\.id.rawValue) == Array(0..<8_400))
+    #expect(foldsAreLaminar(highlighted.folds))
+    #if !DEBUG
+    #expect(observed.0 <= 500)
+    #endif
+    print(
+        "M11_FOLD_RESOLUTION resolutionMS=\(observed.0) "
+            + "candidates=\(observed.1) accepted=\(observed.2)"
+    )
 }
 
 @Test
@@ -622,4 +940,63 @@ private func tokenRanges(
         searchStart = range.upperBound
     }
     return ranges
+}
+
+private func text(in source: String, range: ByteRange) -> String {
+    let bytes = Array(source.utf8)
+    return String(decoding: bytes[Int(range.lowerBound)..<Int(range.upperBound)], as: UTF8.self)
+}
+
+private func foldCandidate(
+    _ kind: FoldKind,
+    header: Range<Int>,
+    body: Range<Int>,
+    depth: Int = 0,
+    summary: FoldSummary
+) -> FoldCandidate {
+    FoldCandidate(
+        kind: kind,
+        headerRange: byteRange(header),
+        bodyRange: byteRange(body),
+        outlineDepth: depth,
+        summary: summary
+    )
+}
+
+private func byteRange(_ range: Range<Int>) -> ByteRange {
+    ByteRange(
+        lowerBound: UInt32(range.lowerBound),
+        upperBound: UInt32(range.upperBound)
+    )
+}
+
+private func foldsAreLaminar(_ folds: [FoldRegion]) -> Bool {
+    for left in folds.indices {
+        for right in folds.indices where left < right {
+            let lhs = folds[left].bodyRange
+            let rhs = folds[right].bodyRange
+            if lhs.upperBound <= rhs.lowerBound || rhs.upperBound <= lhs.lowerBound {
+                continue
+            }
+            let lhsContains = lhs.lowerBound <= rhs.lowerBound
+                && rhs.upperBound <= lhs.upperBound
+                && lhs != rhs
+            let rhsContains = rhs.lowerBound <= lhs.lowerBound
+                && lhs.upperBound <= rhs.upperBound
+                && lhs != rhs
+            if !lhsContains && !rhsContains { return false }
+        }
+    }
+    return true
+}
+
+private func permuted<T>(_ values: [T], seed: UInt64) -> [T] {
+    var result = values
+    var state = seed
+    guard result.count > 1 else { return result }
+    for index in stride(from: result.count - 1, through: 1, by: -1) {
+        state = state &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+        result.swapAt(index, Int(state % UInt64(index + 1)))
+    }
+    return result
 }

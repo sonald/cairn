@@ -88,7 +88,7 @@ public struct HighlightSpan: Equatable, Sendable {
     }
 }
 
-public enum OutlineKind: String, Sendable {
+public enum OutlineKind: String, Hashable, Sendable {
     case fn
     case method
     case `struct`
@@ -130,19 +130,21 @@ public final class ReaderDocument: Sendable {
     public let byteUTF16Map: ByteUTF16Map
     public let highlightSpans: [HighlightSpan]
     public let outlineFacets: [OutlineFacet]
+    package let foldRegions: [FoldRegion]
     public let localBindings: [BindingRecord]
     public let referencesByBinding: [[CodeInsightCore.ByteRange]]
 
     private let localReferenceRanges: [CodeInsightCore.ByteRange]
     private let localReferenceBindingIndices: [Int]
 
-    public init(
+    package init(
         bytes: [UInt8],
         contentID: ContentID? = nil,
         lineTable: LineTable,
         byteUTF16Map: ByteUTF16Map,
         highlightSpans: [HighlightSpan],
         outlineFacets: [OutlineFacet],
+        foldRegions: [FoldRegion],
         localBindings: [BindingRecord] = [],
         referencesByBinding: [[CodeInsightCore.ByteRange]] = []
     ) {
@@ -153,6 +155,7 @@ public final class ReaderDocument: Sendable {
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans
         self.outlineFacets = outlineFacets
+        self.foldRegions = foldRegions
         self.localBindings = localBindings
         self.referencesByBinding = referencesByBinding
         let references = referencesByBinding.enumerated().flatMap {
@@ -164,6 +167,29 @@ public final class ReaderDocument: Sendable {
         }
         localReferenceRanges = references.map(\.range)
         localReferenceBindingIndices = references.map(\.bindingIndex)
+    }
+
+    public convenience init(
+        bytes: [UInt8],
+        contentID: ContentID? = nil,
+        lineTable: LineTable,
+        byteUTF16Map: ByteUTF16Map,
+        highlightSpans: [HighlightSpan],
+        outlineFacets: [OutlineFacet],
+        localBindings: [BindingRecord] = [],
+        referencesByBinding: [[CodeInsightCore.ByteRange]] = []
+    ) {
+        self.init(
+            bytes: bytes,
+            contentID: contentID,
+            lineTable: lineTable,
+            byteUTF16Map: byteUTF16Map,
+            highlightSpans: highlightSpans,
+            outlineFacets: outlineFacets,
+            foldRegions: [],
+            localBindings: localBindings,
+            referencesByBinding: referencesByBinding
+        )
     }
 
     public convenience init(
@@ -429,6 +455,25 @@ public struct RustHighlighter: Sendable {
         bindings: [BindingRecord],
         referencesByBinding: [[CodeInsightCore.ByteRange]]
     ) {
+        let highlighted = try highlightWithFolds(bytes: bytes)
+        return (
+            highlighted.spans,
+            highlighted.outlineFacets,
+            highlighted.bindings,
+            highlighted.referencesByBinding
+        )
+    }
+
+    package func highlightWithFolds(
+        bytes: [UInt8],
+        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)? = nil
+    ) throws -> (
+        spans: [HighlightSpan],
+        outlineFacets: [OutlineFacet],
+        folds: [FoldRegion],
+        bindings: [BindingRecord],
+        referencesByBinding: [[CodeInsightCore.ByteRange]]
+    ) {
         guard
             let language = tree_sitter_rust(),
             let parser = Parser(language: language)
@@ -442,12 +487,24 @@ public struct RustHighlighter: Sendable {
 
         var spans: [HighlightSpan] = []
         var facets: [OutlineFacet] = []
-        var stack: [(node: Node, depth: Int, parentKind: String?, member: OutlineKind?)] = [
-            (tree.rootNode, 0, nil, nil),
+        var foldCandidates = FoldCandidateAccumulator()
+        var stack: [(
+            node: Node,
+            depth: Int,
+            foldDepth: Int,
+            parentKind: String?,
+            member: OutlineKind?
+        )] = [
+            (tree.rootNode, 0, 0, nil, nil),
         ]
         while let current = stack.popLast() {
             let node = current.node
             let kind = node.kind
+            foldCandidates.visit(
+                node: node,
+                foldDepth: current.foldDepth,
+                bytes: bytes
+            )
             let highlight: HighlightKind?
             if Self.comments.contains(kind) {
                 let range = coreRange(node)
@@ -505,6 +562,24 @@ public struct RustHighlighter: Sendable {
                     $0.kind == "declaration_list"
                 })
             let childDepth = current.depth + (isContainer ? 1 : 0)
+            let createsFoldScope = isContainer
+                || kind == "struct_item"
+                || kind == "enum_item"
+                || kind == "function_item"
+                || kind == "if_expression"
+                || kind == "else_clause"
+                || kind == "for_expression"
+                || kind == "loop_expression"
+                || kind == "while_expression"
+                || kind == "async_block"
+                || kind == "unsafe_block"
+                || kind == "const_block"
+                || kind == "try_block"
+                || kind == "gen_block"
+                || kind == "closure_expression"
+                || kind == "match_expression"
+                || kind == "match_arm"
+            let childFoldDepth = current.foldDepth + (createsFoldScope ? 1 : 0)
             let childMember: OutlineKind?
             switch kind {
             case "impl_item":
@@ -523,7 +598,7 @@ public struct RustHighlighter: Sendable {
                     {
                         continue
                     }
-                    stack.append((child, childDepth, kind, childMember))
+                    stack.append((child, childDepth, childFoldDepth, kind, childMember))
                 }
             }
         }
@@ -535,9 +610,14 @@ public struct RustHighlighter: Sendable {
             tree: tree,
             bytes: bytes
         )
+        let folds = foldCandidates.resolve(
+            outlineFacets: facets,
+            observer: resolutionObserver
+        )
         return (
             spans,
             facets,
+            folds,
             references.bindings,
             references.referencesByBinding
         )
@@ -698,11 +778,21 @@ public struct DocumentLoader: Sendable {
     public typealias ContentSource = @Sendable (URL) throws -> [UInt8]
 
     private let source: ContentSource
+    private let foldResolutionObserver: (@Sendable (Double, Int, Int) -> Void)?
 
     public init(source: @escaping ContentSource = { file in
         Array(try Data(contentsOf: file, options: .mappedIfSafe))
     }) {
         self.source = source
+        foldResolutionObserver = nil
+    }
+
+    package init(
+        source: @escaping ContentSource,
+        foldResolutionObserver: (@Sendable (Double, Int, Int) -> Void)?
+    ) {
+        self.source = source
+        self.foldResolutionObserver = foldResolutionObserver
     }
 
     public func load(
@@ -722,11 +812,15 @@ public struct DocumentLoader: Sendable {
             lineTable: lineTable,
             byteUTF16Map: map,
             highlightSpans: [],
-            outlineFacets: []
+            outlineFacets: [],
+            foldRegions: []
         )
 
         if tier == .regular {
-            let highlighted = try RustHighlighter().highlight(bytes: bytes)
+            let highlighted = try RustHighlighter().highlightWithFolds(
+                bytes: bytes,
+                resolutionObserver: foldResolutionObserver
+            )
             return (ReaderDocument(
                 bytes: bytes,
                 contentID: contentID,
@@ -734,6 +828,7 @@ public struct DocumentLoader: Sendable {
                 byteUTF16Map: map,
                 highlightSpans: highlighted.spans,
                 outlineFacets: highlighted.outlineFacets,
+                foldRegions: highlighted.folds,
                 localBindings: highlighted.bindings,
                 referencesByBinding: highlighted.referencesByBinding
             ), tier)
@@ -750,7 +845,10 @@ public struct DocumentLoader: Sendable {
     ) {
         Task.detached(priority: .userInitiated) {
             do {
-                let highlighted = try RustHighlighter().highlight(bytes: document.bytes)
+                let highlighted = try RustHighlighter().highlightWithFolds(
+                    bytes: document.bytes,
+                    resolutionObserver: foldResolutionObserver
+                )
                 completion(.success(ReaderDocument(
                     bytes: document.bytes,
                     contentID: document.contentID,
@@ -758,6 +856,7 @@ public struct DocumentLoader: Sendable {
                     byteUTF16Map: document.byteUTF16Map,
                     highlightSpans: highlighted.spans,
                     outlineFacets: highlighted.outlineFacets,
+                    foldRegions: highlighted.folds,
                     localBindings: highlighted.bindings,
                     referencesByBinding: highlighted.referencesByBinding
                 )))

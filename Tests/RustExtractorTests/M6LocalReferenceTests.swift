@@ -11,6 +11,7 @@ private let m6RepositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
 
+#if DEBUG
 @Test
 func localReferenceWalkUsesTheExistingTreeAndSkipsMacroReparse() throws {
     let source = """
@@ -42,6 +43,7 @@ func localReferenceWalkUsesTheExistingTreeAndSkipsMacroReparse() throws {
     #expect(result.bindings[0].declarationRange.lowerBound
         > UInt32(source[..<visible.lowerBound].utf8.count))
 }
+#endif
 
 @Test
 func m6FixtureLocalReferenceIndexMetrics() throws {
