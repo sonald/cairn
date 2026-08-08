@@ -1,0 +1,575 @@
+<!doctype html><html lang="zh"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M11 · Reading Comfort 原型（P0，待裁决）</title>
+<style>
+*{box-sizing:border-box;}
+body{margin:0;padding:30px 26px 90px;font:14px/1.5 -apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",Arial,sans-serif;background:#eef0f3;color:#1c2024;}
+@media (prefers-color-scheme:dark){body{background:#16181c;color:#e6e8eb;}.lead p{color:#a7adb5!important;}.pc,.dnote,.note{background:#1f2227!important;border-color:#2c3037!important;color:#c4c9cf!important;}.dnote h3{color:#e6e8eb!important;}figcaption{color:#c4c9cf!important;}.reco{background:rgba(122,167,255,.10)!important;border-color:rgba(122,167,255,.3)!important;color:#a9c4f5!important;}.note b{color:#e6a06a!important;}}
+.wrap{max-width:1120px;margin:0 auto;}
+.kick{font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#6b7280;margin-bottom:10px;}
+h1{margin:0 0 6px;font-size:23px;letter-spacing:-.01em;}
+h2{margin:42px 0 4px;font-size:17px;letter-spacing:-.01em;border-bottom:1px solid #d3d8de;padding-bottom:8px;}
+@media (prefers-color-scheme:dark){h2{border-color:#2c3037;}}
+.lead p{margin:0 0 4px;max-width:920px;color:#4b5563;}.lead code{font-family:ui-monospace,monospace;font-size:.92em;}
+.note{margin:16px 0 6px;padding:11px 14px;border:1px solid #e6d3c4;background:#fbf3ec;border-radius:10px;font-size:12.5px;color:#7a4a2e;line-height:1.55;}.note b{color:#a2401f;}
+.swbar{display:flex;gap:8px;align-items:center;margin:16px 0 6px;position:sticky;top:0;z-index:50;background:#eef0f3;padding:8px 0;}
+@media (prefers-color-scheme:dark){.swbar{background:#16181c;}}
+.swbar span{font-size:12px;color:#6b7280;margin-right:4px;}
+.swbar button{font:600 12px/1 inherit;padding:7px 14px;border-radius:8px;border:1px solid #d3d8de;background:#fff;color:#3a4149;cursor:pointer;}
+.swbar button.on{background:#175CD3;color:#fff;border-color:#175CD3;}
+@media (prefers-color-scheme:dark){.swbar button{background:#24272c;color:#c4c9cf;border-color:#33373d;}.swbar button.on{background:#2f5fd0;color:#fff;border-color:#2f5fd0;}}
+figure{margin:0 0 26px;}figcaption{font-size:13px;font-weight:700;color:#374151;margin:0 0 8px;}figcaption .n{color:#6b7280;font-weight:500;}
+@media (prefers-color-scheme:dark){figcaption{color:#c4c9cf;}}
+.pc{margin:8px 0 0;padding:9px 13px;border:1px solid #dfe2e7;border-radius:9px;background:#fff;font-size:12px;line-height:1.55;color:#4b5563;}
+@media (prefers-color-scheme:dark){.pc{background:#1f2227;border-color:#2c3037;color:#c4c9cf;}}
+.pc b{color:#1a7f37;}.pc .con{color:#b54708;}
+
+/* window mockup */
+.win{border-radius:11px;overflow:hidden;border:1px solid var(--divider);box-shadow:0 2px 8px rgba(0,0,0,.10);color:var(--fg);background:var(--content);}
+.code{font:12px/1.85 ui-monospace,"SF Mono",Menlo,monospace;white-space:pre;}
+.code .ln{color:var(--ter);margin-right:12px;user-select:none;display:inline-block;width:26px;text-align:right;}
+.kw{color:var(--kw);}.ty{color:var(--ty);}.fn{color:var(--fn);}.cm{color:var(--com);font-style:italic;}.st{color:var(--strc);}.num{color:var(--warn);}
+
+/* chrome bars */
+.titlebar{display:flex;align-items:center;gap:10px;padding:7px 13px;background:var(--chrome2);border-bottom:1px solid var(--divider);font-size:11px;color:var(--sec);}
+.titlebar .fname{font-weight:600;color:var(--fg);}
+.titlebar .spacer{flex:1;}
+.statusbar{display:flex;align-items:center;gap:14px;padding:6px 13px;background:var(--chrome2);border-top:1px solid var(--divider);font-size:10.5px;color:var(--sec);}
+.statusbar .spacer{flex:1;}
+
+/* gutter / fold column */
+.gutter{display:flex;}
+.gcol{padding:0 6px;text-align:right;font:12px/1.85 ui-monospace,monospace;color:var(--ter);user-select:none;background:var(--chrome);border-right:1px solid var(--divider);white-space:nowrap;}
+.gcol.fold{min-width:26px;color:var(--sec);cursor:pointer;}
+.gcol.ln{min-width:38px;}
+.gcol.diff{min-width:20px;border-right:none;}
+.gbody{flex:1;min-width:0;padding:0 0 0 10px;overflow:auto;background:var(--content);}
+
+/* fold chip variants */
+.chip-inline{color:var(--ter);font-style:italic;} /* A: bare inline text */
+.chip-pill{display:inline-block;font:500 10px/1 ui-monospace,monospace;padding:2px 7px;border-radius:5px;border:1px solid var(--neubd);color:var(--sec);vertical-align:baseline;}
+.chip-fill{display:inline-block;font:500 10px/1 ui-monospace,monospace;padding:2px 7px;border-radius:4px;background:var(--chipbg);color:var(--chipfg);vertical-align:baseline;}
+.cnt{display:inline-block;min-width:54px;text-align:left;} /* fixed-width count region */
+
+/* fold handle chevron */
+.chev{display:inline-block;width:14px;color:var(--sec);cursor:pointer;}
+
+/* height segmented control */
+.seg{display:inline-flex;border:1px solid var(--divider);border-radius:7px;overflow:hidden;background:var(--chrome);}
+.seg button{font:600 10px/1 inherit;padding:5px 10px;border:none;background:transparent;color:var(--sec);cursor:pointer;border-right:1px solid var(--divider);}
+.seg button:last-child{border-right:none;}
+.seg button.on{background:var(--content);color:var(--accent);box-shadow:inset 0 -2px 0 var(--pstroke);}
+
+/* scope header (resident) */
+.scopebar{display:flex;align-items:center;gap:8px;padding:5px 13px;background:var(--chrome);border-bottom:1px solid var(--divider);font:11px/1.4 ui-monospace,monospace;color:var(--sec);}
+.scopebar .sc{color:var(--fg);}
+.scopebar .sk{color:var(--kw);}
+.scopebar .arrow{color:var(--ter);}
+.scopebar .rest{color:var(--sec);}
+
+/* palette */
+.palettescrim{position:relative;}
+.palette{position:absolute;background:var(--content);border:1px solid var(--neubd);border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.18);overflow:hidden;z-index:20;width:380px;}
+.palette .pinput{display:flex;align-items:center;gap:8px;padding:9px 12px;border-bottom:1px solid var(--divider);font:13px ui-monospace,monospace;}
+.palette .pmode{color:var(--ter);font-size:11px;}
+.palette .pquery{color:var(--fg);}
+.palette .plist{max-height:200px;overflow:auto;}
+.palette .prow{display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:12px;cursor:pointer;}
+.palette .prow.sel{background:var(--sel);}
+.palette .prow .pname{flex:1;color:var(--fg);}
+.palette .prow .pmeta{font:10px/1 ui-monospace,monospace;color:var(--ter);}
+.palette .prow .pkey{font:10px/1 ui-monospace,monospace;color:var(--ter);border:1px solid var(--divider);border-radius:3px;padding:1px 4px;}
+.palette .ptrunc{padding:5px 12px;font-size:10.5px;color:var(--ter);border-top:1px solid var(--divider);}
+
+/* reading set excerpt */
+.rsbody{padding:12px 14px;background:var(--content);overflow:auto;}
+.rstitle{font-size:14px;font-weight:700;color:var(--fg);margin:0 0 3px;}
+.rssub{font-size:11px;color:var(--sec);margin:0 0 13px;}
+.ex{border:1px solid var(--divider);border-radius:9px;margin-bottom:12px;overflow:hidden;background:var(--content);}
+.ex .h{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:7px 11px;background:var(--chrome);border-bottom:1px solid var(--divider);}
+.ex .role{font:700 9px/1 ui-monospace,monospace;letter-spacing:.05em;color:var(--sec);}
+.ex .esym{font:600 12px/1 ui-monospace,monospace;color:var(--fg);}
+.ex .epath{font-family:ui-monospace,monospace;font-size:10px;color:var(--sec);}
+.ex .b{padding:9px 12px;overflow:auto;}
+.ex .acts{padding:6px 12px 9px;display:flex;gap:14px;border-top:1px solid var(--divider);background:var(--content);}
+.ex .spacer{flex:1;}
+
+/* badges / chips (M10 reuse) */
+.badge{font:600 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:20px;flex:none;}
+.badge.verified{background:var(--grnbg);color:var(--grn);}
+.badge.inferred{background:var(--blubg);color:var(--blu);}
+.chip{font:500 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:5px;flex:none;background:var(--chipbg);color:var(--chipfg);}
+.chip.scope{background:transparent;color:var(--sec);border:1px dashed var(--neubd);}
+.chip.commit{background:transparent;color:var(--accent);border:1px solid var(--accent);}
+.chip.caveat{background:var(--warnbg);color:var(--warn);border:1px solid var(--warnbd);}
+.chip.cap{background:transparent;color:var(--warn);border:1px dashed var(--warnbd);}
+.act{font:500 10px/1 inherit;color:var(--accent);cursor:pointer;}
+.act.dis{color:var(--ter);cursor:not-allowed;text-decoration:line-through;}
+
+/* AT CAPTURE inspector */
+.insp{border:1px solid var(--divider);border-radius:10px;background:var(--content);overflow:hidden;}
+.insp .ih{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--chrome2);border-bottom:1px solid var(--divider);}
+.insp .ih .icap{font:700 8px/1 ui-monospace,monospace;letter-spacing:.06em;color:var(--warn);border:1px dashed var(--warnbd);padding:2px 5px;border-radius:4px;}
+.insp .ih .ititle{font:600 12px/1 ui-monospace,monospace;color:var(--fg);}
+.insp .isec{padding:9px 12px;border-bottom:1px solid var(--divider);}
+.insp .isec:last-child{border-bottom:none;}
+.insp .isec .ilabel{font:700 8px/1 ui-monospace,monospace;letter-spacing:.06em;color:var(--ter);margin-bottom:5px;}
+.insp .ibody{font-size:11.5px;line-height:1.55;color:var(--fg);}
+.insp .irow{display:flex;gap:8px;font:11px/1.5 ui-monospace,monospace;}
+.insp .irow .ik{color:var(--ter);min-width:96px;}
+.insp .irow .iv{color:var(--fg);}
+.insp .irow .iv.muted{color:var(--sec);}
+
+/* folding menu */
+.menu{background:var(--content);border:1px solid var(--neubd);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.16);overflow:hidden;width:240px;}
+.menu .mhead{padding:4px 11px;font:700 8px/1 ui-monospace,monospace;letter-spacing:.06em;color:var(--ter);background:var(--chrome2);}
+.menu .mrow{display:flex;align-items:center;gap:8px;padding:5px 11px;font-size:12px;color:var(--fg);cursor:default;}
+.menu .mrow .mname{flex:1;}
+.menu .mrow .mkey{font:11px/1 ui-monospace,monospace;color:var(--ter);}
+.menu .mrow.dis{color:var(--ter);}
+.menu .msep{height:1px;background:var(--divider);margin:3px 0;}
+.menu .mcheck{color:var(--accent);width:12px;}
+
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+@media (max-width:760px){.grid2{grid-template-columns:1fr;}}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;}
+@media (max-width:900px){.row3{grid-template-columns:1fr;}}
+.opttag{display:inline-block;font:700 9px/1 ui-monospace,monospace;padding:2px 6px;border-radius:4px;background:#175CD3;color:#fff;margin-left:6px;letter-spacing:.04em;}
+.opttag.rec{background:#1A7F37;}
+.opttag.done{background:#1A7F37;}
+@media (prefers-color-scheme:dark){.opttag{background:#2f5fd0;}.opttag.rec{background:#2a7a44;}}
+
+.win.t-light{ --content:#FFFFFF; --chrome:#F4F5F7; --chrome2:#ECEEF1; --divider:#E1E4EA; --sel:#E7F0FF; --accent:#175CD3; --fg:#1F2328; --sec:#5A6472; --ter:#8C959F; --cur:#F3F6FA; --grn:#1A7F37; --grnbg:rgba(26,127,55,.12); --blu:#175CD3; --blubg:rgba(23,92,211,.10); --chipbg:#EFF1F4; --chipfg:#57606A; --pstroke:#175CD3; --neubd:#C4CAD1; --warn:#B54708; --warnbg:rgba(181,71,8,.10); --warnbd:#EAAA7A; --kw:#9C36B5; --ty:#087E8B; --fn:#175CD3; --com:#4D7C0F; --strc:#B42318; }
+.win.t-dark{ --content:#1E1E1E; --chrome:#252528; --chrome2:#2C2C30; --divider:#34363B; --sel:#2C3644; --accent:#84ADFF; --fg:#D4D4D4; --sec:#9BA1A8; --ter:#6E747B; --cur:#2A2D2E; --grn:#4EC777; --grnbg:rgba(78,199,119,.16); --blu:#7AA7FF; --blubg:rgba(122,167,255,.16); --chipbg:#34383D; --chipfg:#AAB1B8; --pstroke:#84ADFF; --neubd:#4A4E54; --warn:#F0A868; --warnbg:rgba(240,168,104,.15); --warnbd:#6B5334; --kw:#E879F9; --ty:#67E8F9; --fn:#84ADFF; --com:#A3E635; --strc:#FDA29B; }
+.win.t-si{ --content:#F5F0E6; --chrome:#EEE7D6; --chrome2:#E7DEC9; --divider:#DAD0B9; --sel:#E7DAB9; --accent:#163A5F; --fg:#1F2733; --sec:#6E6857; --ter:#8B8272; --cur:#EDE6D8; --grn:#3F6B42; --grnbg:rgba(63,107,66,.15); --blu:#245B78; --blubg:rgba(36,91,120,.11); --chipbg:#E3D8BE; --chipfg:#6E6857; --pstroke:#163A5F; --neubd:#C4B79A; --warn:#8A5A2E; --warnbg:rgba(138,90,46,.12); --warnbd:#C7A574; --kw:#7A1F1F; --ty:#245B78; --fn:#163A5F; --com:#526B45; --strc:#8A3C2E; }
+</style></head><body>
+<div class="wrap">
+<div class="kick">M11 · Reading Comfort — 界面原型（P0，不进产品代码）</div>
+<h1>折叠 chip · 折叠柄 · 高度档 · Palette · 作用域头 · Reading Set</h1>
+<div class="lead">
+<p>M11 P0 待裁决项的变体对照。每个项给出 2–3 个实际渲染形态，三主题（Light / Dark / SI Classic）全覆盖。<b>选中即定稿</b>，落进 <code>prototype-decisions.md</code>，后续 F0–F6 / C1 / R1 / M11D 按此实现。</p>
+<p>固定语料沿用 tokio <code>spawn</code>（与 M10 一致）。下方 <span class="opttag done">已定稿</span> 为用户确认的最终选择。</p>
+</div>
+<div class="note"><b>P0 范围</b>（§4 P0）：折叠占位符 chip、折叠柄、高度档控件位置、palette 布局、常驻作用域头，以及基于 M10 D6 的 Reading Set header、AT CAPTURE Inspector 文案、三动作（含 disabled）状态、Folding 菜单文案、§3.7 的 imports/cfgTest 归档。本页零产品代码差异。</div>
+
+<div class="swbar"><span>主题</span><button data-t="t-light" class="on">Light</button><button data-t="t-dark">Dark</button><button data-t="t-si">SI Classic</button></div>
+
+<!-- ============ §1 折叠占位符 chip ============ -->
+<h2>§1 折叠占位符 chip <span style="font-size:12px;font-weight:400;color:#6b7280">— 折叠体被替换成的附件</span></h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.2(3)）：<code>NSTextAttachment</code>、长度恒 1、<b>固定宽度计数区</b>只重绘不加宽、高度 ≤ 单行行高。计数区承载 <code>· N matches</code> / <code>· diff</code> / <code>· N occurrences</code>，0/3/999 三态宽度不变。下面三变体用同一行折叠后代码对比。</p>
+
+<figure>
+<figcaption>变体 A · 花括号内联文本 <span class="n">— chip 是代码流的一部分，无描边无填充</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol ln">45<br>46</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-inline">⋯ 42 lines · 7 fn · 2 const<span class="cnt"> · 3 matches</span></span>
+}</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：最贴近源码阅读流，视觉最轻，与代码无缝；三主题下都不抢注意力。<span class="con">代价</span>：可发现性弱于描边 pill，需靠 gutter 折叠柄补足"这里可展开"的提示。<b>计数区</b>：<code class="cnt">· 3 matches</code> 固定 min-width 54px，999 时截断为 <code>· 999</code> 不加宽。</div>
+</figure>
+
+<figure>
+<figcaption>变体 B · 描边 pill（M9-S5 chip token） <span class="opttag done">已定稿</span> <span class="n">— 与 diff/scope chip 同族</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol ln">45<br>46</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-pill">⋯ 42 lines · 7 fn · 2 const<span class="cnt"> · 3 matches</span></span>
+}</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：复用 M9-S5 token（1×5pt 描边、r4），与既有 diff/scope/commit chip 视觉同族，一致性最高；可发现性比 A 强。<span class="con">代价</span>：在源码行内引入描边边界，略微打断阅读流；深色主题下描边需够亮。<b>计数区</b>固定宽，三态不变。</div>
+</figure>
+
+<figure>
+<figcaption>变体 C · 淡填充色块 <span class="n">— 比 pill 更融合，比纯文本更有形</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol ln">45<br>46</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-fill">⋯ 42 lines · 7 fn · 2 const<span class="cnt"> · 3 matches</span></span>
+}</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：无描边但有形，介于 A/B 之间；淡填充在 SI 暖纸上辨识度好。<span class="con">代价</span>：引入第三种 chip 视觉（描边 pill 已是既有 token），增加视觉语汇数量。<b>计数区</b>固定宽。</div>
+</figure>
+
+<div class="pc" style="margin-bottom:24px"><b>三态宽度不变验收预览</b>（变体 A 为例，计数区 <code>min-width:54px</code>）：<br>
+<span class="chip-inline">⋯ 42 lines<span class="cnt"> · 0 matches</span></span> &nbsp;→&nbsp; <span class="chip-inline">⋯ 42 lines<span class="cnt"> · 3 matches</span></span> &nbsp;→&nbsp; <span class="chip-inline">⋯ 42 lines<span class="cnt"> · 999</span></span>
+&nbsp;&nbsp;<span style="color:var(--ter)">attachment 宽度与整行排版宽度恒定（F2 断言）</span></div>
+
+<!-- ============ §2 折叠柄 ============ -->
+<h2>§2 折叠柄（gutter 展开/收起箭头）</h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.10）：<code>needsRuler = lineNumbers || 有 diff || 有可见折叠区</code>，折叠列计入 <code>rulerThickness</code>。行号关 + diff 空 + 有折叠区时 ruler 仍显示。<code>hiddenLineCount &lt; 2</code> 不画柄。⌥ 点击递归同级。</p>
+
+<figure>
+<figcaption>变体 A · 常驻折叠列 <span class="n">— gutter 左侧独立 chevron 列，始终可见可点</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol fold">▾<br>&nbsp;<br>▾<br>&nbsp;</div>
+  <div class="gcol ln">45<br>46<br>48<br>49</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-inline">⋯ 42 lines · 7 fn<span class="cnt"> · 3 matches</span></span>
+}
+<span class="kw">pub struct</span> <span class="ty">Runtime</span> {
+    handle: <span class="ty">Handle</span>,</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：可发现性最强，VS Code 惯例；折叠态一眼可见（▾ 展开 / ▸ 折叠）；行号关 + diff 空时折叠列仍承载点击。<span class="con">代价</span>：常驻占宽（~26px）。<b>⌥ 点击</b>递归同级折叠/展开。<b>不画柄条件</b>：<code>hiddenLineCount &lt; 2</code> 的区间与无折叠区行均为空格。</div>
+</figure>
+
+<figure>
+<figcaption>变体 B · 悬停浮现 chevron <span class="opttag done">已定稿</span> <span class="n">— 平时不占位，悬停 margin 才出现</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol ln" style="min-width:52px"><span style="color:var(--sec)">▾</span>45<br>46<br><span style="color:var(--sec)"> </span>48<br>49</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-inline">⋯ 42 lines · 7 fn<span class="cnt"> · 3 matches</span></span>
+}
+<span class="kw">pub struct</span> <span class="ty">Runtime</span> {
+    handle: <span class="ty">Handle</span>,</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：chrome 最轻，无常驻折叠列；干净。<span class="con">代价</span>：可发现性弱（用户不知道悬停会出箭头）；行号关时需额外 margin 承载悬停区；<b>与 <code>needsRuler</code> 合同冲突</b>--行号关 + diff 空时 ruler 被移除，悬停区无处生根，需特殊处理。计划要求"有可见折叠区时 ruler 仍显示"，本变体需为此常驻一个不可见 margin，抵消了"最轻"的优势。</div>
+</figure>
+
+<figure>
+<figcaption>变体 C · 行号内联 chevron <span class="n">— chevron 拼在行号前，无独立列</span></figcaption>
+<div class="win t-light">
+<div class="gutter">
+  <div class="gcol ln" style="min-width:48px">▾45<br>&nbsp;46<br>▾48<br>&nbsp;49</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt; {
+    <span class="chip-inline">⋯ 42 lines · 7 fn<span class="cnt"> · 3 matches</span></span>
+}
+<span class="kw">pub struct</span> <span class="ty">Runtime</span> {
+    handle: <span class="ty">Handle</span>,</div></div>
+</div>
+</div>
+<div class="pc"><b>优点</b>：省一个独立列宽度。<span class="con">代价</span>：行号列宽度随折叠态变化（▾ 占位 vs 空格），<b>行号对齐会抖动</b>；折叠/展开时整列重排，视觉跳动明显。与 gutter 自绘的固定列宽（<code>:990</code>–<code>:1009</code>）模型冲突。</div>
+</figure>
+
+<!-- ============ §3 高度档控件 ============ -->
+<h2>§3 阅读高度档控件位置 <span style="font-size:12px;font-weight:400;color:#6b7280">— Full / Structure / Overview</span></h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.7 / §3.8）：快捷键 <code>⌥⌘0/1/2</code> + View ▸ Folding 五项菜单是硬要求。P0 要定稿<b>是否额外加常驻可见控件</b>。三档：Full（无折叠）/ Structure（declaration body + imports + cfgTest）/ Overview（再加 container，只留 depth 0 声明头）。</p>
+
+<div class="row3">
+<figure>
+<figcaption>变体 A · 仅菜单 + 快捷键 <span class="n">— 无常驻控件</span></figcaption>
+<div class="win t-light" style="margin-bottom:8px">
+<div class="menu">
+<div class="mhead">VIEW ▸ FOLDING</div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Toggle Fold</span><span class="mkey">⌘⇧[</span></div>
+<div class="mrow"><span class="mcheck">✓</span><span class="mname">Full</span><span class="mkey">⌥⌘0</span></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Structure</span><span class="mkey">⌥⌘1</span></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Overview</span><span class="mkey">⌥⌘2</span></div>
+<div class="msep"></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Focus Current Scope</span><span class="mkey">⌥⌘F</span></div>
+</div>
+</div>
+<div class="pc" style="margin-top:0"><b>优点</b>：chrome 最干净，零常驻占用；当前档靠菜单勾选体现。<span class="con">代价</span>：当前档位<b>不可见</b>，用户不看菜单不知道自己在 Overview；可发现性靠快捷键和菜单。</div>
+</figure>
+
+<figure>
+<figcaption>变体 B · 顶部 chrome 分段控件 <span class="opttag done">已定稿</span> <span class="n">— 当前档高亮可见</span></figcaption>
+<div class="win t-light" style="margin-bottom:8px">
+<div class="titlebar">
+  <span class="fname">join_set.rs</span>
+  <span class="seg">
+    <button class="on">Full</button>
+    <button>Structure</button>
+    <button>Overview</button>
+  </span>
+  <span class="spacer"></span>
+  <span style="font-size:10px;color:var(--ter)">⌥⌘0/1/2</span>
+</div>
+<div class="gutter"><div class="gcol ln">45</div><div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(..) {</div></div></div>
+</div>
+<div class="pc" style="margin-top:0"><b>优点</b>：当前档<b>始终可见</b>且一键切换，可发现性最好；与文件名同行不额外占高。<span class="con">代价</span>：顶部 chrome 多一组控件；Structure/Overview 切档是重操作，放在一键可点处需防误触（可加确认或仅菜单触发）。<b>菜单项仍存在</b>，palette <code>&gt;</code> 可采集。</div>
+</figure>
+
+<figure>
+<figcaption>变体 C · 底部状态栏分段 <span class="n">— 不挤顶部阅读区</span></figcaption>
+<div class="win t-light" style="margin-bottom:8px">
+<div class="gutter"><div class="gcol ln">45</div><div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(..) {</div></div></div>
+<div class="statusbar">
+  <span class="seg"><button class="on">Full</button><button>Structure</button><button>Overview</button></span>
+  <span class="spacer"></span>
+  <span>8 folds · 3 matches</span>
+</div>
+</div>
+<div class="pc" style="margin-top:0"><b>优点</b>：不挤顶部；底部本就是状态信息位，档位 + 折叠数 + 命中数同处。<span class="con">代价</span>：需确认底部状态栏是否既有（当前未见）；离阅读视线远，切换需移目光到底部。<b>菜单项仍存在</b>。</div>
+</figure>
+</div>
+
+<!-- ============ §4 Palette 位置 ============ -->
+<h2>§4 Palette 浮层位置 <span style="font-size:12px;font-weight:400;color:#6b7280">— ⌘P / ⇧⌘P / ⌘T / ⌘L 统一入口</span></h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.12 / §3.13）：五模式同一输入框，前缀切换。模式：（无）文件 / <code>&gt;</code> 命令 / <code>@</code> 当前文件符号 / <code>#</code> 项目符号 / <code>:</code> 行号。每模式最多 20 条。P0 定浮层位置。</p>
+
+<div class="row3">
+<figure>
+<figcaption>变体 A · 居中浮层（Spotlight） <span class="opttag done">已定稿</span></figcaption>
+<div class="win t-light" style="height:240px;position:relative">
+<div class="titlebar"><span class="fname">join_set.rs</span></div>
+<div style="height:60px;background:var(--content)"></div>
+<div class="palette" style="left:50%;top:50%;transform:translate(-50%,-50%)">
+  <div class="pinput"><span class="pmode">⌘P</span><span class="pquery">spawn</span></div>
+  <div class="plist">
+    <div class="prow sel"><span class="pname">spawn.rs</span><span class="pmeta">runtime/task/</span></div>
+    <div class="prow"><span class="pname">spawn_blocking.rs</span><span class="pmeta">runtime/</span></div>
+    <div class="prow"><span class="pname">JoinSet::spawn_on</span><span class="pmeta">join_set.rs:88</span></div>
+  </div>
+  <div class="ptrunc">… 还有 2 条</div>
+</div>
+</div>
+<div class="pc" style="margin-top:8px"><b>优点</b>：macOS Spotlight 惯例，不贴边；与阅读区分离感强，专注输入。<span class="con">代价</span>：遮挡部分代码（浮层本就是临时焦点）。</div>
+</figure>
+
+<figure>
+<figcaption>变体 B · 顶部下拉（VS Code）</figcaption>
+<div class="win t-light" style="height:240px;position:relative">
+<div class="titlebar"><span class="fname">join_set.rs</span></div>
+<div class="palette" style="left:12px;right:12px;top:32px;width:auto">
+  <div class="pinput"><span class="pmode">⌘P</span><span class="pquery">spawn</span></div>
+  <div class="plist">
+    <div class="prow sel"><span class="pname">spawn.rs</span><span class="pmeta">runtime/task/</span></div>
+    <div class="prow"><span class="pname">spawn_blocking.rs</span><span class="pmeta">runtime/</span></div>
+    <div class="prow"><span class="pname">JoinSet::spawn_on</span><span class="pmeta">join_set.rs:88</span></div>
+  </div>
+</div>
+<div style="height:100px;background:var(--content)"></div>
+</div>
+<div class="pc" style="margin-top:8px"><b>优点</b>：贴近 tab strip，文件导航心智一致；VS Code 惯例。<span class="con">代价</span>：与 tab strip 视觉竞争；顶部 chrome 已有文件名 + 高度档（§3-B），再加下拉较挤。</div>
+</figure>
+
+<figure>
+<figcaption>变体 C · 底部浮层</figcaption>
+<div class="win t-light" style="height:240px;position:relative">
+<div class="titlebar"><span class="fname">join_set.rs</span></div>
+<div style="height:120px;background:var(--content)"></div>
+<div class="palette" style="left:50%;bottom:12px;transform:translateX(-50%)">
+  <div class="pinput"><span class="pmode">⌘P</span><span class="pquery">spawn</span></div>
+  <div class="plist">
+    <div class="prow sel"><span class="pname">spawn.rs</span><span class="pmeta">runtime/task/</span></div>
+    <div class="prow"><span class="pname">spawn_blocking.rs</span><span class="pmeta">runtime/</span></div>
+  </div>
+</div>
+</div>
+<div class="pc" style="margin-top:8px"><b>优点</b>：不挡顶部 tab/路径条。<span class="con">代价</span>：与多数编辑器习惯相反；离文件名/符号导航的心智位置远。</div>
+</figure>
+</div>
+
+<div class="pc" style="margin:8px 0 24px"><b>palette 五模式预览</b>（前缀切换，同一框）：<br>
+<code>spawn</code> → 文件 &nbsp;|&nbsp; <code>&gt; fold</code> → 命令 &nbsp;|&nbsp; <code>@spawn</code> → 当前文件符号 &nbsp;|&nbsp; <code>#spawn</code> → 项目符号 &nbsp;|&nbsp; <code>:449</code> → 行号跳转<br>
+<span style="color:var(--ter)">命令模式示例：<code>&gt; fold</code> 匹配 View ▸ Folding 五项，显示 <code>View ▸ Folding ▸ Overview ⌥⌘2</code></span></div>
+
+<!-- ============ §5 常驻作用域头 ============ -->
+<h2>§5 常驻作用域头 <span style="font-size:12px;font-weight:400;color:#6b7280">— 定稿呈现（§3.15）</span></h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.15）：顶部钉住至多 2 层，kind/name 来自 <code>outlineFacets</code>。最小包含 facet + kind 兼容关联。无包围声明时整条不占位、不留空条。caret 在 <code>JoinSet::spawn_on</code>（join_set.rs:88，位于 <code>impl Runtime</code> 内的 <code>fn spawn_on</code> body 中）。</p>
+
+<figure>
+<figcaption>常驻作用域头 · 2 层钉住 <span class="n">— impl Runtime ▸ fn spawn_on</span></figcaption>
+<div class="win t-light">
+<div class="scopebar">
+  <span class="sk">impl</span> <span class="sc">Runtime</span>
+  <span class="arrow">▸</span>
+  <span class="sk">fn</span> <span class="sc">spawn_on</span>
+  <span class="rest">join_set.rs:88</span>
+</div>
+<div class="gutter">
+  <div class="gcol ln">84<br>85<br>86<br>87<br>88<br>89</div>
+  <div class="gbody"><div class="code"><span class="kw">pub fn</span> <span class="fn">spawn_on</span>&lt;F&gt;(<span class="kw">&amp;self</span>, future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;
+<span class="kw">where</span> F: <span class="ty">Future</span> + <span class="kw">Send</span> + <span class="cm">'static</span>,
+{
+    <span class="cm">// spawn onto the runtime's driver</span>
+    <span class="kw">let</span> id = <span class="kw">self</span>.next_id();
+    <span class="kw">self</span>.inner.<span class="fn">spawn</span>(future);
+    id
+}</div></div>
+</div>
+</div>
+<div class="pc"><b>定稿</b>：2 层钉住（<code>impl Runtime ▸ fn spawn_on</code>），超出 2 层省略中间用 <code>▸</code> 连接；kind 用语法色（<code>impl</code>/<code>fn</code> 着色），name 用前景色。<b>无包围声明</b>（文件顶层 / import 区 / 注释区）：整条作用域头<b>不占位、不留空条</b>，reader 顶部直接是代码。caret 在签名行或收尾 <code>}</code> 上仍能选中 scope（<code>facet.range</code> 含完整声明范围）。</div>
+</figure>
+
+<!-- ============ §6 Reading Set + AT CAPTURE Inspector + 三动作 ============ -->
+<h2>§6 Reading Set header · AT CAPTURE Inspector · 三动作 <span style="font-size:12px;font-weight:400;color:#6b7280">— 基于 M10 D6</span></h2>
+<p style="font-size:12.5px;color:#4b5563;max-width:920px;margin:0 0 14px">合同（§3.20）：Reading Set 是冻结、可恢复的非文件 tab；每段显示 role / path:line / badge / caveat·scope chip / provenance chip。三动作：打开完整文件 / 扩大上下文 / 查看证据，含 disabled 态。AT CAPTURE Inspector 是冻结态 Resolution Inspector，标题带 <code>AT CAPTURE</code>，availability/environment 明确标 capture-time，audit rows 用稳定 provenance（commit / worktree captured / dependency captured），绝不显示 runtime UUID。</p>
+
+<figure>
+<figcaption>Reading Set tab · 满宽连续流 + 每段出处头 + 三动作 <span class="n">— tokio spawn 固定五段</span></figcaption>
+<div class="win t-light">
+<div class="titlebar">
+  <span class="fname">spawn.rs</span>
+  <span style="color:var(--ter)">×</span>
+  <span style="color:var(--accent);font-weight:600">★ Reading Set: spawn</span>
+  <span style="color:var(--ter)">×</span>
+  <span class="spacer"></span>
+</div>
+<div class="rsbody">
+  <div class="rstitle">Reading Set · spawn</div>
+  <div class="rssub">5 段 · snapshot 3a4f71c · default / Trusted · 由 Relations「Open as Reading Set」生成</div>
+
+  <div class="ex">
+    <div class="h"><span class="role">DEFINITION</span><span class="esym">spawn</span><span class="epath">runtime/task/spawn.rs:142</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">project · 3a4f71c</span></div>
+    <div class="b"><div class="code"><span class="ln">142</span><span class="kw">pub fn</span> <span class="fn">spawn</span>&lt;F&gt;(future: F) -&gt; <span class="ty">JoinHandle</span>&lt;F::Output&gt;
+<span class="ln">143</span><span class="kw">where</span> F: <span class="ty">Future</span> + <span class="kw">Send</span> + <span class="cm">'static</span>,
+<span class="ln">144</span>{
+<span class="ln">145</span>    <span class="fn">spawn_inner</span>(future, <span class="ty">SpawnMeta</span>::<span class="fn">new</span>(<span class="ty">None</span>))
+<span class="ln">146</span>}</div></div>
+    <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+  </div>
+
+  <div class="ex">
+    <div class="h"><span class="role">VERIFIED CALLER</span><span class="esym">Runtime::block_on</span><span class="epath">runtime/runtime.rs:347</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">project · 3a4f71c</span></div>
+    <div class="b"><div class="code"><span class="ln">347</span>    <span class="kw">let</span> handle = <span class="kw">self</span>.<span class="fn">spawn</span>(future);
+<span class="ln">348</span>    <span class="kw">self</span>.<span class="fn">block_on</span>(handle)</div></div>
+    <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+  </div>
+
+  <div class="ex">
+    <div class="h"><span class="role">INFERRED CALLER</span><span class="esym">JoinSet::spawn_on</span><span class="epath">runtime/task/join_set.rs:88</span><span class="spacer"></span><span class="badge inferred">INFERRED</span><span class="chip caveat">name match only</span></div>
+    <div class="b"><div class="code"><span class="ln">88</span>    <span class="kw">self</span>.inner.<span class="fn">spawn</span>(future)   <span class="cm">// 仅方法名匹配</span></div></div>
+    <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+  </div>
+
+  <div class="ex">
+    <div class="h"><span class="role">TRAIT CONTRACT</span><span class="esym">Future</span><span class="epath">core/future/future.rs</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip scope">dependency · captured</span></div>
+    <div class="b"><div class="code"><span class="ln">100</span><span class="kw">pub trait</span> <span class="ty">Future</span> {
+<span class="ln">101</span>    <span class="kw">type</span> <span class="ty">Output</span>;
+<span class="ln">102</span>    <span class="kw">fn</span> <span class="fn">poll</span>(<span class="kw">self</span>: <span class="ty">Pin</span>&lt;&amp;<span class="kw">mut</span> Self&gt;, cx: &amp;<span class="kw">mut</span> <span class="ty">Context</span>) -&gt; <span class="ty">Poll</span>&lt;Self::Output&gt;;
+<span class="ln">103</span>}</div></div>
+    <div class="acts"><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+  </div>
+
+  <div class="ex">
+    <div class="h"><span class="role">TEST</span><span class="esym">spawn_panic_propagation</span><span class="epath">tests/task_panic.rs:41</span><span class="spacer"></span><span class="badge verified">VERIFIED</span><span class="chip commit">project · 3a4f71c</span></div>
+    <div class="b"><div class="code"><span class="ln">41</span><span class="st">#[tokio::test]</span>
+<span class="ln">42</span><span class="kw">async fn</span> <span class="fn">spawn_panic_propagation</span>() {
+<span class="ln">43</span>    <span class="kw">let</span> h = <span class="fn">spawn</span>(<span class="kw">async</span> { <span class="fn">panic!</span>() });
+<span class="ln">44</span>    <span class="fn">assert!</span>(h.<span class="fn">await</span>.is_err());
+<span class="ln">45</span>}</div></div>
+    <div class="acts"><span class="act">打开完整文件</span><span class="act">扩大上下文</span><span class="act">查看证据</span></div>
+  </div>
+</div>
+</div>
+<div class="pc"><b>出处头定稿</b>：role（DEFINITION/VERIFIED CALLER/INFERRED CALLER/TRAIT CONTRACT/TEST）+ symbol + <code>path:line</code> + badge（VERIFIED/INFERRED）+ provenance chip。<b>provenance chip 文案</b>：<code>project · 3a4f71c</code>（commit）/ <code>worktree · captured</code> / <code>dependency · captured</code>。<b>caveat chip</b>：<code>name match only</code>（Inferred）。<b>dependency 段</b>（TRAIT CONTRACT）用虚线 scope chip。<b>三动作 disabled 规则</b>：dependency 段无"打开完整文件"（需 predicate 通过 + contentID 匹配才可用，否则隐藏/disabled）；文件不可读时 expand 禁用但"查看证据"始终可用（纯读 frozen payload）。</div>
+</figure>
+
+<figure>
+<figcaption>AT CAPTURE Inspector · 冻结态 Resolution Inspector <span class="n">— 点"查看证据"唤出</span></figcaption>
+<div class="win t-light">
+<div class="insp">
+  <div class="ih">
+    <span class="icap">AT CAPTURE</span>
+    <span class="ititle">JoinSet::spawn_on</span>
+    <span class="badge inferred">INFERRED</span>
+    <span class="chip caveat">name match only</span>
+    <span style="flex:1"></span>
+    <span style="font:10px ui-monospace,monospace;color:var(--ter)">captured 2026-08-08 14:22 · project 3a4f71c</span>
+  </div>
+  <div class="isec">
+    <div class="ilabel">WHY</div>
+    <div class="ibody">方法名 <code>spawn</code> 与目标符号匹配，但无类型解析证据证明调用的是 <code>tokio::spawn</code>。可能是 <code>self.inner.spawn</code>（JoinSet 内部）而非顶层 spawn。</div>
+  </div>
+  <div class="isec">
+    <div class="ilabel">SOURCE</div>
+    <div class="irow"><span class="ik">kind</span><span class="iv">name-only inferred caller</span></div>
+    <div class="irow"><span class="ik">path</span><span class="iv">runtime/task/join_set.rs:88</span></div>
+    <div class="irow"><span class="ik">provenance</span><span class="iv">project commit 3a4f71c</span></div>
+  </div>
+  <div class="isec">
+    <div class="ilabel">VERIFICATION</div>
+    <div class="ibody">未通过 Verified 验证：rust-analyzer 未确认调用目标的 resolution。仅方法名匹配，存在多义性。</div>
+  </div>
+  <div class="isec">
+    <div class="ilabel">AT CAPTURE · AVAILABILITY</div>
+    <div class="irow"><span class="ik">at capture</span><span class="iv muted">rust-analyzer: ready · captured at navigation time</span></div>
+    <div class="irow"><span class="ik">now</span><span class="iv muted">不显示当前态 — frozen mode 不冒充 current readiness</span></div>
+  </div>
+  <div class="isec">
+    <div class="ilabel">AUDIT</div>
+    <div class="irow"><span class="ik">source</span><span class="iv">project commit 3a4f71c</span></div>
+    <div class="irow"><span class="ik">content</span><span class="iv">9f2a…c1e8（前缀）</span></div>
+    <div class="irow"><span class="ik">captured at</span><span class="iv">2026-08-08 14:22</span></div>
+  </div>
+</div>
+</div>
+<div class="pc"><b>AT CAPTURE 定稿</b>：标题区带 <code>AT CAPTURE</code> 虚线标签；availability/environment 明确标 <code>at capture</code>，<b>不显示 current readiness</b>；audit rows 用稳定 provenance（<code>project commit &lt;revision&gt;</code> / <code>worktree captured</code> / <code>dependency captured</code>）+ contentID 前缀 + capturedAt，<b>绝不显示 runtime UUID / SnapshotID</b>。<b>live-only 控件</b>（如"Open former candidate"）：frozen mode 下若 payload 标记可用走 captured-source action + contentID gate，否则隐藏/disabled，不留失效 closure。<b>frozen vs live mode 差异</b>：AT CAPTURE 标题与 live-only control 是明确 mode 差异，分别断言。</div>
+</figure>
+
+<!-- ============ §7 Folding 菜单文案 ============ -->
+<h2>§7 Folding 菜单文案 · imports/cfgTest 归档 <span style="font-size:12px;font-weight:400;color:#6b7280">— 定稿呈现</span></h2>
+<div class="grid2">
+<figure>
+<figcaption>View ▸ Folding 五项 <span class="n">— §3.12 / §3.7</span></figcaption>
+<div class="win t-light">
+<div class="menu" style="width:280px">
+<div class="mhead">VIEW ▸ FOLDING</div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Toggle Fold</span><span class="mkey">⌘⇧[</span></div>
+<div class="msep"></div>
+<div class="mrow"><span class="mcheck">✓</span><span class="mname">Full</span><span class="mkey">⌥⌘0</span></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Structure</span><span class="mkey">⌥⌘1</span></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Overview</span><span class="mkey">⌥⌘2</span></div>
+<div class="msep"></div>
+<div class="mrow"><span class="mcheck"></span><span class="mname">Focus Current Scope</span><span class="mkey">⌥⌘F</span></div>
+</div>
+</div>
+<div class="pc" style="margin-top:8px"><b>定稿</b>：五项 = Toggle Fold / Full / Structure / Overview / Focus Current Scope。<b>不设</b> Fold All（= Overview 语义重复）与 Unfold All（= Full 语义重复）。Toggle Fold 快捷键 <code>⌘⇧[</code>（单区间手动切换）。菜单项是 palette <code>&gt;</code> 模式的采集源（真实 NSMenuItem）。</div>
+</figure>
+
+<figure>
+<figcaption>§3.7 高度档归档表 · imports/cfgTest 定稿</figcaption>
+<div class="win t-light" style="padding:12px 14px">
+<table style="width:100%;border-collapse:collapse;font-size:11.5px;color:var(--fg)">
+<thead><tr style="border-bottom:1px solid var(--divider)">
+<th style="text-align:left;padding:5px 8px;color:var(--sec);font:700 9px ui-monospace,monospace;letter-spacing:.05em">档位</th>
+<th style="text-align:left;padding:5px 8px;color:var(--sec);font:700 9px ui-monospace,monospace;letter-spacing:.05em">折叠什么</th>
+<th style="text-align:left;padding:5px 8px;color:var(--sec);font:700 9px ui-monospace,monospace;letter-spacing:.05em">快捷键</th>
+</tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid var(--divider)"><td style="padding:6px 8px;font-weight:600">Full</td><td style="padding:6px 8px;color:var(--sec)">无折叠（默认）</td><td style="padding:6px 8px;font-family:ui-monospace,monospace;color:var(--ter)">⌥⌘0</td></tr>
+<tr style="border-bottom:1px solid var(--divider)"><td style="padding:6px 8px;font-weight:600">Structure</td><td style="padding:6px 8px"><code style="font-size:10.5px">.declaration</code> body + <code style="font-size:10.5px">.imports</code> + <code style="font-size:10.5px">.cfgTest</code></td><td style="padding:6px 8px;font-family:ui-monospace,monospace;color:var(--ter)">⌥⌘1</td></tr>
+<tr><td style="padding:6px 8px;font-weight:600">Overview</td><td style="padding:6px 8px">上一档 + <code style="font-size:10.5px">.container</code> body，只留 <code style="font-size:10.5px">depth==0</code> 声明头</td><td style="padding:6px 8px;font-family:ui-monospace,monospace;color:var(--ter)">⌥⌘2</td></tr>
+</tbody>
+</table>
+<div style="margin-top:10px;font-size:11px;color:var(--sec);line-height:1.55">
+<b style="color:var(--fg)">手动 only</b>：<code>.block</code> / <code>.comment</code> / <code>.attributes</code> 只走手动 toggle，不进高度档自动折叠。<br>
+<b style="color:var(--fg)">自动折叠过滤</b>：<code>hiddenLineCount &lt; 2</code> 的区间跳过（不画柄、不自动折）。<br>
+<b style="color:var(--fg)">Focus 例外</b>：Focus 是显式模式，折叠一切 kind（含 block/comment/attributes），不受"manual-only"约束。
+</div>
+</div>
+</div>
+<div class="pc" style="margin-top:8px"><b>imports/cfgTest 归档定稿</b>（§3.7 待 P0 定项）：<code>imports</code> 与 <code>cfgTest</code> 归入 <b>Structure</b> 档（与 declaration body 同档自动折叠）。理由：import 区和 <code>#[cfg(test)] mod tests</code> 在"看结构"时都是想收起的噪声，与 declaration body 同级。<code>.block</code>/<code>.comment</code>/<code>.attributes</code> 保持手动 only。</div>
+</figure>
+</div>
+
+<div class="dnote" style="margin-top:36px">
+<h3>已裁决（2026-08-08 用户确认）</h3>
+<table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px">
+<thead><tr style="border-bottom:1px solid #d3d8de"><th style="text-align:left;padding:6px 8px">#</th><th style="text-align:left;padding:6px 8px">项</th><th style="text-align:left;padding:6px 8px">变体</th><th style="text-align:left;padding:6px 8px">实现倾向</th></tr></thead>
+<tbody>
+<tr style="border-bottom:1px solid #eef0f3"><td style="padding:6px 8px">1</td><td style="padding:6px 8px">折叠占位符 chip</td><td style="padding:6px 8px">A 内联文本 / B 描边 pill / C 淡填充</td><td style="padding:6px 8px"><b>B 描边 pill</b>（M9-S5 chip token，与 diff/scope chip 同族）</td></tr>
+<tr style="border-bottom:1px solid #eef0f3"><td style="padding:6px 8px">2</td><td style="padding:6px 8px">折叠柄</td><td style="padding:6px 8px">A 常驻折叠列 / B 悬停浮现 / C 行号内联</td><td style="padding:6px 8px"><b>B 悬停浮现</b>（chrome 最轻；needsRuler 合同保证 ruler 承载悬停区）</td></tr>
+<tr style="border-bottom:1px solid #eef0f3"><td style="padding:6px 8px">3</td><td style="padding:6px 8px">高度档控件位置</td><td style="padding:6px 8px">A 仅菜单 / B 顶部 chrome 分段 / C 底部状态栏</td><td style="padding:6px 8px"><b>B 顶部 chrome 分段</b>（当前档始终可见、一键切换）</td></tr>
+<tr style="border-bottom:1px solid #eef0f3"><td style="padding:6px 8px">4</td><td style="padding:6px 8px">palette 浮层位置</td><td style="padding:6px 8px">A 居中 / B 顶部下拉 / C 底部</td><td style="padding:6px 8px"><b>A 居中浮层</b>（Spotlight 惯例、专注输入）</td></tr>
+<tr><td style="padding:6px 8px">5</td><td style="padding:6px 8px">imports/cfgTest 归档</td><td style="padding:6px 8px">归 Structure / 归 Overview / 手动 only</td><td style="padding:6px 8px"><b>归 Structure</b>（看结构时收起噪声）</td></tr>
+</tbody>
+</table>
+<div class="reco" style="margin-top:12px"><b>已定稿呈现（无需选）</b>：常驻作用域头（2 层钉住 / 无包围不占位）、Reading Set 出处头 + provenance chip 文案、AT CAPTURE Inspector 文案与 mode 差异、三动作 disabled 规则、Folding 菜单五项文案。这些按计划 §3.15 / §3.20 / §3.12 既定，原型已渲染。</div>
+<p style="margin:10px 0 0;color:#6b7280;">已写入 <code>prototype-decisions.md</code>。后续 F0–F6 / C1 / R1 / M11D 按此实现。</p>
+</div>
+
+</div>
+
+<script>
+document.querySelectorAll('.swbar button').forEach(b=>b.onclick=()=>{
+  document.querySelectorAll('.swbar button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');
+  document.querySelectorAll('.win').forEach(w=>{
+    w.className=w.className.replace(/t-(light|dark|si)/,'').trim()+' '+b.dataset.t;
+  });
+});
+</script>
+</body></html>

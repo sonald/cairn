@@ -53,10 +53,10 @@
 > `FallbackKind`、R0→F6 依赖、TextKit 2 换行前提实测推翻。
 > v2 删除 `CommandRegistry`、⌘F 逻辑命中改 `ByteRange`、复制始终返回源码、折叠数据不按行数裁剪。
 
-## §0 事实基线（HEAD = `a4c2cbf`；带 ✅ 者为本轮/上轮**实测**，非推断）
+## §0 事实基线（HEAD = `2569e70`；带 ✅ 者为本轮/上轮**实测**，非推断）
 
-- **git**：`origin/main...HEAD` = behind 0 / **ahead 3**。本计划与 `docs/plans/evidence/m11/`
-  当前未跟踪。
+- **git**：M11 产品实现起点为 `2569e70486e93cc3e547201de1c80657d98f0adf`；
+  `origin/main...HEAD` = behind 0 / **ahead 4**。计划已提交，P0 原型证据在首个切片提交中纳入。
 - `swift-tools-version: 6.0`（`Package.swift:1`）→ Swift 6 语言模式。
 - ✅ **`enum K: UInt8, Comparable` 编不过**（`evidence/m11/swift6-enum-comparable-probe.*`）：
   `error: type 'K' does not conform to protocol 'Comparable'`。无 raw value 的 enum 才自动合成。
@@ -1253,7 +1253,7 @@ tagged union。三主题、键盘、AX、选择/复制、逐段不可读和空�
 
 ```sh
 set -euo pipefail
-M11_BASE="a4c2cbfec7aa5f51ac98a2f6ea27a7678bf22cc7"
+M11_BASE="2569e70486e93cc3e547201de1c80657d98f0adf"
 git rev-parse --verify "$M11_BASE^{commit}" >/dev/null
 export CLANG_MODULE_CACHE_PATH="$PWD/.build/clang-module-cache"
 export SWIFTPM_MODULECACHE_OVERRIDE="$PWD/.build/swift-module-cache"
@@ -1288,7 +1288,7 @@ Relations → Reading Set 和 Trail → Reading Set；成功才记录 real-provi
 real-provider PASS。
 
 **变更与受保护产物审计（评审 P1）**：M11 开始实现前把 base commit
-`a4c2cbfec7aa5f51ac98a2f6ea27a7678bf22cc7` 记录为 `M11_BASE`；若实现从不同提交开始，先在
+`2569e70486e93cc3e547201de1c80657d98f0adf` 记录为 `M11_BASE`；若实现从不同提交开始，先在
 计划顶部和验收记录中更新该值，再写任何产品代码。不能只查 worktree：分片提交后普通 `git diff`
 会漏掉 M11 修改。V0 必须逐项证明：
 
@@ -1323,7 +1323,7 @@ real-provider PASS。
 - **provision 常量审计命令**（写入 evidence，任一差异 FAIL）：
 
   ```sh
-  : "${M11_BASE:=a4c2cbfec7aa5f51ac98a2f6ea27a7678bf22cc7}"
+  : "${M11_BASE:=2569e70486e93cc3e547201de1c80657d98f0adf}"
   git rev-parse --verify "$M11_BASE^{commit}" >/dev/null
   for name in TOKIO_TAG TOKIO_DIR TOKIO_REPO RIPGREP_TAG RIPGREP_DIR RIPGREP_REPO; do
     base=$(git show "$M11_BASE:scripts/provision-corpora.sh" | rg "^readonly ${name}=")
