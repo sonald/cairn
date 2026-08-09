@@ -435,6 +435,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
+        let fileMenu = NSApplication.shared.mainMenu?.items
+            .compactMap(\.submenu).first { $0.title == "File" }
+        let goMenu = NSApplication.shared.mainMenu?.items
+            .compactMap(\.submenu).first { $0.title == "Go" }
         let relationsMenu = NSApplication.shared.mainMenu?.items
             .compactMap(\.submenu).first { $0.title == "Relations" }
         let viewMenu = NSApplication.shared.mainMenu?.items
@@ -447,6 +451,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let fullHeightItem = foldingMenu?.item(withTitle: "Full")
         let structureHeightItem = foldingMenu?.item(withTitle: "Structure")
         let overviewHeightItem = foldingMenu?.item(withTitle: "Overview")
+        let paletteCommands = PalettePanel.commandRows(
+            in: NSApplication.shared.mainMenu
+        )
         let structureActionSent =
             structureHeightItem.flatMap { item in
                 item.action.map {
@@ -472,6 +479,34 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "lightChromeMatchesTheme": lightChromeMatchesTheme,
             "siClassicChromeStaysLight": siClassicChromeStaysLight,
             "autoChromeFollowsSystem": autoChromeFollowsSystem,
+            "quickOpenUsesCommandP":
+                fileMenu?.item(withTitle: "Quick Open…")?.keyEquivalent == "p"
+                && fileMenu?.item(withTitle: "Quick Open…")?
+                    .keyEquivalentModifierMask == .command,
+            "commandPaletteUsesShiftCommandP":
+                goMenu?.item(withTitle: "Command Palette…")?
+                    .keyEquivalent == "p"
+                && goMenu?.item(withTitle: "Command Palette…")?
+                    .keyEquivalentModifierMask == [.command, .shift],
+            "symbolPaletteUsesCommandT":
+                goMenu?.item(withTitle: "Open Symbol…")?.keyEquivalent == "t"
+                && goMenu?.item(withTitle: "Open Symbol…")?
+                    .keyEquivalentModifierMask == .command,
+            "linePaletteUsesCommandL":
+                goMenu?.item(withTitle: "Go to Line…")?.keyEquivalent == "l"
+                && goMenu?.item(withTitle: "Go to Line…")?
+                    .keyEquivalentModifierMask == .command,
+            "paletteCollectsRuntimeFoldingCommand":
+                paletteCommands.contains {
+                    $0.title == "View ▸ Folding ▸ Overview"
+                        && $0.shortcut == "⌥⌘2"
+                },
+            "paletteExcludesEditingCommands":
+                !paletteCommands.contains {
+                    ["Cut", "Copy", "Paste", "Select All"].contains(
+                        $0.title.components(separatedBy: " ▸ ").last ?? ""
+                    )
+                },
             "foldingMenuHasExactFiveCommands":
                 foldingMenu?.items.filter { !$0.isSeparatorItem }.map(\.title)
                 == [
@@ -5780,6 +5815,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showSymbolSearch()
     }
 
+    @objc private func quickOpen(_ sender: Any?) {
+        windowController?.showPalette()
+    }
+
+    @objc private func openCommandPalette(_ sender: Any?) {
+        windowController?.showPalette(prefill: ">")
+    }
+
+    @objc private func goToLine(_ sender: Any?) {
+        windowController?.showPalette(prefill: ":")
+    }
+
     @objc private func findInProject(_ sender: Any?) {
         windowController?.showProjectSearch()
     }
@@ -6006,6 +6053,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openItem.target = self
         fileMenu.addItem(openItem)
+        let quickOpenItem = NSMenuItem(
+            title: "Quick Open…",
+            action: #selector(quickOpen(_:)),
+            keyEquivalent: "p"
+        )
+        quickOpenItem.target = self
+        fileMenu.addItem(quickOpenItem)
         let recentItem = NSMenuItem(
             title: "Open Recent",
             action: nil,
@@ -6110,6 +6164,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
         let goItem = NSMenuItem()
         let goMenu = NSMenu(title: "Go")
+        let commandPaletteItem = NSMenuItem(
+            title: "Command Palette…",
+            action: #selector(openCommandPalette(_:)),
+            keyEquivalent: "p"
+        )
+        commandPaletteItem.keyEquivalentModifierMask = [.command, .shift]
+        commandPaletteItem.target = self
+        goMenu.addItem(commandPaletteItem)
         let symbolItem = NSMenuItem(
             title: "Open Symbol…",
             action: #selector(openSymbol(_:)),
@@ -6117,6 +6179,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         symbolItem.target = self
         goMenu.addItem(symbolItem)
+        let lineItem = NSMenuItem(
+            title: "Go to Line…",
+            action: #selector(goToLine(_:)),
+            keyEquivalent: "l"
+        )
+        lineItem.target = self
+        goMenu.addItem(lineItem)
         goMenu.addItem(.separator())
         let backItem = NSMenuItem(
             title: "Back",

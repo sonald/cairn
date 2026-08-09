@@ -57,7 +57,7 @@ public final class SymbolSearchPanelModel {
                 let hits = await Task.detached(priority: .userInitiated) {
                     (try? session.searchSymbols(
                         query: query,
-                        limit: 50,
+                        limit: .max,
                         boost: boost,
                         context: context
                     )) ?? []

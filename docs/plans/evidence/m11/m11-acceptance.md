@@ -351,3 +351,42 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   200 rendered，峰值 RSS 增量 4,784,152 bytes（门槛 ≤ 80 MiB），`status=pass`。
 - 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记 skipped；
   F6 的四条合同均为 Reader source / projection / AppKit 行为，不以 fake provider 代替产品结论。
+
+## C1：Palette 五模式
+
+结论：PASS（五模式、运行时菜单时序、查询确定性、原型视觉及全键盘真实 AppKit 流均已收口）。
+
+- 新的 380pt 居中 borderless `KeyablePanel` 是文件、命令、当前文件符号、项目符号与行号的唯一
+  Palette；输入前缀分别为无前缀 / `>` / `@` / `#` / `:`。列表按内容自适应高度、上限 200pt，圆角
+  10pt、1pt chrome border、shadow、26pt 行与 20 条上限均对齐 P0 Spotlight 原型；超出时页脚严格显示
+  `… 还有 N 条`。Light / Dark / SI Classic 三主题均在真实包中截图核对。
+- `⌘P`、`⇧⌘P`、`⌘T`、`⌘L` 分别预填文件 / `>` / `#` / `:`。真实回放首次发现 AppKit 会全选预填
+  前缀，直接输入把 `:` 替换成文件查询；修复为成为 first responder 后把 caret 放到预填末尾。最终
+  `⌘L` 后直接输入 `12` 得到 `:12` 与 `Go to line 12`，`⌘T` 后直接输入 `area` 得到 `#area`。
+- 文件模式只读 `FileTreeModel`，空查询先按 tab 顺序，再以 `(路径深度, 完整路径)` 排序其余文件；
+  standardized URL 去重，同名文件显示最短唯一父目录。真实 `/tmp` fixture 暴露 child URL 被规范成
+  `/private/tmp` 的符号链接差异；相对路径计算改为两端解析 symlink、导航 URL 不变，最终条目为
+  `main.rs  src/`，不再泄露绝对路径。
+- 命令模式每次打开、Palette 获得 first responder 之前即递归更新运行时 `NSMenu`；delegate 动态
+  `Open Recent` 会先填充，分隔符、hidden、`action == nil` 与 Cut / Copy / Paste / Select All 等编辑命令
+  均排除。执行顺序固定为关闭 → 还原 owner / 原 responder → 重新验证 → `NSApp.sendAction`。真实
+  `>overview` 精确显示 `View ▸ Folding ▸ Overview  ⌥⌘2`，Enter 后 Overview segment 置为 on 且只剩
+  `renderer` / `main` 折叠头；`>paste` 显示 `No commands found`。
+- 本地三模式统一复用 Core `asciiFold` / `literalRanges` 的 ASCII 大小写不敏感子串语义；prefix 命中优先，
+  文件、命令、当前符号各自使用计划规定的稳定 tie-break。当前符号真实 `@area` 显示
+  `area  method · line 8`；项目符号继续复用既有 `SymbolSearchPanelModel`，并移除其旧的固定 50 条查询上限，
+  55 个命中严格得到 20 行与 `… 还有 35 条`；真实 `#area` 显示 `area  src/main.rs:8:16`。旧的不可达
+  `SymbolSearchPanel` UI 已删除，只保留该 model；共用
+  `KeyablePanel` 提取为 4 行最小类型，全文搜索面板继续复用。
+- 7 条 `PaletteTests` 覆盖五模式解析、文件空查询 / 消歧 / 稳定排序、当前符号 kind/name/range 排名、
+  非法与越界行号、动态菜单 / hidden / nil action / 编辑排除、20 条上限与精确页脚、selection 保留 / 重置、
+  restore → revalidate → send 顺序、项目索引结果与预填 caret。定向套件与完整
+  `swift test --disable-sandbox` 均 PASS；runtime self-test 同时锁定四个快捷键、Folding 命令采集与编辑排除。
+- 最终签名验收包为 `.build/m11-c1-ui-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11c1`；Info.plist、
+  严格 codesign 与 designated requirement 均通过。非 Git fixture `/private/tmp/m11-f5-ui-fixture-plain`
+  完成全程无鼠标回放：`⌘P` 打开文件、`⌘L` 跳行、`@` / `#` 查符号、`⇧⌘P` 执行 Overview。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；完整 Swift Testing、Exact、Diff、Reading、Projector、Fold
+  self-test 与 ReaderUI 坐标门禁全部退出 0。最终 release runner 为 control resolution 26.289 ms、fold
+  resolution 25.926 ms、首次折叠 244.168 ms（门槛 ≤ 400 ms），4,400 logical / 200 rendered，峰值 RSS
+  增量 5,406,720 bytes（门槛 ≤ 80 MiB），`status=pass`。真实 rust-analyzer 仍因系统 sandbox 限制诚实
+  skipped；C1 文件 / 菜单 / 当前文档 / 本地项目索引行为不以 fake provider 代替产品结论。

@@ -65,7 +65,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
     nonisolated(unsafe) private var escapeMonitor: Any?
-    private var symbolSearchPanel: SymbolSearchPanel?
+    private var palettePanel: PalettePanel?
     private var searchPanel: SearchPanel?
     private var commitPickerPopover: CommitPickerPopover?
     private var compareCommitPickerPopover: CommitPickerPopover?
@@ -74,6 +74,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var pendingRecentProjectRoot: URL?
     private var pendingTabRestore: TabStripModel.Tab?
     private var outlineFollowArbitration = OutlineFollowArbitration()
+    private var currentReaderSettings = ReaderSettings()
 
     init(
         model: AppModel,
@@ -86,6 +87,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
+        currentReaderSettings = settings
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
         self.onChooseProject = onChooseProject
@@ -1085,12 +1087,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func showSymbolSearch() {
-        if symbolSearchPanel == nil {
-            symbolSearchPanel = SymbolSearchPanel(appModel: model) { [weak self] file, offset in
+        showPalette(prefill: "#")
+    }
+
+    func showPalette(prefill: String = "") {
+        if palettePanel == nil {
+            palettePanel = PalettePanel(
+                appModel: model,
+                settings: currentReaderSettings
+            ) { [weak self] file, offset in
                 self?.navigate(to: file, byteOffset: offset, cause: .search)
             }
         }
-        symbolSearchPanel?.show(relativeTo: window)
+        palettePanel?.show(prefill: prefill, relativeTo: window)
     }
 
     func showProjectSearch() {
@@ -1180,6 +1189,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func applyReaderSettings(_ settings: ReaderSettings) {
+        currentReaderSettings = settings
         window?.appearance = switch settings.theme {
         case .dark: NSAppearance(named: .darkAqua)
         case .light, .siClassic: NSAppearance(named: .aqua)
@@ -1196,6 +1206,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.apply(settings: settings)
         contextController.apply(settings: settings)
         trailView.apply(settings: settings)
+        palettePanel?.apply(settings: settings)
     }
 
     var readingHeightLevel: ReadingHeightLevel {
@@ -1576,7 +1587,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard let toolbar = window?.toolbar else { return }
         renderProfileItem(in: toolbar)
         toolbar.validateVisibleItems()
-        symbolSearchPanel?.refreshProjectState()
+        palettePanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
     }
 
