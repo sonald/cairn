@@ -423,3 +423,30 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   strict codesign 与 designated requirement 均通过。fixture 为
   `/private/tmp/m11-f5-ui-fixture-plain/src/main.rs`；R1 是本地 Reader/Fold/outline 行为，不依赖 provider，
   未以 fake provider 代替任何产品结论。
+
+## R2：Reader 路径操作
+
+结论：PASS（右键入口、点击行语义、路径格式、文件消失降级、剪贴板与 Finder 真实联动均已收口）。
+
+- Reader 原有四个 Relations 操作之后增加一处分隔线，再依次放置 `Copy path:line` 与
+  `Reveal in Finder`；沿用同一个 `NSMenu` 与右键点击 byte offset，不增加命令注册表、路径模型或第二套
+  当前文件状态。AppKit 呈现时系统的 Look Up / Translate / Search / Share / Services 与产品项共存，产品
+  六项相对顺序保持 `Show Callers / Calls / Implementations / References / Copy / Reveal`。
+- 两个动作都读取当前 tab 实际显示的 `displayedFile` / `displayedDocument`，并由点击 byte offset 经现有
+  `LineTable` 得到 1-based 行号；不复用可能属于另一 tab 的全局 selection。文件仍在项目根内时复制
+  `relative/path.rs:line`，依赖或项目外文件复制绝对路径；格式与 Inspector / Trail 的路径语义一致且按
+  R2 合同不附加 column。
+- `Copy path:line` 即使磁盘文件刚被删除仍可复制当前已显示文档的位置；`Reveal in Finder` 在菜单打开时
+  检查文件存在性并禁用，执行时再次检查，避免菜单打开后文件消失的竞态。Finder 调用只通过既有
+  `NSWorkspace.activateFileViewerSelecting`，没有另建 workspace service。
+- 3 条新增测试覆盖点击行与动作分发、菜单相邻顺序、当前 tab 隔离、项目相对 / 依赖绝对路径，以及文件
+  消失时 Copy 保持可用而 Reveal 禁用；既有 Reader 只读与四方向关系菜单测试继续通过。定向 6 / 6 与完整
+  `swift test --disable-sandbox` 均 PASS。
+- 最终签名验收包为 `.build/m11-r2-ui-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11r2`；Info.plist、
+  strict codesign 与 designated requirement 均通过。真实非 Git fixture
+  `/private/tmp/m11-f5-ui-fixture-plain/src/main.rs` 第 9 行右键后，两项均可用；执行 Copy 后在 Cairn Palette
+  粘贴严格得到 `src/main.rs:9`，执行 Reveal 后 Finder 打开 `src` 且唯一选中 URL 对应的 `main.rs`。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；完整 Swift Testing、Exact、Diff、Reading、Projector、Fold
+  self-test 与 ReaderUI 坐标门禁全部退出 0。最终 release runner 为 control resolution 26.603 ms、fold
+  resolution 25.825 ms、首次折叠 247.786 ms（门槛 ≤ 400 ms），4,400 logical / 200 rendered，峰值 RSS
+  增量 0 bytes（门槛 ≤ 80 MiB），`status=pass`。R2 为本地 Reader / AppKit / Finder 行为，不依赖 provider。

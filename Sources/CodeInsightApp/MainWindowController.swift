@@ -338,6 +338,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.onShowRelation = { [weak self] offset, direction in
             self?.handleReaderRelation(offset: offset, direction: direction)
         }
+        readerController.onCopyPathLine = { [weak model] file, line in
+            guard let model else { return }
+            let value = Self.pathLineText(
+                for: file,
+                under: model.fileTree?.root,
+                line: line
+            )
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.writeObjects([value as NSString])
+        }
+        readerController.onRevealInFinder = { file in
+            NSWorkspace.shared.activateFileViewerSelecting([file])
+        }
         secondaryReaderController.onChooseCompareVersion = { [weak self] in
             self?.showCompareCommitPicker()
         }
@@ -2270,12 +2284,30 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    private func projectPath(for file: URL) -> String? {
-        guard let root = model.fileTree?.root,
-              file.pathComponents.starts(with: root.pathComponents)
+    nonisolated static func pathLineText(
+        for file: URL,
+        under projectRoot: URL?,
+        line: UInt32
+    ) -> String {
+        let path = projectRoot.flatMap {
+            projectRelativePath(for: file, under: $0)
+        } ?? file.path
+        return "\(path):\(line)"
+    }
+
+    nonisolated private static func projectRelativePath(
+        for file: URL,
+        under root: URL
+    ) -> String? {
+        guard file.pathComponents.starts(with: root.pathComponents)
         else { return nil }
         return file.pathComponents.dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+
+    private func projectPath(for file: URL) -> String? {
+        guard let root = model.fileTree?.root else { return nil }
+        return Self.projectRelativePath(for: file, under: root)
     }
 
     private func readerSource(
@@ -3258,6 +3290,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     var onFocusNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
+    var onCopyPathLine: ((URL, UInt32) -> Void)?
+    var onRevealInFinder: ((URL) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
@@ -3437,6 +3471,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             action: #selector(showReferences(_:)),
             keyEquivalent: ""
         ))
+        relationMenu.addItem(.separator())
+        relationMenu.addItem(NSMenuItem(
+            title: "Copy path:line",
+            action: #selector(copyPathLine(_:)),
+            keyEquivalent: ""
+        ))
+        relationMenu.addItem(NSMenuItem(
+            title: "Reveal in Finder",
+            action: #selector(revealInFinder(_:)),
+            keyEquivalent: ""
+        ))
         for item in relationMenu.items { item.target = self }
         textView.view.menu = relationMenu
         textView.onContextMenu = { [weak self] characterIndex in
@@ -3444,8 +3489,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             contextMenuOffset = displayedDocument == nil
                 ? nil
                 : textView.byteOffset(forCharacterIndex: characterIndex)
-            for item in textView.view.menu?.items ?? [] {
-                item.isEnabled = contextMenuOffset != nil
+            let location = contextMenuLocation()
+            for item in textView.view.menu?.items ?? [] where !item.isSeparatorItem {
+                item.isEnabled = if item.action == #selector(revealInFinder(_:)) {
+                    location.map {
+                        FileManager.default.fileExists(atPath: $0.file.path)
+                    } ?? false
+                } else {
+                    location != nil
+                }
             }
         }
     }
@@ -4679,6 +4731,29 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
 
     @objc private func showReferences(_ sender: Any?) {
         showRelation(.references)
+    }
+
+    @objc private func copyPathLine(_ sender: Any?) {
+        guard let location = contextMenuLocation() else { return }
+        onCopyPathLine?(location.file, location.line)
+    }
+
+    @objc private func revealInFinder(_ sender: Any?) {
+        guard let location = contextMenuLocation(),
+              FileManager.default.fileExists(atPath: location.file.path)
+        else { return }
+        onRevealInFinder?(location.file)
+    }
+
+    private func contextMenuLocation() -> (file: URL, line: UInt32)? {
+        guard let contextMenuOffset,
+              let file = displayedFile,
+              let document = displayedDocument,
+              let line = document.lineTable.lineColumn(
+                  at: contextMenuOffset
+              )?.line
+        else { return nil }
+        return (file, line)
     }
 
     private func showRelation(_ direction: RelationTreeModel.Direction) {

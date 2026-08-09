@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightCore
 import Foundation
 import Testing
 @testable import CodeInsightApp
@@ -36,6 +37,85 @@ func readerContextMenuRoutesEveryRelationFromTheClickedByteOffset() throws {
         #expect(result.0 == expectedOffset)
         #expect(result.1 == direction)
     }
+}
+
+@MainActor
+@Test
+func readerContextMenuCopiesClickedLineAndRevealsTheDisplayedFile() throws {
+    let source = "fn snapshot() {\n    work();\n}\n"
+    let fixture = try makeReaderFixture(source: source)
+    defer { fixture.cleanup() }
+    let event = try rightClick(in: fixture.window, textView: fixture.textView)
+    let characterIndex = fixture.textView.characterIndexForInsertion(
+        at: fixture.textView.convert(event.locationInWindow, from: nil)
+    )
+    let offset = byteOffset(in: source, utf16Offset: characterIndex)
+    let expectedLine = try #require(
+        LineTable(bytes: Array(source.utf8)).lineColumn(at: offset)?.line
+    )
+    var copied: (URL, UInt32)?
+    var revealed: URL?
+    fixture.controller.onCopyPathLine = { copied = ($0, $1) }
+    fixture.controller.onRevealInFinder = { revealed = $0 }
+
+    let menu = try #require(fixture.textView.menu(for: event))
+    let copy = try #require(menu.item(withTitle: "Copy path:line"))
+    let reveal = try #require(menu.item(withTitle: "Reveal in Finder"))
+    let copyIndex = menu.index(of: copy)
+    let revealIndex = menu.index(of: reveal)
+    let referencesIndex = try #require(menu.items.firstIndex(where: {
+        $0.title == "Show References"
+    }))
+
+    #expect(referencesIndex + 2 == copyIndex)
+    #expect(menu.items[referencesIndex + 1].isSeparatorItem)
+    #expect(revealIndex == copyIndex + 1)
+    #expect(copy.isEnabled)
+    #expect(reveal.isEnabled)
+    #expect(NSApplication.shared.sendAction(
+        try #require(copy.action),
+        to: copy.target,
+        from: copy
+    ))
+    #expect(NSApplication.shared.sendAction(
+        try #require(reveal.action),
+        to: reveal.target,
+        from: reveal
+    ))
+    #expect(copied?.0.standardizedFileURL == fixture.file.standardizedFileURL)
+    #expect(copied?.1 == expectedLine)
+    #expect(revealed?.standardizedFileURL == fixture.file.standardizedFileURL)
+}
+
+@MainActor
+@Test
+func revealInFinderDisablesWhenTheDisplayedFileNoLongerExists() throws {
+    let fixture = try makeReaderFixture(source: "fn missing() {}\n")
+    defer { fixture.cleanup() }
+    try FileManager.default.removeItem(at: fixture.file)
+    let event = try rightClick(in: fixture.window, textView: fixture.textView)
+    let menu = try #require(fixture.textView.menu(for: event))
+
+    #expect(menu.item(withTitle: "Copy path:line")?.isEnabled == true)
+    #expect(menu.item(withTitle: "Reveal in Finder")?.isEnabled == false)
+}
+
+@Test
+func pathLineTextUsesProjectRelativeAndDependencyAbsolutePaths() {
+    let root = URL(fileURLWithPath: "/project", isDirectory: true)
+    let projectFile = root.appendingPathComponent("src/main.rs")
+    let dependency = URL(fileURLWithPath: "/dependencies/tokio/src/lib.rs")
+
+    #expect(MainWindowController.pathLineText(
+        for: projectFile,
+        under: root,
+        line: 42
+    ) == "src/main.rs:42")
+    #expect(MainWindowController.pathLineText(
+        for: dependency,
+        under: root,
+        line: 7
+    ) == "/dependencies/tokio/src/lib.rs:7")
 }
 
 @MainActor
@@ -98,15 +178,28 @@ func readerContextMenuUsesTheDocumentSelectedByTheCurrentTab() throws {
     )
     let expectedA = byteOffset(in: sourceA, utf16Offset: characterIndex)
     let wrongB = byteOffset(in: sourceB, utf16Offset: characterIndex)
+    let expectedLine = try #require(
+        LineTable(bytes: Array(sourceA.utf8)).lineColumn(at: expectedA)?.line
+    )
     var received: UInt32?
+    var copied: (URL, UInt32)?
     fixtureA.controller.onShowRelation = { offset, _ in received = offset }
+    fixtureA.controller.onCopyPathLine = { copied = ($0, $1) }
     let menu = try #require(fixtureA.textView.menu(for: event))
     let item = try #require(menu.item(withTitle: "Show References"))
     let action = try #require(item.action)
+    let copy = try #require(menu.item(withTitle: "Copy path:line"))
 
     #expect(NSApplication.shared.sendAction(action, to: item.target, from: item))
+    #expect(NSApplication.shared.sendAction(
+        try #require(copy.action),
+        to: copy.target,
+        from: copy
+    ))
     #expect(expectedA != wrongB)
     #expect(received == expectedA)
+    #expect(copied?.0.standardizedFileURL == fixtureA.file.standardizedFileURL)
+    #expect(copied?.1 == expectedLine)
 }
 
 @MainActor
