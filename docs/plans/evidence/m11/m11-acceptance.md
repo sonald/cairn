@@ -574,3 +574,26 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   current worktree notice；M10 replay 断言已重跑。完整 `swift test --disable-sandbox` 与
   `CODEX_SANDBOX=1 bash scripts/ci.sh` 均 PASS。最终 release runner 为 control resolution 25.044 ms、
   fold resolution 25.320 ms、首次折叠 265.799 ms，峰值 RSS 增量 3,997,696 bytes，`status=pass`。
+
+## R3-2：私有 v1 session codec
+
+结论：PASS（final tagged tab union 与冻结 payload 已有单一严格 codec；本切片只建立可信读写形状，
+checkpoint/恢复编排留给下一 R3 足切片）。
+
+- 新增的唯一顶层实体是 package 内 `SessionCodec`；`Snapshot / Tab / FileTab / ReadingSetTab / Anchor`
+  及 Codable DTO 全部嵌套其中。JSON 明确写 `schemaVersion: 1` 与 `kind: file | readingSet`，不编码
+  runtime UUID、`SnapshotID`、`PathID`、`NameID`、live context/store ID，也未让 domain
+  `ReadingSetExcerpt` 直接承担 Codable。
+- Reading Set round-trip 逐字段保存 frozen source、byteRange、contentID、revision/source kind、capturedAt、
+  partial-line/caveat、skipped reasons 与 `FrozenInspectorDisplay` 的 badge、正文、availability/environment、
+  audit rows、AX、former-candidate 资格；file entry 分开保存 scroll/selection anchors 与共同的
+  anchorContentID。测试对每个可见 Inspector 字段逐项相等断言。
+- trust boundary 在 encode/decode 两侧共用：tab ≤ maximumCount、excerpt ≤50、sourceText ≤16 KiB、
+  title/path ≤4 KiB、display 全字符串合计 ≤16 KiB、audit rows ≤32、有限非负 scrollOffset、合法
+  SHA-256 identity、project relative path 拒绝绝对/`.`/`..`。dependency file tab 必须通过既有 predicate；
+  frozen dependency excerpt 即使当前 predicate 不通过也保留只读证据，后续动作仍由现有 gate 禁用。
+- 3 组 codec 测试覆盖完整 tagged round-trip、unknown version、missing projectRoot、11 tabs、51 excerpts、
+  path escape、超限 source/display/audit，以及 project/dependency 两类路径；测试仅使用内存 Data，未触碰
+  Application Support。完整 `swift test --disable-sandbox` 与 `CODEX_SANDBOX=1 bash scripts/ci.sh` 均
+  PASS。最终 release runner 为 control resolution 27.585 ms、fold resolution 26.588 ms、首次折叠
+  286.057 ms，峰值 RSS 增量 13,926,424 bytes，`status=pass`。
