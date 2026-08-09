@@ -22,9 +22,22 @@ internal struct DisplayMap: Sendable {
     private let sourceMap: ByteUTF16Map
     private let folds: [FoldEntry]
     private let removedUTF16Prefix: [Int]
+    private let placeholderOffsetsByID: [FoldID: Int]
 
     internal let projectedString: String
     internal let projectedUTF16Length: Int
+
+    internal var renderedFoldIDs: Set<FoldID> {
+        Set(folds.map(\.id))
+    }
+
+    internal func placeholderOffset(for id: FoldID) -> Int? {
+        placeholderOffsetsByID[id]
+    }
+
+    internal var foldPlaceholders: [(id: FoldID, offset: Int)] {
+        folds.map { ($0.id, $0.placeholderOffset) }
+    }
 
     internal init?(
         document: ReaderDocument,
@@ -92,6 +105,9 @@ internal struct DisplayMap: Sendable {
         displayCursor += tailRange.length
 
         folds = entries
+        placeholderOffsetsByID = Dictionary(
+            uniqueKeysWithValues: entries.map { ($0.id, $0.placeholderOffset) }
+        )
         removedUTF16Prefix = prefix
         projectedString = projected
         projectedUTF16Length = displayCursor

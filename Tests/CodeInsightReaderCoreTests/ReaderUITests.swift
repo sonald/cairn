@@ -1,4 +1,5 @@
-import AppKit
+@preconcurrency import AppKit
+import CodeInsightCore
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -239,6 +240,352 @@ func wrapSettingReversesEveryTextKitAndScrollerProperty() {
     #expect(reader.view.textContainer?.widthTracksTextView == false)
     #expect(reader.view.textContainer?.containerSize.width == CGFloat.greatestFiniteMagnitude)
     withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func foldAttachmentProviderSpikeCreatesUpdatesClicksAndExposesAX() throws {
+    let source = """
+        fn probe() {
+            let one = 1;
+            let two = 2;
+            let three = one + two;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/fold-spike.rs"))
+        .document
+    let fold = try #require(document.foldRegions.first { $0.kind == .declaration })
+    let (reader, _, window) = renderOffscreen(document)
+    #expect(reader.toggleFold(id: fold.id))
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+
+    let manager = try #require(reader.view.textLayoutManager)
+    let content = try #require(manager.textContentManager)
+    var providers: [NSTextAttachmentViewProvider] = []
+    manager.enumerateTextLayoutFragments(
+        from: content.documentRange.location,
+        options: [.ensuresLayout]
+    ) { fragment in
+        providers.append(contentsOf: fragment.textAttachmentViewProviders)
+        return true
+    }
+    let provider = try #require(providers.first)
+    let providerView = try #require(provider.view)
+    #expect(providers.count == 1)
+    let initialSize = providerView.bounds.size
+    func attachmentLineWidth() -> CGFloat {
+        var width: CGFloat = 0
+        manager.enumerateTextLayoutFragments(
+            from: content.documentRange.location,
+            options: [.ensuresLayout]
+        ) { fragment in
+            guard !fragment.textAttachmentViewProviders.isEmpty else { return true }
+            for line in fragment.textLineFragments {
+                width = max(width, line.typographicBounds.width)
+            }
+            return false
+        }
+        return width
+    }
+    let initialLineWidth = attachmentLineWidth()
+    #expect(initialLineWidth >= initialSize.width)
+
+    reader.setFoldMatchCount(3, for: fold.id)
+    #expect(providerView.accessibilityLabel()?.contains("3 matches") == true)
+    let threeSize = providerView.bounds.size
+    let threeLineWidth = attachmentLineWidth()
+    reader.setFoldMatchCount(999, for: fold.id)
+    let nineNineNineSize = providerView.bounds.size
+    let nineNineNineLineWidth = attachmentLineWidth()
+    #expect(initialSize == threeSize)
+    #expect(threeSize == nineNineNineSize)
+    #expect(initialLineWidth == threeLineWidth)
+    #expect(threeLineWidth == nineNineNineLineWidth)
+    let lineHeight = try #require(manager.textLayoutFragment(for: .zero))
+        .layoutFragmentFrame.height
+    #expect(providerView.bounds.height <= lineHeight)
+
+    let localPoint = reader.view.convert(
+        NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY),
+        from: providerView
+    )
+    #expect(providerView.hitTest(
+        NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)
+    ) == nil)
+    let event = try #require(NSEvent.mouseEvent(
+        with: .leftMouseDown,
+        location: reader.view.convert(localPoint, to: nil),
+        modifierFlags: [],
+        timestamp: 0,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 1,
+        clickCount: 1,
+        pressure: 1
+    ))
+    let mouseUp = try #require(NSEvent.mouseEvent(
+        with: .leftMouseUp,
+        location: reader.view.convert(localPoint, to: nil),
+        modifierFlags: [],
+        timestamp: 0.01,
+        windowNumber: window.windowNumber,
+        context: nil,
+        eventNumber: 2,
+        clickCount: 1,
+        pressure: 0
+    ))
+    NSApp.postEvent(mouseUp, atStart: true)
+    reader.view.mouseDown(with: event)
+    #expect(!reader.renderedFoldIDsForTesting.contains(fold.id))
+    #expect(!reader.view.string.contains("\u{FFFC}"))
+
+    #expect(providerView.accessibilityLabel()?.contains("Collapsed, hides") == true)
+    print(
+        "M11_ATTACHMENT_SPIKE providerCreated=true countUpdated=true "
+            + "clickExpanded=true axLabel=\(providerView.accessibilityLabel() ?? "nil") "
+            + "hitTesting=NSTextView"
+    )
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func foldReducerRendersOnlyMaximalRegionsAndScopesOverridesByFileAndContent() throws {
+    let source = """
+        mod outer {
+            fn first() {
+                let one = 1;
+                let two = 2;
+                let three = one + two;
+            }
+
+            fn second() {
+                let four = 4;
+                let five = 5;
+                let six = four + five;
+            }
+        }
+        """
+    let bytes = Array(source.utf8)
+    let loader = DocumentLoader(source: { _ in bytes })
+    let oldDocument = try loader.load(file: URL(fileURLWithPath: "/scope.rs"))
+        .document
+    let outer = try #require(oldDocument.foldRegions.first { $0.kind == .container })
+    let inner = try #require(oldDocument.foldRegions.first {
+        $0.kind == .declaration
+            && outer.bodyRange.lowerBound <= $0.bodyRange.lowerBound
+            && $0.bodyRange.upperBound <= outer.bodyRange.upperBound
+    })
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.documentView = reader.view
+    let oldURL = URL(fileURLWithPath: "/scope.rs")
+    reader.display(document: oldDocument, fileURL: oldURL)
+
+    #expect(reader.toggleFold(id: inner.id))
+    #expect(reader.renderedFoldIDsForTesting == [inner.id])
+    #expect(reader.toggleFold(id: outer.id))
+    #expect(reader.logicalFoldIDsForTesting == [outer.id, inner.id])
+    #expect(reader.renderedFoldIDsForTesting == [outer.id])
+    #expect(reader.toggleFold(id: outer.id))
+    #expect(reader.logicalFoldIDsForTesting == [inner.id])
+    #expect(reader.renderedFoldIDsForTesting == [inner.id])
+
+    let newBytes = Array((source + "\nfn added() {\n    work();\n    work();\n}\n").utf8)
+    let newDocument = try DocumentLoader(source: { _ in newBytes })
+        .load(file: oldURL)
+        .document
+    reader.display(document: newDocument, fileURL: oldURL)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+    reader.display(document: oldDocument, fileURL: oldURL)
+    #expect(reader.logicalFoldIDsForTesting == [inner.id])
+    reader.display(
+        document: oldDocument,
+        fileURL: URL(fileURLWithPath: "/different-file.rs")
+    )
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+}
+
+@MainActor
+@Test
+func optionFoldHandleRecursivelyTogglesSiblingRegions() throws {
+    let source = """
+        fn first() {
+            let one = 1;
+            let two = 2;
+            let three = one + two;
+        }
+
+        fn second() {
+            let four = 4;
+            let five = 5;
+            let six = four + five;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/siblings.rs"))
+        .document
+    let siblings = document.foldRegions.filter { $0.kind == .declaration }
+    #expect(siblings.count == 2)
+    let first = try #require(siblings.first)
+    let line = try #require(document.lineTable.lineColumn(
+        at: first.headerRange.lowerBound
+    )).line
+    let reader = ReaderTextView()
+    reader.display(document: document)
+
+    #expect(reader.toggleFold(atLine: Int(line), recursiveSiblings: true))
+    #expect(reader.logicalFoldIDsForTesting == Set(siblings.map(\.id)))
+    #expect(reader.toggleFold(atLine: Int(line), recursiveSiblings: true))
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+}
+
+@MainActor
+@Test
+func foldingKeepsRulerWhenLineNumbersAndDiffAreOff() throws {
+    let source = """
+        fn visible_handle() {
+            let one = 1;
+            let two = 2;
+            let three = one + two;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/gutter.rs"))
+        .document
+    let fold = try #require(document.foldRegions.first {
+        $0.summary.hiddenLineCount >= 2
+    })
+    let (reader, scrollView, window) = renderOffscreen(document)
+    reader.apply(settings: ReaderSettings(lineNumbers: false))
+    let line = try #require(document.lineTable.lineColumn(
+        at: fold.headerRange.lowerBound
+    )).line
+
+    #expect(scrollView.hasVerticalRuler)
+    #expect(reader.visibleFoldHandleLinesForTesting.contains(Int(line)))
+    #expect(reader.toggleFold(atLine: Int(line)))
+    #expect(reader.renderedFoldIDsForTesting.contains(fold.id))
+
+    let smallBytes = Array("fn x() {\n    a();\n}\n".utf8)
+    let smallFold = FoldRegion(
+        id: FoldID(rawValue: 0),
+        kind: .declaration,
+        headerRange: ByteRange(lowerBound: 0, upperBound: 8),
+        bodyRange: ByteRange(
+            lowerBound: 8,
+            upperBound: UInt32(smallBytes.count - 2)
+        ),
+        outlineDepth: 0,
+        summary: FoldSummary(hiddenLineCount: 1)
+    )
+    let smallDocument = ReaderDocument(
+        bytes: smallBytes,
+        lineTable: LineTable(bytes: smallBytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: smallBytes),
+        highlightSpans: [],
+        outlineFacets: [],
+        foldRegions: [smallFold]
+    )
+    reader.display(document: smallDocument)
+    reader.apply(settings: ReaderSettings(lineNumbers: false))
+    #expect(!scrollView.hasVerticalRuler)
+    #expect(reader.visibleFoldHandleLinesForTesting.isEmpty)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() throws {
+    let firstBody = (0..<32).map { "    let first_\($0) = \($0);" }
+        .joined(separator: "\n")
+    let secondBody = (0..<32).map { "    let second_\($0) = \($0);" }
+        .joined(separator: "\n")
+    let source = "fn first() {\n\(firstBody)\n}\n\nfn second() {\n\(secondBody)\n}\n"
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/anchors.rs"))
+        .document
+    let declarations = document.foldRegions.filter { $0.kind == .declaration }
+    let first = try #require(declarations.first { region in
+        let range = Int(region.headerRange.lowerBound)..<Int(region.headerRange.upperBound)
+        return String(decoding: bytes[range], as: UTF8.self).contains("first")
+    })
+    let second = try #require(declarations.first { region in
+        let range = Int(region.headerRange.lowerBound)..<Int(region.headerRange.upperBound)
+        return String(decoding: bytes[range], as: UTF8.self).contains("second")
+    })
+    let selectionByte = UInt32((source as NSString).range(of: "first_20").location)
+    let requestedViewportByte = UInt32(
+        (source as NSString).range(of: "second_20").location
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    reader.restore(
+        scrollByteOffset: requestedViewportByte,
+        selectionByteOffset: selectionByte
+    )
+    let viewportByte = try #require(reader.firstVisibleByteOffset())
+    #expect(first.bodyRange.contains(selectionByte))
+    #expect(second.bodyRange.contains(viewportByte))
+
+    #expect(reader.toggleFold(id: first.id))
+    #expect(reader.latentSelectionAnchorForTesting?.0 == selectionByte)
+    #expect(reader.latentSelectionAnchorForTesting?.1 == first.id)
+    #expect(reader.latentViewportAnchorForTesting == nil)
+
+    #expect(reader.toggleFold(id: second.id))
+    #expect(reader.latentSelectionAnchorForTesting?.1 == first.id)
+    #expect(reader.latentViewportAnchorForTesting?.0 == viewportByte)
+    #expect(reader.latentViewportAnchorForTesting?.1 == second.id)
+
+    #expect(reader.toggleFold(id: first.id))
+    #expect(reader.latentSelectionAnchorForTesting == nil)
+    #expect(reader.latentViewportAnchorForTesting?.1 == second.id)
+    #expect(reader.byteOffset(
+        forCharacterIndex: reader.view.selectedRange().location
+    ) == selectionByte)
+
+    #expect(reader.toggleFold(id: second.id))
+    #expect(reader.latentViewportAnchorForTesting == nil)
+    #expect(reader.firstVisibleByteOffset() == viewportByte)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func foldedReferenceScanningDoesNotGrowWithHiddenBody() throws {
+    func counts(lineCount: Int) throws -> (visible: Int, folded: Int) {
+        let body = (0..<lineCount).map { "    value += \($0);" }
+            .joined(separator: "\n")
+        let source = "fn scan() {\n    let mut value = 0;\n\(body)\n}\n"
+        let bytes = Array(source.utf8)
+        let document = try DocumentLoader(source: { _ in bytes })
+            .load(file: URL(fileURLWithPath: "/scan-\(lineCount).rs"))
+            .document
+        let fold = try #require(document.foldRegions.first {
+            $0.kind == .declaration
+        })
+        let (reader, _, window) = renderOffscreen(document)
+        let visible = reader.renderingCoordinator.referenceScannedCount
+        #expect(reader.toggleFold(id: fold.id))
+        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        window.displayIfNeeded()
+        let folded = reader.renderingCoordinator.referenceScannedCount
+        withExtendedLifetime(window) {}
+        return (visible, folded)
+    }
+
+    let small = try counts(lineCount: 80)
+    let large = try counts(lineCount: 800)
+    #expect(small.visible > 0)
+    #expect(large.visible > 0)
+    #expect(small.folded == large.folded)
+    #expect(large.folded < large.visible)
 }
 
 @MainActor

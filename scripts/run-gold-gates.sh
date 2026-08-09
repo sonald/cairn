@@ -136,6 +136,16 @@ fi
 swift build ${swift_options[@]+"${swift_options[@]}"}
 binary="$PWD/.build/debug/codeinsight"
 "$PWD/.build/debug/codeinsight-app" --self-test-projector
+"$PWD/.build/debug/codeinsight-app" --self-test-fold
+bash scripts/provision-corpora.sh \
+    --verify-fold-fixture fixtures/fold_perf.rs \
+    --manifest fixtures/fold_perf.manifest.json
+swift build -c release ${swift_options[@]+"${swift_options[@]}"} \
+    --product codeinsight-app
+bash scripts/run-fold-perf.sh \
+    --app-bin .build/release/codeinsight-app \
+    --fixture fixtures/fold_perf.rs \
+    --manifest fixtures/fold_perf.manifest.json
 
 # ---------- run gold gates ----------
 

@@ -6,6 +6,7 @@
 #   bash scripts/provision-corpora.sh --check      # verify only, no downloads
 #   bash scripts/provision-corpora.sh --root DIR   # override root
 #   bash scripts/provision-corpora.sh --gen-fold-fixture FILE --manifest JSON
+#   bash scripts/provision-corpora.sh --verify-fold-fixture FILE --manifest JSON
 #
 # Default root: $CAIRN_CORPUS_ROOT or ~/.cache/cairn-corpora
 #
@@ -31,12 +32,14 @@ check_only=false
 root="${CAIRN_CORPUS_ROOT:-$HOME/.cache/cairn-corpora}"
 fold_fixture=""
 fold_manifest=""
+verify_fold_fixture=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --check)   check_only=true; shift ;;
         --root)    root="$2"; shift 2 ;;
         --gen-fold-fixture) fold_fixture="$2"; shift 2 ;;
+        --verify-fold-fixture) verify_fold_fixture="$2"; shift 2 ;;
         --manifest) fold_manifest="$2"; shift 2 ;;
         --help|-h)
             head -14 "$0" | tail -12 | sed 's/^# \?//'
@@ -164,6 +167,15 @@ JSON
     trap - RETURN
     validate_fold_fixture "$fixture" "$manifest"
 }
+
+if [[ -n "$verify_fold_fixture" ]]; then
+    if [[ -z "$fold_manifest" || -n "$fold_fixture" || "$check_only" == true ]]; then
+        echo "--verify-fold-fixture FILE requires --manifest JSON" >&2
+        exit 2
+    fi
+    validate_fold_fixture "$verify_fold_fixture" "$fold_manifest"
+    exit 0
+fi
 
 if [[ -n "$fold_fixture" || -n "$fold_manifest" ]]; then
     if [[ -z "$fold_fixture" || -z "$fold_manifest" || "$check_only" == true ]]; then

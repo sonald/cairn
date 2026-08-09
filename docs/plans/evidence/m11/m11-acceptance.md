@@ -120,3 +120,60 @@ F2 仍须在真实 reducer/projector 就位后补齐 `codeinsight-app` control/f
 
 M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set 的只读文本视图，并把
 “Reading Set 字号即时变化”加入既有 `--self-test-reading`；完成前 R4 不宣称该跨片条件已验证。
+
+## F2：折叠附件、gutter 折叠柄与原子入口
+
+结论：PASS（自动门禁、最终签名包真实交互与三主题产品截图均已收口）。
+
+- 真实 `ReaderTextView` attachment spike 四项均通过：provider 创建、0 → 3 → 999 计数更新、
+  点击占位附件展开、AX label 可读。provider 的 `hitTest` 明确让回 `NSTextView`，点击只走既有
+  `activate(atCharacterIndex:)` 路径；实测输出为
+  `providerCreated=true countUpdated=true clickExpanded=true hitTesting=NSTextView`。
+- 首轮最终包验收真实复现了“折叠后只有零宽 `U+FFFC`、pill 不可见”：provider 已创建且 AX
+  label 正确，但 TextKit 布局未取得 provider 的固定 bounds。修复由同一
+  `FoldAttachmentViewProvider.attachmentBounds` 返回 16pt chip bounds；并覆盖 TextKit 在 pill
+  右半区返回 placeholder 后一位 insertion index 的点击语义。新增断言要求附件所在行宽至少包含
+  provider 宽度；修前该真实路径失败，修后 attachment spike 与 31 / 31 ReaderUI 测试 PASS。
+- 折叠状态只按 `(standardized fileURL, contentID)` 保存 baseline override；切换到新 pair 从空状态
+  开始，切回旧 pair 原覆盖集合恢复。逻辑折叠集与渲染折叠集分离，渲染只取极大元；外层展开后
+  内层折叠仍在。
+- 折叠集合变更只有 `applyFoldMutation` 一个 private 入口：分别捕获 selection / viewport 的 source
+  anchor，归一 reducer，重建同源 attributed storage + `DisplayMap`，再分别恢复可见或 latent anchor。
+  两个 anchor 落入不同 fold、依次展开时，各自只在所属 fold 展开后恢复。
+- attachment 使用单个 `U+FFFC`，chip 为 1pt 描边、r4、5pt 水平留白；动态计数区固定 54pt。
+  0 / 3 / 999 matches 下 attachment 与整行布局宽度恒定，高度 16pt 且不超过单行行高。
+- gutter 折叠列仅在可见 fold 存在时占 12pt；chevron 仅悬停显示，展开 / 折叠为 `▾` / `▸`；
+  `hiddenLineCount < 2` 不进入可点击区域。`⌥` 点击对同级及其子树递归。行号关、diff 空但存在
+  可见 fold 时 ruler 仍保留且可点击。
+- 可见源码着色 / 引用扫描通过 `visibleSourceRanges` 的 source-ordered 单遍扫描；隐藏 body 不随
+  `hiddenLineCount` 增长而增加引用扫描量。无折叠时保留原完整 span 路径。
+- `--self-test-fold`：PASS，14 / 14；附件机制、固定宽高、单 placeholder、AX、hit testing、
+  pair 隔离、极大元、嵌套状态、ruler-only 与 viewport 跳过隐藏源码全部为 true。
+- 固定 fixture 校验：SHA-256
+  `86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578`，3,115,800 bytes，
+  50,000 个换行；control / fold 均由真实 production load 观察到 8,400 candidates / 8,400
+  accepted，Overview 为 4,400 logical / 200 rendered。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；其 release 双进程结果为 control resolution
+  29.035 ms、fold resolution 25.138 ms、首次折叠 380.031 ms（门槛 ≤ 400 ms），峰值 RSS 增量
+  6,733,824 bytes（6.42 MiB，门槛 ≤ 80 MiB），最终 `status=pass`。
+- `CODEX_SANDBOX=1 bash scripts/run-gold-gates.sh`：PASS；Tokio 17 条、ripgrep 16 条，unexpected
+  failures 均为 0；同一脚本独立重建 release 并复跑 fold runner，365.093 ms / 6,422,528 bytes，
+  `status=pass`。
+- 最终 pill 布局修复后再次以该 release 二进制复跑：与全屏验收包并行时首次为 447.732 ms，
+  超过 400 ms（`status=fail`），没有忽略；关闭验收包排除进程竞争后，同一命令为 351.492 ms、
+  峰值 RSS 增量 7,897,112 bytes，`status=pass`。同时 `--self-test-fold` 14 / 14 与 ReaderUI
+  31 / 31 PASS。
+- 当前 Swift Testing 与混合 AppKit test host 在单次全量进程中会提前正常退出，因此不以其退出码
+  冒充完整覆盖。按 `swift test list` 的具名清单拆分模块，并将 ReaderCore 65 项逐条隔离执行，
+  455 / 455 均得到明确 PASS；其中四个慢测也分别到达终态。
+- 最终验收包为 `.build/m11-f2-ui-app-final/Cairn.app`；`scripts/make-app.sh` 重新构建并完成
+  Info.plist、逐 dylib 签名与 designated requirement 校验。真实 AppKit 打开非 Git 的确定性
+  Rust fixture，文件树、六项 outline 与 28 行 Reader 均可见；非 Git 仅隔离本机 Git 全局配置
+  读取阻塞，Exact unavailable 为该 fixture 的预期状态，不用于 F2 结论。
+- 真实交互顺序已完成：悬停第 1 行 12pt fold column → 点击收起外层 `mod` → 可见 summary pill
+  `⋯ 1 impl · 1 struct · 19 lines` → 点击 pill 中部恢复全部 28 行；随后再次收起，并通过 Settings
+  的真实 Theme popup 逐项切换 Light / Dark / SI Classic。三张最终产品截图分别为
+  `f2-fold-light.jpeg`、`f2-fold-dark.jpeg`、`f2-fold-si-classic.jpeg`，最后恢复 SI Classic。
+- attachment provider 的 AppKit AX label 实测为 button role 且包含
+  `Collapsed, hides … lines, contains …`；桌面 CUA 对 NSTextView 子附件只扁平显示单个
+  `U+FFFC`，因此以真实 provider AX 对象断言证明可读语义，不把 CUA 的树扁平化冒充缺陷。

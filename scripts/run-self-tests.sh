@@ -105,6 +105,7 @@ run_case tabs --self-test-tabs
 run_case search --self-test-search
 run_case reading --self-test-reading
 run_case projector --self-test-projector
+run_case fold --self-test-fold
 run_case diff --self-test-diff "$git_repo"
 run_case pin --self-test-pin "$git_repo"
 run_case history --self-test-history "$git_repo"

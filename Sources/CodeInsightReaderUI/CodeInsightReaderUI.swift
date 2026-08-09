@@ -1,4 +1,5 @@
-import AppKit
+@preconcurrency import AppKit
+import CodeInsightCore
 import CodeInsightReaderCore
 
 @MainActor
@@ -433,6 +434,21 @@ public final class RenderingAttributesCoordinator {
 
 @MainActor
 public final class ReaderTextView {
+    private struct FoldScopeKey: Hashable {
+        let file: URL
+        let contentID: ContentID
+    }
+
+    private struct FoldOverrides {
+        var forcedFolded: Set<FoldID> = []
+        var forcedUnfolded: Set<FoldID> = []
+    }
+
+    private struct LatentFoldAnchor {
+        let byteOffset: UInt32
+        let foldID: FoldID
+    }
+
     public let view: NSTextView
     public let renderingCoordinator = RenderingAttributesCoordinator()
     public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
@@ -449,6 +465,16 @@ public final class ReaderTextView {
     private var lineNumbers = true
     private var wrapLines: Bool
     private var occurrenceSelectionByteOffset: UInt32?
+    private var foldOverridesByScope: [FoldScopeKey: FoldOverrides] = [:]
+    private var activeFoldScope: FoldScopeKey?
+    private var baselineFoldIDs: Set<FoldID> = []
+    private var logicalFoldIDs: Set<FoldID> = []
+    private var renderedFoldIDs: Set<FoldID> = []
+    private var foldAttachments: [FoldID: FoldAttachment] = [:]
+    private var visibleFoldRegionsCache: [FoldRegion] = []
+    private var latentSelectionAnchor: LatentFoldAnchor?
+    private var latentViewportAnchor: LatentFoldAnchor?
+    private var hoveredFoldID: FoldID?
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
     public private(set) var currentLineNumber: Int?
     public private(set) var occurrenceCount = 0
@@ -569,11 +595,157 @@ public final class ReaderTextView {
         }
     }
 
+    package static func foldSelfTestChecks() -> [String: Bool] {
+        do {
+            let source = """
+                mod outer {
+                    fn inner() {
+                        let one = 1;
+                        let two = 2;
+                        let three = one + two;
+                    }
+                }
+                """
+            let bytes = Array(source.utf8)
+            let file = URL(fileURLWithPath: "/fold-self-test.rs")
+            let document = try DocumentLoader(source: { _ in bytes })
+                .load(file: file).document
+            guard let outer = document.foldRegions.first(where: {
+                $0.kind == .container
+            }), let inner = document.foldRegions.first(where: {
+                $0.kind == .declaration
+            }) else { return ["fixtureFoldsExist": false] }
+
+            let reader = ReaderTextView()
+            let scrollView = NSScrollView(
+                frame: NSRect(x: 0, y: 0, width: 480, height: 180)
+            )
+            scrollView.documentView = reader.view
+            reader.view.frame = scrollView.contentView.bounds
+            let window = NSWindow(
+                contentRect: scrollView.frame,
+                styleMask: [.borderless],
+                backing: .buffered,
+                defer: false
+            )
+            window.contentView = scrollView
+            reader.apply(settings: ReaderSettings(lineNumbers: false))
+            reader.display(document: document, fileURL: file)
+
+            _ = reader.toggleFold(id: inner.id)
+            _ = reader.toggleFold(id: outer.id)
+            let maximalOnly = reader.renderedFoldIDs == [outer.id]
+            _ = reader.toggleFold(id: outer.id)
+            let nestedStatePreserved = reader.logicalFoldIDs == [inner.id]
+                && reader.renderedFoldIDs == [inner.id]
+            let rulerWithoutNumbersOrDiff = scrollView.hasVerticalRuler
+                && reader.diffMarkers.isEmpty
+
+            reader.view.textLayoutManager?.textViewportLayoutController
+                .layoutViewport()
+            window.displayIfNeeded()
+            var providers: [NSTextAttachmentViewProvider] = []
+            if let manager = reader.view.textLayoutManager,
+               let content = manager.textContentManager
+            {
+                manager.enumerateTextLayoutFragments(
+                    from: content.documentRange.location,
+                    options: [.ensuresLayout]
+                ) { fragment in
+                    providers.append(
+                        contentsOf: fragment.textAttachmentViewProviders
+                    )
+                    return true
+                }
+            }
+            let providerView = providers.first?.view
+            let initialSize = providerView?.bounds.size
+            reader.setFoldMatchCount(3, for: inner.id)
+            let threeSize = providerView?.bounds.size
+            reader.setFoldMatchCount(999, for: inner.id)
+            let countWidthIsFixed = initialSize != nil
+                && initialSize == threeSize
+                && threeSize == providerView?.bounds.size
+            let lineHeight = reader.view.textLayoutManager?
+                .textLayoutFragment(for: .zero)?.layoutFragmentFrame.height ?? 0
+            let attachmentFitsLine = (providerView?.bounds.height ?? .infinity)
+                <= lineHeight
+            let axReadable = providerView?.accessibilityLabel()?
+                .contains("Collapsed, hides") == true
+            let providerYieldsHitTesting = providerView.map {
+                $0.hitTest(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY)) == nil
+            } ?? false
+            let placeholder = (reader.view.string as NSString).range(of: "\u{FFFC}")
+            let placeholderIsOneUTF16 = placeholder.location != NSNotFound
+                && placeholder.length == 1
+            let viewportSkipsPlaceholder = reader.displayMap?
+                .visibleSourceRanges(forDisplay: placeholder) == []
+
+            reader.display(
+                document: document,
+                fileURL: URL(fileURLWithPath: "/other-fold-self-test.rs")
+            )
+            let newPairStartsEmpty = reader.logicalFoldIDs.isEmpty
+            reader.display(document: document, fileURL: file)
+            let oldPairReturns = reader.logicalFoldIDs == [inner.id]
+
+            if let offset = reader.displayMap?.placeholderOffset(for: inner.id) {
+                reader.activate(atCharacterIndex: offset)
+            }
+            let attachmentActivationExpands = !reader.renderedFoldIDs.contains(
+                inner.id
+            )
+            withExtendedLifetime(window) {}
+            return [
+                "fixtureFoldsExist": true,
+                "maximalRenderedOnly": maximalOnly,
+                "nestedLogicalStatePreserved": nestedStatePreserved,
+                "pairIsolationStartsEmpty": newPairStartsEmpty,
+                "oldPairOverridesReturn": oldPairReturns,
+                "attachmentProviderCreated": providers.count == 1,
+                "attachmentCountWidthFixed": countWidthIsFixed,
+                "attachmentFitsLineHeight": attachmentFitsLine,
+                "attachmentAXReadable": axReadable,
+                "attachmentYieldsHitTesting": providerYieldsHitTesting,
+                "attachmentActivationExpands": attachmentActivationExpands,
+                "singleUTF16Placeholder": placeholderIsOneUTF16,
+                "viewportSkipsPlaceholder": viewportSkipsPlaceholder,
+                "rulerVisibleForFoldingOnly": rulerWithoutNumbersOrDiff,
+            ]
+        } catch {
+            return ["foldSelfTestThrew": false]
+        }
+    }
+
     public func display(document: ReaderDocument) {
+        display(document: document, fileURL: nil)
+    }
+
+    package func display(document: ReaderDocument, fileURL: URL) {
+        display(document: document, fileURL: Optional(fileURL))
+    }
+
+    private func display(document: ReaderDocument, fileURL: URL?) {
+        let scope = FoldScopeKey(
+            file: (fileURL ?? URL(fileURLWithPath: "/__codeinsight_memory__"))
+                .standardizedFileURL,
+            contentID: document.contentID
+        )
+        activeFoldScope = scope
+        let overrides = foldOverridesByScope[scope] ?? FoldOverrides()
+        foldOverridesByScope[scope] = overrides
+        logicalFoldIDs = Self.logicalFoldIDs(
+            overrides: overrides,
+            baseline: baselineFoldIDs
+        )
+        renderedFoldIDs = Self.maximalFoldIDs(
+            logicalFoldIDs,
+            in: document.foldRegions
+        )
         guard
             let projection = Self.project(
                 document: document,
-                renderedFoldIDs: [],
+                renderedFoldIDs: renderedFoldIDs,
                 attributes: baseAttributes,
                 theme: theme
             ),
@@ -581,7 +753,9 @@ public final class ReaderTextView {
         else { return }
 
         displayMap = projection.map
+        foldAttachments = projection.attachments
         displayedDocument = document
+        refreshVisibleFoldRegions()
         diffMarkers = [:]
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
@@ -592,6 +766,9 @@ public final class ReaderTextView {
         visibleLineNumbers = []
         visibleCurrentLineNumbers = []
         visibleDeclarationMarkerLines = []
+        latentSelectionAnchor = nil
+        latentViewportAnchor = nil
+        hoveredFoldID = nil
         renderingCoordinator.setOccurrences([])
         ruler?.needsDisplay = true
         renderingCoordinator.update(
@@ -600,6 +777,9 @@ public final class ReaderTextView {
             theme: theme
         )
         updateRulerThickness()
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
         installRenderingValidator(in: layoutManager)
         backingTextStorage.setAttributedString(projection.attributed)
         if renderingCoordinator.hasRenderingAttributes {
@@ -611,6 +791,15 @@ public final class ReaderTextView {
         view.textLayoutManager?.renderingAttributesValidator = nil
         displayedDocument = nil
         displayMap = nil
+        activeFoldScope = nil
+        baselineFoldIDs = []
+        logicalFoldIDs = []
+        renderedFoldIDs = []
+        foldAttachments = [:]
+        visibleFoldRegionsCache = []
+        latentSelectionAnchor = nil
+        latentViewportAnchor = nil
+        hoveredFoldID = nil
         diffMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
@@ -623,31 +812,369 @@ public final class ReaderTextView {
         visibleDeclarationMarkerLines = []
         renderingCoordinator.clear()
         backingTextStorage.setAttributedString(NSAttributedString(string: ""))
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
         updateRulerThickness()
         ruler?.needsDisplay = true
         view.needsDisplay = true
     }
 
-    public func updateSyntax(document: ReaderDocument) {
-        guard
-            let layoutManager = view.textLayoutManager
-        else { return }
+    @discardableResult
+    internal func toggleFold(id: FoldID) -> Bool {
+        guard let document = displayedDocument,
+              document.foldRegions.contains(where: { $0.id == id })
+        else { return false }
+        let shouldFold = !logicalFoldIDs.contains(id)
+        return applyFoldMutation { overrides in
+            Self.setFold(
+                id,
+                folded: shouldFold,
+                baseline: baselineFoldIDs,
+                overrides: &overrides
+            )
+        }
+    }
+
+    @discardableResult
+    internal func toggleFold(
+        atLine line: Int,
+        recursiveSiblings: Bool = false
+    ) -> Bool {
+        guard let document = displayedDocument,
+              let region = visibleFoldRegions(in: document).first(where: {
+                  document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
+                      .map { Int($0.line) == line } ?? false
+              })
+        else { return false }
+        guard recursiveSiblings else { return toggleFold(id: region.id) }
+
+        let shouldFold = !logicalFoldIDs.contains(region.id)
+        let parent = document.foldRegions
+            .filter {
+                $0.id != region.id
+                    && $0.bodyRange.lowerBound <= region.bodyRange.lowerBound
+                    && region.bodyRange.upperBound <= $0.bodyRange.upperBound
+            }
+            .max { lhs, rhs in lhs.outlineDepth < rhs.outlineDepth }
+        let siblings = document.foldRegions.filter { candidate in
+            guard candidate.outlineDepth == region.outlineDepth else { return false }
+            let candidateParent = document.foldRegions
+                .filter {
+                    $0.id != candidate.id
+                        && $0.bodyRange.lowerBound <= candidate.bodyRange.lowerBound
+                        && candidate.bodyRange.upperBound <= $0.bodyRange.upperBound
+                }
+                .max { lhs, rhs in lhs.outlineDepth < rhs.outlineDepth }
+            return candidateParent?.id == parent?.id
+        }
+        let affected = document.foldRegions.filter { candidate in
+            siblings.contains { sibling in
+                sibling.bodyRange.lowerBound <= candidate.bodyRange.lowerBound
+                    && candidate.bodyRange.upperBound <= sibling.bodyRange.upperBound
+            }
+        }.map(\.id)
+        return applyFoldMutation { overrides in
+            for id in affected {
+                Self.setFold(
+                    id,
+                    folded: shouldFold,
+                    baseline: baselineFoldIDs,
+                    overrides: &overrides
+                )
+            }
+        }
+    }
+
+    internal var renderedFoldIDsForTesting: Set<FoldID> { renderedFoldIDs }
+    internal var logicalFoldIDsForTesting: Set<FoldID> { logicalFoldIDs }
+    internal var latentSelectionAnchorForTesting: (UInt32, FoldID)? {
+        latentSelectionAnchor.map { ($0.byteOffset, $0.foldID) }
+    }
+    internal var latentViewportAnchorForTesting: (UInt32, FoldID)? {
+        latentViewportAnchor.map { ($0.byteOffset, $0.foldID) }
+    }
+    internal var visibleFoldHandleLinesForTesting: [Int] {
+        guard let document = displayedDocument else { return [] }
+        return visibleFoldRegions(in: document).compactMap {
+            document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
+                .map { Int($0.line) }
+        }
+    }
+
+    internal func setFoldMatchCount(_ count: Int, for id: FoldID) {
+        foldAttachments[id]?.matchCount = max(0, count)
+    }
+
+    package func applyFoldPerformanceOverview() -> (
+        logical: Int,
+        rendered: Int
+    )? {
+        guard let document = displayedDocument else { return nil }
+        let previous = baselineFoldIDs
+        baselineFoldIDs = Set(document.foldRegions.compactMap {
+            region -> FoldID? in
+            guard region.summary.hiddenLineCount >= 2 else { return nil }
+            switch region.kind {
+            case .container, .declaration, .imports, .cfgTest:
+                return region.id
+            case .block, .comment, .attributes:
+                return nil
+            }
+        })
+        guard applyFoldMutation({ _ in }) else {
+            baselineFoldIDs = previous
+            return nil
+        }
+        return (logicalFoldIDs.count, renderedFoldIDs.count)
+    }
+
+    package var foldPerformanceCounts: (logical: Int, rendered: Int) {
+        (logicalFoldIDs.count, renderedFoldIDs.count)
+    }
+
+    package var foldPerformanceEffectiveSettings: (
+        lineNumbers: Bool,
+        theme: ReaderSettings.Theme
+    ) {
+        (lineNumbers, theme.selection)
+    }
+
+    private static func logicalFoldIDs(
+        overrides: FoldOverrides,
+        baseline: Set<FoldID>
+    ) -> Set<FoldID> {
+        baseline.subtracting(overrides.forcedUnfolded)
+            .union(overrides.forcedFolded)
+    }
+
+    private static func maximalFoldIDs(
+        _ logical: Set<FoldID>,
+        in regions: [FoldRegion]
+    ) -> Set<FoldID> {
+        let active = regions.filter { logical.contains($0.id) }.sorted {
+            if $0.bodyRange.lowerBound != $1.bodyRange.lowerBound {
+                return $0.bodyRange.lowerBound < $1.bodyRange.lowerBound
+            }
+            return $0.bodyRange.upperBound > $1.bodyRange.upperBound
+        }
+        var result: Set<FoldID> = []
+        result.reserveCapacity(active.count)
+        var maximalUpper: UInt32?
+        for region in active {
+            if let maximalUpper,
+               region.bodyRange.upperBound <= maximalUpper
+            {
+                continue
+            }
+            result.insert(region.id)
+            maximalUpper = region.bodyRange.upperBound
+        }
+        return result
+    }
+
+    private static func setFold(
+        _ id: FoldID,
+        folded: Bool,
+        baseline: Set<FoldID>,
+        overrides: inout FoldOverrides
+    ) {
+        if folded {
+            overrides.forcedUnfolded.remove(id)
+            if baseline.contains(id) {
+                overrides.forcedFolded.remove(id)
+            } else {
+                overrides.forcedFolded.insert(id)
+            }
+        } else {
+            overrides.forcedFolded.remove(id)
+            if baseline.contains(id) {
+                overrides.forcedUnfolded.insert(id)
+            } else {
+                overrides.forcedUnfolded.remove(id)
+            }
+        }
+    }
+
+    private func applyFoldMutation(
+        _ mutate: (inout FoldOverrides) -> Void
+    ) -> Bool {
+        guard let document = displayedDocument,
+              let scope = activeFoldScope,
+              let layoutManager = view.textLayoutManager
+        else { return false }
+
+        let selectionAnchor = sourceAnchor(
+            atDisplayOffset: view.selectedRange().location,
+            latent: latentSelectionAnchor
+        )
+        let viewportAnchor = latentViewportAnchor.flatMap { latent in
+            renderedFoldIDs.contains(latent.foldID) ? latent.byteOffset : nil
+        } ?? firstVisibleByteOffset()
+
+        var overrides = foldOverridesByScope[scope] ?? FoldOverrides()
+        mutate(&overrides)
+        let logical = Self.logicalFoldIDs(
+            overrides: overrides,
+            baseline: baselineFoldIDs
+        )
+        let rendered = Self.maximalFoldIDs(logical, in: document.foldRegions)
         guard let projection = Self.project(
             document: document,
-            renderedFoldIDs: [],
+            renderedFoldIDs: rendered,
+            attributes: baseAttributes,
+            theme: theme
+        ) else { return false }
+
+        foldOverridesByScope[scope] = overrides
+        logicalFoldIDs = logical
+        renderedFoldIDs = rendered
+        displayMap = projection.map
+        foldAttachments = projection.attachments
+        refreshVisibleFoldRegions()
+        renderingCoordinator.update(
+            document: document,
+            map: projection.map,
+            theme: theme
+        )
+        layoutManager.renderingAttributesValidator = nil
+        backingTextStorage.setAttributedString(projection.attributed)
+        installRenderingValidator(in: layoutManager)
+        restoreSelectionAnchor(selectionAnchor)
+        restoreViewportAnchor(viewportAnchor, in: document)
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
+        updateRulerThickness()
+        ruler?.needsDisplay = true
+        layoutManager.textViewportLayoutController.layoutViewport()
+        validateVisibleRenderingAttributes(in: layoutManager)
+        view.needsDisplay = true
+        return true
+    }
+
+    private func sourceAnchor(
+        atDisplayOffset offset: Int,
+        latent: LatentFoldAnchor?
+    ) -> UInt32? {
+        guard let position = displayMap?.sourcePosition(ofDisplay: offset) else {
+            return nil
+        }
+        switch position {
+        case .source(let byteOffset):
+            return byteOffset
+        case .placeholder(let foldID):
+            if latent?.foldID == foldID { return latent?.byteOffset }
+            return displayedDocument?.foldRegions.first { $0.id == foldID }?
+                .bodyRange.lowerBound
+        }
+    }
+
+    private func restoreSelectionAnchor(
+        _ byteOffset: UInt32?
+    ) {
+        guard let byteOffset,
+              let position = displayMap?.displayPosition(ofByte: byteOffset)
+        else { return }
+        switch position {
+        case .visible(let offset):
+            view.setSelectedRange(NSRange(location: offset, length: 0))
+            if latentSelectionAnchor?.byteOffset == byteOffset {
+                latentSelectionAnchor = nil
+            }
+        case .hidden(let foldID):
+            guard let placeholder = displayMap?.placeholderOffset(for: foldID) else {
+                return
+            }
+            latentSelectionAnchor = LatentFoldAnchor(
+                byteOffset: byteOffset,
+                foldID: foldID
+            )
+            view.setSelectedRange(NSRange(location: placeholder, length: 0))
+        }
+    }
+
+    private func restoreViewportAnchor(
+        _ byteOffset: UInt32?,
+        in document: ReaderDocument
+    ) {
+        guard let byteOffset,
+              let position = displayMap?.displayPosition(ofByte: byteOffset)
+        else { return }
+        switch position {
+        case .visible:
+            restore(scrollByteOffset: byteOffset, selectionByteOffset: nil)
+            if latentViewportAnchor?.byteOffset == byteOffset {
+                latentViewportAnchor = nil
+            }
+        case .hidden(let foldID):
+            guard let region = document.foldRegions.first(where: {
+                $0.id == foldID
+            }) else { return }
+            latentViewportAnchor = LatentFoldAnchor(
+                byteOffset: byteOffset,
+                foldID: foldID
+            )
+            restore(
+                scrollByteOffset: region.headerRange.lowerBound,
+                selectionByteOffset: nil
+            )
+        }
+    }
+
+    private func visibleFoldRegions(in document: ReaderDocument) -> [FoldRegion] {
+        if document === displayedDocument { return visibleFoldRegionsCache }
+        return Self.visibleFoldRegions(in: document, map: displayMap)
+    }
+
+    private func refreshVisibleFoldRegions() {
+        guard let document = displayedDocument else {
+            visibleFoldRegionsCache = []
+            return
+        }
+        visibleFoldRegionsCache = Self.visibleFoldRegions(
+            in: document,
+            map: displayMap
+        )
+    }
+
+    private static func visibleFoldRegions(
+        in document: ReaderDocument,
+        map: DisplayMap?
+    ) -> [FoldRegion] {
+        document.foldRegions.filter { region in
+            guard region.summary.hiddenLineCount >= 2 else { return false }
+            if case .visible = map?.displayPosition(
+                ofByte: region.headerRange.lowerBound
+            ) {
+                return true
+            }
+            return false
+        }
+    }
+
+    public func updateSyntax(document: ReaderDocument) {
+        guard
+            let layoutManager = view.textLayoutManager,
+            displayedDocument?.contentID == document.contentID
+        else { return }
+        renderedFoldIDs = Self.maximalFoldIDs(
+            logicalFoldIDs,
+            in: document.foldRegions
+        )
+        guard let projection = Self.project(
+            document: document,
+            renderedFoldIDs: renderedFoldIDs,
             attributes: baseAttributes,
             theme: theme
         ) else {
             layoutManager.renderingAttributesValidator = nil
             return
         }
-        guard projectionMatchesStorage(projection.map) else {
-            layoutManager.renderingAttributesValidator = nil
-            return
-        }
-
         displayMap = projection.map
+        foldAttachments = projection.attachments
         displayedDocument = document
+        refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         renderingCoordinator.update(
             document: document,
@@ -664,6 +1191,9 @@ public final class ReaderTextView {
             renderingCoordinator.setOccurrences(
                 ranges.filter { $0 != primarySelectionRange }
             )
+        }
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
         updateRulerThickness()
         ruler?.needsDisplay = true
@@ -695,7 +1225,7 @@ public final class ReaderTextView {
         else { return }
         guard let projection = Self.project(
             document: document,
-            renderedFoldIDs: [],
+            renderedFoldIDs: renderedFoldIDs,
             attributes: baseAttributes,
             theme: theme
         ) else {
@@ -708,6 +1238,7 @@ public final class ReaderTextView {
         }
 
         displayMap = projection.map
+        foldAttachments = projection.attachments
         renderingCoordinator.update(
             document: document,
             map: projection.map,
@@ -801,7 +1332,7 @@ public final class ReaderTextView {
     ) {
         self.scrollView = scrollView
         self.lineNumbers = lineNumbers
-        let needsRuler = lineNumbers || !diffMarkers.isEmpty
+        let needsRuler = lineNumbers || !diffMarkers.isEmpty || hasVisibleFoldRegions
         guard needsRuler else {
             scrollView.hasVerticalRuler = false
             scrollView.rulersVisible = false
@@ -1005,6 +1536,20 @@ public final class ReaderTextView {
     }
 
     private func activate(atCharacterIndex index: Int) {
+        if case .placeholder(let foldID) = displayMap?.sourcePosition(
+            ofDisplay: index
+        ) {
+            _ = toggleFold(id: foldID)
+            return
+        }
+        if index > 0,
+           case .placeholder(let foldID) = displayMap?.sourcePosition(
+               ofDisplay: index - 1
+           )
+        {
+            _ = toggleFold(id: foldID)
+            return
+        }
         guard let byteOffset = byteOffset(forCharacterIndex: index) else {
             clearOccurrences()
             return
@@ -1070,6 +1615,7 @@ public final class ReaderTextView {
         guard let ruler else { return }
         ruler.ruleThickness = lineNumberColumnWidth
             + declarationColumnWidth
+            + foldColumnWidth
             + diffColumnWidth
         view.textContainerInset.width = 12 + ruler.ruleThickness
         scrollView?.tile()
@@ -1087,6 +1633,15 @@ public final class ReaderTextView {
 
     private var diffColumnWidth: CGFloat {
         diffMarkers.isEmpty ? 0 : 7
+    }
+
+    private var foldColumnWidth: CGFloat {
+        hasVisibleFoldRegions ? 12 : 0
+    }
+
+    private var hasVisibleFoldRegions: Bool {
+        guard let document = displayedDocument else { return false }
+        return !visibleFoldRegions(in: document).isEmpty
     }
 
     private static func declarationKindsByLine(
@@ -1212,6 +1767,19 @@ public final class ReaderTextView {
         )
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .right
+        let foldsByLine: [Int: FoldRegion]
+        if let document = displayedDocument {
+            var mapped: [Int: FoldRegion] = [:]
+            for region in visibleFoldRegions(in: document) {
+                guard let line = document.lineTable.lineColumn(
+                    at: region.headerRange.lowerBound
+                )?.line else { continue }
+                mapped[Int(line)] = mapped[Int(line)] ?? region
+            }
+            foldsByLine = mapped
+        } else {
+            foldsByLine = [:]
+        }
         enumerateVisibleLayoutFragments { fragment, line in
             let textRect = fragmentRectInTextView(fragment)
             let rulerRect = ruler.convert(textRect, from: view)
@@ -1244,10 +1812,24 @@ public final class ReaderTextView {
                     )
                 }
             }
+            if let fold = foldsByLine[line],
+               hoveredFoldID == fold.id
+            {
+                drawFoldChevron(
+                    collapsed: renderedFoldIDs.contains(fold.id),
+                    in: NSRect(
+                        x: lineNumberColumnWidth + declarationColumnWidth,
+                        y: rulerRect.minY,
+                        width: foldColumnWidth,
+                        height: rulerRect.height
+                    )
+                )
+            }
             if let kind = diffMarkers[line] {
                 theme.color(for: kind).setFill()
                 NSRect(
-                    x: lineNumberColumnWidth + declarationColumnWidth + 1,
+                    x: lineNumberColumnWidth + declarationColumnWidth
+                        + foldColumnWidth + 1,
                     y: rulerRect.minY,
                     width: max(2, diffColumnWidth - 2),
                     height: max(2, rulerRect.height)
@@ -1255,6 +1837,76 @@ public final class ReaderTextView {
             }
         }
         visibleLineNumbers = lineNumbers ? lines : []
+    }
+
+    private func drawFoldChevron(collapsed: Bool, in rect: NSRect) {
+        let path = NSBezierPath()
+        path.lineWidth = 1.4
+        path.lineCapStyle = .round
+        path.lineJoinStyle = .round
+        if collapsed {
+            path.move(to: NSPoint(x: rect.midX - 2, y: rect.midY - 3))
+            path.line(to: NSPoint(x: rect.midX + 2, y: rect.midY))
+            path.line(to: NSPoint(x: rect.midX - 2, y: rect.midY + 3))
+        } else {
+            path.move(to: NSPoint(x: rect.midX - 3, y: rect.midY - 2))
+            path.line(to: NSPoint(x: rect.midX, y: rect.midY + 2))
+            path.line(to: NSPoint(x: rect.midX + 3, y: rect.midY - 2))
+        }
+        theme.chromeSecondaryColor.setStroke()
+        path.stroke()
+    }
+
+    func updateFoldHover(at point: NSPoint?, in ruler: NSRulerView) {
+        let next = point.flatMap { foldRegion(at: $0, in: ruler)?.id }
+        guard next != hoveredFoldID else { return }
+        hoveredFoldID = next
+        ruler.needsDisplay = true
+    }
+
+    func clickFoldHandle(
+        at point: NSPoint,
+        in ruler: NSRulerView,
+        modifiers: NSEvent.ModifierFlags
+    ) {
+        guard let region = foldRegion(at: point, in: ruler),
+              let document = displayedDocument,
+              let line = document.lineTable.lineColumn(
+                  at: region.headerRange.lowerBound
+              )?.line
+        else { return }
+        _ = toggleFold(
+            atLine: Int(line),
+            recursiveSiblings: modifiers.contains(.option)
+        )
+    }
+
+    private func foldRegion(
+        at point: NSPoint,
+        in ruler: NSRulerView
+    ) -> FoldRegion? {
+        let foldX = lineNumberColumnWidth + declarationColumnWidth
+        guard foldColumnWidth > 0,
+              point.x >= foldX,
+              point.x <= foldX + foldColumnWidth,
+              let document = displayedDocument
+        else { return nil }
+        var byLine: [Int: FoldRegion] = [:]
+        for region in visibleFoldRegions(in: document) {
+            guard let line = document.lineTable.lineColumn(
+                at: region.headerRange.lowerBound
+            )?.line else { continue }
+            byLine[Int(line)] = byLine[Int(line)] ?? region
+        }
+        var match: FoldRegion?
+        enumerateVisibleLayoutFragments { fragment, line in
+            guard match == nil, let region = byLine[line] else { return }
+            let rect = ruler.convert(fragmentRectInTextView(fragment), from: view)
+            if rect.minY <= point.y, point.y <= rect.maxY {
+                match = region
+            }
+        }
+        return match
     }
 
     private func drawDeclarationMarker(
@@ -1357,7 +2009,11 @@ public final class ReaderTextView {
         renderedFoldIDs: Set<FoldID>,
         attributes: [NSAttributedString.Key: Any],
         theme: ReaderTheme
-    ) -> (attributed: NSMutableAttributedString, map: DisplayMap)? {
+    ) -> (
+        attributed: NSMutableAttributedString,
+        map: DisplayMap,
+        attachments: [FoldID: FoldAttachment]
+    )? {
         guard let map = DisplayMap(
             document: document,
             renderedFoldIDs: renderedFoldIDs
@@ -1372,7 +2028,22 @@ public final class ReaderTextView {
             to: attributed,
             theme: theme
         )
-        return (attributed, map)
+        let regionsByID = Dictionary(
+            uniqueKeysWithValues: document.foldRegions.map { ($0.id, $0) }
+        )
+        var attachments: [FoldID: FoldAttachment] = [:]
+        attachments.reserveCapacity(map.foldPlaceholders.count)
+        for placeholder in map.foldPlaceholders {
+            guard let region = regionsByID[placeholder.id] else { return nil }
+            let attachment = FoldAttachment(region: region, theme: theme)
+            attributed.addAttribute(
+                .attachment,
+                value: attachment,
+                range: NSRange(location: placeholder.offset, length: 1)
+            )
+            attachments[placeholder.id] = attachment
+        }
+        return (attributed, map, attachments)
     }
 
     // Defense-in-depth fuse only; projection construction is the root consistency seam.
@@ -1394,8 +2065,9 @@ public final class ReaderTextView {
         theme: ReaderTheme
     ) {
         guard theme.syntaxFormatting else { return }
-        for span in spans {
-            guard let projected = map.project(byteRange: span.range) else { continue }
+
+        func apply(_ span: HighlightSpan) {
+            guard let projected = map.project(byteRange: span.range) else { return }
             for range in projected.visible {
                 guard range.location >= 0, range.location < attributed.length else {
                     continue
@@ -1438,6 +2110,33 @@ public final class ReaderTextView {
                 }
             }
         }
+
+        guard !map.renderedFoldIDs.isEmpty else {
+            for span in spans { apply(span) }
+            return
+        }
+        guard let visibleRanges = map.visibleSourceRanges(forDisplay: NSRange(
+            location: 0,
+            length: map.projectedUTF16Length
+        )) else { return }
+
+        // Highlight spans and visible source ranges are source ordered. Advance
+        // through both once so fully hidden spans never pay projection cost.
+        var spanIndex = 0
+        for visible in visibleRanges {
+            while spans.indices.contains(spanIndex),
+                  spans[spanIndex].range.upperBound <= visible.lowerBound
+            {
+                spanIndex += 1
+            }
+            while spans.indices.contains(spanIndex),
+                  spans[spanIndex].range.lowerBound < visible.upperBound
+            {
+                apply(spans[spanIndex])
+                spanIndex += 1
+            }
+            guard spans.indices.contains(spanIndex) else { break }
+        }
     }
 
     private func validateVisibleRenderingAttributes(in layoutManager: NSTextLayoutManager) {
@@ -1466,8 +2165,239 @@ public final class ReaderTextView {
 }
 
 @MainActor
+private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
+    nonisolated(unsafe) private weak var activeProvider: FoldAttachmentViewProvider?
+    nonisolated let chipSize: NSSize
+    nonisolated let bodyText: String
+    nonisolated let accessibilityText: String
+    nonisolated let theme: ReaderTheme
+    nonisolated(unsafe) var matchCount = 0 {
+        didSet { activeProvider?.update() }
+    }
+
+    init(region: FoldRegion, theme: ReaderTheme) {
+        self.theme = theme
+        bodyText = Self.bodyText(for: region)
+        accessibilityText = Self.accessibilityText(for: region)
+        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        let measured = (bodyText as NSString).size(withAttributes: [.font: font])
+        let bodyWidth = min(180, ceil(measured.width))
+        chipSize = NSSize(width: 5 + bodyWidth + 54 + 5, height: 16)
+        super.init(data: nil, ofType: "com.codeinsight.fold-attachment")
+        allowsTextAttachmentView = true
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    @preconcurrency override func viewProvider(
+        for parentView: NSView?,
+        location: any NSTextLocation,
+        textContainer: NSTextContainer?
+    ) -> NSTextAttachmentViewProvider? {
+        let provider = FoldAttachmentViewProvider(
+            textAttachment: self,
+            parentView: parentView,
+            textLayoutManager: textContainer?.textLayoutManager,
+            location: location
+        )
+        provider.tracksTextAttachmentViewBounds = true
+        activeProvider = provider
+        return provider
+    }
+
+    private static func bodyText(for region: FoldRegion) -> String {
+        let summary = region.summary
+        switch region.kind {
+        case .declaration:
+            return joined(
+                summary.leadingText,
+                "\(summary.hiddenLineCount) lines"
+            )
+        case .container:
+            let members = orderedMembers(summary.memberCounts)
+            return "⋯ " + (members + ["\(summary.hiddenLineCount) lines"])
+                .joined(separator: " · ")
+        case .imports:
+            return "⋯ \(summary.itemCount ?? 0) imports"
+        case .comment:
+            return joined(
+                summary.leadingText,
+                "\(summary.hiddenLineCount) lines"
+            )
+        case .attributes:
+            return "⋯ \(summary.itemCount ?? 0) attributes"
+        case .cfgTest:
+            let functionCount = (summary.memberCounts[.fn] ?? 0)
+                + (summary.memberCounts[.method] ?? 0)
+            return "⋯ tests · \(functionCount) fn · \(summary.hiddenLineCount) lines"
+        case .block:
+            if let itemCount = summary.itemCount {
+                return "⋯ \(itemCount) arms"
+            }
+            return "⋯ \(summary.hiddenLineCount) lines"
+        }
+    }
+
+    private static func accessibilityText(for region: FoldRegion) -> String {
+        let members = orderedMembers(region.summary.memberCounts)
+        let memberText = members.isEmpty ? "" : ", contains " + members.joined(separator: ", ")
+        return "Collapsed, hides \(region.summary.hiddenLineCount) lines\(memberText)"
+    }
+
+    private static func joined(_ leading: String?, _ trailing: String) -> String {
+        ["⋯", leading, trailing]
+            .compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            .joined(separator: " · ")
+    }
+
+    private static func orderedMembers(
+        _ counts: [OutlineKind: Int]
+    ) -> [String] {
+        let order: [OutlineKind] = [
+            .mod, .trait, .impl, .struct, .enum, .typeAlias,
+            .const, .static, .fn, .method,
+        ]
+        return order.compactMap { kind in
+            guard let count = counts[kind], count > 0 else { return nil }
+            return "\(count) \(kind.rawValue)"
+        }
+    }
+}
+
+private final class FoldAttachmentViewProvider:
+    NSTextAttachmentViewProvider,
+    @unchecked Sendable
+{
+    nonisolated override func attachmentBounds(
+        for attributes: [NSAttributedString.Key: Any],
+        location: any NSTextLocation,
+        textContainer: NSTextContainer?,
+        proposedLineFragment: CGRect,
+        position: CGPoint
+    ) -> CGRect {
+        guard let attachment = textAttachment as? FoldAttachment else {
+            return super.attachmentBounds(
+                for: attributes,
+                location: location,
+                textContainer: textContainer,
+                proposedLineFragment: proposedLineFragment,
+                position: position
+            )
+        }
+        return CGRect(
+            x: 0,
+            y: -3,
+            width: attachment.chipSize.width,
+            height: attachment.chipSize.height
+        )
+    }
+
+    nonisolated override func loadView() {
+        // AppKit invokes this nonisolated SDK hook on its main UI thread.
+        nonisolated(unsafe) let provider = self
+        MainActor.assumeIsolated {
+            guard let attachment = provider.textAttachment as? FoldAttachment else {
+                provider.view = NSView(frame: .zero)
+                return
+            }
+            provider.view = FoldChipView(attachment: attachment)
+            provider.updateOnMainActor()
+        }
+    }
+
+    nonisolated func update() {
+        nonisolated(unsafe) let provider = self
+        MainActor.assumeIsolated { provider.updateOnMainActor() }
+    }
+
+    @MainActor
+    private func updateOnMainActor() {
+        guard let attachment = textAttachment as? FoldAttachment,
+              let chip = view as? FoldChipView
+        else { return }
+        chip.matchCount = attachment.matchCount
+        let exposure = attachment.matchCount > 0
+            ? ", \(attachment.matchCount) matches"
+            : ""
+        chip.setAccessibilityLabel(attachment.accessibilityText + exposure)
+        chip.needsDisplay = true
+    }
+}
+
+private final class FoldChipView: NSView {
+    let attachment: FoldAttachment
+    var matchCount = 0
+
+    init(attachment: FoldAttachment) {
+        self.attachment = attachment
+        super.init(frame: NSRect(origin: .zero, size: attachment.chipSize))
+        setAccessibilityRole(.button)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        nil
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        let borderRect = bounds.insetBy(dx: 0.5, dy: 0.5)
+        let border = NSBezierPath(roundedRect: borderRect, xRadius: 4, yRadius: 4)
+        border.lineWidth = 1
+        attachment.theme.chromeDividerColor.setStroke()
+        border.stroke()
+
+        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: font,
+            .foregroundColor: attachment.theme.chipForegroundColor,
+            .paragraphStyle: paragraph,
+        ]
+        let countText: String
+        if matchCount == 0 {
+            countText = ""
+        } else if matchCount > 999 {
+            countText = " · 999"
+        } else {
+            countText = " · \(matchCount) matches"
+        }
+        let countWidth: CGFloat = 54
+        let textY = floor((bounds.height - font.ascender + font.descender) / 2)
+        (attachment.bodyText as NSString).draw(
+            in: NSRect(
+                x: 5,
+                y: textY,
+                width: max(0, bounds.width - countWidth - 10),
+                height: ceil(font.ascender - font.descender)
+            ),
+            withAttributes: attributes
+        )
+        (countText as NSString).draw(
+            in: NSRect(
+                x: bounds.width - countWidth - 5,
+                y: textY,
+                width: countWidth,
+                height: ceil(font.ascender - font.descender)
+            ),
+            withAttributes: attributes
+        )
+    }
+}
+
+@MainActor
 private final class ReaderRulerView: NSRulerView {
     private weak var reader: ReaderTextView?
+    private var hoverTrackingArea: NSTrackingArea?
 
     init(scrollView: NSScrollView, reader: ReaderTextView) {
         self.reader = reader
@@ -1482,6 +2412,44 @@ private final class ReaderRulerView: NSRulerView {
 
     override func drawHashMarksAndLabels(in rect: NSRect) {
         reader?.drawRuler(in: self, dirtyRect: rect)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        window?.acceptsMouseMovedEvents = true
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        reader?.updateFoldHover(at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        reader?.updateFoldHover(at: convert(event.locationInWindow, from: nil), in: self)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        reader?.updateFoldHover(at: nil, in: self)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        reader?.clickFoldHandle(
+            at: convert(event.locationInWindow, from: nil),
+            in: self,
+            modifiers: event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        )
     }
 }
 

@@ -3626,7 +3626,7 @@ final class ReaderViewController: NSViewController {
             onDocumentChange?(file, loaded.document)
             label.isHidden = true
             layoutTextViewFrame()
-            textView.display(document: loaded.document)
+            textView.display(document: loaded.document, fileURL: file)
             onOutlineChange?(loaded.document.outlineFacets)
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()

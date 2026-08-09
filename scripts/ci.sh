@@ -70,3 +70,14 @@ fi
 .build/debug/codeinsight-app --self-test-diff .
 .build/debug/codeinsight-app --self-test-reading
 .build/debug/codeinsight-app --self-test-projector
+.build/debug/codeinsight-app --self-test-fold
+
+bash scripts/provision-corpora.sh \
+    --verify-fold-fixture fixtures/fold_perf.rs \
+    --manifest fixtures/fold_perf.manifest.json
+swift build -c release ${swift_options[@]+"${swift_options[@]}"} \
+    --product codeinsight-app
+bash scripts/run-fold-perf.sh \
+    --app-bin .build/release/codeinsight-app \
+    --fixture fixtures/fold_perf.rs \
+    --manifest fixtures/fold_perf.manifest.json

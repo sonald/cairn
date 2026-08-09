@@ -24,6 +24,48 @@ private enum SelfTestBudgets {
     static let snapshotFirstPaintMS = 1_000.0
 }
 
+private final class PerfResolutionCollector: @unchecked Sendable {
+    struct Sample: Sendable {
+        let milliseconds: Double
+        let candidates: Int
+        let accepted: Int
+    }
+
+    private let samples = OSAllocatedUnfairLock(initialState: [Sample]())
+
+    func record(milliseconds: Double, candidates: Int, accepted: Int) {
+        let sample = Sample(
+            milliseconds: milliseconds,
+            candidates: candidates,
+            accepted: accepted
+        )
+        samples.withLock { $0.append(sample) }
+    }
+
+    func snapshot() -> [Sample] {
+        samples.withLock { $0 }
+    }
+}
+
+private func foldPerformanceArguments(
+    _ arguments: [String]
+) -> (mode: String, fixture: URL, output: URL)? {
+    guard let modeIndex = arguments.firstIndex(of: "--fold-perf-mode"),
+          arguments.indices.contains(modeIndex + 1),
+          let fixtureIndex = arguments.firstIndex(of: "--fold-perf-fixture"),
+          arguments.indices.contains(fixtureIndex + 1),
+          let outputIndex = arguments.firstIndex(of: "--fold-perf-out"),
+          arguments.indices.contains(outputIndex + 1)
+    else { return nil }
+    let mode = arguments[modeIndex + 1]
+    guard ["control", "fold"].contains(mode) else { return nil }
+    return (
+        mode,
+        URL(fileURLWithPath: arguments[fixtureIndex + 1]).standardizedFileURL,
+        URL(fileURLWithPath: arguments[outputIndex + 1]).standardizedFileURL
+    )
+}
+
 private struct DiffSelfTestTarget {
     let file: URL
     let path: String
@@ -73,6 +115,17 @@ private struct CodeInsightApplication {
     static func main() {
         let startedAt = ContinuousClock.now
         let arguments = Array(CommandLine.arguments.dropFirst())
+        let foldPerformanceRequested = arguments.contains("--fold-perf-mode")
+        let foldPerformance = foldPerformanceArguments(arguments)
+        if foldPerformanceRequested, foldPerformance == nil {
+            FileHandle.standardError.write(Data(
+                (
+                    "usage: codeinsight-app --fold-perf-mode <control|fold> "
+                        + "--fold-perf-fixture <path> --fold-perf-out <json>\n"
+                ).utf8
+            ))
+            Darwin.exit(2)
+        }
         let relationTimingRequested =
             arguments.contains("--self-test-relation-timing")
         let relationTimingTarget = relationTimingArguments(arguments)
@@ -95,6 +148,14 @@ private struct CodeInsightApplication {
             ))
         }
         let app = NSApplication.shared
+        if let foldPerformance {
+            app.setActivationPolicy(.prohibited)
+            runFoldPerformance(
+                mode: foldPerformance.mode,
+                fixture: foldPerformance.fixture,
+                output: foldPerformance.output
+            )
+        }
         app.setActivationPolicy(.regular)
         let exactRoot = arguments.firstIndex(of: "--self-test-exact")
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
@@ -255,6 +316,8 @@ private struct CodeInsightApplication {
                 delegate.runReadingSelfTest()
             } else if arguments.contains("--self-test-projector") {
                 delegate.runProjectorSelfTest()
+            } else if arguments.contains("--self-test-fold") {
+                delegate.runFoldSelfTest()
             } else if arguments.contains("--self-test-tabs") {
                 delegate.runTabsSelfTest()
             } else if let index = arguments.firstIndex(of: "--self-test-diff"),
@@ -496,6 +559,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             Self.exitSelfTest(channel: "projector", status: 1)
         }
         Self.exitSelfTest(channel: "projector", status: passed ? 0 : 1)
+    }
+
+    func runFoldSelfTest() -> Never {
+        let checks = ReaderTextView.foldSelfTestChecks()
+        let passed = !checks.isEmpty && checks.values.allSatisfy { $0 }
+        do {
+            var object: [String: Any] = checks
+            object["channel"] = "fold"
+            object["passed"] = passed
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+            )
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Self.exitSelfTest(channel: "fold", status: 1)
+        }
+        Self.exitSelfTest(channel: "fold", status: passed ? 0 : 1)
     }
 
     func runProjectSelfTest(root: URL) {
@@ -5328,7 +5411,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             let loader = DocumentLoader()
             let loaded = try loader.load(file: file)
             state.tier = loaded.tier
-            state.textView.display(document: loaded.document)
+            state.textView.display(document: loaded.document, fileURL: file)
             state.textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
             guard
@@ -7330,6 +7413,273 @@ private enum ExactSelfTestError: Error, LocalizedError {
         case .git(let detail): detail
         }
     }
+}
+
+@MainActor
+private func runFoldPerformance(
+    mode: String,
+    fixture: URL,
+    output: URL
+) -> Never {
+    func write(_ object: [String: Any], status: Int32) -> Never {
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+            )
+            try data.write(to: output, options: .atomic)
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+        Darwin.exit(status)
+    }
+
+    let collector = PerfResolutionCollector()
+    let loader = DocumentLoader(
+        source: { file in Array(try Data(contentsOf: file, options: .mappedIfSafe)) },
+        foldResolutionObserver: { milliseconds, candidates, accepted in
+            collector.record(
+                milliseconds: milliseconds,
+                candidates: candidates,
+                accepted: accepted
+            )
+        }
+    )
+    let initial: ReaderDocument
+    do {
+        initial = try loader.load(file: fixture).document
+    } catch {
+        write([
+            "schemaVersion": 1,
+            "mode": mode,
+            "status": "error",
+            "error": "fixture load failed: \(error)",
+        ], status: 1)
+    }
+
+    let peakBytes = OSAllocatedUnfairLock(
+        initialState: physicalFootprintBytes() ?? 0
+    )
+    let samplerQueue = DispatchQueue(label: "com.codeinsight.fold-perf-sampler")
+    let sampler = DispatchSource.makeTimerSource(queue: samplerQueue)
+    sampler.schedule(
+        deadline: .now(),
+        repeating: .milliseconds(25),
+        leeway: .milliseconds(2)
+    )
+    let sampleMemory: @Sendable () -> Void = {
+        guard let bytes = physicalFootprintBytes() else { return }
+        peakBytes.withLock { $0 = max($0, bytes) }
+    }
+    sampler.setEventHandler(handler: sampleMemory)
+    sampler.resume()
+
+    func stopSampler() -> UInt64 {
+        sampler.cancel()
+        samplerQueue.sync {}
+        return peakBytes.withLock { $0 }
+    }
+
+    let reader = ReaderTextView()
+    var settings = ReaderSettings()
+    settings.fontSize = 13
+    settings.wrapLines = false
+    settings.lineNumbers = true
+    settings.theme = .siClassic
+    reader.apply(settings: settings)
+
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: 1440, height: 900))
+    window.contentView = host
+    let scrollView = NSScrollView(
+        frame: NSRect(x: 100, y: 60, width: 1220, height: 780)
+    )
+    scrollView.hasVerticalScroller = true
+    scrollView.hasHorizontalScroller = true
+    scrollView.documentView = reader.view
+    host.addSubview(scrollView)
+    reader.view.frame = scrollView.contentView.bounds
+    reader.display(document: initial, fileURL: fixture)
+
+    func fitViewport() {
+        for _ in 0..<4 {
+            scrollView.tile()
+            let size = scrollView.contentView.bounds.size
+            let delta = NSSize(width: 1200 - size.width, height: 760 - size.height)
+            guard abs(delta.width) > 0.01 || abs(delta.height) > 0.01 else {
+                break
+            }
+            scrollView.setFrameSize(NSSize(
+                width: scrollView.frame.width + delta.width,
+                height: scrollView.frame.height + delta.height
+            ))
+        }
+        scrollView.tile()
+    }
+    fitViewport()
+    window.displayIfNeeded()
+
+    let syntaxResult = OSAllocatedUnfairLock(
+        initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none
+    )
+    loader.loadSyntax(for: initial) { result in
+        syntaxResult.withLock { $0 = result }
+    }
+    guard waitUntil(timeout: 10, condition: {
+        syntaxResult.withLock { $0 != nil }
+    }), let result = syntaxResult.withLock({ $0 })
+    else {
+        let peak = stopSampler()
+        write([
+            "schemaVersion": 1,
+            "mode": mode,
+            "status": "timeout",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": peak,
+        ], status: 1)
+    }
+    let document: ReaderDocument
+    switch result {
+    case .success(let loaded):
+        document = loaded
+    case .failure(let error):
+        let peak = stopSampler()
+        write([
+            "schemaVersion": 1,
+            "mode": mode,
+            "status": "error",
+            "error": "syntax load failed: \(error)",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": peak,
+        ], status: 1)
+    }
+
+    reader.updateSyntax(document: document)
+    fitViewport()
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+    pumpRunLoop()
+
+    var foldLatencyMS: Double?
+    let observedCounts: (logical: Int, rendered: Int)
+    if mode == "fold" {
+        let started = ContinuousClock.now
+        guard let counts = reader.applyFoldPerformanceOverview() else {
+            let peak = stopSampler()
+            write([
+                "schemaVersion": 1,
+                "mode": mode,
+                "status": "error",
+                "error": "overview projection failed",
+                "samplePeriodMs": 25,
+                "peakPhysBytes": peak,
+            ], status: 1)
+        }
+        observedCounts = counts
+        fitViewport()
+        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        window.displayIfNeeded()
+        pumpRunLoop()
+        pumpRunLoop()
+        foldLatencyMS = milliseconds(since: started)
+    } else {
+        observedCounts = reader.foldPerformanceCounts
+        pumpRunLoop()
+        pumpRunLoop()
+    }
+
+    guard waitUntil(timeout: 10, condition: {
+        guard let fragment = reader.view.textLayoutManager?
+            .textLayoutFragment(for: .zero)
+        else { return false }
+        return !fragment.textLineFragments.isEmpty
+    }) else {
+        let peak = stopSampler()
+        write([
+            "schemaVersion": 1,
+            "mode": mode,
+            "status": "timeout",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": peak,
+        ], status: 1)
+    }
+
+    let peak = stopSampler()
+    let samples = collector.snapshot()
+    guard samples.count == 1, let resolution = samples.first else {
+        write([
+            "schemaVersion": 1,
+            "mode": mode,
+            "status": "error",
+            "error": "expected exactly one resolution sample, got \(samples.count)",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": peak,
+        ], status: 1)
+    }
+    let storage = reader.view.textStorage
+    let resolvedFont: NSFont? = storage.flatMap { storage in
+        guard storage.length > 0 else { return nil }
+        return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    }
+    let viewport = scrollView.contentView.bounds.size
+    let windowSize = window.contentView?.bounds.size ?? .zero
+    let effective = reader.foldPerformanceEffectiveSettings
+    let themeName = switch effective.theme {
+    case .siClassic: "SI Classic"
+    case .dark: "Dark"
+    case .light: "Light"
+    case .auto: "Auto"
+    }
+    let wrapLines = reader.view.textContainer?.widthTracksTextView == true
+    let fixtureSHA = document.contentID.bytes
+        .map { String(format: "%02x", $0) }
+        .joined()
+    var object: [String: Any] = [
+        "schemaVersion": 1,
+        "mode": mode,
+        "fixtureSHA256": fixtureSHA,
+        "samplePeriodMs": 25,
+        "perfConfig": [
+            "wrapLines": wrapLines,
+            "resolvedFontName": resolvedFont?.fontName ?? "",
+            "resolvedFontSizePt": resolvedFont?.pointSize ?? 0,
+            "windowPt": [windowSize.width, windowSize.height],
+            "viewportPt": [viewport.width, viewport.height],
+            "lineNumbers": effective.lineNumbers,
+            "theme": themeName,
+        ],
+        "observed": [
+            "candidateCount": resolution.candidates,
+            "acceptedFoldCount": resolution.accepted,
+            "logicalFoldCount": observedCounts.logical,
+            "renderedFoldCount": observedCounts.rendered,
+        ],
+        "status": "ok",
+        "resolutionMs": resolution.milliseconds,
+        "peakPhysBytes": peak,
+    ]
+    if let foldLatencyMS { object["foldLatencyMs"] = foldLatencyMS }
+    let configurationIsExact = abs(viewport.width - 1200) < 0.01
+        && abs(viewport.height - 760) < 0.01
+        && abs(windowSize.width - 1440) < 0.01
+        && abs(windowSize.height - 900) < 0.01
+        && resolvedFont != nil
+        && abs((resolvedFont?.pointSize ?? 0) - 13) < 0.01
+        && !wrapLines
+        && effective.lineNumbers
+        && effective.theme == .siClassic
+    if !configurationIsExact {
+        object["status"] = "error"
+        object["error"] = "effective performance configuration mismatch"
+    }
+    withExtendedLifetime((reader, window, scrollView)) {}
+    write(object, status: configurationIsExact ? 0 : 1)
 }
 
 private func physicalFootprintBytes() -> UInt64? {
