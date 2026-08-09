@@ -4,7 +4,7 @@ import Foundation
 @MainActor
 public final class TabStripModel {
     public struct Tab {
-        package let content: TabContent
+        package fileprivate(set) var content: TabContent
         public var fileURL: URL? { content.fileURL }
         public fileprivate(set) var scrollByteOffset: UInt32?
         public fileprivate(set) var selectionByteOffset: UInt32?
@@ -162,6 +162,18 @@ public final class TabStripModel {
               case .readingSet = tabs[activeIndex].content
         else { return }
         tabs[activeIndex].readingSetScrollOffset = offset
+    }
+
+    package func updateActiveReadingSetExcerpt(
+        at index: Int,
+        to excerpt: ReadingSetExcerpt
+    ) {
+        guard let activeIndex,
+              case .readingSet(let title, var excerpts) = tabs[activeIndex].content,
+              excerpts.indices.contains(index)
+        else { return }
+        excerpts[index] = excerpt
+        tabs[activeIndex].content = .readingSet(title: title, excerpts: excerpts)
     }
 
     public func setActiveDocument(

@@ -407,6 +407,30 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             relationItem.isCollapsed = false
             relationController.showFrozenInspector(excerpts[index].inspector)
         }
+        readerController.onOpenReadingSetExcerpt = { [weak self, weak model] index in
+            guard let self, let model,
+                  case .readingSet(_, let excerpts) = model.tabStrip.activeTab?.content,
+                  excerpts.indices.contains(index)
+            else { return }
+            captureActiveTabState()
+            model.openReadingSetExcerpt(excerpts[index])
+            pendingTabRestore = model.tabStrip.activeTab
+            render()
+        }
+        readerController.onExpandReadingSetExcerpt = { [weak self, weak model] index in
+            guard let self, let model,
+                  case .readingSet(_, let excerpts) = model.tabStrip.activeTab?.content,
+                  excerpts.indices.contains(index),
+                  let bytes = model.readingSetSources(for: [excerpts[index]]).first ?? nil,
+                  let expanded = expandedReadingSetExcerpt(
+                      excerpts[index],
+                      bytes: bytes
+                  )
+            else { return }
+            captureActiveTabState()
+            model.tabStrip.updateActiveReadingSetExcerpt(at: index, to: expanded)
+            render()
+        }
         relationController.onTreeChange = { [weak self] in
             self?.renderStatusBar()
             self?.renderTrail()
@@ -1564,12 +1588,31 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let readerContent = model.tabStrip.activeTab?.content
             ?? model.selectedFile.map(TabContent.file)
+        let readingSetAvailability: [(open: Bool, expand: Bool)]? = if case .readingSet(
+            _, let excerpts
+        ) = readerContent {
+            zip(excerpts, model.readingSetSources(for: excerpts)).map { excerpt, source in
+                let expanded = source.flatMap {
+                    expandedReadingSetExcerpt(excerpt, bytes: $0)
+                }
+                return (
+                    source != nil && excerpt.sourceKind != .dependencyCaptured,
+                    expanded.map {
+                        $0.byteRange != excerpt.byteRange
+                            || $0.sourceText != excerpt.sourceText
+                    } ?? false
+                )
+            }
+        } else {
+            nil
+        }
         let readerFile = readerContent?.fileURL
         let selectedSource = readerSource(for: readerFile)
         readerController.display(
             readerContent,
             snapshotID: model.currentSnapshotID,
-            source: selectedSource
+            source: selectedSource,
+            readingSetAvailability: readingSetAvailability
         )
         if readerFile == nil, model.tabStrip.activeTab != nil {
             readerController.restoreReadingSetScrollOffset(
@@ -4596,13 +4639,18 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     func display(
         _ content: TabContent?,
         snapshotID: SnapshotID? = nil,
-        source: DocumentLoader.ContentSource? = nil
+        source: DocumentLoader.ContentSource? = nil,
+        readingSetAvailability: [(open: Bool, expand: Bool)]? = nil
     ) {
         switch content {
         case .file(let file):
             display(file, snapshotID: snapshotID, source: source)
         case .readingSet(let title, let excerpts):
-            displayReadingSet(title: title, excerpts: excerpts)
+            displayReadingSet(
+                title: title,
+                excerpts: excerpts,
+                actionAvailability: readingSetAvailability
+            )
         case nil:
             display(URL?.none, snapshotID: snapshotID, source: source)
         }
@@ -4610,12 +4658,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
 
     private func displayReadingSet(
         title: String,
-        excerpts: [ReadingSetExcerpt]
+        excerpts: [ReadingSetExcerpt],
+        actionAvailability: [(open: Bool, expand: Bool)]?
     ) {
         loadViewIfNeeded()
         let key = title + excerpts.map {
             "\($0.contentID.bytes)-\($0.byteRange.lowerBound)-\($0.byteRange.upperBound)"
-        }.joined(separator: "|")
+        }.joined(separator: "|") + (actionAvailability?.map {
+            "\($0.open)-\($0.expand)"
+        }.joined(separator: "|") ?? "")
         guard key != displayedReadingSetKey else { return }
         findTask?.cancel()
         findWorker?.cancel()
@@ -4641,7 +4692,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             excerpts: excerpts,
             canOpen: onOpenReadingSetExcerpt != nil,
             canExpand: onExpandReadingSetExcerpt != nil,
-            canViewEvidence: onViewReadingSetEvidence != nil
+            canViewEvidence: onViewReadingSetEvidence != nil,
+            openAvailability: actionAvailability?.map(\.open),
+            expandAvailability: actionAvailability?.map(\.expand)
         )
     }
 

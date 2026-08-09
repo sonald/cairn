@@ -170,63 +170,258 @@ package func makeReadingSetExcerpt(
               capturedAt: capturedAt
           )
     else { return nil }
-    let lineCount = document.lineTable.lineStarts.count
-    let targetLine = Int(coordinate.line)
     let facet = document.outlineFacets.filter {
         $0.range.contains(target.byteOffset)
     }.min { $0.range.length < $1.range.length }
-    let firstLine = facet.flatMap {
-        document.lineTable.lineColumn(at: $0.range.lowerBound)?.line
-    }.map(Int.init) ?? max(1, targetLine - 20)
-    let facetEnd = facet.map {
-        max($0.range.lowerBound, $0.range.upperBound &- 1)
-    }
-    let lastLine = facetEnd.flatMap {
-        document.lineTable.lineColumn(at: $0)?.line
-    }.map(Int.init) ?? min(lineCount, targetLine + 20)
-    var lowerLine = max(firstLine, targetLine - 39)
-    var upperLine = min(lastLine, lowerLine + 79)
-    lowerLine = max(firstLine, upperLine - 79)
-    func range(_ lower: Int, _ upper: Int) -> ByteRange {
-        let start = document.lineTable.lineStarts[lower - 1]
-        let end = upper < lineCount
-            ? document.lineTable.lineStarts[upper]
-            : UInt32(bytes.count)
-        return ByteRange(lowerBound: start, upperBound: end)
-    }
-    var frozenRange = range(lowerLine, upperLine)
-    while frozenRange.length > 8 * 1_024 && lowerLine < upperLine {
-        if targetLine - lowerLine > upperLine - targetLine {
-            lowerLine += 1
-        } else {
-            upperLine -= 1
-        }
-        frozenRange = range(lowerLine, upperLine)
-    }
-    guard frozenRange.length <= 8 * 1_024,
-          let lower = Int(exactly: frozenRange.lowerBound),
-          let upper = Int(exactly: frozenRange.upperBound),
-          bytes.indices.contains(lower) || lower == bytes.endIndex,
-          upper <= bytes.count,
-          let source = String(bytes: bytes[lower..<upper], encoding: .utf8)
-    else { return nil }
-    let prefix = lowerLine > firstLine ? "…\n" : ""
-    let suffix = upperLine < lastLine ? "\n…" : ""
+    guard let frozen = frozenReadingSetSource(
+        bytes: bytes,
+        targetByte: target.byteOffset,
+        enclosingRange: facet?.range
+    ) else { return nil }
     return ReadingSetExcerpt(
         role: role,
         symbol: node.title,
         path: target.path,
         line: coordinate.line,
         column: coordinate.column,
-        firstLine: UInt32(lowerLine),
-        byteRange: frozenRange,
-        sourceText: prefix + source + suffix,
+        firstLine: frozen.firstLine,
+        byteRange: frozen.byteRange,
+        sourceText: frozen.sourceText,
         contentID: contentID,
         revision: revision,
         capturedAt: capturedAt,
         sourceKind: sourceKind,
         inspector: inspector,
-        caveat: inspector.badge == .inferred ? "name match only" : nil
+        caveat: inspector.badge == .inferred ? "name match only" : nil,
+        partialLine: frozen.partialLine
+    )
+}
+
+package func expandedReadingSetExcerpt(
+    _ excerpt: ReadingSetExcerpt,
+    bytes: [UInt8]
+) -> ReadingSetExcerpt? {
+    guard ContentID.sha256(of: bytes) == excerpt.contentID,
+          let targetByte = LineTable(bytes: bytes).byteOffset(
+              line: excerpt.line,
+              column: excerpt.column
+          ),
+          let frozen = frozenReadingSetSource(
+              bytes: bytes,
+              targetByte: targetByte,
+              previousRange: excerpt.byteRange,
+              previousWasPartialLine: excerpt.partialLine
+          )
+    else { return nil }
+    return ReadingSetExcerpt(
+        role: excerpt.role,
+        symbol: excerpt.symbol,
+        path: excerpt.path,
+        line: excerpt.line,
+        column: excerpt.column,
+        firstLine: frozen.firstLine,
+        byteRange: frozen.byteRange,
+        sourceText: frozen.sourceText,
+        contentID: excerpt.contentID,
+        revision: excerpt.revision,
+        capturedAt: excerpt.capturedAt,
+        sourceKind: excerpt.sourceKind,
+        inspector: excerpt.inspector,
+        caveat: excerpt.caveat,
+        partialLine: frozen.partialLine
+    )
+}
+
+package func frozenReadingSetSource(
+    bytes: [UInt8],
+    targetByte: UInt32,
+    enclosingRange: ByteRange? = nil,
+    previousRange: ByteRange? = nil,
+    previousWasPartialLine: Bool = false
+) -> (
+    byteRange: ByteRange,
+    sourceText: String,
+    firstLine: UInt32,
+    partialLine: Bool
+)? {
+    guard String(bytes: bytes, encoding: .utf8) != nil else { return nil }
+    let table = LineTable(bytes: bytes)
+    guard let targetCoordinate = table.lineColumn(at: targetByte) else {
+        return nil
+    }
+    let lineCount = table.lineStarts.count
+    let targetLine = Int(targetCoordinate.line)
+    let expanded = previousRange != nil
+    let byteLimit = expanded ? 16 * 1_024 : 8 * 1_024
+    let lineLimit = expanded ? 200 : 80
+
+    if previousWasPartialLine {
+        return partialReadingSetLine(
+            bytes: bytes,
+            table: table,
+            targetByte: targetByte,
+            targetLine: targetLine,
+            byteLimit: byteLimit
+        )
+    }
+
+    let outerLower: Int
+    let outerUpper: Int
+    var requestedLower: Int
+    var requestedUpper: Int
+    if let previousRange,
+       let previousLower = table.lineColumn(at: previousRange.lowerBound)?.line,
+       previousRange.upperBound > 0,
+       let previousUpper = table.lineColumn(
+           at: min(UInt32(bytes.count), previousRange.upperBound) &- 1
+       )?.line
+    {
+        outerLower = 1
+        outerUpper = lineCount
+        requestedLower = max(outerLower, Int(previousLower) - 40)
+        requestedUpper = min(outerUpper, Int(previousUpper) + 40)
+    } else if let enclosingRange,
+              enclosingRange.upperBound > enclosingRange.lowerBound,
+              let lower = table.lineColumn(at: enclosingRange.lowerBound)?.line
+    {
+        let lastByte = max(
+            enclosingRange.lowerBound,
+            min(UInt32(bytes.count), enclosingRange.upperBound) &- 1
+        )
+        guard let upper = table.lineColumn(at: lastByte)?.line else { return nil }
+        outerLower = Int(lower)
+        outerUpper = Int(upper)
+        requestedLower = outerLower
+        requestedUpper = outerUpper
+    } else {
+        outerLower = max(1, targetLine - 20)
+        outerUpper = min(lineCount, targetLine + 20)
+        requestedLower = outerLower
+        requestedUpper = outerUpper
+    }
+
+    requestedLower = min(requestedLower, targetLine)
+    requestedUpper = max(requestedUpper, targetLine)
+    var lowerLine = max(requestedLower, targetLine - (lineLimit - 1) / 2)
+    var upperLine = min(requestedUpper, lowerLine + lineLimit - 1)
+    lowerLine = max(requestedLower, upperLine - lineLimit + 1)
+
+    func byteRange(_ lower: Int, _ upper: Int) -> ByteRange {
+        let start = table.lineStarts[lower - 1]
+        let end = upper < lineCount
+            ? table.lineStarts[upper]
+            : UInt32(bytes.count)
+        return ByteRange(lowerBound: start, upperBound: end)
+    }
+    func markerBytes(_ lower: Int, _ upper: Int) -> Int {
+        (lower > outerLower ? 4 : 0) + (upper < outerUpper ? 4 : 0)
+    }
+
+    var frozenRange = byteRange(lowerLine, upperLine)
+    while Int(frozenRange.length) + markerBytes(lowerLine, upperLine) > byteLimit,
+          lowerLine < upperLine
+    {
+        if targetLine - lowerLine > upperLine - targetLine {
+            lowerLine += 1
+        } else {
+            upperLine -= 1
+        }
+        frozenRange = byteRange(lowerLine, upperLine)
+    }
+    if Int(frozenRange.length) + markerBytes(lowerLine, upperLine) > byteLimit {
+        return partialReadingSetLine(
+            bytes: bytes,
+            table: table,
+            targetByte: targetByte,
+            targetLine: targetLine,
+            byteLimit: byteLimit
+        )
+    }
+    guard let lower = Int(exactly: frozenRange.lowerBound),
+          let upper = Int(exactly: frozenRange.upperBound),
+          upper <= bytes.count,
+          let source = String(bytes: bytes[lower..<upper], encoding: .utf8)
+    else { return nil }
+    let prefix = lowerLine > outerLower ? "…\n" : ""
+    let suffix = upperLine < outerUpper
+        ? (source.hasSuffix("\n") ? "…" : "\n…")
+        : ""
+    let text = prefix + source + suffix
+    guard text.utf8.count <= byteLimit else { return nil }
+    return (frozenRange, text, UInt32(lowerLine), false)
+}
+
+private func partialReadingSetLine(
+    bytes: [UInt8],
+    table: LineTable,
+    targetByte: UInt32,
+    targetLine: Int,
+    byteLimit: Int
+) -> (
+    byteRange: ByteRange,
+    sourceText: String,
+    firstLine: UInt32,
+    partialLine: Bool
+)? {
+    let lineStart = Int(table.lineStarts[targetLine - 1])
+    let nextLine = targetLine < table.lineStarts.count
+        ? Int(table.lineStarts[targetLine])
+        : bytes.count
+    var lineEnd = nextLine
+    if lineEnd > lineStart, bytes[lineEnd - 1] == 0x0A { lineEnd -= 1 }
+    if lineEnd > lineStart, bytes[lineEnd - 1] == 0x0D { lineEnd -= 1 }
+    guard lineStart < lineEnd else { return nil }
+
+    let target = min(max(Int(targetByte), lineStart), lineEnd - 1)
+    var scalarStart = target
+    while scalarStart > lineStart, bytes[scalarStart] & 0xC0 == 0x80 {
+        scalarStart -= 1
+    }
+    var scalarEnd = scalarStart + 1
+    while scalarEnd < lineEnd, bytes[scalarEnd] & 0xC0 == 0x80 {
+        scalarEnd += 1
+    }
+    let prefixBytes = scalarStart > lineStart ? 3 : 0
+    let suffixBytes = scalarEnd < lineEnd ? 3 : 0
+    let sourceBudget = byteLimit - prefixBytes - suffixBytes
+    guard sourceBudget >= scalarEnd - scalarStart else { return nil }
+
+    var lower = max(lineStart, scalarStart - sourceBudget / 2)
+    while lower > lineStart, bytes[lower] & 0xC0 == 0x80 { lower -= 1 }
+    var upper = min(lineEnd, lower + sourceBudget)
+    while upper > scalarEnd, upper < lineEnd, bytes[upper] & 0xC0 == 0x80 {
+        upper -= 1
+    }
+    if upper < scalarEnd {
+        upper = scalarEnd
+        lower = max(lineStart, upper - sourceBudget)
+        while lower < scalarStart, bytes[lower] & 0xC0 == 0x80 { lower += 1 }
+    }
+    while upper < lineEnd,
+          upper - lower < sourceBudget,
+          bytes[upper] & 0xC0 != 0x80
+    {
+        let next = upper + 1
+        var scalarBoundary = next
+        while scalarBoundary < lineEnd, bytes[scalarBoundary] & 0xC0 == 0x80 {
+            scalarBoundary += 1
+        }
+        guard scalarBoundary - lower <= sourceBudget else { break }
+        upper = scalarBoundary
+    }
+    guard lower <= scalarStart,
+          upper >= scalarEnd,
+          let source = String(bytes: bytes[lower..<upper], encoding: .utf8)
+    else { return nil }
+    let prefix = lower > lineStart ? "…" : ""
+    let suffix = upper < lineEnd ? "…" : ""
+    let text = prefix + source + suffix
+    guard text.utf8.count <= byteLimit else { return nil }
+    return (
+        ByteRange(lowerBound: UInt32(lower), upperBound: UInt32(upper)),
+        text,
+        UInt32(targetLine),
+        lower > lineStart || upper < lineEnd
     )
 }
 

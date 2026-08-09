@@ -344,7 +344,8 @@ public final class AppModel {
     ] = [:]
     @ObservationIgnored private var pendingReplay: (
         record: NavigationRecord,
-        replayedAgainstCurrentWorktree: Bool
+        replayedAgainstCurrentWorktree: Bool,
+        opensInNewTab: Bool
     )?
 
     public init(
@@ -506,7 +507,7 @@ public final class AppModel {
                 trailNodeID: readingTrail.activeNodeID
             )
             navigationHistory.push(record)
-            pendingReplay = (record, false)
+            pendingReplay = (record, false, false)
         }
         switchSnapshot(revision: revision)
     }
@@ -519,7 +520,7 @@ public final class AppModel {
                 trailNodeID: readingTrail.activeNodeID
             )
             navigationHistory.push(record)
-            pendingReplay = (record, false)
+            pendingReplay = (record, false, false)
         }
         switchSnapshot(revision: nil)
     }
@@ -637,6 +638,97 @@ public final class AppModel {
     ) -> (contentID: ContentID, bytes: [UInt8])? {
         guard case .ready(let session, _) = projectState else { return nil }
         return session.capturedSource(atManifestPath: path)
+    }
+
+    package func readingSetSources(
+        for excerpts: [ReadingSetExcerpt]
+    ) -> [[UInt8]?] {
+        var commitSnapshots: [String: CommitSnapshot] = [:]
+        return excerpts.map { excerpt in
+            let bytes: [UInt8]?
+            switch excerpt.sourceKind {
+            case .projectCommit:
+                guard let root = projectRoot,
+                      let revision = excerpt.revision
+                else { return nil }
+                if currentRevision == revision,
+                   let captured = capturedProjectSource(at: excerpt.path)
+                {
+                    bytes = captured.bytes
+                    break
+                }
+                let snapshot: CommitSnapshot
+                if let cached = commitSnapshots[revision] {
+                    snapshot = cached
+                } else {
+                    guard let loaded = try? CommitSnapshot(
+                        repositoryURL: root,
+                        revision: revision
+                    ) else { return nil }
+                    commitSnapshots[revision] = loaded
+                    snapshot = loaded
+                }
+                bytes = try? snapshot.readBytes(path: excerpt.path)
+            case .worktreeCaptured:
+                guard currentRevision == nil else { return nil }
+                bytes = capturedProjectSource(at: excerpt.path)?.bytes
+            case .dependencyCaptured:
+                guard exactLocationIsInDependency(excerpt.path),
+                      let data = try? Data(
+                          contentsOf: URL(fileURLWithPath: excerpt.path),
+                          options: .mappedIfSafe
+                      )
+                else { return nil }
+                bytes = Array(data)
+            }
+            guard let bytes,
+                  ContentID.sha256(of: bytes) == excerpt.contentID
+            else { return nil }
+            return bytes
+        }
+    }
+
+    package func openReadingSetExcerpt(_ excerpt: ReadingSetExcerpt) {
+        guard excerpt.sourceKind != .dependencyCaptured,
+              let bytes = readingSetSources(for: [excerpt]).first ?? nil,
+              let offset = LineTable(bytes: bytes).byteOffset(
+                  line: excerpt.line,
+                  column: excerpt.column
+              ),
+              let root = projectRoot
+        else { return }
+        let file = root.appendingPathComponent(excerpt.path).standardizedFileURL
+        guard file.pathComponents.starts(with: root.pathComponents),
+              file.pathComponents.count > root.pathComponents.count
+        else { return }
+        switch excerpt.sourceKind {
+        case .worktreeCaptured:
+            guard currentRevision == nil else { return }
+            openInNewTab(file, selectionByteOffset: offset)
+        case .projectCommit:
+            guard let revision = excerpt.revision else { return }
+            if currentRevision == revision {
+                openInNewTab(file, selectionByteOffset: offset)
+                return
+            }
+            pendingReplay = (
+                NavigationRecord(jump: JumpRecord(
+                    path: excerpt.path,
+                    contentID: excerpt.contentID,
+                    byteOffset: offset,
+                    line: excerpt.line,
+                    column: excerpt.column,
+                    symbolAnchor: excerpt.symbol,
+                    snapshotID: nil,
+                    revision: revision
+                )),
+                false,
+                true
+            )
+            switchSnapshot(revision: revision)
+        case .dependencyCaptured:
+            break
+        }
     }
 
     public func activateTab(_ index: Int) {
@@ -905,7 +997,8 @@ public final class AppModel {
                 pending.record,
                 replayedAgainstCurrentWorktree:
                     pending.replayedAgainstCurrentWorktree
-                        && pending.record.jump.snapshotID != currentSnapshotID
+                        && pending.record.jump.snapshotID != currentSnapshotID,
+                opensInNewTab: pending.opensInNewTab
             )
         }
     }
@@ -1055,7 +1148,7 @@ public final class AppModel {
         } else {
             false
         }
-        pendingReplay = (record, replaysWorktree)
+        pendingReplay = (record, replaysWorktree, false)
         switch destination {
         case .worktree:
             switchSnapshot(revision: nil)
@@ -1066,7 +1159,8 @@ public final class AppModel {
 
     private func replayWithinCurrentSnapshot(
         _ record: NavigationRecord,
-        replayedAgainstCurrentWorktree: Bool = false
+        replayedAgainstCurrentWorktree: Bool = false,
+        opensInNewTab: Bool = false
     ) {
         guard let root = fileTree?.root else { return }
         let jump = record.jump
@@ -1101,16 +1195,20 @@ public final class AppModel {
             replayNotice = replayedAgainstCurrentWorktree
                 ? "replayed against current worktree"
                 : nil
-            navigate(
-                NavigationRequest(
-                    destination: SourceDestination(
-                        file: file,
-                        byteOffset: offset
-                    ),
-                    cause: .historyReplay,
-                    policy: .replay
+            if opensInNewTab {
+                openInNewTab(file, selectionByteOffset: offset)
+            } else {
+                navigate(
+                    NavigationRequest(
+                        destination: SourceDestination(
+                            file: file,
+                            byteOffset: offset
+                        ),
+                        cause: .historyReplay,
+                        policy: .replay
+                    )
                 )
-            )
+            }
         }
     }
 

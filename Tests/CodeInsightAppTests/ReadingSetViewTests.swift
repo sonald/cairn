@@ -89,6 +89,30 @@ func readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() {
     #expect(controller.selfTestPlaceholderText != "Select a file to read")
 }
 
+@MainActor
+@Test
+func readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() {
+    _ = NSApplication.shared
+    let controller = ReaderViewController()
+    controller.onOpenReadingSetExcerpt = { _ in }
+    controller.onExpandReadingSetExcerpt = { _ in }
+    controller.onViewReadingSetEvidence = { _ in }
+    controller.loadViewIfNeeded()
+    let excerpts = prototypeReadingSetExcerpts()
+    controller.display(
+        .readingSet(title: "spawn", excerpts: excerpts),
+        readingSetAvailability: excerpts.map { _ in (false, false) }
+    )
+
+    let actions = controller.selfTestReadingSetState.actions
+    #expect(actions[0][0].2 == false)
+    #expect(actions[0][1].2 == false)
+    #expect(actions[0][2].2 == true)
+    #expect(actions[3][0].1 == true)
+    #expect(actions[3][1].2 == false)
+    #expect(actions[3][2].2 == true)
+}
+
 private func prototypeReadingSetExcerpts() -> [ReadingSetExcerpt] {
     let specs: [(
         role: String,

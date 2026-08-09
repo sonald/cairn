@@ -94,7 +94,9 @@ final class ReadingSetView: NSView {
         excerpts: [ReadingSetExcerpt],
         canOpen: Bool = true,
         canExpand: Bool = true,
-        canViewEvidence: Bool = true
+        canViewEvidence: Bool = true,
+        openAvailability: [Bool]? = nil,
+        expandAvailability: [Bool]? = nil
     ) {
         titleLabel.stringValue = "Reading Set · \(title)"
         subtitleLabel.stringValue = "\(excerpts.count) 段 · frozen at capture"
@@ -104,10 +106,16 @@ final class ReadingSetView: NSView {
         }
         cards = excerpts.enumerated().map { index, excerpt in
             let card = ReadingSetExcerptView(index: index)
-            if canOpen {
+            let openAvailable = openAvailability.map {
+                $0.indices.contains(index) && $0[index]
+            } ?? true
+            let expandAvailable = expandAvailability.map {
+                $0.indices.contains(index) && $0[index]
+            } ?? true
+            if canOpen && openAvailable {
                 card.onOpen = { [weak self] in self?.onOpen?(index) }
             }
-            if canExpand {
+            if canExpand && expandAvailable {
                 card.onExpand = { [weak self] in self?.onExpand?(index) }
             }
             if canViewEvidence {

@@ -476,3 +476,24 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   `format / area / format` 三段，行号分别从 14 / 8 / 14 起，Open / Expand 在尚未接线的本切片正确 disabled，
   View Evidence 可用；点击后显示 `AT CAPTURE`，展开 audit 得到 `worktree captured`、contentID 前缀和
   ISO-8601 capturedAt，未出现 `Snapshot` / UUID。
+
+## M11D-2：冻结摘录扩展与来源动作
+
+结论：PASS（同一切片 helper、三类来源 gate、Open / Expand 状态与 Reading Set 往返均按 §3.20 收口）。
+
+- capture 与 Expand 共用同一个 UTF-8/整行切片函数：普通段初始 80 行或 8 KiB、每次向两侧扩 40 行且
+  最大 200 行或 16 KiB；省略标记计入 cap，而 `byteRange` 只表示真实 source bytes。目标单行超长时只在
+  该行生成 scalar-safe `partial-line` slice，target byte 始终在内。首行、末行、超长 facet、CJK 多字节
+  边界、超长单行、二次持久化与 contentID drift 均有直接单测。
+- action source 不读“看起来最新”的磁盘版本：worktree 只取 current `EngineSession` 捕获 bytes；commit
+  按 excerpt revision 构建 `CommitSnapshot` 并核 contentID；dependency 只读既有 predicate 认可的绝对
+  路径。commit Open 先安装捕获 revision，再以新 file tab 打开并保留 Reading Set；dependency Open 继续
+  隐藏。任何来源不可读或 hash mismatch 时只禁用 Open / Expand，View Evidence 始终读冻结 payload。
+- 新增动作测试覆盖：worktree 磁盘修改后仍用捕获代际、commit 从当前版本切回捕获 revision 且不替换
+  Reading Set、dependency 修改后拒绝扩展，以及按钮不可用时 Evidence 仍可用。完整
+  `swift test --disable-sandbox` 与 `CODEX_SANDBOX=1 bash scripts/ci.sh` 均 PASS。
+- 重建签名验收包 `.build/m11d-base-ui-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11dbase`；Info.plist、
+  strict codesign 与 designated requirement 均通过。真实非 Git fixture 以键盘/CUA 重放
+  `describe → Show Calls → Reading Set`：第一段由 14–19 行扩到 1–29 行后 Expand 自动 disabled；Open
+  新建 `main.rs` tab，`⇧⌘[` 切回后同一扩展文本与状态仍在；随后 View Evidence 仍显示
+  `Resolution Inspector AT CAPTURE` 与 capture-time availability，未回读 live provider。
