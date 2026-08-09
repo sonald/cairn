@@ -113,6 +113,120 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
 
     #expect(opened.last?.0 == "b.rs")
     #expect(await testWaitUntil("opened.last?.0 == \"a.rs\" && opened.last?.1 == 3") { opened.last?.0 == "a.rs" && opened.last?.1 == 3 })
+    #expect(model.replayNotice == "restored by line and column")
+}
+
+@Test
+func replayOffsetUsesFiveHonestFallbacksAndRejectsInvalidScalars() throws {
+    let source = "fn target() {}\nlet value = \"世\";\n"
+    let root = try temporaryProject(["a.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("a.rs")
+    let contentID = ContentID.sha256(of: Array(source.utf8))
+    let mismatch = ContentID.sha256(of: [0])
+    let targetOffset = byteOffset(of: "target", in: source)
+
+    let exact = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: contentID,
+            offset: targetOffset,
+            line: 1,
+            column: targetOffset + 1
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(exact.offset == targetOffset)
+    #expect(exact.fallback == .exact)
+
+    let unverified = try AppModel.replayOffset(
+        jumpRecord("a.rs", offset: targetOffset),
+        file: file,
+        source: nil
+    )
+    #expect(unverified.offset == targetOffset)
+    #expect(unverified.fallback == .byteUnverified)
+
+    let line = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: mismatch,
+            offset: targetOffset,
+            line: 2,
+            column: 2
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(line.offset == UInt32("fn target() {}\nl".utf8.count))
+    #expect(line.fallback == .line)
+
+    let symbol = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: mismatch,
+            offset: 999,
+            line: 99,
+            column: 99,
+            symbolAnchor: "target"
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(symbol.offset == targetOffset)
+    #expect(symbol.fallback == .symbol)
+
+    let fileHead = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: mismatch,
+            offset: 999,
+            line: 99,
+            column: 99
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(fileHead.offset == 0)
+    #expect(fileHead.fallback == .fileHead)
+
+    let scalarStart = byteOffset(of: "世", in: source)
+    let invalidScalar = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: contentID,
+            offset: scalarStart + 1,
+            line: 99,
+            column: 99
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(invalidScalar.offset == 0)
+    #expect(invalidScalar.fallback == .fileHead)
+}
+
+@Test
+func replayOffsetUsesASymbolOnlyWhenItsDeclarationIsUnique() throws {
+    let source = "fn repeated() {}\nfn repeated() {}\n"
+    let root = try temporaryProject(["a.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let restored = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: ContentID.sha256(of: [0]),
+            offset: 999,
+            line: 99,
+            column: 99,
+            symbolAnchor: "repeated"
+        ),
+        file: root.appendingPathComponent("a.rs"),
+        source: nil
+    )
+
+    #expect(restored.offset == 0)
+    #expect(restored.fallback == .fileHead)
 }
 
 @MainActor
@@ -1414,20 +1528,22 @@ private func byteOffset(of needle: String, in source: String) -> UInt32 {
 
 private func jumpRecord(
     _ path: String,
+    contentID: ContentID? = nil,
     offset: UInt32,
     line: UInt32 = 1,
     column: UInt32? = nil,
+    symbolAnchor: String? = nil,
     snapshotID: SnapshotID? = SnapshotID(
         rawValue: UUID(uuidString: "00000000-0000-0000-0000-000000000006")!
     )
 ) -> JumpRecord {
     JumpRecord(
         path: path,
-        contentID: nil,
+        contentID: contentID,
         byteOffset: offset,
         line: line,
         column: column ?? offset + 1,
-        symbolAnchor: nil,
+        symbolAnchor: symbolAnchor,
         snapshotID: snapshotID
     )
 }

@@ -276,6 +276,14 @@ public struct FileTreeModel: Sendable {
 @MainActor
 @Observable
 public final class AppModel {
+    package enum ReplayFallbackKind: Equatable, Sendable {
+        case exact
+        case byteUnverified
+        case line
+        case symbol
+        case fileHead
+    }
+
     private enum SnapshotDestination {
         case worktree
         case commit(String)
@@ -1319,9 +1327,9 @@ public final class AppModel {
         let replaySnapshotID = currentSnapshotID
         replayTask?.cancel()
         replayTask = Task { [weak self] in
-            let offset: UInt32
+            let replayed: (offset: UInt32, fallback: ReplayFallbackKind)
             do {
-                offset = try await detachedValue {
+                replayed = try await detachedValue {
                     try Self.replayOffset(jump, file: file, source: source)
                 }
                 try Task.checkCancellation()
@@ -1334,17 +1342,18 @@ public final class AppModel {
                   currentSnapshotID == replaySnapshotID
             else { return }
             readingTrail.restore(record.trailNodeID)
-            replayNotice = replayedAgainstCurrentWorktree
-                ? "replayed against current worktree"
-                : nil
+            replayNotice = Self.replayNotice(
+                fallback: replayed.fallback,
+                replayedAgainstCurrentWorktree: replayedAgainstCurrentWorktree
+            )
             if opensInNewTab {
-                openInNewTab(file, selectionByteOffset: offset)
+                openInNewTab(file, selectionByteOffset: replayed.offset)
             } else {
                 navigate(
                     NavigationRequest(
                         destination: SourceDestination(
                             file: file,
-                            byteOffset: offset
+                            byteOffset: replayed.offset
                         ),
                         cause: .historyReplay,
                         policy: .replay
@@ -1354,11 +1363,11 @@ public final class AppModel {
         }
     }
 
-    nonisolated private static func replayOffset(
+    nonisolated package static func replayOffset(
         _ record: JumpRecord,
         file: URL,
         source: DocumentLoader.ContentSource?
-    ) throws -> UInt32 {
+    ) throws -> (offset: UInt32, fallback: ReplayFallbackKind) {
         let loader = if let source {
             DocumentLoader(source: source)
         } else {
@@ -1366,32 +1375,59 @@ public final class AppModel {
         }
         let loaded = try loader.load(file: file)
         let document = loaded.document
-        // 1. Preserve the exact byte position whenever it still fits this version.
-        if Int(record.byteOffset) <= document.bytes.count {
-            return record.byteOffset
-        // 2. A shorter file invalidates the byte; retry its recorded line/column.
-        } else if let lineOffset = document.lineTable.byteOffset(
+        let byteIsValid = document.byteUTF16Map.utf16Offset(
+            forByte: Int(record.byteOffset)
+        ) != nil
+        if let contentID = record.contentID,
+           contentID == document.contentID,
+           byteIsValid
+        {
+            return (record.byteOffset, .exact)
+        }
+        if record.contentID == nil, byteIsValid {
+            return (record.byteOffset, .byteUnverified)
+        }
+        if let lineOffset = document.lineTable.byteOffset(
             line: record.line,
             column: record.column
         ) {
-            return lineOffset
-        // 3. Invalid coordinates fall back to the same named symbol's declaration.
-        } else if let symbolAnchor = record.symbolAnchor {
+            return (lineOffset, .line)
+        }
+        if let symbolAnchor = record.symbolAnchor {
             let facets = if loaded.tier == .regular {
                 document.outlineFacets
             } else {
                 (try? RustHighlighter().highlight(bytes: document.bytes))?
                     .outlineFacets ?? []
             }
-            if let facet = facets.first(where: { $0.name == symbolAnchor }) {
-                return facet.nameRange.lowerBound
-            } else {
-                // 4. A missing symbol leaves the file head as the last safe target.
-                return 0
+            let matches = facets.filter { $0.name == symbolAnchor }
+            if matches.count == 1, let facet = matches.first {
+                return (facet.nameRange.lowerBound, .symbol)
             }
-        } else {
-            // 4. No valid coordinate or anchor remains, so open the file head.
-            return 0
         }
+        return (0, .fileHead)
+    }
+
+    nonisolated private static func replayNotice(
+        fallback: ReplayFallbackKind,
+        replayedAgainstCurrentWorktree: Bool
+    ) -> String? {
+        var parts: [String] = []
+        if replayedAgainstCurrentWorktree {
+            parts.append("replayed against current worktree")
+        }
+        switch fallback {
+        case .exact:
+            break
+        case .byteUnverified:
+            parts.append("restored by unverified byte offset")
+        case .line:
+            parts.append("restored by line and column")
+        case .symbol:
+            parts.append("restored by unique symbol anchor")
+        case .fileHead:
+            parts.append("restored at file head")
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }

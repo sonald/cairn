@@ -554,3 +554,23 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
 - `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；Swift 全量、Exact/Diff/Reading/Projector/Fold self-test 均
   退出 0。最终 release runner 为 control resolution 25.627 ms、fold resolution 24.892 ms、首次折叠
   242.799 ms，4,400 logical / 200 rendered，峰值 RSS 增量 7,274,520 bytes，`status=pass`。
+
+## R3-1：`replayOffset` 五档阶梯
+
+结论：PASS（M10 的“只要 byte 仍在范围内就保留”已迁移为 contentID/标量边界可证明的五档恢复，
+且调用方能显示实际 fallback）。
+
+- `AppModel.ReplayFallbackKind` 是计划要求的唯一新增概念，保持 package 内；resolver 仍返回
+  `(offset, fallback)` 二元组，没有结果对象或第二套导航模型。`.exact` 要求 contentID 相等且 byte 位于
+  UTF-8 scalar 边界；仅 contentID 为 nil 时才进入 `.byteUnverified`；其后依次为 `.line`、唯一声明命中的
+  `.symbol` 与 `.fileHead`。同名多个 facet 明确拒绝 symbol 猜测。
+- status notice 对应显示 `restored by unverified byte offset`、`restored by line and column`、
+  `restored by unique symbol anchor` 或 `restored at file head`；旧 worktree 文案保留为前缀
+  `replayed against current worktree`，因此不把 unverified byte 称为 exact。
+- producer 审计仍只有两条可能产生 `contentID: nil`：`MainWindowController.currentJumpRecord()` 在 Reader
+  无法给出 position 时只有既有 selected byte；`AppModel.trailJump(for:)` 在 captured source 不可得时也
+  无法证明内容代际。两者均不伪造 hash，合法 scalar 走 `.byteUnverified`，否则继续降级。
+- 6 条定向回归覆盖五档、匹配 contentID 但落入多字节 scalar 内部、重复 symbol、跨 snapshot line/symbol、
+  current worktree notice；M10 replay 断言已重跑。完整 `swift test --disable-sandbox` 与
+  `CODEX_SANDBOX=1 bash scripts/ci.sh` 均 PASS。最终 release runner 为 control resolution 25.044 ms、
+  fold resolution 25.320 ms、首次折叠 265.799 ms，峰值 RSS 增量 3,997,696 bytes，`status=pass`。

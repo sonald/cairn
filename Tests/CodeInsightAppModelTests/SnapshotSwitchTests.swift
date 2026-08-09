@@ -370,7 +370,8 @@ func oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() async throws {
         model.currentSnapshotID == currentWorktree.snapshotID
             && model.selectedFile == a
             && model.selectedByteOffset == 3
-            && model.replayNotice == "replayed against current worktree"
+            && model.replayNotice == "replayed against current worktree · "
+                + "restored by unverified byte offset"
     })
     #expect(model.readingTrail.activeNodeID == oldTrailNodeID)
 }
