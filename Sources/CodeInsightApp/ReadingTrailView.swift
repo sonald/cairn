@@ -9,6 +9,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     NSTableViewDelegate
 {
     var onRestore: ((TrailNodeID) -> Void)?
+    var onOpenReadingSet: ((TrailNodeID) -> Void)?
 
     private struct Row {
         let id: TrailNodeID
@@ -28,6 +29,11 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     private let detailText = NSTextField(wrappingLabelWithString: "")
     private let restoreButton = NSButton(
         title: "Restore this node",
+        target: nil,
+        action: nil
+    )
+    private let readingSetButton = NSButton(
+        title: "Open as Reading Set",
         target: nil,
         action: nil
     )
@@ -100,6 +106,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         detailDocument.layer?.backgroundColor = theme.chromeColor.cgColor
         detailText.textColor = theme.foregroundColor
         restoreButton.contentTintColor = theme.accentColor
+        readingSetButton.contentTintColor = theme.accentColor
         tableView.reloadData()
         renderDetail()
     }
@@ -183,6 +190,18 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         restore(nil)
     }
 
+    func openSelectedNodeAsReadingSet() {
+        openReadingSet(nil)
+    }
+
+    var readingSetButtonState: (title: String, enabled: Bool, label: String) {
+        (
+            readingSetButton.title,
+            readingSetButton.isEnabled,
+            readingSetButton.accessibilityLabel() ?? ""
+        )
+    }
+
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
     func tableView(
@@ -235,6 +254,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         onRestore?(selectedID)
     }
 
+    @objc private func openReadingSet(_ sender: Any?) {
+        guard let selectedID, readingSetButton.isEnabled else { return }
+        popover.close()
+        onOpenReadingSet?(selectedID)
+    }
+
     private func configurePopover() {
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 820, height: 520))
         content.wantsLayer = true
@@ -282,7 +307,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         restoreButton.target = self
         restoreButton.action = #selector(restore(_:))
         restoreButton.setAccessibilityLabel("Restore this trail node")
+        readingSetButton.bezelStyle = .rounded
+        readingSetButton.target = self
+        readingSetButton.action = #selector(openReadingSet(_:))
+        readingSetButton.setAccessibilityLabel("Open Trail as Reading Set")
         detailStack.addArrangedSubview(detailText)
+        detailStack.addArrangedSubview(readingSetButton)
         detailStack.addArrangedSubview(restoreButton)
         detailDocument.addSubview(detailStack)
         let detailScroll = NSScrollView()
@@ -420,6 +450,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         else {
             detailText.stringValue = "Select a trail node to inspect its route and evidence."
             restoreButton.isEnabled = false
+            readingSetButton.isEnabled = false
             return
         }
         let incoming = incomingEdge(to: selectedID, in: trail)
@@ -449,6 +480,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         }
         detailText.stringValue = sections.joined(separator: "\n")
         restoreButton.isEnabled = true
+        readingSetButton.isEnabled = path(
+            to: selectedID,
+            in: trail
+        ).dropFirst().contains { id in
+            incomingEdge(to: id, in: trail)?.frozenInspectorDisplay != nil
+        }
     }
 
     private func flattenedRows(_ trail: ReadingTrail) -> [Row] {

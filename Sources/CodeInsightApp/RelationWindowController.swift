@@ -1188,6 +1188,25 @@ final class RelationWindowController: NSViewController,
         )
     }
 
+    func frozenInspectorDisplay(
+        for node: RelationTreeModel.Node
+    ) -> ReadingSetExcerpt.FrozenInspectorDisplay? {
+        guard let explanation = node.explanation,
+              let context = model.relationQueryContexts[explanation.contextID],
+              let source = node.target.flatMap({ capturedSource($0.path) })
+        else { return nil }
+        return makeInspectorDisplay(
+            node: node,
+            context: context,
+            correctedTitles: correctedTitles(for: node),
+            readiness: verificationReadiness(),
+            sourceKind: source.sourceKind,
+            revision: source.revision,
+            contentID: source.contentID,
+            capturedAt: Date()
+        )
+    }
+
     private func hideInspector() {
         inspectorMode = nil
         guard !inspectorView.isHidden else { return }
@@ -1290,7 +1309,7 @@ final class RelationWindowController: NSViewController,
         return result
     }
 
-    private func readingSetRole(for node: RelationTreeModel.Node) -> String {
+    func readingSetRole(for node: RelationTreeModel.Node) -> String {
         if node.kind == .root { return "DEFINITION" }
         return switch model.direction {
         case .callers:

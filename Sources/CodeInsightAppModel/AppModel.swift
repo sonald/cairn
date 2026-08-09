@@ -688,6 +688,112 @@ public final class AppModel {
         }
     }
 
+    package func trailReadingSet(
+        to selectedNodeID: TrailNodeID
+    ) -> (
+        title: String,
+        excerpts: [ReadingSetExcerpt],
+        skippedReasons: [String]
+    ) {
+        guard let selectedNode = readingTrail.nodes[selectedNodeID] else {
+            return ("Trail", [], ["selected node is unavailable"])
+        }
+        var cursor = selectedNodeID
+        var edges: [TrailEdge] = []
+        var visited: Set<TrailNodeID> = [cursor]
+        while let edge = readingTrail.edges.last(where: { $0.to == cursor }),
+              visited.insert(edge.from).inserted
+        {
+            edges.append(edge)
+            cursor = edge.from
+        }
+        edges.reverse()
+
+        var commitSnapshots: [String: CommitSnapshot] = [:]
+        var excerpts: [ReadingSetExcerpt] = []
+        var skippedReasons: [String] = []
+        for edge in edges {
+            guard let inspector = edge.frozenInspectorDisplay else {
+                skippedReasons.append("no frozen evidence")
+                continue
+            }
+            guard let node = readingTrail.nodes[edge.to],
+                  let contentID = node.jump.contentID
+            else {
+                skippedReasons.append("missing content identity")
+                continue
+            }
+            let jump = node.jump
+            let sourceKind: ReadingSetExcerpt.SourceKind
+            let bytes: [UInt8]?
+            if exactLocationIsInDependency(jump.path) {
+                sourceKind = .dependencyCaptured
+                bytes = (try? Data(
+                    contentsOf: URL(fileURLWithPath: jump.path),
+                    options: .mappedIfSafe
+                )).map(Array.init)
+            } else if let revision = jump.revision {
+                sourceKind = .projectCommit
+                guard let root = projectRoot,
+                      !jump.path.hasPrefix("/"),
+                      !jump.path.split(separator: "/").contains("..")
+                else {
+                    skippedReasons.append("recorded project path is invalid")
+                    continue
+                }
+                let snapshot: CommitSnapshot
+                if let cached = commitSnapshots[revision] {
+                    snapshot = cached
+                } else if let loaded = try? CommitSnapshot(
+                    repositoryURL: root,
+                    revision: revision
+                ) {
+                    commitSnapshots[revision] = loaded
+                    snapshot = loaded
+                } else {
+                    skippedReasons.append("recorded revision is unavailable")
+                    continue
+                }
+                bytes = try? snapshot.readBytes(path: jump.path)
+            } else {
+                sourceKind = .worktreeCaptured
+                guard currentRevision == nil,
+                      jump.snapshotID == currentSnapshotID
+                else {
+                    skippedReasons.append("recorded worktree snapshot is unavailable")
+                    continue
+                }
+                bytes = capturedProjectSource(at: jump.path)?.bytes
+            }
+            guard let bytes else {
+                skippedReasons.append("recorded source is unreadable")
+                continue
+            }
+            guard ContentID.sha256(of: bytes) == contentID else {
+                skippedReasons.append("recorded source content changed")
+                continue
+            }
+            guard let excerpt = makeReadingSetExcerpt(
+                role: edge.readingSetRole ?? "TRAIL TARGET",
+                symbol: jump.symbolAnchor ?? inspector.nodeTitle,
+                path: jump.path,
+                targetByte: jump.byteOffset,
+                bytes: bytes,
+                contentID: contentID,
+                revision: jump.revision,
+                sourceKind: sourceKind,
+                inspector: inspector
+            ) else {
+                skippedReasons.append("recorded excerpt could not be frozen")
+                continue
+            }
+            excerpts.append(excerpt)
+        }
+        let title = selectedNode.jump.symbolAnchor
+            ?? URL(fileURLWithPath: selectedNode.jump.path).lastPathComponent
+        return (title, excerpts, skippedReasons)
+    }
+
     package func openReadingSetExcerpt(_ excerpt: ReadingSetExcerpt) {
         guard excerpt.sourceKind != .dependencyCaptured,
               let bytes = readingSetSources(for: [excerpt]).first ?? nil,
@@ -806,6 +912,18 @@ public final class AppModel {
     public func navigationExplanation(
         for node: RelationTreeModel.Node
     ) -> NavigationExplanation? {
+        navigationExplanation(
+            for: node,
+            frozenInspectorDisplay: nil,
+            readingSetRole: ""
+        )
+    }
+
+    package func navigationExplanation(
+        for node: RelationTreeModel.Node,
+        frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay?,
+        readingSetRole: String
+    ) -> NavigationExplanation? {
         guard let materialized = relationTree.materializedExplanation(for: node)
         else { return nil }
         let id: ResolutionExplanationID
@@ -816,11 +934,18 @@ public final class AppModel {
             id = resolutionExplanations.create(materialized)
             node.explanationID = id
         }
+        let observed = ResolutionExplanationSnapshot(explanation: materialized)
+        if let frozenInspectorDisplay {
+            return NavigationExplanation(
+                explanationID: id,
+                observedAtNavigation: observed,
+                frozenInspectorDisplay: frozenInspectorDisplay,
+                readingSetRole: readingSetRole
+            )
+        }
         return NavigationExplanation(
             explanationID: id,
-            observedAtNavigation: ResolutionExplanationSnapshot(
-                explanation: materialized
-            )
+            observedAtNavigation: observed
         )
     }
 
@@ -1097,24 +1222,36 @@ public final class AppModel {
         guard let byteOffset = destination.byteOffset else { return nil }
         let file = destination.file.standardizedFileURL
         let path: String
+        let captured: (contentID: ContentID, bytes: [UInt8])?
+        let isDependency: Bool
         if let root = fileTree?.root,
            let relative = Self.relativePath(of: file, under: root)
         {
             path = relative
+            captured = capturedProjectSource(at: relative)
+            isDependency = false
         } else if exactLocationIsInDependency(file.path) {
             path = file.path
+            captured = (try? Data(contentsOf: file, options: .mappedIfSafe)).map {
+                let bytes = Array($0)
+                return (ContentID.sha256(of: bytes), bytes)
+            }
+            isDependency = true
         } else {
             return nil
         }
+        let coordinate = captured.flatMap {
+            LineTable(bytes: $0.bytes).lineColumn(at: byteOffset)
+        }
         return JumpRecord(
             path: path,
-            contentID: nil,
+            contentID: captured?.contentID,
             byteOffset: byteOffset,
-            line: 1,
-            column: 1,
+            line: coordinate?.line ?? 1,
+            column: coordinate?.column ?? 1,
             symbolAnchor: destination.symbolAnchor,
             snapshotID: currentSnapshotID,
-            revision: currentRevision
+            revision: isDependency ? nil : currentRevision
         )
     }
 

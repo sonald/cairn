@@ -1104,6 +1104,14 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     )
     #expect(fixture.model.readingTrail.edges.last?.currentExplanationID
         == explanation.explanationID)
+    let recordedEdge = try #require(fixture.model.readingTrail.edges.last)
+    #expect(recordedEdge.frozenInspectorDisplay?.nodeTitle == edge.title)
+    let recordedDestination = try #require(
+        fixture.model.readingTrail.nodes[recordedEdge.to]
+    )
+    #expect(recordedDestination.jump.contentID != nil)
+    #expect(recordedDestination.jump.line > 0)
+    #expect(recordedDestination.jump.column > 0)
     #expect(fixture.model.resolutionExplanations.value(
         for: explanation.explanationID
     ) != nil)
@@ -1147,6 +1155,62 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
             && fixture.controller.displayedReaderFile?.standardizedFileURL
                 == main.standardizedFileURL
     })
+}
+
+@MainActor
+@Test
+func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
+    async throws
+{
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    let a = fixture.root.appendingPathComponent("a.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    fixture.controller.selfTestReaderRelation(
+        offset: byteOffset(of: "target() {}", in: fixture.mainSource),
+        direction: .references
+    )
+    try #require(await relationTestWaitUntil("a.rs reference is loaded") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    let edge = try #require(referenceEdge(path: "a.rs", in: fixture.model))
+    #expect(fixture.controller.selfTestSelectRelationEdge(titled: edge.title))
+    try #require(await relationTestWaitUntil("a.rs is selected") {
+        fixture.model.selectedFile?.standardizedFileURL == a.standardizedFileURL
+    })
+
+    try "fn drifted() {}\n".write(to: a, atomically: true, encoding: .utf8)
+    fixture.model.resolutionExplanations.removeAll()
+    fixture.controller.selfTestShowTrailPopover()
+    #expect(fixture.controller.selfTestSelectTrailNode(path: "a.rs"))
+    let button = fixture.controller.selfTestTrailReadingSetButtonState
+    #expect(button.title == "Open as Reading Set")
+    #expect(button.enabled)
+    #expect(button.label == "Open Trail as Reading Set")
+    fixture.controller.selfTestOpenSelectedTrailAsReadingSet()
+
+    guard case .readingSet(let title, let excerpts) =
+            fixture.model.tabStrip.activeTab?.content
+    else {
+        Issue.record("Expected the Trail Reading Set tab")
+        return
+    }
+    #expect(title == edge.title)
+    #expect(excerpts.count == 1)
+    #expect(excerpts[0].role == "REFERENCE")
+    #expect(excerpts[0].path == "a.rs")
+    #expect(excerpts[0].sourceText.contains("target"))
+    #expect(!excerpts[0].sourceText.contains("drifted"))
+    #expect(excerpts[0].inspector.nodeTitle == edge.title)
 }
 
 @MainActor

@@ -438,6 +438,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.onRestore = { [weak model] id in
             model?.restoreTrailNode(id)
         }
+        trailView.onOpenReadingSet = { [weak self, weak model] id in
+            guard let self, let model else { return }
+            let frozen = model.trailReadingSet(to: id)
+            guard !frozen.excerpts.isEmpty else { return }
+            captureActiveTabState()
+            model.openReadingSet(
+                title: frozen.title,
+                excerpts: frozen.excerpts
+            )
+            pendingTabRestore = model.tabStrip.activeTab
+            render()
+        }
         profileButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
             profileButton.widthAnchor.constraint(equalToConstant: 240),
@@ -762,6 +774,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     func selfTestRestoreSelectedTrailNode() {
         trailView.restoreSelectedNode()
+    }
+    var selfTestTrailReadingSetButtonState: (
+        title: String,
+        enabled: Bool,
+        label: String
+    ) {
+        trailView.readingSetButtonState
+    }
+    func selfTestOpenSelectedTrailAsReadingSet() {
+        trailView.openSelectedNodeAsReadingSet()
     }
     var selfTestContentSplitFrameInContentView: NSRect {
         guard let contentView = window?.contentView else { return .zero }
@@ -2218,10 +2240,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func open(_ node: RelationTreeModel.Node) {
         guard let target = node.target else { return }
+        let frozenInspectorDisplay = relationController
+            .frozenInspectorDisplay(for: node)
         open(
             path: target.path,
             byteOffset: target.byteOffset,
-            explanation: model.navigationExplanation(for: node),
+            explanation: model.navigationExplanation(
+                for: node,
+                frozenInspectorDisplay: frozenInspectorDisplay,
+                readingSetRole: relationController.readingSetRole(for: node)
+            ),
             symbolAnchor: node.title
         )
     }

@@ -453,6 +453,8 @@ public final class ResolutionExplanationStore {
 public struct NavigationExplanation: Sendable {
     public let explanationID: ResolutionExplanationID
     public let observedAtNavigation: ResolutionExplanationSnapshot
+    package let frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay?
+    package let readingSetRole: String?
 
     public init(
         explanationID: ResolutionExplanationID,
@@ -460,6 +462,20 @@ public struct NavigationExplanation: Sendable {
     ) {
         self.explanationID = explanationID
         self.observedAtNavigation = observedAtNavigation
+        frozenInspectorDisplay = nil
+        readingSetRole = nil
+    }
+
+    package init(
+        explanationID: ResolutionExplanationID,
+        observedAtNavigation: ResolutionExplanationSnapshot,
+        frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay,
+        readingSetRole: String
+    ) {
+        self.explanationID = explanationID
+        self.observedAtNavigation = observedAtNavigation
+        self.frozenInspectorDisplay = frozenInspectorDisplay
+        self.readingSetRole = readingSetRole
     }
 }
 
@@ -629,6 +645,8 @@ public struct TrailEdge: Sendable {
     public let cause: NavigationCause
     public let observedAtNavigation: ResolutionExplanationSnapshot?
     public let currentExplanationID: ResolutionExplanationID?
+    package let frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay?
+    package let readingSetRole: String?
 
     public init(
         from: TrailNodeID,
@@ -642,6 +660,26 @@ public struct TrailEdge: Sendable {
         self.cause = cause
         self.observedAtNavigation = observedAtNavigation
         self.currentExplanationID = currentExplanationID
+        frozenInspectorDisplay = nil
+        readingSetRole = nil
+    }
+
+    package init(
+        from: TrailNodeID,
+        to: TrailNodeID,
+        cause: NavigationCause,
+        observedAtNavigation: ResolutionExplanationSnapshot?,
+        currentExplanationID: ResolutionExplanationID?,
+        frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay?,
+        readingSetRole: String?
+    ) {
+        self.from = from
+        self.to = to
+        self.cause = cause
+        self.observedAtNavigation = observedAtNavigation
+        self.currentExplanationID = currentExplanationID
+        self.frozenInspectorDisplay = frozenInspectorDisplay
+        self.readingSetRole = readingSetRole
     }
 }
 
@@ -674,7 +712,9 @@ public final class ReadingTrail {
                 to: destinationID,
                 cause: cause,
                 observedAtNavigation: explanation?.observedAtNavigation,
-                currentExplanationID: explanation?.explanationID
+                currentExplanationID: explanation?.explanationID,
+                frozenInspectorDisplay: explanation?.frozenInspectorDisplay,
+                readingSetRole: explanation?.readingSetRole
             ))
         }
         activeNodeID = destinationID

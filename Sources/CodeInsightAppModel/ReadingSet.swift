@@ -151,14 +151,6 @@ package func makeReadingSetExcerpt(
     capturedAt: Date = Date()
 ) -> ReadingSetExcerpt? {
     guard let target = node.target,
-          String(bytes: bytes, encoding: .utf8) != nil
-    else { return nil }
-    let loader = DocumentLoader(source: { _ in bytes })
-    guard let document = try? loader.load(
-        file: URL(fileURLWithPath: target.path)
-    ).document,
-          contentID == document.contentID,
-          let coordinate = document.lineTable.lineColumn(at: target.byteOffset),
           let inspector = makeInspectorDisplay(
               node: node,
               context: context,
@@ -170,18 +162,49 @@ package func makeReadingSetExcerpt(
               capturedAt: capturedAt
           )
     else { return nil }
+    return makeReadingSetExcerpt(
+        role: role,
+        symbol: node.title,
+        path: target.path,
+        targetByte: target.byteOffset,
+        bytes: bytes,
+        contentID: contentID,
+        revision: revision,
+        sourceKind: sourceKind,
+        inspector: inspector
+    )
+}
+
+package func makeReadingSetExcerpt(
+    role: String,
+    symbol: String,
+    path: String,
+    targetByte: UInt32,
+    bytes: [UInt8],
+    contentID: ContentID,
+    revision: String?,
+    sourceKind: ReadingSetExcerpt.SourceKind,
+    inspector: ReadingSetExcerpt.FrozenInspectorDisplay
+) -> ReadingSetExcerpt? {
+    guard ContentID.sha256(of: bytes) == contentID else { return nil }
+    let loader = DocumentLoader(source: { _ in bytes })
+    guard let document = try? loader.load(
+        file: URL(fileURLWithPath: path)
+    ).document,
+          let coordinate = document.lineTable.lineColumn(at: targetByte)
+    else { return nil }
     let facet = document.outlineFacets.filter {
-        $0.range.contains(target.byteOffset)
+        $0.range.contains(targetByte)
     }.min { $0.range.length < $1.range.length }
     guard let frozen = frozenReadingSetSource(
         bytes: bytes,
-        targetByte: target.byteOffset,
+        targetByte: targetByte,
         enclosingRange: facet?.range
     ) else { return nil }
     return ReadingSetExcerpt(
         role: role,
-        symbol: node.title,
-        path: target.path,
+        symbol: symbol,
+        path: path,
         line: coordinate.line,
         column: coordinate.column,
         firstLine: frozen.firstLine,
@@ -189,7 +212,7 @@ package func makeReadingSetExcerpt(
         sourceText: frozen.sourceText,
         contentID: contentID,
         revision: revision,
-        capturedAt: capturedAt,
+        capturedAt: inspector.capturedAt,
         sourceKind: sourceKind,
         inspector: inspector,
         caveat: inspector.badge == .inferred ? "name match only" : nil,

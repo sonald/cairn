@@ -497,3 +497,35 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   `describe → Show Calls → Reading Set`：第一段由 14–19 行扩到 1–29 行后 Expand 自动 disabled；Open
   新建 `main.rs` tab，`⇧⌘[` 切回后同一扩展文本与状态仍在；随后 View Evidence 仍显示
   `Resolution Inspector AT CAPTURE` 与 capture-time availability，未回读 live provider。
+
+## M11D-3：Trail observed-at-navigation 入口
+
+结论：PASS（导航时冻结 display、Trail edge 值携带、recorded source materialization 与真实入口均按
+§3.20 收口；集合顶部 skipped 汇总与 Relations 50 段统计留在下一 M11D 足切片）。
+
+- 每次带 explanation 的语义导航现在同时冻结 `FrozenInspectorDisplay` 与 producer role，并将二者由
+  `NavigationExplanation` 值携带进 `TrailEdge`；既有 public initializer 保持原签名且不带内部 payload，
+  未新增 registry、factory、stable ID 或公开类型。Trail 生成只走选中 node 的 root→node incoming edge
+  path，不读 `currentExplanationID` 对应的 live store。
+- 目标 `JumpRecord` 在导航当时记录 captured source 的 contentID 与真实 1-based line/column；项目文件保留
+  snapshot/revision，dependency 只保存绝对路径与自身 hash，不误带项目 commit。创建集合时 commit 重读
+  recorded revision，current worktree 只取同 snapshot 的 `EngineSession` captured bytes，dependency 才重读
+  predicate 允许的绝对路径；所有来源都再次核 contentID。旧 worktree、缺失 evidence、不可读 revision、
+  drift 或冻结失败均逐 edge skip，保持 producer/path 顺序且不 dedup。
+- 固定五 edge 单测严格得到 `DEFINITION / VERIFIED CALLER / INFERRED CALLER / TRAIT CONTRACT / TEST`，
+  顺序与 symbol 均不变；磁盘修改后仍冻结导航时 session bytes，附加旧 worktree edge 后仍保留原五段并明确
+  报告 `recorded worktree snapshot is unavailable`。真实 AppKit 测试另覆盖清空 live explanation store 后
+  Trail 仍能打开同一 frozen display、按钮 title/enabled/AX 与 `CALL` role。
+- 完整 `swift test --disable-sandbox` PASS。签名验收包为 `.build/m11d-trail-ui-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11dtrail`；Info.plist、strict codesign 与 designated requirement 均通过。真实非 Git
+  fixture `/private/tmp/m11-f5-ui-fixture-plain` 以 CUA 完成
+  `describe → Show Calls → area → Reading Trail → Open as Reading Set`：Trail 显示
+  `renderer · relation → area`、选中 edge 的 `AT NAVIGATION · frozen snapshot`，新 tab 显示
+  `Reading Set · area` 与 `CALL / area / src/main.rs:8 / INFERRED / name match only / worktree · captured`；
+  `查看证据` 后标题为 `Resolution Inspector AT CAPTURE`，availability/environment 均为 capture-time。
+  fixture 的 real rust-analyzer 因非 Git project 明确 unavailable，本项只记录本地 producer/freeze/UI PASS，
+  不冒充 real-provider 结论。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；Swift 全量、Exact/Diff/Reading/Projector/Fold self-test 均
+  退出 0，real rust-analyzer 仍因 `sandbox_apply: Operation not permitted` 诚实 skipped。最终 release runner
+  为 control resolution 29.545 ms、fold resolution 25.172 ms、首次折叠 250.878 ms，4,400 logical /
+  200 rendered，峰值 RSS 增量 4,653,056 bytes，`status=pass`。

@@ -294,6 +294,109 @@ func readingSetLongMultibyteLineUsesScalarSafePersistentSlices() throws {
     #expect(persisted[0].partialLine)
 }
 
+@MainActor
+@Test
+func trailReadingSetKeepsFiveObservedEdgesInPathOrderAndSkipsOldWorktree()
+    async throws
+{
+    let symbols = ["definition", "verified", "inferred", "contract", "test"]
+    let roles = [
+        "DEFINITION",
+        "VERIFIED CALLER",
+        "INFERRED CALLER",
+        "TRAIT CONTRACT",
+        "TEST",
+    ]
+    let source = symbols.map { "fn \($0)() {}" }.joined(separator: "\n") + "\n"
+    let root = try readingSetTemporaryProject(source: source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ReadingSetIndexService())
+    model.openProject(root: root)
+    #expect(await testWaitUntil("Trail Reading Set project ready") {
+        if case .ready = model.projectState { return true }
+        return false
+    })
+    let captured = try #require(model.capturedProjectSource(at: "src/lib.rs"))
+    let snapshotID = try #require(model.currentSnapshotID)
+    let table = LineTable(bytes: captured.bytes)
+    var previous = JumpRecord(
+        path: "src/lib.rs",
+        contentID: captured.contentID,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "root",
+        snapshotID: snapshotID
+    )
+    var selectedID: TrailNodeID?
+    for (index, symbol) in symbols.enumerated() {
+        let range = try #require(source.range(of: "fn \(symbol)"))
+        let byteOffset = UInt32(source[..<range.lowerBound].utf8.count)
+        let coordinate = try #require(table.lineColumn(at: byteOffset))
+        let destination = JumpRecord(
+            path: "src/lib.rs",
+            contentID: captured.contentID,
+            byteOffset: byteOffset,
+            line: coordinate.line,
+            column: coordinate.column,
+            symbolAnchor: symbol,
+            snapshotID: snapshotID
+        )
+        let display = readingSetInspector(
+            symbol: symbol,
+            badge: index == 2 ? .inferred : .verified
+        )
+        selectedID = model.readingTrail.recordNavigation(
+            from: previous,
+            to: destination,
+            explanation: NavigationExplanation(
+                explanationID: ResolutionExplanationID(),
+                observedAtNavigation: readingSetExplanationSnapshot(),
+                frozenInspectorDisplay: display,
+                readingSetRole: roles[index]
+            )
+        )
+        previous = destination
+    }
+    try "fn disk_drift() {}\n".write(
+        to: root.appendingPathComponent("src/lib.rs"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let frozen = model.trailReadingSet(to: try #require(selectedID))
+    #expect(frozen.title == "test")
+    #expect(frozen.excerpts.map(\.role) == roles)
+    #expect(frozen.excerpts.map(\.symbol) == symbols)
+    #expect(frozen.excerpts.allSatisfy { !$0.sourceText.contains("disk_drift") })
+    #expect(frozen.skippedReasons.isEmpty)
+
+    let oldDestination = JumpRecord(
+        path: "src/lib.rs",
+        contentID: captured.contentID,
+        byteOffset: previous.byteOffset,
+        line: previous.line,
+        column: previous.column,
+        symbolAnchor: "old",
+        snapshotID: SnapshotID(rawValue: UUID())
+    )
+    let oldID = model.readingTrail.recordNavigation(
+        from: previous,
+        to: oldDestination,
+        explanation: NavigationExplanation(
+            explanationID: ResolutionExplanationID(),
+            observedAtNavigation: readingSetExplanationSnapshot(),
+            frozenInspectorDisplay: readingSetInspector(symbol: "old"),
+            readingSetRole: "OLD WORKTREE"
+        )
+    )
+    let withOldWorktree = model.trailReadingSet(to: oldID)
+    #expect(withOldWorktree.excerpts.map(\.role) == roles)
+    #expect(withOldWorktree.skippedReasons == [
+        "recorded worktree snapshot is unavailable",
+    ])
+}
+
 private func readingSetTestExcerpt(
     source: String,
     line: UInt32,
@@ -320,22 +423,49 @@ private func readingSetTestExcerpt(
         revision: nil,
         capturedAt: capturedAt,
         sourceKind: .worktreeCaptured,
-        inspector: .init(
-            nodeTitle: "target",
-            badge: .verified,
-            why: "Captured target.",
-            sourceBody: "Captured source.",
-            verificationTitle: "VERIFICATION",
-            verificationBody: "Verified at capture.",
-            correctionBody: "",
-            availabilityBody: "Ready at capture.",
-            environmentBody: "Trusted at capture.",
-            auditRows: [],
-            accessibilityValue: "Verified target",
-            capturedAt: capturedAt,
-            formerCandidateAvailable: false
-        ),
+        inspector: readingSetInspector(symbol: "target", capturedAt: capturedAt),
         partialLine: frozen.partialLine
+    )
+}
+
+private func readingSetInspector(
+    symbol: String,
+    badge: ReadingSetExcerpt.FrozenInspectorDisplay.Badge = .verified,
+    capturedAt: Date = Date(timeIntervalSince1970: 1_786_200_000)
+) -> ReadingSetExcerpt.FrozenInspectorDisplay {
+    .init(
+        nodeTitle: symbol,
+        badge: badge,
+        why: "Captured target.",
+        sourceBody: "Captured source.",
+        verificationTitle: "VERIFICATION",
+        verificationBody: "Verified at capture.",
+        correctionBody: "",
+        availabilityBody: "Ready at capture.",
+        environmentBody: "Trusted at capture.",
+        auditRows: [],
+        accessibilityValue: "Verified target",
+        capturedAt: capturedAt,
+        formerCandidateAvailable: false
+    )
+}
+
+private func readingSetExplanationSnapshot() -> ResolutionExplanationSnapshot {
+    let candidate = CandidateObservation(
+        target: .unresolved(UnresolvedSymbolRef(
+            nameID: NameID(rawValue: 1),
+            hintKind: .unqualified
+        )),
+        certainty: .strong,
+        dispatch: .direct,
+        provenance: .fuzzyResolver,
+        completeness: .complete,
+        evidence: [.nameOnly(nameID: NameID(rawValue: 1))]
+    )
+    return ResolutionExplanationSnapshot(
+        explanation: MaterializedResolutionExplanation(
+            trace: .candidateOnly(candidate)
+        )
     )
 }
 
