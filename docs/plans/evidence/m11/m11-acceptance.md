@@ -319,3 +319,35 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   RSS 增量 1,835,008 bytes（门槛 ≤ 80 MiB），`status=pass`。
 - 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
   skipped；R0 是纯当前文档扫描，不依赖 provider，故不以 fake provider 代替其产品结论。
+
+## F6：折叠诚实合同
+
+结论：PASS（导航、搜索、diff 与当前符号四条红线均独立验证，并在真实 AppKit 折叠 / 查找流中复跑）。
+
+- 导航落点位于折叠 body 时仍只展开包含落点的 logical 祖先链；Full 下手动折叠与 Overview baseline
+  分别沿用既有 override reducer，不引入第二条展开路径。gutter 在 landing source line 绘制 accent
+  短标记，1.2 秒后按 generation 自动清除；标记存在期间即使最后一个 fold 已展开，ruler 也不会先消失。
+- Fold attachment 仍是 F2 的单个固定宽度 `NSTextAttachment`。搜索命中与 symbol occurrences 都在
+  source `ByteRange` 空间按当前 rendered 极大折叠区有序归属；视觉动态区按活动交互显示
+  `· N matches` / `· N occurrences`，超过 999 仍截断为 `· 999`，不改 54pt 宽度、不重建
+  `DisplayMap`。AX label 保留完整真实计数，并同时读出共存的 diff 暴露项。
+- diff marker 继续保留原始逐行字典与总数；落在隐藏 body 的 marker 被归并到 attachment 的
+  `· diff`，并在可见 fold header 的既有 diff 列绘制合并 marker。单一 kind 保留原颜色；隐藏 / header
+  同时存在不同 kind 时诚实归为 changed。跳到隐藏 diff 行会先走同一祖先展开入口，再选择真实源码行。
+- 当前符号在用户折叠其 selected occurrence 后仍保留 source anchor；隐藏 body 内的 occurrence 数写入
+  attachment，未因投影后可见 range 为空而错误清除。搜索优先于 symbol 视觉计数；AX 对共存项不丢失。
+- 四个具名独立测试分别锁定：祖先链与 1.2 秒 gutter 消退、隐藏搜索计数与逻辑总数、隐藏 diff chip 与
+  header 合并 marker、折叠 selected occurrence 后的 symbol anchor 与 `· 3 occurrences`。定向 4 / 4
+  PASS，完整 `swift test --disable-sandbox` PASS。
+- 最终签名验收包为 `.build/m11-f6-ui-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11f6`；Info.plist、严格 codesign 与 designated requirement 均通过。真实非 Git
+  fixture 在 Overview 下搜索 `width` 报告 `1 / 6`；仍折叠的 impl / main pill 分别显示
+  `· 4 matches` / `· 1 match…`，总数包含全部隐藏命中。Next 到第 2 条后只展开
+  `renderer → impl → area` 包含链，`describe` 与 `main` 继续保持折叠，固定宽度 chip、find bar 与 gutter
+  无重叠。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；完整 Swift Testing、Exact、Diff、Reading、Projector、
+  Fold self-test 与 ReaderUI 坐标门禁全部退出 0。最终 release runner 为 control resolution
+  25.669 ms、fold resolution 29.765 ms、首次折叠 269.499 ms（门槛 ≤ 400 ms），4,400 logical /
+  200 rendered，峰值 RSS 增量 4,784,152 bytes（门槛 ≤ 80 MiB），`status=pass`。
+- 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记 skipped；
+  F6 的四条合同均为 Reader source / projection / AppKit 行为，不以 fake provider 代替产品结论。

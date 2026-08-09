@@ -591,7 +591,7 @@ func manualFoldsArbitrateInBothDirectionsAndLevelSwitchClearsEveryPair() throws 
 
 @MainActor
 @Test
-func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() throws {
+func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() async throws {
     let (document, regions) = readingHeightLevelDocument()
     let reader = ReaderTextView()
     reader.display(
@@ -632,6 +632,14 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() thro
                 regions.cfgTest.id,
                 regions.topLevelDeclaration.id,
             ]))
+    #expect(
+        reader.navigationLandingLineForTesting
+            == Int(try #require(
+                document.lineTable.lineColumn(at: nestedOffset)
+            ).line)
+    )
+    try await Task.sleep(nanoseconds: 1_300_000_000)
+    #expect(reader.navigationLandingLineForTesting == nil)
 }
 
 @MainActor
@@ -778,10 +786,75 @@ func findKeepsHiddenMatchesInTheLogicalCountAndRevealsTheirFoldChain() throws {
     reader.setFindMatches([hiddenMatch], selectedIndex: 0)
     #expect(reader.findMatchCount == 1)
     #expect(reader.occurrenceCount == 1)
+    #expect(
+        reader.foldExposureTextForTesting(regions.container.id)
+            == " · 1 matches"
+    )
     #expect(reader.revealFindMatch(at: 0))
     #expect(!reader.logicalFoldIDsForTesting.contains(regions.container.id))
     #expect(!reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
     #expect(reader.selectedFindMatchIndex == 0)
+}
+
+@MainActor
+@Test
+func foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/diff-fold.rs"))
+    #expect(reader.setReadingHeightLevel(.overview))
+
+    let hiddenLine = Int(try #require(
+        document.lineTable.lineColumn(at: 40)
+    ).line)
+    let headerLine = Int(try #require(
+        document.lineTable.lineColumn(at: regions.container.headerRange.lowerBound)
+    ).line)
+    reader.setDiffMarkers([hiddenLine: .added])
+
+    #expect(reader.diffMarkerCounts[.added] == 1)
+    #expect(
+        reader.foldExposureTextForTesting(regions.container.id) == " · diff"
+    )
+    #expect(reader.foldedDiffMarkersForTesting[headerLine]?.rawValue
+        == DiffCore.MarkerKind.added.rawValue)
+}
+
+@MainActor
+@Test
+func foldedCurrentSymbolOccurrencesAreExposedByTheChip() throws {
+    let source = """
+        fn first() {
+            target();
+            target();
+            target();
+        }
+        fn second() {
+            target();
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/occurrence-fold.rs"))
+        .document
+    let firstHeader = UInt32((source as NSString).range(of: "fn first").location)
+    let fold = try #require(document.foldRegions.first {
+        $0.kind == .declaration && $0.headerRange.lowerBound == firstHeader
+    })
+    let reader = ReaderTextView()
+    reader.display(
+        document: document,
+        fileURL: URL(fileURLWithPath: "/occurrence-fold.rs")
+    )
+    let selected = (source as NSString).range(of: "target")
+    #expect(selected.location != NSNotFound)
+    _ = reader.activate(atByteOffset: UInt32(selected.location))
+    #expect(reader.toggleFold(id: fold.id))
+
+    #expect(reader.symbolOccurrenceByteOffset == UInt32(selected.location))
+    #expect(
+        reader.foldExposureTextForTesting(fold.id) == " · 3 occurrences"
+    )
 }
 
 @MainActor

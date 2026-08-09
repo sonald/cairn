@@ -501,6 +501,8 @@ public final class ReaderTextView {
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
     private var hoveredFoldID: FoldID?
+    private var navigationLandingLine: Int?
+    private var navigationMarkerGeneration = 0
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
     public private(set) var currentLineNumber: Int?
     public private(set) var occurrenceCount = 0
@@ -806,6 +808,9 @@ public final class ReaderTextView {
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
         hoveredFoldID = nil
+        navigationLandingLine = nil
+        navigationMarkerGeneration += 1
+        refreshFoldExposures(in: document)
         renderingCoordinator.setOccurrences([])
         ruler?.needsDisplay = true
         renderingCoordinator.update(
@@ -850,6 +855,8 @@ public final class ReaderTextView {
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
         hoveredFoldID = nil
+        navigationLandingLine = nil
+        navigationMarkerGeneration += 1
         diffMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
@@ -986,6 +993,24 @@ public final class ReaderTextView {
                 .map { Int($0.line) }
         }
     }
+    internal var navigationLandingLineForTesting: Int? {
+        navigationLandingLine
+    }
+    internal func foldExposureTextForTesting(_ id: FoldID) -> String? {
+        foldAttachments[id]?.visualExposureText
+    }
+    internal var foldedDiffMarkersForTesting: [Int: DiffCore.MarkerKind] {
+        guard let document = displayedDocument else { return [:] }
+        return foldedDiffMarkers(in: document).reduce(into: [:]) {
+            result, element in
+            guard let region = document.foldRegions.first(where: {
+                $0.id == element.key
+            }), let line = document.lineTable.lineColumn(
+                at: region.headerRange.lowerBound
+            )?.line else { return }
+            result[Int(line)] = element.value
+        }
+    }
 
     @discardableResult
     package func focusCurrentScope(at byteOffset: UInt32) -> Bool {
@@ -1048,6 +1073,7 @@ public final class ReaderTextView {
         guard applyFoldProjection(
             Self.focusFoldIDs(around: target.facet, in: document)
         ) else { return false }
+        markNavigationLanding(at: byteOffset)
         focusState.followsExplicitNavigation = true
         focusState.focusedFoldID = target.region.id
         focusState.byteOffset = byteOffset
@@ -1084,7 +1110,7 @@ public final class ReaderTextView {
     }
 
     internal func setFoldMatchCount(_ count: Int, for id: FoldID) {
-        foldAttachments[id]?.matchCount = max(0, count)
+        foldAttachments[id]?.setMatchCount(max(0, count))
     }
 
     package func applyFoldPerformanceOverview() -> (
@@ -1265,7 +1291,7 @@ public final class ReaderTextView {
             logicalFoldIDs.contains($0.id) && $0.bodyRange.contains(byteOffset)
         }
         guard !ancestors.isEmpty else { return false }
-        return applyFoldMutation { overrides in
+        let unfolded = applyFoldMutation { overrides in
             for region in ancestors {
                 Self.setFold(
                     region.id,
@@ -1274,6 +1300,34 @@ public final class ReaderTextView {
                     overrides: &overrides
                 )
             }
+        }
+        if unfolded { markNavigationLanding(at: byteOffset) }
+        return unfolded
+    }
+
+    private func markNavigationLanding(at byteOffset: UInt32) {
+        guard let line = displayedDocument?.lineTable.lineColumn(
+            at: byteOffset
+        )?.line else { return }
+        navigationMarkerGeneration += 1
+        let generation = navigationMarkerGeneration
+        navigationLandingLine = Int(line)
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
+        updateRulerThickness()
+        ruler?.needsDisplay = true
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            guard let self,
+                  navigationMarkerGeneration == generation
+            else { return }
+            navigationLandingLine = nil
+            if let scrollView = view.enclosingScrollView ?? scrollView {
+                configureGutter(in: scrollView, lineNumbers: lineNumbers)
+            }
+            updateRulerThickness()
+            ruler?.needsDisplay = true
         }
     }
 
@@ -1569,6 +1623,7 @@ public final class ReaderTextView {
 
         displayMap = projection.map
         foldAttachments = projection.attachments
+        refreshFoldExposures(in: document)
         renderingCoordinator.update(
             document: document,
             map: projection.map,
@@ -1663,7 +1718,8 @@ public final class ReaderTextView {
     ) {
         self.scrollView = scrollView
         self.lineNumbers = lineNumbers
-        let needsRuler = lineNumbers || !diffMarkers.isEmpty || hasVisibleFoldRegions
+        let needsRuler = lineNumbers || !diffMarkers.isEmpty
+            || hasVisibleFoldRegions || navigationLandingLine != nil
         guard needsRuler else {
             scrollView.hasVerticalRuler = false
             scrollView.rulersVisible = false
@@ -1696,6 +1752,7 @@ public final class ReaderTextView {
 
     public func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
         diffMarkers = markers
+        refreshFoldExposures()
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -1723,7 +1780,8 @@ public final class ReaderTextView {
             clearOccurrences()
             return 0
         }
-        let ranges = occurrenceNSRanges(in: document, at: byteOffset)
+        let occurrenceRanges = document.identifierOccurrences(at: byteOffset)
+        let ranges = projectedOccurrenceNSRanges(occurrenceRanges)
         occurrenceSelectionByteOffset = ranges.isEmpty ? nil : byteOffset
         let location = visibleDisplayOffset(forByte: byteOffset)
         let selected = location.flatMap { location in
@@ -1735,6 +1793,10 @@ public final class ReaderTextView {
             : [.backgroundColor: NSColor.clear]
         view.setSelectedRange(selected ?? NSRange(location: location ?? 0, length: 0))
         setOccurrences(ranges)
+        refreshFoldExposures(
+            in: document,
+            occurrenceRanges: occurrenceRanges
+        )
         return ranges.count
     }
 
@@ -1744,6 +1806,7 @@ public final class ReaderTextView {
         view.selectedTextAttributes = nativeSelectedTextAttributes
         view.setSelectedRange(NSRange(location: view.selectedRange().location, length: 0))
         setOccurrences([])
+        refreshFoldExposures()
     }
 
     package var symbolOccurrenceByteOffset: UInt32? {
@@ -1829,11 +1892,13 @@ public final class ReaderTextView {
     public func revealDiffLine(_ line: Int) -> Bool {
         guard line > 0,
               let document = displayedDocument,
-              document.lineTable.lineStarts.indices.contains(line - 1),
-              let location = visibleDisplayOffset(
-                  forByte: document.lineTable.lineStarts[line - 1]
-              )
+              document.lineTable.lineStarts.indices.contains(line - 1)
         else { return false }
+        let byteOffset = document.lineTable.lineStarts[line - 1]
+        _ = unfoldAncestors(containing: byteOffset)
+        guard let location = visibleDisplayOffset(forByte: byteOffset) else {
+            return false
+        }
         let range = (backingTextStorage.string as NSString).lineRange(
             for: NSRange(location: location, length: 0)
         )
@@ -2004,6 +2069,7 @@ public final class ReaderTextView {
             return
         }
         if let findMatchByteRanges {
+            refreshFoldExposures(in: document)
             let visible = findMatchByteRanges.flatMap {
                 displayMap?.project(byteRange: $0)?.visible ?? []
             }
@@ -2017,14 +2083,19 @@ public final class ReaderTextView {
             return
         }
         guard let occurrenceSelectionByteOffset else {
+            refreshFoldExposures(in: document)
             setOccurrences([])
             return
         }
-        let ranges = occurrenceNSRanges(
-            in: document,
+        let occurrenceRanges = document.identifierOccurrences(
             at: occurrenceSelectionByteOffset
         )
-        if ranges.isEmpty { self.occurrenceSelectionByteOffset = nil }
+        let ranges = projectedOccurrenceNSRanges(occurrenceRanges)
+        if occurrenceRanges.isEmpty { self.occurrenceSelectionByteOffset = nil }
+        refreshFoldExposures(
+            in: document,
+            occurrenceRanges: occurrenceRanges
+        )
         setOccurrences(ranges)
     }
 
@@ -2032,9 +2103,106 @@ public final class ReaderTextView {
         in document: ReaderDocument,
         at byteOffset: UInt32
     ) -> [NSRange] {
+        projectedOccurrenceNSRanges(
+            document.identifierOccurrences(at: byteOffset)
+        )
+    }
+
+    private func projectedOccurrenceNSRanges(
+        _ ranges: [ByteRange]
+    ) -> [NSRange] {
         guard let displayMap else { return [] }
-        return document.identifierOccurrences(at: byteOffset).flatMap {
+        return ranges.flatMap {
             displayMap.project(byteRange: $0)?.visible ?? []
+        }
+    }
+
+    private func refreshFoldExposures(
+        in document: ReaderDocument? = nil,
+        occurrenceRanges: [ByteRange]? = nil
+    ) {
+        guard let document = document ?? displayedDocument else { return }
+        let matchCounts = foldedRangeCounts(
+            findMatchByteRanges ?? [],
+            in: document
+        )
+        let occurrenceRanges = occurrenceRanges ?? occurrenceSelectionByteOffset.map {
+            document.identifierOccurrences(at: $0)
+        } ?? []
+        let occurrenceCounts = foldedRangeCounts(
+            occurrenceRanges,
+            in: document
+        )
+        let foldedDiff = foldedDiffMarkers(in: document)
+        for (id, attachment) in foldAttachments {
+            attachment.updateExposure(
+                matchCount: matchCounts[id] ?? 0,
+                hasDiff: foldedDiff[id] != nil,
+                occurrenceCount: occurrenceCounts[id] ?? 0
+            )
+        }
+    }
+
+    private func foldedRangeCounts(
+        _ ranges: [ByteRange],
+        in document: ReaderDocument
+    ) -> [FoldID: Int] {
+        let regions = renderedRegions(in: document)
+        guard !regions.isEmpty, !ranges.isEmpty else { return [:] }
+        var result: [FoldID: Int] = [:]
+        var regionIndex = 0
+        for range in ranges.sorted(by: {
+            ($0.lowerBound, $0.upperBound) < ($1.lowerBound, $1.upperBound)
+        }) {
+            while regions.indices.contains(regionIndex),
+                  regions[regionIndex].bodyRange.upperBound <= range.lowerBound
+            {
+                regionIndex += 1
+            }
+            guard regions.indices.contains(regionIndex) else { break }
+            let region = regions[regionIndex]
+            if region.bodyRange.overlaps(range) {
+                result[region.id, default: 0] += 1
+            }
+        }
+        return result
+    }
+
+    private func foldedDiffMarkers(
+        in document: ReaderDocument
+    ) -> [FoldID: DiffCore.MarkerKind] {
+        let regions = renderedRegions(in: document)
+        guard !regions.isEmpty, !diffMarkers.isEmpty else { return [:] }
+        var result: [FoldID: DiffCore.MarkerKind] = [:]
+        var regionIndex = 0
+        for (line, kind) in diffMarkers.sorted(by: { $0.key < $1.key }) {
+            guard line > 0,
+                  document.lineTable.lineStarts.indices.contains(line - 1)
+            else { continue }
+            let byteOffset = document.lineTable.lineStarts[line - 1]
+            while regions.indices.contains(regionIndex),
+                  regions[regionIndex].bodyRange.upperBound <= byteOffset
+            {
+                regionIndex += 1
+            }
+            guard regions.indices.contains(regionIndex) else { break }
+            let region = regions[regionIndex]
+            guard region.bodyRange.contains(byteOffset) else { continue }
+            if let current = result[region.id], current.rawValue != kind.rawValue {
+                result[region.id] = .changed
+            } else {
+                result[region.id] = kind
+            }
+        }
+        return result
+    }
+
+    private func renderedRegions(in document: ReaderDocument) -> [FoldRegion] {
+        document.foldRegions.filter {
+            renderedFoldIDs.contains($0.id)
+        }.sorted {
+            ($0.bodyRange.lowerBound, $0.bodyRange.upperBound)
+                < ($1.bodyRange.lowerBound, $1.bodyRange.upperBound)
         }
     }
 
@@ -2091,7 +2259,7 @@ public final class ReaderTextView {
     }
 
     private var foldColumnWidth: CGFloat {
-        hasVisibleFoldRegions ? 12 : 0
+        hasVisibleFoldRegions || navigationLandingLine != nil ? 12 : 0
     }
 
     private var hasVisibleFoldRegions: Bool {
@@ -2223,6 +2391,7 @@ public final class ReaderTextView {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .right
         let foldsByLine: [Int: FoldRegion]
+        let foldedDiffByLine: [Int: DiffCore.MarkerKind]
         if let document = displayedDocument {
             var mapped: [Int: FoldRegion] = [:]
             for region in visibleFoldRegions(in: document) {
@@ -2232,8 +2401,21 @@ public final class ReaderTextView {
                 mapped[Int(line)] = mapped[Int(line)] ?? region
             }
             foldsByLine = mapped
+            let regionsByID = Dictionary(
+                uniqueKeysWithValues: document.foldRegions.map { ($0.id, $0) }
+            )
+            foldedDiffByLine = foldedDiffMarkers(in: document).reduce(into: [:]) {
+                result, element in
+                guard let region = regionsByID[element.key],
+                      let line = document.lineTable.lineColumn(
+                        at: region.headerRange.lowerBound
+                      )?.line
+                else { return }
+                result[Int(line)] = element.value
+            }
         } else {
             foldsByLine = [:]
+            foldedDiffByLine = [:]
         }
         enumerateVisibleLayoutFragments { fragment, line in
             let textRect = fragmentRectInTextView(fragment)
@@ -2280,7 +2462,31 @@ public final class ReaderTextView {
                     )
                 )
             }
-            if let kind = diffMarkers[line] {
+            if navigationLandingLine == line {
+                theme.accentColor.setFill()
+                let markerHeight = min(8, max(3, rulerRect.height - 4))
+                NSBezierPath(
+                    roundedRect: NSRect(
+                        x: lineNumberColumnWidth + declarationColumnWidth + 4,
+                        y: rulerRect.midY - markerHeight / 2,
+                        width: 4,
+                        height: markerHeight
+                    ),
+                    xRadius: 2,
+                    yRadius: 2
+                ).fill()
+            }
+            let directDiff = diffMarkers[line]
+            let foldedDiff = foldedDiffByLine[line]
+            let mergedDiff: DiffCore.MarkerKind?
+            if let directDiff, let foldedDiff,
+               directDiff.rawValue != foldedDiff.rawValue
+            {
+                mergedDiff = .changed
+            } else {
+                mergedDiff = directDiff ?? foldedDiff
+            }
+            if let kind = mergedDiff {
                 theme.color(for: kind).setFill()
                 NSRect(
                     x: lineNumberColumnWidth + declarationColumnWidth
@@ -2626,8 +2832,24 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
     nonisolated let bodyText: String
     nonisolated let accessibilityText: String
     nonisolated let theme: ReaderTheme
-    nonisolated(unsafe) var matchCount = 0 {
-        didSet { activeProvider?.update() }
+    nonisolated(unsafe) private(set) var matchCount = 0
+    nonisolated(unsafe) private(set) var hasDiff = false
+    nonisolated(unsafe) private(set) var occurrenceCount = 0
+
+    nonisolated var visualExposureText: String {
+        if matchCount > 999 { return " · 999" }
+        if matchCount > 0 { return " · \(matchCount) matches" }
+        if occurrenceCount > 999 { return " · 999" }
+        if occurrenceCount > 0 { return " · \(occurrenceCount) occurrences" }
+        return hasDiff ? " · diff" : ""
+    }
+
+    nonisolated var accessibilityExposureText: String {
+        var values: [String] = []
+        if matchCount > 0 { values.append("\(matchCount) matches") }
+        if occurrenceCount > 0 { values.append("\(occurrenceCount) occurrences") }
+        if hasDiff { values.append("diff") }
+        return values.isEmpty ? "" : ", " + values.joined(separator: ", ")
     }
 
     init(region: FoldRegion, theme: ReaderTheme) {
@@ -2644,6 +2866,31 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func setMatchCount(_ count: Int) {
+        updateExposure(
+            matchCount: count,
+            hasDiff: hasDiff,
+            occurrenceCount: occurrenceCount
+        )
+    }
+
+    func updateExposure(
+        matchCount: Int,
+        hasDiff: Bool,
+        occurrenceCount: Int
+    ) {
+        let matchCount = max(0, matchCount)
+        let occurrenceCount = max(0, occurrenceCount)
+        guard self.matchCount != matchCount
+                || self.hasDiff != hasDiff
+                || self.occurrenceCount != occurrenceCount
+        else { return }
+        self.matchCount = matchCount
+        self.hasDiff = hasDiff
+        self.occurrenceCount = occurrenceCount
+        activeProvider?.update()
     }
 
     @preconcurrency override func viewProvider(
@@ -2775,18 +3022,17 @@ private final class FoldAttachmentViewProvider:
         guard let attachment = textAttachment as? FoldAttachment,
               let chip = view as? FoldChipView
         else { return }
-        chip.matchCount = attachment.matchCount
-        let exposure = attachment.matchCount > 0
-            ? ", \(attachment.matchCount) matches"
-            : ""
-        chip.setAccessibilityLabel(attachment.accessibilityText + exposure)
+        chip.exposureText = attachment.visualExposureText
+        chip.setAccessibilityLabel(
+            attachment.accessibilityText + attachment.accessibilityExposureText
+        )
         chip.needsDisplay = true
     }
 }
 
 private final class FoldChipView: NSView {
     let attachment: FoldAttachment
-    var matchCount = 0
+    var exposureText = ""
 
     init(attachment: FoldAttachment) {
         self.attachment = attachment
@@ -2818,14 +3064,6 @@ private final class FoldChipView: NSView {
             .foregroundColor: attachment.theme.chipForegroundColor,
             .paragraphStyle: paragraph,
         ]
-        let countText: String
-        if matchCount == 0 {
-            countText = ""
-        } else if matchCount > 999 {
-            countText = " · 999"
-        } else {
-            countText = " · \(matchCount) matches"
-        }
         let countWidth: CGFloat = 54
         let textY = floor((bounds.height - font.ascender + font.descender) / 2)
         (attachment.bodyText as NSString).draw(
@@ -2837,7 +3075,7 @@ private final class FoldChipView: NSView {
             ),
             withAttributes: attributes
         )
-        (countText as NSString).draw(
+        (exposureText as NSString).draw(
             in: NSRect(
                 x: bounds.width - countWidth - 5,
                 y: textY,
