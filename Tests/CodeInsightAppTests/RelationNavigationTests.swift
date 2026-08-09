@@ -31,8 +31,8 @@ struct RelationUXTests {
     func relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
-        var captured: (String, [ReadingSetExcerpt])?
-        fixture.controller.onOpenReadingSet = { captured = ($0, $1) }
+        var captured: (String, [ReadingSetExcerpt], [String])?
+        fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
         let button = fixture.controller.selfTestReadingSetButtonState
 
         #expect(button.0 == "Reading Set")
@@ -50,6 +50,7 @@ struct RelationUXTests {
             "Source", "Content", "Captured at",
         ])
         #expect(result.1.first?.inspector.availabilityBody.contains("at capture") == true)
+        #expect(result.2.isEmpty)
 
         let display = try #require(result.1.first?.inspector)
         fixture.controller.showFrozenInspector(display)
@@ -69,6 +70,50 @@ struct RelationUXTests {
         #expect(fixture.controller.selfTestInspectorIsFrozen)
         #expect(fixture.controller.selfTestInspectorVisible)
         #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
+    }
+
+    @MainActor
+    @Test
+    func relationsReportTheFiftyExcerptCapWithoutReorderingSeeds() async throws {
+        let fixture = try await makeRelationUXFixture(
+            includesExactMatch: false,
+            possibleMatchCount: 55
+        )
+        defer { fixture.close() }
+        var captured: (String, [ReadingSetExcerpt], [String])?
+        fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
+
+        fixture.controller.selfTestOpenAsReadingSet()
+
+        let result = try #require(captured)
+        #expect(result.1.count == 50)
+        #expect(result.1.prefix(3).map(\.symbol) == [
+            "first", "second", "possible2",
+        ])
+        #expect(result.2 == Array(
+            repeating: "display cap (50 excerpts)",
+            count: 5
+        ))
+    }
+
+    @MainActor
+    @Test
+    func relationsOpenAnEmptyReadingSetWithEverySourceSkipReason() async throws {
+        let fixture = try await makeRelationUXFixture(
+            capturedSourceAvailable: false
+        )
+        defer { fixture.close() }
+        var captured: (String, [ReadingSetExcerpt], [String])?
+        fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
+
+        fixture.controller.selfTestOpenAsReadingSet()
+
+        let result = try #require(captured)
+        #expect(result.1.isEmpty)
+        #expect(!result.2.isEmpty)
+        #expect(result.2.allSatisfy {
+            $0 == "recorded source is unreadable"
+        })
     }
 
     @MainActor
@@ -1508,7 +1553,8 @@ private func makeRelationUXFixture(
     possibleMatchCount: Int = 2,
     exactResolver: RelationTreeModel.ExactResolver? = nil,
     sourceResultIsTruncated: Bool = false,
-    usesMethodNameOnlyEvidence: Bool = false
+    usesMethodNameOnlyEvidence: Bool = false,
+    capturedSourceAvailable: Bool = true
 ) async throws -> RelationUXFixture {
     _ = NSApplication.shared
     let root = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -1651,6 +1697,7 @@ private func makeRelationUXFixture(
         model: model,
         verificationReadiness: { .ready },
         capturedSource: { path in
+            guard capturedSourceAvailable else { return nil }
             guard let source = session.capturedSource(atManifestPath: path)
             else { return nil }
             return (

@@ -63,7 +63,11 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
     let fileB = URL(fileURLWithPath: "/tmp/b.rs")
     model.open(fileA, inNewTab: false)
     model.updateActiveAnchors(scrollByteOffset: 10, selectionByteOffset: 12)
-    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
+    model.openReadingSet(
+        title: "spawn",
+        excerpts: [readingSetExcerpt()],
+        skippedReasons: ["recorded source is unreadable"]
+    )
     model.updateActiveReadingSetScroll(144)
     model.open(fileB, inNewTab: true)
 
@@ -71,6 +75,9 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
     #expect(model.tabs[1].fileURL == nil)
     #expect(model.tabs[1].title == "spawn")
     #expect(model.tabs[1].readingSetScrollOffset == 144)
+    #expect(model.tabs[1].readingSetSkippedReasons == [
+        "recorded source is unreadable",
+    ])
     #expect(model.tabs[0].scrollByteOffset == 10)
     #expect(model.tabs[0].selectionByteOffset == 12)
 

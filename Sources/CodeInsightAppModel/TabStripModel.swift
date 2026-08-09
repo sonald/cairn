@@ -9,6 +9,7 @@ public final class TabStripModel {
         public fileprivate(set) var scrollByteOffset: UInt32?
         public fileprivate(set) var selectionByteOffset: UInt32?
         package fileprivate(set) var readingSetScrollOffset: Double?
+        package fileprivate(set) var readingSetSkippedReasons: [String]
 
         package var title: String { content.title }
 
@@ -61,6 +62,7 @@ public final class TabStripModel {
             scrollByteOffset: nil,
             selectionByteOffset: selectionByteOffset,
             readingSetScrollOffset: nil,
+            readingSetSkippedReasons: [],
             lastActivated: activationClock
         )
         install(tab, inNewTab: inNewTab)
@@ -68,7 +70,8 @@ public final class TabStripModel {
 
     package func openReadingSet(
         title: String,
-        excerpts: [ReadingSetExcerpt]
+        excerpts: [ReadingSetExcerpt],
+        skippedReasons: [String] = []
     ) {
         activationClock &+= 1
         let tab = Tab(
@@ -76,6 +79,7 @@ public final class TabStripModel {
             scrollByteOffset: nil,
             selectionByteOffset: nil,
             readingSetScrollOffset: nil,
+            readingSetSkippedReasons: skippedReasons,
             lastActivated: activationClock
         )
         install(tab, inNewTab: true)

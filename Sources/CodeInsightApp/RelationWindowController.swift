@@ -18,7 +18,7 @@ final class RelationWindowController: NSViewController,
     }
     var onOpen: ((RelationTreeModel.Node) -> Void)?
     var onTreeChange: (() -> Void)?
-    var onOpenReadingSet: ((String, [ReadingSetExcerpt]) -> Void)?
+    var onOpenReadingSet: ((String, [ReadingSetExcerpt], [String]) -> Void)?
 
     private let model: RelationTreeModel
     private let directionControl = NSSegmentedControl(
@@ -1272,12 +1272,26 @@ final class RelationWindowController: NSViewController,
 
     @objc private func openAsReadingSet(_ sender: Any?) {
         let nodes = readingSetNodes()
-        let excerpts: [ReadingSetExcerpt] = nodes.prefix(50).compactMap { node in
+        guard !nodes.isEmpty else { return }
+        var excerpts: [ReadingSetExcerpt] = []
+        var skippedReasons: [String] = []
+        for (index, node) in nodes.enumerated() {
+            guard index < 50 else {
+                skippedReasons.append("display cap (50 excerpts)")
+                continue
+            }
             guard let explanation = node.explanation,
-                  let context = model.relationQueryContexts[explanation.contextID],
-                  let source = node.target.flatMap({ capturedSource($0.path) })
-            else { return nil }
-            return makeReadingSetExcerpt(
+                  let context = model.relationQueryContexts[explanation.contextID]
+            else {
+                skippedReasons.append("relation evidence is unavailable")
+                continue
+            }
+            guard let source = node.target.flatMap({ capturedSource($0.path) })
+            else {
+                skippedReasons.append("recorded source is unreadable")
+                continue
+            }
+            guard let excerpt = makeReadingSetExcerpt(
                 role: readingSetRole(for: node),
                 node: node,
                 context: context,
@@ -1287,10 +1301,17 @@ final class RelationWindowController: NSViewController,
                 contentID: source.contentID,
                 revision: source.revision,
                 sourceKind: source.sourceKind
-            )
+            ) else {
+                skippedReasons.append("recorded excerpt could not be frozen")
+                continue
+            }
+            excerpts.append(excerpt)
         }
-        guard !excerpts.isEmpty else { return }
-        onOpenReadingSet?(model.root?.title ?? "Relations", excerpts)
+        onOpenReadingSet?(
+            model.root?.title ?? "Relations",
+            excerpts,
+            skippedReasons
+        )
     }
 
     private func readingSetNodes() -> [RelationTreeModel.Node] {

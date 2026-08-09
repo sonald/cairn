@@ -529,3 +529,28 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   退出 0，real rust-analyzer 仍因 `sandbox_apply: Operation not permitted` 诚实 skipped。最终 release runner
   为 control resolution 29.545 ms、fold resolution 25.172 ms、首次折叠 250.878 ms，4,400 logical /
   200 rendered，峰值 RSS 增量 4,653,056 bytes，`status=pass`。
+
+## M11D-4：producer 限额与 skipped 汇总
+
+结论：PASS（Relations 不再静默丢弃冻结失败项；50 段上限、逐 seed 跳过原因与集合顶部统计均按
+§3.20 收口，Trail 的 skipped 原因也进入同一呈现路径）。
+
+- Relations 现在严格遍历 producer 已发布的全部 location rows：前 50 个逐项尝试冻结，其后每个 seed
+  记录 `display cap (50 excerpts)`；缺失 relation evidence、captured source 不可读、excerpt 构造失败分别
+  使用稳定原因。即使全部 seed 都失败也打开空 Reading Set，不制造空 excerpt、不重排、不 dedup，顶部
+  仍诚实显示 `0 段 · frozen at capture · skipped N · …`。
+- skipped reasons 作为既有 `Tab` 的 package 内辅助值与 numeric scroll offset 同级保存；没有扩张
+  `TabContent` tagged union，也没有增加统计模型、错误枚举或 registry。Reader 按原因首次出现顺序聚合，
+  重复项显示 `×N`；AX value 同步暴露 skipped count。Trail M11D-3 已产生的逐 edge 原因也复用这一通道。
+- 定向测试覆盖 55 个 producer seeds 得到前 50 段和 5 个 cap reason、全部来源不可读时仍打开空集合、
+  三主题精确 subtitle/AX，以及 tab 生命周期保留 reasons；完整 `swift test --disable-sandbox` PASS。
+- 重建签名验收包 `.build/m11d-trail-ui-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11dtrail`；Info.plist、
+  strict codesign 与 designated requirement 均通过。真实非 Git fixture
+  `/private/tmp/m11-f5-ui-fixture-plain/src/cap.rs` 由 CUA 完成
+  `subject → Show Callers → Reading Set`：Relations 真实发布 `caller00…caller54` 共 55 项，新 tab 首段仍为
+  `caller00`，顶部精确显示
+  `50 段 · frozen at capture · skipped 5 · display cap (50 excerpts) ×5`；50 张卡片保持 producer 顺序。
+  fixture 的 real rust-analyzer 明确 unavailable，本验收只使用本地 Inferred producer，不冒充 provider 结论。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；Swift 全量、Exact/Diff/Reading/Projector/Fold self-test 均
+  退出 0。最终 release runner 为 control resolution 25.627 ms、fold resolution 24.892 ms、首次折叠
+  242.799 ms，4,400 logical / 200 rendered，峰值 RSS 增量 7,274,520 bytes，`status=pass`。

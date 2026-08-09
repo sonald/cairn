@@ -626,10 +626,15 @@ public final class AppModel {
 
     package func openReadingSet(
         title: String,
-        excerpts: [ReadingSetExcerpt]
+        excerpts: [ReadingSetExcerpt],
+        skippedReasons: [String] = []
     ) {
         replayTask?.cancel()
-        tabStrip.openReadingSet(title: title, excerpts: excerpts)
+        tabStrip.openReadingSet(
+            title: title,
+            excerpts: excerpts,
+            skippedReasons: skippedReasons
+        )
         selectReadingSet()
     }
 

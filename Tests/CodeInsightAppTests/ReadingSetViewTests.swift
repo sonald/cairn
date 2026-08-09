@@ -73,7 +73,14 @@ func readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() {
         defer: false
     )
     window.contentViewController = controller
-    controller.display(TabContent.readingSet(title: "empty", excerpts: []))
+    controller.display(
+        TabContent.readingSet(title: "empty", excerpts: []),
+        readingSetSkippedReasons: [
+            "recorded source is unreadable",
+            "recorded source is unreadable",
+            "relation evidence is unavailable",
+        ]
+    )
 
     for theme in ReaderSettings.Theme.allCases {
         var settings = ReaderSettings()
@@ -84,6 +91,8 @@ func readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() {
         #expect(state.visible)
         #expect(state.emptyVisible)
         #expect(state.cardCount == 0)
+        #expect(state.subtitle == "0 段 · frozen at capture · skipped 3 · "
+            + "recorded source is unreadable ×2; relation evidence is unavailable")
     }
     #expect(controller.displayedFile == nil)
     #expect(controller.selfTestPlaceholderText != "Select a file to read")

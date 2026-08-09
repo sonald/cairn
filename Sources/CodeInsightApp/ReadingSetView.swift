@@ -96,10 +96,25 @@ final class ReadingSetView: NSView {
         canExpand: Bool = true,
         canViewEvidence: Bool = true,
         openAvailability: [Bool]? = nil,
-        expandAvailability: [Bool]? = nil
+        expandAvailability: [Bool]? = nil,
+        skippedReasons: [String] = []
     ) {
         titleLabel.stringValue = "Reading Set · \(title)"
-        subtitleLabel.stringValue = "\(excerpts.count) 段 · frozen at capture"
+        var subtitle = "\(excerpts.count) 段 · frozen at capture"
+        if !skippedReasons.isEmpty {
+            var order: [String] = []
+            var counts: [String: Int] = [:]
+            for reason in skippedReasons {
+                if counts[reason] == nil { order.append(reason) }
+                counts[reason, default: 0] += 1
+            }
+            let reasons = order.map { reason in
+                let count = counts[reason, default: 0]
+                return count == 1 ? reason : "\(reason) ×\(count)"
+            }.joined(separator: "; ")
+            subtitle += " · skipped \(skippedReasons.count) · \(reasons)"
+        }
+        subtitleLabel.stringValue = subtitle
         cards.forEach {
             content.removeArrangedSubview($0)
             $0.removeFromSuperview()
@@ -130,7 +145,12 @@ final class ReadingSetView: NSView {
         }
         emptyLabel.isHidden = !excerpts.isEmpty
         setAccessibilityLabel("Reading Set \(title)")
-        setAccessibilityValue("\(excerpts.count) frozen excerpts")
+        let skippedValue = skippedReasons.isEmpty
+            ? ""
+            : ", skipped \(skippedReasons.count)"
+        setAccessibilityValue(
+            "\(excerpts.count) frozen excerpts\(skippedValue)"
+        )
     }
 
     func apply(settings: ReaderSettings) {

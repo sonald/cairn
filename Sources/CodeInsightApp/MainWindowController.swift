@@ -396,8 +396,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.onOpen = { [weak self] node in
             self?.open(node)
         }
-        relationController.onOpenReadingSet = { [weak model] title, excerpts in
-            model?.openReadingSet(title: title, excerpts: excerpts)
+        relationController.onOpenReadingSet = {
+            [weak model] title, excerpts, skippedReasons in
+            model?.openReadingSet(
+                title: title,
+                excerpts: excerpts,
+                skippedReasons: skippedReasons
+            )
         }
         readerController.onViewReadingSetEvidence = { [weak self, weak model] index in
             guard let self,
@@ -441,11 +446,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.onOpenReadingSet = { [weak self, weak model] id in
             guard let self, let model else { return }
             let frozen = model.trailReadingSet(to: id)
-            guard !frozen.excerpts.isEmpty else { return }
             captureActiveTabState()
             model.openReadingSet(
                 title: frozen.title,
-                excerpts: frozen.excerpts
+                excerpts: frozen.excerpts,
+                skippedReasons: frozen.skippedReasons
             )
             pendingTabRestore = model.tabStrip.activeTab
             render()
@@ -1634,7 +1639,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerContent,
             snapshotID: model.currentSnapshotID,
             source: selectedSource,
-            readingSetAvailability: readingSetAvailability
+            readingSetAvailability: readingSetAvailability,
+            readingSetSkippedReasons:
+                model.tabStrip.activeTab?.readingSetSkippedReasons ?? []
         )
         if readerFile == nil, model.tabStrip.activeTab != nil {
             readerController.restoreReadingSetScrollOffset(
@@ -4668,7 +4675,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         _ content: TabContent?,
         snapshotID: SnapshotID? = nil,
         source: DocumentLoader.ContentSource? = nil,
-        readingSetAvailability: [(open: Bool, expand: Bool)]? = nil
+        readingSetAvailability: [(open: Bool, expand: Bool)]? = nil,
+        readingSetSkippedReasons: [String] = []
     ) {
         switch content {
         case .file(let file):
@@ -4677,7 +4685,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             displayReadingSet(
                 title: title,
                 excerpts: excerpts,
-                actionAvailability: readingSetAvailability
+                actionAvailability: readingSetAvailability,
+                skippedReasons: readingSetSkippedReasons
             )
         case nil:
             display(URL?.none, snapshotID: snapshotID, source: source)
@@ -4687,14 +4696,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private func displayReadingSet(
         title: String,
         excerpts: [ReadingSetExcerpt],
-        actionAvailability: [(open: Bool, expand: Bool)]?
+        actionAvailability: [(open: Bool, expand: Bool)]?,
+        skippedReasons: [String]
     ) {
         loadViewIfNeeded()
         let key = title + excerpts.map {
             "\($0.contentID.bytes)-\($0.byteRange.lowerBound)-\($0.byteRange.upperBound)"
         }.joined(separator: "|") + (actionAvailability?.map {
             "\($0.open)-\($0.expand)"
-        }.joined(separator: "|") ?? "")
+        }.joined(separator: "|") ?? "") + skippedReasons.joined(separator: "|")
         guard key != displayedReadingSetKey else { return }
         findTask?.cancel()
         findWorker?.cancel()
@@ -4722,7 +4732,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             canExpand: onExpandReadingSetExcerpt != nil,
             canViewEvidence: onViewReadingSetEvidence != nil,
             openAvailability: actionAvailability?.map(\.open),
-            expandAvailability: actionAvailability?.map(\.expand)
+            expandAvailability: actionAvailability?.map(\.expand),
+            skippedReasons: skippedReasons
         )
     }
 
