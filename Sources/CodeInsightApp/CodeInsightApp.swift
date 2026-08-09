@@ -296,7 +296,15 @@ private struct CodeInsightApplication {
                 exactSelfTestProviderState: providerState
             )
         } else {
-            delegate = AppDelegate(startedAt: startedAt)
+            let runsSelfTest = arguments.contains {
+                $0.hasPrefix("--self-test") || $0.hasPrefix("--fold-perf")
+            }
+            delegate = AppDelegate(
+                startedAt: startedAt,
+                model: runsSelfTest
+                    ? AppModel()
+                    : AppModel(sessionURL: AppModel.defaultSessionURL)
+            )
         }
         app.delegate = delegate
         withExtendedLifetime(delegate) {
@@ -394,7 +402,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        windowController?.checkpointSessionSynchronously()
         model.exactCoordinator.shutdown()
+    }
+
+    func applicationDidResignActive(_ notification: Notification) {
+        windowController?.scheduleSessionCheckpointForApplicationLifecycle()
     }
 
     func runSelfTest() {

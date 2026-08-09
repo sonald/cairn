@@ -337,8 +337,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 sidebarController.highlightOutline(at: offset)
             }
         }
-        readerController.onReadingPositionChange = { [weak model] offset in
-            model?.tabStrip.updateActiveScroll(offset)
+        readerController.onReadingPositionChange = { [weak self] offset in
+            guard let self else { return }
+            model.tabStrip.updateActiveScroll(offset)
+            captureActiveTabState()
+            model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
         readerController.onOutlineFollowPositionChange = { [weak self] offset in
             guard let self, outlineFollowArbitration.suppressedBy == nil else {
@@ -357,9 +360,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let self else { return }
             sidebarController.highlightOutline(at: offset)
             model.tabStrip.updateActiveSelection(offset)
+            captureActiveTabState()
+            model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
-        readerController.onDocumentChange = { [weak model] file, document in
-            model?.tabStrip.setActiveDocument(document, for: file)
+        readerController.onDocumentChange = { [weak self] file, document in
+            guard let self else { return }
+            model.tabStrip.setActiveDocument(document, for: file)
+            captureActiveTabState()
+            model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+        }
+        readerController.onReadingSetScrollChange = { [weak self] offset in
+            guard let self else { return }
+            model.tabStrip.updateActiveReadingSetScroll(offset)
+            model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
         readerController.onShowRelation = { [weak self] offset, direction in
             self?.handleReaderRelation(offset: offset, direction: direction)
@@ -397,12 +410,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.open(node)
         }
         relationController.onOpenReadingSet = {
-            [weak model] title, excerpts, skippedReasons in
-            model?.openReadingSet(
+            [weak self] title, excerpts, skippedReasons in
+            guard let self else { return }
+            captureActiveTabState()
+            let evictsTab = model.tabStrip.tabs.count == model.tabStrip.maximumCount
+            if evictsTab { model.cancelPendingSessionCheckpoint() }
+            model.openReadingSet(
                 title: title,
                 excerpts: excerpts,
                 skippedReasons: skippedReasons
             )
+            pendingTabRestore = model.tabStrip.activeTab
+            render()
+            if evictsTab {
+                checkpointSessionSynchronously(allowsPendingTopology: true)
+            }
         }
         readerController.onViewReadingSetEvidence = { [weak self, weak model] index in
             guard let self,
@@ -418,9 +440,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                   excerpts.indices.contains(index)
             else { return }
             captureActiveTabState()
+            let mayEvictTab = model.tabStrip.tabs.count == model.tabStrip.maximumCount
+            if mayEvictTab { model.cancelPendingSessionCheckpoint() }
             model.openReadingSetExcerpt(excerpts[index])
             pendingTabRestore = model.tabStrip.activeTab
             render()
+            if mayEvictTab {
+                checkpointSessionSynchronously(allowsPendingTopology: true)
+            }
         }
         readerController.onExpandReadingSetExcerpt = { [weak self, weak model] index in
             guard let self, let model,
@@ -447,6 +474,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let self, let model else { return }
             let frozen = model.trailReadingSet(to: id)
             captureActiveTabState()
+            let evictsTab = model.tabStrip.tabs.count == model.tabStrip.maximumCount
+            if evictsTab { model.cancelPendingSessionCheckpoint() }
             model.openReadingSet(
                 title: frozen.title,
                 excerpts: frozen.excerpts,
@@ -454,6 +483,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
             pendingTabRestore = model.tabStrip.activeTab
             render()
+            if evictsTab {
+                checkpointSessionSynchronously(allowsPendingTopology: true)
+            }
         }
         profileButton.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
@@ -1288,6 +1320,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderItem.holdingPriority = .init(rawValue: 251)
         applyPanelSizes()
         DispatchQueue.main.async { [weak self] in self?.applyPanelSizes() }
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
     func applyReaderSettings(_ settings: ReaderSettings) {
@@ -1714,6 +1747,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderStatusBar()
         renderTrail()
         relationController.refreshInspector()
+        captureActiveTabState()
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
 
         guard let toolbar = window?.toolbar else { return }
         renderProfileItem(in: toolbar)
@@ -2328,9 +2363,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func openInNewTab(_ file: URL) {
         captureActiveTabState()
+        let opensNewTab = !model.tabStrip.tabs.contains {
+            $0.fileURL?.standardizedFileURL == file.standardizedFileURL
+        }
+        let evictsTab = opensNewTab
+            && model.tabStrip.tabs.count == model.tabStrip.maximumCount
+        if evictsTab { model.cancelPendingSessionCheckpoint() }
         model.openInNewTab(file)
         pendingTabRestore = model.tabStrip.activeTab
         render()
+        if evictsTab {
+            checkpointSessionSynchronously(allowsPendingTopology: true)
+        }
     }
 
     private func activateTab(_ index: Int) {
@@ -2346,9 +2390,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func closeTab(_ index: Int) {
         let closesActive = model.tabStrip.activeIndex == index
         if closesActive { captureActiveTabState() }
+        model.cancelPendingSessionCheckpoint()
         model.closeTab(index)
         pendingTabRestore = closesActive ? model.tabStrip.activeTab : nil
         render()
+        checkpointSessionSynchronously(allowsPendingTopology: true)
     }
 
     private func selectRelativeTab(_ delta: Int) {
@@ -2366,11 +2412,50 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             )
             return
         }
-        if let position = readerController.currentReadingPosition(
+        let scrollPosition = readerController.currentReadingPosition(
             fallbackByteOffset: model.selectedByteOffset
-        ) {
-            model.tabStrip.updateActiveScroll(position.byteOffset)
+        )
+        let selectionPosition = readerController.readingPosition(
+            at: model.tabStrip.activeTab?.selectionByteOffset
+                ?? model.selectedByteOffset
+        )
+        guard scrollPosition != nil || selectionPosition != nil else { return }
+        let scrollAnchor = scrollPosition.map {
+            SessionCodec.Anchor(
+                byteOffset: $0.byteOffset,
+                line: $0.line,
+                column: $0.column,
+                symbolAnchor: $0.symbolAnchor
+            )
         }
+        let selectionAnchor = selectionPosition.map {
+            SessionCodec.Anchor(
+                byteOffset: $0.byteOffset,
+                line: $0.line,
+                column: $0.column,
+                symbolAnchor: $0.symbolAnchor
+            )
+        }
+        model.tabStrip.updateActiveSessionAnchors(
+            contentID: scrollPosition?.contentID ?? selectionPosition?.contentID,
+            scrollAnchor: scrollAnchor,
+            selectionAnchor: selectionAnchor
+        )
+    }
+
+    func checkpointSessionSynchronously(
+        allowsPendingTopology: Bool = false
+    ) {
+        captureActiveTabState()
+        try? model.writeSessionCheckpoint(
+            panelPreset: panelPreset,
+            allowsPendingTopology: allowsPendingTopology
+        )
+    }
+
+    func scheduleSessionCheckpointForApplicationLifecycle() {
+        captureActiveTabState()
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
     private func currentJumpRecord() -> JumpRecord? {
@@ -3421,6 +3506,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     var onFocusNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
+    var onReadingSetScrollChange: ((Double) -> Void)?
     var onCopyPathLine: ((URL, UInt32) -> Void)?
     var onRevealInFinder: ((URL) -> Void)?
     var onOpenReadingSetExcerpt: ((Int) -> Void)?
@@ -3547,6 +3633,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         }
         readingSetView.onViewEvidence = { [weak self] in
             self?.onViewReadingSetEvidence?($0)
+        }
+        readingSetView.onScroll = { [weak self] offset in
+            self?.onReadingSetScrollChange?(offset)
         }
         if showsCompareControls {
             view = compareContainer(readerView: readerArea)
@@ -4741,6 +4830,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         displayedReadingSetKey == nil ? nil : readingSetView.scrollOffset
     }
 
+    func setReadingSetScrollOffsetForSelfTest(_ offset: Double) {
+        readingSetView.restoreScrollOffset(offset)
+    }
+
     var selfTestReadingSetState: (
         visible: Bool,
         title: String,
@@ -4934,13 +5027,29 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         column: UInt32,
         symbolAnchor: String?
     )? {
-        guard let file = displayedFile,
+        guard displayedFile != nil,
               let document = displayedDocument
         else { return nil }
         let byteOffset = min(
             textView.firstVisibleByteOffset() ?? fallbackByteOffset ?? 0,
             UInt32(clamping: document.bytes.count)
         )
+        return readingPosition(at: byteOffset)
+    }
+
+    func readingPosition(at byteOffset: UInt32?) -> (
+        file: URL,
+        contentID: ContentID,
+        byteOffset: UInt32,
+        line: UInt32,
+        column: UInt32,
+        symbolAnchor: String?
+    )? {
+        guard let byteOffset,
+              let file = displayedFile,
+              let document = displayedDocument,
+              document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil
+        else { return nil }
         guard let coordinate = document.lineTable.lineColumn(at: byteOffset) else {
             return nil
         }

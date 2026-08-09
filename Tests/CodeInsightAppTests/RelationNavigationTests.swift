@@ -810,6 +810,108 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
 
 @MainActor
 @Test
+func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throws {
+    let stateRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightSessionCheckpoint-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    let fixture = try await makeRelationNavigationFixture(sessionURL: sessionURL)
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+        try? FileManager.default.removeItem(at: stateRoot)
+        #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    let selection = byteOffset(of: "target();", in: fixture.mainSource)
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil(
+        "the main document is loaded",
+        {
+            fixture.controller.displayedReaderFile?.standardizedFileURL
+                == main.standardizedFileURL
+                && fixture.model.tabStrip.activeDocument != nil
+        }
+    ))
+    fixture.controller.setReadingPositionForSelfTest(
+        scrollByteOffset: 0,
+        selectionByteOffset: selection
+    )
+    await pumpRunLoop()
+    fixture.controller.checkpointSessionSynchronously()
+
+    var snapshot = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: fixture.model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(snapshot.projectRoot == fixture.root.path)
+    #expect(snapshot.revision == nil)
+    #expect(snapshot.activeTabOrdinal == 0)
+    #expect(snapshot.panelPreset == PanelPresetModel.reading.rawValue)
+    let fileTab: SessionCodec.FileTab? = if case .file(let tab) = snapshot.tabs.first {
+        tab
+    } else {
+        nil
+    }
+    #expect(fileTab?.path == "main.rs")
+    #expect(fileTab?.anchorContentID == ContentID.sha256(of: Array(fixture.mainSource.utf8)))
+    #expect(fileTab?.scrollAnchor?.byteOffset == 0)
+    #expect(fileTab?.selectionAnchor?.byteOffset == selection)
+    #expect(fileTab?.selectionAnchor?.byteOffset != fileTab?.scrollAnchor?.byteOffset)
+
+    fixture.model.openReadingSet(
+        title: "frozen target",
+        excerpts: [],
+        skippedReasons: ["recorded source is unreadable"]
+    )
+    fixture.model.tabStrip.updateActiveReadingSetScroll(37)
+    try fixture.model.writeSessionCheckpoint(panelPreset: .reading)
+    snapshot = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: fixture.model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    let readingSet: SessionCodec.ReadingSetTab? = if case .readingSet(let tab) = snapshot.tabs.last {
+        tab
+    } else {
+        nil
+    }
+    #expect(readingSet?.title == "frozen target")
+    #expect(readingSet?.scrollOffset == 37)
+    #expect(readingSet?.skippedReasons == ["recorded source is unreadable"])
+
+    fixture.controller.closeActiveTab()
+    snapshot = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: fixture.model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(snapshot.tabs.count == 1)
+    #expect(snapshot.activeTabOrdinal == 0)
+
+    fixture.controller.closeActiveTab()
+    for index in 0...fixture.model.tabStrip.maximumCount {
+        fixture.controller.openFileInNewTabForSelfTest(
+            fixture.root.appendingPathComponent("generated\(index).rs")
+        )
+    }
+    snapshot = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: fixture.model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(snapshot.tabs.count == fixture.model.tabStrip.maximumCount)
+    #expect(snapshot.activeTabOrdinal == fixture.model.tabStrip.maximumCount - 1)
+    #expect(snapshot.tabs.compactMap { tab -> String? in
+        guard case .file(let file) = tab else { return nil }
+        return file.path
+    } == (1...fixture.model.tabStrip.maximumCount).map { "generated\($0).rs" })
+}
+
+@MainActor
+@Test
 func relationSymbolSingleClicksDoNotNavigate() async throws {
     let fixture = try await makeRelationNavigationFixture()
     defer {
@@ -1388,7 +1490,9 @@ func semanticTrailShowsSnapshotBoundaryAndNavigationCause() throws {
 }
 
 @MainActor
-private func makeRelationNavigationFixture() async throws -> (
+private func makeRelationNavigationFixture(
+    sessionURL: URL? = nil
+) async throws -> (
     root: URL,
     mainSource: String,
     aSource: String,
@@ -1427,13 +1531,23 @@ private func makeRelationNavigationFixture() async throws -> (
     ] {
         try Data(source.utf8).write(to: root.appendingPathComponent(path))
     }
-    let model = AppModel(
-        indexService: RelationTestIndexService(),
-        exactCoordinator: ExactCoordinator(
-            providerFactory: { _ in throw CocoaError(.featureUnsupported) },
-            sandboxAvailable: { false }
-        )
+    let indexService = RelationTestIndexService()
+    let exactCoordinator = ExactCoordinator(
+        providerFactory: { _ in throw CocoaError(.featureUnsupported) },
+        sandboxAvailable: { false }
     )
+    let model = if let sessionURL {
+        AppModel(
+            sessionURL: sessionURL,
+            indexService: indexService,
+            exactCoordinator: exactCoordinator
+        )
+    } else {
+        AppModel(
+            indexService: indexService,
+            exactCoordinator: exactCoordinator
+        )
+    }
     let controller = MainWindowController(
         model: model,
         settings: ReaderSettings(),

@@ -122,6 +122,34 @@ func readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() {
     #expect(actions[3][2].2 == true)
 }
 
+@MainActor
+@Test
+func readingSetScrollPublishesItsNumericCheckpointOffset() async {
+    _ = NSApplication.shared
+    let controller = ReaderViewController()
+    var observedOffset: Double?
+    controller.onReadingSetScrollChange = { observedOffset = $0 }
+    controller.loadViewIfNeeded()
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 760, height: 280),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentViewController = controller
+    controller.display(.readingSet(
+        title: "spawn",
+        excerpts: prototypeReadingSetExcerpts()
+    ))
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    controller.setReadingSetScrollOffsetForSelfTest(80)
+    try? await Task.sleep(for: .milliseconds(20))
+
+    #expect(observedOffset == 80)
+    #expect(controller.currentReadingSetScrollOffset == 80)
+}
+
 private func prototypeReadingSetExcerpts() -> [ReadingSetExcerpt] {
     let specs: [(
         role: String,

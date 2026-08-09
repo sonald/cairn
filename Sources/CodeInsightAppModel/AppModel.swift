@@ -346,7 +346,12 @@ public final class AppModel {
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var compareSnapshotTask: Task<Void, Never>?
     @ObservationIgnored private var replayTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionCheckpointTask: Task<Void, Never>?
+    @ObservationIgnored private var sessionURL: URL?
     private var projectRoot: URL?
+    private var lastInstalledProjectRoot: URL?
+    private var lastInstalledRevision: String?
+    private var lastInstalledGeneration: UInt64?
     @ObservationIgnored private var snapshotDestinations: [
         SnapshotID: SnapshotDestination
     ] = [:]
@@ -390,6 +395,139 @@ public final class AppModel {
                 )
             }
         }
+    }
+
+    package convenience init(
+        sessionURL: URL,
+        indexService: any IndexService = ProjectIndexService(),
+        contextWindow: ContextWindowModel = ContextWindowModel(),
+        exactCoordinator: ExactCoordinator = ExactCoordinator(),
+        commitPicker: CommitPickerModel = CommitPickerModel(),
+        compare: CompareModel = CompareModel(),
+        navigationSink: @MainActor @escaping (URL, UInt32?) -> Void = { _, _ in }
+    ) {
+        self.init(
+            indexService: indexService,
+            contextWindow: contextWindow,
+            exactCoordinator: exactCoordinator,
+            commitPicker: commitPicker,
+            compare: compare,
+            navigationSink: navigationSink
+        )
+        self.sessionURL = sessionURL.standardizedFileURL
+    }
+
+    package static var defaultSessionURL: URL {
+        let bundleIdentifier = Bundle.main.bundleIdentifier ?? "dev.cairn.Cairn"
+        return FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in: .userDomainMask
+        )[0]
+            .appendingPathComponent("Cairn", isDirectory: true)
+            .appendingPathComponent(bundleIdentifier, isDirectory: true)
+            .appendingPathComponent("session.json")
+    }
+
+    package func scheduleSessionCheckpoint(panelPreset: PanelPresetModel) {
+        guard sessionURL != nil else { return }
+        sessionCheckpointTask?.cancel()
+        let checkpointGeneration = lastInstalledGeneration
+        sessionCheckpointTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled,
+                  let self,
+                  lastInstalledGeneration == checkpointGeneration
+            else { return }
+            try? writeSessionCheckpointNow(
+                panelPreset: panelPreset,
+                allowsPendingTopology: false
+            )
+            sessionCheckpointTask = nil
+        }
+    }
+
+    package func cancelPendingSessionCheckpoint() {
+        sessionCheckpointTask?.cancel()
+        sessionCheckpointTask = nil
+    }
+
+    package func writeSessionCheckpoint(
+        panelPreset: PanelPresetModel,
+        allowsPendingTopology: Bool = false
+    ) throws {
+        cancelPendingSessionCheckpoint()
+        try writeSessionCheckpointNow(
+            panelPreset: panelPreset,
+            allowsPendingTopology: allowsPendingTopology
+        )
+    }
+
+    private func writeSessionCheckpointNow(
+        panelPreset: PanelPresetModel,
+        allowsPendingTopology: Bool
+    ) throws {
+        guard let sessionURL,
+              let snapshot = makeSessionSnapshot(
+                  panelPreset: panelPreset,
+                  allowsPendingTopology: allowsPendingTopology
+              )
+        else { return }
+        let data = try SessionCodec.encode(
+            snapshot,
+            maximumTabCount: tabStrip.maximumCount,
+            dependencyAllowed: exactLocationIsInDependency
+        )
+        try FileManager.default.createDirectory(
+            at: sessionURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try data.write(to: sessionURL, options: .atomic)
+    }
+
+    private func makeSessionSnapshot(
+        panelPreset: PanelPresetModel,
+        allowsPendingTopology: Bool
+    ) -> SessionCodec.Snapshot? {
+        guard let root = projectRoot,
+              lastInstalledProjectRoot?.standardizedFileURL
+                == root.standardizedFileURL,
+              allowsPendingTopology || lastInstalledGeneration == generation
+        else { return nil }
+        var entries: [SessionCodec.Tab] = []
+        entries.reserveCapacity(tabStrip.tabs.count)
+        for tab in tabStrip.tabs {
+            switch tab.content {
+            case .file(let file):
+                let path: String
+                if let relative = Self.relativePath(of: file, under: root) {
+                    path = relative
+                } else if exactLocationIsInDependency(file.path) {
+                    path = file.path
+                } else {
+                    return nil
+                }
+                entries.append(.file(.init(
+                    path: path,
+                    anchorContentID: tab.anchorContentID,
+                    scrollAnchor: tab.scrollAnchor,
+                    selectionAnchor: tab.selectionAnchor
+                )))
+            case .readingSet(let title, let excerpts):
+                entries.append(.readingSet(.init(
+                    title: title,
+                    excerpts: excerpts,
+                    scrollOffset: tab.readingSetScrollOffset,
+                    skippedReasons: tab.readingSetSkippedReasons
+                )))
+            }
+        }
+        return SessionCodec.Snapshot(
+            projectRoot: root.path,
+            revision: lastInstalledRevision,
+            activeTabOrdinal: tabStrip.activeIndex,
+            panelPreset: panelPreset.rawValue,
+            tabs: entries
+        )
     }
 
     public func openProject(root: URL) {
@@ -1017,6 +1155,9 @@ public final class AppModel {
             assertionFailure("Illegal project state transition to ready")
             return
         }
+        lastInstalledRevision = nil
+        lastInstalledProjectRoot = projectRoot
+        lastInstalledGeneration = generation
         prepareExact(generation: generation)
     }
 
@@ -1159,7 +1300,12 @@ public final class AppModel {
             assertionFailure("Illegal project state transition to ready")
             return
         }
-        if phase == .fullReady { prepareExact(generation: generation) }
+        if phase == .fullReady {
+            lastInstalledRevision = currentRevision
+            lastInstalledProjectRoot = projectRoot
+            lastInstalledGeneration = generation
+            prepareExact(generation: generation)
+        }
     }
 
     private func prepareExact(generation: UInt64) {

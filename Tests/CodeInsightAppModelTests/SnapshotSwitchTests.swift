@@ -50,6 +50,78 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
 
 @MainActor
 @Test
+func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
+    let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
+    let stateRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightSnapshotSession-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: stateRoot)
+        #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    }
+    let initial = try ProjectIndexer().index(root: root)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: [
+            "C": TestSnapshot(label: "C", files: ["main.rs": "fn committed() {}"]),
+        ],
+        blockedCached: ["C"]
+    )
+    let model = AppModel(sessionURL: sessionURL, indexService: service)
+
+    model.openProject(root: root)
+    #expect(await testWaitUntil("initial session ready") {
+        model.snapshotPhase == .fullReady
+    })
+    model.openInNewTab(root.appendingPathComponent("main.rs"))
+    model.openInNewTab(root.appendingPathComponent("other.rs"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    let worktreeData = try Data(contentsOf: sessionURL)
+
+    model.scheduleSessionCheckpoint(panelPreset: .compare)
+    model.switchToCommit("C")
+    #expect(await testWaitUntil("commit first paint installed") {
+        model.snapshotPhase == .firstPaint && model.currentRevision == "C"
+    })
+    try await Task.sleep(for: .milliseconds(350))
+
+    #expect(try Data(contentsOf: sessionURL) == worktreeData)
+    try model.writeSessionCheckpoint(panelPreset: .compare)
+    #expect(try Data(contentsOf: sessionURL) == worktreeData)
+
+    model.closeTab(1)
+    try model.writeSessionCheckpoint(
+        panelPreset: .reading,
+        allowsPendingTopology: true
+    )
+    let pendingTopology = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(pendingTopology.revision == nil)
+    #expect(pendingTopology.tabs.count == 1)
+
+    await service.releaseCached("C")
+    #expect(await testWaitUntil("commit session fully installed") {
+        model.snapshotPhase == .fullReady && model.currentRevision == "C"
+    })
+    try model.writeSessionCheckpoint(panelPreset: .compare)
+    let committed = try SessionCodec.decode(
+        Data(contentsOf: sessionURL),
+        maximumTabCount: model.tabStrip.maximumCount,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(committed.revision == "C")
+    #expect(committed.panelPreset == PanelPresetModel.compare.rawValue)
+    #expect(committed.tabs.count == 1)
+}
+
+@MainActor
+@Test
 func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
     defer { try? FileManager.default.removeItem(at: root) }

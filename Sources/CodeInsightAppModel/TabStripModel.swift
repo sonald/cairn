@@ -1,3 +1,4 @@
+import CodeInsightCore
 import CodeInsightReaderCore
 import Foundation
 
@@ -10,6 +11,9 @@ public final class TabStripModel {
         public fileprivate(set) var selectionByteOffset: UInt32?
         package fileprivate(set) var readingSetScrollOffset: Double?
         package fileprivate(set) var readingSetSkippedReasons: [String]
+        package fileprivate(set) var anchorContentID: ContentID?
+        package fileprivate(set) var scrollAnchor: SessionCodec.Anchor?
+        package fileprivate(set) var selectionAnchor: SessionCodec.Anchor?
 
         package var title: String { content.title }
 
@@ -63,6 +67,9 @@ public final class TabStripModel {
             selectionByteOffset: selectionByteOffset,
             readingSetScrollOffset: nil,
             readingSetSkippedReasons: [],
+            anchorContentID: nil,
+            scrollAnchor: nil,
+            selectionAnchor: nil,
             lastActivated: activationClock
         )
         install(tab, inNewTab: inNewTab)
@@ -80,6 +87,9 @@ public final class TabStripModel {
             selectionByteOffset: nil,
             readingSetScrollOffset: nil,
             readingSetSkippedReasons: skippedReasons,
+            anchorContentID: nil,
+            scrollAnchor: nil,
+            selectionAnchor: nil,
             lastActivated: activationClock
         )
         install(tab, inNewTab: true)
@@ -166,6 +176,21 @@ public final class TabStripModel {
               case .readingSet = tabs[activeIndex].content
         else { return }
         tabs[activeIndex].readingSetScrollOffset = offset
+    }
+
+    package func updateActiveSessionAnchors(
+        contentID: ContentID?,
+        scrollAnchor: SessionCodec.Anchor?,
+        selectionAnchor: SessionCodec.Anchor?
+    ) {
+        guard let activeIndex,
+              case .file = tabs[activeIndex].content
+        else { return }
+        tabs[activeIndex].anchorContentID = contentID
+        tabs[activeIndex].scrollAnchor = scrollAnchor
+        tabs[activeIndex].selectionAnchor = selectionAnchor
+        tabs[activeIndex].scrollByteOffset = scrollAnchor?.byteOffset
+        tabs[activeIndex].selectionByteOffset = selectionAnchor?.byteOffset
     }
 
     package func updateActiveReadingSetExcerpt(

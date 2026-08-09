@@ -597,3 +597,30 @@ checkpoint/恢复编排留给下一 R3 足切片）。
   Application Support。完整 `swift test --disable-sandbox` 与 `CODEX_SANDBOX=1 bash scripts/ci.sh` 均
   PASS。最终 release runner 为 control resolution 27.585 ms、fold resolution 26.588 ms、首次折叠
   286.057 ms，峰值 RSS 增量 13,926,424 bytes，`status=pass`。
+
+## R3-3：原子会话 checkpoint
+
+结论：PASS（双锚点/Reading Set scroll 捕获、去抖写入、close/LRU/退出同步收尾与 snapshot
+代际门均已接通；本切片只写可信 v1，恢复编排留给下一 R3 足切片）。
+
+- 正常 app 使用 package-private session URL 注入，落在
+  `Application Support/Cairn/<bundle identifier>/session.json`；测试与所有 `--self-test*` 路径继续使用无
+  session 的 `AppModel()`，定向测试只注入临时 URL，结束删除并断言文件不存在。bundle identifier 分层也使
+  后续签名验收包不污染正式 Cairn 会话。磁盘写使用 `Data.write(..., .atomic)`，未引入 UserDefaults、store、
+  registry 或公开 session API。
+- file tab 写盘前从 active document 分别构造 scroll 与 selection anchor，共用真实 document contentID；
+  selection 不再借用 `currentJumpRecord()`。Reading Set 的 `NSClipView` bounds change 单独发布 numeric
+  `scrollOffset`，不生成 file byte anchor。失活 tab 保留已捕获 anchors，退出不遍历或重载其文档。
+- open / activate / scroll / panel preset / inactive 使用 250 ms generation-keyed debounce；close 与 LRU 先取消
+  pending task，变更 topology 后同步原子写，`applicationWillTerminate` 也先捕获 active tab、取消 debounce、
+  同步写完再 shutdown。普通切换未到 `fullReady` 时不会覆盖旧文件；close/LRU 是唯一允许在 pending switch
+  中以 last-installed root/revision 写 topology 的路径，因此既不写半新的 target，也不会让已删 tab 复活。
+- AppKit 定向测试真实加载文档后得到互不相同的 `scrollAnchor.byteOffset = 0` 与
+  `selectionAnchor.byteOffset = target()`，并从磁盘解码核对 contentID；同例验证 Reading Set title/scroll/
+  skipped payload、close 后立即只剩旧 tab，以及第 11 个新 tab 触发 LRU 后磁盘立即为精确 10 项且 ordinal
+  正确。另一个受控 snapshot 测试在 commit firstPaint/cached 阶段同时验证 debounce 与退出式同步写均保持
+  worktree 文件不变，pending close 只更新 worktree topology，直到 `fullReady` 后才允许记录 commit revision。
+- `swift test --disable-sandbox` 全量 PASS；`CODEX_SANDBOX=1 bash scripts/ci.sh` 全矩阵 PASS，real
+  rust-analyzer 继续因 `sandbox_apply: Operation not permitted` 明确 skipped。最终 release runner 为 control
+  resolution 26.447 ms、fold resolution 27.125 ms、首次折叠 275.476 ms，4,400 logical / 200 rendered，
+  峰值 RSS 增量 6,340,632 bytes，`status=pass`。
