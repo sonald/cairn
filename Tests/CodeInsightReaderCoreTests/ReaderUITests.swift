@@ -353,6 +353,109 @@ func foldAttachmentProviderSpikeCreatesUpdatesClicksAndExposesAX() throws {
 
 @MainActor
 @Test
+func copyingASelectAllAcrossFoldsWritesTheCompleteSource() throws {
+    let source = """
+        fn first() {
+            let one = 1;
+            let two = 2;
+        }
+
+        fn second() {
+            let three = 3;
+            let four = 4;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/fold-copy-all.rs"))
+        .document
+    let (reader, _, window) = renderOffscreen(document)
+    for fold in document.foldRegions where fold.kind == .declaration {
+        #expect(reader.toggleFold(id: fold.id))
+    }
+    #expect(reader.view.string.contains("\u{FFFC}"))
+    reader.view.selectAll(nil)
+    let selectedSource = reader.sourceText(
+        forDisplaySelection: reader.view.selectedRange()
+    )
+    #expect(selectedSource == source)
+    #expect(selectedSource?.contains("\u{FFFC}") == false)
+
+    let pasteboard = NSPasteboard.withUniqueName()
+    if preparePasteboardForCopyTest(pasteboard) {
+        #expect(reader.view.writeSelection(to: pasteboard, type: .string))
+        let copied = pasteboard.string(forType: .string)
+        #expect(copied == source)
+        #expect(copied?.contains("\u{FFFC}") == false)
+    } else {
+        print("M11_COPY_PASTEBOARD unavailable; source mapping verified")
+    }
+    pasteboard.releaseGlobally()
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func copyingAPartialSelectionExpandsTheCrossedFoldToSourceBytes() throws {
+    let source = """
+        fn before() {
+            let zero = 0;
+        }
+
+        fn folded() {
+            let one = 1;
+            let two = 2;
+        }
+
+        fn after() {
+            let three = 3;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(file: URL(fileURLWithPath: "/fold-copy-partial.rs"))
+        .document
+    let foldedHeaderOffset = (source as NSString).range(of: "fn folded").location
+    let fold = try #require(document.foldRegions.first {
+        $0.kind == .declaration
+            && Int($0.headerRange.lowerBound) == foldedHeaderOffset
+    })
+    let (reader, _, window) = renderOffscreen(document)
+    #expect(reader.toggleFold(id: fold.id))
+
+    let display = reader.view.string as NSString
+    let displayStart = display.range(of: "fn folded").location + 3
+    let displayEnd = display.range(of: "fn after").location + 2
+    let selection = NSRange(
+        location: displayStart,
+        length: displayEnd - displayStart
+    )
+    reader.view.setSelectedRange(selection)
+    let sourceStart = foldedHeaderOffset + 3
+    let sourceEnd = (source as NSString).range(of: "fn after").location + 2
+    let expected = (source as NSString).substring(with: NSRange(
+        location: sourceStart,
+        length: sourceEnd - sourceStart
+    ))
+    let selectedSource = reader.sourceText(forDisplaySelection: selection)
+    #expect(selectedSource == expected)
+    #expect(selectedSource?.contains("\u{FFFC}") == false)
+
+    let pasteboard = NSPasteboard.withUniqueName()
+    if preparePasteboardForCopyTest(pasteboard) {
+        #expect(reader.view.writeSelection(to: pasteboard, type: .string))
+        let copied = pasteboard.string(forType: .string)
+        #expect(copied == expected)
+        #expect(copied?.contains("\u{FFFC}") == false)
+    } else {
+        print("M11_COPY_PASTEBOARD unavailable; source mapping verified")
+    }
+    pasteboard.releaseGlobally()
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
 func foldReducerRendersOnlyMaximalRegionsAndScopesOverridesByFileAndContent() throws {
     let source = """
         mod outer {
@@ -1022,6 +1125,13 @@ private func renderOffscreen(
     scrollView.verticalRulerView?.needsDisplay = true
     window.displayIfNeeded()
     return (reader, scrollView, window)
+}
+
+private func preparePasteboardForCopyTest(_ pasteboard: NSPasteboard) -> Bool {
+    pasteboard.clearContents()
+    guard pasteboard.writeObjects(["probe" as NSString]) else { return false }
+    pasteboard.declareTypes([.string], owner: nil)
+    return true
 }
 
 @MainActor

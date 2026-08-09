@@ -177,3 +177,21 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
 - attachment provider 的 AppKit AX label 实测为 button role 且包含
   `Collapsed, hides … lines, contains …`；桌面 CUA 对 NSTextView 子附件只扁平显示单个
   `U+FFFC`，因此以真实 provider AX 对象断言证明可读语义，不把 CUA 的树扁平化冒充缺陷。
+
+## F3：折叠下的复制与选择
+
+结论：PASS（无可见 UI 变化；复制结果始终来自完整源码空间）。
+
+- `ClickTextView.writeSelection(to:type:)` 对 plain text 走单一 `sourceCopyHandler`；`copy(_:)`
+  作为动作兜底，只向 general pasteboard 写 plain source text。没有复制 attributed storage，因而
+  不会把 attachment 或其 `U+FFFC` 序列化出去。
+- 选区只经 F1 的同一 `DisplayMap.sourceRanges(forDisplay:)` 回到 source `ByteRange`，再从当前
+  `ReaderDocument.bytes` 顺序拼接；没有第二套位置换算或额外文本副本。
+- 红测先证明原生路径在两种场景都不能提供所需结果；修后全折叠 `selectAll` 得到逐字节完整源码，
+  跨一个折叠区的部分选区得到对应 source 子串，两者均明确断言不含 `U+FFFC`。
+- Codex 文件沙箱内 macOS pasteboard 服务不可达时，两条测试仍验证完整 source 映射并打印
+  `M11_COPY_PASTEBOARD unavailable`；同一测试在宿主 AppKit/pasteboard 环境复跑时没有走该分支，
+  `writeSelection`、pasteboard 内容与 `U+FFFC` 断言全部 PASS。
+- ReaderUI 33 / 33 PASS；`CODEX_SANDBOX=1 bash scripts/ci.sh` PASS，包含完整测试、自检、
+  坐标门禁与 release fold runner。最终 runner 为 366.381 ms、RSS 增量 7,421,952 bytes，
+  `status=pass`。

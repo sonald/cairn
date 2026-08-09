@@ -498,6 +498,9 @@ public final class ReaderTextView {
             self?.activate(atCharacterIndex: index)
             self?.onClick?(index, modifiers)
         }
+        textView.sourceCopyHandler = { [weak self] range in
+            self?.sourceText(forDisplaySelection: range)
+        }
         textView.contextMenuHandler = { [weak self] index in
             self?.onContextMenu?(index)
         }
@@ -1535,6 +1538,29 @@ public final class ReaderTextView {
         return offset
     }
 
+    func sourceText(forDisplaySelection range: NSRange) -> String? {
+        guard range.length > 0,
+              let document = displayedDocument,
+              let ranges = displayMap?.sourceRanges(forDisplay: range)
+        else { return nil }
+        var source = ""
+        source.reserveCapacity(ranges.reduce(0) {
+            $0 + Int($1.upperBound - $1.lowerBound)
+        })
+        for range in ranges {
+            guard Int(range.upperBound) <= document.bytes.count else {
+                return nil
+            }
+            source += String(
+                decoding: document.bytes[
+                    Int(range.lowerBound)..<Int(range.upperBound)
+                ],
+                as: UTF8.self
+            )
+        }
+        return source
+    }
+
     private func activate(atCharacterIndex index: Int) {
         if case .placeholder(let foldID) = displayMap?.sourcePosition(
             ofDisplay: index
@@ -2456,6 +2482,7 @@ private final class ReaderRulerView: NSRulerView {
 @MainActor
 private final class ClickTextView: NSTextView {
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
+    var sourceCopyHandler: ((NSRange) -> String?)?
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
@@ -2485,6 +2512,28 @@ private final class ClickTextView: NSTextView {
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
         clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+    }
+
+    override func writeSelection(
+        to pasteboard: NSPasteboard,
+        type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard type == .string,
+              let source = sourceCopyHandler?(selectedRange())
+        else {
+            return super.writeSelection(to: pasteboard, type: type)
+        }
+        return pasteboard.setString(source, forType: .string)
+    }
+
+    override func copy(_ sender: Any?) {
+        guard let source = sourceCopyHandler?(selectedRange()) else {
+            super.copy(sender)
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([source as NSString])
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
