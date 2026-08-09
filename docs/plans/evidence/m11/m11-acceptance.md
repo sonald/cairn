@@ -390,3 +390,36 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   resolution 25.926 ms、首次折叠 244.168 ms（门槛 ≤ 400 ms），4,400 logical / 200 rendered，峰值 RSS
   增量 5,406,720 bytes（门槛 ≤ 80 MiB），`status=pass`。真实 rust-analyzer 仍因系统 sandbox 限制诚实
   skipped；C1 文件 / 菜单 / 当前文档 / 本地项目索引行为不以 fake provider 代替产品结论。
+
+## R1：常驻作用域头
+
+结论：PASS（关联规则、caret 边界、零占位、原型几何、三主题与真实 AppKit 回放均已收口）。
+
+- 作用域层级只从现有 `ReaderDocument.foldRegions` 与 `outlineFacets` 派生：每个 fold 仍使用 F5 已有的
+  “最小包含 `bodyRange` 且 kind 兼容”关联，`declaration ↔ fn/method`、
+  `container/cfgTest ↔ struct/enum/trait/impl/mod`；未增加 header parser、scope model 或第三套结构真值。
+  `.block` / `.comment` / `.attributes` 等无兼容 facet 的层不会进入作用域头，`cfgTest ↔ mod` 有独立断言。
+- 包围层按 outline depth 从外到内稳定排序；最多两层，三层以上严格保留最外与最内、用 `▸` 连接并省略
+  中间层。真实 `main.rs` 的三层 `mod renderer / impl Frame / method area` 因而显示
+  `mod renderer ▸ fn area  main.rs:8`；`.method` 使用源码关键词 `fn`，kind 走 syntax keyword 色、name 走
+  foreground、location 走 secondary 色。
+- 真实键盘回放首次发现 `⌘L` 跳行把 caret 放在签名行的行首缩进，而 tree-sitter facet 从第一个语法 token
+  开始；仅做半开 byte range 判断会漏掉当前方法。边界现按 facet 首尾逻辑行补足：行 8 的缩进、行 12 的
+  收尾 `}` 都保持 `fn area`；该判断不解析 header 文本，内部行仍沿用 byte range。`LineTable.line` 已是
+  1-based，location 文案不再错误加一。
+- AppKit 作用域条位于 tab 与 Reader 之间，固定 26pt；内容 alignment rect 严格为左内边距 13pt、相邻
+  span 8pt，11pt monospaced，chrome surface + 1pt divider。Light / Dark / SI Classic 三个真实截图均与 P0
+  原型一致；AX 暴露 `Current scope: mod renderer, fn area, main.rs line 8`。主题重绘保留 source caret，
+  不依赖 TextKit 重装 attributed storage 后可能漂移的 display selection。
+- 无包围 declaration 时 `scopeHeader.isHidden = true`，`NSStackView` 回收完整 26pt 给 Reader，不显示空文案、
+  不保留 AX 元素。真实行 21 顶层空白回放确认 scope AX 节点从树中移除；切文件与语法加载期间先隐藏，
+  不闪现上一文件的 scope。
+- 3 条新增定向测试覆盖签名/收尾边界、`cfgTest`、不兼容 fold、无作用域、三层压缩、26pt 高度、13/8pt
+  AppKit alignment geometry、monospaced、AX、三主题重绘及隐藏后 Reader 回收 26pt。完整
+  `swift test --disable-sandbox` 与 `CODEX_SANDBOX=1 bash scripts/ci.sh` 均 PASS；最终 release runner 为
+  control resolution 25.535 ms、fold resolution 24.927 ms、首次折叠 242.516 ms（门槛 ≤ 400 ms），
+  4,400 logical / 200 rendered，峰值 RSS 增量 10,878,976 bytes（门槛 ≤ 80 MiB），`status=pass`。
+- 最终签名验收包为 `.build/m11-r1-ui-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11r1`；Info.plist、
+  strict codesign 与 designated requirement 均通过。fixture 为
+  `/private/tmp/m11-f5-ui-fixture-plain/src/main.rs`；R1 是本地 Reader/Fold/outline 行为，不依赖 provider，
+  未以 fake provider 代替任何产品结论。

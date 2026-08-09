@@ -476,6 +476,7 @@ public final class ReaderTextView {
     public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     public var onContextMenu: ((Int) -> Void)?
     public var onViewportChange: (() -> Void)?
+    package var onCaretChange: ((UInt32) -> Void)?
     private let backingTextStorage: NSTextStorage
     private var displayMap: DisplayMap?
     private var displayedDocument: ReaderDocument?
@@ -1031,6 +1032,19 @@ public final class ReaderTextView {
         return true
     }
 
+    package func scopeHeaderFacets(at byteOffset: UInt32) -> [OutlineFacet] {
+        guard let document = displayedDocument else { return [] }
+        let facets = Self.enclosingAssociatedFacets(
+            at: byteOffset,
+            in: document
+        )
+        guard facets.count > 2,
+              let first = facets.first,
+              let last = facets.last
+        else { return facets }
+        return [first, last]
+    }
+
     @discardableResult
     package func exitFocusMode() -> Bool {
         guard let focusState else { return false }
@@ -1195,6 +1209,62 @@ public final class ReaderTextView {
                 < ($1.bodyRange.upperBound - $1.bodyRange.lowerBound)
         }) else { return nil }
         return (facet, region)
+    }
+
+    private static func enclosingAssociatedFacets(
+        at byteOffset: UInt32,
+        in document: ReaderDocument
+    ) -> [OutlineFacet] {
+        var result: [OutlineFacet] = []
+        for region in document.foldRegions {
+            guard let facet = associatedFacet(
+                for: region,
+                in: document.outlineFacets
+            ), facetContainsCaret(
+                byteOffset,
+                facet: facet,
+                in: document
+            ),
+                !result.contains(facet)
+            else { continue }
+            result.append(facet)
+        }
+        return result.sorted { lhs, rhs in
+            if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
+            if lhs.range.lowerBound != rhs.range.lowerBound {
+                return lhs.range.lowerBound < rhs.range.lowerBound
+            }
+            if lhs.range.upperBound != rhs.range.upperBound {
+                return lhs.range.upperBound > rhs.range.upperBound
+            }
+            if lhs.kind.rawValue != rhs.kind.rawValue {
+                return lhs.kind.rawValue < rhs.kind.rawValue
+            }
+            return lhs.name < rhs.name
+        }
+    }
+
+    private static func facetContainsCaret(
+        _ byteOffset: UInt32,
+        facet: OutlineFacet,
+        in document: ReaderDocument
+    ) -> Bool {
+        if facet.range.lowerBound <= byteOffset,
+           byteOffset < facet.range.upperBound
+        {
+            return true
+        }
+        guard let caretLine = document.lineTable.lineColumn(at: byteOffset)?.line,
+              let firstLine = document.lineTable.lineColumn(
+                  at: facet.range.lowerBound
+              )?.line
+        else { return false }
+        let finalByte = facet.range.upperBound > facet.range.lowerBound
+            ? facet.range.upperBound - 1
+            : facet.range.lowerBound
+        guard let lastLine = document.lineTable.lineColumn(at: finalByte)?.line
+        else { return false }
+        return firstLine <= caretLine && caretLine <= lastLine
     }
 
     private static func associatedFacet(
@@ -2220,6 +2290,7 @@ public final class ReaderTextView {
     }
 
     private func updateCurrentLine(byteOffset: UInt32) {
+        onCaretChange?(byteOffset)
         guard let line = displayedDocument?.lineTable.lineColumn(at: byteOffset)?.line
         else {
             updateCurrentLine(line: nil)

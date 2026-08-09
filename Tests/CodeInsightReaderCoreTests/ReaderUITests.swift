@@ -673,6 +673,83 @@ func focusSelectsTheSmallestFacetAtItsHeaderAndClosingBrace() throws {
 
 @MainActor
 @Test
+func scopeHeaderUsesCompatibleFacetsAtSignaturesClosersAndCfgTest() {
+    let (document, _) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/scope.rs"))
+
+    #expect(reader.scopeHeaderFacets(at: 20).map(\.name) == ["outer", "target"])
+    #expect(reader.scopeHeaderFacets(at: 79).map(\.name) == ["outer", "target"])
+    #expect(reader.scopeHeaderFacets(at: 295).map(\.name) == ["tests"])
+    #expect(reader.scopeHeaderFacets(at: 260).isEmpty)
+    #expect(reader.scopeHeaderFacets(at: 370).isEmpty)
+}
+
+@MainActor
+@Test
+func scopeHeaderKeepsOuterAndInnerWhenThreeAssociatedLevelsContainCaret() {
+    let bytes = Array(String(repeating: "x", count: 220).utf8)
+    func facet(
+        _ kind: OutlineKind,
+        _ name: String,
+        _ range: Range<UInt32>,
+        _ depth: Int
+    ) -> OutlineFacet {
+        OutlineFacet(
+            kind: kind,
+            name: name,
+            range: ByteRange(lowerBound: range.lowerBound, upperBound: range.upperBound),
+            nameRange: ByteRange(
+                lowerBound: range.lowerBound,
+                upperBound: range.lowerBound + 1
+            ),
+            depth: depth
+        )
+    }
+    func region(
+        _ id: UInt32,
+        _ kind: FoldKind,
+        _ body: Range<UInt32>,
+        _ depth: Int
+    ) -> FoldRegion {
+        FoldRegion(
+            id: FoldID(rawValue: id),
+            kind: kind,
+            headerRange: ByteRange(
+                lowerBound: body.lowerBound - 1,
+                upperBound: body.lowerBound
+            ),
+            bodyRange: ByteRange(lowerBound: body.lowerBound, upperBound: body.upperBound),
+            outlineDepth: depth,
+            summary: FoldSummary(hiddenLineCount: 3)
+        )
+    }
+    let document = ReaderDocument(
+        bytes: bytes,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: [],
+        outlineFacets: [
+            facet(.mod, "outer", 0..<220, 0),
+            facet(.impl, "Runtime", 10..<210, 1),
+            facet(.method, "spawn_on", 20..<200, 2),
+        ],
+        foldRegions: [
+            region(0, .container, 5..<215, 0),
+            region(1, .container, 15..<205, 1),
+            region(2, .declaration, 25..<195, 2),
+        ]
+    )
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/nested.rs"))
+
+    let scopes = reader.scopeHeaderFacets(at: 50)
+    #expect(scopes.map(\.kind) == [.mod, .method])
+    #expect(scopes.map(\.name) == ["outer", "spawn_on"])
+}
+
+@MainActor
+@Test
 func focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() throws {
     let (document, regions) = readingHeightLevelDocument()
     let reader = ReaderTextView()

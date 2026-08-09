@@ -3275,6 +3275,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private let tabStripView = TabStripView()
     private let readerHeader = NSView()
     private let readerHeaderDivider = NSView()
+    private let scopeHeader = NSView()
+    private let scopeHeaderContent = NSStackView()
+    private let scopeHeaderDivider = NSView()
     private let fileNameLabel = NSTextField(labelWithString: "")
     private let readingHeightControl = ReadingHeightControl()
     private let readingHeightShortcutLabel = NSTextField(
@@ -3306,6 +3309,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
     private var emptyStateView: EmptyStateView?
+    private var readerTheme = ReaderTheme(settings: ReaderSettings())
+    private var scopeHeaderByteOffset: UInt32?
     nonisolated(unsafe) private var liveScrollObserver: NSObjectProtocol?
 
     init(showsCompareControls: Bool = false) {
@@ -3363,8 +3368,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         } else {
             tabStripView.isHidden = true
             configureReaderHeader()
+            configureScopeHeader()
             configureFindBar()
-            tabAndReaderArea.setViews([tabStripView, readerArea], in: .leading)
+            tabAndReaderArea.setViews(
+                [tabStripView, scopeHeader, readerArea],
+                in: .leading
+            )
             tabAndReaderArea.orientation = .vertical
             tabAndReaderArea.alignment = .width
             tabAndReaderArea.distribution = .fill
@@ -3401,6 +3410,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         }
         textView.onViewportChange = { [weak self] in
             self?.scheduleReadingPositionChange()
+        }
+        textView.onCaretChange = { [weak self] byteOffset in
+            self?.renderScopeHeader(at: byteOffset)
         }
 
         let relationMenu = NSMenu(title: "Relations")
@@ -3492,6 +3504,130 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         readerHeader.setAccessibilityElement(false)
         fileNameLabel.setAccessibilityLabel("Current file")
         applyReaderHeaderTheme(ReaderSettings())
+    }
+
+    private func configureScopeHeader() {
+        scopeHeader.wantsLayer = true
+        scopeHeader.translatesAutoresizingMaskIntoConstraints = false
+        scopeHeader.isHidden = true
+        scopeHeaderContent.orientation = .horizontal
+        scopeHeaderContent.alignment = .centerY
+        scopeHeaderContent.spacing = 8
+        scopeHeaderContent.translatesAutoresizingMaskIntoConstraints = false
+        scopeHeaderDivider.wantsLayer = true
+        scopeHeaderDivider.translatesAutoresizingMaskIntoConstraints = false
+        scopeHeader.addSubview(scopeHeaderContent)
+        scopeHeader.addSubview(scopeHeaderDivider)
+        NSLayoutConstraint.activate([
+            scopeHeader.heightAnchor.constraint(equalToConstant: 26),
+            scopeHeaderContent.leadingAnchor.constraint(
+                equalTo: scopeHeader.leadingAnchor,
+                constant: 13
+            ),
+            scopeHeaderContent.trailingAnchor.constraint(
+                lessThanOrEqualTo: scopeHeader.trailingAnchor,
+                constant: -13
+            ),
+            scopeHeaderContent.centerYAnchor.constraint(
+                equalTo: scopeHeader.centerYAnchor,
+                constant: -0.5
+            ),
+            scopeHeaderDivider.leadingAnchor.constraint(
+                equalTo: scopeHeader.leadingAnchor
+            ),
+            scopeHeaderDivider.trailingAnchor.constraint(
+                equalTo: scopeHeader.trailingAnchor
+            ),
+            scopeHeaderDivider.bottomAnchor.constraint(
+                equalTo: scopeHeader.bottomAnchor
+            ),
+            scopeHeaderDivider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        scopeHeader.setAccessibilityElement(true)
+        scopeHeader.setAccessibilityLabel("Current scope")
+        applyScopeHeaderTheme()
+    }
+
+    private func renderScopeHeader(at byteOffset: UInt32?) {
+        scopeHeaderByteOffset = byteOffset
+        guard !showsCompareControls,
+              let byteOffset,
+              let file = displayedFile,
+              let document = displayedDocument
+        else {
+            hideScopeHeader()
+            return
+        }
+        let facets = textView.scopeHeaderFacets(at: byteOffset)
+        guard !facets.isEmpty,
+              let line = document.lineTable.lineColumn(at: byteOffset)?.line
+        else {
+            hideScopeHeader()
+            return
+        }
+
+        for arranged in scopeHeaderContent.arrangedSubviews {
+            scopeHeaderContent.removeArrangedSubview(arranged)
+            arranged.removeFromSuperview()
+        }
+        for (index, facet) in facets.enumerated() {
+            if index > 0 {
+                scopeHeaderContent.addArrangedSubview(scopeLabel(
+                    "▸",
+                    color: readerTheme.chromeTertiaryColor
+                ))
+            }
+            scopeHeaderContent.addArrangedSubview(scopeLabel(
+                Self.scopeKindTitle(facet.kind),
+                color: readerTheme.color(for: .keyword)
+            ))
+            scopeHeaderContent.addArrangedSubview(scopeLabel(
+                facet.name,
+                color: readerTheme.foregroundColor
+            ))
+        }
+        let location = "\(file.lastPathComponent):\(line)"
+        scopeHeaderContent.addArrangedSubview(scopeLabel(
+            location,
+            color: readerTheme.chromeSecondaryColor
+        ))
+        scopeHeader.isHidden = false
+        let scopes = facets.map {
+            "\(Self.scopeKindTitle($0.kind)) \($0.name)"
+        }.joined(separator: ", ")
+        scopeHeader.setAccessibilityLabel(
+            "Current scope: \(scopes), \(file.lastPathComponent) line \(line)"
+        )
+    }
+
+    private func hideScopeHeader() {
+        scopeHeader.isHidden = true
+        scopeHeader.setAccessibilityLabel("Current scope")
+    }
+
+    private func scopeLabel(_ title: String, color: NSColor) -> NSTextField {
+        let label = NSTextField(labelWithString: title)
+        label.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        label.textColor = color
+        label.lineBreakMode = .byTruncatingMiddle
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setAccessibilityElement(false)
+        return label
+    }
+
+    private static func scopeKindTitle(_ kind: OutlineKind) -> String {
+        switch kind {
+        case .method: "fn"
+        case .typeAlias: "type"
+        default: kind.rawValue
+        }
+    }
+
+    private func applyScopeHeaderTheme() {
+        scopeHeader.layer?.backgroundColor = readerTheme.chromeColor.cgColor
+        scopeHeaderDivider.layer?.backgroundColor =
+            readerTheme.chromeDividerColor.cgColor
+        renderScopeHeader(at: scopeHeaderByteOffset)
     }
 
     private func configureFindBar() {
@@ -3620,12 +3756,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     }
 
     private func applyReaderHeaderTheme(_ settings: ReaderSettings) {
-        let theme = ReaderTheme(settings: settings)
-        readerHeader.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
-        readerHeaderDivider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
-        fileNameLabel.textColor = theme.foregroundColor
-        readingHeightShortcutLabel.textColor = theme.chromeTertiaryColor
+        readerTheme = ReaderTheme(settings: settings)
+        readerHeader.layer?.backgroundColor = readerTheme.chromeHeaderColor.cgColor
+        readerHeaderDivider.layer?.backgroundColor =
+            readerTheme.chromeDividerColor.cgColor
+        fileNameLabel.textColor = readerTheme.foregroundColor
+        readingHeightShortcutLabel.textColor = readerTheme.chromeTertiaryColor
         readingHeightControl.apply(settings: settings)
+        applyScopeHeaderTheme()
         applyFindBarTheme(settings)
     }
 
@@ -4098,6 +4236,36 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             readingHeightControl.accessibilityLabel() ?? ""
         )
     }
+    var selfTestScopeHeader: (
+        hidden: Bool,
+        frame: NSRect,
+        readerFrame: NSRect,
+        labels: [String],
+        labelFrames: [NSRect],
+        fontNames: [String],
+        accessibilityLabel: String
+    ) {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        let labels = scopeHeaderContent.arrangedSubviews.compactMap {
+            $0 as? NSTextField
+        }
+        return (
+            scopeHeader.isHidden,
+            scopeHeader.convert(scopeHeader.bounds, to: nil),
+            readerArea.convert(readerArea.bounds, to: nil),
+            labels.map(\.stringValue),
+            labels.map { label in
+                guard let parent = label.superview else { return .zero }
+                return parent.convert(
+                    label.alignmentRect(forFrame: label.frame),
+                    to: nil
+                )
+            },
+            labels.compactMap { $0.font?.fontName },
+            scopeHeader.accessibilityLabel() ?? ""
+        )
+    }
 
     func configureCompareControls(
         versionTitle: String,
@@ -4322,6 +4490,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         loadGeneration &+= 1
         let generation = loadGeneration
         onOutlineChange?([])
+        scopeHeaderByteOffset = nil
+        hideScopeHeader()
 
         guard let file else {
             findBar.isHidden = true
@@ -4330,6 +4500,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             label.stringValue = "Select a file to read"
             label.isHidden = false
             textView.clear()
+            hideScopeHeader()
             return
         }
 
@@ -4341,6 +4512,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             label.isHidden = true
             layoutTextViewFrame()
             textView.display(document: loaded.document, fileURL: file)
+            renderScopeHeader(at: textView.byteOffset(
+                forCharacterIndex: textView.view.selectedRange().location
+            ))
             if rerunFind { scheduleFind(immediate: true) }
             onOutlineChange?(loaded.document.outlineFacets)
             textView.view.textLayoutManager?
@@ -4362,6 +4536,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                                 document: document,
                                 focusByteOffset: focusOffset
                             )
+                            self.renderScopeHeader(at: self.textView.byteOffset(
+                                forCharacterIndex:
+                                    self.textView.view.selectedRange().location
+                            ))
                             if wasFocused,
                                let focusOffset,
                                self.textView.isFocusMode
@@ -4382,6 +4560,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                             }
                             self.label.stringValue = "Syntax highlighting failed"
                             self.label.isHidden = false
+                            self.hideScopeHeader()
                         }
                     }
                 }
@@ -4396,6 +4575,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             label.stringValue = "Could not open \(file.lastPathComponent)"
             label.isHidden = false
             textView.clear()
+            hideScopeHeader()
         }
     }
 
