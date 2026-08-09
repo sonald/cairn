@@ -514,6 +514,128 @@ func foldReducerRendersOnlyMaximalRegionsAndScopesOverridesByFileAndContent() th
 
 @MainActor
 @Test
+func readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/levels.rs"))
+
+    #expect(reader.readingHeightLevel == .full)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+    #expect(reader.renderedFoldIDsForTesting.isEmpty)
+
+    #expect(reader.setReadingHeightLevel(.structure))
+    #expect(reader.readingHeightLevel == .structure)
+    #expect(
+        reader.logicalFoldIDsForTesting
+            == Set([
+                regions.declaration.id,
+                regions.imports.id,
+                regions.cfgTest.id,
+                regions.topLevelDeclaration.id,
+            ]))
+    #expect(reader.renderedFoldIDsForTesting == reader.logicalFoldIDsForTesting)
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.smallDeclaration.id))
+    for manualOnly in [regions.block, regions.comment, regions.attributes] {
+        #expect(!reader.logicalFoldIDsForTesting.contains(manualOnly.id))
+    }
+
+    #expect(reader.setReadingHeightLevel(.overview))
+    #expect(reader.readingHeightLevel == .overview)
+    #expect(
+        reader.logicalFoldIDsForTesting
+            == Set([
+                regions.container.id,
+                regions.declaration.id,
+                regions.imports.id,
+                regions.cfgTest.id,
+                regions.topLevelDeclaration.id,
+            ]))
+    #expect(
+        reader.renderedFoldIDsForTesting
+            == Set([
+                regions.container.id,
+                regions.imports.id,
+                regions.cfgTest.id,
+                regions.topLevelDeclaration.id,
+            ]))
+}
+
+@MainActor
+@Test
+func manualFoldsArbitrateInBothDirectionsAndLevelSwitchClearsEveryPair() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let fileA = URL(fileURLWithPath: "/level-a.rs")
+    let fileB = URL(fileURLWithPath: "/level-b.rs")
+    let reader = ReaderTextView()
+
+    reader.display(document: document, fileURL: fileA)
+    #expect(reader.toggleFold(id: regions.block.id))
+    #expect(reader.renderedFoldIDsForTesting.contains(regions.block.id))
+    reader.display(document: document, fileURL: fileB)
+    #expect(reader.toggleFold(id: regions.comment.id))
+    #expect(reader.renderedFoldIDsForTesting.contains(regions.comment.id))
+
+    #expect(reader.setReadingHeightLevel(.overview))
+    #expect(reader.renderedFoldIDsForTesting.contains(regions.topLevelDeclaration.id))
+    #expect(reader.toggleFold(id: regions.topLevelDeclaration.id))
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.topLevelDeclaration.id))
+    #expect(!reader.renderedFoldIDsForTesting.contains(regions.topLevelDeclaration.id))
+
+    #expect(reader.setReadingHeightLevel(.full))
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+    reader.display(document: document, fileURL: fileA)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+    reader.display(document: document, fileURL: fileB)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+}
+
+@MainActor
+@Test
+func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(
+        document: document,
+        fileURL: URL(fileURLWithPath: "/level-navigation.rs")
+    )
+
+    #expect(reader.toggleFold(id: regions.block.id))
+    #expect(
+        reader.foldOverrideMembershipForTesting(regions.block.id)
+            == (forcedFolded: true, forcedUnfolded: false)
+    )
+    reader.reveal(byteOffset: regions.block.bodyRange.lowerBound + 1)
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.block.id))
+    #expect(
+        reader.foldOverrideMembershipForTesting(regions.block.id)
+            == (forcedFolded: false, forcedUnfolded: false)
+    )
+    #expect(reader.foldOverridesAreDisjointForTesting)
+
+    #expect(reader.setReadingHeightLevel(.overview))
+    let nestedOffset = regions.declaration.bodyRange.lowerBound + 1
+    #expect(reader.logicalFoldIDsForTesting.contains(regions.container.id))
+    #expect(reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+    _ = reader.activate(atByteOffset: nestedOffset)
+    for region in [regions.container, regions.declaration] {
+        #expect(!reader.logicalFoldIDsForTesting.contains(region.id))
+        #expect(
+            reader.foldOverrideMembershipForTesting(region.id)
+                == (forcedFolded: false, forcedUnfolded: true)
+        )
+    }
+    #expect(reader.foldOverridesAreDisjointForTesting)
+    #expect(
+        reader.renderedFoldIDsForTesting
+            == Set([
+                regions.imports.id,
+                regions.cfgTest.id,
+                regions.topLevelDeclaration.id,
+            ]))
+}
+
+@MainActor
+@Test
 func optionFoldHandleRecursivelyTogglesSiblingRegions() throws {
     let source = """
         fn first() {
@@ -1132,6 +1254,82 @@ private func preparePasteboardForCopyTest(_ pasteboard: NSPasteboard) -> Bool {
     guard pasteboard.writeObjects(["probe" as NSString]) else { return false }
     pasteboard.declareTypes([.string], owner: nil)
     return true
+}
+
+private func readingHeightLevelDocument() -> (
+    document: ReaderDocument,
+    regions: (
+        container: FoldRegion,
+        declaration: FoldRegion,
+        imports: FoldRegion,
+        cfgTest: FoldRegion,
+        block: FoldRegion,
+        comment: FoldRegion,
+        attributes: FoldRegion,
+        smallDeclaration: FoldRegion,
+        topLevelDeclaration: FoldRegion
+    )
+) {
+    let bytes = Array(String(repeating: "line\n", count: 120).utf8)
+    func region(
+        _ rawID: UInt32,
+        _ kind: FoldKind,
+        _ header: UInt32,
+        _ body: Range<UInt32>,
+        _ depth: Int,
+        hiddenLines: Int = 3
+    ) -> FoldRegion {
+        FoldRegion(
+            id: FoldID(rawValue: rawID),
+            kind: kind,
+            headerRange: ByteRange(lowerBound: header, upperBound: header + 4),
+            bodyRange: ByteRange(
+                lowerBound: body.lowerBound,
+                upperBound: body.upperBound
+            ),
+            outlineDepth: depth,
+            summary: FoldSummary(hiddenLineCount: hiddenLines)
+        )
+    }
+    let regions = (
+        container: region(0, .container, 0, 5..<250, 0),
+        declaration: region(1, .declaration, 20, 25..<80, 1),
+        imports: region(2, .imports, 255, 260..<290, 0),
+        cfgTest: region(3, .cfgTest, 295, 300..<360, 0),
+        block: region(4, .block, 365, 370..<400, 0),
+        comment: region(5, .comment, 400, 405..<430, 0),
+        attributes: region(6, .attributes, 430, 435..<460, 0),
+        smallDeclaration: region(
+            7,
+            .declaration,
+            460,
+            465..<470,
+            0,
+            hiddenLines: 1
+        ),
+        topLevelDeclaration: region(8, .declaration, 475, 480..<520, 0)
+    )
+    return (
+        ReaderDocument(
+            bytes: bytes,
+            lineTable: LineTable(bytes: bytes),
+            byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+            highlightSpans: [],
+            outlineFacets: [],
+            foldRegions: [
+                regions.container,
+                regions.declaration,
+                regions.imports,
+                regions.cfgTest,
+                regions.block,
+                regions.comment,
+                regions.attributes,
+                regions.smallDeclaration,
+                regions.topLevelDeclaration,
+            ]
+        ),
+        regions
+    )
 }
 
 @MainActor

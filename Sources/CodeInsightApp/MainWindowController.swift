@@ -1172,6 +1172,38 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.apply(settings: settings)
     }
 
+    var readingHeightLevel: ReadingHeightLevel {
+        readerController.readingHeightLevel
+    }
+
+    @discardableResult
+    func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
+        readerController.setReadingHeightLevel(level)
+    }
+
+    @discardableResult
+    func toggleFoldAtSelection() -> Bool {
+        readerController.toggleFoldAtSelection()
+    }
+
+    var canToggleFoldAtSelection: Bool {
+        readerController.canToggleFoldAtSelection
+    }
+
+    var selfTestReadingHeightHeader:
+        (
+            fileName: String,
+            level: ReadingHeightLevel,
+            labels: [String],
+            frame: NSRect,
+            controlFrame: NSRect,
+            shortcut: String,
+            accessibilityLabel: String
+        )
+    {
+        readerController.selfTestReadingHeightHeader
+    }
+
     private func applyPanelSizes() {
         window?.contentView?.layoutSubtreeIfNeeded()
         let layout = panelPreset.layout
@@ -3061,6 +3093,95 @@ private final class TabStripView: NSView {
 }
 
 @MainActor
+private final class ReadingHeightControl: NSSegmentedControl {
+    private var theme = ReaderTheme(settings: ReaderSettings())
+    private let segmentWidths: [CGFloat] = [56, 82, 78]
+
+    init() {
+        super.init(frame: .zero)
+        segmentCount = ReadingHeightLevel.allCases.count
+        trackingMode = .selectOne
+        segmentStyle = .rounded
+        for level in ReadingHeightLevel.allCases {
+            setLabel(level.title, forSegment: level.rawValue)
+        }
+        selectedSegment = ReadingHeightLevel.full.rawValue
+        for (index, width) in segmentWidths.enumerated() {
+            setWidth(width, forSegment: index)
+        }
+        setAccessibilityLabel("Reading height")
+        toolTip = "Reading height (⌥⌘0/1/2)"
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    var level: ReadingHeightLevel {
+        ReadingHeightLevel(rawValue: selectedSegment) ?? .full
+    }
+
+    func set(level: ReadingHeightLevel) {
+        selectedSegment = level.rawValue
+        needsDisplay = true
+    }
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let border = NSBezierPath(
+            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
+            xRadius: 7, yRadius: 7)
+        theme.chromeColor.setFill()
+        border.fill()
+        theme.chromeDividerColor.setStroke()
+        border.lineWidth = 1
+        border.stroke()
+
+        var x = bounds.minX
+        for index in 0..<segmentCount {
+            let width = segmentWidths[index]
+            let rect = NSRect(x: x, y: bounds.minY, width: width, height: bounds.height)
+            if index == selectedSegment {
+                NSGraphicsContext.saveGraphicsState()
+                border.addClip()
+                theme.backgroundColor.setFill()
+                rect.fill()
+                theme.accentColor.setFill()
+                NSRect(x: rect.minX, y: rect.minY + 1, width: rect.width, height: 2)
+                    .fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
+            if index > 0 {
+                theme.chromeDividerColor.setFill()
+                NSRect(
+                    x: rect.minX, y: rect.minY + 1, width: 1,
+                    height: max(0, rect.height - 2)
+                ).fill()
+            }
+            let title = label(forSegment: index) ?? ""
+            let attributes: [NSAttributedString.Key: Any] = [
+                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
+                .foregroundColor: index == selectedSegment
+                    ? theme.accentColor : theme.chromeSecondaryColor,
+            ]
+            let size = (title as NSString).size(withAttributes: attributes)
+            (title as NSString).draw(
+                at: NSPoint(
+                    x: rect.midX - size.width / 2,
+                    y: rect.midY - size.height / 2
+                ),
+                withAttributes: attributes
+            )
+            x += width
+        }
+    }
+}
+
+@MainActor
 final class ReaderViewController: NSViewController {
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
@@ -3085,6 +3206,14 @@ final class ReaderViewController: NSViewController {
     private var displayedFunctionChanges: [DiffCore.FunctionChange] = []
     private let readerArea = NSView()
     private let tabStripView = TabStripView()
+    private let readerHeader = NSView()
+    private let readerHeaderDivider = NSView()
+    private let fileNameLabel = NSTextField(labelWithString: "")
+    private let readingHeightControl = ReadingHeightControl()
+    private let readingHeightShortcutLabel = NSTextField(
+        labelWithString: "⌥⌘0/1/2"
+    )
+    private let tabAndReaderArea = NSStackView()
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
@@ -3139,13 +3268,20 @@ final class ReaderViewController: NSViewController {
             view = compareContainer(readerView: readerArea)
         } else {
             tabStripView.isHidden = true
-            let stack = NSStackView(views: [tabStripView, readerArea])
+            configureReaderHeader()
+            tabAndReaderArea.setViews([tabStripView, readerArea], in: .leading)
+            tabAndReaderArea.orientation = .vertical
+            tabAndReaderArea.alignment = .width
+            tabAndReaderArea.distribution = .fill
+            tabAndReaderArea.spacing = 0
+            let stack = NSStackView(views: [readerHeader, tabAndReaderArea])
             stack.orientation = .vertical
             stack.alignment = .width
             stack.distribution = .fill
             stack.spacing = 0
             NSLayoutConstraint.activate([
                 tabStripView.heightAnchor.constraint(equalToConstant: 30),
+                readerHeader.heightAnchor.constraint(equalToConstant: 32),
             ])
             view = stack
         }
@@ -3200,6 +3336,75 @@ final class ReaderViewController: NSViewController {
                 item.isEnabled = contextMenuOffset != nil
             }
         }
+    }
+
+    private func configureReaderHeader() {
+        readerHeader.wantsLayer = true
+        readerHeader.translatesAutoresizingMaskIntoConstraints = false
+        fileNameLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        fileNameLabel.cell?.lineBreakMode = .byTruncatingMiddle
+        fileNameLabel.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal)
+        readingHeightShortcutLabel.font = .systemFont(ofSize: 10)
+        readingHeightControl.target = self
+        readingHeightControl.action = #selector(changeReadingHeight(_:))
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [
+            fileNameLabel,
+            readingHeightControl,
+            spacer,
+            readingHeightShortcutLabel,
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 10
+        row.translatesAutoresizingMaskIntoConstraints = false
+        readerHeaderDivider.wantsLayer = true
+        readerHeaderDivider.translatesAutoresizingMaskIntoConstraints = false
+        readerHeader.addSubview(row)
+        readerHeader.addSubview(readerHeaderDivider)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(
+                equalTo: readerHeader.leadingAnchor,
+                constant: 13),
+            row.trailingAnchor.constraint(
+                equalTo: readerHeader.trailingAnchor,
+                constant: -13),
+            row.centerYAnchor.constraint(
+                equalTo: readerHeader.centerYAnchor,
+                constant: -0.5),
+            readingHeightControl.widthAnchor.constraint(equalToConstant: 216),
+            readingHeightControl.heightAnchor.constraint(equalToConstant: 24),
+            readerHeaderDivider.leadingAnchor.constraint(
+                equalTo: readerHeader.leadingAnchor
+            ),
+            readerHeaderDivider.trailingAnchor.constraint(
+                equalTo: readerHeader.trailingAnchor
+            ),
+            readerHeaderDivider.bottomAnchor.constraint(
+                equalTo: readerHeader.bottomAnchor
+            ),
+            readerHeaderDivider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        readerHeader.setAccessibilityElement(false)
+        fileNameLabel.setAccessibilityLabel("Current file")
+        applyReaderHeaderTheme(ReaderSettings())
+    }
+
+    @objc private func changeReadingHeight(_ sender: ReadingHeightControl) {
+        _ = setReadingHeightLevel(sender.level)
+    }
+
+    private func applyReaderHeaderTheme(_ settings: ReaderSettings) {
+        let theme = ReaderTheme(settings: settings)
+        readerHeader.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        readerHeaderDivider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+        fileNameLabel.textColor = theme.foregroundColor
+        readingHeightShortcutLabel.textColor = theme.chromeTertiaryColor
+        readingHeightControl.apply(settings: settings)
     }
 
     private func compareContainer(readerView: NSView) -> NSView {
@@ -3301,7 +3506,10 @@ final class ReaderViewController: NSViewController {
     func apply(settings: ReaderSettings) {
         loadViewIfNeeded()
         textView.apply(settings: settings)
-        if !showsCompareControls { tabStripView.apply(settings: settings) }
+        if !showsCompareControls {
+            tabStripView.apply(settings: settings)
+            applyReaderHeaderTheme(settings)
+        }
     }
 
     func configureTabs(
@@ -3322,6 +3530,7 @@ final class ReaderViewController: NSViewController {
         guard !showsCompareControls else { return }
         loadViewIfNeeded()
         tabStripView.refresh()
+        fileNameLabel.stringValue = displayedFile?.lastPathComponent ?? ""
     }
 
     func showEmptyState(
@@ -3435,9 +3644,62 @@ final class ReaderViewController: NSViewController {
         (
             tabStripView.convert(tabStripView.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
-            view.convert(view.bounds, to: nil),
+            tabAndReaderArea.convert(tabAndReaderArea.bounds, to: nil),
             tabStripView.isHidden,
             tabStripView.isHiddenOrHasHiddenAncestor
+        )
+    }
+
+    var readingHeightLevel: ReadingHeightLevel { textView.readingHeightLevel }
+    @discardableResult
+    func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
+        loadViewIfNeeded()
+        let changed = textView.setReadingHeightLevel(level)
+        readingHeightControl.set(level: textView.readingHeightLevel)
+        return changed
+    }
+    @discardableResult
+    func toggleFoldAtSelection() -> Bool {
+        guard let document = displayedDocument,
+            let byteOffset = textView.byteOffset(
+                forCharacterIndex: textView.view.selectedRange().location
+            ),
+            let line = document.lineTable.lineColumn(at: byteOffset)?.line
+        else { return false }
+        return textView.toggleFold(atLine: Int(line))
+    }
+    var canToggleFoldAtSelection: Bool {
+        guard let document = displayedDocument,
+            let byteOffset = textView.byteOffset(
+                forCharacterIndex: textView.view.selectedRange().location
+            ),
+            let line = document.lineTable.lineColumn(at: byteOffset)?.line
+        else { return false }
+        return textView.canToggleFold(atLine: Int(line))
+    }
+    var selfTestReadingHeightHeader:
+        (
+            fileName: String,
+            level: ReadingHeightLevel,
+            labels: [String],
+            frame: NSRect,
+            controlFrame: NSRect,
+            shortcut: String,
+            accessibilityLabel: String
+        )
+    {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        return (
+            fileNameLabel.stringValue,
+            readingHeightControl.level,
+            (0..<readingHeightControl.segmentCount).compactMap {
+                readingHeightControl.label(forSegment: $0)
+            },
+            readerHeader.convert(readerHeader.bounds, to: nil),
+            readingHeightControl.convert(readingHeightControl.bounds, to: nil),
+            readingHeightShortcutLabel.stringValue,
+            readingHeightControl.accessibilityLabel() ?? ""
         )
     }
 
@@ -3603,6 +3865,9 @@ final class ReaderViewController: NSViewController {
         loadViewIfNeeded()
         guard file != displayedFile || snapshotID != displayedSnapshotID else { return }
         displayedFile = file
+        if !showsCompareControls {
+            fileNameLabel.stringValue = file?.lastPathComponent ?? ""
+        }
         displayedSnapshotID = snapshotID
         contextMenuOffset = nil
         readingPositionTask?.cancel()

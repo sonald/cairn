@@ -195,3 +195,48 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
 - ReaderUI 33 / 33 PASS；`CODEX_SANDBOX=1 bash scripts/ci.sh` PASS，包含完整测试、自检、
   坐标门禁与 release fold runner。最终 runner 为 366.381 ms、RSS 增量 7,421,952 bytes，
   `status=pass`。
+
+## F4：Reading Height 三档与 Folding 菜单
+
+结论：PASS（层级 reducer、真实 AppKit 控件 / 菜单、三主题截图与完整 CI 均已收口）。
+
+- 唯一新增语义类型为 package 级 `ReadingHeightLevel`：`Full`、`Structure`、`Overview`。
+  Full baseline 为空；Structure 只包含 declaration / imports / cfgTest；Overview 在 Structure 上增加
+  container；block / comment / attributes 始终只可手动折叠，且所有 baseline 都跳过
+  `hiddenLineCount < 2`。
+- 手动折叠状态继续复用 F2 的 `(fileURL, contentID)` override store，没有新增第二套状态容器。
+  `logical = (baseline - forcedUnfolded) ∪ forcedFolded`；切换任一高度档会清除所有 pair 的旧 override，
+  再从新 baseline 原子重建。测试覆盖 Full 下手动收起、Overview 下手动展开、嵌套极大元渲染以及
+  跨两个 pair 的 override 清空。导航进入 Full 下的手动折叠区只移除 `forcedFolded`；导航进入
+  Overview baseline 的嵌套 container / declaration body 会为完整祖先链加入 `forcedUnfolded`；两集合
+  始终不相交，最终 rendered 集仍等于 logical 集的极大元。
+- Reader 顶部新增固定 32pt header：11pt semibold 文件名、216×24 三段控件、spacer 与
+  `⌥⌘0/1/2` 提示。三段宽度严格为 56 / 82 / 78pt；选中项使用当前主题内容背景、accent 文字和
+  2pt 底部 accent 线。控件为真实 `NSSegmentedControl`，AX 暴露 Reading height radio group 和
+  Full / Structure / Overview 三个 segment。
+- `View ▸ Folding` 的真实菜单顺序严格为 Toggle Fold、Full、Structure、Overview、separator、
+  Focus Current Scope。Full / Structure / Overview 使用 `⌥⌘0/1/2`；Toggle Fold 因原型建议的
+  `⌘⇧[` 与既有 Previous Tab 冲突，按裁决允许的冲突替代使用 `⌃⌘[`，保留方括号助记。
+  Focus Current Scope 属 F5，本片显示但保持禁用且不伪造动作。
+- segment、菜单 checkmark 与 Reader reducer 共用同一状态入口。基础 self-test 断言五项菜单文案、
+  全部快捷键、冲突替代、输入同步、header 文案 / AX 及 32 / 216 / 24 几何，全部为 true。
+- 真实签名验收包：`.build/m11-f4-ui-app-final/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11f4`。在非 Git 确定性 Rust fixture 中，AX 点击 Structure 后方法 / main body
+  收起但 container 展开；点击 Overview 后 `mod renderer` 与 `fn main` body 收起；`⌥⌘0` 恢复
+  Full；菜单点击 Structure 与 segment 同步。Outline 导航到 main 后 Toggle Fold 变为可用，点击只
+  收起 main body。
+- 三主题真实产品截图为 `f4-height-light.png`、`f4-height-dark.png`、
+  `f4-height-si-classic.png`；均显示同一 32pt header、三段控件、选中底线和真实折叠 pill，主题色
+  分别跟随 Light / Dark / SI Classic。
+- 性能门首次在高负载环境报告 442.091 ms，随后隔离复跑仍为 411.373 ms，没有忽略。定位到
+  TextKit 对 2 MB backing storage 的整段编辑通知后，保持 F1 单一 projector 不变：替换被包进
+  `performEditingTransaction` / `beginEditing`，并仅在编辑期间临时摘下同一个 layout manager，随后
+  立即挂回，再执行既有 selection / viewport anchor 恢复。ReaderCore 全套测试、Fold 与基础
+  self-test 均证明 layout manager、渲染、附件、选择和滚动语义未变。
+- 优化后隔离 release runner 为 240.847 ms；加入导航自动展开祖先的最终代码后，
+  `CODEX_SANDBOX=1 bash scripts/ci.sh` 再次 PASS，重负载串行末尾结果为 control resolution
+  25.766 ms、fold resolution 27.851 ms、首次折叠 232.340 ms（门槛 ≤ 400 ms），4,400 logical /
+  200 rendered，峰值 RSS 增量 2,801,688 bytes（门槛 ≤ 80 MiB），`status=pass`。
+- 完整 Swift Testing、Exact、Diff、Reading、Projector、Fold self-test 与 ReaderUI 坐标门禁全部
+  PASS。真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
+  skipped；fake provider 只作为结构 / UI 自测，不冒充真实 provider 覆盖。

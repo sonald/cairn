@@ -432,6 +432,20 @@ public final class RenderingAttributesCoordinator {
     }
 }
 
+package enum ReadingHeightLevel: Int, CaseIterable, Sendable {
+    case full
+    case structure
+    case overview
+
+    package var title: String {
+        switch self {
+        case .full: "Full"
+        case .structure: "Structure"
+        case .overview: "Overview"
+        }
+    }
+}
+
 @MainActor
 public final class ReaderTextView {
     private struct FoldScopeKey: Hashable {
@@ -467,6 +481,7 @@ public final class ReaderTextView {
     private var occurrenceSelectionByteOffset: UInt32?
     private var foldOverridesByScope: [FoldScopeKey: FoldOverrides] = [:]
     private var activeFoldScope: FoldScopeKey?
+    package private(set) var readingHeightLevel: ReadingHeightLevel = .full
     private var baselineFoldIDs: Set<FoldID> = []
     private var logicalFoldIDs: Set<FoldID> = []
     private var renderedFoldIDs: Set<FoldID> = []
@@ -735,6 +750,10 @@ public final class ReaderTextView {
             contentID: document.contentID
         )
         activeFoldScope = scope
+        baselineFoldIDs = Self.baselineFoldIDs(
+            for: readingHeightLevel,
+            in: document.foldRegions
+        )
         let overrides = foldOverridesByScope[scope] ?? FoldOverrides()
         foldOverridesByScope[scope] = overrides
         logicalFoldIDs = Self.logicalFoldIDs(
@@ -784,7 +803,15 @@ public final class ReaderTextView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
         installRenderingValidator(in: layoutManager)
-        backingTextStorage.setAttributedString(projection.attributed)
+        if let contentStorage = view.textContentStorage {
+            contentStorage.performEditingTransaction {
+                backingTextStorage.beginEditing()
+                backingTextStorage.setAttributedString(projection.attributed)
+                backingTextStorage.endEditing()
+            }
+        } else {
+            backingTextStorage.setAttributedString(projection.attributed)
+        }
         if renderingCoordinator.hasRenderingAttributes {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
@@ -840,7 +867,7 @@ public final class ReaderTextView {
     }
 
     @discardableResult
-    internal func toggleFold(
+    package func toggleFold(
         atLine line: Int,
         recursiveSiblings: Bool = false
     ) -> Bool {
@@ -889,8 +916,32 @@ public final class ReaderTextView {
         }
     }
 
+    package func canToggleFold(atLine line: Int) -> Bool {
+        guard let document = displayedDocument else { return false }
+        return visibleFoldRegions(in: document).contains {
+            document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
+                .map { Int($0.line) == line } ?? false
+        }
+    }
+
     internal var renderedFoldIDsForTesting: Set<FoldID> { renderedFoldIDs }
     internal var logicalFoldIDsForTesting: Set<FoldID> { logicalFoldIDs }
+    internal func foldOverrideMembershipForTesting(
+        _ id: FoldID
+    ) -> (forcedFolded: Bool, forcedUnfolded: Bool) {
+        guard let scope = activeFoldScope,
+              let overrides = foldOverridesByScope[scope]
+        else { return (false, false) }
+        return (
+            overrides.forcedFolded.contains(id),
+            overrides.forcedUnfolded.contains(id)
+        )
+    }
+    internal var foldOverridesAreDisjointForTesting: Bool {
+        foldOverridesByScope.values.allSatisfy {
+            $0.forcedFolded.isDisjoint(with: $0.forcedUnfolded)
+        }
+    }
     internal var latentSelectionAnchorForTesting: (UInt32, FoldID)? {
         latentSelectionAnchor.map { ($0.byteOffset, $0.foldID) }
     }
@@ -905,6 +956,29 @@ public final class ReaderTextView {
         }
     }
 
+    @discardableResult
+    package func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
+        guard level != readingHeightLevel else { return false }
+        let previousLevel = readingHeightLevel
+        let previousOverrides = foldOverridesByScope
+        let previousBaseline = baselineFoldIDs
+        readingHeightLevel = level
+        foldOverridesByScope.removeAll(keepingCapacity: true)
+        baselineFoldIDs =
+            displayedDocument.map {
+                Self.baselineFoldIDs(for: level, in: $0.foldRegions)
+            } ?? []
+
+        guard displayedDocument != nil else { return true }
+        guard applyFoldMutation({ $0 = FoldOverrides() }) else {
+            readingHeightLevel = previousLevel
+            foldOverridesByScope = previousOverrides
+            baselineFoldIDs = previousBaseline
+            return false
+        }
+        return true
+    }
+
     internal func setFoldMatchCount(_ count: Int, for id: FoldID) {
         foldAttachments[id]?.matchCount = max(0, count)
     }
@@ -913,22 +987,12 @@ public final class ReaderTextView {
         logical: Int,
         rendered: Int
     )? {
-        guard let document = displayedDocument else { return nil }
-        let previous = baselineFoldIDs
-        baselineFoldIDs = Set(document.foldRegions.compactMap {
-            region -> FoldID? in
-            guard region.summary.hiddenLineCount >= 2 else { return nil }
-            switch region.kind {
-            case .container, .declaration, .imports, .cfgTest:
-                return region.id
-            case .block, .comment, .attributes:
-                return nil
-            }
-        })
-        guard applyFoldMutation({ _ in }) else {
-            baselineFoldIDs = previous
-            return nil
-        }
+        guard displayedDocument != nil else { return nil }
+        guard
+            readingHeightLevel == .overview
+                ? applyFoldMutation({ _ in })
+                : setReadingHeightLevel(.overview)
+        else { return nil }
         return (logicalFoldIDs.count, renderedFoldIDs.count)
     }
 
@@ -949,6 +1013,25 @@ public final class ReaderTextView {
     ) -> Set<FoldID> {
         baseline.subtracting(overrides.forcedUnfolded)
             .union(overrides.forcedFolded)
+    }
+
+    private static func baselineFoldIDs(
+        for level: ReadingHeightLevel,
+        in regions: [FoldRegion]
+    ) -> Set<FoldID> {
+        guard level != .full else { return [] }
+        return Set(
+            regions.compactMap { region in
+                guard region.summary.hiddenLineCount >= 2 else { return nil }
+                switch region.kind {
+                case .declaration, .imports, .cfgTest:
+                    return region.id
+                case .container:
+                    return level == .overview ? region.id : nil
+                case .block, .comment, .attributes:
+                    return nil
+                }
+            })
     }
 
     private static func maximalFoldIDs(
@@ -999,6 +1082,25 @@ public final class ReaderTextView {
         }
     }
 
+    @discardableResult
+    private func unfoldAncestors(containing byteOffset: UInt32) -> Bool {
+        guard let document = displayedDocument else { return false }
+        let ancestors = document.foldRegions.filter {
+            logicalFoldIDs.contains($0.id) && $0.bodyRange.contains(byteOffset)
+        }
+        guard !ancestors.isEmpty else { return false }
+        return applyFoldMutation { overrides in
+            for region in ancestors {
+                Self.setFold(
+                    region.id,
+                    folded: false,
+                    baseline: baselineFoldIDs,
+                    overrides: &overrides
+                )
+            }
+        }
+    }
+
     private func applyFoldMutation(
         _ mutate: (inout FoldOverrides) -> Void
     ) -> Bool {
@@ -1041,7 +1143,17 @@ public final class ReaderTextView {
             theme: theme
         )
         layoutManager.renderingAttributesValidator = nil
-        backingTextStorage.setAttributedString(projection.attributed)
+        if let contentStorage = view.textContentStorage {
+            contentStorage.removeTextLayoutManager(layoutManager)
+            contentStorage.performEditingTransaction {
+                backingTextStorage.beginEditing()
+                backingTextStorage.setAttributedString(projection.attributed)
+                backingTextStorage.endEditing()
+            }
+            contentStorage.addTextLayoutManager(layoutManager)
+        } else {
+            backingTextStorage.setAttributedString(projection.attributed)
+        }
         installRenderingValidator(in: layoutManager)
         restoreSelectionAnchor(selectionAnchor)
         restoreViewportAnchor(viewportAnchor, in: document)
@@ -1050,7 +1162,6 @@ public final class ReaderTextView {
         }
         updateRulerThickness()
         ruler?.needsDisplay = true
-        layoutManager.textViewportLayoutController.layoutViewport()
         validateVisibleRenderingAttributes(in: layoutManager)
         view.needsDisplay = true
         return true
@@ -1259,6 +1370,7 @@ public final class ReaderTextView {
     }
 
     public func reveal(byteOffset: UInt32) {
+        _ = unfoldAncestors(containing: byteOffset)
         guard let location = visibleDisplayOffset(forByte: byteOffset),
               location <= backingTextStorage.length
         else { return }
@@ -1389,6 +1501,7 @@ public final class ReaderTextView {
 
     @discardableResult
     public func activate(atByteOffset byteOffset: UInt32) -> Int {
+        _ = unfoldAncestors(containing: byteOffset)
         updateCurrentLine(byteOffset: byteOffset)
         guard let document = displayedDocument else {
             clearOccurrences()

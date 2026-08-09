@@ -439,15 +439,79 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             .compactMap(\.submenu).first { $0.title == "Relations" }
         let viewMenu = NSApplication.shared.mainMenu?.items
             .compactMap(\.submenu).first { $0.title == "View" }
+        let foldingMenu = viewMenu?.item(withTitle: "Folding")?.submenu
         let inspectorMenuItem = relationsMenu?.item(
             withTitle: "Show Resolution Inspector"
         )
         let trailMenuItem = viewMenu?.item(withTitle: "Show Reading Trail")
+        let fullHeightItem = foldingMenu?.item(withTitle: "Full")
+        let structureHeightItem = foldingMenu?.item(withTitle: "Structure")
+        let overviewHeightItem = foldingMenu?.item(withTitle: "Overview")
+        let structureActionSent =
+            structureHeightItem.flatMap { item in
+                item.action.map {
+                    NSApplication.shared.sendAction($0, to: item.target, from: item)
+                }
+            } ?? false
+        for item in [fullHeightItem, structureHeightItem, overviewHeightItem]
+            .compactMap({ $0 })
+        {
+            _ = validateMenuItem(item)
+        }
+        let heightHeader = windowController.selfTestReadingHeightHeader
+        let readingHeightInputsStaySynchronized =
+            structureActionSent
+            && windowController.readingHeightLevel == .structure
+            && heightHeader.level == .structure
+            && structureHeightItem?.state == .on
+            && fullHeightItem?.state == .off
+            && overviewHeightItem?.state == .off
+        useFullReadingHeight(nil)
         var checks = [
             "darkChromeMatchesTheme": darkChromeMatchesTheme,
             "lightChromeMatchesTheme": lightChromeMatchesTheme,
             "siClassicChromeStaysLight": siClassicChromeStaysLight,
             "autoChromeFollowsSystem": autoChromeFollowsSystem,
+            "foldingMenuHasExactFiveCommands":
+                foldingMenu?.items.filter { !$0.isSeparatorItem }.map(\.title)
+                == [
+                    "Toggle Fold",
+                    "Full",
+                    "Structure",
+                    "Overview",
+                    "Focus Current Scope",
+                ],
+            "toggleFoldUsesResolvedKey":
+                foldingMenu?.item(withTitle: "Toggle Fold")?.keyEquivalent == "[",
+            "toggleFoldAvoidsPreviousTabShortcut":
+                foldingMenu?.item(withTitle: "Toggle Fold")?
+                .keyEquivalentModifierMask == [.command, .control],
+            "fullHeightUsesPrototypeShortcut":
+                fullHeightItem?.keyEquivalent == "0"
+                && fullHeightItem?.keyEquivalentModifierMask == [.command, .option],
+            "structureHeightUsesPrototypeShortcut":
+                structureHeightItem?.keyEquivalent == "1"
+                && structureHeightItem?.keyEquivalentModifierMask
+                    == [.command, .option],
+            "overviewHeightUsesPrototypeShortcut":
+                overviewHeightItem?.keyEquivalent == "2"
+                && overviewHeightItem?.keyEquivalentModifierMask
+                    == [.command, .option],
+            "focusUsesPrototypeShortcut":
+                foldingMenu?.item(withTitle: "Focus Current Scope")?
+                .keyEquivalent == "f"
+                && foldingMenu?.item(withTitle: "Focus Current Scope")?
+                    .keyEquivalentModifierMask == [.command, .option],
+            "readingHeightInputsStaySynchronized":
+                readingHeightInputsStaySynchronized,
+            "readingHeightHeaderMatchesPrototypeGeometry":
+                heightHeader.labels == ["Full", "Structure", "Overview"]
+                && heightHeader.shortcut == "⌥⌘0/1/2"
+                && heightHeader.accessibilityLabel == "Reading height"
+                && abs(heightHeader.frame.height - 32) <= 1
+                && abs(heightHeader.controlFrame.width - 216) <= 1
+                && abs(heightHeader.controlFrame.height - 24) <= 1
+                && heightHeader.frame.contains(heightHeader.controlFrame),
             "filesPlaceholderVisibleWithoutProject":
                 windowController.selfTestFilesPlaceholderVisible,
             "filesPlaceholderTextWithoutProject":
@@ -5791,6 +5855,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showReadingTrail()
     }
 
+    @objc private func toggleFold(_ sender: Any?) {
+        _ = windowController?.toggleFoldAtSelection()
+    }
+
+    @objc private func useFullReadingHeight(_ sender: Any?) {
+        _ = windowController?.setReadingHeightLevel(.full)
+    }
+
+    @objc private func useStructureReadingHeight(_ sender: Any?) {
+        _ = windowController?.setReadingHeightLevel(.structure)
+    }
+
+    @objc private func useOverviewReadingHeight(_ sender: Any?) {
+        _ = windowController?.setReadingHeightLevel(.overview)
+    }
+
+    @objc private func focusCurrentScope(_ sender: Any?) {
+        // F5 supplies the independently restorable Focus mode.
+    }
+
     @objc private func increaseReaderFontSize(_ sender: Any?) {
         changeReaderFontSize(by: 1)
     }
@@ -5817,33 +5901,52 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
         case #selector(goBack(_:)):
-            model.navigationHistory.canGoBack
+            return model.navigationHistory.canGoBack
         case #selector(goForward(_:)):
-            model.navigationHistory.canGoForward
+            return model.navigationHistory.canGoForward
         case #selector(previousDiffHunk(_:)), #selector(nextDiffHunk(_:)):
-            !(model.compare.diff?.hunks.isEmpty ?? true)
+            return !(model.compare.diff?.hunks.isEmpty ?? true)
         case #selector(showCallers(_:)),
-             #selector(showCalls(_:)),
-             #selector(showImplementations(_:)):
-            model.contextWindow.selectedCandidate != nil
+            #selector(showCalls(_:)),
+            #selector(showImplementations(_:)):
+            return model.contextWindow.selectedCandidate != nil
         case #selector(showResolutionInspector(_:)):
-            windowController?.canShowResolutionInspector == true
+            return windowController?.canShowResolutionInspector == true
         case #selector(showReadingTrail(_:)):
-            windowController?.canShowReadingTrail == true
+            return windowController?.canShowReadingTrail == true
+        case #selector(toggleFold(_:)):
+            return windowController?.canToggleFoldAtSelection == true
+        case #selector(useFullReadingHeight(_:)):
+            menuItem.state =
+                windowController?.readingHeightLevel == .full
+                ? .on : .off
+            return true
+        case #selector(useStructureReadingHeight(_:)):
+            menuItem.state =
+                windowController?.readingHeightLevel == .structure
+                ? .on : .off
+            return true
+        case #selector(useOverviewReadingHeight(_:)):
+            menuItem.state =
+                windowController?.readingHeightLevel == .overview
+                ? .on : .off
+            return true
+        case #selector(focusCurrentScope(_:)):
+            return false
         case #selector(increaseReaderFontSize(_:)):
-            readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
+            return readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
         case #selector(decreaseReaderFontSize(_:)):
-            readerSettings.fontSize > ReaderSettings.fontSizeRange.lowerBound
+            return readerSettings.fontSize > ReaderSettings.fontSizeRange.lowerBound
         case #selector(trustThisRepository(_:)):
-            model.canTrustCurrentRepository
+            return model.canTrustCurrentRepository
         case #selector(openSelectedFileInNewTab(_:)):
-            windowController?.selectedSidebarFile != nil
+            return windowController?.selectedSidebarFile != nil
         case #selector(closeActiveTab(_:)):
-            !model.tabStrip.tabs.isEmpty
+            return !model.tabStrip.tabs.isEmpty
         case #selector(selectPreviousTab(_:)), #selector(selectNextTab(_:)):
-            model.tabStrip.tabs.count > 1
+            return model.tabStrip.tabs.count > 1
         default:
-            true
+            return true
         }
     }
 
@@ -6088,6 +6191,45 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
+        viewMenu.addItem(.separator())
+        let foldingItem = NSMenuItem(
+            title: "Folding",
+            action: nil,
+            keyEquivalent: ""
+        )
+        let foldingMenu = NSMenu(title: "Folding")
+        let toggleFoldItem = NSMenuItem(
+            title: "Toggle Fold",
+            action: #selector(toggleFold(_:)),
+            keyEquivalent: "["
+        )
+        // ⌘⇧[ is already Previous Tab. P0 explicitly permits a non-conflicting
+        // replacement, so keep the bracket mnemonic with ⌃⌘[.
+        toggleFoldItem.keyEquivalentModifierMask = [.command, .control]
+        toggleFoldItem.target = self
+        foldingMenu.addItem(toggleFoldItem)
+        let levels: [(String, Selector, String)] = [
+            ("Full", #selector(useFullReadingHeight(_:)), "0"),
+            ("Structure", #selector(useStructureReadingHeight(_:)), "1"),
+            ("Overview", #selector(useOverviewReadingHeight(_:)), "2"),
+        ]
+        for (title, action, key) in levels {
+            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
+            item.keyEquivalentModifierMask = [.command, .option]
+            item.target = self
+            foldingMenu.addItem(item)
+        }
+        foldingMenu.addItem(.separator())
+        let focusItem = NSMenuItem(
+            title: "Focus Current Scope",
+            action: #selector(focusCurrentScope(_:)),
+            keyEquivalent: "f"
+        )
+        focusItem.keyEquivalentModifierMask = [.command, .option]
+        focusItem.target = self
+        foldingMenu.addItem(focusItem)
+        foldingItem.submenu = foldingMenu
+        viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
         let increaseFontItem = NSMenuItem(
             title: "Increase Font Size",
