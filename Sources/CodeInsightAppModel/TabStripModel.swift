@@ -4,9 +4,13 @@ import Foundation
 @MainActor
 public final class TabStripModel {
     public struct Tab {
-        public let fileURL: URL
+        package let content: TabContent
+        public var fileURL: URL? { content.fileURL }
         public fileprivate(set) var scrollByteOffset: UInt32?
         public fileprivate(set) var selectionByteOffset: UInt32?
+        package fileprivate(set) var readingSetScrollOffset: Double?
+
+        package var title: String { content.title }
 
         fileprivate var lastActivated: UInt64
     }
@@ -42,7 +46,7 @@ public final class TabStripModel {
     ) {
         let file = file.standardizedFileURL
         if let existing = tabs.firstIndex(where: {
-            $0.fileURL.standardizedFileURL == file
+            $0.fileURL?.standardizedFileURL == file
         }) {
             activate(existing)
             if let selectionByteOffset {
@@ -53,11 +57,31 @@ public final class TabStripModel {
 
         activationClock &+= 1
         let tab = Tab(
-            fileURL: file,
+            content: .file(file),
             scrollByteOffset: nil,
             selectionByteOffset: selectionByteOffset,
+            readingSetScrollOffset: nil,
             lastActivated: activationClock
         )
+        install(tab, inNewTab: inNewTab)
+    }
+
+    package func openReadingSet(
+        title: String,
+        excerpts: [ReadingSetExcerpt]
+    ) {
+        activationClock &+= 1
+        let tab = Tab(
+            content: .readingSet(title: title, excerpts: excerpts),
+            scrollByteOffset: nil,
+            selectionByteOffset: nil,
+            readingSetScrollOffset: nil,
+            lastActivated: activationClock
+        )
+        install(tab, inNewTab: true)
+    }
+
+    private func install(_ tab: Tab, inNewTab: Bool) {
         activeDocument = nil
         if tabs.isEmpty {
             tabs = [tab]
@@ -133,12 +157,19 @@ public final class TabStripModel {
         tabs[activeIndex].selectionByteOffset = byteOffset
     }
 
+    package func updateActiveReadingSetScroll(_ offset: Double?) {
+        guard let activeIndex,
+              case .readingSet = tabs[activeIndex].content
+        else { return }
+        tabs[activeIndex].readingSetScrollOffset = offset
+    }
+
     public func setActiveDocument(
         _ document: ReaderDocument?,
         for file: URL
     ) {
-        guard let activeTab else { return }
-        if activeTab.fileURL.standardizedFileURL != file.standardizedFileURL {
+        guard let activeFile = activeTab?.fileURL else { return }
+        if activeFile.standardizedFileURL != file.standardizedFileURL {
             return
         }
         activeDocument = document

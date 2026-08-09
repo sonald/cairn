@@ -558,8 +558,18 @@ public final class EngineSession: Sendable {
             .joined(separator: "/")
     }
 
-    func sourceBytes(at pathID: PathID) -> [UInt8]? {
+    package func sourceBytes(at pathID: PathID) -> [UInt8]? {
         filesByPath[pathID].flatMap { sourceBytesByContent[$0.contentID] }
+    }
+
+    package func capturedSource(
+        atManifestPath path: String
+    ) -> (contentID: ContentID, bytes: [UInt8])? {
+        guard let file = manifest.files.first(where: {
+            paths.resolve($0.pathID) == path
+        }), let bytes = sourceBytesByContent[file.contentID]
+        else { return nil }
+        return (file.contentID, bytes)
     }
 
     func occurrences(of key: ContentIndexKey) -> [FileOccurrence] {

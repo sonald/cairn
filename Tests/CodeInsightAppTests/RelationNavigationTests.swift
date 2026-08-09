@@ -28,6 +28,51 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() async throws {
+        let fixture = try await makeRelationUXFixture()
+        defer { fixture.close() }
+        var captured: (String, [ReadingSetExcerpt])?
+        fixture.controller.onOpenReadingSet = { captured = ($0, $1) }
+        let button = fixture.controller.selfTestReadingSetButtonState
+
+        #expect(button.0 == "Reading Set")
+        #expect(button.1)
+        #expect(button.2 == "Open as Reading Set")
+        fixture.controller.selfTestOpenAsReadingSet()
+        let result = try #require(captured)
+        #expect(result.0 == "subject")
+        #expect(result.1.map(\.symbol).first == "first")
+        #expect(result.1.allSatisfy { !$0.sourceText.isEmpty })
+        #expect(result.1.allSatisfy {
+            $0.contentID.algorithm == 1 && $0.contentID.bytes.count == 32
+        })
+        #expect(result.1.first?.inspector.auditRows.map(\.label) == [
+            "Source", "Content", "Captured at",
+        ])
+        #expect(result.1.first?.inspector.availabilityBody.contains("at capture") == true)
+
+        let display = try #require(result.1.first?.inspector)
+        fixture.controller.showFrozenInspector(display)
+        #expect(fixture.controller.selfTestInspectorIsFrozen)
+        #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
+        #expect(fixture.controller.selfTestInspectorText.contains(display.nodeTitle))
+        #expect(fixture.controller.selfTestInspectorText.contains(display.availabilityBody))
+        #expect(fixture.controller.selfTestInspectorText.contains(display.environmentBody))
+        #expect(!fixture.controller.selfTestInspectorText.contains {
+            $0.localizedCaseInsensitiveContains("snapshot")
+        })
+        #expect(fixture.controller.selfTestInspectorAccessibility.0
+            == "Resolution Inspector for \(display.nodeTitle), at capture")
+
+        fixture.model.updateProjectState(.empty)
+        await pumpRunLoop()
+        #expect(fixture.controller.selfTestInspectorIsFrozen)
+        #expect(fixture.controller.selfTestInspectorVisible)
+        #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
+    }
+
+    @MainActor
+    @Test
     func relationReferenceRowsExposeProvenanceThroughAccessibility() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
@@ -111,6 +156,10 @@ struct RelationUXTests {
         fixture.controller.selfTestToggleInspectorAudit()
         #expect(fixture.controller.selfTestInspectorAuditVisible)
         #expect(fixture.controller.selfTestInspectorText.contains("Hide full audit"))
+        #expect(fixture.controller.selfTestInspectorText.contains("Source"))
+        #expect(fixture.controller.selfTestInspectorText.contains("Content"))
+        #expect(fixture.controller.selfTestInspectorText.contains("Captured at"))
+        #expect(!fixture.controller.selfTestInspectorText.contains("Snapshot"))
         let openListWidth = fixture.controller.selfTestRelationListFrame.width
         fixture.controller.selfTestCloseInspector()
         #expect(!fixture.controller.selfTestInspectorVisible)
@@ -1536,7 +1585,17 @@ private func makeRelationUXFixture(
     model.updateProjectState(.ready(session, context))
     let controller = RelationWindowController(
         model: model,
-        verificationReadiness: { .ready }
+        verificationReadiness: { .ready },
+        capturedSource: { path in
+            guard let source = session.capturedSource(atManifestPath: path)
+            else { return nil }
+            return (
+                source.contentID,
+                source.bytes,
+                ReadingSetExcerpt.SourceKind.worktreeCaptured,
+                nil
+            )
+        }
     )
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1_600, height: 1_000),

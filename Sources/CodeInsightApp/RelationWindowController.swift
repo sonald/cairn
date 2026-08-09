@@ -9,8 +9,16 @@ import Observation
 final class RelationWindowController: NSViewController,
     NSOutlineViewDataSource, NSOutlineViewDelegate
 {
+    private enum InspectorMode {
+        case live(RelationTreeModel.Node)
+        case frozen(
+            ReadingSetExcerpt.FrozenInspectorDisplay,
+            onOpenFormerCandidate: (() -> Void)?
+        )
+    }
     var onOpen: ((RelationTreeModel.Node) -> Void)?
     var onTreeChange: (() -> Void)?
+    var onOpenReadingSet: ((String, [ReadingSetExcerpt]) -> Void)?
 
     private let model: RelationTreeModel
     private let directionControl = NSSegmentedControl(
@@ -27,6 +35,7 @@ final class RelationWindowController: NSViewController,
     private let listPane = NSView()
     private let inspectorView = ResolutionInspectorView()
     private let inspectButton = NSButton()
+    private let readingSetButton = NSButton()
     private let placeholderLabel = NSTextField(
         labelWithString:
             "Right-click a symbol → Show Callers / Calls / Implements / References"
@@ -38,8 +47,16 @@ final class RelationWindowController: NSViewController,
     private var wholeTreeReloadCount = 0
     private var nodeReloadCount = 0
     private var theme = ReaderTheme(settings: ReaderSettings())
-    private var inspectedNode: RelationTreeModel.Node?
+    private var inspectorMode: InspectorMode?
     private let verificationReadiness: () -> ExactCoordinator.Readiness
+    private let capturedSource: (
+        String
+    ) -> (
+        contentID: ContentID,
+        bytes: [UInt8],
+        sourceKind: ReadingSetExcerpt.SourceKind,
+        revision: String?
+    )?
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
@@ -78,6 +95,19 @@ final class RelationWindowController: NSViewController,
     var selfTestInspectorButtonTitle: String {
         loadViewIfNeeded()
         return inspectButton.title
+    }
+    var selfTestReadingSetButtonState: (String, Bool, String) {
+        loadViewIfNeeded()
+        return (
+            readingSetButton.title,
+            readingSetButton.isEnabled,
+            readingSetButton.accessibilityLabel() ?? ""
+        )
+    }
+    func selfTestOpenAsReadingSet() { openAsReadingSet(nil) }
+    var selfTestInspectorIsFrozen: Bool {
+        if case .frozen = inspectorMode { return true }
+        return false
     }
 
     var selfTestExactGroupTitle: String? {
@@ -636,10 +666,19 @@ final class RelationWindowController: NSViewController,
         model: RelationTreeModel,
         verificationReadiness: @escaping () -> ExactCoordinator.Readiness = {
             .off("no project")
-        }
+        },
+        capturedSource: @escaping (
+            String
+        ) -> (
+            contentID: ContentID,
+            bytes: [UInt8],
+            sourceKind: ReadingSetExcerpt.SourceKind,
+            revision: String?
+        )? = { _ in nil }
     ) {
         self.model = model
         self.verificationReadiness = verificationReadiness
+        self.capturedSource = capturedSource
         super.init(nibName: nil, bundle: nil)
         model.onNodeChange = { [weak self] node in
             guard let self else { return }
@@ -718,6 +757,21 @@ final class RelationWindowController: NSViewController,
         inspectButton.isEnabled = false
         inspectButton.translatesAutoresizingMaskIntoConstraints = false
 
+        readingSetButton.title = "Reading Set"
+        readingSetButton.image = NSImage(
+            systemSymbolName: "text.badge.plus",
+            accessibilityDescription: "Open as Reading Set"
+        )
+        readingSetButton.imagePosition = .imageLeading
+        readingSetButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        readingSetButton.bezelStyle = .accessoryBarAction
+        readingSetButton.toolTip = "Open published locations as a Reading Set"
+        readingSetButton.setAccessibilityLabel("Open as Reading Set")
+        readingSetButton.target = self
+        readingSetButton.action = #selector(openAsReadingSet(_:))
+        readingSetButton.isEnabled = false
+        readingSetButton.translatesAutoresizingMaskIntoConstraints = false
+
         contentSplit.orientation = .horizontal
         contentSplit.distribution = .fillEqually
         contentSplit.spacing = 1
@@ -745,6 +799,7 @@ final class RelationWindowController: NSViewController,
         headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
         headerSurface.translatesAutoresizingMaskIntoConstraints = false
         headerSurface.addSubview(directionControl)
+        headerSurface.addSubview(readingSetButton)
         headerSurface.addSubview(inspectButton)
         container.addSubview(headerSurface)
         container.addSubview(contentSplit)
@@ -758,9 +813,18 @@ final class RelationWindowController: NSViewController,
                 constant: 8
             ),
             directionControl.trailingAnchor.constraint(
+                equalTo: readingSetButton.leadingAnchor,
+                constant: -6
+            ),
+            readingSetButton.trailingAnchor.constraint(
                 equalTo: inspectButton.leadingAnchor,
                 constant: -6
             ),
+            readingSetButton.centerYAnchor.constraint(
+                equalTo: directionControl.centerYAnchor
+            ),
+            readingSetButton.widthAnchor.constraint(equalToConstant: 104),
+            readingSetButton.heightAnchor.constraint(equalToConstant: 22),
             inspectButton.trailingAnchor.constraint(
                 equalTo: headerSurface.trailingAnchor,
                 constant: -8
@@ -1060,19 +1124,24 @@ final class RelationWindowController: NSViewController,
 
     private func showInspector(for node: RelationTreeModel.Node) {
         guard let explanation = node.explanation,
-              let context = model.relationQueryContexts[explanation.contextID]
+              let context = model.relationQueryContexts[explanation.contextID],
+              let source = node.target.flatMap({ capturedSource($0.path) }),
+              let display = makeInspectorDisplay(
+                  node: node,
+                  context: context,
+                  correctedTitles: correctedTitles(for: node),
+                  readiness: verificationReadiness(),
+                  sourceKind: source.sourceKind,
+                  revision: source.revision,
+                  contentID: source.contentID,
+                  capturedAt: Date(),
+                  atCapture: false
+              )
         else { return }
-        inspectedNode = node
+        inspectorMode = .live(node)
         inspectorView.isHidden = false
         view.layoutSubtreeIfNeeded()
-        inspectorView.display(
-            node: node,
-            clauses: narrativeClauses(for: explanation, context: context),
-            context: context,
-            correctedTitles: correctedTitles(for: node),
-            readiness: verificationReadiness(),
-            theme: theme
-        )
+        inspectorView.displayLive(display, theme: theme)
     }
 
     private func inspectBadge(for node: RelationTreeModel.Node) {
@@ -1089,22 +1158,50 @@ final class RelationWindowController: NSViewController,
     }
 
     func refreshInspector() {
-        guard let inspectedNode else { return }
-        showInspector(for: inspectedNode)
+        switch inspectorMode {
+        case .live(let node): showInspector(for: node)
+        case .frozen(let display, let action):
+            inspectorView.displayFrozen(
+                display,
+                canOpenFormerCandidate: action != nil,
+                theme: theme
+            )
+        case nil: break
+        }
+    }
+
+    func showFrozenInspector(
+        _ display: ReadingSetExcerpt.FrozenInspectorDisplay,
+        onOpenFormerCandidate: (() -> Void)? = nil
+    ) {
+        loadViewIfNeeded()
+        inspectorMode = .frozen(
+            display,
+            onOpenFormerCandidate: onOpenFormerCandidate
+        )
+        inspectorView.isHidden = false
+        view.layoutSubtreeIfNeeded()
+        inspectorView.displayFrozen(
+            display,
+            canOpenFormerCandidate: onOpenFormerCandidate != nil,
+            theme: theme
+        )
     }
 
     private func hideInspector() {
-        inspectedNode = nil
+        inspectorMode = nil
         guard !inspectorView.isHidden else { return }
         inspectorView.isHidden = true
         view.layoutSubtreeIfNeeded()
     }
 
     private func openInspectedFormerCandidate() {
-        guard let inspectedNode,
-              inspectedNode.modifiers.contains("Conflict/Corrected")
-        else { return }
-        onOpen?(inspectedNode)
+        switch inspectorMode {
+        case .live(let node) where node.modifiers.contains("Conflict/Corrected"):
+            onOpen?(node)
+        case .frozen(_, let action): action?()
+        default: break
+        }
     }
 
     private func correctedTitles(
@@ -1145,12 +1242,63 @@ final class RelationWindowController: NSViewController,
 
     private func render() {
         directionControl.selectedSegment = segment(for: model.direction)
+        readingSetButton.isEnabled = !readingSetNodes().isEmpty
         if model.root == nil {
             currentTarget = nil
             currentDocument = nil
-            hideInspector()
+            if case .live = inspectorMode { hideInspector() }
         }
         reloadWholeTree()
+    }
+
+    @objc private func openAsReadingSet(_ sender: Any?) {
+        let nodes = readingSetNodes()
+        let excerpts: [ReadingSetExcerpt] = nodes.prefix(50).compactMap { node in
+            guard let explanation = node.explanation,
+                  let context = model.relationQueryContexts[explanation.contextID],
+                  let source = node.target.flatMap({ capturedSource($0.path) })
+            else { return nil }
+            return makeReadingSetExcerpt(
+                role: readingSetRole(for: node),
+                node: node,
+                context: context,
+                correctedTitles: correctedTitles(for: node),
+                readiness: verificationReadiness(),
+                bytes: source.bytes,
+                contentID: source.contentID,
+                revision: source.revision,
+                sourceKind: source.sourceKind
+            )
+        }
+        guard !excerpts.isEmpty else { return }
+        onOpenReadingSet?(model.root?.title ?? "Relations", excerpts)
+    }
+
+    private func readingSetNodes() -> [RelationTreeModel.Node] {
+        guard let root = model.root else { return [] }
+        var result: [RelationTreeModel.Node] = []
+        func visit(_ node: RelationTreeModel.Node) {
+            if (node.kind == .edge || node.kind == .root),
+               node.target != nil,
+               node.explanation != nil
+            {
+                result.append(node)
+            }
+            (node.children ?? []).forEach(visit)
+        }
+        visit(root)
+        return result
+    }
+
+    private func readingSetRole(for node: RelationTreeModel.Node) -> String {
+        if node.kind == .root { return "DEFINITION" }
+        return switch model.direction {
+        case .callers:
+            node.badge == "Verified" ? "VERIFIED CALLER" : "INFERRED CALLER"
+        case .calls: "CALL"
+        case .implementations: "IMPLEMENTATION"
+        case .references: "REFERENCE"
+        }
     }
 
     private func reloadWholeTree() {
@@ -1184,8 +1332,14 @@ final class RelationWindowController: NSViewController,
         if inspectedNode === node || inspectedNode === selectedItem {
             refreshInspector()
         }
+        readingSetButton.isEnabled = !readingSetNodes().isEmpty
         scrollView.contentView.scroll(to: visibleOrigin)
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    private var inspectedNode: RelationTreeModel.Node? {
+        guard case .live(let node) = inspectorMode else { return nil }
+        return node
     }
 
     private func expandLoadedGroups(under node: RelationTreeModel.Node) {
@@ -1361,6 +1515,7 @@ private final class ResolutionInspectorView: NSView {
 
     private let header = NSView()
     private let headerTitle = NSTextField(labelWithString: "Resolution Inspector")
+    private let captureChip = RelationChipView()
     private let closeButton = NSButton()
     private let scrollView = NSScrollView()
     private let documentView = InspectorDocumentView()
@@ -1414,6 +1569,7 @@ private final class ResolutionInspectorView: NSView {
         closeButton.action = #selector(closeInspector(_:))
         closeButton.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(headerTitle)
+        header.addSubview(captureChip)
         header.addSubview(closeButton)
 
         scrollView.documentView = documentView
@@ -1497,6 +1653,9 @@ private final class ResolutionInspectorView: NSView {
             header.heightAnchor.constraint(equalToConstant: 34),
             headerTitle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 10),
             headerTitle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            captureChip.leadingAnchor.constraint(equalTo: headerTitle.trailingAnchor, constant: 8),
+            captureChip.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            captureChip.trailingAnchor.constraint(lessThanOrEqualTo: closeButton.leadingAnchor, constant: -8),
             closeButton.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -8),
             closeButton.centerYAnchor.constraint(equalTo: header.centerYAnchor),
             closeButton.widthAnchor.constraint(equalToConstant: 20),
@@ -1528,7 +1687,8 @@ private final class ResolutionInspectorView: NSView {
     }
 
     var selfTestVisibleText: [String] {
-        [
+        var values: [String] = [
+            captureChip.isHidden ? nil : captureChip.text,
             nodeTitle.stringValue,
             badge.text,
             why.stringValue,
@@ -1545,6 +1705,14 @@ private final class ResolutionInspectorView: NSView {
             formerCandidateButton.isHidden ? nil : formerCandidateButton.title,
             auditButton.title,
         ].compactMap { $0 }
+        if !auditStack.isHidden {
+            values.append(contentsOf: auditStack.arrangedSubviews.flatMap { row in
+                (row as? NSStackView)?.arrangedSubviews.compactMap {
+                    ($0 as? NSTextField)?.stringValue
+                } ?? []
+            })
+        }
+        return values
     }
 
     var selfTestAuditVisible: Bool { !auditStack.isHidden }
@@ -1592,77 +1760,98 @@ private final class ResolutionInspectorView: NSView {
         }
     }
 
-    func display(
-        node: RelationTreeModel.Node,
-        clauses: [NarrativeClause],
-        context: RelationQueryContext,
-        correctedTitles: [String],
-        readiness: ExactCoordinator.Readiness,
+    func displayLive(
+        _ display: ReadingSetExcerpt.FrozenInspectorDisplay,
         theme: ReaderTheme
     ) {
-        nodeTitle.stringValue = node.title
-        switch node.badge {
-        case "Verified":
+        displayNormalized(
+            display,
+            atCapture: false,
+            canOpenFormerCandidate: display.formerCandidateAvailable,
+            theme: theme
+        )
+    }
+
+    func displayFrozen(
+        _ display: ReadingSetExcerpt.FrozenInspectorDisplay,
+        canOpenFormerCandidate: Bool,
+        theme: ReaderTheme
+    ) {
+        displayNormalized(
+            display,
+            atCapture: true,
+            canOpenFormerCandidate: canOpenFormerCandidate,
+            theme: theme
+        )
+    }
+
+    private func displayNormalized(
+        _ display: ReadingSetExcerpt.FrozenInspectorDisplay,
+        atCapture: Bool,
+        canOpenFormerCandidate: Bool,
+        theme: ReaderTheme
+    ) {
+        if atCapture {
+            captureChip.display(
+                "AT CAPTURE",
+                foreground: theme.chromeSecondaryColor,
+                background: .clear,
+                border: theme.chromeTertiaryColor,
+                dashed: true
+            )
+        } else {
+            captureChip.isHidden = true
+        }
+        nodeTitle.stringValue = display.nodeTitle
+        switch display.badge {
+        case .verified:
             badge.display(
-                "VERIFIED",
+                display.badge.rawValue,
                 foreground: theme.verifiedColor,
                 background: theme.verifiedBackgroundColor,
                 border: theme.verifiedBackgroundColor
             )
-        case "Unresolved":
+        case .inferred:
             badge.display(
-                "UNRESOLVED",
-                foreground: theme.unresolvedColor,
-                background: .clear,
-                border: theme.unresolvedBorderColor
-            )
-        default:
-            badge.display(
-                "INFERRED",
+                display.badge.rawValue,
                 foreground: theme.inferredColor,
                 background: theme.inferredBackgroundColor,
                 border: theme.inferredBackgroundColor
             )
+        case .unresolved:
+            badge.display(
+                display.badge.rawValue,
+                foreground: theme.unresolvedColor,
+                background: .clear,
+                border: theme.unresolvedBorderColor
+            )
         }
-        let sourceClauses = clauses.filter(isSourceClause)
-        let verificationClauses = clauses.filter { !isSourceClause($0) }
-        why.stringValue = (sourceClauses.first ?? verificationClauses.first)
-            .map(renderEnglish) ?? "No resolution explanation is available."
-        sourceBody.stringValue = sourceClauses.map(renderEnglish)
-            .joined(separator: " ")
-        sourceSection.isHidden = sourceClauses.isEmpty
-        verificationBody.stringValue = verificationClauses.map(renderEnglish)
-            .joined(separator: " ")
-        verificationSection.isHidden = verificationClauses.isEmpty
-        verificationTitle.stringValue = verificationClauses.contains {
-            if case .conflict = $0 { return true }
-            return false
-        } ? "VERIFICATION CONFLICT" : "VERIFICATION"
-        correctionBody.stringValue = correctedTitles.isEmpty ? "" :
-            "This target replaced earlier source candidates: "
-                + correctedTitles.joined(separator: ", ") + "."
-        correctionSection.isHidden = correctedTitles.isEmpty
-        availabilityBody.stringValue = readinessText(readiness)
-        let environment = analysisEnvironment(
-            for: node.explanation,
-            context: context
-        )
-        environmentBody.stringValue = environmentText(environment)
-        environmentSection.isHidden = environment == nil
-        formerCandidateButton.isHidden =
-            !node.modifiers.contains("Conflict/Corrected")
+        why.stringValue = display.why
+        sourceBody.stringValue = display.sourceBody
+        sourceSection.isHidden = display.sourceBody.isEmpty
+        verificationTitle.stringValue = display.verificationTitle
+        verificationBody.stringValue = display.verificationBody
+        verificationSection.isHidden = display.verificationBody.isEmpty
+        correctionBody.stringValue = display.correctionBody
+        correctionSection.isHidden = display.correctionBody.isEmpty
+        availabilityBody.stringValue = display.availabilityBody
+        environmentBody.stringValue = display.environmentBody
+        environmentSection.isHidden = display.environmentBody.isEmpty
+        formerCandidateButton.isHidden = !display.formerCandidateAvailable
+        formerCandidateButton.isEnabled = display.formerCandidateAvailable
+            && canOpenFormerCandidate
         auditStack.isHidden = true
         auditButton.title = "Show full audit"
         rebuildAudit(
-            auditRows(for: node.explanation, context: context),
+            display.auditRows.map { ($0.label, $0.value) },
             theme: theme
         )
-        setAccessibilityLabel("Resolution Inspector for \(node.title)")
-        setAccessibilityValue(
-            ([node.badge, why.stringValue].compactMap { $0 }
-                + clauses.map(renderEnglish))
-                .joined(separator: ", ")
+        setAccessibilityLabel(
+            atCapture
+                ? "Resolution Inspector for \(display.nodeTitle), at capture"
+                : "Resolution Inspector for \(display.nodeTitle)"
         )
+        setAccessibilityValue(display.accessibilityValue)
         apply(theme: theme)
     }
 
@@ -1733,210 +1922,6 @@ private final class ResolutionInspectorView: NSView {
         }
     }
 
-    private func auditRows(
-        for explanation: RelationRowExplanation?,
-        context: RelationQueryContext
-    ) -> [(String, String)] {
-        guard let explanation else { return [] }
-        let candidate = candidateObservation(explanation.primaryTrace)
-        let attribution = exactAttribution(
-            explanation.primaryTrace,
-            context: context
-        )
-        var rows: [(String, String)] = [
-            ("Resolver", resolverText(candidate: candidate, attribution: attribution)),
-            ("Certainty", certaintyText(candidate?.certainty, verified: attribution != nil)),
-            ("Dispatch", dispatchText(candidate?.dispatch)),
-            ("Evidence", candidate.map { evidenceText($0.evidence) } ?? "—"),
-            ("Candidate coverage", candidate.map {
-                completenessText($0.completeness)
-            } ?? "n/a"),
-        ]
-        if case .completed(let observation) = context.candidateQuery {
-            rows.append((
-                "Relation set",
-                "\(completenessText(observation.completeness)) · returned \(observation.returnedCount)"
-            ))
-        }
-        if case .completed(.completed(_, let origin, let exhaustiveness)) =
-            context.exactQuery
-        {
-            rows.append(("Query exhaustiveness", exhaustivenessText(exhaustiveness)))
-            rows.append(("Exact origin", originText(origin)))
-        }
-        if let snapshot = candidateSnapshot(candidate) {
-            rows.append(("Snapshot", String(snapshot.uuidString.prefix(8))))
-        }
-        if let attribution {
-            rows.append((
-                "Profile",
-                "\(attribution.featureSelection.rawValue) · \(trustText(attribution.environment.trustMode))"
-            ))
-            rows.append(("Provider", "\(attribution.provider) \(attribution.toolVersion)"))
-        }
-        return rows
-    }
-
-    private func isSourceClause(_ clause: NarrativeClause) -> Bool {
-        switch clause {
-        case .sourceEvidence, .candidateCompleteness, .candidateRelationSet: true
-        default: false
-        }
-    }
-
-    private func candidateObservation(
-        _ trace: ResolutionTrace
-    ) -> CandidateObservation? {
-        switch trace {
-        case .candidateOnly(let candidate), .conflict(let candidate, _),
-             .corroborated(let candidate, _): candidate
-        case .verificationOnly: nil
-        }
-    }
-
-    private func exactAttribution(
-        _ trace: ResolutionTrace,
-        context: RelationQueryContext
-    ) -> ExactAttribution? {
-        switch trace {
-        case .verificationOnly(let observation),
-             .corroborated(_, let observation): return observation.attribution
-        case .candidateOnly, .conflict:
-            if case .completed(.completed(let attribution, _, _)) =
-                context.exactQuery
-            {
-                return attribution
-            }
-            return nil
-        }
-    }
-
-    private func analysisEnvironment(
-        for explanation: RelationRowExplanation?,
-        context: RelationQueryContext
-    ) -> ExactAnalysisEnvironment? {
-        explanation.flatMap {
-            exactAttribution($0.primaryTrace, context: context)?.environment
-        }
-    }
-
-    private func readinessText(
-        _ readiness: ExactCoordinator.Readiness
-    ) -> String {
-        switch readiness {
-        case .preparing: "Preparing exact provider…"
-        case .ready: "Exact provider is ready."
-        case .unavailable(let reason): "Exact provider unavailable: \(reason)"
-        case .off(let reason): "Exact provider is off: \(reason)"
-        }
-    }
-
-    private func environmentText(
-        _ environment: ExactAnalysisEnvironment?
-    ) -> String {
-        guard let environment else { return "" }
-        let limitations = environment.limitations
-            .sorted { $0.rawValue < $1.rawValue }
-            .map(\.displayName)
-        return ([trustText(environment.trustMode)] + limitations)
-            .joined(separator: " · ")
-    }
-
-    private func resolverText(
-        candidate: CandidateObservation?,
-        attribution: ExactAttribution?
-    ) -> String {
-        switch (candidate, attribution) {
-        case (_?, _?): "Source resolver + rust-analyzer"
-        case (_?, nil): "Source resolver"
-        case (nil, _?): "rust-analyzer"
-        case (nil, nil): "—"
-        }
-    }
-
-    private func certaintyText(
-        _ certainty: Certainty?,
-        verified: Bool
-    ) -> String {
-        if verified { return "Exact" }
-        guard let certainty else { return "—" }
-        return switch certainty {
-        case .unresolved: "Unresolved"
-        case .possible: "Possible"
-        case .probable: "Probable"
-        case .strong: "Strong"
-        case .exact: "Exact"
-        }
-    }
-
-    private func dispatchText(_ dispatch: DispatchKind?) -> String {
-        guard let dispatch else { return "—" }
-        return switch dispatch {
-        case .direct: "Direct"
-        case .virtualDispatch: "Virtual"
-        case .traitDispatch: "Trait"
-        case .interfaceDispatch: "Interface"
-        case .callback: "Callback"
-        case .dynamicDispatch: "Dynamic"
-        case .macroGenerated: "Macro generated"
-        }
-    }
-
-    private func evidenceText(_ evidence: [ResolutionEvidence]) -> String {
-        evidence.map {
-            switch $0 {
-            case .lexicalBinding: "lexicalBinding"
-            case .uniqueImport: "uniqueImport"
-            case .sameFile: "sameFile"
-            case .nameOnly: "nameOnly"
-            case .methodNameOnly: "methodNameOnly"
-            case .receiverType: "receiverType"
-            }
-        }.joined(separator: ", ")
-    }
-
-    private func completenessText(_ completeness: Completeness) -> String {
-        switch completeness {
-        case .complete: "complete"
-        case .partial: "partial"
-        case .truncated: "truncated"
-        case .unknown: "unknown"
-        }
-    }
-
-    private func exhaustivenessText(
-        _ exhaustiveness: QueryExhaustiveness
-    ) -> String {
-        switch exhaustiveness {
-        case .guaranteed: "guaranteed"
-        case .bestEffort: "best-effort"
-        case .unknown: "unknown"
-        }
-    }
-
-    private func originText(_ origin: ExactOrigin) -> String {
-        switch origin {
-        case .worktree: "worktree"
-        case .materialized(let commitOID): "materialized \(commitOID)"
-        }
-    }
-
-    private func candidateSnapshot(
-        _ candidate: CandidateObservation?
-    ) -> UUID? {
-        guard let candidate else { return nil }
-        if case .occurrence(let occurrence) = candidate.target {
-            return occurrence.snapshotID.rawValue
-        }
-        return nil
-    }
-
-    private func trustText(_ trustMode: TrustMode) -> String {
-        switch trustMode {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
-        }
-    }
 }
 
 @MainActor

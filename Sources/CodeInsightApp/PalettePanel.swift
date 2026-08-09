@@ -384,7 +384,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             install(Self.fileRows(
                 query: parsed.query,
                 tree: appModel.fileTree,
-                tabs: appModel.tabStrip.tabs.map(\.fileURL)
+                tabs: appModel.tabStrip.tabs.compactMap(\.fileURL)
             ), emptyMessage: appModel.fileTree == nil ? "No project open" : "No files found")
         case .command:
             symbolModel.reset()
@@ -395,7 +395,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             guard let document = appModel.tabStrip.activeDocument,
                   let file = appModel.selectedFile
             else {
-                install([], emptyMessage: "No active file")
+                install([], emptyMessage: fileModeUnavailableMessage)
                 return
             }
             install(Self.currentSymbolRows(
@@ -422,7 +422,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             guard let document = appModel.tabStrip.activeDocument,
                   let file = appModel.selectedFile
             else {
-                install([], emptyMessage: "No active file")
+                install([], emptyMessage: fileModeUnavailableMessage)
                 return
             }
             let result = Self.lineRows(
@@ -432,6 +432,13 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             )
             install(result.rows, emptyMessage: result.message)
         }
+    }
+
+    private var fileModeUnavailableMessage: String {
+        guard let tab = appModel.tabStrip.activeTab,
+              tab.fileURL == nil
+        else { return "No active file" }
+        return "Reading Set has no active file"
     }
 
     private func installProjectSymbolRows() {

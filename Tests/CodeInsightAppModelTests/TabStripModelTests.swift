@@ -1,4 +1,5 @@
 import CodeInsightAppModel
+import CodeInsightCore
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -33,7 +34,7 @@ func tabStripEvictsTheLeastRecentlyUsedTabAtItsLimit() {
     model.activate(0)
     model.open(files[3], inNewTab: true)
 
-    #expect(model.tabs.map(\.fileURL) == [files[0], files[2], files[3]])
+    #expect(model.tabs.compactMap(\.fileURL) == [files[0], files[2], files[3]])
     #expect(model.activeTab?.fileURL == files[3])
 }
 
@@ -52,6 +53,87 @@ func switchingTabsReleasesTheInactiveReaderDocument() {
 
     #expect(model.activeDocument == nil)
     #expect(probe.document == nil)
+}
+
+@Test
+@MainActor
+func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
+    let model = TabStripModel(maximumCount: 3)
+    let fileA = URL(fileURLWithPath: "/tmp/a.rs")
+    let fileB = URL(fileURLWithPath: "/tmp/b.rs")
+    model.open(fileA, inNewTab: false)
+    model.updateActiveAnchors(scrollByteOffset: 10, selectionByteOffset: 12)
+    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
+    model.updateActiveReadingSetScroll(144)
+    model.open(fileB, inNewTab: true)
+
+    #expect(model.tabs.count == 3)
+    #expect(model.tabs[1].fileURL == nil)
+    #expect(model.tabs[1].title == "spawn")
+    #expect(model.tabs[1].readingSetScrollOffset == 144)
+    #expect(model.tabs[0].scrollByteOffset == 10)
+    #expect(model.tabs[0].selectionByteOffset == 12)
+
+    model.activate(1)
+    #expect(model.activeDocument == nil)
+    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
+    #expect(model.tabs.count == 3)
+    #expect(model.tabs.compactMap(\.fileURL) == [fileB])
+    #expect(model.tabs.filter { $0.fileURL == nil }.count == 2)
+}
+
+@Test
+@MainActor
+func appModelClearsFileOnlyStateForAReadingSetAndRestoresItForAFile() {
+    let model = AppModel()
+    let file = URL(fileURLWithPath: "/tmp/a.rs")
+    model.openInNewTab(file, selectionByteOffset: 7)
+    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
+
+    #expect(model.selectedFile == nil)
+    #expect(model.selectedByteOffset == nil)
+    #expect(model.tabStrip.activeDocument == nil)
+
+    model.activateTab(0)
+    #expect(model.selectedFile == file)
+    #expect(model.selectedByteOffset == 7)
+}
+
+private func readingSetExcerpt() -> ReadingSetExcerpt {
+    let capturedAt = Date(timeIntervalSince1970: 1_786_200_000)
+    let source = "pub fn spawn() {}\n"
+    let inspector = ReadingSetExcerpt.FrozenInspectorDisplay(
+        nodeTitle: "spawn",
+        badge: .verified,
+        why: "rust-analyzer returned this target.",
+        sourceBody: "Matched a declaration in the same file.",
+        verificationTitle: "VERIFICATION",
+        verificationBody: "Verified at capture.",
+        correctionBody: "",
+        availabilityBody: "rust-analyzer ready at capture",
+        environmentBody: "default · Trusted at capture",
+        auditRows: [
+            .init(label: "Source", value: "worktree captured"),
+        ],
+        accessibilityValue: "Verified spawn at capture",
+        capturedAt: capturedAt,
+        formerCandidateAvailable: false
+    )
+    return ReadingSetExcerpt(
+        role: "Definition",
+        symbol: "spawn",
+        path: "src/lib.rs",
+        line: 1,
+        column: 1,
+        firstLine: 1,
+        byteRange: ByteRange(lowerBound: 0, upperBound: UInt32(source.utf8.count)),
+        sourceText: source,
+        contentID: .sha256(of: Array(source.utf8)),
+        revision: nil,
+        capturedAt: capturedAt,
+        sourceKind: .worktreeCaptured,
+        inspector: inspector
+    )
 }
 
 private final class WeakDocumentProbe {

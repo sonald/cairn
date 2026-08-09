@@ -271,6 +271,34 @@ struct PaletteTests {
                 }
         })
     }
+
+    @Test
+    func readingSetDisablesOnlyTheTwoActiveFilePaletteModes() {
+        _ = NSApplication.shared
+        let model = AppModel()
+        model.openReadingSet(title: "spawn", excerpts: [])
+        let panel = PalettePanel(
+            appModel: model,
+            settings: ReaderSettings(),
+            onOpen: { _, _ in }
+        )
+        defer { panel.close() }
+
+        panel.prepareForTesting(prefill: "@", owner: nil, commands: [])
+        #expect(panel.rowsForTesting.map(\.title) == [
+            "Reading Set has no active file",
+        ])
+        panel.setQueryForTesting(":12")
+        #expect(panel.rowsForTesting.map(\.title) == [
+            "Reading Set has no active file",
+        ])
+        panel.setQueryForTesting("")
+        #expect(panel.rowsForTesting.map(\.title) == ["No project open"])
+        panel.setQueryForTesting("#")
+        #expect(panel.rowsForTesting.map(\.title) == ["Type a project symbol"])
+        panel.setQueryForTesting(">")
+        #expect(panel.rowsForTesting.map(\.title) == ["No commands found"])
+    }
 }
 
 private func facet(

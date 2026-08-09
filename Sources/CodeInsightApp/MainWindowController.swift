@@ -100,6 +100,32 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model: model.relationTree,
             verificationReadiness: { [weak model] in
                 model?.exactCoordinator.readiness ?? .off("no project")
+            },
+            capturedSource: { [weak model] path in
+                guard let model else { return nil }
+                if exactLocationIsInDependency(path) {
+                    guard let data = try? Data(
+                        contentsOf: URL(fileURLWithPath: path),
+                        options: .mappedIfSafe
+                    ) else { return nil }
+                    let bytes = Array(data)
+                    return (
+                        ContentID.sha256(of: bytes),
+                        bytes,
+                        ReadingSetExcerpt.SourceKind.dependencyCaptured,
+                        nil
+                    )
+                }
+                guard let source = model.capturedProjectSource(at: path)
+                else { return nil }
+                return (
+                    source.contentID,
+                    source.bytes,
+                    model.currentRevision == nil
+                        ? ReadingSetExcerpt.SourceKind.worktreeCaptured
+                        : .projectCommit,
+                    model.currentRevision
+                )
             }
         )
         relationController.view.frame.size.width = 500
@@ -369,6 +395,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         relationController.onOpen = { [weak self] node in
             self?.open(node)
+        }
+        relationController.onOpenReadingSet = { [weak model] title, excerpts in
+            model?.openReadingSet(title: title, excerpts: excerpts)
+        }
+        readerController.onViewReadingSetEvidence = { [weak self, weak model] index in
+            guard let self,
+                  case .readingSet(_, let excerpts) = model?.tabStrip.activeTab?.content,
+                  excerpts.indices.contains(index)
+            else { return }
+            relationItem.isCollapsed = false
+            relationController.showFrozenInspector(excerpts[index].inspector)
         }
         relationController.onTreeChange = { [weak self] in
             self?.renderStatusBar()
@@ -1525,13 +1562,20 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 _ = sidebarController.synchronizeFileSelection(to: model.selectedFile)
             }
         }
-        let readerFile = model.tabStrip.activeTab?.fileURL ?? model.selectedFile
+        let readerContent = model.tabStrip.activeTab?.content
+            ?? model.selectedFile.map(TabContent.file)
+        let readerFile = readerContent?.fileURL
         let selectedSource = readerSource(for: readerFile)
         readerController.display(
-            readerFile,
+            readerContent,
             snapshotID: model.currentSnapshotID,
             source: selectedSource
         )
+        if readerFile == nil, model.tabStrip.activeTab != nil {
+            readerController.restoreReadingSetScrollOffset(
+                model.tabStrip.activeTab?.readingSetScrollOffset
+            )
+        }
         readerController.refreshTabs()
         let compareFile = model.selectedFile.flatMap {
             projectPath(for: $0) == nil ? nil : $0
@@ -1555,7 +1599,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         if displayedNavigationGeneration != model.navigationGeneration {
             if let restore = pendingTabRestore,
-               restore.fileURL.standardizedFileURL
+               let restoreFile = restore.fileURL,
+               restoreFile.standardizedFileURL
                     == readerFile?.standardizedFileURL
             {
                 readerController.restoreReadingPosition(
@@ -2180,7 +2225,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let current = currentJumpRecord()
         captureActiveTabState()
         let existingTab = model.tabStrip.tabs.firstIndex(where: {
-            $0.fileURL.standardizedFileURL == file.standardizedFileURL
+            $0.fileURL?.standardizedFileURL == file.standardizedFileURL
         })
         let focusesExistingTab = byteOffset == nil
             && existingTab != nil
@@ -2237,6 +2282,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func captureActiveTabState() {
+        if model.tabStrip.activeTab?.fileURL == nil {
+            model.tabStrip.updateActiveReadingSetScroll(
+                readerController.currentReadingSetScrollOffset
+            )
+            return
+        }
         if let position = readerController.currentReadingPosition(
             fallbackByteOffset: model.selectedByteOffset
         ) {
@@ -3099,9 +3150,11 @@ private final class TabStripView: NSView {
 
     func refresh() {
         isHidden = (model?.tabs.count ?? 0) <= 1
-        setAccessibilityValue(model?.activeTab?.fileURL.lastPathComponent ?? "")
+        setAccessibilityValue(model?.activeTab?.title ?? "")
         needsDisplay = true
     }
+
+    var activeTitle: String { model?.activeTab?.title ?? "" }
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
@@ -3127,7 +3180,7 @@ private final class TabStripView: NSView {
                 width: max(0, titleRect.width - closeWidth),
                 height: titleRect.height
             )
-            (model.tabs[index].fileURL.lastPathComponent as NSString).draw(
+            (model.tabs[index].title as NSString).draw(
                 in: textRect,
                 withAttributes: [
                     .font: NSFont.systemFont(
@@ -3292,12 +3345,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onCopyPathLine: ((URL, UInt32) -> Void)?
     var onRevealInFinder: ((URL) -> Void)?
+    var onOpenReadingSetExcerpt: ((Int) -> Void)?
+    var onExpandReadingSetExcerpt: ((Int) -> Void)?
+    var onViewReadingSetEvidence: ((Int) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
     var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
     private let label = NSTextField(labelWithString: "")
     private let textView = ReaderTextView()
+    private let readingSetView = ReadingSetView()
     private let loader = DocumentLoader()
     private let showsCompareControls: Bool
     private let compareVersionButton = NSButton()
@@ -3330,6 +3387,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
     private var displayedDocument: ReaderDocument?
+    private var displayedReadingSetKey: String?
     private var loadGeneration: UInt64 = 0
     private var syntaxLoadPending = false
     private var pendingFocusNavigationOffset: UInt32?
@@ -3388,15 +3446,30 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(scrollView)
+        readerArea.addSubview(readingSetView)
         readerArea.addSubview(label)
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
             scrollView.topAnchor.constraint(equalTo: readerArea.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+            readingSetView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            readingSetView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            readingSetView.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            readingSetView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
             label.centerXAnchor.constraint(equalTo: readerArea.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: readerArea.centerYAnchor),
         ])
+        readingSetView.isHidden = true
+        readingSetView.onOpen = { [weak self] in
+            self?.onOpenReadingSetExcerpt?($0)
+        }
+        readingSetView.onExpand = { [weak self] in
+            self?.onExpandReadingSetExcerpt?($0)
+        }
+        readingSetView.onViewEvidence = { [weak self] in
+            self?.onViewReadingSetEvidence?($0)
+        }
         if showsCompareControls {
             view = compareContainer(readerView: readerArea)
         } else {
@@ -3925,6 +3998,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     func apply(settings: ReaderSettings) {
         loadViewIfNeeded()
         textView.apply(settings: settings)
+        readingSetView.apply(settings: settings)
         if !showsCompareControls {
             tabStripView.apply(settings: settings)
             applyReaderHeaderTheme(settings)
@@ -3943,13 +4017,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             onActivate: onActivate,
             onClose: onClose
         )
+        readingSetView.onScroll = { [weak model] offset in
+            model?.updateActiveReadingSetScroll(offset)
+        }
     }
 
     func refreshTabs() {
         guard !showsCompareControls else { return }
         loadViewIfNeeded()
         tabStripView.refresh()
-        fileNameLabel.stringValue = displayedFile?.lastPathComponent ?? ""
+        fileNameLabel.stringValue = tabStripView.activeTitle
     }
 
     func showEmptyState(
@@ -4517,12 +4594,104 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     }
 
     func display(
+        _ content: TabContent?,
+        snapshotID: SnapshotID? = nil,
+        source: DocumentLoader.ContentSource? = nil
+    ) {
+        switch content {
+        case .file(let file):
+            display(file, snapshotID: snapshotID, source: source)
+        case .readingSet(let title, let excerpts):
+            displayReadingSet(title: title, excerpts: excerpts)
+        case nil:
+            display(URL?.none, snapshotID: snapshotID, source: source)
+        }
+    }
+
+    private func displayReadingSet(
+        title: String,
+        excerpts: [ReadingSetExcerpt]
+    ) {
+        loadViewIfNeeded()
+        let key = title + excerpts.map {
+            "\($0.contentID.bytes)-\($0.byteRange.lowerBound)-\($0.byteRange.upperBound)"
+        }.joined(separator: "|")
+        guard key != displayedReadingSetKey else { return }
+        findTask?.cancel()
+        findWorker?.cancel()
+        readingPositionTask?.cancel()
+        loadGeneration &+= 1
+        displayedFile = nil
+        displayedSnapshotID = nil
+        displayedDocument = nil
+        displayedReadingSetKey = key
+        contextMenuOffset = nil
+        onOutlineChange?([])
+        hideScopeHeader()
+        findBar.isHidden = true
+        label.isHidden = true
+        textView.clear()
+        scrollView?.isHidden = true
+        readingSetView.isHidden = false
+        readingHeightControl.isHidden = true
+        readingHeightShortcutLabel.isHidden = true
+        fileNameLabel.stringValue = "Reading Set · \(title)"
+        readingSetView.display(
+            title: title,
+            excerpts: excerpts,
+            canOpen: onOpenReadingSetExcerpt != nil,
+            canExpand: onExpandReadingSetExcerpt != nil,
+            canViewEvidence: onViewReadingSetEvidence != nil
+        )
+    }
+
+    var currentReadingSetScrollOffset: Double? {
+        displayedReadingSetKey == nil ? nil : readingSetView.scrollOffset
+    }
+
+    var selfTestReadingSetState: (
+        visible: Bool,
+        title: String,
+        subtitle: String,
+        emptyVisible: Bool,
+        cardCount: Int,
+        cardFrames: [NSRect],
+        cardAccessibility: [(String, String)],
+        code: [(String, Bool, Bool)],
+        codeGeometry: [(String, Bool, Bool)],
+        actions: [[(String, Bool, Bool)]]
+    ) {
+        (
+            !readingSetView.isHidden,
+            readingSetView.selfTestTitle,
+            readingSetView.selfTestSubtitle,
+            readingSetView.selfTestEmptyVisible,
+            readingSetView.selfTestCardCount,
+            readingSetView.selfTestCardFrames,
+            readingSetView.selfTestCardAccessibility,
+            readingSetView.selfTestCodeState,
+            readingSetView.selfTestCodeGeometry,
+            readingSetView.selfTestActionState
+        )
+    }
+
+    func restoreReadingSetScrollOffset(_ offset: Double?) {
+        guard displayedReadingSetKey != nil else { return }
+        readingSetView.restoreScrollOffset(offset)
+    }
+
+    func display(
         _ file: URL?,
         snapshotID: SnapshotID? = nil,
         source: DocumentLoader.ContentSource? = nil
     ) {
         loadViewIfNeeded()
         guard file != displayedFile || snapshotID != displayedSnapshotID else { return }
+        displayedReadingSetKey = nil
+        readingSetView.isHidden = true
+        scrollView?.isHidden = false
+        readingHeightControl.isHidden = false
+        readingHeightShortcutLabel.isHidden = false
         let rerunFind = !findBar.isHidden
         if rerunFind {
             invalidateFind()

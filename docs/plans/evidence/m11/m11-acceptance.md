@@ -450,3 +450,29 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   self-test 与 ReaderUI 坐标门禁全部退出 0。最终 release runner 为 control resolution 26.603 ms、fold
   resolution 25.825 ms、首次折叠 247.786 ms（门槛 ≤ 400 ms），4,400 logical / 200 rendered，峰值 RSS
   增量 0 bytes（门槛 ≤ 80 MiB），`status=pass`。R2 为本地 Reader / AppKit / Finder 行为，不依赖 provider。
+
+## M11D-1：Reading Set 基础切片与 Relations 入口
+
+结论：PASS（非文件 tab 生命周期、Relations 冻结入口、连续只读呈现与 AT CAPTURE Inspector 已形成
+可独立使用的竖切片；Open / Expand、Trail producer 与 session codec 留在后续 M11D / R3 切片）。
+
+- `TabContent` 是 tab 的唯一 package 真值，`fileURL` 已按计划显式 optionalize；Reading Set 不伪造 URL，
+  激活时 `activeDocument` / `selectedFile` 均为 nil，滚动只保存 numeric offset，并与 file tab 共用新开、
+  activate、close、maximumCount 与 LRU 规则。包内 24 个 `.fileURL` 命中已逐处迁移；
+  `swift package dump-package ... | jq ... | rg -x true` 证明 `CodeInsightAppModel` 仍不是发布 product。
+- Relations 的 `Reading Set` 按已发布 location row 的 producer 顺序冻结，排除 group / evidence / loading /
+  error；source 与 evidence 同代际，worktree 只读取 `EngineSession` 已捕获 bytes。入口最多取 50 段，不做
+  跨记录 dedup。固定测试断言 contentID、顺序、稳定 audit labels 与 capture-time availability。
+- 专用 Reading Set `NSScrollView` 呈现满宽连续卡片；每段有 role、symbol、`path:line`、badge、
+  `name match only` caveat、三种 provenance chip。源码区保持冻结文本的只读选择/复制，行号单独绘制且
+  不进入复制内容；不换行并在需要时独立横向滚动。Light / Dark / SI Classic、五段固定原型、空态、AX、
+  file-only Palette 降级和 Reading Set → File → Reading Set 生命周期均有断言。
+- `makeInspectorDisplay` 同时服务 live 与 freeze；live audit 已删除 runtime Snapshot UUID，统一为稳定
+  `Source / Content / Captured at`。`查看证据`只读冻结 payload，展开既有 Relations pane 后进入明确 frozen
+  mode；`AT CAPTURE`、capture-time availability/environment 与稳定 audit 在 relation root 清空后仍保留。
+- 完整 `swift test --disable-sandbox` PASS；签名验收包为 `.build/m11d-base-ui-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11dbase`，strict codesign 与 designated requirement 均通过。真实非 Git fixture
+  `/private/tmp/m11-f5-ui-fixture-plain` 以键盘/CUA 完成 `describe → Show Calls → Reading Set`：严格生成
+  `format / area / format` 三段，行号分别从 14 / 8 / 14 起，Open / Expand 在尚未接线的本切片正确 disabled，
+  View Evidence 可用；点击后显示 `AT CAPTURE`，展开 audit 得到 `worktree captured`、contentID 前缀和
+  ISO-8601 capturedAt，未出现 `Snapshot` / UUID。

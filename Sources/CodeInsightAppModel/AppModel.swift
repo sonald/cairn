@@ -623,42 +623,68 @@ public final class AppModel {
         selectFile(url, byteOffset: selectionByteOffset)
     }
 
+    package func openReadingSet(
+        title: String,
+        excerpts: [ReadingSetExcerpt]
+    ) {
+        replayTask?.cancel()
+        tabStrip.openReadingSet(title: title, excerpts: excerpts)
+        selectReadingSet()
+    }
+
+    package func capturedProjectSource(
+        at path: String
+    ) -> (contentID: ContentID, bytes: [UInt8])? {
+        guard case .ready(let session, _) = projectState else { return nil }
+        return session.capturedSource(atManifestPath: path)
+    }
+
     public func activateTab(_ index: Int) {
         guard tabStrip.tabs.indices.contains(index) else { return }
         tabStrip.activate(index)
         guard let tab = tabStrip.activeTab else { return }
+        guard let file = tab.fileURL else {
+            selectReadingSet()
+            return
+        }
         activeNavigationRequest = NavigationRequest(
             destination: SourceDestination(
-                file: tab.fileURL,
+                file: file,
                 byteOffset: tab.selectionByteOffset
             ),
             cause: .tabActivation,
             policy: .passive
         )
-        selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+        selectFile(file, byteOffset: tab.selectionByteOffset)
     }
 
     public func selectRelativeTab(_ delta: Int) {
         guard tabStrip.tabs.count > 1 else { return }
         tabStrip.selectRelative(delta)
         guard let tab = tabStrip.activeTab else { return }
+        guard let file = tab.fileURL else {
+            selectReadingSet()
+            return
+        }
         activeNavigationRequest = NavigationRequest(
             destination: SourceDestination(
-                file: tab.fileURL,
+                file: file,
                 byteOffset: tab.selectionByteOffset
             ),
             cause: .tabActivation,
             policy: .passive
         )
-        selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+        selectFile(file, byteOffset: tab.selectionByteOffset)
     }
 
     public func closeTab(_ index: Int) {
         let closesActive = tabStrip.activeIndex == index
         _ = tabStrip.close(index)
         guard closesActive else { return }
-        if let tab = tabStrip.activeTab {
-            selectFile(tab.fileURL, byteOffset: tab.selectionByteOffset)
+        if let tab = tabStrip.activeTab, let file = tab.fileURL {
+            selectFile(file, byteOffset: tab.selectionByteOffset)
+        } else if tabStrip.activeTab != nil {
+            selectReadingSet()
         } else {
             selectedFile = nil
             selectedByteOffset = nil
@@ -927,6 +953,14 @@ public final class AppModel {
         selectedByteOffset = byteOffset
         navigationGeneration &+= 1
         navigationSink(file, byteOffset)
+        updateCompareFile()
+    }
+
+    private func selectReadingSet() {
+        activeNavigationRequest = nil
+        selectedFile = nil
+        selectedByteOffset = nil
+        navigationGeneration &+= 1
         updateCompareFile()
     }
 
