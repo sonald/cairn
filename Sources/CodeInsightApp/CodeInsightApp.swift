@@ -5784,6 +5784,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.showProjectSearch()
     }
 
+    @objc private func findInFile(_ sender: Any?) {
+        _ = windowController?.showFindBar()
+    }
+
+    @objc private func findNext(_ sender: Any?) {
+        windowController?.findNextMatch()
+    }
+
+    @objc private func findPrevious(_ sender: Any?) {
+        windowController?.findPreviousMatch()
+    }
+
     @objc private func openSelectedFileInNewTab(_ sender: Any?) {
         windowController?.openSelectedFileInNewTab()
     }
@@ -5900,6 +5912,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(findInFile(_:)), #selector(findNext(_:)),
+            #selector(findPrevious(_:)):
+            return windowController?.canFindInFile == true
         case #selector(goBack(_:)):
             return model.navigationHistory.canGoBack
         case #selector(goForward(_:)):
@@ -6059,6 +6074,29 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
         let findItem = NSMenuItem()
         let findMenu = NSMenu(title: "Find")
+        let findInFileItem = NSMenuItem(
+            title: "Find in File…",
+            action: #selector(findInFile(_:)),
+            keyEquivalent: "f"
+        )
+        findInFileItem.target = self
+        findMenu.addItem(findInFileItem)
+        let findNextItem = NSMenuItem(
+            title: "Find Next",
+            action: #selector(findNext(_:)),
+            keyEquivalent: "g"
+        )
+        findNextItem.target = self
+        findMenu.addItem(findNextItem)
+        let findPreviousItem = NSMenuItem(
+            title: "Find Previous",
+            action: #selector(findPrevious(_:)),
+            keyEquivalent: "g"
+        )
+        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
+        findPreviousItem.target = self
+        findMenu.addItem(findPreviousItem)
+        findMenu.addItem(.separator())
         let findInProjectItem = NSMenuItem(
             title: "Find in Project…",
             action: #selector(findInProject(_:)),

@@ -194,12 +194,14 @@ public struct SnapshotSearchService: Sendable {
                             wallClockLimit: wallClockLimit
                         )
                     } else {
-                        ranges = Self.literalRanges(
+                        ranges = try literalRanges(
                             literalPattern,
-                            bytes: bytes,
+                            in: bytes,
                             caseSensitive: query.caseSensitive,
-                            startedAt: startedAt,
-                            wallClockLimit: wallClockLimit
+                            maximumMatches: Self.matchesPerFile,
+                            wallClockExpired: {
+                                Self.expired(startedAt, limit: wallClockLimit)
+                            }
                         )
                     }
 
@@ -363,13 +365,14 @@ public struct SnapshotSearchService: Sendable {
                             break
                         }
 
-                        let rawRanges = Self.literalRanges(
+                        let rawRanges = try literalRanges(
                             pattern,
-                            bytes: bytes,
+                            in: bytes,
                             caseSensitive: query.caseSensitive,
                             maximumMatches: nil,
-                            startedAt: startedAt,
-                            wallClockLimit: wallClockLimit
+                            wallClockExpired: {
+                                Self.expired(startedAt, limit: wallClockLimit)
+                            }
                         )
                         try Task.checkCancellation()
                         if Self.expired(startedAt, limit: wallClockLimit) {
@@ -485,54 +488,6 @@ public struct SnapshotSearchService: Sendable {
         }
     }
 
-    private static func literalRanges(
-        _ pattern: [UInt8],
-        bytes: [UInt8],
-        caseSensitive: Bool,
-        maximumMatches: Int? = matchesPerFile,
-        startedAt: ContinuousClock.Instant,
-        wallClockLimit: Duration
-    ) -> [ByteRange] {
-        guard pattern.count <= bytes.count else { return [] }
-        var ranges: [ByteRange] = []
-        var offset = 0
-        return bytes.withUnsafeBufferPointer { haystack in
-            pattern.withUnsafeBufferPointer { needle in
-                while offset <= haystack.count - needle.count {
-                    if offset & 0xFFF == 0,
-                       Task.isCancelled || expired(startedAt, limit: wallClockLimit)
-                    {
-                        break
-                    }
-                    var matches = true
-                    for patternOffset in needle.indices {
-                        let lhs = haystack[offset + patternOffset]
-                        let rhs = needle[patternOffset]
-                        if caseSensitive ? lhs != rhs : asciiFold(lhs) != asciiFold(rhs) {
-                            matches = false
-                            break
-                        }
-                    }
-                    if matches {
-                        ranges.append(ByteRange(
-                            lowerBound: UInt32(offset),
-                            upperBound: UInt32(offset + needle.count)
-                        ))
-                        if let maximumMatches,
-                           ranges.count > maximumMatches
-                        {
-                            break
-                        }
-                        offset += needle.count
-                    } else {
-                        offset += 1
-                    }
-                }
-                return ranges
-            }
-        }
-    }
-
     private static func regexRanges(
         _ regex: NSRegularExpression,
         string: String,
@@ -608,10 +563,6 @@ public struct SnapshotSearchService: Sendable {
                 upperBound: UInt32(excerptEnd)
             )
         )
-    }
-
-    private static func asciiFold(_ byte: UInt8) -> UInt8 {
-        (0x41...0x5A).contains(byte) ? byte + 0x20 : byte
     }
 
     private static func expired(

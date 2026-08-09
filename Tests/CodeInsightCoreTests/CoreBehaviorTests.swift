@@ -76,6 +76,43 @@ func lineTableHandlesEmptyAndUnterminatedFiles() throws {
 }
 
 @Test
+func literalSearchUsesSharedASCIIFoldAndLeftmostNonoverlappingRanges() throws {
+    let bytes = Array("AaAa éÉ".utf8)
+
+    #expect(asciiFold(Character("A").asciiValue!) == Character("a").asciiValue!)
+    #expect(asciiFold(0xC3) == 0xC3)
+    #expect(try literalRanges(
+        Array("aa".utf8),
+        in: bytes,
+        caseSensitive: false
+    ) == [
+        ByteRange(lowerBound: 0, upperBound: 2),
+        ByteRange(lowerBound: 2, upperBound: 4),
+    ])
+    #expect(try literalRanges(
+        Array("aa".utf8),
+        in: bytes,
+        caseSensitive: true
+    ).isEmpty)
+    #expect(try literalRanges([], in: bytes, caseSensitive: false).isEmpty)
+}
+
+@Test
+func literalSearchCancellationThrowsInsteadOfPublishingPartialRanges() async {
+    let worker = Task.detached {
+        try literalRanges(
+            [0x61],
+            in: Array(repeating: 0x61, count: 20_000_000),
+            caseSensitive: true
+        )
+    }
+    worker.cancel()
+    await #expect(throws: CancellationError.self) {
+        _ = try await worker.value
+    }
+}
+
+@Test
 func lineTableUsesUTF8ByteColumnsAndRoundTrips() throws {
     let table = LineTable(bytes: Array("é\nz".utf8))
 

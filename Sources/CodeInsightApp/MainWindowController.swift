@@ -261,10 +261,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             [weak self, weak window] event in
             guard event.keyCode == 53,
                   event.window === window,
-                  self?.isFocusMode == true
+                  let self
             else { return event }
-            _ = self?.toggleFocusCurrentScope()
-            return nil
+            if self.isFindBarVisible {
+                _ = self.closeFindBar()
+                return nil
+            }
+            if self.isFocusMode {
+                _ = self.toggleFocusCurrentScope()
+                return nil
+            }
+            return event
         }
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
@@ -1201,6 +1208,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var isFocusMode: Bool { readerController.isFocusMode }
+    var isFindBarVisible: Bool { readerController.isFindBarVisible }
+
+    @discardableResult
+    func showFindBar() -> Bool { readerController.showFindBar() }
+
+    @discardableResult
+    func closeFindBar() -> Bool { readerController.closeFindBar() }
+
+    func findNextMatch() { readerController.findNextMatch() }
+    func findPreviousMatch() { readerController.findPreviousMatch() }
+
+    var canFindInFile: Bool { readerController.canFindInFile }
 
     @discardableResult
     func toggleFocusCurrentScope() -> Bool {
@@ -3218,7 +3237,7 @@ private final class ReadingHeightControl: NSSegmentedControl {
 }
 
 @MainActor
-final class ReaderViewController: NSViewController {
+final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
@@ -3250,6 +3269,14 @@ final class ReaderViewController: NSViewController {
     private let readingHeightShortcutLabel = NSTextField(
         labelWithString: "⌥⌘0/1/2"
     )
+    private let findBar = NSView()
+    private let findBarDivider = NSView()
+    private let findField = NSSearchField()
+    private let findCaseButton = NSButton()
+    private let findPreviousButton = NSButton()
+    private let findNextButton = NSButton()
+    private let findStatusLabel = NSTextField(labelWithString: "")
+    private let findCloseButton = NSButton()
     private let tabAndReaderArea = NSStackView()
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
@@ -3258,18 +3285,34 @@ final class ReaderViewController: NSViewController {
     private var loadGeneration: UInt64 = 0
     private var syntaxLoadPending = false
     private var pendingFocusNavigationOffset: UInt32?
+    private var findTask: Task<Void, Never>?
+    private var findWorker: Task<[ByteRange], Error>?
+    private var findRequestID: UInt64 = 0
+    private var savedSymbolOccurrenceByteOffset: UInt32?
+    private var findWrapped = false
+    private var findScanDelayForTesting = Duration.zero
+    private(set) var findCancelledWorkerCountForTesting = 0
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
     private var emptyStateView: EmptyStateView?
-    private var liveScrollObserver: NSObjectProtocol?
+    nonisolated(unsafe) private var liveScrollObserver: NSObjectProtocol?
 
     init(showsCompareControls: Bool = false) {
         self.showsCompareControls = showsCompareControls
         super.init(nibName: nil, bundle: nil)
+        findBar.isHidden = true
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        findTask?.cancel()
+        findWorker?.cancel()
+        if let liveScrollObserver {
+            NotificationCenter.default.removeObserver(liveScrollObserver)
+        }
     }
 
     override func loadView() {
@@ -3309,12 +3352,17 @@ final class ReaderViewController: NSViewController {
         } else {
             tabStripView.isHidden = true
             configureReaderHeader()
+            configureFindBar()
             tabAndReaderArea.setViews([tabStripView, readerArea], in: .leading)
             tabAndReaderArea.orientation = .vertical
             tabAndReaderArea.alignment = .width
             tabAndReaderArea.distribution = .fill
             tabAndReaderArea.spacing = 0
-            let stack = NSStackView(views: [readerHeader, tabAndReaderArea])
+            let stack = NSStackView(views: [
+                readerHeader,
+                findBar,
+                tabAndReaderArea,
+            ])
             stack.orientation = .vertical
             stack.alignment = .width
             stack.distribution = .fill
@@ -3322,6 +3370,7 @@ final class ReaderViewController: NSViewController {
             NSLayoutConstraint.activate([
                 tabStripView.heightAnchor.constraint(equalToConstant: 30),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
+                findBar.heightAnchor.constraint(equalToConstant: 31),
             ])
             view = stack
         }
@@ -3434,8 +3483,129 @@ final class ReaderViewController: NSViewController {
         applyReaderHeaderTheme(ReaderSettings())
     }
 
+    private func configureFindBar() {
+        findBar.wantsLayer = true
+        findBar.translatesAutoresizingMaskIntoConstraints = false
+        findBar.isHidden = true
+        findField.placeholderString = "Find in file"
+        findField.sendsSearchStringImmediately = true
+        findField.sendsWholeSearchString = false
+        findField.delegate = self
+        findField.setAccessibilityLabel("Find in file")
+
+        findCaseButton.title = "Aa"
+        findCaseButton.setButtonType(.toggle)
+        findCaseButton.bezelStyle = .texturedRounded
+        findCaseButton.target = self
+        findCaseButton.action = #selector(toggleFindCase(_:))
+        findCaseButton.toolTip = "Match case"
+        findCaseButton.setAccessibilityLabel("Match case")
+
+        findPreviousButton.title = "↑"
+        findPreviousButton.bezelStyle = .inline
+        findPreviousButton.target = self
+        findPreviousButton.action = #selector(findPrevious(_:))
+        findPreviousButton.setAccessibilityLabel("Previous match")
+
+        findNextButton.title = "↓"
+        findNextButton.bezelStyle = .inline
+        findNextButton.target = self
+        findNextButton.action = #selector(findNext(_:))
+        findNextButton.setAccessibilityLabel("Next match")
+
+        findStatusLabel.font = .systemFont(ofSize: 11)
+        findStatusLabel.alignment = .right
+        findStatusLabel.setContentCompressionResistancePriority(
+            .defaultHigh,
+            for: .horizontal
+        )
+        findStatusLabel.setAccessibilityLabel("Find result")
+
+        findCloseButton.title = "×"
+        findCloseButton.bezelStyle = .inline
+        findCloseButton.target = self
+        findCloseButton.action = #selector(closeFind(_:))
+        findCloseButton.setAccessibilityLabel("Close find bar")
+
+        let spacer = NSView()
+        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        let row = NSStackView(views: [
+            findField,
+            findCaseButton,
+            findPreviousButton,
+            findNextButton,
+            spacer,
+            findStatusLabel,
+            findCloseButton,
+        ])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 6
+        row.translatesAutoresizingMaskIntoConstraints = false
+        findBarDivider.wantsLayer = true
+        findBarDivider.translatesAutoresizingMaskIntoConstraints = false
+        findBar.addSubview(row)
+        findBar.addSubview(findBarDivider)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: findBar.leadingAnchor, constant: 13),
+            row.trailingAnchor.constraint(equalTo: findBar.trailingAnchor, constant: -8),
+            row.centerYAnchor.constraint(equalTo: findBar.centerYAnchor, constant: -0.5),
+            findField.widthAnchor.constraint(equalToConstant: 240),
+            findField.heightAnchor.constraint(equalToConstant: 22),
+            findCaseButton.widthAnchor.constraint(equalToConstant: 34),
+            findPreviousButton.widthAnchor.constraint(equalToConstant: 24),
+            findNextButton.widthAnchor.constraint(equalToConstant: 24),
+            findCloseButton.widthAnchor.constraint(equalToConstant: 24),
+            findBarDivider.leadingAnchor.constraint(equalTo: findBar.leadingAnchor),
+            findBarDivider.trailingAnchor.constraint(equalTo: findBar.trailingAnchor),
+            findBarDivider.bottomAnchor.constraint(equalTo: findBar.bottomAnchor),
+            findBarDivider.heightAnchor.constraint(equalToConstant: 1),
+        ])
+        findBar.setAccessibilityElement(false)
+        applyFindBarTheme(ReaderSettings())
+    }
+
     @objc private func changeReadingHeight(_ sender: ReadingHeightControl) {
         _ = setReadingHeightLevel(sender.level)
+    }
+
+    @objc private func toggleFindCase(_ sender: NSButton) {
+        scheduleFind()
+    }
+
+    @objc private func findPrevious(_ sender: Any?) {
+        navigateFind(by: -1)
+    }
+
+    @objc private func findNext(_ sender: Any?) {
+        navigateFind(by: 1)
+    }
+
+    @objc private func closeFind(_ sender: Any?) {
+        closeFindBar()
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard notification.object as? NSSearchField === findField else { return }
+        scheduleFind()
+    }
+
+    func control(
+        _ control: NSControl,
+        textView: NSTextView,
+        doCommandBy commandSelector: Selector
+    ) -> Bool {
+        guard control === findField else { return false }
+        switch commandSelector {
+        case #selector(NSResponder.insertNewline(_:)):
+            navigateFind(by: NSEvent.modifierFlags.contains(.shift) ? -1 : 1)
+            return true
+        case #selector(NSResponder.cancelOperation(_:)):
+            closeFindBar()
+            return true
+        default:
+            return false
+        }
     }
 
     private func applyReaderHeaderTheme(_ settings: ReaderSettings) {
@@ -3445,6 +3615,14 @@ final class ReaderViewController: NSViewController {
         fileNameLabel.textColor = theme.foregroundColor
         readingHeightShortcutLabel.textColor = theme.chromeTertiaryColor
         readingHeightControl.apply(settings: settings)
+        applyFindBarTheme(settings)
+    }
+
+    private func applyFindBarTheme(_ settings: ReaderSettings) {
+        let theme = ReaderTheme(settings: settings)
+        findBar.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        findBarDivider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+        findStatusLabel.textColor = theme.chromeSecondaryColor
     }
 
     private func compareContainer(readerView: NSView) -> NSView {
@@ -3691,6 +3869,159 @@ final class ReaderViewController: NSViewController {
     }
 
     var readingHeightLevel: ReadingHeightLevel { textView.readingHeightLevel }
+    var isFindBarVisible: Bool { !findBar.isHidden }
+    var canFindInFile: Bool { displayedDocument != nil && !showsCompareControls }
+
+    @discardableResult
+    func showFindBar() -> Bool {
+        loadViewIfNeeded()
+        guard canFindInFile else { return false }
+        if findBar.isHidden {
+            savedSymbolOccurrenceByteOffset = textView.symbolOccurrenceByteOffset
+            findBar.isHidden = false
+            scheduleFind(immediate: true)
+        }
+        view.window?.makeFirstResponder(findField)
+        findField.currentEditor()?.selectAll(nil)
+        return true
+    }
+
+    @discardableResult
+    func closeFindBar() -> Bool {
+        guard !findBar.isHidden else { return false }
+        invalidateFind()
+        findBar.isHidden = true
+        textView.clearFindMatches(
+            restoringSymbolAt: savedSymbolOccurrenceByteOffset
+        )
+        savedSymbolOccurrenceByteOffset = nil
+        findWrapped = false
+        findStatusLabel.stringValue = ""
+        view.window?.makeFirstResponder(textView.view)
+        return true
+    }
+
+    func findNextMatch() {
+        if findBar.isHidden { _ = showFindBar() }
+        navigateFind(by: 1)
+    }
+
+    func findPreviousMatch() {
+        if findBar.isHidden { _ = showFindBar() }
+        navigateFind(by: -1)
+    }
+
+    private func scheduleFind(immediate: Bool = false) {
+        invalidateFind()
+        findWrapped = false
+        let query = findField.stringValue
+        guard !findBar.isHidden,
+              let file = displayedFile?.standardizedFileURL,
+              let document = displayedDocument
+        else { return }
+        guard !query.isEmpty else {
+            textView.setFindMatches([], selectedIndex: nil)
+            renderFindStatus()
+            return
+        }
+        guard !query.contains("\n"), !query.contains("\r") else {
+            textView.setFindMatches([], selectedIndex: nil)
+            findStatusLabel.stringValue = "Line breaks are not supported"
+            findPreviousButton.isEnabled = false
+            findNextButton.isEnabled = false
+            return
+        }
+
+        let requestID = findRequestID
+        let contentID = document.contentID
+        let bytes = document.bytes
+        let pattern = Array(query.utf8)
+        let caseSensitive = findCaseButton.state == .on
+        let selectedRange = textView.selectedFindMatchRange
+        let scanDelay = findScanDelayForTesting
+        findStatusLabel.stringValue = "Searching…"
+        findPreviousButton.isEnabled = false
+        findNextButton.isEnabled = false
+        findTask = Task { [weak self] in
+            if !immediate {
+                do {
+                    try await Task.sleep(for: .milliseconds(150))
+                } catch {
+                    return
+                }
+            }
+            guard let self, requestID == self.findRequestID else { return }
+            let worker = Task.detached(priority: .userInitiated) {
+                if scanDelay != .zero {
+                    try await Task.sleep(for: scanDelay)
+                }
+                return try literalRanges(
+                    pattern,
+                    in: bytes,
+                    caseSensitive: caseSensitive
+                )
+            }
+            self.findWorker = worker
+            do {
+                let ranges = try await worker.value
+                guard requestID == self.findRequestID,
+                      !self.findBar.isHidden,
+                      self.displayedFile?.standardizedFileURL == file,
+                      self.displayedDocument?.contentID == contentID,
+                      self.findField.stringValue == query,
+                      (self.findCaseButton.state == .on) == caseSensitive
+                else { return }
+                self.findWorker = nil
+                let selectedIndex = selectedRange.flatMap { ranges.firstIndex(of: $0) }
+                    ?? (ranges.isEmpty ? nil : 0)
+                self.textView.setFindMatches(
+                    ranges,
+                    selectedIndex: selectedIndex
+                )
+                if let selectedIndex {
+                    _ = self.textView.revealFindMatch(at: selectedIndex)
+                }
+                self.renderFindStatus()
+            } catch is CancellationError {
+                self.findCancelledWorkerCountForTesting += 1
+                return
+            } catch {
+                guard requestID == self.findRequestID else { return }
+                self.findStatusLabel.stringValue = "Search failed"
+            }
+        }
+    }
+
+    private func invalidateFind() {
+        findRequestID &+= 1
+        findTask?.cancel()
+        findTask = nil
+        findWorker?.cancel()
+        findWorker = nil
+    }
+
+    private func navigateFind(by delta: Int) {
+        let count = textView.findMatchCount
+        guard count > 0 else { return }
+        let previous = textView.selectedFindMatchIndex ?? (delta > 0 ? -1 : 0)
+        let unwrapped = previous + delta
+        let next = (unwrapped % count + count) % count
+        findWrapped = unwrapped < 0 || unwrapped >= count
+        _ = textView.revealFindMatch(at: next)
+        renderFindStatus()
+    }
+
+    private func renderFindStatus() {
+        let count = textView.findMatchCount
+        findPreviousButton.isEnabled = count > 0
+        findNextButton.isEnabled = count > 0
+        guard count > 0, let selected = textView.selectedFindMatchIndex else {
+            findStatusLabel.stringValue = "0 matches"
+            return
+        }
+        findStatusLabel.stringValue = "\(selected + 1) / \(count)"
+            + (findWrapped ? " · wrapped" : "")
+    }
     var isFocusMode: Bool { textView.isFocusMode }
     var canFocusCurrentScope: Bool { displayedDocument != nil }
     @discardableResult
@@ -3829,6 +4160,49 @@ final class ReaderViewController: NSViewController {
     }
     var selectedDiffLine: Int? { textView.selectedLineNumber }
     var selfTestOccurrenceCount: Int { textView.occurrenceCount }
+    var selfTestFindState: (
+        visible: Bool,
+        query: String,
+        status: String,
+        count: Int,
+        selectedIndex: Int?,
+        previousEnabled: Bool,
+        nextEnabled: Bool,
+        barFrame: NSRect,
+        fieldFrame: NSRect,
+        caseFrame: NSRect,
+        closeFrame: NSRect
+    ) {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        return (
+            !findBar.isHidden,
+            findField.stringValue,
+            findStatusLabel.stringValue,
+            textView.findMatchCount,
+            textView.selectedFindMatchIndex,
+            findPreviousButton.isEnabled,
+            findNextButton.isEnabled,
+            findBar.frame,
+            findField.frame,
+            findCaseButton.frame,
+            findCloseButton.frame
+        )
+    }
+    func selfTestSetFind(
+        _ query: String,
+        caseSensitive: Bool = false,
+        delay: Duration = .zero
+    ) {
+        findScanDelayForTesting = delay
+        findCaseButton.state = caseSensitive ? .on : .off
+        findField.stringValue = query
+        scheduleFind(immediate: true)
+    }
+    func selfTestNavigateFind(by delta: Int) {
+        navigateFind(by: delta)
+    }
+    var selfTestFindWorkerActive: Bool { findWorker != nil }
     var selfTestCurrentLineNumber: Int? { textView.currentLineNumber }
     var selfTestStyledFragmentCount: Int {
         textView.renderingCoordinator.styledFragmentCount
@@ -3918,6 +4292,12 @@ final class ReaderViewController: NSViewController {
     ) {
         loadViewIfNeeded()
         guard file != displayedFile || snapshotID != displayedSnapshotID else { return }
+        let rerunFind = !findBar.isHidden
+        if rerunFind {
+            invalidateFind()
+            savedSymbolOccurrenceByteOffset = nil
+            textView.setFindMatches([], selectedIndex: nil)
+        }
         displayedFile = file
         if !showsCompareControls {
             fileNameLabel.stringValue = file?.lastPathComponent ?? ""
@@ -3933,6 +4313,8 @@ final class ReaderViewController: NSViewController {
         onOutlineChange?([])
 
         guard let file else {
+            findBar.isHidden = true
+            findStatusLabel.stringValue = ""
             displayedDocument = nil
             label.stringValue = "Select a file to read"
             label.isHidden = false
@@ -3948,6 +4330,7 @@ final class ReaderViewController: NSViewController {
             label.isHidden = true
             layoutTextViewFrame()
             textView.display(document: loaded.document, fileURL: file)
+            if rerunFind { scheduleFind(immediate: true) }
             onOutlineChange?(loaded.document.outlineFacets)
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
@@ -3993,6 +4376,10 @@ final class ReaderViewController: NSViewController {
                 }
             }
         } catch {
+            if rerunFind {
+                textView.setFindMatches([], selectedIndex: nil)
+                renderFindStatus()
+            }
             displayedDocument = nil
             onDocumentChange?(file, nil)
             label.stringValue = "Could not open \(file.lastPathComponent)"

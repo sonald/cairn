@@ -276,3 +276,46 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
   200 rendered，峰值 RSS 增量 11,157,480 bytes（门槛 ≤ 80 MiB），`status=pass`。
 - 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
   skipped；fake provider 只证明既有结构 / UI 自测，不作为真实 provider 证据。
+
+## R0：⌘F 文件内查找
+
+结论：PASS（共享 literal scan、完整结果发布、文档代际、折叠导航及真实 AppKit 查找条均已收口）。
+
+- `SnapshotSearch` 原 private `asciiFold` / `literalRanges` 已提取为 CodeInsightCore 的 package 顶层
+  唯一实现；Engine 与 Reader 查找共用同一份 `A-Z → a-z`、其余字节原样比较语义。扫描为字面、
+  leftmost-first、不重叠；空 query 返回空，R0 对含 CR/LF 的 query 明确显示
+  `Line breaks are not supported`。
+- Core scan 每 4,096 byte 调用 `Task.checkCancellation()`；取消抛 `CancellationError`，不返回部分
+  `[ByteRange]`。既有 Engine 仍通过 closure 保留自己的 wall-clock / per-file 上限语义；文件内查找
+  不传 wall-clock，只有完整数组才发布。Core 专测以 20,000,000 bytes worker 证明取消抛错而非发布
+  部分结果。
+- Reader controller 复用既有 `requestID + Task` 形状：150 ms 输入去抖，分别持有并取消外层 publish
+  task 与其派生的 detached worker。发布前逐项比较 `(standardized fileURL, contentID, query,
+  caseSensitive)`；切文件、切 snapshot、关闭查找条三条延迟扫描路径分别证明旧 worker 已取消、旧
+  计数不发布。没有新 registry / factory / 持久化 store。
+- 逻辑命中唯一保存为 `[ByteRange]`，查找条计数始终使用其完整大小；渲染才经 F1 `DisplayMap`
+  派生可见 `NSRange`。测试把命中置于 Overview 隐藏的 declaration 内，仍报告总数 1；跳转后仅展开
+  包含命中的 container / declaration 祖先链并选中真实源码 range。
+- Reader header 下新增 31pt 原生查找条：240×22 `NSSearchField`、Aa toggle、Previous / Next、
+  `N / total` status 与关闭按钮，沿用现有 chrome header/divider token，不新增视觉色板。AX 暴露
+  `Find in file`、`Match case`、`Previous match`、`Next match`、`Find result`、`Close find bar`；控件
+  互不重叠。Find 菜单为 Find in File… / Find Next / Find Previous / Find in Project…，快捷键分别为
+  `⌘F` / `⌘G` / `⇧⌘G` / `⇧⌘F`。
+- 查询变化后若原选中 `ByteRange` 仍在新结果中则保持，否则选首条。到尾/首循环后 status 追加
+  `· wrapped`。关闭查找条会清除 find 命中并按进入前 anchor 恢复原符号 occurrence；无原 occurrence
+  时不残留高亮。
+- Escape 的主窗口 monitor 只在当前窗口内工作，优先级固定为 find bar → Focus → occurrence。
+  Reader 测试锁定 occurrence 恢复；真实 AppKit 回放在 Focus main 时打开查找，第一次 Escape 只移除
+  查找条且 `mod renderer {…}` 仍折叠，第二次 Escape 才恢复完整源码。
+- 最终签名验收包为 `.build/m11-r0-ui-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11r0`。真实非 Git fixture 中，Find 菜单四项与内联 AX 控件全部可见；`frame`
+  大小写不敏感为 `1 / 5`，连续 Next 后为 `1 / 5 · wrapped`，Aa 打开后为 `1 / 2`。实际 `⌘F`
+  可从 Reader 直接打开并聚焦搜索框；结果高亮、header、折叠 pill、gutter 与 Reader 不重叠。
+- `swift test --disable-sandbox`：PASS；新增 Core cancellation / literal、Reader hidden-fold 与单窗口
+  AppKit 全合同测试全部通过，既有 SnapshotSearch timeout / cap / cancellation 测试亦通过。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；完整 Swift Testing、Exact、Diff、Reading、Projector、
+  Fold self-test 与坐标门禁全部退出 0。最终 release runner 为 control resolution 25.675 ms、fold
+  resolution 25.888 ms、首次折叠 255.286 ms（门槛 ≤ 400 ms），4,400 logical / 200 rendered，峰值
+  RSS 增量 1,835,008 bytes（门槛 ≤ 80 MiB），`status=pass`。
+- 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
+  skipped；R0 是纯当前文档扫描，不依赖 provider，故不以 fake provider 代替其产品结论。

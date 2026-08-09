@@ -766,6 +766,26 @@ func focusUsesTheExplicitLandingPointAfterDeferredSyntaxLoads() throws {
 
 @MainActor
 @Test
+func findKeepsHiddenMatchesInTheLogicalCountAndRevealsTheirFoldChain() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/find-fold.rs"))
+    #expect(reader.setReadingHeightLevel(.overview))
+    #expect(reader.logicalFoldIDsForTesting.contains(regions.container.id))
+    #expect(reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+
+    let hiddenMatch = ByteRange(lowerBound: 40, upperBound: 41)
+    reader.setFindMatches([hiddenMatch], selectedIndex: 0)
+    #expect(reader.findMatchCount == 1)
+    #expect(reader.occurrenceCount == 1)
+    #expect(reader.revealFindMatch(at: 0))
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.container.id))
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+    #expect(reader.selectedFindMatchIndex == 0)
+}
+
+@MainActor
+@Test
 func optionFoldHandleRecursivelyTogglesSiblingRegions() throws {
     let source = """
         fn first() {

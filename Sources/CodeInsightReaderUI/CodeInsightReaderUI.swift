@@ -487,6 +487,8 @@ public final class ReaderTextView {
     private var lineNumbers = true
     private var wrapLines: Bool
     private var occurrenceSelectionByteOffset: UInt32?
+    private var findMatchByteRanges: [ByteRange]?
+    private var findSelectionIndex: Int?
     private var foldOverridesByScope: [FoldScopeKey: FoldOverrides] = [:]
     private var activeFoldScope: FoldScopeKey?
     package private(set) var readingHeightLevel: ReadingHeightLevel = .full
@@ -792,6 +794,8 @@ public final class ReaderTextView {
         diffMarkers = [:]
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
+        findMatchByteRanges = nil
+        findSelectionIndex = nil
         primarySelectionRange = nil
         view.selectedTextAttributes = nativeSelectedTextAttributes
         currentLineNumber = nil
@@ -849,6 +853,8 @@ public final class ReaderTextView {
         diffMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
+        findMatchByteRanges = nil
+        findSelectionIndex = nil
         primarySelectionRange = nil
         view.selectedTextAttributes = nativeSelectedTextAttributes
         currentLineNumber = nil
@@ -1319,6 +1325,7 @@ public final class ReaderTextView {
             map: projection.map,
             theme: theme
         )
+        refreshOccurrenceRendering(in: document)
         layoutManager.renderingAttributesValidator = nil
         if let contentStorage = view.textContentStorage {
             contentStorage.removeTextLayoutManager(layoutManager)
@@ -1514,17 +1521,7 @@ public final class ReaderTextView {
             map: projection.map,
             theme: theme
         )
-        if let occurrenceSelectionByteOffset {
-            let ranges = occurrenceNSRanges(
-                in: document,
-                at: occurrenceSelectionByteOffset
-            )
-            if ranges.isEmpty { self.occurrenceSelectionByteOffset = nil }
-            occurrenceCount = ranges.count
-            renderingCoordinator.setOccurrences(
-                ranges.filter { $0 != primarySelectionRange }
-            )
-        }
+        refreshOccurrenceRendering(in: document)
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -1749,6 +1746,71 @@ public final class ReaderTextView {
         setOccurrences([])
     }
 
+    package var symbolOccurrenceByteOffset: UInt32? {
+        occurrenceSelectionByteOffset
+    }
+
+    package var findMatchCount: Int {
+        findMatchByteRanges?.count ?? 0
+    }
+
+    package var selectedFindMatchIndex: Int? {
+        findSelectionIndex
+    }
+
+    package var selectedFindMatchRange: ByteRange? {
+        findSelectionIndex.flatMap { index in
+            guard let findMatchByteRanges,
+                  findMatchByteRanges.indices.contains(index)
+            else { return nil }
+            return findMatchByteRanges[index]
+        }
+    }
+
+    package func setFindMatches(
+        _ ranges: [ByteRange],
+        selectedIndex: Int?
+    ) {
+        findMatchByteRanges = ranges
+        findSelectionIndex = selectedIndex.flatMap {
+            ranges.indices.contains($0) ? $0 : nil
+        }
+        occurrenceSelectionByteOffset = nil
+        refreshOccurrenceRendering()
+    }
+
+    package func clearFindMatches(restoringSymbolAt byteOffset: UInt32?) {
+        findMatchByteRanges = nil
+        findSelectionIndex = nil
+        occurrenceSelectionByteOffset = byteOffset
+        primarySelectionRange = nil
+        view.selectedTextAttributes = nativeSelectedTextAttributes
+        refreshOccurrenceRendering()
+    }
+
+    @discardableResult
+    package func revealFindMatch(at index: Int) -> Bool {
+        guard let ranges = findMatchByteRanges,
+              ranges.indices.contains(index)
+        else { return false }
+        let range = ranges[index]
+        if isFocusMode {
+            _ = followFocusForExplicitNavigation(to: range.lowerBound)
+        } else {
+            _ = unfoldAncestors(containing: range.lowerBound)
+        }
+        guard let displayRange = displayMap?.project(byteRange: range)?.visible.first
+        else { return false }
+        findSelectionIndex = index
+        primarySelectionRange = displayRange
+        view.selectedTextAttributes = [.backgroundColor: NSColor.clear]
+        view.setSelectedRange(displayRange)
+        refreshOccurrenceRendering()
+        view.scrollRangeToVisible(displayRange)
+        view.showFindIndicator(for: displayRange)
+        return true
+    }
+
     public func captureVisibleDecorationState() {
         var lines: [Int] = []
         enumerateVisibleLayoutFragments { _, line in
@@ -1915,8 +1977,11 @@ public final class ReaderTextView {
         activate(atByteOffset: byteOffset)
     }
 
-    private func setOccurrences(_ ranges: [NSRange]) {
-        occurrenceCount = ranges.count
+    private func setOccurrences(
+        _ ranges: [NSRange],
+        logicalCount: Int? = nil
+    ) {
+        occurrenceCount = logicalCount ?? ranges.count
         renderingCoordinator.setOccurrences(
             ranges.filter { $0 != primarySelectionRange }
         )
@@ -1929,6 +1994,38 @@ public final class ReaderTextView {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
         view.needsDisplay = true
+    }
+
+    private func refreshOccurrenceRendering(
+        in document: ReaderDocument? = nil
+    ) {
+        guard let document = document ?? displayedDocument else {
+            setOccurrences([])
+            return
+        }
+        if let findMatchByteRanges {
+            let visible = findMatchByteRanges.flatMap {
+                displayMap?.project(byteRange: $0)?.visible ?? []
+            }
+            primarySelectionRange = findSelectionIndex.flatMap { index in
+                guard findMatchByteRanges.indices.contains(index) else { return nil }
+                return displayMap?.project(
+                    byteRange: findMatchByteRanges[index]
+                )?.visible.first
+            }
+            setOccurrences(visible, logicalCount: findMatchByteRanges.count)
+            return
+        }
+        guard let occurrenceSelectionByteOffset else {
+            setOccurrences([])
+            return
+        }
+        let ranges = occurrenceNSRanges(
+            in: document,
+            at: occurrenceSelectionByteOffset
+        )
+        if ranges.isEmpty { self.occurrenceSelectionByteOffset = nil }
+        setOccurrences(ranges)
     }
 
     private func occurrenceNSRanges(
