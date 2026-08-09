@@ -240,3 +240,39 @@ M11D 完成时必须把同一 `commitReaderSettings` 路径应用到 Reading Set
 - 完整 Swift Testing、Exact、Diff、Reading、Projector、Fold self-test 与 ReaderUI 坐标门禁全部
   PASS。真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
   skipped；fake provider 只作为结构 / UI 自测，不冒充真实 provider 覆盖。
+
+## F5：Focus Current Scope
+
+结论：PASS（作用域选择、折叠投影、状态恢复、跨文件跟随及真实 AppKit 退出路径均已收口）。
+
+- Focus 从当前 caret 所在的最小 `outlineFacet.range` 选择目标；`fn` / `method` 优先，其余支持
+  `struct` / `enum` / `trait` / `impl` / `mod`。facet header 与 closing brace 均属于目标范围；
+  `cfgTest` 按 `mod` container 处理。目标完整 facet 与祖先 header chain 保持可见，范围外全部可折叠
+  kind（含 block / comment / attributes）收起；仍跳过 `hiddenLineCount < 2`，渲染只取极大元。
+- Focus 不新增第二套 projector：只保存进入前的 Reading Height 与既有 pair override store，再经 F2
+  的同一个 `applyFoldProjection` 原子重建。退出后逐项恢复原高度档和全部 pair overrides；Focus
+  期间 Toggle Fold 禁用，直接选择高度档会先退出 Focus，再应用所选档位。
+- `⌥⌘F`、`View ▸ Folding ▸ Focus Current Scope` 与 Reader 的同一 toggle 入口同步。Escape 的
+  优先级为先退出 Focus，再清除 occurrences；关闭文件也清理 Focus。无可识别 scope 时不折叠，
+  仅通过既有 status bar 给出一次提示。
+- 显式跨文件导航在 Focus 内继续跟随新 landing scope；syntax 尚未完成时保存 landing byte，完成后
+  再计算目标。用户 live scroll 只解除显式导航跟随，不退出 Focus。显式导航落在无 scope 文件时
+  退出并恢复原状态，同时给出一次提示。
+- 五条具名 Focus 测试先以缺失 API 编译失败记录红测，修后全部 PASS：header / closing brace、祖先
+  可见与七类范围外折叠、cfg-test container、无 scope、精确恢复与 Escape 优先级、跨文件跟随、
+  live-scroll 仲裁，以及 deferred syntax landing point。完整 ReaderCore 与 `swift test --disable-sandbox`
+  均 PASS。
+- 最终签名验收包为 `.build/m11-f5-ui-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11f5`；使用非 Git fixture `/private/tmp/m11-f5-ui-fixture-plain`，避免把 Git
+  全局配置读取问题混入产品结论。Info.plist、严格 codesign 与 designated requirement 均通过。
+- 真实 AppKit 回放从 Outline 的 `describe` 行进入 Focus。Reader AX 文本只保留祖先
+  `mod` / `impl` header、完整 `describe` body，并把 `Frame`、`area`、`main` 显示为折叠 pill；
+  Reading Height 仍为 Full。首轮真实回放发现 Outline 保持 first responder 时 Escape 未送达 Reader；
+  修复为仅限当前主窗口、仅在 Focus 激活时消费 Escape 的 local monitor。最终包复跑同一路径，单次
+  Escape 恢复完整源码；再次进入后从真实 Folding 菜单点击 Focus Current Scope 也恢复 Full。
+- `CODEX_SANDBOX=1 bash scripts/ci.sh`：PASS；完整 Swift Testing、Exact、Diff、Reading、Projector、
+  Fold self-test 与 ReaderUI 坐标门禁全部退出 0。最终 release runner 为 control resolution
+  28.816 ms、fold resolution 53.023 ms、首次折叠 242.961 ms（门槛 ≤ 400 ms），4,400 logical /
+  200 rendered，峰值 RSS 增量 11,157,480 bytes（门槛 ≤ 80 MiB），`status=pass`。
+- 真实 rust-analyzer 仍因系统 `sandbox-exec: sandbox_apply: Operation not permitted` 诚实标记
+  skipped；fake provider 只证明既有结构 / UI 自测，不作为真实 provider 证据。

@@ -636,6 +636,136 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() thro
 
 @MainActor
 @Test
+func focusSelectsTheSmallestFacetAtItsHeaderAndClosingBrace() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus.rs"))
+
+    #expect(reader.focusCurrentScope(at: 20))
+    #expect(reader.isFocusMode)
+    #expect(reader.focusedFoldIDForTesting == regions.declaration.id)
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.container.id))
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+    for outside in [
+        regions.imports,
+        regions.cfgTest,
+        regions.block,
+        regions.comment,
+        regions.attributes,
+        regions.topLevelDeclaration,
+    ] {
+        #expect(reader.logicalFoldIDsForTesting.contains(outside.id))
+    }
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.smallDeclaration.id))
+    #expect(reader.exitFocusMode())
+
+    #expect(reader.focusCurrentScope(at: 79))
+    #expect(reader.focusedFoldIDForTesting == regions.declaration.id)
+}
+
+@MainActor
+@Test
+func focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-restore.rs"))
+    #expect(reader.setReadingHeightLevel(.structure))
+    #expect(reader.toggleFold(id: regions.topLevelDeclaration.id))
+    let savedLogical = reader.logicalFoldIDsForTesting
+    let savedOverride = reader.foldOverrideMembershipForTesting(
+        regions.topLevelDeclaration.id
+    )
+
+    #expect(reader.activate(atByteOffset: 20) > 0)
+    let savedOccurrenceCount = reader.occurrenceCount
+    #expect(reader.focusCurrentScope(at: 20))
+    #expect(reader.readingHeightLevel == .structure)
+    reader.view.cancelOperation(nil)
+
+    #expect(!reader.isFocusMode)
+    #expect(reader.occurrenceCount == savedOccurrenceCount)
+    #expect(reader.readingHeightLevel == .structure)
+    #expect(reader.logicalFoldIDsForTesting == savedLogical)
+    #expect(
+        reader.foldOverrideMembershipForTesting(regions.topLevelDeclaration.id)
+            == savedOverride
+    )
+    reader.view.cancelOperation(nil)
+    #expect(reader.occurrenceCount == 0)
+}
+
+@MainActor
+@Test
+func focusTreatsCfgTestAsAContainerAndNoScopeDoesNotFold() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-cfg.rs"))
+
+    #expect(reader.focusCurrentScope(at: 295))
+    #expect(reader.focusedFoldIDForTesting == regions.cfgTest.id)
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.cfgTest.id))
+    #expect(reader.exitFocusMode())
+
+    #expect(!reader.focusCurrentScope(at: 260))
+    #expect(!reader.isFocusMode)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+}
+
+@MainActor
+@Test
+func focusFollowsExplicitCrossFileNavigationButNotLiveScroll() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-a.rs"))
+    #expect(reader.focusCurrentScope(at: 20))
+
+    reader.didLiveScrollWhileFocused()
+    #expect(reader.isFocusMode)
+    #expect(!reader.focusFollowsExplicitNavigationForTesting)
+
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-b.rs"))
+    #expect(reader.followFocusForExplicitNavigation(to: 475))
+    #expect(reader.isFocusMode)
+    #expect(reader.focusFollowsExplicitNavigationForTesting)
+    #expect(reader.focusedFoldIDForTesting == regions.topLevelDeclaration.id)
+
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-c.rs"))
+    #expect(!reader.followFocusForExplicitNavigation(to: 260))
+    #expect(!reader.isFocusMode)
+    #expect(reader.logicalFoldIDsForTesting.isEmpty)
+
+    #expect(reader.focusCurrentScope(at: 20))
+    reader.clear()
+    #expect(!reader.isFocusMode)
+}
+
+@MainActor
+@Test
+func focusUsesTheExplicitLandingPointAfterDeferredSyntaxLoads() throws {
+    let (document, regions) = readingHeightLevelDocument()
+    let reader = ReaderTextView()
+    reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-loaded.rs"))
+    #expect(reader.focusCurrentScope(at: 20))
+
+    let plain = ReaderDocument(
+        bytes: document.bytes,
+        lineTable: document.lineTable,
+        byteUTF16Map: document.byteUTF16Map,
+        highlightSpans: [],
+        outlineFacets: [],
+        foldRegions: []
+    )
+    reader.display(document: plain, fileURL: URL(fileURLWithPath: "/focus-plain.rs"))
+    reader.updateSyntax(document: document, focusByteOffset: 475)
+
+    #expect(reader.isFocusMode)
+    #expect(reader.focusedFoldIDForTesting == regions.topLevelDeclaration.id)
+    #expect(!reader.logicalFoldIDsForTesting.contains(regions.topLevelDeclaration.id))
+    #expect(reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+}
+
+@MainActor
+@Test
 func optionFoldHandleRecursivelyTogglesSiblingRegions() throws {
     let source = """
         fn first() {
@@ -1315,7 +1445,36 @@ private func readingHeightLevelDocument() -> (
             lineTable: LineTable(bytes: bytes),
             byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
             highlightSpans: [],
-            outlineFacets: [],
+            outlineFacets: [
+                OutlineFacet(
+                    kind: .mod,
+                    name: "outer",
+                    range: ByteRange(lowerBound: 0, upperBound: 250),
+                    nameRange: ByteRange(lowerBound: 0, upperBound: 4),
+                    depth: 0
+                ),
+                OutlineFacet(
+                    kind: .fn,
+                    name: "target",
+                    range: ByteRange(lowerBound: 20, upperBound: 80),
+                    nameRange: ByteRange(lowerBound: 20, upperBound: 24),
+                    depth: 1
+                ),
+                OutlineFacet(
+                    kind: .mod,
+                    name: "tests",
+                    range: ByteRange(lowerBound: 295, upperBound: 360),
+                    nameRange: ByteRange(lowerBound: 295, upperBound: 299),
+                    depth: 0
+                ),
+                OutlineFacet(
+                    kind: .fn,
+                    name: "top_level",
+                    range: ByteRange(lowerBound: 475, upperBound: 520),
+                    nameRange: ByteRange(lowerBound: 475, upperBound: 479),
+                    depth: 0
+                ),
+            ],
             foldRegions: [
                 regions.container,
                 regions.declaration,

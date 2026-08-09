@@ -55,6 +55,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
     private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
+    private var focusNotice: String?
     private let toolbar = NSToolbar(identifier: "MainToolbar")
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
@@ -63,6 +64,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
+    nonisolated(unsafe) private var escapeMonitor: Any?
     private var symbolSearchPanel: SymbolSearchPanel?
     private var searchPanel: SearchPanel?
     private var commitPickerPopover: CommitPickerPopover?
@@ -255,6 +257,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentViewController
         super.init(window: window)
+        escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
+            [weak self, weak window] event in
+            guard event.keyCode == 53,
+                  event.window === window,
+                  self?.isFocusMode == true
+            else { return event }
+            _ = self?.toggleFocusCurrentScope()
+            return nil
+        }
         toolbar.delegate = self
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
@@ -302,6 +313,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onLiveScroll = { [weak self] in
             self?.outlineFollowArbitration.didLiveScroll()
+        }
+        readerController.onFocusNotice = { [weak self] message in
+            self?.focusNotice = message
+            self?.renderStatusBar()
         }
         readerController.onSelectionChange = { [weak self] offset in
             guard let self else { return }
@@ -353,6 +368,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         render()
         applyPanelPreset(.reading)
         observe()
+    }
+
+    deinit {
+        if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
     }
 
     required init?(coder: NSCoder) {
@@ -1181,6 +1200,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.setReadingHeightLevel(level)
     }
 
+    var isFocusMode: Bool { readerController.isFocusMode }
+
+    @discardableResult
+    func toggleFocusCurrentScope() -> Bool {
+        readerController.toggleFocusCurrentScope()
+    }
+
+    var canFocusCurrentScope: Bool {
+        readerController.canFocusCurrentScope
+    }
+
     @discardableResult
     func toggleFoldAtSelection() -> Bool {
         readerController.toggleFoldAtSelection()
@@ -1800,9 +1830,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let coverageStatus = model.coverage.statusText(
             for: model.snapshotPhase ?? .firstPaint
         )
-        let indexStatus = [initialIndexStatus, coverageStatus, model.replayNotice]
+        let indexStatus = [
+            focusNotice,
+            initialIndexStatus,
+            coverageStatus,
+            model.replayNotice,
+        ]
             .compactMap { $0 }
             .joined(separator: " · ")
+        focusNotice = nil
         indexLabel.stringValue = indexStatus
         indexLabel.isHidden = indexStatus.isEmpty
         truncatedLabel.isHidden = !model.relationTree.hasTruncatedResults
@@ -3189,6 +3225,7 @@ final class ReaderViewController: NSViewController {
     var onReadingPositionChange: ((UInt32) -> Void)?
     var onOutlineFollowPositionChange: ((UInt32) -> Void)?
     var onLiveScroll: (() -> Void)?
+    var onFocusNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
@@ -3219,6 +3256,8 @@ final class ReaderViewController: NSViewController {
     private var displayedSnapshotID: SnapshotID?
     private var displayedDocument: ReaderDocument?
     private var loadGeneration: UInt64 = 0
+    private var syntaxLoadPending = false
+    private var pendingFocusNavigationOffset: UInt32?
     private var contextMenuOffset: UInt32?
     private var readingPositionTask: Task<Void, Never>?
     private var emptyStateView: EmptyStateView?
@@ -3248,6 +3287,7 @@ final class ReaderViewController: NSViewController {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
+                self?.textView.didLiveScrollWhileFocused()
                 self?.onLiveScroll?()
             }
         }
@@ -3651,12 +3691,26 @@ final class ReaderViewController: NSViewController {
     }
 
     var readingHeightLevel: ReadingHeightLevel { textView.readingHeightLevel }
+    var isFocusMode: Bool { textView.isFocusMode }
+    var canFocusCurrentScope: Bool { displayedDocument != nil }
     @discardableResult
     func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
         loadViewIfNeeded()
         let changed = textView.setReadingHeightLevel(level)
         readingHeightControl.set(level: textView.readingHeightLevel)
         return changed
+    }
+    @discardableResult
+    func toggleFocusCurrentScope() -> Bool {
+        if textView.isFocusMode { return textView.exitFocusMode() }
+        guard let byteOffset = textView.byteOffset(
+            forCharacterIndex: textView.view.selectedRange().location
+        ), textView.focusCurrentScope(at: byteOffset)
+        else {
+            onFocusNotice?("No enclosing scope to focus")
+            return false
+        }
+        return true
     }
     @discardableResult
     func toggleFoldAtSelection() -> Bool {
@@ -3872,6 +3926,8 @@ final class ReaderViewController: NSViewController {
         contextMenuOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
+        syntaxLoadPending = false
+        pendingFocusNavigationOffset = nil
         loadGeneration &+= 1
         let generation = loadGeneration
         onOutlineChange?([])
@@ -3896,16 +3952,40 @@ final class ReaderViewController: NSViewController {
             textView.view.textLayoutManager?
                 .textViewportLayoutController.layoutViewport()
             if loaded.tier != .regular {
+                syntaxLoadPending = true
                 activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
                     Task { @MainActor [weak self] in
                         guard let self, self.loadGeneration == generation else { return }
+                        self.syntaxLoadPending = false
                         switch result {
                         case let .success(document):
                             self.displayedDocument = document
                             self.onDocumentChange?(file, document)
-                            self.textView.updateSyntax(document: document)
+                            let wasFocused = self.textView.isFocusMode
+                            let focusOffset = self.pendingFocusNavigationOffset
+                            self.pendingFocusNavigationOffset = nil
+                            self.textView.updateSyntax(
+                                document: document,
+                                focusByteOffset: focusOffset
+                            )
+                            if wasFocused,
+                               let focusOffset,
+                               self.textView.isFocusMode
+                            {
+                                _ = self.textView.followFocusForExplicitNavigation(
+                                    to: focusOffset
+                                )
+                            }
+                            if wasFocused && !self.textView.isFocusMode {
+                                self.onFocusNotice?("Focus ended: no enclosing scope")
+                            }
                             self.onOutlineChange?(document.outlineFacets)
                         case .failure:
+                            self.pendingFocusNavigationOffset = nil
+                            if self.textView.isFocusMode {
+                                _ = self.textView.exitFocusMode()
+                                self.onFocusNotice?("Focus ended: syntax unavailable")
+                            }
                             self.label.stringValue = "Syntax highlighting failed"
                             self.label.isHidden = false
                         }
@@ -3928,6 +4008,13 @@ final class ReaderViewController: NSViewController {
         source: DocumentLoader.ContentSource? = nil
     ) {
         display(file, snapshotID: snapshotID, source: source)
+        if textView.isFocusMode {
+            if syntaxLoadPending {
+                pendingFocusNavigationOffset = byteOffset
+            } else if !textView.followFocusForExplicitNavigation(to: byteOffset) {
+                onFocusNotice?("Focus ended: no enclosing scope")
+            }
+        }
         textView.reveal(byteOffset: byteOffset)
         _ = textView.activate(atByteOffset: byteOffset)
         onSelectionChange?(byteOffset)

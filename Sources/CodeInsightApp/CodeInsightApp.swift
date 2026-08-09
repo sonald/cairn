@@ -5872,7 +5872,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
 
     @objc private func focusCurrentScope(_ sender: Any?) {
-        // F5 supplies the independently restorable Focus mode.
+        _ = windowController?.toggleFocusCurrentScope()
     }
 
     @objc private func increaseReaderFontSize(_ sender: Any?) {
@@ -5932,7 +5932,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ? .on : .off
             return true
         case #selector(focusCurrentScope(_:)):
-            return false
+            menuItem.state = windowController?.isFocusMode == true ? .on : .off
+            return windowController?.canFocusCurrentScope == true
         case #selector(increaseReaderFontSize(_:)):
             return readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
         case #selector(decreaseReaderFontSize(_:)):

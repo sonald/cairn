@@ -458,6 +458,14 @@ public final class ReaderTextView {
         var forcedUnfolded: Set<FoldID> = []
     }
 
+    private struct FocusState {
+        let readingHeightLevel: ReadingHeightLevel
+        let foldOverridesByScope: [FoldScopeKey: FoldOverrides]
+        var followsExplicitNavigation = true
+        var focusedFoldID: FoldID
+        var byteOffset: UInt32
+    }
+
     private struct LatentFoldAnchor {
         let byteOffset: UInt32
         let foldID: FoldID
@@ -486,6 +494,7 @@ public final class ReaderTextView {
     private var logicalFoldIDs: Set<FoldID> = []
     private var renderedFoldIDs: Set<FoldID> = []
     private var foldAttachments: [FoldID: FoldAttachment] = [:]
+    private var focusState: FocusState?
     private var visibleFoldRegionsCache: [FoldRegion] = []
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
@@ -542,7 +551,9 @@ public final class ReaderTextView {
             }
         }
         textView.escapeHandler = { [weak self] in
-            guard let self, occurrenceCount > 0 else { return false }
+            guard let self else { return false }
+            if isFocusMode { return exitFocusMode() }
+            guard occurrenceCount > 0 else { return false }
             clearOccurrences()
             return true
         }
@@ -818,6 +829,11 @@ public final class ReaderTextView {
     }
 
     public func clear() {
+        if let focusState {
+            readingHeightLevel = focusState.readingHeightLevel
+            foldOverridesByScope = focusState.foldOverridesByScope
+            self.focusState = nil
+        }
         view.textLayoutManager?.renderingAttributesValidator = nil
         displayedDocument = nil
         displayMap = nil
@@ -852,7 +868,8 @@ public final class ReaderTextView {
 
     @discardableResult
     internal func toggleFold(id: FoldID) -> Bool {
-        guard let document = displayedDocument,
+        guard !isFocusMode,
+              let document = displayedDocument,
               document.foldRegions.contains(where: { $0.id == id })
         else { return false }
         let shouldFold = !logicalFoldIDs.contains(id)
@@ -871,7 +888,8 @@ public final class ReaderTextView {
         atLine line: Int,
         recursiveSiblings: Bool = false
     ) -> Bool {
-        guard let document = displayedDocument,
+        guard !isFocusMode,
+              let document = displayedDocument,
               let region = visibleFoldRegions(in: document).first(where: {
                   document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
                       .map { Int($0.line) == line } ?? false
@@ -917,7 +935,7 @@ public final class ReaderTextView {
     }
 
     package func canToggleFold(atLine line: Int) -> Bool {
-        guard let document = displayedDocument else { return false }
+        guard !isFocusMode, let document = displayedDocument else { return false }
         return visibleFoldRegions(in: document).contains {
             document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
                 .map { Int($0.line) == line } ?? false
@@ -942,6 +960,13 @@ public final class ReaderTextView {
             $0.forcedFolded.isDisjoint(with: $0.forcedUnfolded)
         }
     }
+    package var isFocusMode: Bool { focusState != nil }
+    internal var focusedFoldIDForTesting: FoldID? {
+        focusState?.focusedFoldID
+    }
+    internal var focusFollowsExplicitNavigationForTesting: Bool {
+        focusState?.followsExplicitNavigation ?? false
+    }
     internal var latentSelectionAnchorForTesting: (UInt32, FoldID)? {
         latentSelectionAnchor.map { ($0.byteOffset, $0.foldID) }
     }
@@ -957,7 +982,80 @@ public final class ReaderTextView {
     }
 
     @discardableResult
+    package func focusCurrentScope(at byteOffset: UInt32) -> Bool {
+        guard focusState == nil,
+              let document = displayedDocument,
+              let target = Self.focusTarget(at: byteOffset, in: document)
+        else { return false }
+        let saved = FocusState(
+            readingHeightLevel: readingHeightLevel,
+            foldOverridesByScope: foldOverridesByScope,
+            focusedFoldID: target.region.id,
+            byteOffset: byteOffset
+        )
+        guard applyFoldProjection(
+            Self.focusFoldIDs(around: target.facet, in: document)
+        ) else { return false }
+        focusState = saved
+        return true
+    }
+
+    @discardableResult
+    package func exitFocusMode() -> Bool {
+        guard let focusState else { return false }
+        let restoredBaseline = displayedDocument.map {
+            Self.baselineFoldIDs(
+                for: focusState.readingHeightLevel,
+                in: $0.foldRegions
+            )
+        } ?? []
+        let restoredOverrides = activeFoldScope.flatMap {
+            focusState.foldOverridesByScope[$0]
+        } ?? FoldOverrides()
+        let restoredLogical = Self.logicalFoldIDs(
+            overrides: restoredOverrides,
+            baseline: restoredBaseline
+        )
+        if displayedDocument != nil,
+           !applyFoldProjection(restoredLogical)
+        {
+            return false
+        }
+        readingHeightLevel = focusState.readingHeightLevel
+        foldOverridesByScope = focusState.foldOverridesByScope
+        baselineFoldIDs = restoredBaseline
+        self.focusState = nil
+        return true
+    }
+
+    @discardableResult
+    package func followFocusForExplicitNavigation(
+        to byteOffset: UInt32
+    ) -> Bool {
+        guard var focusState, let document = displayedDocument else {
+            return false
+        }
+        guard let target = Self.focusTarget(at: byteOffset, in: document) else {
+            _ = exitFocusMode()
+            return false
+        }
+        guard applyFoldProjection(
+            Self.focusFoldIDs(around: target.facet, in: document)
+        ) else { return false }
+        focusState.followsExplicitNavigation = true
+        focusState.focusedFoldID = target.region.id
+        focusState.byteOffset = byteOffset
+        self.focusState = focusState
+        return true
+    }
+
+    package func didLiveScrollWhileFocused() {
+        focusState?.followsExplicitNavigation = false
+    }
+
+    @discardableResult
     package func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
+        if isFocusMode { _ = exitFocusMode() }
         guard level != readingHeightLevel else { return false }
         let previousLevel = readingHeightLevel
         let previousOverrides = foldOverridesByScope
@@ -1034,6 +1132,78 @@ public final class ReaderTextView {
             })
     }
 
+    private static func focusTarget(
+        at byteOffset: UInt32,
+        in document: ReaderDocument
+    ) -> (facet: OutlineFacet, region: FoldRegion)? {
+        let containing = document.outlineFacets.filter {
+            $0.range.lowerBound <= byteOffset && byteOffset < $0.range.upperBound
+        }
+        let declarations = containing.filter {
+            $0.kind == .fn || $0.kind == .method
+        }
+        let containers = containing.filter {
+            switch $0.kind {
+            case .struct, .enum, .trait, .impl, .mod: true
+            case .fn, .method, .const, .static, .typeAlias: false
+            }
+        }
+        guard let facet = (declarations.isEmpty ? containers : declarations)
+            .min(by: { lhs, rhs in
+                let lhsLength = lhs.range.upperBound - lhs.range.lowerBound
+                let rhsLength = rhs.range.upperBound - rhs.range.lowerBound
+                if lhsLength != rhsLength { return lhsLength < rhsLength }
+                return lhs.depth > rhs.depth
+            })
+        else { return nil }
+        guard let region = document.foldRegions.filter({
+            associatedFacet(for: $0, in: document.outlineFacets) == facet
+        }).min(by: {
+            ($0.bodyRange.upperBound - $0.bodyRange.lowerBound)
+                < ($1.bodyRange.upperBound - $1.bodyRange.lowerBound)
+        }) else { return nil }
+        return (facet, region)
+    }
+
+    private static func associatedFacet(
+        for region: FoldRegion,
+        in facets: [OutlineFacet]
+    ) -> OutlineFacet? {
+        facets.filter { facet in
+            guard facet.range.lowerBound <= region.bodyRange.lowerBound,
+                  region.bodyRange.upperBound <= facet.range.upperBound
+            else { return false }
+            switch (region.kind, facet.kind) {
+            case (.declaration, .fn), (.declaration, .method):
+                return true
+            case (.container, .struct), (.container, .enum),
+                (.container, .trait), (.container, .impl), (.container, .mod),
+                (.cfgTest, .struct), (.cfgTest, .enum), (.cfgTest, .trait),
+                (.cfgTest, .impl), (.cfgTest, .mod):
+                return true
+            default:
+                return false
+            }
+        }.min { lhs, rhs in
+            let lhsLength = lhs.range.upperBound - lhs.range.lowerBound
+            let rhsLength = rhs.range.upperBound - rhs.range.lowerBound
+            if lhsLength != rhsLength { return lhsLength < rhsLength }
+            return lhs.depth > rhs.depth
+        }
+    }
+
+    private static func focusFoldIDs(
+        around facet: OutlineFacet,
+        in document: ReaderDocument
+    ) -> Set<FoldID> {
+        Set(document.foldRegions.compactMap { region in
+            guard region.summary.hiddenLineCount >= 2 else { return nil }
+            let intersects = region.bodyRange.lowerBound < facet.range.upperBound
+                && facet.range.lowerBound < region.bodyRange.upperBound
+            return intersects ? nil : region.id
+        })
+    }
+
     private static func maximalFoldIDs(
         _ logical: Set<FoldID>,
         in regions: [FoldRegion]
@@ -1084,7 +1254,7 @@ public final class ReaderTextView {
 
     @discardableResult
     private func unfoldAncestors(containing byteOffset: UInt32) -> Bool {
-        guard let document = displayedDocument else { return false }
+        guard !isFocusMode, let document = displayedDocument else { return false }
         let ancestors = document.foldRegions.filter {
             logicalFoldIDs.contains($0.id) && $0.bodyRange.contains(byteOffset)
         }
@@ -1104,8 +1274,23 @@ public final class ReaderTextView {
     private func applyFoldMutation(
         _ mutate: (inout FoldOverrides) -> Void
     ) -> Bool {
+        guard !isFocusMode,
+              let scope = activeFoldScope
+        else { return false }
+
+        var overrides = foldOverridesByScope[scope] ?? FoldOverrides()
+        mutate(&overrides)
+        let logical = Self.logicalFoldIDs(
+            overrides: overrides,
+            baseline: baselineFoldIDs
+        )
+        guard applyFoldProjection(logical) else { return false }
+        foldOverridesByScope[scope] = overrides
+        return true
+    }
+
+    private func applyFoldProjection(_ logical: Set<FoldID>) -> Bool {
         guard let document = displayedDocument,
-              let scope = activeFoldScope,
               let layoutManager = view.textLayoutManager
         else { return false }
 
@@ -1116,13 +1301,6 @@ public final class ReaderTextView {
         let viewportAnchor = latentViewportAnchor.flatMap { latent in
             renderedFoldIDs.contains(latent.foldID) ? latent.byteOffset : nil
         } ?? firstVisibleByteOffset()
-
-        var overrides = foldOverridesByScope[scope] ?? FoldOverrides()
-        mutate(&overrides)
-        let logical = Self.logicalFoldIDs(
-            overrides: overrides,
-            baseline: baselineFoldIDs
-        )
         let rendered = Self.maximalFoldIDs(logical, in: document.foldRegions)
         guard let projection = Self.project(
             document: document,
@@ -1131,7 +1309,6 @@ public final class ReaderTextView {
             theme: theme
         ) else { return false }
 
-        foldOverridesByScope[scope] = overrides
         logicalFoldIDs = logical
         renderedFoldIDs = rendered
         displayMap = projection.map
@@ -1267,11 +1444,54 @@ public final class ReaderTextView {
         }
     }
 
-    public func updateSyntax(document: ReaderDocument) {
+    public func updateSyntax(
+        document: ReaderDocument,
+        focusByteOffset: UInt32? = nil
+    ) {
         guard
             let layoutManager = view.textLayoutManager,
             displayedDocument?.contentID == document.contentID
         else { return }
+        displayedDocument = document
+        baselineFoldIDs = Self.baselineFoldIDs(
+            for: readingHeightLevel,
+            in: document.foldRegions
+        )
+        if var focusState,
+           let target = Self.focusTarget(
+               at: focusByteOffset ?? focusState.byteOffset,
+               in: document
+           )
+        {
+            logicalFoldIDs = Self.focusFoldIDs(
+                around: target.facet,
+                in: document
+            )
+            focusState.focusedFoldID = target.region.id
+            focusState.byteOffset = focusByteOffset ?? focusState.byteOffset
+            self.focusState = focusState
+        } else if let focusState {
+            readingHeightLevel = focusState.readingHeightLevel
+            foldOverridesByScope = focusState.foldOverridesByScope
+            baselineFoldIDs = Self.baselineFoldIDs(
+                for: readingHeightLevel,
+                in: document.foldRegions
+            )
+            logicalFoldIDs = Self.logicalFoldIDs(
+                overrides: activeFoldScope.flatMap {
+                    foldOverridesByScope[$0]
+                } ?? FoldOverrides(),
+                baseline: baselineFoldIDs
+            )
+            self.focusState = nil
+        } else {
+            logicalFoldIDs = Self.logicalFoldIDs(
+                overrides: activeFoldScope.flatMap {
+                    foldOverridesByScope[$0]
+                } ?? FoldOverrides(),
+                baseline: baselineFoldIDs
+            )
+        }
         renderedFoldIDs = Self.maximalFoldIDs(
             logicalFoldIDs,
             in: document.foldRegions
@@ -1287,7 +1507,6 @@ public final class ReaderTextView {
         }
         displayMap = projection.map
         foldAttachments = projection.attachments
-        displayedDocument = document
         refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         renderingCoordinator.update(
