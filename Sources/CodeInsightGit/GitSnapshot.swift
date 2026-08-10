@@ -10,7 +10,12 @@ enum LibGit2Executor {
         queue.setSpecific(key: marker, value: 1)
         return queue
     }()
-    private static let initializationCode = git_libgit2_init()
+    private static let initializationCode: Int32 = {
+        let code = git_libgit2_init()
+        guard code >= 0 else { return code }
+        // Repository snapshots must not depend on ambient user or system config.
+        return codeinsight_use_repository_config_only()
+    }()
 
     static func sync<T>(_ operation: () throws -> T) throws -> T {
         if DispatchQueue.getSpecific(key: marker) != nil {
