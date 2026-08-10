@@ -70,6 +70,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var commitPickerPopover: CommitPickerPopover?
     private var compareCommitPickerPopover: CommitPickerPopover?
     private var panelPreset = PanelPresetModel.reading
+    private var readingSetLayoutActive = false
     private var lastOpenedProjectRoot: URL?
     private var pendingRecentProjectRoot: URL?
     private var pendingTabRestore: TabStripModel.Tab?
@@ -606,6 +607,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     var displayedReaderFile: URL? { readerController.displayedFile }
     var selfTestPanelPreset: PanelPresetModel { panelPreset }
+    var selfTestPanelCollapses: (Bool, Bool, Bool, Bool) {
+        (
+            sidebarItem.isCollapsed,
+            contextItem.isCollapsed,
+            relationItem.isCollapsed,
+            secondaryReaderItem.isCollapsed
+        )
+    }
     var selfTestTabCount: Int { model.tabStrip.tabs.count }
     var selfTestActiveTabIndex: Int? { model.tabStrip.activeIndex }
     var selfTestActiveTabFile: URL? { model.tabStrip.activeTab?.fileURL }
@@ -1341,7 +1350,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func applyPanelPreset(_ preset: PanelPresetModel) {
         panelPreset = preset
-        let layout = preset.layout
+        applyPanelLayout(
+            readingSetLayoutActive ? PanelPresetModel.focus.layout : preset.layout
+        )
+        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+    }
+
+    private func applyPanelLayout(_ layout: PanelLayoutDescription) {
         sidebarItem.isCollapsed = layout.sidebarCollapsed
         readerGroupItem.isCollapsed = layout.readerCollapsed
         contextItem.isCollapsed = layout.contextCollapsed
@@ -1353,9 +1368,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.holdingPriority = .init(rawValue: 250)
         contextItem.holdingPriority = .init(rawValue: 250)
         secondaryReaderItem.holdingPriority = .init(rawValue: 251)
-        applyPanelSizes()
-        DispatchQueue.main.async { [weak self] in self?.applyPanelSizes() }
-        model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+        applyPanelSizes(layout)
+        DispatchQueue.main.async { [weak self] in self?.applyPanelSizes(layout) }
     }
 
     func applyReaderSettings(_ settings: ReaderSettings) {
@@ -1434,9 +1448,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.selfTestReadingHeightHeader
     }
 
-    private func applyPanelSizes() {
+    private func applyPanelSizes(_ layout: PanelLayoutDescription) {
         window?.contentView?.layoutSubtreeIfNeeded()
-        let layout = panelPreset.layout
         let upperSplit = upperSplitController.splitView
         if !layout.sidebarCollapsed, upperSplit.bounds.width > 0 {
             upperSplit.setPosition(
@@ -1683,6 +1696,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let readerContent = model.tabStrip.activeTab?.content
             ?? model.selectedFile.map(TabContent.file)
+        let nextReadingSetLayout = if case .some(.readingSet) = readerContent {
+            true
+        } else {
+            false
+        }
+        if nextReadingSetLayout != readingSetLayoutActive {
+            readingSetLayoutActive = nextReadingSetLayout
+            applyPanelLayout(
+                nextReadingSetLayout
+                    ? PanelPresetModel.focus.layout
+                    : panelPreset.layout
+            )
+        }
         let readingSetAvailability: [(open: Bool, expand: Bool)]? = if case .readingSet(
             _, let excerpts
         ) = readerContent {

@@ -80,6 +80,25 @@ public final class TabStripModel {
         excerpts: [ReadingSetExcerpt],
         skippedReasons: [String] = []
     ) {
+        if let existing = tabs.firstIndex(where: { tab in
+            guard case .readingSet(let openTitle, let openExcerpts) = tab.content,
+                  openTitle == title,
+                  tab.readingSetSkippedReasons == skippedReasons,
+                  openExcerpts.count == excerpts.count
+            else { return false }
+            return zip(openExcerpts, excerpts).allSatisfy { open, requested in
+                open.role == requested.role
+                    && open.path == requested.path
+                    && open.byteRange.lowerBound == requested.byteRange.lowerBound
+                    && open.byteRange.upperBound == requested.byteRange.upperBound
+                    && open.contentID == requested.contentID
+                    && open.sourceText == requested.sourceText
+            }
+        }) {
+            activate(existing)
+            return
+        }
+
         activationClock &+= 1
         let tab = Tab(
             content: .readingSet(title: title, excerpts: excerpts),

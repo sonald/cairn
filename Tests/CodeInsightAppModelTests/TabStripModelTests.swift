@@ -83,10 +83,15 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
 
     model.activate(1)
     #expect(model.activeDocument == nil)
-    model.openReadingSet(title: "spawn", excerpts: [readingSetExcerpt()])
+    model.openReadingSet(
+        title: "spawn",
+        excerpts: [readingSetExcerpt()],
+        skippedReasons: ["recorded source is unreadable"]
+    )
     #expect(model.tabs.count == 3)
-    #expect(model.tabs.compactMap(\.fileURL) == [fileB])
-    #expect(model.tabs.filter { $0.fileURL == nil }.count == 2)
+    #expect(model.tabs.compactMap(\.fileURL) == [fileA, fileB])
+    #expect(model.tabs.filter { $0.fileURL == nil }.count == 1)
+    #expect(model.activeIndex == 1)
 }
 
 @Test

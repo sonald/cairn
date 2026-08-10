@@ -1427,6 +1427,11 @@ func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
     #expect(excerpts[0].sourceText.contains("target"))
     #expect(!excerpts[0].sourceText.contains("drifted"))
     #expect(excerpts[0].inspector.nodeTitle == edge.title)
+    #expect(fixture.controller.selfTestPanelPreset == .reading)
+    #expect(fixture.controller.selfTestPanelCollapses == (true, true, true, true))
+
+    fixture.controller.selectPreviousTab()
+    #expect(fixture.controller.selfTestPanelCollapses == (false, false, true, true))
 }
 
 @MainActor
