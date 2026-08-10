@@ -696,6 +696,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
+        headerFrame: NSRect,
+        controlFrame: NSRect,
         scopeFrame: NSRect,
         readerFrame: NSRect,
         containerFrame: NSRect,
@@ -710,6 +712,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         } ?? .zero
         return (
             geometry.stripFrame,
+            geometry.headerFrame,
+            geometry.controlFrame,
             geometry.scopeFrame,
             geometry.readerFrame,
             geometry.containerFrame,
@@ -3383,19 +3387,32 @@ private final class TabStripView: NSView {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        theme.backgroundColor.setFill()
+        theme.chromeHeaderColor.setFill()
         bounds.fill()
         guard let model else { return }
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingMiddle
         for index in model.tabs.indices {
             let rect = tabRect(index: index, count: model.tabs.count)
+            let backgroundRect = rect.insetBy(dx: 3, dy: 3)
             if index == model.activeIndex {
-                NSColor.controlAccentColor.withAlphaComponent(0.12).setFill()
-                rect.fill()
-                NSColor.controlAccentColor.setFill()
-                NSRect(x: rect.minX, y: rect.maxY - 2, width: rect.width, height: 2)
-                    .fill()
+                let background = NSBezierPath(
+                    roundedRect: backgroundRect,
+                    xRadius: 6,
+                    yRadius: 6
+                )
+                theme.backgroundColor.setFill()
+                background.fill()
+                theme.chromeDividerColor.setStroke()
+                background.lineWidth = 1
+                background.stroke()
+                theme.accentColor.setFill()
+                NSRect(
+                    x: backgroundRect.minX + 6,
+                    y: backgroundRect.maxY - 2,
+                    width: max(0, backgroundRect.width - 12),
+                    height: 2
+                ).fill()
             }
             let titleRect = rect.insetBy(dx: 10, dy: 7)
             let closeWidth: CGFloat = 18
@@ -3423,13 +3440,7 @@ private final class TabStripView: NSView {
                     .foregroundColor: theme.foregroundColor.withAlphaComponent(0.65),
                 ]
             )
-            NSColor.separatorColor.setFill()
-            NSRect(x: rect.maxX - 1, y: 5, width: 1, height: rect.height - 10)
-                .fill()
         }
-        NSColor.separatorColor.setFill()
-        NSRect(x: bounds.minX, y: bounds.maxY - 1, width: bounds.width, height: 1)
-            .fill()
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -3706,10 +3717,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             configureReaderHeader()
             configureScopeHeader()
             configureFindBar()
-            tabAndReaderArea.setViews(
-                [tabStripView, scopeHeader, readerArea],
-                in: .leading
-            )
+            tabAndReaderArea.setViews([scopeHeader, readerArea], in: .leading)
             tabAndReaderArea.orientation = .vertical
             tabAndReaderArea.alignment = .width
             tabAndReaderArea.distribution = .fill
@@ -3724,7 +3732,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             stack.distribution = .fill
             stack.spacing = 0
             NSLayoutConstraint.activate([
-                tabStripView.heightAnchor.constraint(equalToConstant: 30),
                 tabAndReaderArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 readerArea.widthAnchor.constraint(equalTo: tabAndReaderArea.widthAnchor),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
@@ -3814,21 +3821,21 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         fileNameLabel.setContentCompressionResistancePriority(
             .defaultLow,
             for: .horizontal)
+        fileNameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
         readingHeightShortcutLabel.font = .systemFont(ofSize: 10)
         readingHeightControl.target = self
         readingHeightControl.action = #selector(changeReadingHeight(_:))
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [
             fileNameLabel,
-            readingHeightControl,
-            spacer,
+            tabStripView,
             readingHeightShortcutLabel,
+            readingHeightControl,
         ])
         row.orientation = .horizontal
         row.alignment = .centerY
         row.spacing = 10
+        row.distribution = .fill
         row.translatesAutoresizingMaskIntoConstraints = false
         readerHeaderDivider.wantsLayer = true
         readerHeaderDivider.translatesAutoresizingMaskIntoConstraints = false
@@ -3846,6 +3853,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 constant: -0.5),
             readingHeightControl.widthAnchor.constraint(equalToConstant: 216),
             readingHeightControl.heightAnchor.constraint(equalToConstant: 24),
+            tabStripView.heightAnchor.constraint(equalToConstant: 30),
             readerHeaderDivider.leadingAnchor.constraint(
                 equalTo: readerHeader.leadingAnchor
             ),
@@ -4258,6 +4266,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         loadViewIfNeeded()
         tabStripView.refresh()
         fileNameLabel.stringValue = tabStripView.activeTitle
+        fileNameLabel.isHidden = !tabStripView.isHidden
     }
 
     func showEmptyState(
@@ -4363,6 +4372,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
+        headerFrame: NSRect,
+        controlFrame: NSRect,
         scopeFrame: NSRect,
         readerFrame: NSRect,
         containerFrame: NSRect,
@@ -4372,6 +4383,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     ) {
         (
             tabStripView.convert(tabStripView.bounds, to: nil),
+            readerHeader.convert(readerHeader.bounds, to: nil),
+            readingHeightControl.convert(readingHeightControl.bounds, to: nil),
             scopeHeader.convert(scopeHeader.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
             tabAndReaderArea.convert(tabAndReaderArea.bounds, to: nil),
