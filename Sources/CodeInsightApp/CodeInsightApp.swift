@@ -6482,10 +6482,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private static func tabGeometryChecks(
         _ geometry: (
             stripFrame: NSRect,
+            scopeFrame: NSRect,
             readerFrame: NSRect,
             containerFrame: NSRect,
             contentFrame: NSRect,
             stripHidden: Bool,
+            scopeHidden: Bool,
             stripHiddenOrHasHiddenAncestor: Bool
         ),
         prefix: String,
@@ -6496,6 +6498,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             dx: -tolerance,
             dy: -tolerance
         )
+        let scopeHeight = geometry.scopeHidden ? 0 : geometry.scopeFrame.height
         if expectsVisibleStrip {
             return [
                 "\(prefix)StripVisible":
@@ -6507,14 +6510,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     contentBounds.contains(geometry.stripFrame),
                 "\(prefix)StripDoesNotOverlapReader":
                     geometry.readerFrame.maxY
-                        <= geometry.stripFrame.minY + tolerance,
+                        <= geometry.stripFrame.minY - scopeHeight + tolerance,
                 "\(prefix)StripTouchesReader":
-                    abs(geometry.readerFrame.maxY - geometry.stripFrame.minY)
+                    abs(
+                        geometry.readerFrame.maxY + scopeHeight
+                            - geometry.stripFrame.minY
+                    )
                         <= tolerance,
                 "\(prefix)ReaderAndStripFillContainerHeight":
                     abs(
                         geometry.readerFrame.height
                             + geometry.stripFrame.height
+                            + scopeHeight
                             - geometry.containerFrame.height
                     ) <= tolerance,
                 "\(prefix)ReaderFillsContainerWidth":
@@ -6535,7 +6542,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && geometry.stripHiddenOrHasHiddenAncestor,
             "\(prefix)ReaderRestoresFullHeight":
                 abs(
-                    geometry.readerFrame.height
+                    geometry.readerFrame.height + scopeHeight
                         - geometry.containerFrame.height
                 ) <= tolerance,
             "\(prefix)ReaderRestoresFullWidth":
@@ -6545,7 +6552,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ) <= tolerance,
             "\(prefix)ReaderRestoresContainerTop":
                 abs(
-                    geometry.readerFrame.maxY
+                    geometry.readerFrame.maxY + scopeHeight
                         - geometry.containerFrame.maxY
                 ) <= tolerance,
             "\(prefix)ReaderRestoresContainerBottom":
@@ -6559,10 +6566,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private static func tabGeometryJSON(
         _ geometry: (
             stripFrame: NSRect,
+            scopeFrame: NSRect,
             readerFrame: NSRect,
             containerFrame: NSRect,
             contentFrame: NSRect,
             stripHidden: Bool,
+            scopeHidden: Bool,
             stripHiddenOrHasHiddenAncestor: Bool
         )
     ) -> [String: Double] {
@@ -6571,6 +6580,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "stripMaxY": geometry.stripFrame.maxY,
             "stripWidth": geometry.stripFrame.width,
             "stripHeight": geometry.stripFrame.height,
+            "scopeHeight": geometry.scopeHidden ? 0 : geometry.scopeFrame.height,
             "readerMinY": geometry.readerFrame.minY,
             "readerMaxY": geometry.readerFrame.maxY,
             "readerWidth": geometry.readerFrame.width,

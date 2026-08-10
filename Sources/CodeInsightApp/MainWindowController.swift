@@ -687,10 +687,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
+        scopeFrame: NSRect,
         readerFrame: NSRect,
         containerFrame: NSRect,
         contentFrame: NSRect,
         stripHidden: Bool,
+        scopeHidden: Bool,
         stripHiddenOrHasHiddenAncestor: Bool
     ) {
         let geometry = readerController.selfTestTabGeometry
@@ -699,10 +701,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         } ?? .zero
         return (
             geometry.stripFrame,
+            geometry.scopeFrame,
             geometry.readerFrame,
             geometry.containerFrame,
             contentFrame,
             geometry.stripHidden,
+            geometry.scopeHidden,
             geometry.stripHiddenOrHasHiddenAncestor
         )
     }
@@ -3695,6 +3699,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             stack.spacing = 0
             NSLayoutConstraint.activate([
                 tabStripView.heightAnchor.constraint(equalToConstant: 30),
+                tabAndReaderArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
+                readerArea.widthAnchor.constraint(equalTo: tabAndReaderArea.widthAnchor),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
                 findBar.heightAnchor.constraint(equalToConstant: 31),
             ])
@@ -4331,16 +4337,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     }
     var selfTestTabGeometry: (
         stripFrame: NSRect,
+        scopeFrame: NSRect,
         readerFrame: NSRect,
         containerFrame: NSRect,
         stripHidden: Bool,
+        scopeHidden: Bool,
         stripHiddenOrHasHiddenAncestor: Bool
     ) {
         (
             tabStripView.convert(tabStripView.bounds, to: nil),
+            scopeHeader.convert(scopeHeader.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
             tabAndReaderArea.convert(tabAndReaderArea.bounds, to: nil),
             tabStripView.isHidden,
+            scopeHeader.isHidden,
             tabStripView.isHiddenOrHasHiddenAncestor
         )
     }
