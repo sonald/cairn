@@ -1299,7 +1299,7 @@ real-provider PASS。
   产品实现允许只落在本计划点名的 `Sources/CodeInsightCore/`、`Sources/CodeInsightEngine/`、
   `Sources/CodeInsightReaderCore/`、`Sources/CodeInsightReaderUI/`、`Sources/CodeInsightAppModel/`、
   `Sources/CodeInsightApp/`、对应 `Tests/`、`scripts/`、
-  `fixtures/fold_perf.rs`、`fixtures/fold_perf.manifest.json`、`docs/plans/m11-plan.md` 和
+  `Package.swift`、`fixtures/fold_perf.rs`、`fixtures/fold_perf.manifest.json`、`docs/plans/m11-plan.md` 和
   `docs/plans/evidence/m11/`；每项仍须能映射到 F/C/R/M11D 切片，不能以宽泛目录掩盖无关清理。
 - **protected deny-list** 独立于上述产品 allow-list：
   `Sources/CodeInsightEngine/CanonicalDump.swift`、`goldset/**`、`docs/goldset-baseline.md`、
@@ -1326,7 +1326,7 @@ real-provider PASS。
   : "${M11_BASE:=2569e70486e93cc3e547201de1c80657d98f0adf}"
   git rev-parse --verify "$M11_BASE^{commit}" >/dev/null
   for name in TOKIO_TAG TOKIO_DIR TOKIO_REPO RIPGREP_TAG RIPGREP_DIR RIPGREP_REPO; do
-    base=$(git show "$M11_BASE:scripts/provision-corpora.sh" | rg "^readonly ${name}=")
+    base=$(git show "${M11_BASE}:scripts/provision-corpora.sh" | rg "^readonly ${name}=")
     head=$(rg "^readonly ${name}=" scripts/provision-corpora.sh)
     [[ "$base" == "$head" ]] || { echo "FAIL: provision constant changed: $name"; exit 1; }
   done

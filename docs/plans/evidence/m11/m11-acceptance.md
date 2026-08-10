@@ -660,3 +660,43 @@ checkpoint/恢复编排留给下一 R3 足切片）。
   line 42–57（scrollbar 0.964989），而 session 中独立 selection anchor 仍为 `subject` line 1；`⇧⌘]`
   切回 Reading Set 后滚动位置仍为 1。证据见 `r3-restore-scroll.jpeg` 与
   `r3-restore-file-anchors.jpeg`。
+
+## V0：总验收
+
+结论：PASS（修复后矩阵、受保护路径审计、签名真实应用以及 provisioned Tokio 的
+Relations / Trail → Reading Set 两条 real-provider 路径均通过）。
+
+- 基线为 `2569e70486e93cc3e547201de1c80657d98f0adf`，`RECORD` 未设置；Tokio corpus 为
+  `be8ee45` / 720 个 Rust 文件，ripgrep 为 `4649aa9` / 98 个 Rust 文件。fold fixture 的 SHA-256 为
+  `86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578`，3,115,800 bytes、
+  50,000 个换行，重复生成保持一致。
+- V0 首轮发现两个真实问题并分别修复：tab + Reader 在 1,280 pt 容器中被压到 36 pt，修复后 file 与
+  Reading Set 在 scope header 显隐两种状态均保持 1,280 pt 全宽（`d42dc54`）；真实签名 app 打开 Tokio
+  时 libgit2 串行队列卡在 ambient global config，修复只在共享初始化处禁用 system/XDG/global config
+  搜索路径，保留 repository-local config（`fa04c72`）。Git 定向 10/10、并发 history/snapshot 与完整门禁
+  均通过；修复后的 `project-git` 为 extracted 0 / reused 57、tree 110.704 ms、index 513.011 ms。
+- 修复后执行 `swift test --disable-sandbox`：PASS；`run-self-tests.sh` 14/14 PASS，产物
+  `.build/self-test-run-20260810-101519-66238`。固定 stress 命令 5/5 PASS、failures 0、hangs 0、
+  errors 0、总耗时 109 s、残留进程 0，产物 `.build/stress-test-20260810-101643-66499`。
+- release fold runner：control resolution 25.677 ms、fold resolution 25.143 ms、首次折叠 278.853 ms，
+  8,400 candidate / accepted、4,400 logical / 200 rendered、RSS 增量 7,667,736 bytes，`status=pass`。
+  随后的 `CODEX_SANDBOX=1 bash scripts/ci.sh` PASS；CI runner 为首次折叠 246.651 ms、RSS 增量
+  8,060,952 bytes。`run-gold-gates.sh` PASS：Tokio Top-1 8/8、Top-5 3/3、unexpected 0；ripgrep
+  Top-1 5/6、Top-5 2/3、KNOWN-FAIL 3、unexpected 0。
+- 签名验收包 `.build/m11-v0-git-app/Cairn.app`，bundle id `dev.cairn.Cairn.m11v0git`；Info.plist、
+  strict codesign 与 designated requirement 均通过。CUA 打开 provisioned Tokio 后立即显示
+  `Exact: ready · Safe (limited)`，不再停在 `Files 0/717`。在 `join_set.rs:132` 选择 `spawn`，真实
+  Callers 完成 1,076 条发布（界面诚实显示前 500 条）；Relations → Reading Set 生成前 50 段并显示
+  `skipped 450 · display cap (50 excerpts) ×450`，每段保留 role、path:line、INFERRED、`name match only`、
+  `worktree · captured` 与三项动作。证据见 `v0-real-relations-reading-set.jpeg`。
+- 从上述真实 relation 的首项用键盘 Enter 导航到 `tokio-util/src/task/task_tracker.rs:398`，Trail 明确显示
+  `join_set.rs · search → JoinSet · relation → spawn_on`；选择 relation edge 后其 audit 为
+  `AT NAVIGATION · frozen snapshot`，Trail → Reading Set 生成 1 段并诚实报告另 1 条 search edge
+  `skipped · no frozen evidence`。底部 context 为 `Exact·direct · rust-analyzer ... Safe`，Inspector 与
+  capture provenance 同时可达。证据见 `v0-real-trail-reading-set.jpeg`。因此本次 real-provider 为 PASS，
+  不沿用 CI 中 `sandbox_apply: Operation not permitted` 的 provider skip 作为替代证明。
+- 完整变更域预提交审计为 `M11_BASE...HEAD` 70 个路径、index 0、worktree 1（本计划修订）、untracked 2
+  （上述两张 V0 截图），并集 72 个唯一路径；`Package.swift` 是 F1 让 ReaderUI 复用 Core
+  `LiteralSearch` 所需的既有 target dependency，已补入 allow-list。protected base/index/worktree/untracked
+  四路均为空；Tokio/ripgrep 的 tag、目录与 repo 六个常量逐项一致。`git diff --check` 三路均 PASS。
+  provision 审计命令同时改为 zsh 可执行的 `"${M11_BASE}:scripts/provision-corpora.sh"` 形式。
