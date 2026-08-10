@@ -983,7 +983,6 @@ final class RelationWindowController: NSViewController,
             return
         }
         inspectButton.isEnabled = node.explanation != nil
-        showInspector(for: node)
         if node.modifiers.contains("Conflict/Corrected") { return }
         model.select(node)
         guard node.representsLocation, node.target != nil else { return }

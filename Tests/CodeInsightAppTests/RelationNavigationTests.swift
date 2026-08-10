@@ -147,6 +147,18 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func selectingRelationKeepsInspectorClosedUntilRequested() async throws {
+        let fixture = try await makeRelationUXFixture()
+        defer { fixture.close() }
+
+        #expect(fixture.controller.selfTestSelectEdge(titled: "first"))
+        #expect(!fixture.controller.selfTestInspectorVisible)
+        #expect(fixture.controller.selfTestPressInspectorShortcut())
+        #expect(fixture.controller.selfTestInspectorVisible)
+    }
+
+    @MainActor
+    @Test
     func resolutionInspectorMatchesProgressiveDisclosureAndAX() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
