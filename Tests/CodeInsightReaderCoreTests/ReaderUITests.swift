@@ -1067,6 +1067,9 @@ func foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() throws {
     #expect(reader.latentSelectionAnchorForTesting?.1 == first.id)
     #expect(reader.latentViewportAnchorForTesting?.0 == viewportByte)
     #expect(reader.latentViewportAnchorForTesting?.1 == second.id)
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+    #expect(!renderedColors(in: reader).isEmpty)
 
     #expect(reader.toggleFold(id: first.id))
     #expect(reader.latentSelectionAnchorForTesting == nil)

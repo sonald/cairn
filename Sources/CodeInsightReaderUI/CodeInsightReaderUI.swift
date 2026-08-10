@@ -1452,13 +1452,11 @@ public final class ReaderTextView {
         refreshOccurrenceRendering(in: document)
         layoutManager.renderingAttributesValidator = nil
         if let contentStorage = view.textContentStorage {
-            contentStorage.removeTextLayoutManager(layoutManager)
             contentStorage.performEditingTransaction {
                 backingTextStorage.beginEditing()
                 backingTextStorage.setAttributedString(projection.attributed)
                 backingTextStorage.endEditing()
             }
-            contentStorage.addTextLayoutManager(layoutManager)
         } else {
             backingTextStorage.setAttributedString(projection.attributed)
         }
