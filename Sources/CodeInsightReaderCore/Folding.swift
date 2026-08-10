@@ -332,12 +332,35 @@ internal struct FoldCandidateAccumulator {
             if end - start >= 2 {
                 let first = children[start].byteRange
                 let last = children[end - 1].byteRange
+                var headerUpperBound = first.upperBound
+                var bodyLowerBound = first.upperBound
+                var bodyUpperBound = last.upperBound
+                if kind == .comment {
+                    while bodyLowerBound < bodyUpperBound,
+                          let separator = byte(at: bodyLowerBound, in: bytes),
+                          separator == UInt8(ascii: "\n")
+                            || separator == UInt8(ascii: "\r")
+                    {
+                        bodyLowerBound += 1
+                        headerUpperBound += 1
+                    }
+                    while bodyUpperBound > first.upperBound,
+                          let trailing = byte(at: bodyUpperBound - 1, in: bytes),
+                          trailing == UInt8(ascii: "\n")
+                            || trailing == UInt8(ascii: "\r")
+                    {
+                        bodyUpperBound -= 1
+                    }
+                }
                 appendCandidate(
                     kind: kind,
-                    headerRange: coreRange(first),
+                    headerRange: CodeInsightCore.ByteRange(
+                        lowerBound: first.lowerBound,
+                        upperBound: headerUpperBound
+                    ),
                     bodyRange: CodeInsightCore.ByteRange(
-                        lowerBound: first.upperBound,
-                        upperBound: last.upperBound
+                        lowerBound: bodyLowerBound,
+                        upperBound: bodyUpperBound
                     ),
                     foldDepth: foldDepth,
                     bytes: bytes,
@@ -363,7 +386,8 @@ internal struct FoldCandidateAccumulator {
             bodyRange: bodyRange,
             outlineDepth: foldDepth,
             summary: FoldSummary(
-                hiddenLineCount: newlineCount(in: bodyRange, bytes: bytes),
+                hiddenLineCount: newlineCount(in: bodyRange, bytes: bytes)
+                    + (kind == .comment ? 1 : 0),
                 itemCount: itemCount,
                 leadingText: kind == .declaration || kind == .comment
                     ? leadingText(in: bodyRange, bytes: bytes)

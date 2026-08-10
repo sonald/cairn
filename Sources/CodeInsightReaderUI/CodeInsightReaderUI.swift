@@ -1172,7 +1172,9 @@ public final class ReaderTextView {
                     return region.id
                 case .container:
                     return level == .overview ? region.id : nil
-                case .block, .comment, .attributes:
+                case .comment:
+                    return region.id
+                case .block, .attributes:
                     return nil
                 }
             })
@@ -2993,10 +2995,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         case .imports:
             return "⋯ \(summary.itemCount ?? 0) imports"
         case .comment:
-            return joined(
-                summary.leadingText,
-                "\(summary.hiddenLineCount) lines"
-            )
+            return "⋯ \(summary.hiddenLineCount) comment lines"
         case .attributes:
             return "⋯ \(summary.itemCount ?? 0) attributes"
         case .cfgTest:

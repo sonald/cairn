@@ -292,6 +292,8 @@ func foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() throws {
         // first comment
         // second comment
         // third comment
+
+        fn after_comments() {}
         """
     let result = try RustHighlighter().highlightWithFolds(bytes: Array(source.utf8))
     let folds = result.folds
@@ -333,8 +335,11 @@ func foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() throws {
     #expect(attributes.summary.itemCount == 2)
 
     let comment = try #require(folds.first { $0.kind == .comment })
-    #expect(text(in: source, range: comment.headerRange) == "// first comment")
+    #expect(text(in: source, range: comment.headerRange) == "// first comment\n")
     #expect(text(in: source, range: comment.bodyRange).contains("// third comment"))
+    #expect(!text(in: source, range: comment.bodyRange).hasSuffix("\n"))
+    #expect(Array(source.utf8)[Int(comment.bodyRange.upperBound)] == UInt8(ascii: "\n"))
+    #expect(comment.summary.hiddenLineCount == 2)
     #expect(comment.summary.leadingText == "// second comment")
 
     let matchArm = try #require(folds.first {

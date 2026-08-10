@@ -531,11 +531,12 @@ func readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() throws {
                 regions.declaration.id,
                 regions.imports.id,
                 regions.cfgTest.id,
+                regions.comment.id,
                 regions.topLevelDeclaration.id,
             ]))
     #expect(reader.renderedFoldIDsForTesting == reader.logicalFoldIDsForTesting)
     #expect(!reader.logicalFoldIDsForTesting.contains(regions.smallDeclaration.id))
-    for manualOnly in [regions.block, regions.comment, regions.attributes] {
+    for manualOnly in [regions.block, regions.attributes] {
         #expect(!reader.logicalFoldIDsForTesting.contains(manualOnly.id))
     }
 
@@ -548,6 +549,7 @@ func readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() throws {
                 regions.declaration.id,
                 regions.imports.id,
                 regions.cfgTest.id,
+                regions.comment.id,
                 regions.topLevelDeclaration.id,
             ]))
     #expect(
@@ -556,6 +558,7 @@ func readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() throws {
                 regions.container.id,
                 regions.imports.id,
                 regions.cfgTest.id,
+                regions.comment.id,
                 regions.topLevelDeclaration.id,
             ]))
 }
