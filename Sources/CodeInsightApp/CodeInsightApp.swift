@@ -5598,6 +5598,27 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         self.windowController = windowController
         windowController.showWindow(nil)
+        guard !offscreen else { return }
+        let session = model.loadSessionSnapshot()
+        if let snapshot = session.snapshot {
+            windowController.restoreSession(snapshot)
+        } else if session.discarded {
+            presentDiscardedSessionNotice()
+        }
+    }
+
+    private func presentDiscardedSessionNotice() {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Previous Session Couldn’t Be Restored"
+        alert.informativeText = "Cairn discarded invalid or unavailable session "
+            + "data. Open a project to continue."
+        alert.addButton(withTitle: "OK")
+        if let window = windowController?.window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     private func enlargedWindowLayout(

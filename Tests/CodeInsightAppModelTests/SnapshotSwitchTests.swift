@@ -122,6 +122,57 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
 
 @MainActor
 @Test
+func sessionRestoreInstallsRevisionBeforeActivatingFrozenReadingSet() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    try snapshotWrite(
+        "fn committed() {}\n",
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    try fixture.git("add", "main.rs")
+    try fixture.commit("saved")
+    let revision = try fixture.git("rev-parse", "HEAD")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    try snapshotWrite(
+        "fn worktree() {}\n",
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: fixture.root.path,
+        revision: revision,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.relations.rawValue,
+        tabs: [
+            .readingSet(.init(
+                title: "captured evidence",
+                excerpts: [],
+                scrollOffset: 64,
+                skippedReasons: ["recorded source is unreadable"]
+            )),
+        ]
+    )
+    let model = AppModel(indexService: ProjectIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.currentRevision == revision)
+    #expect(model.tabStrip.activeIndex == 0)
+    #expect(model.selectedFile == nil)
+    guard case .readingSet(let title, let excerpts) = model.tabStrip.activeTab?.content
+    else {
+        Issue.record("expected the frozen Reading Set to be active")
+        return
+    }
+    #expect(title == "captured evidence")
+    #expect(excerpts.isEmpty)
+    #expect(model.tabStrip.activeTab?.readingSetScrollOffset == 64)
+    #expect(model.tabStrip.activeTab?.readingSetSkippedReasons
+        == ["recorded source is unreadable"])
+}
+
+@MainActor
+@Test
 func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
     defer { try? FileManager.default.removeItem(at: root) }

@@ -912,6 +912,63 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
 
 @MainActor
 @Test
+func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let selection = byteOffset(of: "target();", in: fixture.mainSource)
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: fixture.root.path,
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.relations.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: ContentID.sha256(
+                    of: Array(fixture.mainSource.utf8)
+                ),
+                scrollAnchor: .init(
+                    byteOffset: 0,
+                    line: 1,
+                    column: 1,
+                    symbolAnchor: "target"
+                ),
+                selectionAnchor: .init(
+                    byteOffset: selection,
+                    line: 3,
+                    column: 27,
+                    symbolAnchor: "target"
+                )
+            )),
+        ]
+    )
+
+    fixture.controller.restoreSession(snapshot)
+    try #require(await relationTestWaitUntil(
+        "session tab and document are restored",
+        {
+            fixture.model.snapshotPhase == .fullReady
+                && fixture.controller.displayedReaderFile?.standardizedFileURL
+                    == fixture.root.appendingPathComponent("main.rs")
+                        .standardizedFileURL
+                && fixture.controller.selfTestActiveTabSelectionByteOffset
+                    == selection
+                && fixture.controller.selfTestReadingByteOffset == 0
+        }
+    ))
+
+    #expect(fixture.controller.selfTestPanelPreset == .relations)
+    #expect(fixture.controller.selfTestTabCount == 1)
+    #expect(fixture.controller.selfTestActiveTabIndex == 0)
+    #expect(fixture.controller.selfTestReadingByteOffset == 0)
+    #expect(fixture.controller.selfTestActiveTabSelectionByteOffset == selection)
+}
+
+@MainActor
+@Test
 func relationSymbolSingleClicksDoNotNavigate() async throws {
     let fixture = try await makeRelationNavigationFixture()
     defer {

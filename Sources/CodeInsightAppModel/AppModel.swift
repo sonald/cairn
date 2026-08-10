@@ -451,6 +451,33 @@ public final class AppModel {
         sessionCheckpointTask = nil
     }
 
+    package func loadSessionSnapshot() -> (
+        snapshot: SessionCodec.Snapshot?,
+        discarded: Bool
+    ) {
+        guard let sessionURL,
+              FileManager.default.fileExists(atPath: sessionURL.path)
+        else { return (nil, false) }
+        do {
+            let snapshot = try SessionCodec.decode(
+                Data(contentsOf: sessionURL),
+                maximumTabCount: tabStrip.maximumCount,
+                dependencyAllowed: exactLocationIsInDependency
+            )
+            var isDirectory: ObjCBool = false
+            guard FileManager.default.fileExists(
+                atPath: snapshot.projectRoot,
+                isDirectory: &isDirectory
+            ), isDirectory.boolValue else {
+                throw CocoaError(.fileNoSuchFile)
+            }
+            return (snapshot, false)
+        } catch {
+            try? FileManager.default.removeItem(at: sessionURL)
+            return (nil, true)
+        }
+    }
+
     package func writeSessionCheckpoint(
         panelPreset: PanelPresetModel,
         allowsPendingTopology: Bool = false
@@ -528,6 +555,217 @@ public final class AppModel {
             panelPreset: panelPreset.rawValue,
             tabs: entries
         )
+    }
+
+    package func restoreSession(_ snapshot: SessionCodec.Snapshot) async -> Bool {
+        let root = URL(
+            fileURLWithPath: snapshot.projectRoot,
+            isDirectory: true
+        ).standardizedFileURL
+        openProject(root: root)
+        let worktreeGeneration = generation
+        let worktreeTask = snapshotTask
+        await worktreeTask?.value
+        guard !Task.isCancelled,
+              generation == worktreeGeneration,
+              projectRoot?.standardizedFileURL == root,
+              snapshotPhase == .fullReady
+        else { return false }
+
+        var revisionUnavailable = false
+        if let revision = snapshot.revision {
+            let revisionExists = await Task.detached {
+                (try? CommitSnapshot(
+                    repositoryURL: root,
+                    revision: revision
+                )) != nil
+            }.value
+            guard !Task.isCancelled,
+                  generation == worktreeGeneration,
+                  projectRoot?.standardizedFileURL == root
+            else { return false }
+            if revisionExists {
+                switchSnapshot(revision: revision)
+                let revisionGeneration = generation
+                let revisionTask = snapshotTask
+                await revisionTask?.value
+                guard !Task.isCancelled,
+                      generation == revisionGeneration,
+                      projectRoot?.standardizedFileURL == root
+                else { return false }
+                if snapshotPhase != .fullReady {
+                    revisionUnavailable = true
+                    openProject(root: root)
+                    let fallbackGeneration = generation
+                    let fallbackTask = snapshotTask
+                    await fallbackTask?.value
+                    guard !Task.isCancelled,
+                          generation == fallbackGeneration,
+                          projectRoot?.standardizedFileURL == root,
+                          snapshotPhase == .fullReady
+                    else { return false }
+                }
+            } else {
+                revisionUnavailable = true
+            }
+        }
+
+        let restoreGeneration = generation
+        let source = documentSource
+        var oldToNew: [Int: (
+            index: Int,
+            scrollFallback: ReplayFallbackKind?,
+            selectionFallback: ReplayFallbackKind?
+        )] = [:]
+        var successfulOrdinals: [Int] = []
+        for (oldOrdinal, entry) in snapshot.tabs.enumerated() {
+            guard !Task.isCancelled,
+                  generation == restoreGeneration,
+                  projectRoot?.standardizedFileURL == root
+            else { return false }
+            switch entry {
+            case .file(let saved):
+                let dependency = exactLocationIsInDependency(saved.path)
+                let file = dependency
+                    ? URL(fileURLWithPath: saved.path).standardizedFileURL
+                    : root.appendingPathComponent(saved.path).standardizedFileURL
+                guard dependency || (
+                    file.pathComponents.starts(with: root.pathComponents)
+                        && file.pathComponents.count > root.pathComponents.count
+                ) else { continue }
+                let resolved = await Self.resolveSessionFile(
+                    saved,
+                    file: file,
+                    source: dependency ? nil : source,
+                    revision: currentRevision
+                )
+                guard !Task.isCancelled,
+                      generation == restoreGeneration,
+                      let resolved
+                else {
+                    if generation != restoreGeneration { return false }
+                    continue
+                }
+                tabStrip.open(
+                    file,
+                    inNewTab: true,
+                    selectionByteOffset: resolved.selectionAnchor?.byteOffset
+                )
+                tabStrip.updateActiveSessionAnchors(
+                    contentID: resolved.contentID,
+                    scrollAnchor: resolved.scrollAnchor,
+                    selectionAnchor: resolved.selectionAnchor
+                )
+                guard let newIndex = tabStrip.activeIndex else { continue }
+                oldToNew[oldOrdinal] = (
+                    newIndex,
+                    resolved.scrollFallback,
+                    resolved.selectionFallback
+                )
+                successfulOrdinals.append(oldOrdinal)
+            case .readingSet(let saved):
+                tabStrip.openReadingSet(
+                    title: saved.title,
+                    excerpts: saved.excerpts,
+                    skippedReasons: saved.skippedReasons
+                )
+                tabStrip.updateActiveReadingSetScroll(saved.scrollOffset)
+                guard let newIndex = tabStrip.activeIndex else { continue }
+                oldToNew[oldOrdinal] = (newIndex, nil, nil)
+                successfulOrdinals.append(oldOrdinal)
+            }
+        }
+        guard !Task.isCancelled,
+              generation == restoreGeneration,
+              projectRoot?.standardizedFileURL == root
+        else { return false }
+
+        let selected = snapshot.activeTabOrdinal.flatMap { oldToNew[$0] }
+            ?? successfulOrdinals.first.flatMap { oldToNew[$0] }
+        if let selected {
+            activateTab(selected.index)
+        }
+        var notices: [String] = []
+        if revisionUnavailable {
+            notices.append("saved revision unavailable; restored against current worktree")
+        }
+        if let selected {
+            for (anchor, fallback) in [
+                ("selection", selected.selectionFallback),
+                ("scroll", selected.scrollFallback),
+            ] {
+                if let fallback,
+                   let notice = Self.replayNotice(
+                       fallback: fallback,
+                       replayedAgainstCurrentWorktree: false
+                   )
+                {
+                    notices.append("\(anchor) \(notice)")
+                }
+            }
+        }
+        replayNotice = notices.isEmpty ? nil : notices.joined(separator: " · ")
+        return true
+    }
+
+    nonisolated private static func resolveSessionFile(
+        _ saved: SessionCodec.FileTab,
+        file: URL,
+        source: DocumentLoader.ContentSource?,
+        revision: String?
+    ) async -> (
+        contentID: ContentID,
+        scrollAnchor: SessionCodec.Anchor?,
+        selectionAnchor: SessionCodec.Anchor?,
+        scrollFallback: ReplayFallbackKind?,
+        selectionFallback: ReplayFallbackKind?
+    )? {
+        try? await detachedValue {
+            let loader = source.map(DocumentLoader.init(source:))
+                ?? DocumentLoader()
+            let loaded = try loader.load(file: file)
+            func resolve(
+                _ anchor: SessionCodec.Anchor?
+            ) -> (SessionCodec.Anchor?, ReplayFallbackKind?) {
+                guard let anchor else { return (nil, nil) }
+                let record = JumpRecord(
+                    path: file.path,
+                    contentID: saved.anchorContentID,
+                    byteOffset: anchor.byteOffset,
+                    line: anchor.line,
+                    column: anchor.column,
+                    symbolAnchor: anchor.symbolAnchor,
+                    snapshotID: nil,
+                    revision: revision
+                )
+                let replayed = replayOffset(
+                    record,
+                    document: loaded.document,
+                    tier: loaded.tier
+                )
+                let coordinate = loaded.document.lineTable.lineColumn(
+                    at: replayed.offset
+                )
+                return (
+                    SessionCodec.Anchor(
+                        byteOffset: replayed.offset,
+                        line: coordinate?.line ?? 1,
+                        column: coordinate?.column ?? 1,
+                        symbolAnchor: anchor.symbolAnchor
+                    ),
+                    replayed.fallback
+                )
+            }
+            let scroll = resolve(saved.scrollAnchor)
+            let selection = resolve(saved.selectionAnchor)
+            return (
+                loaded.document.contentID,
+                scroll.0,
+                selection.0,
+                scroll.1,
+                selection.1
+            )
+        }
     }
 
     public func openProject(root: URL) {
@@ -1520,7 +1758,18 @@ public final class AppModel {
             DocumentLoader()
         }
         let loaded = try loader.load(file: file)
-        let document = loaded.document
+        return replayOffset(
+            record,
+            document: loaded.document,
+            tier: loaded.tier
+        )
+    }
+
+    nonisolated private static func replayOffset(
+        _ record: JumpRecord,
+        document: ReaderDocument,
+        tier: FileTier
+    ) -> (offset: UInt32, fallback: ReplayFallbackKind) {
         let byteIsValid = document.byteUTF16Map.utf16Offset(
             forByte: Int(record.byteOffset)
         ) != nil
@@ -1540,7 +1789,7 @@ public final class AppModel {
             return (lineOffset, .line)
         }
         if let symbolAnchor = record.symbolAnchor {
-            let facets = if loaded.tier == .regular {
+            let facets = if tier == .regular {
                 document.outlineFacets
             } else {
                 (try? RustHighlighter().highlight(bytes: document.bytes))?

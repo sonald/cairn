@@ -624,3 +624,39 @@ checkpoint/恢复编排留给下一 R3 足切片）。
   rust-analyzer 继续因 `sandbox_apply: Operation not permitted` 明确 skipped。最终 release runner 为 control
   resolution 26.447 ms、fold resolution 27.125 ms、首次折叠 275.476 ms，4,400 logical / 200 rendered，
   峰值 RSS 增量 6,340,632 bytes，`status=pass`。
+
+## R3-4：启动恢复编排
+
+结论：PASS（严格 v1 启动恢复、active entry/双锚点/Reading Set scroll、panel preset 与真实 AppKit
+退出重开均已闭合）。
+
+- 启动只从 bundle 隔离的 Application Support 路径严格解码 v1；unknown version、坏 JSON 或缺失
+  `projectRoot` 会删除整份文件，并且只在本次读取返回一次 discarded 信号。正常 offscreen/self-test 路径不
+  自动恢复，继续保持测试与用户状态隔离。
+- 恢复先安装 worktree；保存 revision 可用时再完整安装该 commit，之后才按保存顺序恢复 tagged entries。
+  revision 缺失或安装失败会回到当前 worktree 并明确提示，不把它冒充保存快照。每个异步阶段都校验
+  Task cancellation、project root 与运行时 generation，用户手动打开另一项目或选择版本会取消旧恢复。
+- file entry 复用一次文档加载，scroll/selection 两个 anchor 分别走 §3.17 五档阶梯，再把新 contentID 与
+  实际解析 offset 写回 tab；Reading Set 直接恢复冻结 payload、skipped reasons 与 numeric scrollOffset，
+  不经过 file replay。old ordinal 到 new index 的映射保证前置文件缺失时 active entry 不错位；保存 active
+  不可用时激活第一个成功 entry。
+- 7 条恢复定向测试覆盖项目相对路径、dependency 绝对路径、exact scroll、line selection、缺失 active file、
+  缺 root/坏版本单次丢弃、缺 revision worktree 降级、恢复中手动开另一项目取消、真实 Git commit 在 active
+  Reading Set 前安装，以及 MainWindow 的 Relations preset 与双锚点应用。完整
+  `swift test --disable-sandbox` 本次退出码 0；`CODEX_SANDBOX=1 bash scripts/ci.sh` 全矩阵 PASS。最终 release
+  runner 为 control resolution 24.587 ms、fold resolution 23.945 ms、首次折叠 248.470 ms，4,400 logical /
+  200 rendered，峰值 RSS 增量 5,079,040 bytes，`status=pass`。
+- 已构建并签名隔离验收包 `.build/m11-r3-restore-app/Cairn.app`，bundle id
+  `dev.cairn.Cairn.m11r3restore`。fixture 直接复用 codec round-trip 测试生成的合法 v1 形状，无 self-test
+  注入或产品 API：`cap.rs` file tab 保存 scroll line 42 / selection line 1，active `spawn trace · 8`
+  Reading Set 保存 8 个冻结段、skipped reason 与 `Relations` preset。
+- 首次真实启动即显示两个 tab，active Reading Set 的 8 段、`VERIFIED` badge、`name match only`、
+  `worktree · captured` 与 disabled Open/Expand 均保持；点击“查看证据”显示 `Resolution Inspector AT
+  CAPTURE`、冻结 source/verification/availability/environment。证据见
+  `r3-restore-reading-set.jpeg`。
+- 使用 Reading Set 原生 scroller 滚到末尾后执行 `⌘Q`，退出同步文件精确写出
+  `activeTabOrdinal = 1`、`panelPreset = relations`、`scrollOffset = 853` 与 8 个 excerpts；重启后仍以
+  `spawn trace · 8` 为 active，scrollbar value 恢复为 1。`⇧⌘[` 切回 `cap.rs` 时 Reader 位于保存的
+  line 42–57（scrollbar 0.964989），而 session 中独立 selection anchor 仍为 `subject` line 1；`⇧⌘]`
+  切回 Reading Set 后滚动位置仍为 1。证据见 `r3-restore-scroll.jpeg` 与
+  `r3-restore-file-anchors.jpeg`。

@@ -73,6 +73,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var lastOpenedProjectRoot: URL?
     private var pendingRecentProjectRoot: URL?
     private var pendingTabRestore: TabStripModel.Tab?
+    private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
 
@@ -504,6 +505,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     deinit {
+        sessionRestoreTask?.cancel()
         if let escapeMonitor { NSEvent.removeMonitor(escapeMonitor) }
     }
 
@@ -512,11 +514,38 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func openProject(root: URL) {
+        cancelSessionRestore()
         let root = root.standardizedFileURL
         lastOpenedProjectRoot = root
         pendingRecentProjectRoot = root
         model.openProject(root: root)
         render()
+    }
+
+    func restoreSession(_ snapshot: SessionCodec.Snapshot) {
+        cancelSessionRestore()
+        let root = URL(
+            fileURLWithPath: snapshot.projectRoot,
+            isDirectory: true
+        ).standardizedFileURL
+        lastOpenedProjectRoot = root
+        pendingRecentProjectRoot = root
+        if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
+            applyPanelPreset(preset)
+        }
+        sessionRestoreTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let restored = await model.restoreSession(snapshot)
+            guard restored, !Task.isCancelled else { return }
+            pendingTabRestore = model.tabStrip.activeTab
+            render()
+            sessionRestoreTask = nil
+        }
+    }
+
+    private func cancelSessionRestore() {
+        sessionRestoreTask?.cancel()
+        sessionRestoreTask = nil
     }
 
     func refreshRecentProjects() {
@@ -555,6 +584,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 appModel: model,
                 selectedRevision: { [weak model] in model?.currentRevision },
                 onChoose: { [weak self] commit in
+                    self?.cancelSessionRestore()
                     if let commit {
                         self?.model.switchToCommit(
                             commit.fullSHA,
@@ -575,6 +605,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     var displayedReaderFile: URL? { readerController.displayedFile }
+    var selfTestPanelPreset: PanelPresetModel { panelPreset }
     var selfTestTabCount: Int { model.tabStrip.tabs.count }
     var selfTestActiveTabIndex: Int? { model.tabStrip.activeIndex }
     var selfTestActiveTabFile: URL? { model.tabStrip.activeTab?.fileURL }
@@ -2096,6 +2127,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 appModel: model,
                 selectedRevision: { [weak model] in model?.currentRevision },
                 onChoose: { [weak self] commit in
+                    self?.cancelSessionRestore()
                     if let commit {
                         self?.model.switchToCommit(
                             commit.fullSHA,
