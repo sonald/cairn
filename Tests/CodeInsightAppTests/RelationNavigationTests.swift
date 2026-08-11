@@ -933,6 +933,7 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
     let selection = byteOffset(of: "target();", in: fixture.mainSource)
     let snapshot = SessionCodec.Snapshot(
         projectRoot: fixture.root.path,
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.relations.rawValue,
@@ -1686,9 +1687,9 @@ private func pumpRunLoop() async {
 }
 
 private struct RelationTestIndexService: IndexService {
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached {
-            try ProjectIndexer().index(root: root)
+            try ProjectIndexer().index(root: root, language: language)
         }.value
     }
 }
@@ -1894,7 +1895,8 @@ private func makeRelationUXFixture(
                 ReadingSetExcerpt.SourceKind.worktreeCaptured,
                 nil
             )
-        }
+        },
+        languageMode: { _ in LanguageMode(language: .rust) }
     )
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1_600, height: 1_000),

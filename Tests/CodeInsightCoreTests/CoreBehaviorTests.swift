@@ -35,6 +35,30 @@ func contentIDUsesSHA256() {
 }
 
 @Test
+func languageModeUsesStableIdentityAndOneRustPathClassifier() throws {
+    #expect([
+        LanguageID.rust.rawValue,
+        LanguageID.python.rawValue,
+        LanguageID.typescript.rawValue,
+        LanguageID.javascript.rawValue,
+    ] == [0, 1, 2, 3])
+
+    let composed = LanguageMode(language: .typescript, variant: "caf\u{e9}")
+    let decomposed = LanguageMode(language: .typescript, variant: "cafe\u{301}")
+    #expect(composed == decomposed)
+    #expect(decomposed.variant == "caf\u{e9}")
+
+    #expect(LanguageMode.classify(path: "src/lib.rs", language: .rust)
+        == LanguageMode(language: .rust))
+    #expect(LanguageMode.classify(path: "src/LIB.RS", language: .rust) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.py", language: .rust) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.rs", language: .python) == nil)
+
+    let encoded = try JSONEncoder().encode(decomposed)
+    #expect(try JSONDecoder().decode(LanguageMode.self, from: encoded) == composed)
+}
+
+@Test
 func byteRangeUsesHalfOpenBounds() {
     let range = ByteRange(lowerBound: 4, upperBound: 8)
 

@@ -713,6 +713,77 @@ func storeAndSnapshotViewPreserveFixtureFieldsAndQueries() throws {
 }
 
 @Test
+func engineSessionExposesOnlyTheClassifierSelectedLanguageMode() throws {
+    try withProject([
+        "main.rs": "fn active() {}\nfn caller() { active(); }\n",
+    ]) { session in
+        let active = try #require(session.contentIndexes.first)
+        let bytes = try #require(session.sourceBytesByContent[active.key.contentID])
+
+        func rekey(_ mode: LanguageMode) -> ContentIndex {
+            ContentIndex(
+                key: ContentIndexKey(
+                    contentID: active.key.contentID,
+                    languageMode: mode,
+                    grammarVersion: active.key.grammarVersion,
+                    extractorVersion: active.key.extractorVersion
+                ),
+                scopes: active.value.scopes,
+                bindings: active.value.bindings,
+                executableRegions: active.value.executableRegions,
+                symbols: active.value.symbols,
+                implRelations: active.value.implRelations,
+                calls: active.value.calls,
+                imports: active.value.imports,
+                exports: active.value.exports,
+                lineTable: active.value.lineTable
+            )
+        }
+
+        let foreignLanguage = rekey(LanguageMode(language: .python))
+        let foreignVariant = rekey(LanguageMode(
+            language: .rust,
+            variant: "alternate"
+        ))
+        session.store.insert(
+            foreignLanguage,
+            bytes: bytes,
+            containsErrorNodes: false
+        )
+        session.store.insert(
+            foreignVariant,
+            bytes: bytes,
+            containsErrorNodes: false
+        )
+
+        let rebuilt = EngineSession(
+            store: session.store,
+            snapshotView: SnapshotView(
+                store: session.store,
+                manifest: session.manifest,
+                stats: session.stats,
+                analysisProfile: session.analysisProfile,
+                extractor: session.extractor
+            )
+        )
+        let activeKeys = Set(rebuilt.contentIndexes.keys)
+        #expect(activeKeys == Set([active.key]))
+        let path = try #require(pathID("main.rs", in: rebuilt))
+        #expect(rebuilt.content(at: path)?.0 == active.key)
+        #expect(rebuilt.namePosting.definitions.values.flatMap { $0 }.allSatisfy {
+            activeKeys.contains($0.key)
+        })
+        #expect(rebuilt.namePosting.calls.values.flatMap { $0 }.allSatisfy {
+            activeKeys.contains($0.key)
+        })
+        #expect(try rebuilt.definitions(
+            of: "active",
+            context: queryContext(for: rebuilt)
+        ).count == 1)
+    }
+}
+
+@Test
 func rejectsWrongSnapshotAcrossEveryQueryAPI() throws {
     try withProject(["main.rs": "fn main() {}"] ) { session in
         let definition = try #require(session.definitions(

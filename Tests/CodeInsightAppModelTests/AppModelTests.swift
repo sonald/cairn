@@ -1,9 +1,9 @@
 import CodeInsightCore
-import CodeInsightEngine
 import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
+@testable import CodeInsightEngine
 
 private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
@@ -139,6 +139,20 @@ func replayOffsetUsesFiveHonestFallbacksAndRejectsInvalidScalars() throws {
     )
     #expect(exact.offset == targetOffset)
     #expect(exact.fallback == .exact)
+    let explicitVariant = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: contentID,
+            offset: targetOffset,
+            line: 1,
+            column: targetOffset + 1
+        ),
+        file: file,
+        source: nil,
+        languageMode: LanguageMode(language: .rust, variant: "reader-test")
+    )
+    #expect(explicitVariant.offset == exact.offset)
+    #expect(explicitVariant.fallback == exact.fallback)
 
     let unverified = try AppModel.replayOffset(
         jumpRecord("a.rs", offset: targetOffset),
@@ -604,7 +618,7 @@ func navigationPushesWhileProjectIsIndexing() {
 }
 
 @Test
-func fileTreeSortsSkipsAndKeepsOnlyRustBranches() throws {
+func fileTreeUsesTheSharedRustClassifierAcrossBothSources() throws {
     let root = try temporaryProject([
         "z.rs": "",
         "a.rs": "",
@@ -619,7 +633,8 @@ func fileTreeSortsSkipsAndKeepsOnlyRustBranches() throws {
         try write("", to: root.appendingPathComponent(skipped).appendingPathComponent("skip.rs"))
     }
 
-    let tree = try FileTreeModel(root: root)
+    let compatibility = try FileTreeModel(root: root)
+    let tree = try FileTreeModel(root: root, language: .rust)
 
     #expect(tree.children.map(\.name) == ["src", "a.rs", "z.rs"])
     #expect(tree.children[0].children.map(\.name) == ["a.rs", "z.rs"])
@@ -630,6 +645,17 @@ func fileTreeSortsSkipsAndKeepsOnlyRustBranches() throws {
     )
     #expect(tree.selectionPath(for: root.appendingPathComponent("missing.rs")) == nil)
     #expect(tree.selectionPath(for: nil) == nil)
+    #expect(tree.children.map(\.name) == compatibility.children.map(\.name))
+    #expect(tree.fileCount == compatibility.fileCount)
+
+    let snapshot = FileTreeModel(
+        root: root,
+        snapshotPaths: ["src/a.rs", "src/ignored.py", "README.md"],
+        language: .rust
+    )
+    #expect(snapshot.children.map(\.name) == ["src"])
+    #expect(snapshot.children[0].children.map(\.name) == ["a.rs"])
+    #expect(snapshot.fileCount == 1)
 }
 
 @MainActor
@@ -643,6 +669,37 @@ func projectOpenPublishesFileTreeAsynchronously() async throws {
 
     #expect(model.fileTree == nil)
     #expect(await testWaitUntil("model.fileTree?.fileCount == 1") { model.fileTree?.fileCount == 1 })
+}
+
+@MainActor
+@Test
+func unsupportedLanguageOpenIsSynchronousAndAtomic() async {
+    let service = ControlledIndexService()
+    let model = AppModel(indexService: service)
+    let root = URL(fileURLWithPath: "/tmp/python-project", isDirectory: true)
+    let originalGeneration = model.generation
+
+    do {
+        try model.openProject(root: root, language: .python)
+        Issue.record("expected unsupported language")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect(
+            (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
+                .contains("python") == true
+        )
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+
+    guard case .empty = model.projectState else {
+        Issue.record("unsupported open changed project state")
+        return
+    }
+    #expect(model.projectLanguage == nil)
+    #expect(model.projectRoot == nil)
+    #expect(model.generation == originalGeneration)
+    #expect(await service.requestedLanguages().isEmpty)
 }
 
 @MainActor
@@ -665,7 +722,7 @@ func openingAnotherProjectDiscardsLateSession() async throws {
         model.fileTree?.root == rootA.standardizedFileURL
     })
     #expect(await service.waitUntilRequested(root: rootA))
-    model.openProject(root: rootB)
+    try model.openProject(root: rootB, language: .rust)
 
     #expect(model.generation == 2)
     #expect(model.fileTree == nil)
@@ -696,6 +753,8 @@ func openingAnotherProjectDiscardsLateSession() async throws {
     #expect(context.snapshotID == sessionB.snapshotID)
     #expect(context.analysisProfileID == sessionB.analysisProfile.id)
     #expect(context.generation == 2)
+    #expect(await service.requestedLanguage(root: rootA) == .rust)
+    #expect(await service.requestedLanguage(root: rootB) == .rust)
 }
 
 @MainActor
@@ -714,6 +773,42 @@ func indexingFailureMovesProjectToFailed() async throws {
         if case .failed = model.projectState { return true }
         return false
     })
+    #expect(model.projectLanguage == .rust)
+    #expect(model.projectRoot == root.standardizedFileURL)
+}
+
+@MainActor
+@Test
+func mismatchedSessionLanguageFailsWithoutPublishingSessionState() async throws {
+    let root = try temporaryProject(["main.rs": "fn main() {}"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let base = try ProjectIndexer().index(root: root)
+    let mismatched = EngineSession(
+        store: base.store,
+        snapshotView: SnapshotView(
+            reprofiling: base.snapshotView,
+            analysisProfile: .placeholder(
+                language: .python,
+                root: base.analysisProfile.projectRoot
+            )
+        )
+    )
+    let service = ControlledIndexService()
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: root)
+    #expect(await service.waitUntilRequested(root: root))
+    await service.complete(root: root, result: .success(mismatched))
+    #expect(await testWaitUntil("mismatched session rejected") {
+        if case .failed = model.projectState { return true }
+        return false
+    })
+
+    #expect(model.projectLanguage == .rust)
+    #expect(model.currentSnapshotID == nil)
+    #expect(model.snapshotPhase == nil)
+    #expect(model.coverage.filesIndexed == 0)
+    #expect(model.coverage.filesTotal == 1)
 }
 
 @Test
@@ -728,6 +823,54 @@ func realIndexServiceBuildsFixtureSession() async throws {
     #expect(session.stats.symbolCount == 3)
     #expect(session.stats.callCount == 1)
     #expect(session.stats.importCount == 1)
+}
+
+@Test
+func projectIndexServiceRejectsUnsupportedLanguageBeforeIO() async {
+    let root = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnsupportedService-\(UUID().uuidString)")
+    let resolvedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+    let digest = ContentID.sha256(of: Data(resolvedPath.utf8)).bytes
+        .map { String(format: "%02x", $0) }
+        .joined()
+    guard let applicationSupport = FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+    ).first else {
+        Issue.record("application support directory unavailable")
+        return
+    }
+    let cache = applicationSupport
+        .appendingPathComponent("CodeInsight/index-cache")
+        .appendingPathComponent("\(digest).sqlite3")
+    let cachePaths = ["", "-wal", "-shm"].map { cache.path + $0 }
+    defer {
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+
+    let service = ProjectIndexService()
+    for operation in [
+        { try await service.index(root: root, language: .python) as Any },
+        {
+            try await service.captureSnapshot(
+                root: root,
+                revision: "HEAD",
+                language: .typescript
+            ) as Any
+        },
+    ] {
+        do {
+            _ = try await operation()
+            Issue.record("unsupported service operation unexpectedly succeeded")
+        } catch let error as CocoaError {
+            #expect(error.code == .featureUnsupported)
+        } catch {
+            Issue.record("unsupported service operation reached I/O: \(error)")
+        }
+    }
+    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+    #expect(!FileManager.default.fileExists(atPath: root.path))
 }
 
 @MainActor
@@ -883,7 +1026,9 @@ func contextWindowReusesLoadedTargetDocumentAcrossClicks() async throws {
         { session, file, offset, context in
             try session.resolve(file: file, offset: offset, context: context)
         },
-        loader: { file in await loader.load(file) }
+        loader: { file, languageMode in
+            await loader.load(file, languageMode: languageMode)
+        }
     )
     model.updateProjectState(.ready(session, context), root: root)
     let first = byteOffset(of: "target();", in: source)
@@ -892,6 +1037,7 @@ func contextWindowReusesLoadedTargetDocumentAcrossClicks() async throws {
     #expect(await model.explicitJump(file: "main.rs", offset: first) != nil)
     #expect(await model.explicitJump(file: "main.rs", offset: second) != nil)
     #expect(await loader.loadCount == 1)
+    #expect(await loader.languageModes == [LanguageMode(language: .rust)])
 }
 
 @MainActor
@@ -1009,6 +1155,44 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
         model.selectedCandidate?.targetByteOffset
             == byteOffset(of: "beta() {}", in: source)
     })
+}
+
+@MainActor
+@Test
+func resolvedContextCandidateRejectsAnOlderProfileGeneration() async throws {
+    let source = "fn target() {}\nfn main() { target(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let firstContext = queryContext(for: session)
+    let secondContext = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: firstContext.generation + 1
+    )
+    let path = try #require(pathID("main.rs", in: session))
+    let offset = byteOffset(of: "target();", in: source)
+    let gate = ControlledContextResolver()
+    let model = ContextWindowModel(gate.resolve)
+    model.updateProjectState(.ready(session, firstContext), root: root)
+
+    let pending = Task {
+        await model.resolvedCandidate(file: "main.rs", offset: offset)
+    }
+    #expect(await testWaitUntil("gate.isPending(offset)") {
+        gate.isPending(offset)
+    })
+    model.updateProjectState(.ready(session, secondContext), root: root)
+    gate.complete(
+        offset,
+        with: try session.resolve(
+            file: path,
+            offset: offset,
+            context: firstContext
+        )
+    )
+
+    #expect(await pending.value == nil)
 }
 
 @MainActor
@@ -1380,9 +1564,11 @@ private actor ControlledIndexService: IndexService {
     private var pending: [String: CheckedContinuation<Outcome, Never>] = [:]
     private var completed: [String: Outcome] = [:]
     private var delivered: Set<String> = []
+    private var languagesByRoot: [String: LanguageID] = [:]
 
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         let key = root.standardizedFileURL.path
+        languagesByRoot[key] = language
         let result: Outcome
         if let completed = completed.removeValue(forKey: key) {
             result = completed
@@ -1414,6 +1600,14 @@ private actor ControlledIndexService: IndexService {
         return await waitUntil("index request received for \(key)") {
             pending[key] != nil
         }
+    }
+
+    func requestedLanguage(root: URL) -> LanguageID? {
+        languagesByRoot[root.standardizedFileURL.path]
+    }
+
+    func requestedLanguages() -> [LanguageID] {
+        Array(languagesByRoot.values)
     }
 
     private func waitUntil(
@@ -1461,16 +1655,18 @@ private final class ControlledContextResolver {
 
 private actor CountingContextLoader {
     private(set) var loadCount = 0
+    private(set) var languageModes: [LanguageMode] = []
 
-    func load(_ file: URL) -> ReaderDocument? {
+    func load(_ file: URL, languageMode: LanguageMode) -> ReaderDocument? {
         loadCount += 1
+        languageModes.append(languageMode)
         guard let data = try? Data(contentsOf: file) else { return nil }
-        return ReaderDocument(bytes: Array(data))
+        return ReaderDocument(bytes: Array(data), languageMode: languageMode)
     }
 }
 
 private struct FailingIndexService: IndexService {
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         throw Failure.expected
     }
 }

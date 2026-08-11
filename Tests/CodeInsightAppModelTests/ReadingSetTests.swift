@@ -4,6 +4,52 @@ import CodeInsightEngine
 import Foundation
 import Testing
 
+@Test
+func readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() throws {
+    let source = """
+        fn before() {}
+        fn target() {
+            let value = 1;
+        }
+        fn after() {}
+        """
+    let bytes = Array(source.utf8)
+    let targetByte = try #require(
+        bytes.firstRange(of: Array("target".utf8))?.lowerBound
+    )
+    let contentID = ContentID.sha256(of: bytes)
+    let inspector = readingSetInspector(symbol: "target")
+
+    let rust = makeReadingSetExcerpt(
+        role: "Definition",
+        symbol: "target",
+        path: "src/lib.rs",
+        targetByte: UInt32(targetByte),
+        languageMode: LanguageMode(language: .rust),
+        bytes: bytes,
+        contentID: contentID,
+        revision: nil,
+        sourceKind: .worktreeCaptured,
+        inspector: inspector
+    )
+    #expect(rust?.sourceText.contains("fn target") == true)
+    #expect(rust?.sourceText.contains("fn before") == false)
+    #expect(rust?.sourceText.contains("fn after") == false)
+
+    #expect(makeReadingSetExcerpt(
+        role: "Definition",
+        symbol: "target",
+        path: "src/lib.py",
+        targetByte: UInt32(targetByte),
+        languageMode: LanguageMode(language: .python),
+        bytes: bytes,
+        contentID: contentID,
+        revision: nil,
+        sourceKind: .worktreeCaptured,
+        inspector: inspector
+    ) == nil)
+}
+
 @MainActor
 @Test
 func readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() async throws {
@@ -470,8 +516,8 @@ private func readingSetExplanationSnapshot() -> ResolutionExplanationSnapshot {
 }
 
 private struct ReadingSetIndexService: IndexService {
-    func index(root: URL) async throws -> EngineSession {
-        try ProjectIndexer().index(root: root)
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+        try ProjectIndexer().index(root: root, language: language)
     }
 }
 

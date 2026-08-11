@@ -11,6 +11,110 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
 
 @Test
+func explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() throws {
+    let bytes = Array("fn greet(value: usize) { let copy = value; }\n".utf8)
+    let loader = DocumentLoader(source: { _ in bytes })
+    let file = URL(fileURLWithPath: "/fixture.rs")
+    let mode = LanguageMode(language: .rust, variant: "artificial-test-mode")
+
+    let convenience = try loader.load(file: file)
+    let explicit = try loader.load(file: file, languageMode: mode)
+
+    #expect(convenience.tier == explicit.tier)
+    #expect(convenience.document.languageMode == LanguageMode(language: .rust))
+    #expect(explicit.document.languageMode == mode)
+    #expect(convenience.document.bytes == explicit.document.bytes)
+    #expect(convenience.document.contentID == explicit.document.contentID)
+    #expect(convenience.document.lineTable == explicit.document.lineTable)
+    #expect(convenience.document.byteUTF16Map.bytes == explicit.document.byteUTF16Map.bytes)
+    #expect(convenience.document.byteUTF16Map.utf16Count
+        == explicit.document.byteUTF16Map.utf16Count)
+    #expect(convenience.document.highlightSpans == explicit.document.highlightSpans)
+    #expect(convenience.document.outlineFacets == explicit.document.outlineFacets)
+    #expect(convenience.document.foldRegions == explicit.document.foldRegions)
+    #expect(convenience.document.localBindings.map(\.kind.rawValue)
+        == explicit.document.localBindings.map(\.kind.rawValue))
+    #expect(convenience.document.localBindings.map(\.declarationRange)
+        == explicit.document.localBindings.map(\.declarationRange))
+    #expect(convenience.document.referencesByBinding
+        == explicit.document.referencesByBinding)
+}
+
+#if DEBUG
+@Test
+func unsupportedDocumentModeFailsBeforeParsing() throws {
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let loader = DocumentLoader(source: { _ in Array("def greet(): pass\n".utf8) })
+
+    do {
+        _ = try RustExtractor.$parseObserver.withValue({
+            parseCount.withLock { $0 += 1 }
+        }) {
+            try loader.load(
+                file: URL(fileURLWithPath: "/fixture.py"),
+                languageMode: LanguageMode(language: .python)
+            )
+        }
+        Issue.record("DocumentLoader accepted an unsupported Python mode")
+    } catch RustHighlighterError.unsupportedLanguage(let language) {
+        #expect(language == .python)
+    } catch {
+        Issue.record("DocumentLoader returned the wrong error: \(error)")
+    }
+
+    #expect(parseCount.withLock { $0 } == 0)
+}
+
+@Test
+func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
+    let resolutionCount = OSAllocatedUnfairLock(initialState: 0)
+    let loader = DocumentLoader(
+        source: { _ in [] },
+        foldResolutionObserver: { _, _, _ in
+            resolutionCount.withLock { $0 += 1 }
+        }
+    )
+    let document = ReaderDocument(
+        bytes: Array("def greet(): pass\n".utf8),
+        languageMode: LanguageMode(language: .python)
+    )
+
+    let completed = await withCheckedContinuation { continuation in
+        loader.loadSyntax(for: document) { result in
+            continuation.resume(returning: result)
+        }
+    }
+    switch completed {
+    case .success:
+        Issue.record("Detached syntax accepted an unsupported Python mode")
+    case .failure(.unsupportedLanguage(let language)):
+        #expect(language == .python)
+    case .failure(let error):
+        Issue.record("Detached syntax returned the wrong error: \(error)")
+    }
+    #expect(resolutionCount.withLock { $0 } == 0)
+}
+#endif
+
+@Test
+func identifierOccurrencesUseTheDocumentLanguageMode() {
+    let bytes = Array("value value\n".utf8)
+    let convenience = ReaderDocument(bytes: bytes)
+    let explicitRust = ReaderDocument(
+        bytes: bytes,
+        languageMode: LanguageMode(language: .rust)
+    )
+    let unsupportedPython = ReaderDocument(
+        bytes: bytes,
+        languageMode: LanguageMode(language: .python)
+    )
+
+    #expect(convenience.identifierOccurrences(at: 0)
+        == explicitRust.identifierOccurrences(at: 0))
+    #expect(unsupportedPython.identifierOccurrences(at: 0).isEmpty)
+}
+
+@Test
 func rustHighlighterProducesStableSpans() throws {
     let source = "fn greet(value: usize) -> String { // hi\n    let n = 42; \"ok\".to_string()\n}\n"
     let result = try RustHighlighter().highlight(bytes: Array(source.utf8))
@@ -809,10 +913,12 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     try source.write(to: file, atomically: true, encoding: .utf8)
     defer { try? FileManager.default.removeItem(at: file) }
     let loader = DocumentLoader()
+    let mode = LanguageMode(language: .rust, variant: "large-test-mode")
 
-    let loaded = try loader.load(file: file)
+    let loaded = try loader.load(file: file, languageMode: mode)
 
     #expect(loaded.tier == .large)
+    #expect(loaded.document.languageMode == mode)
     #expect(loaded.document.contentID == ContentID.sha256(of: loaded.document.bytes))
     #expect(loaded.document.highlightSpans.isEmpty)
     let completed = await withCheckedContinuation { continuation in
@@ -821,6 +927,7 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
         }
     }
     let document = try completed.get()
+    #expect(document.languageMode == mode)
     #expect(document.contentID == loaded.document.contentID)
     #expect(!document.highlightSpans.isEmpty)
     #expect(document.outlineFacets.count == 10_001)

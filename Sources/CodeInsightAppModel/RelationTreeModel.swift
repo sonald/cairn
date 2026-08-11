@@ -325,6 +325,8 @@ public final class RelationTreeModel {
                   let file = session.manifest.files.first(where: {
                       $0.pathID == pathID && $0.contentID == document.contentID
                   }),
+                  session.content(at: file.pathID)?.0.languageMode
+                    == document.languageMode,
                   let index = Int(exactly: bindingIndex),
                   document.localBindings.indices.contains(index)
             else {
@@ -2122,12 +2124,7 @@ public final class RelationTreeModel {
         at pathID: PathID,
         in session: EngineSession
     ) -> ContentIndex? {
-        guard let file = session.manifest.files.first(where: { $0.pathID == pathID })
-        else { return nil }
-        return session.contentIndexes.first {
-            $0.key.contentID == file.contentID
-                && $0.key.languageMode.language == file.detectedLanguage
-        }?.value
+        session.content(at: pathID)?.1
     }
 
     private nonisolated static func lexicalBindingIndex(

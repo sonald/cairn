@@ -21,6 +21,7 @@ public final class CompareModel {
     @ObservationIgnored private var diffTask: Task<Void, Never>?
     @ObservationIgnored private var snapshotGeneration: UInt64 = 0
     @ObservationIgnored private var diffGeneration: UInt64 = 0
+    @ObservationIgnored private var diffLanguageMode: LanguageMode?
 
     public init() {}
 
@@ -65,17 +66,20 @@ public final class CompareModel {
 
     func update(
         file: URL?,
-        leftSource: DocumentLoader.ContentSource?
+        leftSource: DocumentLoader.ContentSource?,
+        languageMode: LanguageMode?
     ) {
         diffTask?.cancel()
         diffGeneration &+= 1
         let updateGeneration = diffGeneration
+        diffLanguageMode = languageMode
         diff = nil
         functionChanges = []
         selectedHunkIndex = nil
         rightBytes = nil
-        guard let file, let rightSource else { return }
+        isLoading = false
         errorMessage = nil
+        guard let file, let rightSource, let languageMode else { return }
 
         do {
             let left = try (leftSource ?? Self.readFile)(file)
@@ -83,19 +87,38 @@ public final class CompareModel {
             rightBytes = right
             isLoading = true
             diffTask = Task { [weak self] in
-                let result = await Task.detached(priority: .userInitiated) {
+                let result = await Task.detached(priority: .userInitiated) { () -> (
+                    diff: DiffCore.Result?,
+                    functionChanges: [DiffCore.FunctionChange],
+                    errorMessage: String?
+                ) in
                     let core = DiffCore()
-                    return (
-                        core.compare(left: left, right: right),
-                        (try? core.functionChanges(left: left, right: right)) ?? []
-                    )
+                    do {
+                        return try (
+                            core.compare(
+                                left: left,
+                                right: right,
+                                languageMode: languageMode
+                            ),
+                            core.functionChanges(
+                                left: left,
+                                right: right,
+                                languageMode: languageMode
+                            ),
+                            nil
+                        )
+                    } catch {
+                        return (nil, [], error.localizedDescription)
+                    }
                 }.value
                 guard let self,
                       !Task.isCancelled,
-                      diffGeneration == updateGeneration
+                      diffGeneration == updateGeneration,
+                      diffLanguageMode == languageMode
                 else { return }
-                diff = result.0
-                functionChanges = result.1
+                diff = result.diff
+                functionChanges = result.functionChanges
+                errorMessage = result.errorMessage
                 isLoading = false
             }
         } catch {
@@ -123,6 +146,7 @@ public final class CompareModel {
         diffTask = nil
         snapshotGeneration &+= 1
         diffGeneration &+= 1
+        diffLanguageMode = nil
         rightRevision = nil
         rightSnapshotID = nil
         rightBytes = nil

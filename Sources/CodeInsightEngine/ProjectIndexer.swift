@@ -25,6 +25,7 @@ public struct ProjectIndexer: Sendable {
         fileprivate let store: ProjectIndexStore
         fileprivate let manifest: SnapshotManifest
         fileprivate let analysisProfile: AnalysisProfile
+        fileprivate let extractor: any LanguageExtractor
         fileprivate let missingInputs: [ExtractionInput]
         fileprivate let deferredDrafts: [ExtractionDraft]
         fileprivate let cache: IndexCache?
@@ -39,25 +40,28 @@ public struct ProjectIndexer: Sendable {
 
     private let parallelism: Int
     private let cache: IndexCache?
+    private let extractorOverride: (any LanguageExtractor)?
 
     public init() {
         parallelism = max(1, ProcessInfo.processInfo.activeProcessorCount)
         cache = nil
+        extractorOverride = nil
     }
 
     public init(persistingProjectAt root: URL) {
         parallelism = max(1, ProcessInfo.processInfo.activeProcessorCount)
         cache = try? IndexCache(projectURL: root)
+        extractorOverride = nil
     }
 
-    init(parallelism: Int) {
-        self.parallelism = max(1, parallelism)
-        cache = nil
-    }
-
-    init(parallelism: Int, cache: IndexCache?) {
+    init(
+        parallelism: Int,
+        cache: IndexCache? = nil,
+        extractor: (any LanguageExtractor)? = nil
+    ) {
         self.parallelism = max(1, parallelism)
         self.cache = cache
+        extractorOverride = extractor
     }
 
     public func flushPersistentWrites() {
@@ -65,9 +69,14 @@ public struct ProjectIndexer: Sendable {
     }
 
     public func index(root: URL) throws -> EngineSession {
+        try index(root: root, language: .rust)
+    }
+
+    public func index(root: URL, language: LanguageID) throws -> EngineSession {
+        let extractor = try languageExtractor(for: language)
         let startedAt = Date()
         let root = root.standardizedFileURL
-        let files = try rustFiles(in: root).sorted {
+        let files = try sourceFiles(in: root, language: language).sorted {
             relativePath(of: $0, under: root) < relativePath(of: $1, under: root)
         }
         let store = ProjectIndexStore()
@@ -82,15 +91,18 @@ public struct ProjectIndexer: Sendable {
             let data = try Data(contentsOf: fileURL, options: .mappedIfSafe)
             let bytes = [UInt8](data)
             let contentID = ContentID.sha256(of: data)
-            let key = ContentIndexKey(
+            let relativePath = relativePath(of: fileURL, under: root)
+            guard let mode = LanguageMode.classify(path: relativePath, language: language)
+            else { continue }
+            let key = try contentKey(
                 contentID: contentID,
-                languageMode: LanguageMode(language: .rust),
-                grammarVersion: RustExtractorInfo.grammarVersion,
-                extractorVersion: RustExtractorInfo.extractorVersion
+                mode: mode,
+                extractor: extractor
             )
             fileInputs.append(FileInput(
-                relativePath: relativePath(of: fileURL, under: root),
+                relativePath: relativePath,
                 contentID: contentID,
+                key: key,
                 size: UInt64(data.count)
             ))
             if seenKeys.insert(key).inserted {
@@ -114,7 +126,7 @@ public struct ProjectIndexer: Sendable {
                 extractionInputs.append(input)
             }
         }
-        let extractedDrafts = try extract(extractionInputs)
+        let extractedDrafts = try extract(extractionInputs, using: extractor)
         let drafts = (cachedDrafts + extractedDrafts).sorted { $0.order < $1.order }
         // Each worker owns its parser and temporary interners. Global IDs are
         // assigned only here, in first-path order, so scheduling and cache hits
@@ -133,7 +145,7 @@ public struct ProjectIndexer: Sendable {
                 occurrenceID: FileOccurrenceID(rawValue: occurrenceID),
                 pathID: store.paths.intern(input.relativePath),
                 contentID: input.contentID,
-                detectedLanguage: .rust,
+                detectedLanguage: input.key.languageMode.language,
                 sourceKind: .untracked,
                 fileMode: .regular,
                 size: input.size
@@ -154,27 +166,23 @@ public struct ProjectIndexer: Sendable {
             callCount: indexes.values.reduce(0) { $0 + $1.calls.count },
             importCount: indexes.values.reduce(0) { $0 + $1.imports.count },
             elapsedMilliseconds: UInt64(max(0, Date().timeIntervalSince(startedAt) * 1_000)),
-            filesWithErrorNodes: occurrences.reduce(0) { count, file in
-                let key = ContentIndexKey(
-                    contentID: file.contentID,
-                    languageMode: LanguageMode(language: .rust),
-                    grammarVersion: RustExtractorInfo.grammarVersion,
-                    extractorVersion: RustExtractorInfo.extractorVersion
-                )
-                return count + (hasErrors[key] == true ? 1 : 0)
+            filesWithErrorNodes: fileInputs.reduce(0) { count, input in
+                count + (hasErrors[input.key] == true ? 1 : 0)
             },
             reusedCount: cachedDrafts.count,
             extractedCount: extractedDrafts.count
         )
-        let profile = ProfileDetector.detect(
+        let profile = try analysisProfile(
             root: root,
+            language: language,
             projectRoot: store.paths.intern(".")
         )
         let snapshotView = SnapshotView(
             store: store,
             manifest: manifest,
             stats: stats,
-            analysisProfile: profile
+            analysisProfile: profile,
+            extractor: extractor
         )
         return EngineSession(
             store: store,
@@ -188,6 +196,15 @@ public struct ProjectIndexer: Sendable {
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore
     ) throws -> PreparedSnapshot {
+        try prepareSnapshot(snapshot, into: store, language: .rust)
+    }
+
+    public func prepareSnapshot(
+        _ snapshot: any Snapshot,
+        into store: ProjectIndexStore,
+        language: LanguageID
+    ) throws -> PreparedSnapshot {
+        let extractor = try languageExtractor(for: language)
         try Task.checkCancellation()
         let startedAt = Date()
         let stored = store.snapshot()
@@ -202,7 +219,7 @@ public struct ProjectIndexer: Sendable {
             try Task.checkCancellation()
             let bytes = try snapshot.readBytes(path: file.path)
             capturedBytes[file.contentID] = bytes
-            let language = detectedLanguage(for: file.path)
+            let mode = LanguageMode.classify(path: file.path, language: language)
             guard let occurrenceID = UInt32(exactly: offset) else {
                 preconditionFailure("File count exceeds UInt32")
             }
@@ -210,13 +227,17 @@ public struct ProjectIndexer: Sendable {
                 occurrenceID: FileOccurrenceID(rawValue: occurrenceID),
                 pathID: store.paths.intern(file.path),
                 contentID: file.contentID,
-                detectedLanguage: language,
+                detectedLanguage: mode?.language,
                 sourceKind: snapshot.sourceKind,
                 fileMode: file.fileMode,
                 size: UInt64(bytes.count)
             ))
-            guard language == .rust, file.fileMode != .lfsPointer else { continue }
-            let key = rustContentKey(file.contentID)
+            guard let mode, file.fileMode != .lfsPointer else { continue }
+            let key = try contentKey(
+                contentID: file.contentID,
+                mode: mode,
+                extractor: extractor
+            )
             if stored.contentIndexes[key] != nil {
                 reusedKeys.insert(key)
             } else if missingKeys.insert(key).inserted {
@@ -258,13 +279,16 @@ public struct ProjectIndexer: Sendable {
             snapshotID: snapshot.snapshotID,
             files: occurrences
         )
-        let analysisProfile = ProfileDetector.detect(
+        let analysisProfile = try analysisProfile(
             snapshot: snapshot,
+            language: language,
             projectRoot: store.paths.intern(".")
         )
-        let stats = snapshotStats(
+        let stats = try snapshotStats(
             manifest: manifest,
+            paths: store.paths,
             stored: storedAfterCache,
+            extractor: extractor,
             reusedCount: readyReusedKeys.count,
             extractedCount: 0,
             startedAt: startedAt
@@ -273,13 +297,15 @@ public struct ProjectIndexer: Sendable {
             store: store,
             manifest: manifest,
             stats: stats,
-            analysisProfile: analysisProfile
+            analysisProfile: analysisProfile,
+            extractor: extractor
         )
         return PreparedSnapshot(
             cachedSession: EngineSession(store: store, snapshotView: view),
             store: store,
             manifest: manifest,
             analysisProfile: analysisProfile,
+            extractor: extractor,
             missingInputs: missingInputs,
             deferredDrafts: deferredDrafts,
             cache: cache,
@@ -292,7 +318,10 @@ public struct ProjectIndexer: Sendable {
         _ prepared: PreparedSnapshot
     ) throws -> EngineSession {
         try Task.checkCancellation()
-        let extractedDrafts = try extract(prepared.missingInputs)
+        let extractedDrafts = try extract(
+            prepared.missingInputs,
+            using: prepared.extractor
+        )
         let drafts = (prepared.deferredDrafts + extractedDrafts)
             .sorted { $0.order < $1.order }
         // Extraction is pure and completes before the shared store changes;
@@ -301,9 +330,11 @@ public struct ProjectIndexer: Sendable {
         prepared.store.insert(remap(drafts, into: prepared.store))
         persist(extractedDrafts, to: prepared.cache)
         let stored = prepared.store.snapshot()
-        let stats = snapshotStats(
+        let stats = try snapshotStats(
             manifest: prepared.manifest,
+            paths: prepared.store.paths,
             stored: stored,
+            extractor: prepared.extractor,
             reusedCount: prepared.reusedCount,
             extractedCount: extractedDrafts.count,
             startedAt: prepared.startedAt
@@ -312,7 +343,8 @@ public struct ProjectIndexer: Sendable {
             store: prepared.store,
             manifest: prepared.manifest,
             stats: stats,
-            analysisProfile: prepared.analysisProfile
+            analysisProfile: prepared.analysisProfile,
+            extractor: prepared.extractor
         )
         return EngineSession(store: prepared.store, snapshotView: view)
     }
@@ -321,34 +353,48 @@ public struct ProjectIndexer: Sendable {
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore
     ) throws -> EngineSession {
-        try completeSnapshot(prepareSnapshot(snapshot, into: store))
+        try indexSnapshot(snapshot, into: store, language: .rust)
     }
 
-    private func detectedLanguage(for path: String) -> LanguageID? {
-        URL(fileURLWithPath: path).pathExtension.lowercased() == "rs" ? .rust : nil
-    }
-
-    private func rustContentKey(_ contentID: ContentID) -> ContentIndexKey {
-        ContentIndexKey(
-            contentID: contentID,
-            languageMode: LanguageMode(language: .rust),
-            grammarVersion: RustExtractorInfo.grammarVersion,
-            extractorVersion: RustExtractorInfo.extractorVersion
-        )
+    public func indexSnapshot(
+        _ snapshot: any Snapshot,
+        into store: ProjectIndexStore,
+        language: LanguageID
+    ) throws -> EngineSession {
+        try completeSnapshot(prepareSnapshot(
+            snapshot,
+            into: store,
+            language: language
+        ))
     }
 
     private func snapshotStats(
         manifest: SnapshotManifest,
+        paths: Interner<PathID>,
         stored: ProjectIndexStore.State,
+        extractor: any LanguageExtractor,
         reusedCount: Int,
         extractedCount: Int,
         startedAt: Date
-    ) -> IndexStats {
-        let rustFiles = manifest.files.filter { $0.detectedLanguage == .rust }
-        let keys = Set(rustFiles.map { rustContentKey($0.contentID) })
+    ) throws -> IndexStats {
+        var activeFiles: [(FileOccurrence, ContentIndexKey)] = []
+        for file in manifest.files {
+            guard file.detectedLanguage == extractor.language,
+                  let mode = LanguageMode.classify(
+                    path: paths.resolve(file.pathID),
+                    language: extractor.language
+                  )
+            else { continue }
+            activeFiles.append((file, try contentKey(
+                contentID: file.contentID,
+                mode: mode,
+                extractor: extractor
+            )))
+        }
+        let keys = Set(activeFiles.map(\.1))
         let indexes = keys.compactMap { stored.contentIndexes[$0] }
         return IndexStats(
-            fileCount: rustFiles.count,
+            fileCount: activeFiles.count,
             uniqueContentCount: indexes.count,
             scopeCount: indexes.reduce(0) { $0 + $1.scopes.count },
             bindingCount: indexes.reduce(0) { $0 + $1.bindings.count },
@@ -359,8 +405,8 @@ public struct ProjectIndexer: Sendable {
                 0,
                 Date().timeIntervalSince(startedAt) * 1_000
             )),
-            filesWithErrorNodes: rustFiles.reduce(0) { count, file in
-                count + (stored.containsErrorNodes[rustContentKey(file.contentID)] == true
+            filesWithErrorNodes: activeFiles.reduce(0) { count, input in
+                count + (stored.containsErrorNodes[input.1] == true
                     ? 1 : 0)
             },
             reusedCount: reusedCount,
@@ -368,7 +414,10 @@ public struct ProjectIndexer: Sendable {
         )
     }
 
-    private func rustFiles(in root: URL) throws -> [URL] {
+    private func sourceFiles(
+        in root: URL,
+        language: LanguageID
+    ) throws -> [URL] {
         var result: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(
             at: root,
@@ -382,12 +431,112 @@ public struct ProjectIndexer: Sendable {
                 guard values.isSymbolicLink != true,
                       !Self.skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                result += try rustFiles(in: url)
-            } else if values.isRegularFile == true && url.pathExtension == "rs" {
+                result += try sourceFiles(in: url, language: language)
+            } else if values.isRegularFile == true,
+                      LanguageMode.classify(path: url.path, language: language) != nil
+            {
                 result.append(url)
             }
         }
         return result
+    }
+
+    private func languageExtractor(
+        for language: LanguageID
+    ) throws -> any LanguageExtractor {
+        if let extractorOverride {
+            guard extractorOverride.language == language else {
+                throw invalidIdentity(
+                    "Requested \(String(describing: language)) does not match extractor "
+                        + "\(String(describing: extractorOverride.language))"
+                )
+            }
+            return extractorOverride
+        }
+        switch language {
+        case .rust:
+            return RustExtractor()
+        case .python, .typescript, .javascript:
+            throw unsupportedLanguage(language)
+        }
+    }
+
+    private func contentKey(
+        contentID: ContentID,
+        mode: LanguageMode,
+        extractor: any LanguageExtractor
+    ) throws -> ContentIndexKey {
+        guard mode.language == extractor.language else {
+            throw invalidIdentity(
+                "Mode \(String(describing: mode.language)) does not match extractor "
+                    + "\(String(describing: extractor.language))"
+            )
+        }
+        return ContentIndexKey(
+            contentID: contentID,
+            languageMode: mode,
+            grammarVersion: extractor.grammarVersion,
+            extractorVersion: extractor.extractorVersion
+        )
+    }
+
+    private func analysisProfile(
+        root: URL,
+        language: LanguageID,
+        projectRoot: PathID
+    ) throws -> AnalysisProfile {
+        let profile: AnalysisProfile
+        switch language {
+        case .rust:
+            profile = ProfileDetector.detect(root: root, projectRoot: projectRoot)
+        case .python, .typescript, .javascript:
+            throw unsupportedLanguage(language)
+        }
+        return try validated(profile, for: language)
+    }
+
+    private func analysisProfile(
+        snapshot: any Snapshot,
+        language: LanguageID,
+        projectRoot: PathID
+    ) throws -> AnalysisProfile {
+        let profile: AnalysisProfile
+        switch language {
+        case .rust:
+            profile = ProfileDetector.detect(
+                snapshot: snapshot,
+                projectRoot: projectRoot
+            )
+        case .python, .typescript, .javascript:
+            throw unsupportedLanguage(language)
+        }
+        return try validated(profile, for: language)
+    }
+
+    private func validated(
+        _ profile: AnalysisProfile,
+        for language: LanguageID
+    ) throws -> AnalysisProfile {
+        guard profile.language == language else {
+            throw invalidIdentity(
+                "Profile \(String(describing: profile.language)) does not match requested "
+                    + "\(String(describing: language))"
+            )
+        }
+        return profile
+    }
+
+    private func unsupportedLanguage(_ language: LanguageID) -> CocoaError {
+        CocoaError(.featureUnsupported, userInfo: [
+            NSLocalizedFailureReasonErrorKey:
+                "ProjectIndexer does not support \(String(describing: language))",
+        ])
+    }
+
+    private func invalidIdentity(_ reason: String) -> CocoaError {
+        CocoaError(.coderInvalidValue, userInfo: [
+            NSLocalizedFailureReasonErrorKey: reason,
+        ])
     }
 
     private func relativePath(of file: URL, under root: URL) -> String {
@@ -471,7 +620,15 @@ public struct ProjectIndexer: Sendable {
         cache.store(drafts)
     }
 
-    private func extract(_ inputs: [ExtractionInput]) throws -> [ExtractionDraft] {
+    private func extract(
+        _ inputs: [ExtractionInput],
+        using extractor: any LanguageExtractor
+    ) throws -> [ExtractionDraft] {
+        guard inputs.allSatisfy({
+            $0.key.languageMode.language == extractor.language
+        }) else {
+            throw invalidIdentity("Extraction input language does not match extractor")
+        }
         let result = BlockingResult<[ExtractionDraft]>()
         let operation: @Sendable () async -> Void = {
             do {
@@ -485,7 +642,7 @@ public struct ProjectIndexer: Sendable {
                             group.addTask {
                                 let names = Interner<NameID>()
                                 let strings = Interner<StringID>()
-                                let result = try RustExtractor().extractWithDiagnostics(
+                                let result = try extractor.extractWithDiagnostics(
                                     bytes: input.bytes,
                                     key: input.key,
                                     interner: ExtractionInterners(
@@ -493,6 +650,11 @@ public struct ProjectIndexer: Sendable {
                                         strings: strings
                                     )
                                 )
+                                guard result.index.key == input.key else {
+                                    throw invalidIdentity(
+                                        "Extractor returned a different ContentIndexKey"
+                                    )
+                                }
                                 return ExtractionDraft(
                                     order: input.order,
                                     bytes: input.bytes,
@@ -626,6 +788,7 @@ public struct ProjectIndexer: Sendable {
     private struct FileInput: Sendable {
         let relativePath: String
         let contentID: ContentID
+        let key: ContentIndexKey
         let size: UInt64
     }
 

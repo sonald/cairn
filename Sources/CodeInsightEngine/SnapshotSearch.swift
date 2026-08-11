@@ -4,6 +4,7 @@ import Foundation
 
 public protocol SnapshotContentSource: Sendable {
     var manifest: SnapshotManifest { get }
+    func path(for pathID: PathID) -> String?
     func bytes(for contentID: ContentID) -> [UInt8]?
 }
 
@@ -79,18 +80,40 @@ public struct SnapshotSearchService: Sendable {
     private static let matchesPerBatch = 200
 
     private let source: any SnapshotContentSource
+    private let language: LanguageID
+    private let extractor: any LanguageExtractor
     private let wallClockLimit: Duration
 
     public init(source: any SnapshotContentSource) {
+        self.init(
+            source: source,
+            language: .rust,
+            extractor: RustExtractor()
+        )
+    }
+
+    init(
+        source: any SnapshotContentSource,
+        language: LanguageID,
+        extractor: any LanguageExtractor
+    ) {
+        precondition(extractor.language == language)
         self.source = source
+        self.language = language
+        self.extractor = extractor
         wallClockLimit = .seconds(5)
     }
 
     init(
         source: any SnapshotContentSource,
+        language: LanguageID,
+        extractor: any LanguageExtractor,
         wallClockLimit: Duration
     ) {
+        precondition(extractor.language == language)
         self.source = source
+        self.language = language
+        self.extractor = extractor
         self.wallClockLimit = wallClockLimit
     }
 
@@ -119,11 +142,11 @@ public struct SnapshotSearchService: Sendable {
         let literalPattern = Array(query.pattern.utf8)
 
         let source = source
+        let files = activeFiles().map(\.file)
         let wallClockLimit = wallClockLimit
         return AsyncThrowingStream { continuation in
             let task = Task.detached(priority: .userInitiated) {
                 let startedAt = ContinuousClock.now
-                let files = source.manifest.files
                 let filesByContent = Dictionary(grouping: files, by: \.contentID)
                 var seenContentIDs: Set<ContentID> = []
                 let contentIDs = files.compactMap {
@@ -303,6 +326,18 @@ public struct SnapshotSearchService: Sendable {
         }
         let pattern = Array(query.pattern.utf8)
         let source = source
+        let extractor = extractor
+        let keyedFiles = activeFiles().map { item in
+            (
+                file: item.file,
+                key: ContentIndexKey(
+                    contentID: item.file.contentID,
+                    languageMode: item.mode,
+                    grammarVersion: extractor.grammarVersion,
+                    extractorVersion: extractor.extractorVersion
+                )
+            )
+        }
         let wallClockLimit = wallClockLimit
         #if DEBUG
         let parseObserver = RustExtractor.parseObserver
@@ -311,16 +346,12 @@ public struct SnapshotSearchService: Sendable {
             let task = Task.detached(priority: .userInitiated) {
                 do {
                     let startedAt = ContinuousClock.now
-                    let files = source.manifest.files.filter {
-                        $0.detectedLanguage == .rust
+                    let filesByKey = Dictionary(grouping: keyedFiles, by: \.key)
+                    var seenKeys: Set<ContentIndexKey> = []
+                    let keys = keyedFiles.compactMap {
+                        seenKeys.insert($0.key).inserted ? $0.key : nil
                     }
-                    let filesByContent = Dictionary(grouping: files, by: \.contentID)
-                    var seenContentIDs: Set<ContentID> = []
-                    let contentIDs = files.compactMap {
-                        seenContentIDs.insert($0.contentID).inserted
-                            ? $0.contentID : nil
-                    }
-                    let allPathIDs = Set(files.map(\.pathID))
+                    let allPathIDs = Set(keyedFiles.map(\.file.pathID))
                     var processedPathIDs: Set<PathID> = []
                     var truncatedPathIDs: Set<PathID> = []
                     var completeness = Completeness.complete
@@ -339,7 +370,7 @@ public struct SnapshotSearchService: Sendable {
                         batchMatchCount = 0
                     }
 
-                    contentLoop: for contentID in contentIDs {
+                    contentLoop: for key in keys {
                         try Task.checkCancellation()
                         if Self.expired(startedAt, limit: wallClockLimit) {
                             completeness = .truncated
@@ -349,8 +380,8 @@ public struct SnapshotSearchService: Sendable {
                             break
                         }
 
-                        let occurrences = filesByContent[contentID] ?? []
-                        guard let bytes = source.bytes(for: contentID) else {
+                        let occurrences = (filesByKey[key] ?? []).map(\.file)
+                        guard let bytes = source.bytes(for: key.contentID) else {
                             completeness = .truncated
                             truncatedPathIDs.formUnion(occurrences.map(\.pathID))
                             processedPathIDs.formUnion(occurrences.map(\.pathID))
@@ -391,15 +422,17 @@ public struct SnapshotSearchService: Sendable {
                         let identifiers = try RustExtractor.$parseObserver.withValue(
                             parseObserver
                         ) {
-                            try RustExtractor().identifierRanges(
+                            try extractor.identifierRanges(
                                 named: query.pattern,
-                                in: bytes
+                                in: bytes,
+                                mode: key.languageMode
                             )
                         }
                         #else
-                        let identifiers = try RustExtractor().identifierRanges(
+                        let identifiers = try extractor.identifierRanges(
                             named: query.pattern,
-                            in: bytes
+                            in: bytes,
+                            mode: key.languageMode
                         )
                         #endif
                         let identifierOffsets = Set(identifiers.map(\.lowerBound))
@@ -485,6 +518,18 @@ public struct SnapshotSearchService: Sendable {
                 }
             }
             continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    private func activeFiles() -> [(
+        file: FileOccurrence,
+        mode: LanguageMode
+    )] {
+        source.manifest.files.compactMap { file in
+            guard let path = source.path(for: file.pathID),
+                  let mode = LanguageMode.classify(path: path, language: language)
+            else { return nil }
+            return (file, mode)
         }
     }
 
@@ -574,6 +619,10 @@ public struct SnapshotSearchService: Sendable {
 }
 
 extension EngineSession: SnapshotContentSource {
+    public func path(for pathID: PathID) -> String? {
+        paths.resolve(pathID)
+    }
+
     public func bytes(for contentID: ContentID) -> [UInt8]? {
         sourceBytesByContent[contentID]
     }
@@ -583,7 +632,11 @@ extension EngineSession: SnapshotContentSource {
         context: QueryContext
     ) throws -> AsyncThrowingStream<SearchBatch, Error> {
         try validate(context)
-        return try SnapshotSearchService(source: self).search(query, context: context)
+        return try SnapshotSearchService(
+            source: self,
+            language: analysisProfile.language,
+            extractor: extractor
+        ).search(query, context: context)
     }
 
     public func searchReferences(
@@ -593,7 +646,11 @@ extension EngineSession: SnapshotContentSource {
         context: QueryContext
     ) throws -> AsyncThrowingStream<SearchBatch, Error> {
         try validate(context)
-        return try SnapshotSearchService(source: self).searchReferences(
+        return try SnapshotSearchService(
+            source: self,
+            language: analysisProfile.language,
+            extractor: extractor
+        ).searchReferences(
             query,
             excludingPathID: excludingPathID,
             excludingRange: excludingRange,

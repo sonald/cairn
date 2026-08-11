@@ -268,7 +268,20 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     // captured worktree files retain the existing .untracked convention.
     public let sourceKind: SourceKind = .untracked
 
-    public init(repositoryURL: URL) throws {
+    public convenience init(repositoryURL: URL) throws {
+        try self.init(repositoryURL: repositoryURL, language: .rust)
+    }
+
+    public init(repositoryURL: URL, language: LanguageID) throws {
+        switch language {
+        case .rust:
+            break
+        case .python, .typescript, .javascript:
+            throw CocoaError(.featureUnsupported, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    "Worktree snapshot does not support \(String(describing: language))",
+            ])
+        }
         let repositoryInfo: (URL, GitObjectFormat) = try LibGit2Executor.sync {
             let repository = try GitRepository(url: repositoryURL)
             guard let workdir = git_repository_workdir(repository.raw) else {
@@ -285,7 +298,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         let root = repositoryInfo.0
 
         var captured: [String: CapturedFile] = [:]
-        for file in try Self.rustFiles(under: root) {
+        for file in try Self.sourceFiles(under: root, language: language) {
             let bytes = [UInt8](try Data(contentsOf: file, options: .mappedIfSafe))
             captured[Self.relativePath(of: file, under: root)] = CapturedFile(
                 bytes: bytes,
@@ -334,7 +347,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         return file.bytes
     }
 
-    private static func rustFiles(under root: URL) throws -> [URL] {
+    private static func sourceFiles(
+        under root: URL,
+        language: LanguageID
+    ) throws -> [URL] {
         var result: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(
             at: root,
@@ -350,8 +366,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 guard values.isSymbolicLink != true,
                       !skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                result += try rustFiles(under: url)
-            } else if values.isRegularFile == true && url.pathExtension == "rs" {
+                result += try sourceFiles(under: url, language: language)
+            } else if values.isRegularFile == true,
+                      LanguageMode.classify(path: url.path, language: language) != nil
+            {
                 result.append(url)
             }
         }

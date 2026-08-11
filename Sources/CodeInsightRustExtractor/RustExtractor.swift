@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CTreeSitterRust
+import Foundation
 import TreeSitterKit
 
 public struct RustExtractor: LanguageExtractor, Sendable {
@@ -9,23 +10,16 @@ public struct RustExtractor: LanguageExtractor, Sendable {
 
     public init() {}
 
-    public func extract(
-        bytes: [UInt8],
-        key: ContentIndexKey,
-        interner: ExtractionInterners
-    ) throws -> ContentIndex {
-        try extractWithDiagnostics(
-            bytes: bytes,
-            key: key,
-            interner: interner
-        ).index
-    }
+    public var language: LanguageID { .rust }
+    public var grammarVersion: UInt32 { RustExtractorInfo.grammarVersion }
+    public var extractorVersion: UInt32 { RustExtractorInfo.extractorVersion }
 
     public func extractWithDiagnostics(
         bytes: [UInt8],
         key: ContentIndexKey,
         interner: ExtractionInterners
     ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        try requireSupported(key.languageMode)
         guard
             let language = tree_sitter_rust(),
             let parser = Parser(language: language)
@@ -127,8 +121,10 @@ public struct RustExtractor: LanguageExtractor, Sendable {
 
     public func identifierRanges(
         named name: String,
-        in bytes: [UInt8]
+        in bytes: [UInt8],
+        mode: LanguageMode
     ) throws -> [CodeInsightCore.ByteRange] {
+        try requireSupported(mode)
         guard
             let language = tree_sitter_rust(),
             let parser = Parser(language: language)
@@ -154,6 +150,17 @@ public struct RustExtractor: LanguageExtractor, Sendable {
                 upperBound: range.upperBound
             )
         }
+    }
+
+    public func identifierRanges(
+        named name: String,
+        in bytes: [UInt8]
+    ) throws -> [CodeInsightCore.ByteRange] {
+        try identifierRanges(
+            named: name,
+            in: bytes,
+            mode: LanguageMode(language: .rust)
+        )
     }
 
     private func traverse(
@@ -307,6 +314,15 @@ public struct RustExtractor: LanguageExtractor, Sendable {
         Self.parseObserver?()
         #endif
         return parser.parse(bytes)
+    }
+
+    private func requireSupported(_ mode: LanguageMode) throws {
+        guard mode.language == language else {
+            throw CocoaError(.featureUnsupported, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    "RustExtractor does not support \(String(describing: mode.language))",
+            ])
+        }
     }
 
     private func isAcceptedMacroItem(_ kind: String) -> Bool {

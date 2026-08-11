@@ -3,6 +3,7 @@ import CodeInsightGit
 import Foundation
 
 public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
+    public let language: LanguageID = .rust
     public let capabilities: ExactCapabilities = [
         .definition, .implementations, .callHierarchy, .references,
     ]
@@ -75,6 +76,12 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
         profile: ExactProfileKey,
         trustMode: TrustMode
     ) throws -> any ExactSession {
+        guard profile.language == language else {
+            throw ExactError.unavailable(
+                "provider language \(String(describing: language)) does not match "
+                    + "profile language \(String(describing: profile.language))"
+            )
+        }
         let options = Self.initializationOptions(
             trustMode: trustMode,
             featureSelection: profile.featureSelection

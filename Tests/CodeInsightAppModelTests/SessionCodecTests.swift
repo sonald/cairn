@@ -4,12 +4,47 @@ import Testing
 @testable import CodeInsightAppModel
 
 @Test
+func sessionCodecPersistsLanguageAndMigratesMissingLanguageToRust() throws {
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        language: .python,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    var object = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    #expect(object["language"] as? Int == Int(LanguageID.python.rawValue))
+    #expect(try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    ).language == .python)
+
+    object.removeValue(forKey: "language")
+    let legacy = try JSONSerialization.data(withJSONObject: object)
+    #expect(try SessionCodec.decode(
+        legacy,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    ).language == .rust)
+}
+
+@Test
 func sessionCodecRoundTripsTaggedTabsAndEveryFrozenInspectorField() throws {
     let capturedAt = Date(timeIntervalSince1970: 1_786_270_000.125)
     let excerpt = sessionExcerpt(capturedAt: capturedAt)
     let contentID = excerpt.contentID
     let snapshot = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: "abc123",
         activeTabOrdinal: 1,
         panelPreset: PanelPresetModel.relations.rawValue,
@@ -115,6 +150,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
     let excerpt = sessionExcerpt()
     let valid = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -159,6 +195,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let tooMany = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -174,6 +211,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let tooManyExcerpts = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -193,6 +231,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let escaping = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -213,6 +252,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let oversized = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -232,6 +272,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let tooManyAuditRows = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -251,6 +292,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
 
     let oversizedDisplay = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -276,6 +318,7 @@ func sessionCodecAppliesDependencyPredicateToFileTabsButKeepsFrozenExcerpts() th
     let path = "/tmp/dependency/src/lib.rs"
     let file = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",
@@ -301,6 +344,7 @@ func sessionCodecAppliesDependencyPredicateToFileTabsButKeepsFrozenExcerpts() th
 
     let frozen = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: "reading",

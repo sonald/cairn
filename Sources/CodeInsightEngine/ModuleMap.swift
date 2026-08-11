@@ -9,12 +9,20 @@ public struct ModuleMap: Sendable {
 
     init(
         manifest: SnapshotManifest,
+        language: LanguageID,
         indexes: [ContentIndexKey: ContentIndex],
         bytesByContent: [ContentID: [UInt8]],
         names: Interner<NameID>,
         paths: Interner<PathID>
     ) {
-        let pathIDsByString = Dictionary(uniqueKeysWithValues: manifest.files.map {
+        precondition(language == .rust)
+        let files = manifest.files.filter {
+            LanguageMode.classify(
+                path: paths.resolve($0.pathID),
+                language: language
+            ) != nil
+        }
+        let pathIDsByString = Dictionary(uniqueKeysWithValues: files.map {
             (paths.resolve($0.pathID), $0.pathID)
         })
         var indexesByContent: [ContentID: ContentIndex] = [:]
@@ -25,7 +33,7 @@ public struct ModuleMap: Sendable {
         var parents: [PathID: PathID] = [:]
         var roots: Set<PathID> = []
 
-        for file in manifest.files {
+        for file in files {
             let path = paths.resolve(file.pathID)
             let fileName = path.split(separator: "/").last.map(String.init) ?? path
             if fileName == "main.rs" || fileName == "lib.rs" {

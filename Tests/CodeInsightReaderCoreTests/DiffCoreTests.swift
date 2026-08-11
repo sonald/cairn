@@ -1,5 +1,54 @@
+import CodeInsightCore
 import CodeInsightReaderCore
+import CodeInsightRustExtractor
+import Foundation
+import os
 import Testing
+
+@Test
+func explicitRustDiffMatchesConvenience() throws {
+    let left = Array("fn item(value: i32) { old(value); }\n".utf8)
+    let right = Array("fn item(value: i64) { new(value); }\n".utf8)
+    let mode = LanguageMode(language: .rust, variant: "artificial-test-mode")
+    let core = DiffCore()
+
+    #expect(try core.compare(left: left, right: right, languageMode: mode)
+        == core.compare(left: left, right: right))
+    #expect(try core.functionChanges(left: left, right: right, languageMode: mode)
+        == core.functionChanges(left: left, right: right))
+}
+
+#if DEBUG
+@Test
+func unsupportedDiffModeFailsBeforeParsing() throws {
+    let left = Array("def item(): return 1\n".utf8)
+    let right = Array("def item(): return 2\n".utf8)
+    let mode = LanguageMode(language: .python)
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let core = DiffCore()
+
+    do {
+        _ = try core.compare(left: left, right: right, languageMode: mode)
+        Issue.record("DiffCore accepted Python line diff")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+    }
+
+    do {
+        _ = try RustExtractor.$parseObserver.withValue({
+            parseCount.withLock { $0 += 1 }
+        }) {
+            try core.functionChanges(left: left, right: right, languageMode: mode)
+        }
+        Issue.record("DiffCore accepted Python syntax diff")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+    }
+    #expect(parseCount.withLock { $0 } == 0)
+}
+#endif
 
 @Test
 func lineDiffMarksAddedRemovedAndChangedLines() {

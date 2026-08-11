@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightRustExtractor
+import Foundation
 
 public struct DiffCore: Sendable {
     public static let maximumLineCount = 20_000
@@ -67,6 +68,19 @@ public struct DiffCore: Sendable {
     public init() {}
 
     public func compare(left: [UInt8], right: [UInt8]) -> Result {
+        compareSupported(left: left, right: right)
+    }
+
+    public func compare(
+        left: [UInt8],
+        right: [UInt8],
+        languageMode: LanguageMode
+    ) throws -> Result {
+        try requireSupported(languageMode)
+        return compareSupported(left: left, right: right)
+    }
+
+    private func compareSupported(left: [UInt8], right: [UInt8]) -> Result {
         let leftLines = splitLines(left)
         let rightLines = splitLines(right)
         guard max(leftLines.count, rightLines.count) <= Self.maximumLineCount else {
@@ -160,8 +174,21 @@ public struct DiffCore: Sendable {
         left: [UInt8],
         right: [UInt8]
     ) throws -> [FunctionChange] {
-        let old = try extractFunctions(left)
-        let new = try extractFunctions(right)
+        try functionChanges(
+            left: left,
+            right: right,
+            languageMode: LanguageMode(language: .rust)
+        )
+    }
+
+    public func functionChanges(
+        left: [UInt8],
+        right: [UInt8],
+        languageMode: LanguageMode
+    ) throws -> [FunctionChange] {
+        try requireSupported(languageMode)
+        let old = try extractFunctions(left, languageMode: languageMode)
+        let new = try extractFunctions(right, languageMode: languageMode)
         let keys = Set(old.keys).union(new.keys).sorted()
         var changes: [FunctionChange] = []
 
@@ -277,13 +304,14 @@ public struct DiffCore: Sendable {
     }
 
     private func extractFunctions(
-        _ bytes: [UInt8]
+        _ bytes: [UInt8],
+        languageMode: LanguageMode
     ) throws -> [FunctionKey: [ExtractedFunction]] {
         let names = Interner<NameID>()
         let strings = Interner<StringID>()
         let key = ContentIndexKey(
             contentID: ContentID.sha256(of: bytes),
-            languageMode: LanguageMode(language: .rust),
+            languageMode: languageMode,
             grammarVersion: RustExtractorInfo.grammarVersion,
             extractorVersion: RustExtractorInfo.extractorVersion
         )
@@ -309,6 +337,18 @@ public struct DiffCore: Sendable {
         }
         return result.mapValues { functions in
             functions.sorted { $0.facet.range.lowerBound < $1.facet.range.lowerBound }
+        }
+    }
+
+    private func requireSupported(_ languageMode: LanguageMode) throws {
+        switch languageMode.language {
+        case .rust:
+            return
+        case .python, .typescript, .javascript:
+            throw CocoaError(.featureUnsupported, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    "DiffCore does not support \(String(describing: languageMode.language))",
+            ])
         }
     }
 

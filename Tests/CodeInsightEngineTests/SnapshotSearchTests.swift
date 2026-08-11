@@ -30,6 +30,33 @@ func snapshotSearchScansDuplicateContentOnceAndProjectsEveryPath() async throws 
 }
 
 @Test
+func snapshotSearchFiltersOccurrencesBeforeDeduplicatingContent() async throws {
+    let bytes = Array("fn target() {}\nfn caller() { target(); }\n".utf8)
+    let source = FakeSnapshotSource([
+        ("active.rs", bytes),
+        ("foreign.py", bytes),
+    ])
+
+    let content = try await search(
+        ContentSearchQuery(pattern: "target", caseSensitive: true),
+        source: source
+    )
+    let references = try await referenceSearch(
+        ContentSearchQuery(pattern: "target", caseSensitive: true),
+        source: source,
+        excludingPathID: PathID(rawValue: .max),
+        excludingRange: ByteRange(lowerBound: .max, upperBound: .max)
+    )
+
+    #expect(Set(content.matches.map(\.pathID))
+        == Set([source.manifest.files[0].pathID]))
+    #expect(content.matches.count == 2)
+    #expect(Set(references.matches.map(\.pathID))
+        == Set([source.manifest.files[0].pathID]))
+    #expect(references.matches.count == 2)
+}
+
+@Test
 func snapshotSearchHonorsCaseSensitivityAndRegex() async throws {
     let source = FakeSnapshotSource([
         ("main.rs", Array("Alpha alpha foo1 foo22\n".utf8)),
@@ -48,7 +75,11 @@ func snapshotSearchHonorsCaseSensitivityAndRegex() async throws {
 
     var rejected = false
     do {
-        _ = try SnapshotSearchService(source: source).search(
+        _ = try SnapshotSearchService(
+            source: source,
+            language: .rust,
+            extractor: RustExtractor()
+        ).search(
             ContentSearchQuery(pattern: "(", isRegex: true),
             context: context(for: source)
         )
@@ -183,6 +214,8 @@ func snapshotReferenceSearchMarksTimeoutPartial() async throws {
     )
     let service = SnapshotSearchService(
         source: source,
+        language: .rust,
+        extractor: RustExtractor(),
         wallClockLimit: .milliseconds(1)
     )
 
@@ -206,7 +239,11 @@ func snapshotReferenceSearchCancellationTerminatesConsumer() async throws {
         },
         pauseAtScanCount: 3
     )
-    let stream = try SnapshotSearchService(source: source).searchReferences(
+    let stream = try SnapshotSearchService(
+        source: source,
+        language: .rust,
+        extractor: RustExtractor()
+    ).searchReferences(
         ContentSearchQuery(pattern: "needle", caseSensitive: true),
         excludingPathID: source.manifest.files[0].pathID,
         excludingRange: ByteRange(lowerBound: 0, upperBound: 0),
@@ -250,6 +287,8 @@ func snapshotSearchTimesOutAfterASlowSourceRead() async throws {
     )
     let service = SnapshotSearchService(
         source: source,
+        language: .rust,
+        extractor: RustExtractor(),
         wallClockLimit: .milliseconds(1)
     )
     let result = try await collect(
@@ -272,7 +311,11 @@ func snapshotSearchCancellationTerminatesConsumer() async throws {
         },
         pauseAtScanCount: 3
     )
-    let stream = try SnapshotSearchService(source: source).search(
+    let stream = try SnapshotSearchService(
+        source: source,
+        language: .rust,
+        extractor: RustExtractor()
+    ).search(
         ContentSearchQuery(pattern: "needle"),
         context: context(for: source)
     )
@@ -333,6 +376,7 @@ func snapshotContentSearchCLIAlignsWithGrepSample() throws {
 private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendable {
     let manifest: SnapshotManifest
     private let contents: [ContentID: [UInt8]]
+    private let paths: [PathID: String]
     private let readDelay: TimeInterval
     private let pauseAtScanCount: Int?
     private let scanPaused = DispatchSemaphore(value: 0)
@@ -348,12 +392,15 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
         pauseAtScanCount: Int? = nil
     ) {
         var contents: [ContentID: [UInt8]] = [:]
+        var paths: [PathID: String] = [:]
         let occurrences = files.enumerated().map { offset, file in
             let contentID = ContentID.sha256(of: file.bytes)
+            let pathID = PathID(rawValue: UInt32(offset))
             contents[contentID] = file.bytes
+            paths[pathID] = file.path
             return FileOccurrence(
                 occurrenceID: FileOccurrenceID(rawValue: UInt32(offset)),
-                pathID: PathID(rawValue: UInt32(offset)),
+                pathID: pathID,
                 contentID: contentID,
                 detectedLanguage: .rust,
                 sourceKind: .untracked,
@@ -366,6 +413,7 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
             files: occurrences
         )
         self.contents = contents
+        self.paths = paths
         self.readDelay = readDelay
         self.pauseAtScanCount = pauseAtScanCount
     }
@@ -401,13 +449,19 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
         if readDelay > 0 { Thread.sleep(forTimeInterval: readDelay) }
         return contents[contentID]
     }
+
+    func path(for pathID: PathID) -> String? {
+        paths[pathID]
+    }
 }
 
 private func search(
     _ query: ContentSearchQuery,
     source: FakeSnapshotSource
 ) async throws -> (matches: [SearchMatch], final: SearchBatch) {
-    try await collect(try SnapshotSearchService(source: source).search(
+    try await collect(try SnapshotSearchService(
+        source: source
+    ).search(
         query,
         context: context(for: source)
     ))
@@ -419,7 +473,11 @@ private func referenceSearch(
     excludingPathID: PathID,
     excludingRange: ByteRange
 ) async throws -> (matches: [SearchMatch], final: SearchBatch) {
-    try await collect(try SnapshotSearchService(source: source).searchReferences(
+    try await collect(try SnapshotSearchService(
+        source: source,
+        language: .rust,
+        extractor: RustExtractor()
+    ).searchReferences(
         query,
         excludingPathID: excludingPathID,
         excludingRange: excludingRange,

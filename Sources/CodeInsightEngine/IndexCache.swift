@@ -1,5 +1,4 @@
 import CodeInsightCore
-import CodeInsightRustExtractor
 import CryptoKit
 import Foundation
 import SQLite3
@@ -7,12 +6,10 @@ import SQLite3
 final class IndexCache: @unchecked Sendable {
     struct Metadata: Equatable, Sendable {
         let schemaVersion: UInt32
-        let grammarVersion: UInt32
-        let extractorVersion: UInt32
     }
 
     static let defaultQuotaBytes = 512 * 1024 * 1024
-    private static let schemaVersion: UInt32 = 1
+    private static let schemaVersion: UInt32 = 2
 
     let metadata: Metadata
     private let fileURL: URL
@@ -27,15 +24,12 @@ final class IndexCache: @unchecked Sendable {
     init(
         fileURL: URL,
         quotaBytes: Int = IndexCache.defaultQuotaBytes,
-        grammarVersion: UInt32 = RustExtractorInfo.grammarVersion,
-        extractorVersion: UInt32 = RustExtractorInfo.extractorVersion
+        schemaVersionOverride: UInt32? = nil
     ) throws {
         self.fileURL = fileURL
         self.quotaBytes = Int64(max(0, quotaBytes))
         metadata = Metadata(
-            schemaVersion: Self.schemaVersion,
-            grammarVersion: grammarVersion,
-            extractorVersion: extractorVersion
+            schemaVersion: schemaVersionOverride ?? Self.schemaVersion
         )
         queue = DispatchQueue(label: "CodeInsight.IndexCache.\(fileURL.lastPathComponent)")
         try FileManager.default.createDirectory(
@@ -179,9 +173,7 @@ final class IndexCache: @unchecked Sendable {
         try execute("PRAGMA synchronous=NORMAL")
         try execute("""
             CREATE TABLE IF NOT EXISTS meta(
-                schemaVersion INTEGER NOT NULL,
-                grammarVersion INTEGER NOT NULL,
-                extractorVersion INTEGER NOT NULL
+                schemaVersion INTEGER NOT NULL
             )
             """)
         try execute("""
@@ -194,13 +186,10 @@ final class IndexCache: @unchecked Sendable {
         let rows = try metadataRows()
         if rows.isEmpty {
             let statement = try prepare(
-                "INSERT INTO meta(schemaVersion, grammarVersion, extractorVersion) "
-                    + "VALUES(?1, ?2, ?3)"
+                "INSERT INTO meta(schemaVersion) VALUES(?1)"
             )
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_int64(statement, 1, Int64(metadata.schemaVersion))
-            sqlite3_bind_int64(statement, 2, Int64(metadata.grammarVersion))
-            sqlite3_bind_int64(statement, 3, Int64(metadata.extractorVersion))
             try stepDone(statement)
         } else if rows != [metadata] {
             throw IndexCacheError.metadataMismatch
@@ -209,21 +198,15 @@ final class IndexCache: @unchecked Sendable {
 
     private func metadataRows() throws -> [Metadata] {
         let statement = try prepare(
-            "SELECT schemaVersion, grammarVersion, extractorVersion FROM meta"
+            "SELECT schemaVersion FROM meta"
         )
         defer { sqlite3_finalize(statement) }
         var rows: [Metadata] = []
         var code = sqlite3_step(statement)
         while code == SQLITE_ROW {
-            guard let schema = UInt32(exactly: sqlite3_column_int64(statement, 0)),
-                  let grammar = UInt32(exactly: sqlite3_column_int64(statement, 1)),
-                  let extractor = UInt32(exactly: sqlite3_column_int64(statement, 2))
+            guard let schema = UInt32(exactly: sqlite3_column_int64(statement, 0))
             else { throw IndexCacheError.invalidMetadata }
-            rows.append(Metadata(
-                schemaVersion: schema,
-                grammarVersion: grammar,
-                extractorVersion: extractor
-            ))
+            rows.append(Metadata(schemaVersion: schema))
             code = sqlite3_step(statement)
         }
         guard code == SQLITE_DONE else { throw IndexCacheError.sqlite(code) }
@@ -404,8 +387,13 @@ final class IndexCache: @unchecked Sendable {
 
 func cacheKey(for key: ContentIndexKey) -> String {
     let content = key.contentID.bytes.map { String(format: "%02x", $0) }.joined()
-    let variant = key.languageMode.variant.map { String($0.rawValue) } ?? "-"
-    return "\(key.contentID.algorithm):\(content):\(key.languageMode.language.rawValue):"
+    let variant = key.languageMode.variant.map {
+        let normalized = $0.precomposedStringWithCanonicalMapping
+        let bytes = Array(normalized.utf8)
+        return "v\(bytes.count)#" + bytes.map { String(format: "%02x", $0) }.joined()
+    } ?? "n"
+    return "\(key.contentID.algorithm):\(key.contentID.bytes.count)#\(content):"
+        + "\(key.languageMode.language.rawValue):"
         + "\(variant):\(key.grammarVersion):\(key.extractorVersion)"
 }
 

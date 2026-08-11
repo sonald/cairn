@@ -4,6 +4,82 @@ import Foundation
 import Testing
 
 @Test
+func languageExtractorExistentialMatchesRustExtractionContracts() throws {
+    let source = "fn alpha() { alpha(); fn broken( { }"
+    let bytes = Array(source.utf8)
+    let key = ContentIndexKey(
+        contentID: ContentID.sha256(of: bytes),
+        languageMode: LanguageMode(language: .rust),
+        grammarVersion: RustExtractorInfo.grammarVersion,
+        extractorVersion: RustExtractorInfo.extractorVersion
+    )
+    let extractor: any LanguageExtractor = RustExtractor()
+
+    #expect(extractor.language == .rust)
+    #expect(extractor.grammarVersion == RustExtractorInfo.grammarVersion)
+    #expect(extractor.extractorVersion == RustExtractorInfo.extractorVersion)
+
+    let diagnosticNames = Interner<NameID>()
+    let diagnosticStrings = Interner<StringID>()
+    let diagnostic = try extractor.extractWithDiagnostics(
+        bytes: bytes,
+        key: key,
+        interner: ExtractionInterners(
+            names: diagnosticNames,
+            strings: diagnosticStrings
+        )
+    )
+    #expect(diagnostic.containsErrorNodes)
+    #expect(diagnostic.index.key == key)
+
+    let plainNames = Interner<NameID>()
+    let plainStrings = Interner<StringID>()
+    let plain = try extractor.extract(
+        bytes: bytes,
+        key: key,
+        interner: ExtractionInterners(names: plainNames, strings: plainStrings)
+    )
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    #expect(try encoder.encode(plain) == encoder.encode(diagnostic.index))
+    #expect(plainNames.values == diagnosticNames.values)
+    #expect(plainStrings.values == diagnosticStrings.values)
+
+    let ranges = try extractor.identifierRanges(
+        named: "alpha",
+        in: bytes,
+        mode: key.languageMode
+    )
+    #expect(ranges.count == 2)
+    #expect(try extractor.identifierRanges(
+        named: "alpha",
+        in: bytes,
+        mode: LanguageMode(language: .rust, variant: "artificial-test-mode")
+    ) == ranges)
+
+    let foreignKey = ContentIndexKey(
+        contentID: key.contentID,
+        languageMode: LanguageMode(language: .python),
+        grammarVersion: key.grammarVersion,
+        extractorVersion: key.extractorVersion
+    )
+    do {
+        _ = try extractor.extractWithDiagnostics(
+            bytes: bytes,
+            key: foreignKey,
+            interner: ExtractionInterners(
+                names: Interner<NameID>(),
+                strings: Interner<StringID>()
+            )
+        )
+        Issue.record("Rust extractor accepted a Python content key")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+    }
+}
+
+@Test
 func preservesShadowedBindingsInSourceOrder() throws {
     let result = try extract("fn f() { let x = 1; let x = x + 1; }")
     let bindings = result.index.bindings.filter {

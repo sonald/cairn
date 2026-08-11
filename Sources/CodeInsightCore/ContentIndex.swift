@@ -1,17 +1,31 @@
+import Foundation
+
 public enum LanguageID: UInt8, Codable, Sendable {
-    case rust
-    case python
-    case typescript
-    case javascript
+    case rust = 0
+    case python = 1
+    case typescript = 2
+    case javascript = 3
 }
 
 public struct LanguageMode: Codable, Hashable, Sendable {
     public let language: LanguageID
-    public let variant: StringID?
+    public let variant: String?
 
-    public init(language: LanguageID, variant: StringID? = nil) {
+    public init(language: LanguageID, variant: String? = nil) {
         self.language = language
-        self.variant = variant
+        self.variant = variant?.precomposedStringWithCanonicalMapping
+    }
+
+    public static func classify(path: String, language: LanguageID) -> LanguageMode? {
+        switch language {
+        case .rust:
+            guard URL(fileURLWithPath: path).pathExtension == "rs" else {
+                return nil
+            }
+            return LanguageMode(language: .rust)
+        case .python, .typescript, .javascript:
+            return nil
+        }
     }
 }
 
@@ -160,6 +174,10 @@ public struct ExtractionInterners: Sendable {
 }
 
 public protocol LanguageExtractor: Sendable {
+    var language: LanguageID { get }
+    var grammarVersion: UInt32 { get }
+    var extractorVersion: UInt32 { get }
+
     /// Content extraction interns syntax names and free-form strings. Paths are
     /// intentionally absent because they belong to SnapshotManifest.
     func extract(
@@ -167,4 +185,30 @@ public protocol LanguageExtractor: Sendable {
         key: ContentIndexKey,
         interner: ExtractionInterners
     ) throws -> ContentIndex
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool)
+
+    func identifierRanges(
+        named name: String,
+        in bytes: [UInt8],
+        mode: LanguageMode
+    ) throws -> [ByteRange]
+}
+
+public extension LanguageExtractor {
+    func extract(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner: ExtractionInterners
+    ) throws -> ContentIndex {
+        try extractWithDiagnostics(
+            bytes: bytes,
+            key: key,
+            interner: interner
+        ).index
+    }
 }

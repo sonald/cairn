@@ -6,6 +6,32 @@ import Testing
 
 @MainActor
 @Test
+func unsupportedSavedLanguageDoesNotMutateProjectState() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .python,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+    let originalGeneration = model.generation
+
+    #expect(await model.restoreSession(snapshot) == false)
+    guard case .empty = model.projectState else {
+        Issue.record("unsupported restore changed project state")
+        return
+    }
+    #expect(model.projectRoot == nil)
+    #expect(model.projectLanguage == nil)
+    #expect(model.generation == originalGeneration)
+}
+
+@MainActor
+@Test
 func sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() async throws {
     let root = try sessionRestoreProject([
         "main.rs": "fn first() {}\nfn target() {}\n",
@@ -36,6 +62,7 @@ func sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() async thr
     )
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 2,
         panelPreset: PanelPresetModel.relations.rawValue,
@@ -113,6 +140,7 @@ func sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() asy
     defer { try? FileManager.default.removeItem(at: root) }
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -178,6 +206,7 @@ func invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() throws {
 
     let missingRoot = SessionCodec.Snapshot(
         projectRoot: stateRoot.appendingPathComponent("gone").path,
+        language: .rust,
         revision: nil,
         activeTabOrdinal: nil,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -201,6 +230,7 @@ func missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
+        language: .rust,
         revision: "revision-that-does-not-exist",
         activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -223,6 +253,7 @@ func missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() async throws {
     #expect(await model.restoreSession(snapshot))
 
     #expect(model.currentRevision == nil)
+    #expect(model.projectLanguage == .rust)
     #expect(model.tabStrip.tabs.count == 1)
     #expect(model.replayNotice?.contains("saved revision unavailable") == true)
     #expect(model.replayNotice?.contains("unverified byte offset") == true)
@@ -241,6 +272,7 @@ func openingAnotherProjectCancelsTheOlderAutomaticRestore() async throws {
     let model = AppModel(indexService: service)
     let snapshot = SessionCodec.Snapshot(
         projectRoot: restoredRoot.path,
+        language: .rust,
         revision: nil,
         activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -272,9 +304,9 @@ func openingAnotherProjectCancelsTheOlderAutomaticRestore() async throws {
 }
 
 private struct SessionRestoreIndexService: IndexService {
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached {
-            try ProjectIndexer().index(root: root)
+            try ProjectIndexer().index(root: root, language: language)
         }.value
     }
 }
@@ -287,7 +319,7 @@ private actor GatedSessionRestoreIndexService: IndexService {
         self.blockedRoot = blockedRoot.standardizedFileURL
     }
 
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         if root.standardizedFileURL == blockedRoot {
             blockedIndexStarted = true
             while true {
@@ -296,7 +328,7 @@ private actor GatedSessionRestoreIndexService: IndexService {
             }
         }
         return try await Task.detached {
-            try ProjectIndexer().index(root: root)
+            try ProjectIndexer().index(root: root, language: language)
         }.value
     }
 

@@ -4,6 +4,7 @@ import Foundation
 package enum SessionCodec {
     package struct Snapshot: Sendable {
         package let projectRoot: String
+        package let language: LanguageID
         package let revision: String?
         package let activeTabOrdinal: Int?
         package let panelPreset: String
@@ -11,12 +12,14 @@ package enum SessionCodec {
 
         package init(
             projectRoot: String,
+            language: LanguageID,
             revision: String?,
             activeTabOrdinal: Int?,
             panelPreset: String,
             tabs: [Tab]
         ) {
             self.projectRoot = projectRoot
+            self.language = language
             self.revision = revision
             self.activeTabOrdinal = activeTabOrdinal
             self.panelPreset = panelPreset
@@ -244,6 +247,7 @@ package enum SessionCodec {
     private struct Envelope: Codable {
         let schemaVersion: Int
         let projectRoot: String
+        let language: LanguageID?
         let revision: String?
         let activeTabOrdinal: Int?
         let panelPreset: String
@@ -252,6 +256,7 @@ package enum SessionCodec {
         init(_ snapshot: Snapshot) {
             schemaVersion = 1
             projectRoot = snapshot.projectRoot
+            language = snapshot.language
             revision = snapshot.revision
             activeTabOrdinal = snapshot.activeTabOrdinal
             panelPreset = snapshot.panelPreset
@@ -261,6 +266,7 @@ package enum SessionCodec {
         func snapshot() throws -> Snapshot {
             Snapshot(
                 projectRoot: projectRoot,
+                language: language ?? .rust,
                 revision: revision,
                 activeTabOrdinal: activeTabOrdinal,
                 panelPreset: panelPreset,

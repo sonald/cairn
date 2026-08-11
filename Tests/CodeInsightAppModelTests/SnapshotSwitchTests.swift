@@ -1,10 +1,10 @@
 import CodeInsightCore
-import CodeInsightEngine
 import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
+@testable import CodeInsightEngine
 
 private let snapshotSwitchRepositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
@@ -19,7 +19,10 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
         initialSession: initial,
-        snapshots: ["C": TestSnapshot(label: "C", files: ["src/c.rs": "fn c() {}"])],
+        snapshots: ["C": TestSnapshot(label: "C", files: [
+            "src/c.rs": "fn c() {}",
+            "src/ignored.py": "def ignored(): pass",
+        ])],
         blockedCached: ["C"],
         blockedFull: ["C"]
     )
@@ -31,6 +34,7 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
 
     #expect(await testWaitUntil("model.snapshotPhase == .firstPaint") { model.snapshotPhase == .firstPaint })
     #expect(model.fileTree?.children.first?.name == "src")
+    #expect(model.fileTree?.children.first?.children.map(\.name) == ["c.rs"])
     #expect(model.coverage.filesIndexed == 0)
     #expect(model.coverage.filesTotal == 1)
 
@@ -46,6 +50,46 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     #expect(model.coverage.filesIndexed == 1)
     #expect(model.coverage.importsResolved == nil)
+    let languages = await service.receivedLanguages()
+    #expect(languages.index == [.rust])
+    #expect(languages.capture == [.rust])
+    #expect(languages.prepare == [.rust])
+}
+
+@MainActor
+@Test
+func snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() async throws {
+    let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: ["C": TestSnapshot(label: "C", files: ["main.rs": "fn c() {}"])],
+        blockedFull: ["C"],
+        completedLanguageOverride: .python
+    )
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: root)
+    #expect(await testWaitUntil("initial session ready") {
+        model.snapshotPhase == .fullReady
+    })
+    model.switchToCommit("C")
+    #expect(await testWaitUntil("cached session ready") {
+        model.snapshotPhase == .cachedReady
+    })
+    let cachedSnapshotID = model.currentSnapshotID
+    let cachedCoverage = model.coverage
+
+    await service.releaseFull("C")
+    #expect(await testWaitUntil("mismatched full session rejected") {
+        if case .failed = model.projectState { return true }
+        return false
+    })
+    #expect(model.snapshotPhase == .cachedReady)
+    #expect(model.currentSnapshotID == cachedSnapshotID)
+    #expect(model.coverage == cachedCoverage)
+    #expect(model.projectLanguage == .rust)
 }
 
 @MainActor
@@ -103,6 +147,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
         dependencyAllowed: { _ in false }
     )
     #expect(pendingTopology.revision == nil)
+    #expect(pendingTopology.language == .rust)
     #expect(pendingTopology.tabs.count == 1)
 
     await service.releaseCached("C")
@@ -116,6 +161,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
         dependencyAllowed: { _ in false }
     )
     #expect(committed.revision == "C")
+    #expect(committed.language == .rust)
     #expect(committed.panelPreset == PanelPresetModel.compare.rawValue)
     #expect(committed.tabs.count == 1)
 }
@@ -139,6 +185,7 @@ func sessionRestoreInstallsRevisionBeforeActivatingFrozenReadingSet() async thro
     )
     let snapshot = SessionCodec.Snapshot(
         projectRoot: fixture.root.path,
+        language: .rust,
         revision: revision,
         activeTabOrdinal: 0,
         panelPreset: PanelPresetModel.relations.rawValue,
@@ -689,6 +736,81 @@ func sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() async throws {
 
 @MainActor
 @Test
+func compareModelUsesTheExplicitModeForDiffAndFunctionChanges() async throws {
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn target() { 1 }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("main.rs")
+    let model = CompareModel()
+    let generation = model.beginLoading(revision: "RIGHT")
+    #expect(model.install(
+        snapshot: TestSnapshot(
+            label: "right",
+            files: ["main.rs": "fn target() { 2 }\n"]
+        ),
+        root: root,
+        revision: "RIGHT",
+        generation: generation
+    ))
+
+    model.update(
+        file: file,
+        leftSource: { _ in Array("fn target() { 1 }\n".utf8) },
+        languageMode: LanguageMode(language: .rust)
+    )
+
+    #expect(await testWaitUntil("explicit-mode compare completes") {
+        !model.isLoading && model.diff != nil
+    })
+    #expect((model.diff?.changeCount ?? 0) > 0)
+    #expect(model.functionChanges.contains { $0.kind == .bodyChanged })
+    #expect(model.errorMessage == nil)
+}
+
+@MainActor
+@Test
+func compareModelDoesNotPublishAnOlderModeCompletion() async throws {
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn target() { 1 }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("main.rs")
+    let model = CompareModel()
+    let generation = model.beginLoading(revision: "RIGHT")
+    #expect(model.install(
+        snapshot: TestSnapshot(
+            label: "right",
+            files: ["main.rs": "fn target() { 2 }\n"]
+        ),
+        root: root,
+        revision: "RIGHT",
+        generation: generation
+    ))
+
+    model.update(
+        file: file,
+        leftSource: { _ in Array("fn target() { 1 }\n".utf8) },
+        languageMode: LanguageMode(language: .rust)
+    )
+    model.update(
+        file: file,
+        leftSource: { _ in Array("fn target() { 1 }\n".utf8) },
+        languageMode: LanguageMode(language: .python)
+    )
+
+    #expect(await testWaitUntil("new mode completion publishes") {
+        !model.isLoading && model.diff == nil && model.errorMessage != nil
+    })
+    let currentError = model.errorMessage
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(model.diff == nil)
+    #expect(model.functionChanges.isEmpty)
+    #expect(model.errorMessage == currentError)
+}
+
+@MainActor
+@Test
 func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn current() {}"])
     defer { try? FileManager.default.removeItem(at: root) }
@@ -712,7 +834,11 @@ func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
         revision: "RIGHT",
         generation: compareGeneration
     ))
-    model.compare.update(file: model.selectedFile, leftSource: model.documentSource)
+    model.compare.update(
+        file: model.selectedFile,
+        leftSource: model.documentSource,
+        languageMode: LanguageMode(language: .rust)
+    )
     right = nil
     #expect(retainedRight != nil)
     #expect(model.compare.rightBytes == Array("fn previous() {}".utf8))
@@ -765,24 +891,38 @@ private actor ControlledSnapshotIndexService: IndexService {
     private var blockedFull: Set<String>
     private var labelsBySnapshotID: [SnapshotID: String] = [:]
     private var cancelled: Set<String> = []
+    private var indexLanguages: [LanguageID] = []
+    private var captureLanguages: [LanguageID] = []
+    private var prepareLanguages: [LanguageID] = []
+    private let completedLanguageOverride: LanguageID?
 
     init(
         initialSession: EngineSession,
         worktreeSnapshot: TestSnapshot? = nil,
         snapshots: [String: TestSnapshot],
         blockedCached: Set<String> = [],
-        blockedFull: Set<String> = []
+        blockedFull: Set<String> = [],
+        completedLanguageOverride: LanguageID? = nil
     ) {
         self.initialSession = initialSession
         self.worktreeSnapshot = worktreeSnapshot
         self.snapshots = snapshots
         self.blockedCached = blockedCached
         self.blockedFull = blockedFull
+        self.completedLanguageOverride = completedLanguageOverride
     }
 
-    func index(root: URL) async throws -> EngineSession { initialSession }
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+        indexLanguages.append(language)
+        return initialSession
+    }
 
-    func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
+    func captureSnapshot(
+        root: URL,
+        revision: String?,
+        language: LanguageID
+    ) async throws -> any Snapshot {
+        captureLanguages.append(language)
         let snapshot = if let revision {
             snapshots[revision]
         } else {
@@ -794,14 +934,20 @@ private actor ControlledSnapshotIndexService: IndexService {
     }
 
     func prepareSnapshot(
-        _ snapshot: any Snapshot
+        _ snapshot: any Snapshot,
+        language: LanguageID
     ) async throws -> ProjectIndexer.PreparedSnapshot {
+        prepareLanguages.append(language)
         let label = try label(for: snapshot.snapshotID)
         while blockedCached.contains(label) {
             try Task.checkCancellation()
             await Task.yield()
         }
-        return try ProjectIndexer().prepareSnapshot(snapshot, into: store)
+        return try ProjectIndexer().prepareSnapshot(
+            snapshot,
+            into: store,
+            language: language
+        )
     }
 
     func completeSnapshot(
@@ -813,7 +959,18 @@ private actor ControlledSnapshotIndexService: IndexService {
                 try Task.checkCancellation()
                 await Task.yield()
             }
-            return try ProjectIndexer().completeSnapshot(prepared)
+            let session = try ProjectIndexer().completeSnapshot(prepared)
+            guard let completedLanguageOverride else { return session }
+            return EngineSession(
+                store: session.store,
+                snapshotView: SnapshotView(
+                    reprofiling: session.snapshotView,
+                    analysisProfile: .placeholder(
+                        language: completedLanguageOverride,
+                        root: session.analysisProfile.projectRoot
+                    )
+                )
+            )
         } catch is CancellationError {
             cancelled.insert(label)
             throw CancellationError()
@@ -827,6 +984,13 @@ private actor ControlledSnapshotIndexService: IndexService {
     }
     func wasCancelled(_ label: String) -> Bool { cancelled.contains(label) }
     func snapshotID(for label: String) -> SnapshotID? { snapshots[label]?.snapshotID }
+    func receivedLanguages() -> (
+        index: [LanguageID],
+        capture: [LanguageID],
+        prepare: [LanguageID]
+    ) {
+        (indexLanguages, captureLanguages, prepareLanguages)
+    }
 
     private func label(for snapshotID: SnapshotID) throws -> String {
         guard let label = labelsBySnapshotID[snapshotID] else {

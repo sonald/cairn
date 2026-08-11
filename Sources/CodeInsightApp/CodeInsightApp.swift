@@ -1541,7 +1541,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ])
 
         let referenceFixture = root.appendingPathComponent(
-            "m6_reference_density.rust"
+            "target/m6_reference_density.rs"
         )
         let referenceProjectFixture = root.appendingPathComponent(
             "m6_reference_density.rs"
@@ -1807,7 +1807,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ])
 
         controller.applyReaderSettings(readerSettings)
-        let huge = root.appendingPathComponent("huge.txt")
+        let huge = root.appendingPathComponent("target/huge.rs")
         guard let hugeBytes = try? [UInt8](Data(contentsOf: huge)),
               let needleOffset = Data(hugeBytes).range(
                   of: Data("needle".utf8)
@@ -2181,13 +2181,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         snapshot: CommitSnapshot
     ) -> DiffSelfTestTarget? {
         let candidates = snapshot.listFiles().map(\.path).filter {
-            let ext = URL(fileURLWithPath: $0).pathExtension
-            return ext == "rs" || ext == "swift"
-        }.sorted {
-            let leftRust = $0.hasSuffix(".rs")
-            let rightRust = $1.hasSuffix(".rs")
-            return leftRust == rightRust ? $0 < $1 : leftRust
-        }
+            URL(fileURLWithPath: $0).pathExtension == "rs"
+        }.sorted()
         for path in candidates {
             let file = root.appendingPathComponent(path).standardizedFileURL
             guard let worktree = try? Array(Data(contentsOf: file)),
@@ -6892,9 +6887,9 @@ private struct ExactSelfTestTarget {
 }
 
 private struct ExactSelfTestIndexService: IndexService {
-    func index(root: URL) async throws -> EngineSession {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached(priority: .userInitiated) {
-            try ProjectIndexer().index(root: root)
+            try ProjectIndexer().index(root: root, language: language)
         }.value
     }
 }
@@ -6931,6 +6926,7 @@ struct ExactSelfTestDirectorySnapshot: Snapshot {
 }
 
 final class InProcessExactProvider: ExactProvider, @unchecked Sendable {
+    let language: LanguageID = .rust
     let capabilities: ExactCapabilities
     let toolVersion = "in-process-fake-1"
     private let negotiatedCapabilities: ExactCapabilities
@@ -7664,13 +7660,19 @@ private func makeReadingSelfTestDirectory() throws -> URL {
             """.utf8).write(to: root.appendingPathComponent("regular.rs"))
         let huge = String(repeating: "needle\n", count: 200)
             + String(repeating: "\n", count: 99_799)
-        try Data(huge.utf8).write(to: root.appendingPathComponent("huge.txt"))
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent("target"),
+            withIntermediateDirectories: true
+        )
+        try Data(huge.utf8).write(
+            to: root.appendingPathComponent("target/huge.rs")
+        )
         let referenceFixture = URL(
             fileURLWithPath: FileManager.default.currentDirectoryPath
         ).appendingPathComponent("Tests/Fixtures/m6_reference_density.rust")
         try FileManager.default.copyItem(
             at: referenceFixture,
-            to: root.appendingPathComponent("m6_reference_density.rust")
+            to: root.appendingPathComponent("target/m6_reference_density.rs")
         )
         try FileManager.default.copyItem(
             at: referenceFixture,

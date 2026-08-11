@@ -128,6 +128,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                         : .projectCommit,
                     model.currentRevision
                 )
+            },
+            languageMode: { [weak model] path in
+                guard let model, let root = model.projectRoot else { return nil }
+                let file = exactLocationIsInDependency(path)
+                    ? URL(fileURLWithPath: path)
+                    : root.appendingPathComponent(path)
+                return model.languageMode(for: file)
             }
         )
         relationController.view.frame.size.width = 500
@@ -1733,10 +1740,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let readerFile = readerContent?.fileURL
         let selectedSource = readerSource(for: readerFile)
+        let selectedLanguageMode = readerFile.flatMap(model.languageMode(for:))
         readerController.display(
             readerContent,
             snapshotID: model.currentSnapshotID,
             source: selectedSource,
+            languageMode: selectedLanguageMode,
             readingSetAvailability: readingSetAvailability,
             readingSetSkippedReasons:
                 model.tabStrip.activeTab?.readingSetSkippedReasons ?? []
@@ -1753,7 +1762,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderController.display(
             model.compare.rightSnapshotID == nil ? nil : compareFile,
             snapshotID: model.compare.rightSnapshotID,
-            source: model.compare.rightSource
+            source: model.compare.rightSource,
+            languageMode: compareFile.flatMap(model.languageMode(for:))
         )
         readerController.setDiffMarkers(model.compare.diff?.leftMarkers ?? [:])
         secondaryReaderController.setDiffMarkers(
@@ -1790,7 +1800,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                         to: file,
                         byteOffset: offset,
                         snapshotID: model.currentSnapshotID,
-                        source: selectedSource
+                        source: selectedSource,
+                        languageMode: selectedLanguageMode
                     )
                 }
             }
@@ -2265,20 +2276,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func openFunctionChange(_ change: DiffCore.FunctionChange) {
-        guard let file = model.selectedFile else { return }
+        guard let file = model.selectedFile,
+              let languageMode = model.languageMode(for: file)
+        else { return }
         if let range = change.rightRange {
             secondaryReaderController.navigate(
                 to: file,
                 byteOffset: range.lowerBound,
                 snapshotID: model.compare.rightSnapshotID,
-                source: model.compare.rightSource
+                source: model.compare.rightSource,
+                languageMode: languageMode
             )
         } else if let range = change.leftRange {
             readerController.navigate(
                 to: file,
                 byteOffset: range.lowerBound,
                 snapshotID: model.currentSnapshotID,
-                source: model.documentSource
+                source: model.documentSource,
+                languageMode: languageMode
             )
         }
     }
@@ -3623,6 +3638,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
+    private var displayedLanguageMode: LanguageMode?
     private var displayedDocument: ReaderDocument?
     private var displayedReadingSetKey: String?
     private var loadGeneration: UInt64 = 0
@@ -4845,12 +4861,18 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         _ content: TabContent?,
         snapshotID: SnapshotID? = nil,
         source: DocumentLoader.ContentSource? = nil,
+        languageMode: LanguageMode? = LanguageMode(language: .rust),
         readingSetAvailability: [(open: Bool, expand: Bool)]? = nil,
         readingSetSkippedReasons: [String] = []
     ) {
         switch content {
         case .file(let file):
-            display(file, snapshotID: snapshotID, source: source)
+            display(
+                file,
+                snapshotID: snapshotID,
+                source: source,
+                languageMode: languageMode
+            )
         case .readingSet(let title, let excerpts):
             displayReadingSet(
                 title: title,
@@ -4859,7 +4881,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 skippedReasons: readingSetSkippedReasons
             )
         case nil:
-            display(URL?.none, snapshotID: snapshotID, source: source)
+            display(
+                URL?.none,
+                snapshotID: snapshotID,
+                source: source,
+                languageMode: languageMode
+            )
         }
     }
 
@@ -4882,6 +4909,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         loadGeneration &+= 1
         displayedFile = nil
         displayedSnapshotID = nil
+        displayedLanguageMode = nil
         displayedDocument = nil
         displayedReadingSetKey = key
         contextMenuOffset = nil
@@ -4949,10 +4977,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     func display(
         _ file: URL?,
         snapshotID: SnapshotID? = nil,
-        source: DocumentLoader.ContentSource? = nil
+        source: DocumentLoader.ContentSource? = nil,
+        languageMode: LanguageMode? = LanguageMode(language: .rust)
     ) {
         loadViewIfNeeded()
-        guard file != displayedFile || snapshotID != displayedSnapshotID else { return }
+        guard file != displayedFile
+                || snapshotID != displayedSnapshotID
+                || languageMode != displayedLanguageMode
+        else { return }
         displayedReadingSetKey = nil
         readingSetView.isHidden = true
         scrollView?.isHidden = false
@@ -4969,6 +5001,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             fileNameLabel.stringValue = file?.lastPathComponent ?? ""
         }
         displayedSnapshotID = snapshotID
+        displayedLanguageMode = languageMode
         contextMenuOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
@@ -4991,9 +5024,22 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             return
         }
 
+        guard let languageMode else {
+            displayedDocument = nil
+            onDocumentChange?(file, nil)
+            label.stringValue = "Unsupported file language"
+            label.isHidden = false
+            textView.clear()
+            hideScopeHeader()
+            return
+        }
+
         do {
             let activeLoader = source.map { DocumentLoader(source: $0) } ?? loader
-            let loaded = try activeLoader.load(file: file)
+            let loaded = try activeLoader.load(
+                file: file,
+                languageMode: languageMode
+            )
             displayedDocument = loaded.document
             onDocumentChange?(file, loaded.document)
             label.isHidden = true
@@ -5010,7 +5056,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 syntaxLoadPending = true
                 activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
                     Task { @MainActor [weak self] in
-                        guard let self, self.loadGeneration == generation else { return }
+                        guard let self,
+                              self.loadGeneration == generation,
+                              self.displayedLanguageMode == languageMode
+                        else { return }
                         self.syntaxLoadPending = false
                         switch result {
                         case let .success(document):
@@ -5070,9 +5119,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         to file: URL,
         byteOffset: UInt32,
         snapshotID: SnapshotID? = nil,
-        source: DocumentLoader.ContentSource? = nil
+        source: DocumentLoader.ContentSource? = nil,
+        languageMode: LanguageMode? = LanguageMode(language: .rust)
     ) {
-        display(file, snapshotID: snapshotID, source: source)
+        display(
+            file,
+            snapshotID: snapshotID,
+            source: source,
+            languageMode: languageMode
+        )
         if textView.isFocusMode {
             if syntaxLoadPending {
                 pendingFocusNavigationOffset = byteOffset
@@ -5091,8 +5146,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         selectionByteOffset: UInt32?
     ) {
         let generation = loadGeneration
+        let languageMode = displayedLanguageMode
         DispatchQueue.main.async { [weak self] in
-            guard let self, loadGeneration == generation else { return }
+            guard let self,
+                  loadGeneration == generation,
+                  displayedLanguageMode == languageMode
+            else { return }
             textView.restore(
                 scrollByteOffset: scrollByteOffset,
                 selectionByteOffset: selectionByteOffset
@@ -5498,7 +5557,15 @@ final class ContextWindowViewController: NSViewController {
         }
         previousButton.isEnabled = model.candidateCount > 1
         nextButton.isEnabled = model.candidateCount > 1
-        miniReader.display(document: readerDocument(text, highlightsSyntax: highlightsSyntax))
+        guard let document = readerDocument(
+            text,
+            languageMode: model.selectedLanguageMode,
+            highlightsSyntax: highlightsSyntax
+        ) else {
+            miniReader.clear()
+            return
+        }
+        miniReader.display(document: document)
     }
 
     private func applyBadgeStyle() {
@@ -5519,17 +5586,17 @@ final class ContextWindowViewController: NSViewController {
 
     private func readerDocument(
         _ source: String,
+        languageMode: LanguageMode?,
         highlightsSyntax: Bool
-    ) -> ReaderDocument {
+    ) -> ReaderDocument? {
         let bytes = Array(source.utf8)
-        let highlighted = highlightsSyntax
-            ? try? RustHighlighter().highlight(bytes: bytes)
-            : nil
-        return ReaderDocument(
+        guard let languageMode else { return nil }
+        let plain = ReaderDocument(
             bytes: bytes,
-            highlightSpans: highlighted?.spans ?? [],
-            outlineFacets: highlighted?.outlineFacets ?? []
+            languageMode: languageMode
         )
+        guard highlightsSyntax else { return plain }
+        return try? DocumentLoader().loadSyntax(for: plain)
     }
 }
 

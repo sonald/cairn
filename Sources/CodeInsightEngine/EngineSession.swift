@@ -79,7 +79,7 @@ public struct ImplementationResult: Sendable {
 public final class EngineSession: Sendable {
     public var manifest: SnapshotManifest { snapshotView.manifest }
     public var contentIndexes: [ContentIndexKey: ContentIndex] {
-        storeState.contentIndexes
+        snapshotView.contentIndexes
     }
     public var stats: IndexStats { snapshotView.stats }
     public var names: Interner<NameID> { store.names }
@@ -99,6 +99,7 @@ public final class EngineSession: Sendable {
     var moduleMap: ModuleMap { snapshotView.moduleMap }
     let store: ProjectIndexStore
     let snapshotView: SnapshotView
+    let extractor: any LanguageExtractor
     private let storeState: ProjectIndexStore.State
     private let filesByPath: [PathID: FileOccurrence]
     private let contentKeysByPath: [PathID: ContentIndexKey]
@@ -118,33 +119,24 @@ public final class EngineSession: Sendable {
         precondition(snapshotView.store === store)
         self.store = store
         self.snapshotView = snapshotView
+        extractor = snapshotView.extractor
         storeState = snapshotView.storeState
         let manifest = snapshotView.manifest
-        let contentIndexes = storeState.contentIndexes
+        let contentIndexes = snapshotView.contentIndexes
         filesByPath = Dictionary(uniqueKeysWithValues: manifest.files.map {
             ($0.pathID, $0)
         })
 
-        let keysByContent = Dictionary(grouping: contentIndexes.keys) {
-            $0.contentID
-        }
-        var contentKeysByPath: [PathID: ContentIndexKey] = [:]
+        contentKeysByPath = snapshotView.contentKeysByPath
         var occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]] = [:]
         for file in manifest.files {
-            guard let keys = keysByContent[file.contentID] else { continue }
-            for key in keys where key.languageMode.language == file.detectedLanguage {
-                if contentKeysByPath[file.pathID] == nil {
-                    contentKeysByPath[file.pathID] = key
-                }
-                occurrencesByContentKey[key, default: []].append(file)
-            }
+            guard let key = contentKeysByPath[file.pathID] else { continue }
+            occurrencesByContentKey[key, default: []].append(file)
         }
-        self.contentKeysByPath = contentKeysByPath
         self.occurrencesByContentKey = occurrencesByContentKey
 
         var aliasIndex: [NameID: Set<NameID>] = [:]
-        let viewIndexes = Dictionary(uniqueKeysWithValues: occurrencesByContentKey.keys
-            .compactMap { key in contentIndexes[key].map { (key, $0) } })
+        let viewIndexes = contentIndexes
         for index in viewIndexes.values {
             for binding in index.imports {
                 guard let importedName = binding.importedName,
@@ -155,12 +147,8 @@ public final class EngineSession: Sendable {
         }
         self.aliasIndex = aliasIndex
         implIndex = ImplIndex(indexes: viewIndexes)
-        namePosting = storeState.namePosting
-        let viewKeys = Set(viewIndexes.keys)
-        searchableDefinitionNameIDs = namePosting.definitions.compactMap {
-            nameID, postings in
-            postings.contains { viewKeys.contains($0.key) } ? nameID : nil
-        }
+        namePosting = NamePosting(indexes: viewIndexes)
+        searchableDefinitionNameIDs = Array(namePosting.definitions.keys)
     }
 
     public func reprofiled(
@@ -519,7 +507,7 @@ public final class EngineSession: Sendable {
         return Resolver(session: self).tokenRange(file: file, offset: offset)
     }
 
-    func content(at pathID: PathID) -> (ContentIndexKey, ContentIndex)? {
+    package func content(at pathID: PathID) -> (ContentIndexKey, ContentIndex)? {
         guard let key = contentKeysByPath[pathID],
               let index = contentIndexes[key]
         else { return nil }

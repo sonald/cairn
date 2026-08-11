@@ -97,6 +97,89 @@ func exactCoordinatorPreparesOpportunistically() async throws {
 
 @MainActor
 @Test
+func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let snapshots = ExactSnapshotFactoryState(files: fixture.files)
+    let providerFactoryStatus = ExactVersionBox("not called")
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, _ in
+            providerFactoryStatus.value = "called"
+            return ExactTestProvider(state: state)
+        },
+        snapshotFactory: snapshots.make,
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+    let originalReadiness = coordinator.readiness
+
+    do {
+        try coordinator.prepare(
+            projectURL: fixture.root,
+            revision: nil,
+            analysisProfile: exactAnalysisProfile(language: .python),
+            generation: 1
+        )
+        Issue.record("expected unsupported language")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect(
+            (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
+                .contains("python") == true
+        )
+    } catch {
+        Issue.record("unexpected error: \(error)")
+    }
+
+    #expect(coordinator.readiness == originalReadiness)
+    #expect(coordinator.attribution == nil)
+    #expect(coordinator.analysisEnvironment == nil)
+    #expect(coordinator.trustMode == nil)
+    #expect(snapshots.snapshotIDs.isEmpty)
+    #expect(providerFactoryStatus.value == "not called")
+    #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+    let state = ExactProviderState()
+    let factoryLanguage = ExactVersionBox("")
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            factoryLanguage.value = String(describing: language)
+            return ExactTestProvider(language: .python, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: fixture.files).make,
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: exactAnalysisProfile(language: .rust),
+        generation: 1
+    )
+
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .unavailable(let reason) = coordinator.readiness else {
+        Issue.record("provider language mismatch did not fail")
+        return
+    }
+    #expect(reason.contains("python"))
+    #expect(reason.contains("rust"))
+    #expect(factoryLanguage.value == "rust")
+    #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
 func exactCoordinatorMarksWorktreeOrigin() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
@@ -440,6 +523,7 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     let state = ExactProviderState()
     let versions = ExactVersionBox("fake-1")
     let snapshots = ExactSnapshotFactoryState(files: fixture.files)
+    let analysisProfile = exactAnalysisProfile(language: .rust)
     let coordinator = ExactCoordinator(
         providerFactory: { _ in
             ExactTestProvider(toolVersion: versions.value, state: state)
@@ -449,13 +533,23 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         trustRegistry: fixture.trustRegistry
     )
 
-    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: analysisProfile,
+        generation: 1
+    )
     #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 1
     ) != nil)
 
-    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: analysisProfile,
+        generation: 2
+    )
     #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 2
@@ -463,25 +557,67 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     #expect(state.definitionCount == 1)
     #expect(Set(snapshots.snapshotIDs).count == 2)
 
-    versions.value = "fake-2"
-    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 3)
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            projectUnitName: "other-unit"
+        ),
+        generation: 3
+    )
     #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 3
     ) != nil)
     #expect(state.definitionCount == 2)
 
-    try "[package]\nname='changed'\nversion='0.1.0'\n".write(
-        to: fixture.root.appendingPathComponent("Cargo.toml"),
+    try "version = 3\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.lock"),
         atomically: true,
         encoding: .utf8
     )
-    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 4)
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: analysisProfile,
+        generation: 4
+    )
     #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 4
     ) != nil)
     #expect(state.definitionCount == 3)
+
+    versions.value = "fake-2"
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: analysisProfile,
+        generation: 5
+    )
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 5
+    ) != nil)
+    #expect(state.definitionCount == 4)
+
+    try "[package]\nname='changed'\nversion='0.1.0'\n".write(
+        to: fixture.root.appendingPathComponent("Cargo.toml"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try coordinator.prepare(
+        projectURL: fixture.root,
+        revision: nil,
+        analysisProfile: analysisProfile,
+        generation: 6
+    )
+    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await coordinator.definition(
+        file: "main.rs", byteOffset: 0, generation: 6
+    ) != nil)
+    #expect(state.definitionCount == 5)
 }
 
 @Test
@@ -508,6 +644,46 @@ func exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() {
     #expect(resolve(defaultKey) != nil)
     #expect(resolve(allKey) != nil)
     #expect(providerCallCount == 2)
+}
+
+@Test
+func exactOverlayDoesNotReuseAcrossLanguageProfileOrEnvironment() {
+    var overlay = ExactOverlay()
+    var providerCallCount = 0
+    let profileID = exactAnalysisProfile(language: .rust).id
+    let keys = [
+        exactReuseKey(analysisProfileID: profileID),
+        exactReuseKey(language: .python, analysisProfileID: profileID),
+        exactReuseKey(
+            analysisProfileID: exactAnalysisProfile(
+                language: .rust,
+                projectUnitName: "other-unit"
+            ).id
+        ),
+        exactReuseKey(
+            analysisProfileID: profileID,
+            environmentFingerprint: "other-environment"
+        ),
+    ]
+
+    func resolve(_ key: ExactOverlay.ReuseKey) -> ExactOverlay.Entry? {
+        if let cached = overlay.definition(
+            for: key,
+            file: "main.rs",
+            byteOffset: 0
+        ) {
+            return cached.first
+        }
+        providerCallCount += 1
+        let entry = exactEntry(file: "main.rs", byteOffset: 0)
+        overlay.store([entry], for: key, file: "main.rs", byteOffset: 0)
+        return entry
+    }
+
+    for key in keys {
+        #expect(resolve(key) != nil)
+    }
+    #expect(providerCallCount == 4)
 }
 
 @MainActor
@@ -880,10 +1056,16 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
 
 private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
     let capabilities: ExactCapabilities = [.definition]
+    let language: LanguageID
     let toolVersion: String
     private let state: ExactProviderState
 
-    init(toolVersion: String = "fake-1", state: ExactProviderState) {
+    init(
+        language: LanguageID = .rust,
+        toolVersion: String = "fake-1",
+        state: ExactProviderState
+    ) {
+        self.language = language
         self.toolVersion = toolVersion
         self.state = state
     }
@@ -1148,6 +1330,7 @@ private final class ExactTestSnapshot: Snapshot, @unchecked Sendable {
 }
 
 private final class BlockingExactProvider: ExactProvider, @unchecked Sendable {
+    let language: LanguageID = .rust
     let capabilities: ExactCapabilities = [.definition]
     let toolVersion = "blocking-1"
     private let session: BlockingExactSession
@@ -1336,12 +1519,38 @@ private func exactAttribution() -> ExactAttribution {
     )
 }
 
+private func exactAnalysisProfile(
+    language: LanguageID,
+    projectUnitName: String = "exact-test",
+    configFingerprint: String = "analysis-config",
+    environmentFingerprint: String = "analysis-environment",
+    featureSelection: FeatureSelection = .defaultFeatures
+) -> AnalysisProfile {
+    AnalysisProfile(
+        language: language,
+        projectRoot: PathID(rawValue: 0),
+        projectUnitName: projectUnitName,
+        configFingerprint: configFingerprint,
+        environmentFingerprint: environmentFingerprint,
+        featureSelection: featureSelection,
+        featureNames: [],
+        edition: nil,
+        trustMode: .safe
+    )
+}
+
 private func exactReuseKey(
-    featureSelection: FeatureSelection
+    language: LanguageID = .rust,
+    analysisProfileID: AnalysisProfileID = exactAnalysisProfile(language: .rust).id,
+    environmentFingerprint: String = "environment",
+    featureSelection: FeatureSelection = .defaultFeatures
 ) -> ExactOverlay.ReuseKey {
     return ExactOverlay.ReuseKey(
         versionIdentity: "worktree:/fixture",
+        language: language,
+        analysisProfileID: analysisProfileID,
         configFingerprint: "config",
+        environmentFingerprint: environmentFingerprint,
         featureSelection: featureSelection,
         trustMode: .safe,
         toolVersion: "fake-1"

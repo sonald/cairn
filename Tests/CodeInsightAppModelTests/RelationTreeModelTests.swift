@@ -3551,6 +3551,7 @@ private enum RelationTestError: Error {
 }
 
 private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Sendable {
+    let language: LanguageID = .rust
     let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-hierarchy-fake-1"
     private let session: RelationHierarchyExactSession
@@ -3586,6 +3587,7 @@ private final class RelationHierarchyExactProvider: ExactProvider, @unchecked Se
 }
 
 private final class RelationRotatingExactProvider: ExactProvider, @unchecked Sendable {
+    let language: LanguageID = .rust
     let capabilities: ExactCapabilities = [.callHierarchy, .references]
     let toolVersion = "relation-rotating-fake-1"
     private let lock = NSLock()
@@ -3879,6 +3881,7 @@ private final class QueuedRelationExactSession: ExactSession, @unchecked Sendabl
 }
 
 private final class QueuedRelationExactProvider: ExactProvider, @unchecked Sendable {
+    let language: LanguageID = .rust
     let capabilities: ExactCapabilities = [.callHierarchy]
     let toolVersion = "queued-relation-fake-1"
     private let session: QueuedRelationExactSession

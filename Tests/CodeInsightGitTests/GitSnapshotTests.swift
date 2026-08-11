@@ -1,4 +1,5 @@
 import Dispatch
+import CodeInsightCore
 import Foundation
 import Testing
 import os
@@ -205,6 +206,64 @@ func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
     #expect(try snapshot.readBytes(path: "Cargo.toml") == capturedCargo)
     #expect(!snapshot.listFiles().contains { $0.path == "Cargo.toml" })
     #expect(snapshot.projectRootName == fixture.root.lastPathComponent)
+}
+
+@Test
+func explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "src/lib.rs": "pub fn rust_only() {}\n",
+        "src/ignored.py": "def python_only(): pass\n",
+        "src/ignored.ts": "export const typescriptOnly = 1\n",
+        "Cargo.toml": "[package]\nname = \"fixture\"\n",
+        "Cargo.lock": "# lock\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+
+    let compatibility = try WorktreeSnapshot(repositoryURL: fixture.root)
+    let explicit = try WorktreeSnapshot(
+        repositoryURL: fixture.root,
+        language: .rust
+    )
+    let compatibilityFiles = compatibility.listFiles()
+    let explicitFiles = explicit.listFiles()
+
+    #expect(compatibilityFiles.map(\.path) == ["src/lib.rs"])
+    #expect(explicitFiles.map(\.path) == compatibilityFiles.map(\.path))
+    for (left, right) in zip(compatibilityFiles, explicitFiles) {
+        #expect(left.contentID == right.contentID)
+        #expect(left.fileMode == right.fileMode)
+        #expect(try compatibility.readBytes(path: left.path)
+            == explicit.readBytes(path: right.path))
+    }
+    #expect(try compatibility.readBytes(path: "Cargo.toml")
+        == explicit.readBytes(path: "Cargo.toml"))
+    #expect(try compatibility.readBytes(path: "Cargo.lock")
+        == explicit.readBytes(path: "Cargo.lock"))
+}
+
+@Test
+func unsupportedWorktreeLanguageFailsBeforeOpeningARepository() {
+    let nonexistent = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnsupported-\(UUID().uuidString)")
+
+    do {
+        _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: .python)
+        Issue.record("Python worktree capture unexpectedly succeeded")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+    } catch {
+        Issue.record("Unsupported preflight happened after repository access: \(error)")
+    }
 }
 
 @Test

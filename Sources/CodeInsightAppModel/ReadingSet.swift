@@ -144,6 +144,7 @@ package func makeReadingSetExcerpt(
     context: RelationQueryContext,
     correctedTitles: [String],
     readiness: ExactCoordinator.Readiness,
+    languageMode: LanguageMode,
     bytes: [UInt8],
     contentID: ContentID,
     revision: String?,
@@ -167,6 +168,7 @@ package func makeReadingSetExcerpt(
         symbol: node.title,
         path: target.path,
         targetByte: target.byteOffset,
+        languageMode: languageMode,
         bytes: bytes,
         contentID: contentID,
         revision: revision,
@@ -180,6 +182,7 @@ package func makeReadingSetExcerpt(
     symbol: String,
     path: String,
     targetByte: UInt32,
+    languageMode: LanguageMode,
     bytes: [UInt8],
     contentID: ContentID,
     revision: String?,
@@ -189,7 +192,8 @@ package func makeReadingSetExcerpt(
     guard ContentID.sha256(of: bytes) == contentID else { return nil }
     let loader = DocumentLoader(source: { _ in bytes })
     guard let document = try? loader.load(
-        file: URL(fileURLWithPath: path)
+        file: URL(fileURLWithPath: path),
+        languageMode: languageMode
     ).document,
           let coordinate = document.lineTable.lineColumn(at: targetByte)
     else { return nil }

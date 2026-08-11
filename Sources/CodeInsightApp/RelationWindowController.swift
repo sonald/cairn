@@ -57,6 +57,7 @@ final class RelationWindowController: NSViewController,
         sourceKind: ReadingSetExcerpt.SourceKind,
         revision: String?
     )?
+    private let languageMode: (String) -> LanguageMode?
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
@@ -674,11 +675,13 @@ final class RelationWindowController: NSViewController,
             bytes: [UInt8],
             sourceKind: ReadingSetExcerpt.SourceKind,
             revision: String?
-        )? = { _ in nil }
+        )? = { _ in nil },
+        languageMode: @escaping (String) -> LanguageMode?
     ) {
         self.model = model
         self.verificationReadiness = verificationReadiness
         self.capturedSource = capturedSource
+        self.languageMode = languageMode
         super.init(nibName: nil, bundle: nil)
         model.onNodeChange = { [weak self] node in
             guard let self else { return }
@@ -1290,12 +1293,19 @@ final class RelationWindowController: NSViewController,
                 skippedReasons.append("recorded source is unreadable")
                 continue
             }
+            guard let target = node.target,
+                  let languageMode = languageMode(target.path)
+            else {
+                skippedReasons.append("recorded source language is unsupported")
+                continue
+            }
             guard let excerpt = makeReadingSetExcerpt(
                 role: readingSetRole(for: node),
                 node: node,
                 context: context,
                 correctedTitles: correctedTitles(for: node),
                 readiness: verificationReadiness(),
+                languageMode: languageMode,
                 bytes: source.bytes,
                 contentID: source.contentID,
                 revision: source.revision,

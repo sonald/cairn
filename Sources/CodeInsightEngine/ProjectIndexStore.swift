@@ -80,6 +80,9 @@ struct SnapshotView: Sendable {
     let manifest: SnapshotManifest
     let stats: IndexStats
     let analysisProfile: AnalysisProfile
+    let extractor: any LanguageExtractor
+    let contentIndexes: [ContentIndexKey: ContentIndex]
+    let contentKeysByPath: [PathID: ContentIndexKey]
     let moduleMap: ModuleMap
     let storeState: ProjectIndexStore.State
 
@@ -87,16 +90,39 @@ struct SnapshotView: Sendable {
         store: ProjectIndexStore,
         manifest: SnapshotManifest,
         stats: IndexStats,
-        analysisProfile: AnalysisProfile
+        analysisProfile: AnalysisProfile,
+        extractor: any LanguageExtractor
     ) {
+        precondition(extractor.language == analysisProfile.language)
         self.store = store
         self.manifest = manifest
         self.stats = stats
         self.analysisProfile = analysisProfile
+        self.extractor = extractor
         storeState = store.snapshot()
+        var contentIndexes: [ContentIndexKey: ContentIndex] = [:]
+        var contentKeysByPath: [PathID: ContentIndexKey] = [:]
+        for file in manifest.files {
+            guard let mode = LanguageMode.classify(
+                path: store.paths.resolve(file.pathID),
+                language: analysisProfile.language
+            ) else { continue }
+            let key = ContentIndexKey(
+                contentID: file.contentID,
+                languageMode: mode,
+                grammarVersion: extractor.grammarVersion,
+                extractorVersion: extractor.extractorVersion
+            )
+            guard let index = storeState.contentIndexes[key] else { continue }
+            contentIndexes[key] = index
+            contentKeysByPath[file.pathID] = key
+        }
+        self.contentIndexes = contentIndexes
+        self.contentKeysByPath = contentKeysByPath
         moduleMap = ModuleMap(
             manifest: manifest,
-            indexes: storeState.contentIndexes,
+            language: analysisProfile.language,
+            indexes: contentIndexes,
             bytesByContent: storeState.sourceBytesByContent,
             names: store.names,
             paths: store.paths
@@ -123,6 +149,9 @@ struct SnapshotView: Sendable {
             extractedCount: 0
         )
         self.analysisProfile = analysisProfile
+        extractor = view.extractor
+        contentIndexes = view.contentIndexes
+        contentKeysByPath = view.contentKeysByPath
         moduleMap = view.moduleMap
         storeState = view.storeState
     }

@@ -100,6 +100,7 @@ func exactProfileKeyHashesCargoFileBytes() throws {
 
     let profile = try ExactProfileKey(projectURL: root)
 
+    #expect(profile.language == .rust)
     #expect(
         profile.configFingerprint
             == "940ac77af3bcb2c15c059645193eceadc81f5d3b516f312736ef6d6b7afd40a9"
@@ -115,6 +116,22 @@ func exactProfileKeyHashesCargoFileBytes() throws {
             featureSelection: .allFeatures
         ).featureSelection == .allFeatures
     )
+    #expect(
+        try ExactProfileKey(
+            projectURL: root,
+            language: .rust
+        ) == profile
+    )
+    do {
+        _ = try ExactProfileKey(projectURL: root, language: .python)
+        Issue.record("expected unsupported exact fingerprint language")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect(
+            (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
+                .contains("python") == true
+        )
+    }
 }
 
 @Test

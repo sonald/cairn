@@ -19,20 +19,29 @@ public func exactLocationIsInDependency(_ file: String) -> Bool {
 public struct ExactOverlay: Sendable {
     public struct ReuseKey: Hashable, Sendable {
         public let versionIdentity: String
+        public let language: LanguageID
+        public let analysisProfileID: AnalysisProfileID
         public let configFingerprint: String
+        public let environmentFingerprint: String
         public let featureSelection: FeatureSelection
         public let trustMode: TrustMode
         public let toolVersion: String
 
         public init(
             versionIdentity: String,
+            language: LanguageID,
+            analysisProfileID: AnalysisProfileID,
             configFingerprint: String,
+            environmentFingerprint: String,
             featureSelection: FeatureSelection,
             trustMode: TrustMode,
             toolVersion: String
         ) {
             self.versionIdentity = versionIdentity
+            self.language = language
+            self.analysisProfileID = analysisProfileID
             self.configFingerprint = configFingerprint
+            self.environmentFingerprint = environmentFingerprint
             self.featureSelection = featureSelection
             self.trustMode = trustMode
             self.toolVersion = toolVersion
@@ -95,7 +104,10 @@ public final class ExactCoordinator {
         case off(String)
     }
 
-    public typealias ProviderFactory = @Sendable (URL) throws -> any ExactProvider
+    public typealias ProviderFactory = @Sendable (
+        URL,
+        LanguageID
+    ) throws -> any ExactProvider
     public typealias SnapshotFactory = @Sendable (
         URL,
         String?
@@ -164,7 +176,17 @@ public final class ExactCoordinator {
     @ObservationIgnored private var expectedGeneration: UInt64 = 0
 
     public init(
-        providerFactory: @escaping ProviderFactory = { projectURL in
+        providerFactory: @escaping ProviderFactory = { projectURL, language in
+            switch language {
+            case .rust:
+                break
+            case .python, .typescript, .javascript:
+                throw CocoaError(.featureUnsupported, userInfo: [
+                    NSLocalizedFailureReasonErrorKey:
+                        "Exact analysis does not support "
+                            + String(describing: language),
+                ])
+            }
             guard let executable = RustAnalyzerProvider.findExecutable() else {
                 throw ExactError.unavailable("rust-analyzer is not installed")
             }
@@ -192,6 +214,36 @@ public final class ExactCoordinator {
         self.sandboxAvailable = sandboxAvailable
         self.trustRegistry = trustRegistry
         self.materializer = materializer
+    }
+
+    public convenience init(
+        providerFactory legacyProviderFactory: @escaping @Sendable (
+            URL
+        ) throws -> any ExactProvider,
+        snapshotFactory: @escaping SnapshotFactory = { root, revision in
+            if let revision {
+                return try CommitSnapshot(repositoryURL: root, revision: revision)
+            }
+            return try WorktreeSnapshot(repositoryURL: root)
+        },
+        sandboxAvailable: @escaping @Sendable () -> Bool = {
+            FileManager.default.isExecutableFile(
+                atPath: "/usr/bin/sandbox-exec"
+            )
+        },
+        trustRegistry: TrustRegistry = TrustRegistry(),
+        materializer: Materializer = Materializer()
+    ) {
+        self.init(
+            providerFactory: { projectURL, language in
+                try validateExactLanguage(language)
+                return try legacyProviderFactory(projectURL)
+            },
+            snapshotFactory: snapshotFactory,
+            sandboxAvailable: sandboxAvailable,
+            trustRegistry: trustRegistry,
+            materializer: materializer
+        )
     }
 
     public func invalidate(generation: UInt64) {
@@ -234,7 +286,48 @@ public final class ExactCoordinator {
         featureSelection: FeatureSelection = .defaultFeatures,
         generation: UInt64
     ) {
+        prepareSupported(
+            projectURL: projectURL,
+            revision: revision,
+            analysisProfile: AnalysisProfile(
+                language: .rust,
+                projectRoot: PathID(rawValue: 0),
+                projectUnitName: ".",
+                configFingerprint: "",
+                environmentFingerprint: "",
+                featureSelection: featureSelection,
+                featureNames: [],
+                edition: nil,
+                trustMode: .safe
+            ),
+            generation: generation
+        )
+    }
+
+    public func prepare(
+        projectURL: URL,
+        revision: String?,
+        analysisProfile: AnalysisProfile,
+        generation: UInt64
+    ) throws {
+        try validateExactLanguage(analysisProfile.language)
+        prepareSupported(
+            projectURL: projectURL,
+            revision: revision,
+            analysisProfile: analysisProfile,
+            generation: generation
+        )
+    }
+
+    private func prepareSupported(
+        projectURL: URL,
+        revision: String?,
+        analysisProfile: AnalysisProfile,
+        generation: UInt64
+    ) {
         let root = projectURL.standardizedFileURL
+        let language = analysisProfile.language
+        let featureSelection = analysisProfile.featureSelection
         invalidate(generation: generation)
         let currentEpoch = epoch
         let providerFactory = providerFactory
@@ -268,6 +361,7 @@ public final class ExactCoordinator {
                     if let commit = snapshot as? CommitSnapshot {
                         profile = try ExactProfileKey(
                             snapshot: commit,
+                            language: language,
                             featureSelection: featureSelection
                         )
                         let resolvedRoot = try materializer.materialize(
@@ -280,6 +374,7 @@ public final class ExactCoordinator {
                     } else {
                         profile = try ExactProfileKey(
                             projectURL: root,
+                            language: language,
                             featureSelection: featureSelection
                         )
                         providerRoot = root
@@ -287,10 +382,27 @@ public final class ExactCoordinator {
                         versionIdentity =
                             "worktree:\(root.resolvingSymlinksInPath().path)"
                     }
-                    let provider = try providerFactory(providerRoot)
+                    let provider = try providerFactory(providerRoot, language)
+                    guard profile.language == language else {
+                        throw ExactError.unavailable(
+                            "exact profile language "
+                                + "\(String(describing: profile.language)) does not match "
+                                + "analysis profile language \(String(describing: language))"
+                        )
+                    }
+                    guard provider.language == language else {
+                        throw ExactError.unavailable(
+                            "exact provider language "
+                                + "\(String(describing: provider.language)) does not match "
+                                + "analysis profile language \(String(describing: language))"
+                        )
+                    }
                     let key = ExactOverlay.ReuseKey(
                         versionIdentity: versionIdentity,
+                        language: language,
+                        analysisProfileID: analysisProfile.id,
                         configFingerprint: profile.configFingerprint,
+                        environmentFingerprint: profile.environmentFingerprint,
                         featureSelection: profile.featureSelection,
                         trustMode: trustMode,
                         toolVersion: provider.toolVersion
@@ -871,4 +983,16 @@ private func isHelperCrash(_ error: any Error) -> Bool {
 private func isSandboxUnavailable(_ error: any Error) -> Bool {
     guard case let ExactError.unavailable(detail) = error else { return false }
     return detail.contains("sandbox-exec")
+}
+
+private func validateExactLanguage(_ language: LanguageID) throws {
+    switch language {
+    case .rust:
+        return
+    case .python, .typescript, .javascript:
+        throw CocoaError(.featureUnsupported, userInfo: [
+            NSLocalizedFailureReasonErrorKey:
+                "Exact analysis does not support \(String(describing: language))",
+        ])
+    }
 }

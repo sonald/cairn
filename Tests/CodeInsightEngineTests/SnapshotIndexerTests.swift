@@ -1,7 +1,6 @@
 import CodeInsightCore
 @testable import CodeInsightEngine
 import CodeInsightGit
-import CodeInsightRustExtractor
 import Foundation
 import Testing
 
@@ -9,6 +8,35 @@ private let snapshotIndexerRepositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
     .deletingLastPathComponent()
     .deletingLastPathComponent()
+
+@Test
+func cacheKeyUsesStableLengthFramedLanguageModeIdentity() {
+    let key = ContentIndexKey(
+        contentID: ContentID(algorithm: 1, bytes: [0x00, 0xab]),
+        languageMode: LanguageMode(language: .rust),
+        grammarVersion: 1,
+        extractorVersion: 7
+    )
+
+    #expect(cacheKey(for: key) == "1:2#00ab:0:n:1:7")
+
+    func typescriptKey(variant: String?) -> String {
+        cacheKey(for: ContentIndexKey(
+            contentID: key.contentID,
+            languageMode: LanguageMode(language: .typescript, variant: variant),
+            grammarVersion: key.grammarVersion,
+            extractorVersion: key.extractorVersion
+        ))
+    }
+
+    #expect(Set([
+        typescriptKey(variant: nil),
+        typescriptKey(variant: ""),
+        typescriptKey(variant: "a:b"),
+    ]).count == 3)
+    #expect(typescriptKey(variant: "caf\u{e9}")
+        == typescriptKey(variant: "cafe\u{301}"))
+}
 
 @Test
 func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
@@ -28,6 +56,12 @@ func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
     #expect(preparedOlder.pendingExtractionCount == 1)
     #expect(preparedOlder.cachedSession.stats.reusedCount == 1)
     #expect(preparedOlder.cachedSession.stats.extractedCount == 0)
+    let olderContentIDs = Set(preparedOlder.cachedSession.manifest.files.compactMap {
+        $0.detectedLanguage == .rust ? $0.contentID : nil
+    })
+    #expect(preparedOlder.cachedSession.contentIndexes.keys.allSatisfy {
+        olderContentIDs.contains($0.contentID)
+    })
     #expect(try preparedOlder.cachedSession.definitions(
         of: "shared",
         context: snapshotQueryContext(for: preparedOlder.cachedSession)
@@ -70,6 +104,145 @@ func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
         if case .untracked = $0.sourceKind { return true }
         return false
     })
+}
+
+@Test
+func explicitRustIndexerMatchesEveryCompatibilityPipeline() throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let indexer = ProjectIndexer(parallelism: 2)
+
+    let compatibilityRoot = try indexer.index(root: fixture.root)
+    let explicitRoot = try indexer.index(root: fixture.root, language: .rust)
+    try expectEquivalentContent(compatibilityRoot, explicitRoot)
+    #expect(compatibilityRoot.analysisProfile.id == explicitRoot.analysisProfile.id)
+    #expect(manifestDump(compatibilityRoot) == manifestDump(explicitRoot))
+
+    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let compatibilitySnapshot = try indexer.indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore()
+    )
+    let explicitSnapshot = try indexer.indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+    let prepared = try indexer.prepareSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+    let explicitPrepared = try indexer.completeSnapshot(prepared)
+
+    for session in [explicitSnapshot, explicitPrepared] {
+        try expectEquivalentContent(compatibilitySnapshot, session)
+        #expect(compatibilitySnapshot.analysisProfile.id == session.analysisProfile.id)
+        #expect(manifestDump(compatibilitySnapshot) == manifestDump(session))
+    }
+}
+
+@Test
+func moduleMapIgnoresForeignOccurrenceWithActiveContentID() throws {
+    let parent = Array("mod child;\nfn root() {}\n".utf8)
+    let child = Array("use super::root;\nfn call() { root(); }\n".utf8)
+    let snapshot = CountingSnapshot(files: [
+        "child.rs": child,
+        "main.rs": parent,
+        "z.py": parent,
+    ])
+    let session = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+    let childPath = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "child.rs"
+    }?.pathID)
+    let childIndex = try #require(session.content(at: childPath)?.1)
+    let importBinding = try #require(childIndex.imports.first)
+    let target = try #require(session.moduleMap.targetFile(
+        for: importBinding,
+        from: childPath,
+        names: session.names,
+        strings: session.strings
+    ))
+
+    #expect(session.paths.resolve(target) == "main.rs")
+}
+
+@Test
+func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
+    let indexer = ProjectIndexer(parallelism: 1)
+    let snapshot = CountingSnapshot()
+    let store = ProjectIndexStore()
+
+    do {
+        _ = try indexer.prepareSnapshot(snapshot, into: store, language: .python)
+        Issue.record("Python snapshot indexing unexpectedly succeeded")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+    } catch {
+        Issue.record("Unexpected unsupported snapshot error: \(error)")
+    }
+    #expect(snapshot.counts.list == 0)
+    #expect(snapshot.counts.read == 0)
+    #expect(store.contentIndexes.isEmpty)
+    #expect(store.sourceBytesByContent.isEmpty)
+
+    let nonexistent = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnsupportedIndexer-\(UUID().uuidString)")
+    do {
+        _ = try indexer.index(root: nonexistent, language: .typescript)
+        Issue.record("TypeScript filesystem indexing unexpectedly succeeded")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
+    } catch {
+        Issue.record("Unsupported preflight happened after filesystem access: \(error)")
+    }
+}
+
+@Test
+func indexerRejectsExtractorAndResultIdentityMismatches() throws {
+    let snapshot = CountingSnapshot()
+    let mismatchedExtractor = ProjectIndexer(
+        parallelism: 1,
+        cache: nil,
+        extractor: ContractExtractor(language: .python, returnsForeignKey: false)
+    )
+    do {
+        _ = try mismatchedExtractor.prepareSnapshot(
+            snapshot,
+            into: ProjectIndexStore(),
+            language: .rust
+        )
+        Issue.record("Rust request accepted a Python extractor")
+    } catch let error as CocoaError {
+        #expect(error.code == .coderInvalidValue)
+    }
+    #expect(snapshot.counts.list == 0)
+    #expect(snapshot.counts.read == 0)
+
+    let foreignResult = ProjectIndexer(
+        parallelism: 1,
+        cache: nil,
+        extractor: ContractExtractor(language: .rust, returnsForeignKey: true)
+    )
+    let prepared = try foreignResult.prepareSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+    do {
+        _ = try foreignResult.completeSnapshot(prepared)
+        Issue.record("Indexer accepted a foreign ContentIndexKey")
+    } catch let error as CocoaError {
+        #expect(error.code == .coderInvalidValue)
+        #expect((error as NSError).localizedFailureReason?
+            .contains("different ContentIndexKey") == true)
+    }
 }
 
 @Test
@@ -170,14 +343,14 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
 
     #expect(first.stats.extractedCount == 2)
     #expect(cache.payload(for: cacheKey(for: storedKey))?
-        .starts(with: Data("CIDX".utf8)) == true)
+        .starts(with: Data([0x43, 0x49, 0x44, 0x58, 0x02])) == true)
     #expect(reloaded.stats.extractedCount == 0)
     #expect(reloaded.stats.reusedCount == 2)
     try expectEquivalentContent(direct, reloaded)
 }
 
 @Test
-func extractorVersionBumpRemapsAndPersistsCallNamesAcrossFiles() throws {
+func persistentCacheRemapsAndPersistsCallNamesAcrossFiles() throws {
     let fixture = snapshotIndexerRepositoryRoot.appendingPathComponent(
         "Tests/RustExtractorTests/Fixtures/receiver_type",
         isDirectory: true
@@ -185,17 +358,7 @@ func extractorVersionBumpRemapsAndPersistsCallNamesAcrossFiles() throws {
     let cacheURL = temporaryCacheURL()
     defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
 
-    var oldCache: IndexCache? = try IndexCache(
-        fileURL: cacheURL,
-        extractorVersion: 6
-    )
-    oldCache?.storeSynchronously([("v6-payload", Data([1, 2, 3]), 1)])
-    oldCache?.flush()
-    oldCache = nil
-
     let cache = try IndexCache(fileURL: cacheURL)
-    #expect(cache.metadata.extractorVersion == RustExtractorInfo.extractorVersion)
-    #expect(cache.payload(for: "v6-payload") == nil)
     let writer = ProjectIndexer(parallelism: 2, cache: cache)
     let first = try writer.index(root: fixture)
     writer.flushPersistentWrites()
@@ -283,25 +446,51 @@ func corruptPersistentPayloadSilentlyFallsBackToExtraction() throws {
 }
 
 @Test
-func extractorVersionMismatchRebuildsTheWholeDatabase() throws {
+func schemaMismatchRebuildsTheWholeDatabase() throws {
     let cacheURL = temporaryCacheURL()
     defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
-    var cache: IndexCache? = try IndexCache(fileURL: cacheURL, extractorVersion: 40)
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL, schemaVersionOverride: 1)
     cache?.storeSynchronously([("old", Data([1, 2, 3]), 1)])
     #expect(cache?.payload(for: "old") == Data([1, 2, 3]))
     // payload(...) schedules an async LRU touch that retains the cache, so simply
-    // dropping the reference would not close the v40 SQLite connection yet. Drain
+    // dropping the reference would not close the old SQLite connection yet. Drain
     // the queue, then release, so the connection (and its -wal/-shm) is fully
     // closed before we reopen the same file. This models an app upgrade — a new
-    // process opening the DB — which is the only situation the extractorVersion
-    // actually changes. Reopening while the v40 connection is still live races the
-    // rebuild's file removal against it and can surface SQLITE_IOERR under load.
+    // process opening the DB. Reopening while that connection is still live races
+    // the rebuild's file removal against it and can surface SQLITE_IOERR under load.
     cache?.flush()
     cache = nil
 
-    let bumped = try IndexCache(fileURL: cacheURL, extractorVersion: 41)
+    let bumped = try IndexCache(fileURL: cacheURL)
     #expect(bumped.payload(for: "old") == nil)
-    #expect(bumped.metadata.extractorVersion == 41)
+    #expect(bumped.metadata == IndexCache.Metadata(schemaVersion: 2))
+}
+
+@Test
+func extractorVersionsCoexistInSchemaTwoCache() throws {
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    let contentID = ContentID(algorithm: 1, bytes: [0x01])
+    func key(extractorVersion: UInt32) -> String {
+        cacheKey(for: ContentIndexKey(
+            contentID: contentID,
+            languageMode: LanguageMode(language: .rust),
+            grammarVersion: 1,
+            extractorVersion: extractorVersion
+        ))
+    }
+
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    cache?.storeSynchronously([
+        (key(extractorVersion: 40), Data([40]), 1),
+        (key(extractorVersion: 41), Data([41]), 2),
+    ])
+    cache?.flush()
+    cache = nil
+
+    let reopened = try IndexCache(fileURL: cacheURL)
+    #expect(reopened.payload(for: key(extractorVersion: 40)) == Data([40]))
+    #expect(reopened.payload(for: key(extractorVersion: 41)) == Data([41]))
 }
 
 @Test
@@ -451,6 +640,14 @@ private func snapshotQueryDump(_ session: EngineSession) throws -> String {
     return lines.joined(separator: "\n")
 }
 
+private func manifestDump(_ session: EngineSession) -> [String] {
+    session.manifest.files.map { file in
+        let language = file.detectedLanguage.map { String($0.rawValue) } ?? "-"
+        return "\(session.paths.resolve(file.pathID)):\(file.contentID.algorithm):"
+            + "\(file.contentID.bytes):\(language):\(file.fileMode):\(file.size)"
+    }
+}
+
 private func snapshotQueryContext(for session: EngineSession) -> QueryContext {
     QueryContext(
         snapshotID: session.snapshotID,
@@ -530,6 +727,81 @@ private final class SnapshotGitFixture {
 
     func remove() {
         try? FileManager.default.removeItem(at: root)
+    }
+}
+
+private final class CountingSnapshot: Snapshot, @unchecked Sendable {
+    let snapshotID = SnapshotID(rawValue: UUID())
+    let objectFormat = GitObjectFormat.sha1
+    let sourceKind = SourceKind.tracked
+
+    private let files: [String: [UInt8]]
+    private let lock = NSLock()
+    private var listCount = 0
+    private var readCount = 0
+
+    init(files: [String: [UInt8]] = [
+        "never.rs": Array("never".utf8),
+    ]) {
+        self.files = files
+    }
+
+    var counts: (list: Int, read: Int) {
+        lock.withLock { (listCount, readCount) }
+    }
+
+    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+        lock.withLock { listCount += 1 }
+        return files.map {
+            ($0.key, ContentID.sha256(of: $0.value), .regular)
+        }.sorted { $0.path < $1.path }
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        lock.withLock { readCount += 1 }
+        guard let bytes = files[path] else { throw GitError.missingPath(path) }
+        return bytes
+    }
+}
+
+private struct ContractExtractor: LanguageExtractor {
+    let language: LanguageID
+    let returnsForeignKey: Bool
+    let grammarVersion: UInt32 = 1
+    let extractorVersion: UInt32 = 1
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner _: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        let resultKey = returnsForeignKey
+            ? ContentIndexKey(
+                contentID: key.contentID,
+                languageMode: LanguageMode(language: .python),
+                grammarVersion: key.grammarVersion,
+                extractorVersion: key.extractorVersion
+            )
+            : key
+        return (ContentIndex(
+            key: resultKey,
+            scopes: [],
+            bindings: [],
+            executableRegions: [],
+            symbols: [],
+            calls: [],
+            imports: [],
+            exports: [],
+            lineTable: LineTable(bytes: bytes)
+        ), false)
+    }
+
+    func identifierRanges(
+        named _: String,
+        in _: [UInt8],
+        mode _: LanguageMode
+    ) throws -> [ByteRange] {
+        []
     }
 }
 

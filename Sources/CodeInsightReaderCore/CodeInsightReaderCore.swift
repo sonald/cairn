@@ -126,6 +126,7 @@ public struct OutlineFacet: Equatable, Sendable {
 public final class ReaderDocument: Sendable {
     public let bytes: [UInt8]
     public let contentID: ContentID
+    public let languageMode: LanguageMode
     public let lineTable: LineTable
     public let byteUTF16Map: ByteUTF16Map
     public let highlightSpans: [HighlightSpan]
@@ -139,6 +140,7 @@ public final class ReaderDocument: Sendable {
 
     package init(
         bytes: [UInt8],
+        languageMode: LanguageMode = LanguageMode(language: .rust),
         contentID: ContentID? = nil,
         lineTable: LineTable,
         byteUTF16Map: ByteUTF16Map,
@@ -151,6 +153,7 @@ public final class ReaderDocument: Sendable {
         precondition(localBindings.count == referencesByBinding.count)
         self.bytes = bytes
         self.contentID = contentID ?? ContentID.sha256(of: bytes)
+        self.languageMode = languageMode
         self.lineTable = lineTable
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans
@@ -171,6 +174,7 @@ public final class ReaderDocument: Sendable {
 
     public convenience init(
         bytes: [UInt8],
+        languageMode: LanguageMode = LanguageMode(language: .rust),
         contentID: ContentID? = nil,
         lineTable: LineTable,
         byteUTF16Map: ByteUTF16Map,
@@ -181,6 +185,7 @@ public final class ReaderDocument: Sendable {
     ) {
         self.init(
             bytes: bytes,
+            languageMode: languageMode,
             contentID: contentID,
             lineTable: lineTable,
             byteUTF16Map: byteUTF16Map,
@@ -194,6 +199,7 @@ public final class ReaderDocument: Sendable {
 
     public convenience init(
         bytes: [UInt8],
+        languageMode: LanguageMode = LanguageMode(language: .rust),
         highlightSpans: [HighlightSpan] = [],
         outlineFacets: [OutlineFacet] = [],
         localBindings: [BindingRecord] = [],
@@ -201,6 +207,7 @@ public final class ReaderDocument: Sendable {
     ) {
         self.init(
             bytes: bytes,
+            languageMode: languageMode,
             lineTable: LineTable(bytes: bytes),
             byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
             highlightSpans: highlightSpans,
@@ -305,6 +312,12 @@ public final class ReaderDocument: Sendable {
     }
 
     public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
+        switch languageMode.language {
+        case .rust:
+            break
+        case .python, .typescript, .javascript:
+            return []
+        }
         guard byteOffset < bytes.count,
               let source = String(bytes: bytes, encoding: .utf8),
               let selectedIndex = source.utf8.index(
@@ -419,6 +432,7 @@ public enum FileTier: String, Sendable {
 }
 
 public enum RustHighlighterError: Error, Sendable {
+    case unsupportedLanguage(LanguageID)
     case parserUnavailable
     case parseFailed
 }
@@ -798,6 +812,17 @@ public struct DocumentLoader: Sendable {
     public func load(
         file: URL
     ) throws -> (document: ReaderDocument, tier: FileTier) {
+        try load(
+            file: file,
+            languageMode: LanguageMode(language: .rust)
+        )
+    }
+
+    public func load(
+        file: URL,
+        languageMode: LanguageMode
+    ) throws -> (document: ReaderDocument, tier: FileTier) {
+        try Self.requireSupported(languageMode)
         let bytes = try source(file)
         guard String(bytes: bytes, encoding: .utf8) != nil else {
             throw CocoaError(.fileReadCorruptFile)
@@ -808,6 +833,7 @@ public struct DocumentLoader: Sendable {
         let tier = FileTier(lineCount: lineTable.lineStarts.count)
         let plain = ReaderDocument(
             bytes: bytes,
+            languageMode: languageMode,
             contentID: contentID,
             lineTable: lineTable,
             byteUTF16Map: map,
@@ -823,6 +849,7 @@ public struct DocumentLoader: Sendable {
             )
             return (ReaderDocument(
                 bytes: bytes,
+                languageMode: languageMode,
                 contentID: contentID,
                 lineTable: lineTable,
                 byteUTF16Map: map,
@@ -837,6 +864,37 @@ public struct DocumentLoader: Sendable {
         return (plain, tier)
     }
 
+    private static func requireSupported(_ languageMode: LanguageMode) throws {
+        switch languageMode.language {
+        case .rust:
+            return
+        case .python, .typescript, .javascript:
+            throw RustHighlighterError.unsupportedLanguage(languageMode.language)
+        }
+    }
+
+    package func loadSyntax(
+        for document: ReaderDocument
+    ) throws -> ReaderDocument {
+        try Self.requireSupported(document.languageMode)
+        let highlighted = try RustHighlighter().highlightWithFolds(
+            bytes: document.bytes,
+            resolutionObserver: foldResolutionObserver
+        )
+        return ReaderDocument(
+            bytes: document.bytes,
+            languageMode: document.languageMode,
+            contentID: document.contentID,
+            lineTable: document.lineTable,
+            byteUTF16Map: document.byteUTF16Map,
+            highlightSpans: highlighted.spans,
+            outlineFacets: highlighted.outlineFacets,
+            foldRegions: highlighted.folds,
+            localBindings: highlighted.bindings,
+            referencesByBinding: highlighted.referencesByBinding
+        )
+    }
+
     public func loadSyntax(
         for document: ReaderDocument,
         completion: @escaping @Sendable (
@@ -845,21 +903,7 @@ public struct DocumentLoader: Sendable {
     ) {
         Task.detached(priority: .userInitiated) {
             do {
-                let highlighted = try RustHighlighter().highlightWithFolds(
-                    bytes: document.bytes,
-                    resolutionObserver: foldResolutionObserver
-                )
-                completion(.success(ReaderDocument(
-                    bytes: document.bytes,
-                    contentID: document.contentID,
-                    lineTable: document.lineTable,
-                    byteUTF16Map: document.byteUTF16Map,
-                    highlightSpans: highlighted.spans,
-                    outlineFacets: highlighted.outlineFacets,
-                    foldRegions: highlighted.folds,
-                    localBindings: highlighted.bindings,
-                    referencesByBinding: highlighted.referencesByBinding
-                )))
+                completion(.success(try loadSyntax(for: document)))
             } catch let error as RustHighlighterError {
                 completion(.failure(error))
             } catch {

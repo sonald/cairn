@@ -48,6 +48,7 @@ public final class ContextWindowModel {
     private struct DocumentKey: Hashable {
         let path: String
         let contentID: ContentID
+        let languageMode: LanguageMode
     }
 
     typealias Resolver = @MainActor (
@@ -56,7 +57,7 @@ public final class ContextWindowModel {
         UInt32,
         QueryContext
     ) async throws -> [ResolutionCandidate]
-    typealias Loader = @Sendable (URL) async -> ReaderDocument?
+    typealias Loader = @Sendable (URL, LanguageMode) async -> ReaderDocument?
     typealias ExactResolver = @MainActor (
         String,
         UInt32,
@@ -112,6 +113,19 @@ public final class ContextWindowModel {
               candidates.indices.contains(selected)
         else { return nil }
         return candidates[selected]
+    }
+
+    package var selectedLanguageMode: LanguageMode? {
+        guard let candidate = selectedCandidate,
+              case let .ready(session, _) = projectState
+        else { return nil }
+        if exactLocationIsInDependency(candidate.path) {
+            return dependencyLanguageMode(path: candidate.path)
+        }
+        guard let pathID = pathID(candidate.path, in: session) else {
+            return nil
+        }
+        return session.content(at: pathID)?.0.languageMode
     }
 
     public var candidateCount: Int {
@@ -232,12 +246,18 @@ public final class ContextWindowModel {
             return selectedCandidate
         }
         guard let pathID = pathID(file, in: session) else { return nil }
-        return try? await resolveCandidates(
-            session: session,
-            pathID: pathID,
-            offset: offset,
-            context: context
-        ).first
+        guard let candidates = try? await resolveCandidates(
+                  session: session,
+                  pathID: pathID,
+                  offset: offset,
+                  context: context
+              ),
+              case let .ready(currentSession, currentContext) = projectState,
+              currentContext.generation == context.generation,
+              currentSession.snapshotID == session.snapshotID,
+              currentSession.analysisProfile.id == session.analysisProfile.id
+        else { return nil }
+        return candidates.first
     }
 
     public func selectNext() {
@@ -340,7 +360,7 @@ public final class ContextWindowModel {
     ) async -> [Candidate] {
         var candidates: [Candidate] = []
         for resolution in resolved {
-            guard let index = contentIndex(at: resolution.target.pathID, in: session)
+            guard let (key, index) = session.content(at: resolution.target.pathID)
             else { continue }
 
             let targetRange: ByteRange
@@ -391,7 +411,8 @@ public final class ContextWindowModel {
                 in: session
             ), let document = await document(
                 path: path,
-                contentID: contentID
+                contentID: contentID,
+                languageMode: key.languageMode
             ) {
                 text = excerpt(
                     for: targetRange,
@@ -456,15 +477,27 @@ public final class ContextWindowModel {
         else { return }
         guard case .completed(let entries) = result else { return }
         for exact in entries {
-            await applyExact(exact, session: session)
+            await applyExact(
+                exact,
+                session: session,
+                context: context,
+                request: request
+            )
         }
     }
 
     private func applyExact(
         _ exact: ExactOverlay.Entry,
-        session: EngineSession
+        session: EngineSession,
+        context: QueryContext,
+        request: UInt64
     ) async {
-        guard case let .candidates(current, selected) = stage,
+        guard requestID == request,
+              case let .ready(currentSession, currentContext) = projectState,
+              currentContext.generation == context.generation,
+              currentSession.snapshotID == session.snapshotID,
+              currentSession.analysisProfile.id == session.analysisProfile.id,
+              case let .candidates(current, selected) = stage,
               current.indices.contains(selected),
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
         else { return }
@@ -500,9 +533,15 @@ public final class ContextWindowModel {
                   attribution: exact.attribution,
                   origin: exact.origin,
                   session: session
-              )
+              ),
+              requestID == request,
+              case let .ready(currentSession, currentContext) = projectState,
+              currentContext.generation == context.generation,
+              currentSession.snapshotID == session.snapshotID,
+              currentSession.analysisProfile.id == session.analysisProfile.id,
+              case let .candidates(latest, _) = stage
         else { return }
-        stage = .candidates([candidate] + current, selected: 0)
+        stage = .candidates([candidate] + latest, selected: 0)
     }
 
     private func exactCandidate(
@@ -548,13 +587,17 @@ public final class ContextWindowModel {
             )
         }
         guard let pathID = pathID(path, in: session),
-              let index = contentIndex(at: pathID, in: session),
+              let (key, index) = session.content(at: pathID),
               let symbolIndex = index.symbols.firstIndex(where: {
                   $0.nameRange.contains(offset) || $0.nameRange.lowerBound == offset
               }),
               let coordinate = index.lineTable.lineColumn(at: offset),
               let contentID = contentID(at: pathID, in: session),
-              let document = await document(path: path, contentID: contentID)
+              let document = await document(
+                  path: path,
+                  contentID: contentID,
+                  languageMode: key.languageMode
+              )
         else { return nil }
         let facet = index.symbols[symbolIndex]
         let label = "Exact·direct"
@@ -590,7 +633,11 @@ public final class ContextWindowModel {
         attribution: ExactAttribution,
         origin: ExactOrigin
     ) async -> Candidate? {
-        guard let document = await dependencyDocument(path: path),
+        guard let languageMode = dependencyLanguageMode(path: path),
+              let document = await dependencyDocument(
+                  path: path,
+                  languageMode: languageMode
+              ),
               let byteCount = UInt32(exactly: document.bytes.count),
               offset <= byteCount,
               let coordinate = document.lineTable.lineColumn(at: offset)
@@ -668,24 +715,20 @@ public final class ContextWindowModel {
         }?.pathID
     }
 
-    private func contentIndex(at pathID: PathID, in session: EngineSession) -> ContentIndex? {
-        guard let file = session.manifest.files.first(where: { $0.pathID == pathID })
-        else { return nil }
-        return session.contentIndexes.first {
-            $0.key.contentID == file.contentID
-                && $0.key.languageMode.language == file.detectedLanguage
-        }?.value
-    }
-
     private func contentID(at pathID: PathID, in session: EngineSession) -> ContentID? {
         session.manifest.files.first { $0.pathID == pathID }?.contentID
     }
 
     private func document(
         path: String,
-        contentID: ContentID
+        contentID: ContentID,
+        languageMode: LanguageMode
     ) async -> ReaderDocument? {
-        let key = DocumentKey(path: path, contentID: contentID)
+        let key = DocumentKey(
+            path: path,
+            contentID: contentID,
+            languageMode: languageMode
+        )
         if let cached = documents[key] {
             documentRecency.removeAll { $0 == key }
             documentRecency.append(key)
@@ -696,34 +739,58 @@ public final class ContextWindowModel {
         let loaded: ReaderDocument?
         if let contentSource {
             loaded = await Task.detached(priority: .userInitiated) {
-                try? DocumentLoader(source: contentSource).load(file: file).document
+                try? DocumentLoader(source: contentSource).load(
+                    file: file,
+                    languageMode: languageMode
+                ).document
             }.value
         } else {
-            loaded = await loader(file)
+            loaded = await loader(file, languageMode)
         }
         guard let loaded else { return nil }
         return remember(loaded, path: path)
     }
 
-    private func dependencyDocument(path: String) async -> ReaderDocument? {
-        if let key = documentRecency.last(where: { $0.path == path }),
+    private func dependencyDocument(
+        path: String,
+        languageMode: LanguageMode
+    ) async -> ReaderDocument? {
+        if let key = documentRecency.last(where: {
+            $0.path == path && $0.languageMode == languageMode
+        }),
            let cached = documents[key]
         {
             documentRecency.removeAll { $0 == key }
             documentRecency.append(key)
             return cached
         }
-        guard let loaded = await loader(URL(fileURLWithPath: path)) else {
+        guard let loaded = await loader(
+            URL(fileURLWithPath: path),
+            languageMode
+        ) else {
             return nil
         }
         return remember(loaded, path: path)
+    }
+
+    private func dependencyLanguageMode(path: String) -> LanguageMode? {
+        guard case let .ready(session, _) = projectState else { return nil }
+        let language = session.analysisProfile.language
+        return LanguageMode.classify(path: path, language: language)
+            ?? (URL(fileURLWithPath: path).pathExtension.isEmpty
+                ? LanguageMode(language: language)
+                : nil)
     }
 
     private func remember(
         _ document: ReaderDocument,
         path: String
     ) -> ReaderDocument {
-        let key = DocumentKey(path: path, contentID: document.contentID)
+        let key = DocumentKey(
+            path: path,
+            contentID: document.contentID,
+            languageMode: document.languageMode
+        )
         documents[key] = document
         documentRecency.removeAll { $0 == key }
         documentRecency.append(key)
@@ -779,9 +846,15 @@ private func dependencyCrateName(_ path: String) -> String? {
     return nil
 }
 
-private func loadReaderDocument(at file: URL) async -> ReaderDocument? {
+private func loadReaderDocument(
+    at file: URL,
+    languageMode: LanguageMode
+) async -> ReaderDocument? {
     await Task.detached(priority: .userInitiated) {
-        try? DocumentLoader().load(file: file).document
+        try? DocumentLoader().load(
+            file: file,
+            languageMode: languageMode
+        ).document
     }.value
 }
 
