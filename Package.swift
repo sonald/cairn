@@ -90,6 +90,20 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
+            name: "CTreeSitterTypeScript",
+            dependencies: ["CTreeSitter"],
+            path: "Sources/CTreeSitterTypeScript",
+            exclude: [
+                "typescript/src/node-types.json",
+                "tsx/src/node-types.json",
+            ],
+            publicHeadersPath: "include",
+            cSettings: [
+                .headerSearchPath("typescript/src"),
+                .headerSearchPath("tsx/src"),
+            ]
+        ),
+        .target(
             name: "CProcessGuard",
             path: "Sources/CProcessGuard",
             publicHeadersPath: "include"
@@ -193,7 +207,12 @@ let package = Package(
         ),
         .testTarget(
             name: "TreeSitterKitTests",
-            dependencies: ["TreeSitterKit", "CTreeSitterRust", "CTreeSitterPython"]
+            dependencies: [
+                "TreeSitterKit",
+                "CTreeSitterRust",
+                "CTreeSitterPython",
+                "CTreeSitterTypeScript",
+            ]
         ),
         .testTarget(
             name: "CodeInsightCoreTests",

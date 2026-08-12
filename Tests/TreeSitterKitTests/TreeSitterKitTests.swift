@@ -1,5 +1,6 @@
 import CTreeSitterRust
 import CTreeSitterPython
+import CTreeSitterTypeScript
 import Testing
 import TreeSitterKit
 
@@ -86,6 +87,71 @@ private func makeRustParser() -> Parser? {
 
 private func makePythonParser() -> Parser? {
     guard let language = tree_sitter_python() else { return nil }
+    return Parser(language: language)
+}
+
+@Test
+func exposesFrozenTypeScriptAndTsxParsers() throws {
+    let typescript = try #require(tree_sitter_typescript())
+    let tsx = try #require(tree_sitter_tsx())
+
+    let tsParser = ts_parser_new()
+    let tsxParser = ts_parser_new()
+    defer {
+        ts_parser_delete(tsParser)
+        ts_parser_delete(tsxParser)
+    }
+    #expect(ts_parser_set_language(tsParser, typescript))
+    #expect(ts_parser_set_language(tsxParser, tsx))
+    #expect([typescript, tsx].map { ts_language_version($0) } == [14, 14])
+}
+
+@Test
+func findsTypeScriptFunctionNamedFields() throws {
+    let source = """
+        function add(a: number, b: number): number {
+            return a + b
+        }
+        """
+
+    let parser = try #require(makeTypeScriptParser())
+    let tree = try #require(parser.parse(Array(source.utf8)))
+
+    #expect(tree.rootNode.kind == "program")
+    #expect(tree.rootNode.hasError == false)
+
+    let declaration = try #require(tree.rootNode.namedChildren.first {
+        $0.kind == "function_declaration"
+    })
+    let name = try #require(declaration.child(namedField: "name"))
+    let body = try #require(declaration.child(namedField: "body"))
+
+    #expect(name.kind == "identifier")
+    #expect(text(of: name, in: source) == "add")
+    #expect(body.kind == "statement_block")
+}
+
+@Test
+func parsesTypeScriptJsxAndRejectsItWithTypeScriptGrammar() throws {
+    let source = "export const view = <Component />;"
+
+    let tsxParser = try #require(makeTsxParser())
+    let tsxTree = try #require(tsxParser.parse(Array(source.utf8)))
+    #expect(tsxTree.rootNode.kind == "program")
+    #expect(tsxTree.rootNode.hasError == false)
+
+    let tsParser = try #require(makeTypeScriptParser())
+    let tsTree = try #require(tsParser.parse(Array(source.utf8)))
+    #expect(tsTree.rootNode.hasError)
+}
+
+private func makeTypeScriptParser() -> Parser? {
+    guard let language = tree_sitter_typescript() else { return nil }
+    return Parser(language: language)
+}
+
+private func makeTsxParser() -> Parser? {
+    guard let language = tree_sitter_tsx() else { return nil }
     return Parser(language: language)
 }
 
