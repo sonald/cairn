@@ -2,6 +2,7 @@ import CodeInsightCore
 import CodeInsightGit
 import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
+import CodeInsightTypeScriptExtractor
 import Foundation
 
 public struct IndexStats: Sendable {
@@ -459,7 +460,9 @@ public struct ProjectIndexer: Sendable {
             return RustExtractor()
         case .python:
             return PythonExtractor()
-        case .typescript, .javascript:
+        case .typescript:
+            return TypeScriptExtractor()
+        case .javascript:
             throw unsupportedLanguage(language)
         }
     }
@@ -498,7 +501,13 @@ public struct ProjectIndexer: Sendable {
                 language: language,
                 projectRoot: projectRoot
             )
-        case .typescript, .javascript:
+        case .typescript:
+            profile = ProfileDetector.detect(
+                projectURL: root,
+                language: language,
+                projectRoot: projectRoot
+            )
+        case .javascript:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)
@@ -522,7 +531,13 @@ public struct ProjectIndexer: Sendable {
                 language: language,
                 projectRoot: projectRoot
             )
-        case .typescript, .javascript:
+        case .typescript:
+            profile = ProfileDetector.detect(
+                snapshot: snapshot,
+                language: language,
+                projectRoot: projectRoot
+            )
+        case .javascript:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)

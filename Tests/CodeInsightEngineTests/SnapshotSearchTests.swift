@@ -1,6 +1,7 @@
 import CodeInsightCore
 import CodeInsightRustExtractor
 import CodeInsightPythonExtractor
+import CodeInsightTypeScriptExtractor
 @testable import CodeInsightEngine
 import Dispatch
 import Foundation
@@ -90,6 +91,91 @@ func pythonSnapshotSearchExcludesIdentifiersInStringsAndComments() async throws 
     #expect(Set(matches.map(\.line)) == [1, 4])
     #expect(Set(matches.map(\.pathID)).count == 2)
     #expect(source.totalScanCount == 1)
+}
+
+@Test
+func typescriptReferenceSearchUsesTsGrammarAndExcludesSpoofs() async throws {
+    let bytes = Array("""
+        export function foo() {}
+        export function call_site() { foo(); }
+        const TEXT = "foo"
+        // foo
+        /* foo */
+        type Alias = { foo: string }
+        function suffix() { foo_suffix() }
+        """.utf8)
+    let source = FakeSnapshotSource([
+        ("a.ts", bytes),
+        ("copy.ts", bytes),
+    ], language: .typescript)
+
+    let result = try await collect(try SnapshotSearchService(
+        source: source,
+        language: .typescript,
+        extractor: TypeScriptExtractor()
+    ).searchReferences(
+        ContentSearchQuery(pattern: "foo", caseSensitive: true),
+        excludingPathID: PathID(rawValue: .max),
+        excludingRange: ByteRange(lowerBound: .max, upperBound: .max),
+        context: context(for: source)
+    ))
+
+    #expect(result.matches.count == 4)
+    #expect(result.matches.map(\.line).sorted() == [1, 1, 2, 2])
+    #expect(Set(result.matches.map(\.pathID)).count == 2)
+    #expect(source.totalScanCount == 1)
+    #expect(result.final.completeness == .complete)
+}
+
+@Test
+func typescriptTsxReferenceSearchExcludesJSXTagsButIncludesValueRefs() async throws {
+    let bytes = Array("""
+        const foo = 1
+        export function View() {
+            return <Widget foo={foo}>{foo}</Widget>
+        }
+        """.utf8)
+    let source = FakeSnapshotSource([
+        ("View.tsx", bytes),
+    ], language: .typescript)
+
+    let result = try await collect(try SnapshotSearchService(
+        source: source,
+        language: .typescript,
+        extractor: TypeScriptExtractor()
+    ).searchReferences(
+        ContentSearchQuery(pattern: "foo", caseSensitive: true),
+        excludingPathID: PathID(rawValue: .max),
+        excludingRange: ByteRange(lowerBound: .max, upperBound: .max),
+        context: context(for: source)
+    ))
+
+    #expect(result.matches.map(\.line).sorted() == [1, 3, 3])
+    #expect(result.matches.count == 3)
+    #expect(source.totalScanCount == 1)
+}
+
+@Test
+func typescriptContentSearchCoversTsAndTsxActiveView() async throws {
+    let ts = Array("export function greet(name: string) { return name }\n".utf8)
+    let tsx = Array("const hello = <strong>greet</strong>\n".utf8)
+    let source = FakeSnapshotSource([
+        ("a.ts", ts),
+        ("b.tsx", tsx),
+    ], language: .typescript)
+
+    let result = try await collect(try SnapshotSearchService(
+        source: source,
+        language: .typescript,
+        extractor: TypeScriptExtractor()
+    ).search(
+        ContentSearchQuery(pattern: "greet"),
+        context: context(for: source)
+    ))
+
+    #expect(result.matches.map(\.line).sorted() == [1, 1])
+    #expect(Set(result.matches.map(\.pathID)).count == 2)
+    #expect(source.totalScanCount == 2)
 }
 
 @Test

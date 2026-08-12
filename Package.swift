@@ -158,6 +158,7 @@ let package = Package(
                 "CodeInsightGit",
                 "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
+                "CodeInsightTypeScriptExtractor",
             ],
             linkerSettings: [.linkedLibrary("sqlite3")]
         ),
@@ -279,6 +280,7 @@ let package = Package(
                 "CodeInsightEngine",
                 "CodeInsightGit",
                 "CodeInsightPythonExtractor",
+                "CodeInsightTypeScriptExtractor",
             ]
         ),
         .testTarget(

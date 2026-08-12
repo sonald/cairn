@@ -2,6 +2,7 @@ import CodeInsightCore
 @testable import CodeInsightEngine
 import CodeInsightGit
 import CodeInsightPythonExtractor
+import CodeInsightTypeScriptExtractor
 import Foundation
 import Testing
 
@@ -185,16 +186,16 @@ func moduleMapIgnoresForeignOccurrenceWithActiveContentID() throws {
 func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
     let indexer = ProjectIndexer(parallelism: 1)
     let snapshot = CountingSnapshot(
-        files: ["never.ts": Array("never".utf8)]
+        files: ["never.js": Array("never".utf8)]
     )
     let store = ProjectIndexStore()
 
     do {
-        _ = try indexer.prepareSnapshot(snapshot, into: store, language: .typescript)
-        Issue.record("TypeScript snapshot indexing unexpectedly succeeded")
+        _ = try indexer.prepareSnapshot(snapshot, into: store, language: .javascript)
+        Issue.record("JavaScript snapshot indexing unexpectedly succeeded")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
     } catch {
         Issue.record("Unexpected unsupported snapshot error: \(error)")
     }
@@ -206,11 +207,11 @@ func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
     let nonexistent = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupportedIndexer-\(UUID().uuidString)")
     do {
-        _ = try indexer.index(root: nonexistent, language: .typescript)
-        Issue.record("TypeScript filesystem indexing unexpectedly succeeded")
+        _ = try indexer.index(root: nonexistent, language: .javascript)
+        Issue.record("JavaScript filesystem indexing unexpectedly succeeded")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
     } catch {
         Issue.record("Unsupported preflight happened after filesystem access: \(error)")
     }
@@ -310,6 +311,263 @@ func pythonAndRustSameContentKeysStayIsolated() throws {
         == [.rust])
     #expect(python.contentIndexes.keys.first?.contentID
         == rust.contentIndexes.keys.first?.contentID)
+}
+
+@Test
+func typescriptIndexerIndexesTsAndTsxTogether() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightTypeScriptIndexerFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try """
+        export function greet(name: string) {
+            return name
+        }
+        """.write(
+        to: root.appendingPathComponent("greet.ts"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try """
+        export function Welcome() {
+            return greet("hi")
+        }
+        """.write(
+        to: root.appendingPathComponent("Welcome.tsx"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try "ignored".write(
+        to: root.appendingPathComponent("legacy.js"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let session = try ProjectIndexer(parallelism: 1).index(
+        root: root,
+        language: .typescript
+    )
+
+    #expect(session.analysisProfile.language == .typescript)
+    #expect(session.analysisProfile.projectUnitName == root.lastPathComponent)
+    #expect(session.stats.fileCount == 2)
+    #expect(session.stats.uniqueContentCount == 2)
+    #expect(Set(session.contentIndexes.keys.map(\.languageMode.language))
+        == [.typescript])
+    #expect(Set(session.contentIndexes.keys.compactMap(\.languageMode.variant))
+        == Set(["tsx"] as [String?]))
+    let files = session.manifest.files.map { session.paths.resolve($0.pathID) }
+    #expect(files == ["Welcome.tsx", "greet.ts"])
+    #expect(files.allSatisfy {
+        LanguageMode.classify(path: $0, language: .typescript) != nil
+    })
+    #expect(try session.searchSymbols(
+        query: "Welcome",
+        limit: 10,
+        boost: SearchBoost(),
+        context: snapshotQueryContext(for: session)
+    ).map(\.path).contains("Welcome.tsx"))
+}
+
+@Test
+func typescriptPersistentCacheExtractsOnceThenVariantOnlyMisses() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightTypeScriptCache-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = """
+        export const value = "value"
+        export function run() { return value }
+        """
+    try source.write(to: root.appendingPathComponent("a.ts"), atomically: true, encoding: .utf8)
+    try source.write(to: root.appendingPathComponent("b.tsx"), atomically: true, encoding: .utf8)
+    try "fn keep() {}\n".write(
+        to: root.appendingPathComponent("keep.rs"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try "def keep():\n    pass\n".write(
+        to: root.appendingPathComponent("keep.py"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    let writer = ProjectIndexer(parallelism: 1, cache: cache!)
+    let cold = try writer.index(root: root, language: .typescript)
+    _ = try writer.index(root: root, language: .rust)
+    _ = try writer.index(root: root, language: .python)
+    writer.flushPersistentWrites()
+    cache?.flush()
+    cache = nil
+
+    let hot = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .typescript)
+    cache = try IndexCache(fileURL: cacheURL)
+    let hotRust = try ProjectIndexer(
+        parallelism: 1,
+        cache: cache
+    ).index(root: root, language: .rust)
+    cache?.flush()
+    cache = nil
+    let hotPython = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .python)
+
+    #expect(cold.stats.fileCount == 2)
+    #expect(cold.stats.uniqueContentCount == 2)
+    #expect(cold.stats.extractedCount == 2)
+    #expect(hot.stats.uniqueContentCount == 2)
+    #expect(hot.stats.reusedCount == 2)
+    #expect(hot.stats.extractedCount == 0)
+    #expect(hotRust.stats.reusedCount == 1)
+    #expect(hotRust.stats.extractedCount == 0)
+    #expect(hotPython.stats.reusedCount == 1)
+    #expect(hotPython.stats.extractedCount == 0)
+
+    cache = try IndexCache(fileURL: cacheURL)
+    let bumped = try ProjectIndexer(
+        parallelism: 1,
+        cache: cache!,
+        extractor: VersionedTypeScriptExtractor(version: 2)
+    ).index(root: root, language: .typescript)
+    cache?.flush()
+    cache = nil
+    let rustAfterTypeScriptMiss = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .rust)
+    let pythonAfterTypeScriptMiss = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .python)
+
+    #expect(bumped.stats.reusedCount == 0)
+    #expect(bumped.stats.extractedCount == 2)
+    #expect(rustAfterTypeScriptMiss.stats.reusedCount == 1)
+    #expect(rustAfterTypeScriptMiss.stats.extractedCount == 0)
+    #expect(pythonAfterTypeScriptMiss.stats.reusedCount == 1)
+    #expect(pythonAfterTypeScriptMiss.stats.extractedCount == 0)
+}
+
+@Test
+func typescriptVariantOnlyMissExtractsSecondVariantAfterTsCacheHit() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightTypeScriptVariantCache-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = """
+        export const value = 1
+        export function identical() {}
+        """
+    try source.write(to: root.appendingPathComponent("a.ts"), atomically: true, encoding: .utf8)
+
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    let indexer = ProjectIndexer(parallelism: 1, cache: cache!)
+    let first = try indexer.index(root: root, language: .typescript)
+    indexer.flushPersistentWrites()
+    cache?.flush()
+    cache = nil
+
+    try source.write(to: root.appendingPathComponent("b.tsx"), atomically: true, encoding: .utf8)
+    let second = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .typescript)
+
+    #expect(first.stats.fileCount == 1)
+    #expect(first.stats.uniqueContentCount == 1)
+    #expect(first.stats.extractedCount == 1)
+    #expect(second.stats.fileCount == 2)
+    #expect(second.stats.uniqueContentCount == 2)
+    #expect(second.stats.reusedCount == 1)
+    #expect(second.stats.extractedCount == 1)
+    #expect(Set(second.contentIndexes.keys.map(\.languageMode.variant))
+        == Set([nil, "tsx"] as [String?]))
+}
+
+@Test
+func typescriptSnapshotExtractsWithoutForeignActiveFiles() throws {
+    let snapshot = CountingSnapshot(files: [
+        "src/main.ts": Array("export function main() {}\n".utf8),
+        "src/component.tsx": Array("export function View() { return null }\n".utf8),
+        "legacy.js": Array("function legacy() {}\n".utf8),
+        "types.d.ts": Array("export type T = string\n".utf8),
+    ])
+    let session = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .typescript
+    )
+
+    #expect(session.analysisProfile.language == .typescript)
+    #expect(session.stats.fileCount == 2)
+    #expect(session.stats.uniqueContentCount == 2)
+    #expect(session.manifest.files.map { session.paths.resolve($0.pathID) }
+        == ["legacy.js", "src/component.tsx", "src/main.ts", "types.d.ts"])
+    #expect(Set(session.contentIndexes.keys.map(\.languageMode.variant))
+        == Set([nil, "tsx"] as [String?]))
+}
+
+@Test
+func typescriptCommitAndWorktreeIndexAreContentEquivalent() throws {
+    let fixture = try SnapshotGitFixture(typescript: true)
+    defer { fixture.remove() }
+    let root = fixture.root
+
+    let worktree = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        WorktreeSnapshot(repositoryURL: root, language: .typescript),
+        into: ProjectIndexStore(),
+        language: .typescript
+    )
+    let commit = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        CommitSnapshot(repositoryURL: root),
+        into: ProjectIndexStore(),
+        language: .typescript
+    )
+
+    #expect(worktree.analysisProfile.id == commit.analysisProfile.id)
+    #expect(worktree.analysisProfile.language == .typescript)
+    let worktreeActive = worktree.contentIndexes
+    let commitActive = commit.contentIndexes
+    #expect(Set(worktreeActive.keys) == Set(commitActive.keys))
+    #expect(worktreeActive.count == 2)
+    for key in worktreeActive.keys {
+        #expect(try encodedIndex(worktreeActive[key]!)
+            == encodedIndex(commitActive[key]!))
+        #expect(worktree.sourceBytesByContent[key.contentID]
+            == commit.sourceBytesByContent[key.contentID])
+        #expect(CanonicalDump.render(
+            worktreeActive[key]!,
+            names: worktree.names,
+            strings: worktree.strings
+        ) == CanonicalDump.render(
+            commitActive[key]!,
+            names: commit.names,
+            strings: commit.strings
+        ))
+    }
+    #expect(Set(worktree.manifest.files.map(\.sourceKind))
+        == Set([SourceKind.untracked]))
+    #expect(Set(commit.manifest.files.map(\.sourceKind))
+        == Set([SourceKind.tracked]))
+    #expect(commit.manifest.files.contains {
+        commit.paths.resolve($0.pathID) == "tsconfig.json"
+            && $0.detectedLanguage == nil
+    })
 }
 
 @Test
@@ -834,21 +1092,30 @@ private func snapshotQueryContext(for session: EngineSession) -> QueryContext {
 private final class SnapshotGitFixture {
     let root: URL
 
-    init() throws {
+    init(typescript: Bool = false) throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "CodeInsightSnapshotIndexerTests-\(UUID().uuidString)",
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try git("init", "-q")
-        try write("Package.swift", "// non-Rust manifest entry\n")
-        try write("src/main.rs", "fn a() {}\nfn call() { a(); }\n")
-        try write("src/shared.rs", "pub fn shared() {}\n")
-        try git("add", ".")
-        try commit("older")
-        try write("src/main.rs", "fn b() {}\nfn call() { b(); }\n")
-        try git("add", "src/main.rs")
-        try commit("newer")
+        if typescript {
+            try write("src/main.ts", "export function main() {}\n")
+            try write("src/component.tsx", "export function View() { return null }\n")
+            try write("tsconfig.json", "{}")
+            try write("package.json", "{\"name\":\"sample\"}")
+            try git("add", ".")
+            try commit("typescript")
+        } else {
+            try write("Package.swift", "// non-Rust manifest entry\n")
+            try write("src/main.rs", "fn a() {}\nfn call() { a(); }\n")
+            try write("src/shared.rs", "pub fn shared() {}\n")
+            try git("add", ".")
+            try commit("older")
+            try write("src/main.rs", "fn b() {}\nfn call() { b(); }\n")
+            try git("add", "src/main.rs")
+            try commit("newer")
+        }
     }
 
     func commitLFSPointer(_ bytes: [UInt8]) throws {
@@ -1005,6 +1272,38 @@ private struct VersionedPythonExtractor: LanguageExtractor {
         mode: LanguageMode
     ) throws -> [ByteRange] {
         try PythonExtractor().identifierRanges(
+            named: name,
+            in: bytes,
+            mode: mode
+        )
+    }
+}
+
+private struct VersionedTypeScriptExtractor: LanguageExtractor {
+    let version: UInt32
+
+    var language: LanguageID { .typescript }
+    var grammarVersion: UInt32 { TypeScriptExtractor.grammarVersion }
+    var extractorVersion: UInt32 { version }
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        try TypeScriptExtractor().extractWithDiagnostics(
+            bytes: bytes,
+            key: key,
+            interner: interner
+        )
+    }
+
+    func identifierRanges(
+        named name: String,
+        in bytes: [UInt8],
+        mode: LanguageMode
+    ) throws -> [ByteRange] {
+        try TypeScriptExtractor().identifierRanges(
             named: name,
             in: bytes,
             mode: mode
