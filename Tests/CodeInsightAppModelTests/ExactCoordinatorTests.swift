@@ -97,7 +97,7 @@ func exactCoordinatorPreparesOpportunistically() async throws {
 
 @MainActor
 @Test
-func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
+func exactCoordinatorRejectsJavaScriptWithoutChangingState() throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
     let state = ExactProviderState()
@@ -118,7 +118,7 @@ func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
         try coordinator.prepare(
             projectURL: fixture.root,
             revision: nil,
-            analysisProfile: exactAnalysisProfile(language: .typescript),
+            analysisProfile: exactAnalysisProfile(language: .javascript),
             generation: 1
         )
         Issue.record("expected unsupported language")
@@ -126,7 +126,7 @@ func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("typescript") == true
+                .contains("javascript") == true
         )
     } catch {
         Issue.record("unexpected error: \(error)")
@@ -304,6 +304,279 @@ func exactCoordinatorFiltersPythonStubTargets() async throws {
         return
     }
     #expect(entries.isEmpty)
+}
+
+@MainActor
+@Test
+func exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly()
+    async throws
+{
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "package.json": "{}\n",
+        "main.ts": "export function target(): void {}\ntarget();\n",
+        "widget.tsx": "export function widget(): void {}\n",
+        "index.d.ts": "declare const old: any\n",
+        "legacy.js": "let old = 1\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(file: "main.ts", byteOffset: 0, line: 1, column: 1)
+    }
+    let expectedProfile = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+            "package.json": "{}\n",
+            "main.ts": "export function target(): void {}\ntarget();\n",
+            "widget.tsx": "export function widget(): void {}\n",
+            "index.d.ts": "export const old: any\n",
+            "legacy.js": "let old = 1\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: expectedProfile.configFingerprint,
+            environmentFingerprint: expectedProfile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ready or unavailable") {
+        coordinator.readiness != .preparing
+    })
+    guard case .ready = coordinator.readiness else {
+        if case .unavailable(let reason) = coordinator.readiness {
+            Issue.record("TypeScript exact became unavailable: \(reason)")
+        }
+        return
+    }
+    #expect(state.prepareCount == 1)
+
+    let tsResult = await coordinator.definition(
+        file: "main.ts",
+        byteOffset: 0,
+        generation: 1
+    )
+    #expect(exactCompletedEntry(tsResult)?.origin == .worktree)
+    #expect(exactCompletedEntry(tsResult)?.location.file == "main.ts")
+
+    let tsxResult = await coordinator.definition(
+        file: "widget.tsx",
+        byteOffset: 0,
+        generation: 1
+    )
+    #expect(exactCompletedEntry(tsxResult) != nil)
+}
+
+@MainActor
+@Test
+func exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() async throws {
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "package.json": "{}\n",
+        "main.ts": "export function target(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState()
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+            "package.json": "{}\n",
+            "main.ts": "export function target(): void {}\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: "wrong",
+            environmentFingerprint: ""
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ts profile mismatch leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .unavailable(let reason) = coordinator.readiness else {
+        Issue.record("ts profile mismatch did not fail")
+        return
+    }
+    #expect(reason.contains("profile"))
+    #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorReportsMissingTypeScriptProvider() async throws {
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "package.json": "{}\n",
+        "main.ts": "export function target(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let profile = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, _ in
+            throw ExactError.unavailable(
+                "typescript-language-server is not installed"
+            )
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+            "package.json": "{}\n",
+            "main.ts": "export function target(): void {}\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ts missing provider leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .unavailable(let reason) = coordinator.readiness else {
+        Issue.record("missing TS provider did not fail")
+        return
+    }
+    #expect(reason.contains("typescript-language-server"))
+}
+
+@Test
+func exactTypeScriptProfileTracksConfigPackageAndLockFingerprints() throws {
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": { \"strict\": true } }\n",
+        "package.json": "{ \"name\": \"p\", \"version\": \"1.0.0\" }\n",
+        "bun.lockb": Data([0x01, 0x02, 0x03]).base64EncodedString(),
+        "main.ts": "export function target(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let base = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    #expect(base.featureSelection == .defaultFeatures)
+    #expect(!base.configFingerprint.isEmpty)
+    #expect(!base.environmentFingerprint.isEmpty)
+
+    try "{ \"name\": \"p\", \"version\": \"2.0.0\" }\n".write(
+        to: root.appendingPathComponent("package.json"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let packageChanged = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    #expect(packageChanged.configFingerprint != base.configFingerprint)
+    #expect(packageChanged.environmentFingerprint == base.environmentFingerprint)
+
+    try "[0x09, 0x0a]".write(
+        to: root.appendingPathComponent("bun.lockb"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let lockChanged = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    #expect(lockChanged.environmentFingerprint != base.environmentFingerprint)
+}
+
+@MainActor
+@Test
+func exactCoordinatorFiltersDeferredTypeScriptTargets() async throws {
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "package.json": "{}\n",
+        "main.ts": "export function target(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(file: "index.d.ts", byteOffset: 0, line: 1, column: 1)
+    }
+    let profile = try ExactProfileKey(
+        projectURL: root,
+        language: .typescript
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+            "package.json": "{}\n",
+            "main.ts": "export function target(): void {}\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ts ready") { coordinator.readiness == .ready })
+    let result = await coordinator.definition(
+        file: "main.ts",
+        byteOffset: 0,
+        generation: 1
+    )
+    guard case .completed(let entries) = result else {
+        Issue.record("deferred target should complete empty")
+        return
+    }
+    #expect(entries.isEmpty)
+    #expect(state.definitionCount == 1)
 }
 
 @MainActor
@@ -1235,6 +1508,86 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
 
 @MainActor
 @Test
+func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throws {
+    let root = try exactTemporaryTypeScriptProject([
+        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "package.json": "{}\n",
+        "src/lib.ts": "export function target(): void {}\n",
+        "src/main.ts": "import { target } from './lib'; target();\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let snapshot = try CommitSnapshot(repositoryURL: root)
+    let profile = try ExactProfileKey(
+        snapshot: snapshot,
+        language: .typescript
+    )
+    let materializer = Materializer(
+        rootURL: root.appendingPathComponent("cache/materialized")
+    )
+    let expectedRoot = materializer.rootURL
+        .appendingPathComponent(snapshot.commitOID.hex)
+        .appendingPathComponent(profile.configFingerprint)
+    let providerRoot = ExactVersionBox("")
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(
+            file: expectedRoot.appendingPathComponent("src/lib.ts").path,
+            byteOffset: 4,
+            line: 1,
+            column: 5
+        )
+    }
+    let coordinator = ExactCoordinator(
+        providerFactory: { root, language in
+            providerRoot.value = root.path
+            return ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: { root, revision in
+            try CommitSnapshot(
+                repositoryURL: root,
+                revision: revision ?? "HEAD"
+            )
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        ),
+        materializer: materializer
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: "HEAD",
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ts commit ready") {
+        coordinator.readiness == .ready
+    })
+    let result = await coordinator.definition(
+        file: "src/main.ts",
+        byteOffset: 0,
+        generation: 1
+    )
+
+    #expect(providerRoot.value == expectedRoot.path)
+    #expect(exactCompletedEntry(result)?.location.file == "src/lib.ts")
+    #expect(exactCompletedEntry(result)?.origin == .materialized(
+        commitOID: snapshot.commitOID.hex
+    ))
+}
+
+@MainActor
+@Test
 func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
@@ -2115,9 +2468,50 @@ private func exactTemporaryPythonProject(
     return root
 }
 
+private func exactTemporaryTypeScriptProject(
+    _ files: [String: String]
+) throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactCoordinatorTypeScriptTests-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    for (path, contents) in files {
+        let file = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try contents.write(to: file, atomically: true, encoding: .utf8)
+    }
+    return root
+}
+
 private func exactPythonProfile(
     language: LanguageID,
     projectUnitName: String = "python-test",
+    configFingerprint: String,
+    environmentFingerprint: String
+) -> AnalysisProfile {
+    AnalysisProfile(
+        language: language,
+        projectRoot: PathID(rawValue: 0),
+        projectUnitName: projectUnitName,
+        configFingerprint: configFingerprint,
+        environmentFingerprint: environmentFingerprint,
+        featureSelection: .defaultFeatures,
+        featureNames: [],
+        edition: nil,
+        trustMode: .safe
+    )
+}
+
+private func exactTypeScriptProfile(
+    language: LanguageID,
+    projectUnitName: String = "typescript-test",
     configFingerprint: String,
     environmentFingerprint: String
 ) -> AnalysisProfile {

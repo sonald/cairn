@@ -192,7 +192,44 @@ public final class ExactCoordinator {
                 )
             case .rust:
                 break
-            case .typescript, .javascript:
+            case .typescript:
+                guard let node = TypeScriptLanguageServerProvider
+                    .findExecutable(
+                        named: "node",
+                        projectURL: projectURL
+                    ),
+                    let languageServer = TypeScriptLanguageServerProvider
+                        .findExecutable(
+                            named: "typescript-language-server",
+                            projectURL: projectURL
+                        )
+                else {
+                    throw ExactError.unavailable(
+                        "typescript-language-server is not installed"
+                    )
+                }
+                let tsserver = TypeScriptLanguageServerProvider
+                    .findExecutable(
+                        named: "tsserver.js",
+                        projectURL: projectURL
+                    )
+                    ?? [
+                        "/opt/homebrew/lib/node_modules/typescript/lib/tsserver.js",
+                        "/usr/local/lib/node_modules/typescript/lib/tsserver.js",
+                    ].first { FileManager.default.isReadableFile(atPath: $0) }
+                    .map(URL.init(fileURLWithPath:))
+                guard let tsserver else {
+                    throw ExactError.unavailable(
+                        "typescript-language-server is not installed"
+                    )
+                }
+                return try TypeScriptLanguageServerProvider(
+                    projectURL: projectURL,
+                    nodeURL: node,
+                    languageServerURL: languageServer,
+                    tsserverURL: tsserver
+                )
+            case .javascript:
                 throw CocoaError(.featureUnsupported, userInfo: [
                     NSLocalizedFailureReasonErrorKey:
                         "Exact analysis does not support "
@@ -1031,9 +1068,9 @@ private func isSandboxUnavailable(_ error: any Error) -> Bool {
 
 private func validateExactLanguage(_ language: LanguageID) throws {
     switch language {
-    case .rust, .python:
+    case .rust, .python, .typescript:
         return
-    case .typescript, .javascript:
+    case .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 "Exact analysis does not support \(String(describing: language))",
@@ -1084,7 +1121,12 @@ private func validateProfile(
             && profile.featureSelection == analysisProfile.featureSelection
     case .rust:
         matches = profile.featureSelection == analysisProfile.featureSelection
-    case .typescript, .javascript:
+    case .typescript:
+        matches = profile.configFingerprint == analysisProfile.configFingerprint
+            && profile.environmentFingerprint
+                == analysisProfile.environmentFingerprint
+            && profile.featureSelection == analysisProfile.featureSelection
+    case .javascript:
         matches = false
     }
     guard matches else {

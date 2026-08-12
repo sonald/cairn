@@ -172,7 +172,18 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .typescript, .javascript:
+        case .typescript:
+            let fingerprints = typescriptConfigIdentity { path in
+                try? [UInt8](Data(
+                    contentsOf: root.appendingPathComponent(path),
+                    options: .mappedIfSafe
+                ))
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -216,7 +227,15 @@ public struct ExactProfileKey: Hashable, Sendable {
             environmentFingerprint = fingerprints.environment
             try Self.requireDefaultFeatures(featureSelection)
             self.featureSelection = .defaultFeatures
-        case .typescript, .javascript:
+        case .typescript:
+            let fingerprints = typescriptConfigIdentity { path in
+                try? snapshot.readBytes(path: path)
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -250,9 +269,9 @@ public struct ExactProfileKey: Hashable, Sendable {
         _ language: LanguageID
     ) throws {
         switch language {
-        case .rust, .python:
+        case .rust, .python, .typescript:
             return
-        case .typescript, .javascript:
+        case .javascript:
             throw Self.unsupportedFingerprint(language)
         }
     }
@@ -262,7 +281,7 @@ public struct ExactProfileKey: Hashable, Sendable {
     ) throws {
         guard featureSelection == .defaultFeatures else {
             throw ExactError.unavailable(
-                "Exact Python feature selection must be .defaultFeatures"
+                "Exact non-Rust feature selection must be .defaultFeatures"
             )
         }
     }
