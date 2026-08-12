@@ -14,18 +14,21 @@ final class EmptyStateView: NSView {
     private var isFailure = false
 
     private let onChooseProject: () -> Void
-    private let onOpenProject: (URL) -> Void
+    private let onOpenRecent: (URL) -> Void
+    private let onOpenDropped: (URL) -> Void
     private let onRetry: () -> Void
 
     init(
         recentPaths: [String],
         failed: Bool,
         onChooseProject: @escaping () -> Void,
-        onOpenProject: @escaping (URL) -> Void,
+        onOpenRecent: @escaping (URL) -> Void,
+        onOpenDropped: @escaping (URL) -> Void,
         onRetry: @escaping () -> Void
     ) {
         self.onChooseProject = onChooseProject
-        self.onOpenProject = onOpenProject
+        self.onOpenRecent = onOpenRecent
+        self.onOpenDropped = onOpenDropped
         self.onRetry = onRetry
         super.init(frame: .zero)
 
@@ -158,7 +161,7 @@ final class EmptyStateView: NSView {
             return false
         }
         setDropHighlighted(false)
-        onOpenProject(root)
+        onOpenDropped(root)
         return true
     }
 
@@ -172,7 +175,7 @@ final class EmptyStateView: NSView {
 
     @objc private func openRecent(_ sender: NSButton) {
         guard recentPaths.indices.contains(sender.tag) else { return }
-        onOpenProject(URL(
+        onOpenRecent(URL(
             fileURLWithPath: recentPaths[sender.tag],
             isDirectory: true
         ))

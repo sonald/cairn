@@ -83,6 +83,13 @@ let package = Package(
             publicHeadersPath: "include"
         ),
         .target(
+            name: "CTreeSitterPython",
+            dependencies: ["CTreeSitter"],
+            path: "Sources/CTreeSitterPython",
+            exclude: ["src/node-types.json"],
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "CProcessGuard",
             path: "Sources/CProcessGuard",
             publicHeadersPath: "include"
@@ -107,6 +114,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CodeInsightPythonExtractor",
+            dependencies: [
+                "CodeInsightCore",
+                "TreeSitterKit",
+                "CTreeSitterPython",
+            ]
+        ),
+        .target(
             name: "CodeInsightExact",
             dependencies: [
                 "CProcessGuard",
@@ -119,6 +134,7 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightGit",
+                "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
             ],
             linkerSettings: [.linkedLibrary("sqlite3")]
@@ -152,9 +168,11 @@ let package = Package(
             name: "CodeInsightReaderCore",
             dependencies: [
                 "CodeInsightCore",
+                "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
                 "TreeSitterKit",
                 "CTreeSitterRust",
+                "CTreeSitterPython",
             ]
         ),
         .target(
@@ -175,7 +193,7 @@ let package = Package(
         ),
         .testTarget(
             name: "TreeSitterKitTests",
-            dependencies: ["TreeSitterKit", "CTreeSitterRust"]
+            dependencies: ["TreeSitterKit", "CTreeSitterRust", "CTreeSitterPython"]
         ),
         .testTarget(
             name: "CodeInsightCoreTests",
@@ -212,11 +230,20 @@ let package = Package(
             exclude: ["Fixtures"]
         ),
         .testTarget(
+            name: "PythonExtractorTests",
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightPythonExtractor",
+            ],
+            exclude: ["Fixtures"]
+        ),
+        .testTarget(
             name: "CodeInsightEngineTests",
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
                 "CodeInsightGit",
+                "CodeInsightPythonExtractor",
             ]
         ),
         .testTarget(

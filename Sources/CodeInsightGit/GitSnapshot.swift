@@ -274,9 +274,9 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
 
     public init(repositoryURL: URL, language: LanguageID) throws {
         switch language {
-        case .rust:
+        case .rust, .python:
             break
-        case .python, .typescript, .javascript:
+        case .typescript, .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "Worktree snapshot does not support \(String(describing: language))",
@@ -308,7 +308,17 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         }
 
         var configurationFiles: [String: CapturedFile] = [:]
-        for file in (try? Self.configurationFiles(under: root)) ?? [] {
+        let configurationURLs: [URL]
+        switch language {
+        case .rust:
+            configurationURLs = (try? Self.configurationFiles(under: root)) ?? []
+        case .python:
+            configurationURLs = ["pyrightconfig.json", "pyproject.toml", "uv.lock"]
+                .map(root.appendingPathComponent)
+        case .typescript, .javascript:
+            configurationURLs = []
+        }
+        for file in configurationURLs {
             guard let data = try? Data(contentsOf: file, options: .mappedIfSafe)
             else { continue }
             let bytes = [UInt8](data)

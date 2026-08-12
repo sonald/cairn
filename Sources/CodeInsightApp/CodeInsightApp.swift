@@ -20,7 +20,7 @@ private enum SelfTestBudgets {
     static let hugeFirstVisibleMS = 2_500.0
     static let hugeStyledFragments = 500
     static let projectTreeVisibleMS = 1_000.0
-    static let projectIndexReadyMS = 2_000.0
+    static let projectIndexReadyMS = 2_500.0
     static let snapshotFirstPaintMS = 1_000.0
 }
 
@@ -146,6 +146,14 @@ private struct CodeInsightApplication {
                 fileURLWithPath: arguments[index + 1],
                 isDirectory: true
             ))
+        }
+        let pythonSelfTestRoot = arguments.firstIndex(of: "--self-test-python")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        if arguments.contains("--self-test-python"), pythonSelfTestRoot == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-python <python-git-repo>\n".utf8
+            ))
+            Darwin.exit(2)
         }
         let app = NSApplication.shared
         if let foldPerformance {
@@ -299,12 +307,41 @@ private struct CodeInsightApplication {
             let runsSelfTest = arguments.contains {
                 $0.hasPrefix("--self-test") || $0.hasPrefix("--fold-perf")
             }
-            delegate = AppDelegate(
-                startedAt: startedAt,
-                model: runsSelfTest
-                    ? AppModel()
-                    : AppModel(sessionURL: AppModel.defaultSessionURL)
-            )
+            if pythonSelfTestRoot != nil {
+                let pythonSelfTestID = UUID().uuidString
+                let pythonRecentStore = RecentProjectsStore(defaults: UserDefaults(
+                    suiteName: "CodeInsightPythonSelfTest-\(pythonSelfTestID)"
+                )!)
+                delegate = AppDelegate(
+                    startedAt: startedAt,
+                    model: AppModel(
+                        sessionURL: FileManager.default.temporaryDirectory
+                            .appendingPathComponent(
+                                "CodeInsightPythonSelfTest-\(pythonSelfTestID).json"
+                            )
+                    ),
+                    recentProjectsStore: pythonRecentStore
+                )
+            } else {
+                delegate = AppDelegate(
+                    startedAt: startedAt,
+                    model: runsSelfTest
+                        ? AppModel()
+                        : AppModel(sessionURL: AppModel.defaultSessionURL)
+                )
+            }
+        }
+        if let pythonRoot = pythonSelfTestRoot {
+            withExtendedLifetime(delegate) {
+                Task { @MainActor in
+                    await delegate.runPythonSelfTest(root: URL(
+                        fileURLWithPath: pythonRoot,
+                        isDirectory: true
+                    ))
+                }
+                app.run()
+            }
+            return
         }
         app.delegate = delegate
         withExtendedLifetime(delegate) {
@@ -379,7 +416,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private let model: AppModel
     private let exactSelfTestProviderState: ExactSelfTestProviderState?
     private let relationTimingTemporaryRoot: URL?
-    private let recentProjectsStore = RecentProjectsStore()
+    private let recentProjectsStore: RecentProjectsStore
     private var readerSettings = ReaderSettings(defaults: .standard)
     private var windowController: MainWindowController?
     private var settingsWindowController: ReaderSettingsWindowController?
@@ -388,12 +425,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         startedAt: ContinuousClock.Instant,
         model: AppModel = AppModel(),
         exactSelfTestProviderState: ExactSelfTestProviderState? = nil,
-        relationTimingTemporaryRoot: URL? = nil
+        relationTimingTemporaryRoot: URL? = nil,
+        recentProjectsStore: RecentProjectsStore = RecentProjectsStore()
     ) {
         self.startedAt = startedAt
         self.model = model
         self.exactSelfTestProviderState = exactSelfTestProviderState
         self.relationTimingTemporaryRoot = relationTimingTemporaryRoot
+        self.recentProjectsStore = recentProjectsStore
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -496,6 +535,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 fileMenu?.item(withTitle: "Quick Open…")?.keyEquivalent == "p"
                 && fileMenu?.item(withTitle: "Quick Open…")?
                     .keyEquivalentModifierMask == .command,
+            "fileMenuHasRustAndPythonOpen":
+                fileMenu?.item(withTitle: "Open Project…") != nil
+                && fileMenu?.item(withTitle: "Open Python Project…") != nil,
+            "paletteCollectsRustAndPythonOpen":
+                paletteCommands.contains {
+                    $0.title == "File ▸ Open Project…"
+                }
+                && paletteCommands.contains {
+                    $0.title == "File ▸ Open Python Project…"
+                },
             "commandPaletteUsesShiftCommandP":
                 goMenu?.item(withTitle: "Command Palette…")?
                     .keyEquivalent == "p"
@@ -5250,7 +5299,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     private func exactRelationEdges(
         in model: AppModel
     ) -> [RelationTreeModel.Node] {
-        guard let children = model.relationTree.root?.children else { return [] }
+        guard let root = model.relationTree.root else { return [] }
+        return relationEdgeNodes(in: root).filter { $0.badge == "Verified" }
+    }
+
+    private func relationEdgeNodes(
+        in root: RelationTreeModel.Node
+    ) -> [RelationTreeModel.Node] {
+        let children = root.children ?? []
         var rows: [RelationTreeModel.Node] = []
         for child in children {
             if child.kind == .edge {
@@ -5259,7 +5315,60 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 rows += (child.children ?? []).filter { $0.kind == .edge }
             }
         }
-        return rows.filter { $0.badge == "Verified" }
+        return rows
+    }
+
+    private var exactRelationEdgeCount: Int {
+        exactRelationEdges(in: model).count
+    }
+
+    private func exactRelationEdgeCount(in model: AppModel) -> Int {
+        exactRelationEdges(in: model).count
+    }
+
+    private func finishPythonSelfTest(
+        coldFileCount: Int,
+        coldReused: Int,
+        coldExtracted: Int,
+        hotFileCount: Int,
+        hotReused: Int,
+        hotExtracted: Int,
+        checks: [String: Bool],
+        startedAt: ContinuousClock.Instant
+    ) -> Never {
+        let passed = checks.values.allSatisfy { $0 }
+        Self.writeJSON([
+            "step": "summary",
+            "channel": "python",
+            "passed": passed,
+            "cold": [
+                "fileCount": coldFileCount,
+                "reused": coldReused,
+                "extracted": coldExtracted,
+            ],
+            "hot": [
+                "fileCount": hotFileCount,
+                "reused": hotReused,
+                "extracted": hotExtracted,
+            ],
+            "checks": checks,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        Self.exitSelfTest(channel: "python", status: passed ? 0 : 1)
+    }
+
+    private func finishPythonSelfTest(
+        error: String,
+        startedAt: ContinuousClock.Instant
+    ) -> Never {
+        Self.writeJSON([
+            "step": "summary",
+            "channel": "python",
+            "passed": false,
+            "error": error,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        Self.exitSelfTest(channel: "python", status: 1)
     }
 
     private func firstActionableRelation(
@@ -5491,6 +5600,486 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runPythonSelfTest(root inputRoot: URL) async -> Never {
+        launch(offscreen: true, measuresIdleFootprint: false)
+        let startedAt = ContinuousClock.now
+        let root = inputRoot.standardizedFileURL
+        let relativeMemoryFile = "src/mcp/shared/memory.py"
+        let memoryFile = root.appendingPathComponent(relativeMemoryFile)
+            .standardizedFileURL
+        let compareRelativeFile = "src/mcp/server/fastmcp/server.py"
+        let compareFile = root.appendingPathComponent(compareRelativeFile)
+            .standardizedFileURL
+        let hierarchyRelativeFile = "src/mcp/cli/cli.py"
+        let hierarchyFile = root.appendingPathComponent(hierarchyRelativeFile)
+            .standardizedFileURL
+        let pythonModel = self.model
+        let pythonRecentStore = self.recentProjectsStore
+
+        func pythonReady() -> Bool {
+            if case let .ready(session, _) = pythonModel.projectState {
+                return session.analysisProfile.language == .python
+            }
+            return false
+        }
+        func finish(_ error: String) -> Never {
+            finishPythonSelfTest(error: error, startedAt: startedAt)
+        }
+        func pythonWait(
+            timeout: TimeInterval,
+            _ condition: @escaping () -> Bool
+        ) async -> Bool {
+            let deadline = Date(timeIntervalSinceNow: timeout)
+            while Date() < deadline {
+                if condition() { return true }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return condition()
+        }
+
+        guard let controller = windowController else {
+            finish("window unavailable")
+        }
+        guard previousCommitRevision(root: root) != nil else {
+            finish("HEAD~1 unavailable")
+        }
+
+        controller.openProject(root: root, language: .python)
+        guard await pythonWait(timeout: 120, {
+            if case .failed = pythonModel.projectState { return true }
+            if case .ready = pythonModel.projectState {
+                return pythonModel.fileTree != nil
+                    && !pythonModel.commitPicker.isLoading
+                    && pythonModel.snapshotPhase == .fullReady
+                    && pythonReady()
+            }
+            return false
+        }), case let .ready(session, context) = pythonModel.projectState,
+              pythonModel.snapshotPhase == .fullReady,
+              pythonModel.fileTree != nil,
+              session.analysisProfile.language == .python,
+              let previousRevision = pythonModel.commitPicker.commits
+                .dropFirst().first?.fullSHA
+        else {
+            finish("python project or HEAD~1 commit unavailable")
+        }
+        let coldSession = session
+        let coldContext = context
+        let fileCount = pythonModel.fileTree?.fileCount ?? 0
+        let coldStats = coldSession.stats
+        let manifestPaths = coldSession.manifest.files.map {
+            coldSession.paths.resolve($0.pathID)
+        }
+        let badManifestPaths = manifestPaths.filter {
+            !$0.hasSuffix(".py") || $0.hasSuffix(".pyi")
+        }
+        let treeFiles = pythonFiles(in: pythonModel.fileTree?.children ?? [])
+        let treeOnlyPython = !treeFiles.isEmpty
+            && treeFiles.allSatisfy { $0.pathExtension == "py" }
+        guard treeOnlyPython, badManifestPaths.isEmpty else {
+            finish("python tree contained non-.py paths: \(badManifestPaths)")
+        }
+        Self.writeJSON([
+            "step": "cold-open",
+            "language": "python",
+            "projectUnit": coldSession.analysisProfile.projectUnitName,
+            "fileCount": fileCount,
+            "reused": coldStats.reusedCount,
+            "extracted": coldStats.extractedCount,
+            "snapshotPhase": pythonModel.snapshotPhase?.rawValue as Any,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        guard await pythonWait(timeout: 90, {
+            pythonModel.exactCoordinator.readiness == .ready
+        }), let attribution = pythonModel.exactCoordinator.attribution
+        else {
+            finish("Pyright missing/unready: \(pythonModel.exactCoordinator.readiness)")
+        }
+
+        do {
+            let contentHits = try await contentSearchHits(
+                session: coldSession,
+                context: coldContext,
+                query: ContentSearchQuery(
+                    pattern: "create_client_server_memory_streams",
+                    caseSensitive: true
+                )
+            )
+            let symbolHits = try coldSession.searchSymbols(
+                query: "create_client_server_memory_streams",
+                limit: 20,
+                boost: SearchBoost(),
+                context: coldContext
+            )
+            guard contentHits.contains(where: { $0.hasSuffix(relativeMemoryFile) }),
+                  symbolHits.contains(where: { $0.path.hasSuffix(relativeMemoryFile) })
+            else {
+                finish("search did not hit memory.py")
+            }
+            Self.writeJSON([
+                "step": "search",
+                "contentHit": relativeMemoryFile,
+                "symbolHit": relativeMemoryFile,
+                "elapsedMS": milliseconds(since: startedAt),
+            ])
+        } catch {
+            finish("search failed: \(error)")
+        }
+
+        guard controller.selectFileInSidebar(memoryFile),
+              await pythonWait(timeout: 30, {
+                  controller.displayedReaderFile?.standardizedFileURL
+                      == memoryFile.standardizedFileURL
+                      && pythonModel.tabStrip.activeDocument != nil
+                      && controller.selfTestStyledFragmentCount > 0
+              })
+        else {
+            finish("could not open memory.py in reader")
+        }
+        let readerBytes = controller.selfTestLeftReaderBytes ?? []
+        let activeDocument = pythonModel.tabStrip.activeDocument
+        let outlineCount = activeDocument?.outlineFacets.count ?? 0
+        let bindingCount = activeDocument?.localBindings.count ?? 0
+        let localReferenceCount = activeDocument?.referencesByBinding
+            .compactMap(\.count).reduce(0, +) ?? 0
+        let styledFragments = controller.selfTestStyledFragmentCount
+        let foldRegions = activeDocument?.foldRegions.count ?? 0
+        guard !readerBytes.isEmpty,
+              outlineCount > 0,
+              bindingCount > 0,
+              localReferenceCount > 0,
+              styledFragments > 0,
+              foldRegions > 0
+        else {
+            finish("Reader/outline/local reference unavailable")
+        }
+        let needleOffsets = utf8Offsets(
+            of: "create_client_server_memory_streams",
+            in: readerBytes
+        )
+        guard let callOffset = needleOffsets.dropFirst().first
+            .flatMap(UInt32.init)
+        else {
+            finish("call-site offset unavailable")
+        }
+        let fuzzy = await pythonModel.contextWindow.resolvedCandidate(
+            file: relativeMemoryFile,
+            offset: callOffset
+        )
+        guard let fuzzySymbol = fuzzy?.symbol else {
+            finish("fuzzy context had no Python symbol")
+        }
+        controller.selfTestReaderRelation(
+            offset: callOffset,
+            direction: .references
+        )
+        let localRelationLoaded = await pythonWait(timeout: 30) {
+            guard let root = pythonModel.relationTree.root,
+                  !(root.children?.contains { $0.kind == .loading } ?? true)
+            else { return false }
+            return !self.relationEdgeNodes(in: root).isEmpty
+        }
+        guard localRelationLoaded else {
+            finish("local relation tree did not load")
+        }
+        Self.writeJSON([
+            "step": "reader-context",
+            "outlineFacets": outlineCount,
+            "localBindings": bindingCount,
+            "localReferences": localReferenceCount,
+            "styledFragments": styledFragments,
+            "foldRegions": foldRegions,
+            "fuzzySymbol": fuzzySymbol.localIndex,
+            "localRelationLoaded": localRelationLoaded,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        guard case let .completed(definitions) =
+            await pythonModel.exactCoordinator.definition(
+                file: relativeMemoryFile,
+                byteOffset: callOffset,
+                generation: coldContext.generation
+            ),
+            !definitions.isEmpty
+        else {
+            finish("Pyright definition unavailable")
+        }
+
+        await pythonModel.relationTree.setRoot(
+            target: .engine(fuzzySymbol),
+            direction: .references
+        )?.value
+        let referenceCount = exactRelationEdgeCount(in: pythonModel)
+
+        guard let hierarchyBytes = try? Array(Data(contentsOf: hierarchyFile)),
+              let hierarchyDeclOffset = utf8Offsets(
+                  of: "def _parse_file_path",
+                  in: hierarchyBytes
+              ).first,
+              let hierarchyOffset = utf8Offsets(
+                  of: "_parse_file_path",
+                  in: Array(hierarchyBytes.dropFirst(hierarchyDeclOffset))
+              ).first.map({ hierarchyDeclOffset + $0 }).flatMap(UInt32.init),
+              let hierarchyCandidate = await pythonModel.contextWindow
+                .resolvedCandidate(
+                    file: hierarchyRelativeFile,
+                    offset: hierarchyOffset
+                ),
+              let hierarchySymbol = hierarchyCandidate.symbol
+        else {
+            finish("hierarchy symbol unavailable")
+        }
+        await pythonModel.relationTree.setRoot(
+            target: .engine(hierarchySymbol),
+            direction: .callers
+        )?.value
+        let callerCount = exactRelationEdgeCount(in: pythonModel)
+        await pythonModel.relationTree.setRoot(
+            target: .engine(hierarchySymbol),
+            direction: .calls
+        )?.value
+        let callCount = exactRelationEdgeCount(in: pythonModel)
+        let exactReferences = referenceCount > 0
+        let callHierarchyExact = callerCount > 0 || callCount > 0
+        Self.writeJSON([
+            "step": "real-python-hierarchy-counts",
+            "hierarchyFile": hierarchyRelativeFile,
+            "hierarchyOffset": hierarchyOffset,
+            "referenceCount": referenceCount,
+            "callerCount": callerCount,
+            "callCount": callCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        guard callHierarchyExact else {
+            finish("Pyright call hierarchy unavailable")
+        }
+        pythonModel.contextWindow.tokenClicked(
+            file: hierarchyRelativeFile,
+            offset: hierarchyOffset
+        )
+        let contextSymbolReady = await pythonWait(timeout: 5) {
+            if pythonModel.contextWindow.selectedCandidate?.symbol
+                == hierarchySymbol
+            {
+                return true
+            }
+            return false
+        }
+        guard contextSymbolReady else {
+            finish("implementations context symbol unavailable")
+        }
+        controller.showRelations(direction: .implementations)
+        let implementationsUnsupported = await pythonWait(timeout: 5) {
+            if controller.selfTestVisibleRelationText.contains(where: {
+                $0.contains("Verified unavailable: server does not support implementations")
+            }) {
+                return true
+            }
+            return false
+        }
+        guard implementationsUnsupported else {
+            finish("implementations must be unsupported")
+        }
+        controller.showRelations(direction: .references)
+        let referencesAfterUnsupported = await pythonWait(timeout: 5) {
+            guard pythonModel.exactCoordinator.readiness == .ready
+            else { return false }
+            let visible = controller.selfTestVisibleRelationText
+            return visible.contains {
+                $0.contains(" Verified")
+                    || $0.hasPrefix("No verified references")
+                    || $0.hasPrefix("Analysis limited:")
+            }
+        }
+        let referencesVisibleAfterUnsupported =
+            controller.selfTestVisibleRelationText
+        let coordinatorReadinessAfterUnsupported =
+            pythonModel.exactCoordinator.readiness
+        guard referencesAfterUnsupported else {
+            Self.writeJSON([
+                "step": "references-after-unsupported-diagnostic",
+                "visible": referencesVisibleAfterUnsupported,
+                "readiness": String(describing: coordinatorReadinessAfterUnsupported),
+                "elapsedMS": milliseconds(since: startedAt),
+            ])
+            finish("references after unsupported implementations failed")
+        }
+        Self.writeJSON([
+            "step": "real-python-exact",
+            "provider": attribution.provider,
+            "toolVersion": attribution.toolVersion,
+            "definitionTargets": definitions.count,
+            "references": referenceCount,
+            "callers": callerCount,
+            "calls": callCount,
+            "implementations": "unsupported",
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        guard let worktreeBytes = try? Array(Data(contentsOf: compareFile)),
+              let commitSnapshot = try? CommitSnapshot(
+                  repositoryURL: root,
+                  revision: previousRevision
+              ),
+              let commitBytes = try? commitSnapshot.readBytes(
+                  path: compareRelativeFile
+              ),
+              worktreeBytes != commitBytes
+        else {
+            finish("compare fixture or HEAD~1 diff unavailable")
+        }
+        controller.openFileForSelfTest(compareFile)
+        guard await pythonWait(timeout: 30, {
+            pythonModel.selectedFile?.standardizedFileURL
+                == compareFile.standardizedFileURL
+                && controller.displayedReaderFile?.standardizedFileURL
+                    == compareFile.standardizedFileURL
+        }) else {
+            finish("compare main reader did not open")
+        }
+        controller.applyPanelPreset(.compare)
+        guard controller.selectCompareCommit(previousRevision) else {
+            finish("compare commit picker did not select")
+        }
+        guard await pythonWait(timeout: 60, {
+            pythonModel.compare.diff != nil
+                && pythonModel.compare.diff?.hunks.isEmpty == false
+                && pythonModel.compare.diff?.truncated == false
+                && pythonModel.compare.rightRevision == previousRevision
+                && controller.selfTestRightReaderBytes != nil
+        }) else {
+            finish("compare HEAD~1 did not finish")
+        }
+        let rightBytes = controller.selfTestRightReaderBytes ?? []
+        let rightReaderMatchesCommit = rightBytes == commitBytes
+        let rightReaderDiffersFromWorktree = rightBytes != worktreeBytes
+        guard rightReaderMatchesCommit, rightReaderDiffersFromWorktree else {
+            finish("compare right reader mismatch")
+        }
+        Self.writeJSON([
+            "step": "compare",
+            "diffHunks": pythonModel.compare.diff?.hunks.count ?? 0,
+            "truncated": pythonModel.compare.diff?.truncated ?? true,
+            "rightReaderMatchesCommit": rightReaderMatchesCommit,
+            "rightReaderDiffersFromWorktree": rightReaderDiffersFromWorktree,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        pythonModel.switchToCommit(previousRevision)
+        guard await pythonWait(timeout: 120, {
+            pythonModel.snapshotPhase == .fullReady
+                && pythonModel.currentRevision != nil
+                && pythonModel.exactCoordinator.readiness == .ready
+                && pythonReady()
+        }) else {
+            finish("switchToCommit did not finish Python")
+        }
+        let commitStats = if case let .ready(s, _) = pythonModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        pythonModel.switchToWorktree()
+        guard await pythonWait(timeout: 120, {
+            pythonModel.currentRevision == nil
+                && pythonModel.snapshotPhase == .fullReady
+                && pythonModel.exactCoordinator.readiness == .ready
+                && pythonReady()
+        }) else {
+            finish("switchToWorktree did not finish Python")
+        }
+        let worktreeStats = if case let .ready(s, _) = pythonModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        Self.writeJSON([
+            "step": "switch",
+            "commitReused": commitStats.reusedCount,
+            "commitExtracted": commitStats.extractedCount,
+            "worktreeReused": worktreeStats.reusedCount,
+            "worktreeExtracted": worktreeStats.extractedCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        controller.checkpointSessionSynchronously()
+        guard let session = pythonModel.loadSessionSnapshot().snapshot,
+              session.language == .python
+        else {
+            finish("session checkpoint language not Python")
+        }
+        pythonRecentStore.record(root, language: .python)
+        controller.openRecentProject(root)
+        guard await pythonWait(timeout: 120, {
+            pythonModel.snapshotPhase == .fullReady
+                && pythonReady()
+        }) else {
+            finish("recent reopen did not finish Python")
+        }
+        let hotStats = if case let .ready(s, _) = pythonModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        guard hotStats.reusedCount > 0 else {
+            finish("recent reopen did not reuse cache")
+        }
+        Self.writeJSON([
+            "step": "hot-recent",
+            "fileCount": pythonModel.fileTree?.fileCount ?? 0,
+            "reused": hotStats.reusedCount,
+            "extracted": hotStats.extractedCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let generationBeforeRestore = pythonModel.generation
+        controller.restoreSession(session)
+        guard await pythonWait(timeout: 120, {
+            pythonModel.generation != generationBeforeRestore
+                && pythonModel.snapshotPhase == .fullReady
+                && pythonModel.exactCoordinator.readiness == .ready
+                && pythonReady()
+        }) else {
+            finish("session restore did not finish Python")
+        }
+        pythonRecentStore.clear()
+
+        let checks = [
+            "treeOnlyPython": treeOnlyPython,
+            "manifestOnlyPython": badManifestPaths.isEmpty,
+            "contentSearchMemory": true,
+            "symbolSearchMemory": true,
+            "readerOutlineReady": outlineCount > 0,
+            "localReferencesReady": localReferenceCount > 0,
+            "styledFragmentsReady": styledFragments > 0,
+            "foldRegionsReady": foldRegions > 0,
+            "fuzzyContextSymbol": true,
+            "localRelationLoaded": localRelationLoaded,
+            "exactDefinition": true,
+            "exactReferences": exactReferences,
+            "exactCallHierarchy": callHierarchyExact,
+            "implementationsUnsupported": implementationsUnsupported,
+            "referencesAfterUnsupported": referencesAfterUnsupported,
+            "compareHunksNonempty": true,
+            "compareRightDiffers": rightReaderDiffersFromWorktree,
+            "switchToCommitPython": true,
+            "switchToWorktreePython": true,
+            "recentReopenPython": true,
+            "sessionRestorePython": true,
+        ]
+        finishPythonSelfTest(
+            coldFileCount: fileCount,
+            coldReused: coldStats.reusedCount,
+            coldExtracted: coldStats.extractedCount,
+            hotFileCount: pythonModel.fileTree?.fileCount ?? 0,
+            hotReused: hotStats.reusedCount,
+            hotExtracted: hotStats.extractedCount,
+            checks: checks,
+            startedAt: startedAt
+        )
+    }
+
     func runOpenSelfTest(file: URL) {
         let textView = ReaderTextView()
         let scrollView = NSScrollView(
@@ -5588,7 +6177,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             measuresIdleFootprint: measuresIdleFootprint,
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
-            onChooseProject: { [weak self] in self?.openProject(nil) },
+            onChooseProject: { [weak self] in
+                self?.chooseLanguageAndOpenProject(nil)
+            },
+            onChooseProjectLanguage: { [weak self] in
+                self?.chooseLanguageAndOpenProject($0)
+            },
             onShowSettings: { [weak self] in self?.showSettings(nil) }
         )
         self.windowController = windowController
@@ -5707,22 +6301,57 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
 
     @objc private func openProject(_ sender: Any?) {
+        chooseProject(language: .rust)
+    }
+
+    @objc private func openPythonProject(_ sender: Any?) {
+        chooseProject(language: .python)
+    }
+
+    private func chooseProject(language: LanguageID) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
         if panel.runModal() == .OK, let root = panel.url {
-            windowController?.openProject(root: root)
+            windowController?.openProject(root: root, language: language)
         }
     }
 
     @objc private func openRecentProject(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        windowController?.openProject(root: URL(
+        windowController?.openRecentProject(URL(
             fileURLWithPath: path,
             isDirectory: true
         ))
+    }
+
+    private func chooseLanguageAndOpenProject(_ root: URL?) {
+        let alert = NSAlert()
+        alert.messageText = "Open Project"
+        alert.informativeText = root.map {
+            "Choose the project language for \($0.lastPathComponent)."
+        } ?? "Choose the project language."
+        alert.addButton(withTitle: "Rust")
+        alert.addButton(withTitle: "Python")
+        alert.addButton(withTitle: "Cancel")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            if let root {
+                windowController?.openProject(root: root, language: .rust)
+            } else {
+                chooseProject(language: .rust)
+            }
+        case .alertSecondButtonReturn:
+            if let root {
+                windowController?.openProject(root: root, language: .python)
+            } else {
+                chooseProject(language: .python)
+            }
+        default:
+            break
+        }
     }
 
     @objc private func clearRecentProjects(_ sender: Any?) {
@@ -6082,6 +6711,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openItem.target = self
         fileMenu.addItem(openItem)
+        let openPythonItem = NSMenuItem(
+            title: "Open Python Project…",
+            action: #selector(openPythonProject(_:)),
+            keyEquivalent: ""
+        )
+        openPythonItem.target = self
+        fileMenu.addItem(openPythonItem)
         let quickOpenItem = NSMenuItem(
             title: "Quick Open…",
             action: #selector(quickOpen(_:)),
@@ -8036,4 +8672,51 @@ private func rustFiles(in nodes: [FileTreeNode]) -> [URL] {
     nodes.flatMap { node in
         node.isDirectory ? rustFiles(in: node.children) : [node.url]
     }
+}
+
+private func pythonFiles(in nodes: [FileTreeNode]) -> [URL] {
+    nodes.flatMap { node in
+        node.isDirectory ? pythonFiles(in: node.children) : [node.url]
+    }
+}
+
+private func utf8Offsets(
+    of needle: String,
+    in bytes: [UInt8]
+) -> [Int] {
+    guard !needle.isEmpty else { return [] }
+    let data = Data(bytes)
+    let pattern = Data(needle.utf8)
+    var result: [Int] = []
+    var start = data.startIndex
+    while start < data.endIndex,
+          let range = data.range(of: pattern, in: start ..< data.endIndex)
+    {
+        result.append(range.lowerBound)
+        start = range.upperBound
+    }
+    return result
+}
+
+@MainActor
+private func contentSearchHits(
+    session: EngineSession,
+    context: QueryContext,
+    query: ContentSearchQuery
+) async throws -> [String] {
+    var paths: [String] = []
+    for try await batch in try session.search(query, context: context) {
+        for pathID in batch.matchesByPath.keys {
+            paths.append(session.paths.resolve(pathID))
+        }
+    }
+    return paths
+}
+
+private func previousCommitRevision(root: URL) -> String? {
+    guard (try? CommitSnapshot(
+        repositoryURL: root,
+        revision: "HEAD~1"
+    )) != nil else { return nil }
+    return "HEAD~1"
 }

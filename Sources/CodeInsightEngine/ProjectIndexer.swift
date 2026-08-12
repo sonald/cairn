@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightGit
+import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
 import Foundation
 
@@ -456,7 +457,9 @@ public struct ProjectIndexer: Sendable {
         switch language {
         case .rust:
             return RustExtractor()
-        case .python, .typescript, .javascript:
+        case .python:
+            return PythonExtractor()
+        case .typescript, .javascript:
             throw unsupportedLanguage(language)
         }
     }
@@ -489,7 +492,13 @@ public struct ProjectIndexer: Sendable {
         switch language {
         case .rust:
             profile = ProfileDetector.detect(root: root, projectRoot: projectRoot)
-        case .python, .typescript, .javascript:
+        case .python:
+            profile = ProfileDetector.detect(
+                projectURL: root,
+                language: language,
+                projectRoot: projectRoot
+            )
+        case .typescript, .javascript:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)
@@ -507,7 +516,13 @@ public struct ProjectIndexer: Sendable {
                 snapshot: snapshot,
                 projectRoot: projectRoot
             )
-        case .python, .typescript, .javascript:
+        case .python:
+            profile = ProfileDetector.detect(
+                snapshot: snapshot,
+                language: language,
+                projectRoot: projectRoot
+            )
+        case .typescript, .javascript:
             throw unsupportedLanguage(language)
         }
         return try validated(profile, for: language)

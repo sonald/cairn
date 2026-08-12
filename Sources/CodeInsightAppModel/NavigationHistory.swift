@@ -284,9 +284,9 @@ public func renderEnglish(_ clause: NarrativeClause) -> String {
             return "The source relation result set completeness is unknown; \(count) \(noun) were returned."
         }
     case .verified(let origin):
-        return "rust-analyzer returned this target from \(originEnglish(origin))."
+        return "The exact provider returned this target from \(originEnglish(origin))."
     case .corroborated:
-        return "The source candidate and rust-analyzer target were corroborated."
+        return "The source candidate and exact provider target were corroborated."
     case .exactNotStarted:
         return "Exact verification was not attempted."
     case .exactPending:
@@ -298,9 +298,9 @@ public func renderEnglish(_ clause: NarrativeClause) -> String {
     case .exactNotApplicable:
         return "The exact relation query does not apply to this root."
     case .conflict:
-        return "rust-analyzer returned a different target; this earlier candidate remains in the correction trail."
+        return "The exact provider returned a different target; this earlier candidate remains in the correction trail."
     case .inconclusive:
-        return "The source candidate and rust-analyzer target could not be compared reliably."
+        return "The source candidate and exact provider target could not be compared reliably."
     }
 }
 

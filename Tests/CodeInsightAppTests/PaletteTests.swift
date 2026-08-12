@@ -84,6 +84,56 @@ struct PaletteTests {
     }
 
     @Test
+    func currentSymbolModeOrdersPythonClassInExistingTypeGroup() {
+        let file = URL(fileURLWithPath: "/palette.py")
+        let document = ReaderDocument(
+            bytes: Array(String(repeating: "x", count: 80).utf8),
+            languageMode: LanguageMode(language: .python),
+            outlineFacets: [
+                facet("make", .fn, 60),
+                facet("Widget", .class, 10),
+                facet("run", .method, 40),
+            ]
+        )
+
+        let matches = PalettePanel.currentSymbolRows(
+            query: "run",
+            document: document,
+            file: file
+        )
+        #expect(matches.map(\.title) == ["run"])
+        #expect(matches.map(\.identity) == [
+            "current:method:40",
+        ])
+
+        let widgetOnly = PalettePanel.currentSymbolRows(
+            query: "Widget",
+            document: document,
+            file: file
+        )
+        #expect(widgetOnly.map(\.title) == ["Widget"])
+        #expect(widgetOnly.map(\.identity) == ["current:class:10"])
+
+        let typeGroup = ReaderDocument(
+            bytes: Array(String(repeating: "x", count: 100).utf8),
+            outlineFacets: [
+                facet("ClassBox", .class, 30),
+                facet("StructBox", .struct, 10),
+                facet("AliasBox", .typeAlias, 50),
+                facet("EnumBox", .enum, 20),
+            ]
+        )
+        let typeRows = PalettePanel.currentSymbolRows(
+            query: "Box",
+            document: typeGroup,
+            file: URL(fileURLWithPath: "/order.rs")
+        )
+        #expect(typeRows.map(\.title) == [
+            "StructBox", "ClassBox", "EnumBox", "AliasBox",
+        ])
+    }
+
+    @Test
     func lineModeRejectsInvalidValuesAndClampsPastEnd() {
         let file = URL(fileURLWithPath: "/palette.rs")
         let document = ReaderDocument(bytes: Array("one\ntwo\nthree\n".utf8))

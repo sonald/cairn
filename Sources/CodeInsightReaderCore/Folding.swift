@@ -86,6 +86,25 @@ internal struct FoldCandidateAccumulator {
         appendSiblingRunCandidates(parent: node, foldDepth: foldDepth, bytes: bytes)
     }
 
+    internal mutating func visitPython(
+        node: Node,
+        foldDepth: Int,
+        bytes: [UInt8],
+        headerOwner: Node? = nil
+    ) {
+        appendPythonStructuralCandidate(
+            node: node,
+            foldDepth: foldDepth,
+            bytes: bytes,
+            headerOwner: headerOwner
+        )
+        appendPythonSiblingRunCandidates(
+            parent: node,
+            foldDepth: foldDepth,
+            bytes: bytes
+        )
+    }
+
     internal func resolve(
         outlineFacets: [OutlineFacet],
         observer: (@Sendable (Double, Int, Int) -> Void)?
@@ -191,6 +210,108 @@ internal struct FoldCandidateAccumulator {
         default:
             break
         }
+    }
+
+    private mutating func appendPythonStructuralCandidate(
+        node: Node,
+        foldDepth: Int,
+        bytes: [UInt8],
+        headerOwner: Node? = nil
+    ) {
+        switch node.kind {
+        case "function_definition", "class_definition":
+            appendPythonIndentedCandidate(
+                kind: node.kind == "class_definition" ? .container : .declaration,
+                owner: node,
+                foldDepth: foldDepth,
+                bytes: bytes,
+                headerOwner: headerOwner
+            )
+        case "if_statement", "for_statement", "while_statement", "try_statement",
+             "with_statement", "match_statement", "case_clause",
+             "elif_clause", "else_clause", "except_clause", "finally_clause":
+            appendPythonBlockCandidate(
+                owner: node,
+                foldDepth: foldDepth,
+                bytes: bytes,
+                headerOwner: headerOwner
+            )
+        default:
+            break
+        }
+    }
+
+    private mutating func appendPythonIndentedCandidate(
+        kind: FoldKind,
+        owner: Node,
+        foldDepth: Int,
+        bytes: [UInt8],
+        headerOwner: Node? = nil
+    ) {
+        guard let body = owner.child(namedField: "body"),
+              body.kind == "block"
+        else { return }
+        let headerLowerBound = (headerOwner ?? owner).byteRange.lowerBound
+        let headerUpperBound = body.byteRange.lowerBound
+        guard headerLowerBound < headerUpperBound else { return }
+        appendCandidate(
+            kind: kind,
+            headerRange: CodeInsightCore.ByteRange(
+                lowerBound: headerLowerBound,
+                upperBound: headerUpperBound
+            ),
+            bodyRange: coreRange(body),
+            foldDepth: foldDepth,
+            bytes: bytes
+        )
+    }
+
+    private mutating func appendPythonBlockCandidate(
+        owner: Node,
+        foldDepth: Int,
+        bytes: [UInt8],
+        headerOwner: Node? = nil
+    ) {
+        if let body = owner.namedChildren.first(where: { $0.kind == "block" }) {
+            let headerLowerBound = (headerOwner ?? owner).byteRange.lowerBound
+            let headerUpperBound = body.byteRange.lowerBound
+            guard headerLowerBound < headerUpperBound else { return }
+            appendCandidate(
+                kind: .block,
+                headerRange: CodeInsightCore.ByteRange(
+                    lowerBound: headerLowerBound,
+                    upperBound: headerUpperBound
+                ),
+                bodyRange: coreRange(body),
+                foldDepth: foldDepth,
+                bytes: bytes
+            )
+        }
+    }
+
+    private mutating func appendPythonSiblingRunCandidates(
+        parent: Node,
+        foldDepth: Int,
+        bytes: [UInt8]
+    ) {
+        let children = parent.namedChildren
+        appendRuns(
+            in: children,
+            matching: {
+                $0.kind == "import_statement"
+                    || $0.kind == "import_from_statement"
+            },
+            kind: .imports,
+            foldDepth: foldDepth,
+            bytes: bytes
+        )
+        appendRuns(
+            in: children,
+            matching: { $0.kind == "comment" },
+            kind: .comment,
+            foldDepth: foldDepth,
+            bytes: bytes
+        )
     }
 
     private mutating func appendBracedCandidate(
@@ -371,7 +492,7 @@ internal struct FoldCandidateAccumulator {
         }
     }
 
-    private mutating func appendCandidate(
+    internal mutating func appendCandidate(
         kind: FoldKind,
         headerRange: CodeInsightCore.ByteRange,
         bodyRange: CodeInsightCore.ByteRange,
@@ -441,6 +562,13 @@ internal func resolveFoldCandidates(_ input: [FoldCandidate]) -> [FoldRegion] {
             summary: candidate.summary
         )
     }
+}
+
+internal func coreRange(_ node: Node) -> CodeInsightCore.ByteRange {
+    CodeInsightCore.ByteRange(
+        lowerBound: node.byteRange.lowerBound,
+        upperBound: node.byteRange.upperBound
+    )
 }
 
 private func sameGeometry(_ lhs: FoldCandidate, _ rhs: FoldCandidate) -> Bool {

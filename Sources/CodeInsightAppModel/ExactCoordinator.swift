@@ -165,7 +165,7 @@ public final class ExactCoordinator {
     public var attribution: ExactAttribution? { active?.session.attribution }
 
     @ObservationIgnored private let providerFactory: ProviderFactory
-    @ObservationIgnored private let snapshotFactory: SnapshotFactory
+    @ObservationIgnored private let snapshotFactory: SnapshotFactory?
     @ObservationIgnored private let sandboxAvailable: @Sendable () -> Bool
     @ObservationIgnored private let trustRegistry: TrustRegistry
     @ObservationIgnored private let materializer: Materializer
@@ -178,9 +178,21 @@ public final class ExactCoordinator {
     public init(
         providerFactory: @escaping ProviderFactory = { projectURL, language in
             switch language {
+            case .python:
+                guard let executable = PyrightProvider.findExecutable(
+                    projectURL: projectURL
+                ) else {
+                    throw ExactError.unavailable(
+                        "pyright-langserver is not installed"
+                    )
+                }
+                return try PyrightProvider(
+                    projectURL: projectURL,
+                    executableURL: executable
+                )
             case .rust:
                 break
-            case .python, .typescript, .javascript:
+            case .typescript, .javascript:
                 throw CocoaError(.featureUnsupported, userInfo: [
                     NSLocalizedFailureReasonErrorKey:
                         "Exact analysis does not support "
@@ -195,12 +207,7 @@ public final class ExactCoordinator {
                 executableURL: executable
             )
         },
-        snapshotFactory: @escaping SnapshotFactory = { root, revision in
-            if let revision {
-                return try CommitSnapshot(repositoryURL: root, revision: revision)
-            }
-            return try WorktreeSnapshot(repositoryURL: root)
-        },
+        snapshotFactory: SnapshotFactory? = nil,
         sandboxAvailable: @escaping @Sendable () -> Bool = {
             FileManager.default.isExecutableFile(
                 atPath: "/usr/bin/sandbox-exec"
@@ -220,12 +227,7 @@ public final class ExactCoordinator {
         providerFactory legacyProviderFactory: @escaping @Sendable (
             URL
         ) throws -> any ExactProvider,
-        snapshotFactory: @escaping SnapshotFactory = { root, revision in
-            if let revision {
-                return try CommitSnapshot(repositoryURL: root, revision: revision)
-            }
-            return try WorktreeSnapshot(repositoryURL: root)
-        },
+        snapshotFactory: SnapshotFactory? = nil,
         sandboxAvailable: @escaping @Sendable () -> Bool = {
             FileManager.default.isExecutableFile(
                 atPath: "/usr/bin/sandbox-exec"
@@ -234,11 +236,13 @@ public final class ExactCoordinator {
         trustRegistry: TrustRegistry = TrustRegistry(),
         materializer: Materializer = Materializer()
     ) {
+        let providerFactory: ProviderFactory
+        providerFactory = { projectURL, language in
+            try validateExactLanguage(language)
+            return try legacyProviderFactory(projectURL)
+        }
         self.init(
-            providerFactory: { projectURL, language in
-                try validateExactLanguage(language)
-                return try legacyProviderFactory(projectURL)
-            },
+            providerFactory: providerFactory,
             snapshotFactory: snapshotFactory,
             sandboxAvailable: sandboxAvailable,
             trustRegistry: trustRegistry,
@@ -300,6 +304,7 @@ public final class ExactCoordinator {
                 edition: nil,
                 trustMode: .safe
             ),
+            verifyProfileMatches: false,
             generation: generation
         )
     }
@@ -315,6 +320,7 @@ public final class ExactCoordinator {
             projectURL: projectURL,
             revision: revision,
             analysisProfile: analysisProfile,
+            verifyProfileMatches: true,
             generation: generation
         )
     }
@@ -323,6 +329,7 @@ public final class ExactCoordinator {
         projectURL: URL,
         revision: String?,
         analysisProfile: AnalysisProfile,
+        verifyProfileMatches: Bool,
         generation: UInt64
     ) {
         let root = projectURL.standardizedFileURL
@@ -330,6 +337,7 @@ public final class ExactCoordinator {
         let featureSelection = analysisProfile.featureSelection
         invalidate(generation: generation)
         let currentEpoch = epoch
+        let verifyProfileMatches = verifyProfileMatches
         let providerFactory = providerFactory
         let snapshotFactory = snapshotFactory
         let sandboxAvailable = sandboxAvailable
@@ -353,7 +361,15 @@ public final class ExactCoordinator {
 
             do {
                 let prepared = try await Task.detached(priority: .utility) {
-                    let snapshot = try snapshotFactory(root, revision)
+                    let snapshot: any Snapshot = if let snapshotFactory {
+                        try snapshotFactory(root, revision)
+                    } else {
+                        try makeSnapshot(
+                            root: root,
+                            revision: revision,
+                            language: language
+                        )
+                    }
                     let profile: ExactProfileKey
                     let providerRoot: URL
                     let materializedRoot: URL?
@@ -364,6 +380,13 @@ public final class ExactCoordinator {
                             language: language,
                             featureSelection: featureSelection
                         )
+                        if verifyProfileMatches {
+                            try validateProfile(
+                                profile,
+                                matches: analysisProfile,
+                                language: language
+                            )
+                        }
                         let resolvedRoot = try materializer.materialize(
                             commit,
                             configFingerprint: profile.configFingerprint
@@ -377,19 +400,19 @@ public final class ExactCoordinator {
                             language: language,
                             featureSelection: featureSelection
                         )
+                        if verifyProfileMatches {
+                            try validateProfile(
+                                profile,
+                                matches: analysisProfile,
+                                language: language
+                            )
+                        }
                         providerRoot = root
                         materializedRoot = nil
                         versionIdentity =
                             "worktree:\(root.resolvingSymlinksInPath().path)"
                     }
                     let provider = try providerFactory(providerRoot, language)
-                    guard profile.language == language else {
-                        throw ExactError.unavailable(
-                            "exact profile language "
-                                + "\(String(describing: profile.language)) does not match "
-                                + "analysis profile language \(String(describing: language))"
-                        )
-                    }
                     guard provider.language == language else {
                         throw ExactError.unavailable(
                             "exact provider language "
@@ -866,8 +889,13 @@ public final class ExactCoordinator {
         analysisEnvironment = analysisEnvironment
             ?? source.session.attribution.environment
         guard case .completed(let targets) = result else { return nil }
-        let entries = targets.map { target in
-            ExactOverlay.Entry(
+        let entries = targets.compactMap { target -> ExactOverlay.Entry? in
+            guard supportedTarget(
+                file: target.location.file,
+                language: source.profile.language
+            )
+            else { return nil }
+            return ExactOverlay.Entry(
                 location: mapped(target.location, from: source.materializedRoot),
                 attribution: source.session.attribution,
                 origin: source.materializedRoot != nil
@@ -897,22 +925,38 @@ public final class ExactCoordinator {
         case .notApplicable:
             .notApplicable
         case .calls(let relations):
-            .relations(relations.map {
-                Relation(
+            .relations(relations.compactMap {
+                guard supportedTarget(
+                    file:
+                    $0.item.selectionRange.file,
+                    language: source.profile.language
+                ) else { return nil }
+                let callSites = $0.callSites.filter {
+                    supportedTarget(
+                        file: $0.file,
+                        language: source.profile.language
+                    )
+                }
+                return Relation(
                     name: $0.item.name,
                     location: mapped(
                         $0.item.selectionRange,
                         from: source.materializedRoot
                     ),
                     item: $0.item,
-                    callSites: $0.callSites.map {
+                    callSites: callSites.map {
                         mapped($0, from: source.materializedRoot)
                     }
                 )
             }, origin: origin, attribution: source.session.attribution)
         case .locations(let locations):
-            .relations(locations.map {
-                Relation(
+            .relations(locations.compactMap {
+                guard supportedTarget(
+                    file: $0.file,
+                    language: source.profile.language
+                )
+                else { return nil }
+                return Relation(
                     name: nil,
                     location: mapped($0, from: source.materializedRoot),
                     item: nil,
@@ -987,12 +1031,65 @@ private func isSandboxUnavailable(_ error: any Error) -> Bool {
 
 private func validateExactLanguage(_ language: LanguageID) throws {
     switch language {
-    case .rust:
+    case .rust, .python:
         return
-    case .python, .typescript, .javascript:
+    case .typescript, .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 "Exact analysis does not support \(String(describing: language))",
         ])
+    }
+}
+
+private func makeSnapshot(
+    root: URL,
+    revision: String?,
+    language: LanguageID
+) throws -> any Snapshot {
+    if let revision {
+        return try CommitSnapshot(repositoryURL: root, revision: revision)
+    }
+    return try WorktreeSnapshot(
+        repositoryURL: root,
+        language: language
+    )
+}
+
+private func supportedTarget(
+    file: String,
+    language: LanguageID
+) -> Bool {
+    LanguageMode.classify(
+        path: file,
+        language: language
+    ) != nil
+}
+
+private func validateProfile(
+    _ profile: ExactProfileKey,
+    matches analysisProfile: AnalysisProfile,
+    language: LanguageID
+) throws {
+    guard profile.language == language else {
+        throw ExactError.unavailable(
+            "exact profile language does not match analysis profile"
+        )
+    }
+    let matches: Bool
+    switch language {
+    case .python:
+        matches = profile.configFingerprint == analysisProfile.configFingerprint
+            && profile.environmentFingerprint
+                == analysisProfile.environmentFingerprint
+            && profile.featureSelection == analysisProfile.featureSelection
+    case .rust:
+        matches = profile.featureSelection == analysisProfile.featureSelection
+    case .typescript, .javascript:
+        matches = false
+    }
+    guard matches else {
+        throw ExactError.unavailable(
+            "exact profile does not match analysis profile"
+        )
     }
 }

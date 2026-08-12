@@ -251,18 +251,72 @@ func explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() throws {
 }
 
 @Test
-func unsupportedWorktreeLanguageFailsBeforeOpeningARepository() {
+func unsupportedWorktreeLanguagesFailBeforeOpeningARepository() {
     let nonexistent = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupported-\(UUID().uuidString)")
 
+    for language in [LanguageID.typescript, .javascript] {
+        do {
+            _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: language)
+            Issue.record("Unsupported language unexpectedly succeeded: \(language)")
+        } catch let error as CocoaError {
+            #expect(error.code == .featureUnsupported)
+            #expect((error as NSError).localizedFailureReason?.contains(
+                String(describing: language)
+            ) == true)
+        } catch {
+            Issue.record("Unsupported preflight happened after repository access: \(error)")
+        }
+    }
+}
+
+@Test
+func pythonWorktreeSnapshotCapturesOnlyPythonFilesAndRootConfigs() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "main.py": "print('main')\n",
+        "src/service.py": "class Service: pass\n",
+        "src/ignored.rs": "fn rust() {}\n",
+        "src/ignored.ts": "const ignored = 1\n",
+        "src/ignored.js": "const ignored = 1\n",
+        "nested/pyproject.toml": "[tool.pyright]\n",
+        ".venv/lib.py": "print('venv')\n",
+        "__pycache__/main.cpython-311.pyc": "pyc",
+        "build/generated.py": "print('build')\n",
+        "dist/generated.py": "print('dist')\n",
+        "pyrightconfig.json": "{\"venvPath\": \".\"}\n",
+        "pyproject.toml": "[project]\nname = \"sample\"\n",
+        "uv.lock": "version = 1\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+
+    let snapshot = try WorktreeSnapshot(
+        repositoryURL: fixture.root,
+        language: .python
+    )
+
+    #expect(snapshot.listFiles().map(\.path) == ["main.py", "src/service.py"])
+    #expect(try snapshot.readBytes(path: "pyrightconfig.json")
+        == Array(files["pyrightconfig.json"]!.utf8))
+    #expect(try snapshot.readBytes(path: "pyproject.toml")
+        == Array(files["pyproject.toml"]!.utf8))
+    #expect(try snapshot.readBytes(path: "uv.lock")
+        == Array(files["uv.lock"]!.utf8))
     do {
-        _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: .python)
-        Issue.record("Python worktree capture unexpectedly succeeded")
-    } catch let error as CocoaError {
-        #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+        _ = try snapshot.readBytes(path: "nested/pyproject.toml")
+        Issue.record("Nested Python config unexpectedly entered the snapshot")
+    } catch let GitError.missingPath(path) {
+        #expect(path == "nested/pyproject.toml")
     } catch {
-        Issue.record("Unsupported preflight happened after repository access: \(error)")
+        Issue.record("Unexpected nested config read error: \(error)")
     }
 }
 

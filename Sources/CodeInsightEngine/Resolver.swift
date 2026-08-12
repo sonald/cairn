@@ -37,6 +37,23 @@ struct Resolver {
             )
         }
         if case .methodCall? = kind {
+            if session.analysisProfile.language == .python {
+                if let receiver = located.call.flatMap({
+                    pythonReceiverModuleImportCandidates(
+                        call: $0,
+                        from: file,
+                        index: index,
+                        context: context
+                    )
+                }) {
+                    return receiver
+                }
+                return pythonMethodCandidates(
+                    methodNameID: located.nameID,
+                    from: file,
+                    context: context
+                )
+            }
             if let call = located.call,
                let candidates = receiverMethodCandidates(
                    call: call,
@@ -506,6 +523,72 @@ struct Resolver {
             }
         }
         return sorted(candidates, from: source)
+    }
+
+    private func pythonReceiverModuleImportCandidates(
+        call: UnresolvedCall,
+        from source: PathID,
+        index: ContentIndex,
+        context: QueryContext
+    ) -> [ResolutionCandidate]? {
+        guard let receiverRange = call.receiverRange,
+              let bytes = session.sourceBytes(at: source),
+              Int(receiverRange.upperBound) <= bytes.count,
+              receiverRange.lowerBound < receiverRange.upperBound
+        else { return nil }
+        let receiverBytes = bytes[
+            Int(receiverRange.lowerBound)..<Int(receiverRange.upperBound)
+        ]
+        guard receiverBytes.allSatisfy(isIdentifierByte) else { return nil }
+        let receiverNameID = session.names.intern(
+            String(decoding: receiverBytes, as: UTF8.self)
+        )
+        let visibleScopes = Set(scopeChain(
+            at: receiverRange.lowerBound,
+            in: index
+        ).map(\.id))
+        let moduleImport = index.imports.enumerated().first { item in
+            item.element.localName == receiverNameID
+                && item.element.kind == .module
+                && visibleScopes.contains(item.element.scopeID)
+        }
+        guard let moduleImport,
+              let importIndex = UInt32(exactly: moduleImport.offset)
+        else { return nil }
+        return [candidate(
+            pathID: source,
+            localKind: .importBinding,
+            localIndex: importIndex,
+            certainty: .unresolved,
+            dispatch: .dynamicDispatch,
+            evidence: [.uniqueImport(importBindingIndex: importIndex)],
+            context: context
+        )]
+    }
+
+    private func pythonMethodCandidates(
+        methodNameID: NameID,
+        from source: PathID,
+        context: QueryContext
+    ) -> [ResolutionCandidate] {
+        let results = session.definitionOccurrences(named: methodNameID).compactMap {
+            occurrence, facet, _ -> ResolutionCandidate? in
+            guard facet.kind == .pythonFunction,
+                  let parent = facet.parentFacetIndex,
+                  let (_, targetIndex) = session.content(at: occurrence.pathID),
+                  targetIndex.symbols.indices.contains(Int(parent)),
+                  targetIndex.symbols[Int(parent)].kind == .pythonClass
+            else { return nil }
+            return candidate(
+                pathID: occurrence.pathID,
+                localIndex: occurrence.localIndex,
+                certainty: .possible,
+                dispatch: .dynamicDispatch,
+                evidence: [.methodNameOnly(nameID: methodNameID)],
+                context: context
+            )
+        }
+        return sorted(results, from: source)
     }
 
     private func globalCandidates(

@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
 import Foundation
 
@@ -62,7 +63,9 @@ public struct DiffCore: Sendable {
         public let leftRange: CodeInsightCore.ByteRange?
         public let rightRange: CodeInsightCore.ByteRange?
 
-        public var displayName: String { nameChain.joined(separator: "::") }
+        public var displayName: String {
+            nameChain.joined(separator: declarationKind == .pythonFunction ? "." : "::")
+        }
     }
 
     public init() {}
@@ -312,24 +315,31 @@ public struct DiffCore: Sendable {
         let key = ContentIndexKey(
             contentID: ContentID.sha256(of: bytes),
             languageMode: languageMode,
-            grammarVersion: RustExtractorInfo.grammarVersion,
-            extractorVersion: RustExtractorInfo.extractorVersion
+            grammarVersion: extractor(for: languageMode).grammarVersion,
+            extractorVersion: extractor(for: languageMode).extractorVersion
         )
-        let contentIndex = try RustExtractor().extract(
+        let contentIndex = try extractor(for: languageMode).extract(
             bytes: bytes,
             key: key,
             interner: ExtractionInterners(names: names, strings: strings)
         )
         var result: [FunctionKey: [ExtractedFunction]] = [:]
-        for facet in contentIndex.symbols
-        where facet.kind == .rustFn || facet.kind == .rustMethod {
+        for facet in contentIndex.symbols where isFunction(facet.kind) {
             var chain = [names.resolve(facet.nameID)]
             var parent = facet.parentFacetIndex
             while let parentIndex = parent,
                   contentIndex.symbols.indices.contains(Int(parentIndex))
             {
                 let parentFacet = contentIndex.symbols[Int(parentIndex)]
-                chain.append(names.resolve(parentFacet.nameID))
+                if languageMode.language == .python {
+                    guard isFunction(parentFacet.kind) || parentFacet.kind == .pythonClass else {
+                        parent = parentFacet.parentFacetIndex
+                        continue
+                    }
+                    chain.append(names.resolve(parentFacet.nameID))
+                } else {
+                    chain.append(names.resolve(parentFacet.nameID))
+                }
                 parent = parentFacet.parentFacetIndex
             }
             let key = FunctionKey(names: chain.reversed(), kind: facet.kind.rawValue)
@@ -342,14 +352,29 @@ public struct DiffCore: Sendable {
 
     private func requireSupported(_ languageMode: LanguageMode) throws {
         switch languageMode.language {
-        case .rust:
+        case .rust, .python:
             return
-        case .python, .typescript, .javascript:
+        case .typescript, .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "DiffCore does not support \(String(describing: languageMode.language))",
             ])
         }
+    }
+
+    private func extractor(for languageMode: LanguageMode) -> any LanguageExtractor {
+        switch languageMode.language {
+        case .python:
+            PythonExtractor()
+        case .rust:
+            RustExtractor()
+        case .typescript, .javascript:
+            preconditionFailure("DiffCore requireSupported must reject \(languageMode.language)")
+        }
+    }
+
+    private func isFunction(_ kind: DeclarationKind) -> Bool {
+        kind == .rustFn || kind == .rustMethod || kind == .pythonFunction
     }
 
     private func change(

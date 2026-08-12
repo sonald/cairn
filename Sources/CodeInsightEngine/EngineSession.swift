@@ -659,6 +659,8 @@ public final class EngineSession: Sendable {
         case .rustConst, .rustStatic: 10
         case .rustImpl: 8
         case .rustField: 0
+        case .pythonFunction: 24
+        case .pythonClass: 22
         }
     }
 }

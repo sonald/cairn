@@ -79,6 +79,80 @@ func diffGutterStoresMarkersAndHunkRevealSelectsTheLine() {
 
 @MainActor
 @Test
+func pythonClassOutlineGutterColorAndFoldSummaryAreMapped() throws {
+    let source = [
+        "class Widget:",
+        "    class Inner:",
+        "        def __init__(self):",
+        "            pass",
+        "",
+        "def make():",
+        "    return Widget()",
+        "",
+    ].joined(separator: "\n")
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(
+            file: URL(fileURLWithPath: "/sample.py"),
+            languageMode: LanguageMode(language: .python)
+        )
+        .document
+
+    let widget = try #require(document.outlineFacets.first {
+        $0.kind == .class && $0.name == "Widget"
+    })
+    let widgetRange = try #require(document.byteUTF16Map.nsRange(
+        byteLowerBound: Int(widget.nameRange.lowerBound),
+        byteUpperBound: Int(widget.nameRange.upperBound)
+    ))
+    let theme = ReaderTheme(settings: ReaderSettings())
+    let (reader, scrollView, window) = renderOffscreen(document)
+    withExtendedLifetime(window) {
+        let classMarker = reader.declarationMarkerColor(for: .class)
+        #expect(colorsEqual(
+            classMarker,
+            theme.color(for: .declarationTitle)
+                .withAlphaComponent(theme.declarationMarkerAlpha)
+        ))
+        #expect(renderedColors(in: reader, intersecting: widgetRange).contains {
+            colorsEqual($0, theme.color(for: .declarationTitle))
+        })
+        reader.reveal(byteOffset: widget.nameRange.lowerBound)
+        window.displayIfNeeded()
+        reader.captureVisibleDecorationState()
+        let line = document.lineTable.lineColumn(
+            at: widget.nameRange.lowerBound
+        ).map { Int($0.line) }
+        #expect(line.map { reader.visibleDeclarationMarkerLines.contains($0) } == true)
+        #expect(scrollView.hasVerticalRuler)
+
+        let container = document.foldRegions.first {
+            $0.kind == .container && $0.summary.memberCounts[.class] == 1
+        }
+        #expect(container != nil)
+        if let container {
+            #expect(reader.toggleFold(id: container.id))
+            reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+            window.displayIfNeeded()
+            let manager = reader.view.textLayoutManager
+            let content = manager?.textContentManager
+            var providers: [NSTextAttachmentViewProvider] = []
+            if let manager, let content {
+                manager.enumerateTextLayoutFragments(
+                    from: content.documentRange.location,
+                    options: [.ensuresLayout]
+                ) { fragment in
+                    providers.append(contentsOf: fragment.textAttachmentViewProviders)
+                    return true
+                }
+            }
+            #expect(providers.first?.view?.accessibilityLabel()?.contains("1 class") == true)
+        }
+    }
+}
+
+@MainActor
+@Test
 func readerInstallsLineNumberRulerByDefault() {
     let reader = ReaderTextView()
     let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))

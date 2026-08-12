@@ -6,6 +6,10 @@ public struct ModuleMap: Sendable {
 
     private let parentModules: [PathID: PathID]
     private let crateRoots: Set<PathID>
+    private let language: LanguageID
+    private let pythonModuleFiles: [String: [PathID]]
+    private let pathsByID: [PathID: String]
+    private let pythonRootsByFile: [PathID: String]
 
     init(
         manifest: SnapshotManifest,
@@ -15,13 +19,67 @@ public struct ModuleMap: Sendable {
         names: Interner<NameID>,
         paths: Interner<PathID>
     ) {
-        precondition(language == .rust)
         let files = manifest.files.filter {
             LanguageMode.classify(
                 path: paths.resolve($0.pathID),
                 language: language
             ) != nil
         }
+        switch language {
+        case .rust:
+            self.language = .rust
+            let rust = Self.rustModuleMap(
+                files: files,
+                indexes: indexes,
+                bytesByContent: bytesByContent,
+                names: names,
+                paths: paths
+            )
+            parentModules = rust.parents
+            crateRoots = rust.roots
+            pythonModuleFiles = [:]
+            pathsByID = [:]
+            pythonRootsByFile = [:]
+            moduleChildren = rust.children
+        case .python:
+            let canonical = Self.pythonModuleFiles(
+                files: files,
+                paths: paths
+            )
+            self.language = .python
+            parentModules = [:]
+            crateRoots = []
+            pythonModuleFiles = canonical
+            var rootsByFile: [PathID: String] = [:]
+            for file in files {
+                let path = paths.resolve(file.pathID)
+                if path.hasPrefix("src/") {
+                    rootsByFile[file.pathID] = "src"
+                } else {
+                    rootsByFile[file.pathID] = "root"
+                }
+            }
+            pathsByID = Dictionary(uniqueKeysWithValues: files.map {
+                ($0.pathID, paths.resolve($0.pathID))
+            })
+            pythonRootsByFile = rootsByFile
+            moduleChildren = [:]
+        case .typescript, .javascript:
+            fatalError("ModuleMap does not support \(String(describing: language))")
+        }
+    }
+
+    private static func rustModuleMap(
+        files: [FileOccurrence],
+        indexes: [ContentIndexKey: ContentIndex],
+        bytesByContent: [ContentID: [UInt8]],
+        names: Interner<NameID>,
+        paths: Interner<PathID>
+    ) -> (
+        children: [PathID: [NameID: PathID]],
+        parents: [PathID: PathID],
+        roots: Set<PathID>
+    ) {
         let pathIDsByString = Dictionary(uniqueKeysWithValues: files.map {
             (paths.resolve($0.pathID), $0.pathID)
         })
@@ -66,12 +124,77 @@ public struct ModuleMap: Sendable {
             }
         }
 
-        moduleChildren = children
-        parentModules = parents
-        crateRoots = roots
+        return (children, parents, roots)
+    }
+
+    private static func pythonModuleFiles(
+        files: [FileOccurrence],
+        paths: Interner<PathID>
+    ) -> [String: [PathID]] {
+        var filesByPath: [String: PathID] = [:]
+        for file in files {
+            let path = paths.resolve(file.pathID)
+            filesByPath[path] = file.pathID
+        }
+        var canonical: [String: [PathID]] = [:]
+        for (path, pathID) in filesByPath {
+            if path.hasPrefix("src/") {
+                let modulePath = String(path.dropFirst("src/".count))
+                guard modulePath.hasSuffix(".py") else { continue }
+                appendModule(path: modulePath, pathID: pathID, to: &canonical)
+            } else {
+                guard path.hasSuffix(".py") else { continue }
+                appendModule(path: path, pathID: pathID, to: &canonical)
+            }
+        }
+        return canonical
+    }
+
+    private static func appendModule(
+        path: String,
+        pathID: PathID,
+        to canonical: inout [String: [PathID]]
+    ) {
+        let module: String
+        if path.hasSuffix("/__init__.py") {
+            module = String(path.dropLast("/__init__.py".count))
+        } else {
+            module = String(path.dropLast(".py".count))
+        }
+        let canonicalModule = module
+            .split(separator: "/")
+            .map(String.init)
+            .joined(separator: ".")
+        guard !canonicalModule.isEmpty else { return }
+        canonical[canonicalModule, default: []].append(pathID)
     }
 
     func targetFile(
+        for importBinding: ImportBinding,
+        from source: PathID,
+        names: Interner<NameID>,
+        strings: Interner<StringID>
+    ) -> PathID? {
+        switch language {
+        case .rust:
+            return rustTargetFile(
+                for: importBinding,
+                from: source,
+                names: names,
+                strings: strings
+            )
+        case .python:
+            return pythonTargetFile(
+                for: importBinding,
+                from: source,
+                strings: strings
+            )
+        case .typescript, .javascript:
+            fatalError("ModuleMap does not support \(String(describing: language))")
+        }
+    }
+
+    private func rustTargetFile(
         for importBinding: ImportBinding,
         from source: PathID,
         names: Interner<NameID>,
@@ -110,6 +233,96 @@ public struct ModuleMap: Sendable {
             current = child
         }
         return current
+    }
+
+    private func pythonTargetFile(
+        for importBinding: ImportBinding,
+        from source: PathID,
+        strings: Interner<StringID>
+    ) -> PathID? {
+        let specifier = strings.resolve(importBinding.moduleSpecifier)
+        let components = specifier.split(
+            separator: ".",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+
+        if specifier.hasPrefix(".") {
+            let sourceRoot = pythonRootsByFile[source] ?? "root"
+            guard let sourcePath = pythonSourcePath(for: source),
+                  let sourceComponents = pythonPackageComponents(
+                    for: sourcePath,
+                    root: sourceRoot
+                  ),
+                  !sourceComponents.isEmpty
+            else { return nil }
+            guard !components.isEmpty else { return nil }
+            var dots = 0
+            while dots < components.count, components[dots].isEmpty {
+                dots += 1
+            }
+            guard dots > 0 else { return nil }
+            guard dots - 1 <= sourceComponents.count else { return nil }
+            var baseComponents = sourceComponents
+            baseComponents.removeLast(dots - 1)
+            let tail = components.dropFirst(dots)
+            let combined = baseComponents + tail
+            guard !combined.isEmpty else { return nil }
+            return resolveModule(combined.joined(separator: "."))
+        }
+
+        return resolveModule(specifier)
+    }
+
+    private func pythonPackageComponents(
+        for path: String,
+        root: String
+    ) -> [String]? {
+        let relative = root == "src"
+            ? String(path.dropFirst("src/".count))
+            : path
+        if relative.hasSuffix("/__init__.py") {
+            return String(relative.dropLast("/__init__.py".count))
+                .split(separator: "/")
+                .map(String.init)
+        }
+        return relative
+            .split(separator: "/")
+            .dropLast(1)
+            .map(String.init)
+    }
+
+    private func pythonSourcePath(for pathID: PathID) -> String? {
+        pathsByID[pathID]
+    }
+
+    private func resolveModule(_ module: String) -> PathID? {
+        let components = module.split(separator: ".").map(String.init)
+        guard !components.isEmpty else { return nil }
+        var package = ""
+        for (index, component) in components.enumerated() {
+            package = package.isEmpty ? component : "\(package).\(component)"
+            if index < components.count - 1 {
+                guard singleUniquePackageInit(for: package) != nil else { return nil }
+            }
+        }
+        return singleFileFor(module)
+    }
+
+    private func singleUniquePackageInit(for package: String) -> PathID? {
+        guard let mapping = pythonModuleFiles[package],
+              mapping.count == 1,
+              let pathID = mapping.first,
+              let path = pathsByID[pathID],
+              path.hasSuffix("/__init__.py")
+        else { return nil }
+        return pathID
+    }
+
+    private func singleFileFor(_ module: String) -> PathID? {
+        guard let matches = pythonModuleFiles[module], matches.count == 1 else {
+            return nil
+        }
+        return matches[0]
     }
 
     private func crateRoot(containing path: PathID) -> PathID? {

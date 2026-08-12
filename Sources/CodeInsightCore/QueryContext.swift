@@ -1,5 +1,32 @@
 import Foundation
 
+package func pythonConfigIdentity(
+    readBytes: (String) -> [UInt8]?
+) -> (config: String, environment: String) {
+    let config: (name: String, bytes: [UInt8])?
+    if let bytes = readBytes("pyrightconfig.json") {
+        config = ("pyrightconfig.json", bytes)
+    } else if let bytes = readBytes("pyproject.toml") {
+        config = ("pyproject.toml", bytes)
+    } else {
+        config = nil
+    }
+
+    let configFingerprint = config.map { item in
+        ContentID.sha256(of: Array(item.name.utf8) + [0] + item.bytes)
+            .bytes
+            .map { String(format: "%02x", $0) }
+            .joined()
+    } ?? "ad63780a0cbd089b3305c2cf137e6b6bf21da9bd79e5c110172db574a847be12"
+    let environmentFingerprint = readBytes("uv.lock").map { bytes in
+        ContentID.sha256(of: Array("uv.lock".utf8) + [0] + bytes)
+            .bytes
+            .map { String(format: "%02x", $0) }
+            .joined()
+    } ?? ""
+    return (configFingerprint, environmentFingerprint)
+}
+
 public struct AnalysisProfileID: Hashable, Sendable {
     public let rawValue: UUID
 

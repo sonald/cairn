@@ -1,4 +1,5 @@
 import CProcessGuard
+import CodeInsightGit
 import Darwin
 import Foundation
 
@@ -97,6 +98,223 @@ public struct LSPFrameDecoder {
             buffer.removeSubrange(..<bodyEnd)
         }
         return messages
+    }
+}
+
+func parseExactLocation(
+    _ object: [String: Any],
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> ExactLocation {
+    guard let uri = (object["targetUri"] ?? object["uri"]) as? String,
+          let range = (object["targetSelectionRange"] ?? object["range"])
+            as? [String: Any],
+          let start = range["start"] as? [String: Any],
+          let line = (start["line"] as? NSNumber)?.intValue,
+          let character = (start["character"] as? NSNumber)?.intValue,
+          let url = URL(string: uri), url.isFileURL
+    else {
+        throw ExactError.invalidDefinitionResponse(String(describing: object))
+    }
+
+    let targetURL = url.standardizedFileURL
+    let relative = projectRelativePath(
+        of: targetURL,
+        projectURL: projectURL
+    )
+    let bytes: [UInt8]
+    if let relative, let captured = try? snapshot.readBytes(path: relative) {
+        bytes = captured
+    } else {
+        bytes = [UInt8](try Data(contentsOf: targetURL, options: .mappedIfSafe))
+    }
+    guard let map = LSPPositionMap(utf8: bytes) else {
+        throw ExactError.invalidUTF8(targetURL.path)
+    }
+    guard let byteOffset = map.byteOffset(
+        for: LSPPosition(line: line, character: character)
+    ), let coordinate = map.lineAndByteColumn(at: byteOffset) else {
+        throw ExactError.invalidDefinitionResponse(
+            "position \(line):\(character) is outside \(targetURL.path)"
+        )
+    }
+    return ExactLocation(
+        file: relative ?? targetURL.path,
+        byteOffset: byteOffset,
+        line: coordinate.line,
+        column: coordinate.column
+    )
+}
+
+func projectRelativePath(of url: URL, projectURL: URL) -> String? {
+    let rootComponents = projectURL.pathComponents
+    let components = url.standardizedFileURL.pathComponents
+    guard components.starts(with: rootComponents) else { return nil }
+    return components.dropFirst(rootComponents.count).joined(separator: "/")
+}
+
+func relativeProjectPath(
+    _ input: String,
+    projectURL: URL
+) throws -> String {
+    let candidate = input.hasPrefix("/")
+        ? URL(fileURLWithPath: input)
+        : projectURL.appendingPathComponent(input)
+    guard let relative = projectRelativePath(
+        of: candidate.standardizedFileURL,
+        projectURL: projectURL
+    ), !relative.isEmpty
+    else { throw ExactError.invalidPath(input) }
+    return relative
+}
+
+func parseCallHierarchyItems(
+    _ value: Any,
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> [ExactCallHierarchyItem]? {
+    if value is NSNull { return nil }
+    guard let objects = value as? [[String: Any]] else {
+        throw ExactError.invalidDefinitionResponse(String(describing: value))
+    }
+    return try objects.map {
+        try parseCallHierarchyItem(
+            $0,
+            projectURL: projectURL,
+            snapshot: snapshot
+        )
+    }
+}
+
+func parseCallHierarchyItem(
+    _ object: [String: Any],
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> ExactCallHierarchyItem {
+    guard let name = object["name"] as? String,
+          let kind = (object["kind"] as? NSNumber)?.intValue,
+          let uri = object["uri"] as? String,
+          let range = object["range"] as? [String: Any],
+          let selectionRange = object["selectionRange"] as? [String: Any]
+    else {
+        throw ExactError.invalidDefinitionResponse(String(describing: object))
+    }
+    let data: Data?
+    if let value = object["data"] {
+        data = try JSONSerialization.data(
+            withJSONObject: value,
+            options: [.fragmentsAllowed, .sortedKeys]
+        )
+    } else {
+        data = nil
+    }
+    return ExactCallHierarchyItem(
+        name: name,
+        kind: kind,
+        uri: uri,
+        range: try parseExactLocation(
+            ["uri": uri, "range": range],
+            projectURL: projectURL,
+            snapshot: snapshot
+        ),
+        selectionRange: try parseExactLocation(
+            ["uri": uri, "range": selectionRange],
+            projectURL: projectURL,
+            snapshot: snapshot
+        ),
+        data: data
+    )
+}
+
+func parseCallRelations(
+    _ value: Any,
+    itemKey: String,
+    callSiteURI: (ExactCallHierarchyItem) -> String,
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> [ExactCallRelation]? {
+    if value is NSNull { return nil }
+    guard let objects = value as? [[String: Any]] else {
+        throw ExactError.invalidDefinitionResponse(String(describing: value))
+    }
+    return try objects.map { object in
+        guard let itemObject = object[itemKey] as? [String: Any],
+              let ranges = object["fromRanges"] as? [[String: Any]]
+        else {
+            throw ExactError.invalidDefinitionResponse(
+                String(describing: object)
+            )
+        }
+        let item = try parseCallHierarchyItem(
+            itemObject,
+            projectURL: projectURL,
+            snapshot: snapshot
+        )
+        let uri = callSiteURI(item)
+        return ExactCallRelation(
+            item: item,
+            callSites: try ranges.map {
+                try parseExactLocation(
+                    ["uri": uri, "range": $0],
+                    projectURL: projectURL,
+                    snapshot: snapshot
+                )
+            }
+        )
+    }
+}
+
+func exactLSPRange(
+    for location: ExactLocation,
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> [String: Any] {
+    let bytes: [UInt8]
+    if location.file.hasPrefix("/") {
+        bytes = [UInt8](try Data(
+            contentsOf: URL(fileURLWithPath: location.file),
+            options: .mappedIfSafe
+        ))
+    } else {
+        bytes = try snapshot.readBytes(
+            path: try relativeProjectPath(
+                location.file,
+                projectURL: projectURL
+            )
+        )
+    }
+    guard let map = LSPPositionMap(utf8: bytes) else {
+        throw ExactError.invalidUTF8(location.file)
+    }
+    guard let position = map.position(forByteOffset: location.byteOffset) else {
+        throw ExactError.invalidPosition(location.file, location.byteOffset)
+    }
+    return [
+        "start": ["line": position.line, "character": position.character],
+        "end": ["line": position.line, "character": position.character],
+    ]
+}
+
+func exactLocations(
+    _ value: Any,
+    projectURL: URL,
+    snapshot: any Snapshot
+) throws -> [ExactLocation]? {
+    if value is NSNull { return nil }
+    let objects: [[String: Any]]
+    if let dictionary = value as? [String: Any] {
+        objects = [dictionary]
+    } else if let array = value as? [[String: Any]] {
+        objects = array
+    } else {
+        throw ExactError.invalidDefinitionResponse(String(describing: value))
+    }
+    return try objects.map {
+        try parseExactLocation(
+            $0,
+            projectURL: projectURL,
+            snapshot: snapshot
+        )
     }
 }
 

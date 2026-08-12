@@ -61,7 +61,8 @@ public final class ContextWindowModel {
     typealias ExactResolver = @MainActor (
         String,
         UInt32,
-        UInt64
+        UInt64,
+        ExactRequestBatch
     ) async -> ExactCoordinator.DefinitionResult?
 
     public private(set) var mode: Mode = .follow
@@ -78,6 +79,8 @@ public final class ContextWindowModel {
     private var locatedToken: LocatedToken?
     private var displayedToken: Token?
     private var documents: [DocumentKey: ReaderDocument] = [:]
+    private var exactBatch: ExactRequestBatch?
+    private var cancelExactBatch: (@MainActor (ExactRequestBatch) -> Void)?
     private var documentRecency: [DocumentKey] = []
 
     public init() {
@@ -99,12 +102,16 @@ public final class ContextWindowModel {
     }
 
     func attachExactCoordinator(_ coordinator: ExactCoordinator) {
-        exactResolver = { [weak coordinator] file, offset, generation in
+        exactResolver = { [weak coordinator] file, offset, generation, batch in
             await coordinator?.definition(
                 file: file,
                 byteOffset: offset,
-                generation: generation
+                generation: generation,
+                batch: batch
             )
+        }
+        cancelExactBatch = { [weak coordinator] batch in
+            coordinator?.cancel(batch: batch)
         }
     }
 
@@ -149,6 +156,7 @@ public final class ContextWindowModel {
         let enteringPin = mode == .pinned && self.mode != .pinned
         if enteringPin {
             requestID &+= 1
+            cancelExactUpgrade()
             pendingToken = nil
             let hasDisplayedLocatedToken = if let displayedToken, let locatedToken {
                 locatedToken.file == displayedToken.file
@@ -185,8 +193,11 @@ public final class ContextWindowModel {
         }
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
+            requestID &+= 1
+            cancelExactUpgrade()
             pendingToken = nil
             displayedToken = nil
+            locatedToken = nil
         }
         self.root = normalizedRoot
         self.contentSource = contentSource
@@ -195,6 +206,7 @@ public final class ContextWindowModel {
         switch state {
         case .indexing:
             requestID &+= 1
+            cancelExactUpgrade()
             locatedToken = nil
             displayedToken = nil
             stage = .indexBuilding
@@ -203,6 +215,7 @@ public final class ContextWindowModel {
                previousGeneration != context.generation
             {
                 requestID &+= 1
+                cancelExactUpgrade()
                 locatedToken = nil
             }
             if let pendingToken {
@@ -215,6 +228,7 @@ public final class ContextWindowModel {
             }
         case .empty, .failed:
             requestID &+= 1
+            cancelExactUpgrade()
             pendingToken = nil
             locatedToken = nil
             displayedToken = nil
@@ -290,6 +304,7 @@ public final class ContextWindowModel {
             return selectedCandidate
         }
         requestID &+= 1
+        cancelExactUpgrade()
         let currentRequest = requestID
         guard let pathID = pathID(token.file, in: session) else {
             locatedToken = nil
@@ -465,15 +480,21 @@ public final class ContextWindowModel {
         request: UInt64
     ) async {
         guard let exactResolver,
-              let result = await exactResolver(
-                  token.file,
-                  token.offset,
-                  context.generation
-              ),
-              requestID == request,
+              let batch = makeUpgradeBatch()
+        else { return }
+        let result = await exactResolver(
+            token.file,
+            token.offset,
+            context.generation,
+            batch
+        )
+        defer { finishExactUpgrade(batch) }
+        guard requestID == request,
+              batch.isCurrent,
               case let .ready(currentSession, currentContext) = projectState,
               currentContext.generation == context.generation,
-              currentSession.snapshotID == session.snapshotID
+              currentSession.snapshotID == session.snapshotID,
+              currentSession.analysisProfile.id == session.analysisProfile.id
         else { return }
         guard case .completed(let entries) = result else { return }
         for exact in entries {
@@ -483,6 +504,27 @@ public final class ContextWindowModel {
                 context: context,
                 request: request
             )
+        }
+    }
+
+    package func cancelExactUpgrade() {
+        guard let exactBatch else { return }
+        exactBatch.cancel()
+        cancelExactBatch?(exactBatch)
+        self.exactBatch = nil
+    }
+
+    private func makeUpgradeBatch() -> ExactRequestBatch? {
+        cancelExactUpgrade()
+        guard exactResolver != nil else { return nil }
+        let batch = ExactRequestBatch()
+        exactBatch = batch
+        return batch
+    }
+
+    private func finishExactUpgrade(_ batch: ExactRequestBatch) {
+        if exactBatch === batch {
+            exactBatch = nil
         }
     }
 
@@ -509,7 +551,8 @@ public final class ContextWindowModel {
             let upgraded = exactCandidate(
                 upgrading: candidates[index],
                 attribution: exact.attribution,
-                origin: exact.origin
+                origin: exact.origin,
+                language: session.analysisProfile.language
             )
             if mode == .pinned {
                 guard index == selected else { return }
@@ -547,7 +590,8 @@ public final class ContextWindowModel {
     private func exactCandidate(
         upgrading candidate: Candidate,
         attribution: ExactAttribution,
-        origin: ExactOrigin
+        origin: ExactOrigin,
+        language: LanguageID
     ) -> Candidate {
         let label = "Exact·direct"
         return Candidate(
@@ -566,7 +610,8 @@ public final class ContextWindowModel {
             provenanceBadge: exactBadge(
                 label,
                 attribution: attribution,
-                origin: origin
+                origin: origin,
+                language: language
             )
         )
     }
@@ -583,7 +628,8 @@ public final class ContextWindowModel {
                 at: path,
                 offset: offset,
                 attribution: attribution,
-                origin: origin
+                origin: origin,
+                language: session.analysisProfile.language
             )
         }
         guard let pathID = pathID(path, in: session),
@@ -622,7 +668,8 @@ public final class ContextWindowModel {
             provenanceBadge: exactBadge(
                 label,
                 attribution: attribution,
-                origin: origin
+                origin: origin,
+                language: session.analysisProfile.language
             )
         )
     }
@@ -631,7 +678,8 @@ public final class ContextWindowModel {
         at path: String,
         offset: UInt32,
         attribution: ExactAttribution,
-        origin: ExactOrigin
+        origin: ExactOrigin,
+        language: LanguageID
     ) async -> Candidate? {
         guard let languageMode = dependencyLanguageMode(path: path),
               let document = await dependencyDocument(
@@ -650,7 +698,8 @@ public final class ContextWindowModel {
         let exact = exactBadge(
             "Exact·direct",
             attribution: attribution,
-            origin: origin
+            origin: origin,
+            language: language
         )
         return Candidate(
             symbol: nil,
@@ -682,7 +731,8 @@ public final class ContextWindowModel {
     private func exactBadge(
         _ label: String,
         attribution: ExactAttribution,
-        origin: ExactOrigin
+        origin: ExactOrigin,
+        language: LanguageID
     ) -> String {
         let trust = switch attribution.environment.trustMode {
         case .safe: "Safe"
@@ -694,11 +744,18 @@ public final class ContextWindowModel {
         case .materialized(let commitOID):
             " · @\(commitOID.prefix(7)) (materialized)"
         }
-        let features = switch attribution.featureSelection {
-        case .defaultFeatures: "default"
-        case .allFeatures: "all"
-        case .noDefaultFeatures: "no-default"
+        let featureDetail: String? = if language == .python {
+            nil
+        } else {
+            switch attribution.featureSelection {
+            case .defaultFeatures: "default"
+            case .allFeatures: "all"
+            case .noDefaultFeatures: "no-default"
+            }
         }
+        let featureSuffix = featureDetail.map {
+            " · features: \($0)"
+        } ?? ""
         let limitations = attribution.environment.limitations
             .sorted { $0.rawValue < $1.rawValue }
             .map(\.displayName)
@@ -706,7 +763,7 @@ public final class ContextWindowModel {
         let environment = limitations.isEmpty
             ? "no known limitations"
             : "limitations: \(limitations)"
-        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source) · features: \(features)"
+        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source)\(featureSuffix)"
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {

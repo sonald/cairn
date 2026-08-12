@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightRustExtractor
+import CodeInsightPythonExtractor
 @testable import CodeInsightEngine
 import Dispatch
 import Foundation
@@ -54,6 +55,41 @@ func snapshotSearchFiltersOccurrencesBeforeDeduplicatingContent() async throws {
     #expect(Set(references.matches.map(\.pathID))
         == Set([source.manifest.files[0].pathID]))
     #expect(references.matches.count == 2)
+}
+
+@Test
+func pythonSnapshotSearchExcludesIdentifiersInStringsAndComments() async throws {
+    let bytes = Array("""
+        value = 1
+        text = "value"
+        # value
+        print(value)
+        """.utf8)
+    let source = FakeSnapshotSource([
+        ("main.py", bytes),
+        ("copy.py", bytes),
+    ], language: .python)
+    let stream = try SnapshotSearchService(
+        source: source,
+        language: .python,
+        extractor: PythonExtractor()
+    ).searchReferences(
+        ContentSearchQuery(pattern: "value", caseSensitive: true),
+        excludingPathID: source.manifest.files[0].pathID,
+        excludingRange: ByteRange(lowerBound: 0, upperBound: 0),
+        context: context(for: source)
+    )
+    var matches: [SearchMatch] = []
+    do {
+        for try await batch in stream {
+            matches.append(contentsOf: batch.matchesByPath.values.flatMap { $0 })
+        }
+    }
+
+    #expect(matches.count == 4)
+    #expect(Set(matches.map(\.line)) == [1, 4])
+    #expect(Set(matches.map(\.pathID)).count == 2)
+    #expect(source.totalScanCount == 1)
 }
 
 @Test
@@ -389,7 +425,8 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
     init(
         _ files: [(path: String, bytes: [UInt8])],
         readDelay: TimeInterval = 0,
-        pauseAtScanCount: Int? = nil
+        pauseAtScanCount: Int? = nil,
+        language: LanguageID = .rust
     ) {
         var contents: [ContentID: [UInt8]] = [:]
         var paths: [PathID: String] = [:]
@@ -402,7 +439,7 @@ private final class FakeSnapshotSource: SnapshotContentSource, @unchecked Sendab
                 occurrenceID: FileOccurrenceID(rawValue: UInt32(offset)),
                 pathID: pathID,
                 contentID: contentID,
-                detectedLanguage: .rust,
+                detectedLanguage: language,
                 sourceKind: .untracked,
                 fileMode: .regular,
                 size: UInt64(file.bytes.count)

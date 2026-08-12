@@ -2098,7 +2098,7 @@ private final class RelationCellView: NSTableCellView {
         badgeLabel.stringValue = node.badge ?? ""
         badgePill.isHidden = node.badge == nil
         badgeLabel.toolTip = switch node.badge {
-        case "Verified": "Verified by rust-analyzer"
+        case "Verified": "Verified by exact provider"
         case "Inferred": "Inferred from source structure"
         case "Unresolved": "Unresolved source target"
         default: nil

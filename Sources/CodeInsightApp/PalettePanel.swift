@@ -654,7 +654,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     ) -> [Row] {
         guard !query.isEmpty else { return [] }
         let kindOrder: [OutlineKind: Int] = Dictionary(uniqueKeysWithValues: [
-            OutlineKind.mod, .trait, .impl, .struct, .enum, .typeAlias,
+            OutlineKind.mod, .trait, .impl, .struct, .class, .enum, .typeAlias,
             .const, .static, .fn, .method,
         ].enumerated().map { ($0.element, $0.offset) })
         return document.outlineFacets.filter {

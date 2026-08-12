@@ -2,6 +2,22 @@
 import CodeInsightCore
 import CodeInsightReaderCore
 
+private func readerDynamicColor(
+    value: @escaping @Sendable (Bool) -> UInt32,
+    alpha: @escaping @Sendable (Bool) -> CGFloat
+) -> NSColor {
+    NSColor(name: nil) { appearance in
+        let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
+        let rgb = value(isDark)
+        return NSColor(
+            red: CGFloat((rgb >> 16) & 0xff) / 255,
+            green: CGFloat((rgb >> 8) & 0xff) / 255,
+            blue: CGFloat(rgb & 0xff) / 255,
+            alpha: alpha(isDark)
+        )
+    }
+}
+
 @MainActor
 public extension ReaderTheme {
     func color(for kind: HighlightKind) -> NSColor {
@@ -130,16 +146,7 @@ public extension ReaderTheme {
         _ value: @escaping @Sendable (Bool) -> UInt32,
         alpha: @escaping @Sendable (Bool) -> CGFloat
     ) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let isDark = appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            let rgb = value(isDark)
-            return NSColor(
-                red: CGFloat((rgb >> 16) & 0xff) / 255,
-                green: CGFloat((rgb >> 8) & 0xff) / 255,
-                blue: CGFloat(rgb & 0xff) / 255,
-                alpha: alpha(isDark)
-            )
-        }
+        readerDynamicColor(value: value, alpha: alpha)
     }
 }
 
@@ -1192,7 +1199,7 @@ public final class ReaderTextView {
         }
         let containers = containing.filter {
             switch $0.kind {
-            case .struct, .enum, .trait, .impl, .mod: true
+            case .struct, .enum, .trait, .impl, .mod, .class: true
             case .fn, .method, .const, .static, .typeAlias: false
             }
         }
@@ -2660,7 +2667,7 @@ public final class ReaderTextView {
         case .mod, .const, .static:
             NSRect(x: rect.minX, y: rect.midY - 0.5, width: rect.width, height: 1)
                 .fill()
-        case .struct, .enum, .trait, .typeAlias:
+        case .struct, .enum, .trait, .typeAlias, .class:
             rect.fill()
         }
     }
@@ -2670,7 +2677,7 @@ public final class ReaderTextView {
         switch kind {
         case .fn, .method:
             color = theme.color(for: .functionName)
-        case .struct, .enum, .trait, .typeAlias:
+        case .struct, .enum, .trait, .typeAlias, .class:
             color = theme.color(for: .declarationTitle)
         case .impl:
             color = theme.color(for: .typeName)
@@ -3029,7 +3036,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         _ counts: [OutlineKind: Int]
     ) -> [String] {
         let order: [OutlineKind] = [
-            .mod, .trait, .impl, .struct, .enum, .typeAlias,
+            .mod, .trait, .impl, .struct, .class, .enum, .typeAlias,
             .const, .static, .fn, .method,
         ]
         return order.compactMap { kind in

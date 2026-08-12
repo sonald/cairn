@@ -18,6 +18,184 @@ func analysisProfileIDMatchesTheCrossLanguageV1Vector() {
 }
 
 @Test
+func pythonProfileDetectorUsesPyrightConfigOverPyprojectAndUvLock() throws {
+    try withProfileProject([
+        "pyrightconfig.json": #"{"venvPath": "."}"#,
+        "pyproject.toml": "[project]\nname = \"sample\"\n",
+        "uv.lock": "version = 1\n",
+        "main.py": "print('main')\n",
+    ]) { root in
+        let config = [UInt8](try Data(
+            contentsOf: root.appendingPathComponent("pyrightconfig.json")
+        ))
+        let uv = [UInt8](try Data(
+            contentsOf: root.appendingPathComponent("uv.lock")
+        ))
+        let profile = ProfileDetector.detect(
+            projectURL: root,
+            language: .python,
+            projectRoot: PathID(rawValue: 7)
+        )
+
+        #expect(profile.language == .python)
+        #expect(profile.projectRoot == PathID(rawValue: 7))
+        #expect(profile.projectUnitName == root.lastPathComponent)
+        #expect(profile.configFingerprint == sha256Hex(
+            Array("pyrightconfig.json\0".utf8) + config
+        ))
+        #expect(profile.environmentFingerprint == sha256Hex(
+            Array("uv.lock\0".utf8) + uv
+        ))
+        #expect(profile.featureSelection == .defaultFeatures)
+        #expect(profile.featureNames.isEmpty)
+        #expect(profile.edition == nil)
+        if case .safe = profile.trustMode {} else {
+            Issue.record("Python profiles must start in safe mode")
+        }
+    }
+}
+
+@Test
+func pythonProfileDetectorFallsBackToPyprojectAndEmptyUvLock() throws {
+    try withProfileProject([
+        "pyproject.toml": "[project]\nname = \"sample\"\n",
+        "main.py": "print('main')\n",
+    ]) { root in
+        let profile = ProfileDetector.detect(
+            projectURL: root,
+            language: .python,
+            projectRoot: PathID(rawValue: 8)
+        )
+        let expectedConfig = sha256Hex(
+            Array("pyproject.toml\0".utf8) + [UInt8](try Data(
+                contentsOf: root.appendingPathComponent("pyproject.toml")
+            ))
+        )
+
+        #expect(profile.language == .python)
+        #expect(profile.configFingerprint == expectedConfig)
+        #expect(profile.environmentFingerprint == "")
+    }
+}
+
+@Test
+func pythonProfileDetectorConfigDeviationChangesOnlyItsFingerprint() throws {
+    try withProfileProject([
+        "pyrightconfig.json": #"{"venvPath": "."}"#,
+        "uv.lock": "version = 1\n",
+        "main.py": "print('main')\n",
+    ]) { root in
+        let initial = ProfileDetector.detect(
+            projectURL: root,
+            language: .python,
+            projectRoot: PathID(rawValue: 9)
+        )
+        try Data("version = 2\n".utf8).write(
+            to: root.appendingPathComponent("uv.lock")
+        )
+        let changedLock = ProfileDetector.detect(
+            projectURL: root,
+            language: .python,
+            projectRoot: PathID(rawValue: 9)
+        )
+        try Data(#"{"venv": "other"}"#.utf8).write(
+            to: root.appendingPathComponent("pyrightconfig.json")
+        )
+        let changedConfig = ProfileDetector.detect(
+            projectURL: root,
+            language: .python,
+            projectRoot: PathID(rawValue: 9)
+        )
+
+        #expect(initial.environmentFingerprint != changedLock.environmentFingerprint)
+        #expect(initial.configFingerprint == changedLock.configFingerprint)
+        #expect(changedLock.configFingerprint != changedConfig.configFingerprint)
+        #expect(changedLock.environmentFingerprint == changedConfig.environmentFingerprint)
+    }
+}
+
+@Test
+func pythonProfileDetectorMissingConfigUsesFixedNonemptySentinel() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightMissingPython-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let profile = ProfileDetector.detect(
+        projectURL: root,
+        language: .python,
+        projectRoot: PathID(rawValue: 10)
+    )
+
+    #expect(profile.language == .python)
+    #expect(profile.configFingerprint ==
+        "ad63780a0cbd089b3305c2cf137e6b6bf21da9bd79e5c110172db574a847be12")
+    #expect(profile.environmentFingerprint == "")
+}
+
+@Test
+func snapshotPythonProfileReadsRootConfigBytesForDeterministicIdentity() throws {
+    let main = Array("print('main')\n".utf8)
+    let config = Array(#"{"venvPath": "."}"#.utf8)
+    let env = Array("version = 1\n".utf8)
+    let snapshot = ProfileSnapshot(
+        projectRootName: "snapshot-python",
+        visiblePaths: ["main.py"],
+        bytesByPath: [
+            "main.py": main,
+            "pyrightconfig.json": config,
+            "uv.lock": env,
+        ]
+    )
+
+    let one = ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .python,
+        projectRoot: PathID(rawValue: 11)
+    )
+    let two = ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .python,
+        projectRoot: PathID(rawValue: 12)
+    )
+
+    let worktreeParent = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "PythonWorktreeIdentity-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    let worktreeRoot = worktreeParent.appendingPathComponent(
+        "snapshot-python",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: worktreeParent) }
+    try Data(config).write(to: worktreeRoot.appendingPathComponent("pyrightconfig.json"))
+    try Data(env).write(to: worktreeRoot.appendingPathComponent("uv.lock"))
+    let worktree = ProfileDetector.detect(
+        projectURL: worktreeRoot,
+        language: .python,
+        projectRoot: PathID(rawValue: 13)
+    )
+
+    #expect(one.language == .python)
+    #expect(one.configFingerprint == sha256Hex(
+        Array("pyrightconfig.json\0".utf8) + config
+    ))
+    #expect(one.environmentFingerprint == sha256Hex(
+        Array("uv.lock\0".utf8) + env
+    ))
+    #expect(worktree.configFingerprint == one.configFingerprint)
+    #expect(worktree.environmentFingerprint == one.environmentFingerprint)
+    #expect(worktree.configFingerprint ==
+        "b6889f386c36d8ec8584cb829b44ba761eb5e806e76efdfb1503d1dbdcf4da1a")
+    #expect(worktree.environmentFingerprint ==
+        "64fb59631c8cea5db88cf2a47a66fa0353d8c090b517488ff0311dd08989d679")
+    #expect(worktree.id == one.id)
+    #expect(one.id == two.id)
+}
+
+@Test
 func profileDetectorReadsPackageFeaturesEditionAndLockfile() throws {
     try withProfileProject([
         "Cargo.toml": """

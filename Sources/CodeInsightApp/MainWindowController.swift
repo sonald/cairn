@@ -60,6 +60,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
     private let onChooseProject: () -> Void
+    private let onChooseProjectLanguage: (URL) -> Void
     private let onShowSettings: () -> Void
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
@@ -72,7 +73,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var panelPreset = PanelPresetModel.reading
     private var readingSetLayoutActive = false
     private var lastOpenedProjectRoot: URL?
+    var lastOpenedProjectLanguage: LanguageID?
     private var pendingRecentProjectRoot: URL?
+    var pendingRecentProjectLanguage: LanguageID?
     private var pendingTabRestore: TabStripModel.Tab?
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
@@ -86,6 +89,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
         onChooseProject: @escaping () -> Void = {},
+        onChooseProjectLanguage: @escaping (URL) -> Void = { _ in },
         onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
@@ -93,6 +97,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
         self.onChooseProject = onChooseProject
+        self.onChooseProjectLanguage = onChooseProjectLanguage
         self.onShowSettings = onShowSettings
         sidebarController.setSplitAutosaveName(
             offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
@@ -522,12 +527,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func openProject(root: URL) {
+        openProject(root: root, language: .rust)
+    }
+
+    func openProject(root: URL, language: LanguageID) {
         cancelSessionRestore()
         let root = root.standardizedFileURL
         lastOpenedProjectRoot = root
+        lastOpenedProjectLanguage = language
         pendingRecentProjectRoot = root
-        model.openProject(root: root)
+        pendingRecentProjectLanguage = language
+        try? model.openProject(root: root, language: language)
         render()
+    }
+
+    func openRecentProject(_ root: URL) {
+        openProject(root: root, language: recentProjectsStore.language(for: root.standardizedFileURL.path))
     }
 
     func restoreSession(_ snapshot: SessionCodec.Snapshot) {
@@ -537,7 +552,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             isDirectory: true
         ).standardizedFileURL
         lastOpenedProjectRoot = root
+        lastOpenedProjectLanguage = snapshot.language
         pendingRecentProjectRoot = root
+        pendingRecentProjectLanguage = snapshot.language
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
             applyPanelPreset(preset)
         }
@@ -1163,6 +1180,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestProfileButtonFrame: NSRect { profileButton.frame }
     var selfTestProfileContainerBounds: NSRect {
         profileButton.superview?.bounds ?? .zero
+    }
+    var selfTestProfileMenuTitles: [String] {
+        makeProfileMenu().items.compactMap(\.title)
     }
     func selfTestSwitchFeatureSelection(
         _ featureSelection: FeatureSelection
@@ -1841,10 +1861,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .safe: "Safe"
         case .trusted: "Trusted"
         }
-        return "\(Self.displayName(for: profile.language))"
+        let base = "\(Self.displayName(for: profile.language))"
             + " · \(profile.projectUnitName)"
-            + " · \(Self.displayName(for: profile.featureSelection))"
-            + " · \(trust)"
+        guard profile.language == .python else {
+            return base
+                + " · \(Self.displayName(for: profile.featureSelection))"
+                + " · \(trust)"
+        }
+        return base + " · \(trust)"
     }
 
     private static func displayName(for language: LanguageID) -> String {
@@ -1914,34 +1938,42 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let edition = profile.edition.map { "edition \($0)" }
             ?? "edition unknown"
-        let current = NSMenuItem(
-            title: "Current unit: \(profile.projectUnitName)"
+        let currentTitle: String
+        if profile.language == .python {
+            currentTitle = "Current unit: \(profile.projectUnitName) · \(trust)"
+        } else {
+            currentTitle = "Current unit: \(profile.projectUnitName)"
                 + " · features: \(Self.displayName(for: profile.featureSelection))"
-                + " · \(edition) · \(trust)",
+                + " · \(edition) · \(trust)"
+        }
+        let current = NSMenuItem(
+            title: currentTitle,
             action: nil,
             keyEquivalent: ""
         )
         current.isEnabled = false
         menu.addItem(current)
-        menu.addItem(.separator())
-        for featureSelection in model.availableFeatureSelections {
-            let title = switch featureSelection {
-            case .defaultFeatures: "Default features"
-            case .allFeatures: "All features"
-            case .noDefaultFeatures: "No default features"
+        if profile.language != .python {
+            menu.addItem(.separator())
+            for featureSelection in model.availableFeatureSelections {
+                let title = switch featureSelection {
+                case .defaultFeatures: "Default features"
+                case .allFeatures: "All features"
+                case .noDefaultFeatures: "No default features"
+                }
+                let feature = NSMenuItem(
+                    title: title,
+                    action: #selector(switchFeatureSelectionFromMenu(_:)),
+                    keyEquivalent: ""
+                )
+                feature.target = self
+                feature.representedObject = featureSelection.rawValue
+                feature.state = featureSelection == profile.featureSelection
+                    ? .on
+                    : .off
+                feature.isEnabled = model.snapshotPhase == .fullReady
+                menu.addItem(feature)
             }
-            let feature = NSMenuItem(
-                title: title,
-                action: #selector(switchFeatureSelectionFromMenu(_:)),
-                keyEquivalent: ""
-            )
-            feature.target = self
-            feature.representedObject = featureSelection.rawValue
-            feature.state = featureSelection == profile.featureSelection
-                ? .on
-                : .off
-            feature.isEnabled = model.snapshotPhase == .fullReady
-            menu.addItem(feature)
         }
         menu.addItem(.separator())
         let trustItem = NSMenuItem(
@@ -1951,29 +1983,38 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         trustItem.target = NSApplication.shared.delegate
         menu.addItem(trustItem)
-        menu.addItem(.separator())
-        let explanation = NSMenuItem(
-            title: "Switch features here; the current unit is detected",
-            action: nil,
-            keyEquivalent: ""
-        )
-        explanation.isEnabled = false
-        menu.addItem(explanation)
+        if profile.language != .python {
+            menu.addItem(.separator())
+            let explanation = NSMenuItem(
+                title: "Switch features here; the current unit is detected",
+                action: nil,
+                keyEquivalent: ""
+            )
+            explanation.isEnabled = false
+            menu.addItem(explanation)
+        }
         return menu
     }
 
     private func renderEmptyState() {
         if case .ready = model.projectState, let root = pendingRecentProjectRoot {
             if recordsRecentProjects {
-                recentProjectsStore.record(root)
+                recentProjectsStore.record(
+                    root,
+                    language: pendingRecentProjectLanguage ?? .rust
+                )
             }
             pendingRecentProjectRoot = nil
+            pendingRecentProjectLanguage = nil
         }
 
         let retry = { [weak self] in
             guard let self else { return }
             if let root = lastOpenedProjectRoot {
-                openProject(root: root)
+                openProject(
+                    root: root,
+                    language: lastOpenedProjectLanguage ?? .rust
+                )
             } else {
                 onChooseProject()
             }
@@ -1984,7 +2025,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 recentPaths: recentProjectsStore.paths,
                 failed: false,
                 onChooseProject: onChooseProject,
-                onOpenProject: { [weak self] in self?.openProject(root: $0) },
+                onOpenRecent: { [weak self] in self?.openRecentProject($0) },
+                onOpenDropped: onChooseProjectLanguage,
                 onRetry: retry
             )
         case .failed:
@@ -1992,7 +2034,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 recentPaths: recentProjectsStore.paths,
                 failed: true,
                 onChooseProject: onChooseProject,
-                onOpenProject: { [weak self] in self?.openProject(root: $0) },
+                onOpenRecent: { [weak self] in self?.openRecentProject($0) },
+                onOpenDropped: onChooseProjectLanguage,
                 onRetry: retry
             )
         case .indexing:
@@ -2074,8 +2117,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 "Tool version: \(attribution.toolVersion)",
                 "Trust: \(trust ?? "Unknown")",
                 "Limitations: \(limitationMeaning)",
-                "Features: \(Self.displayName(for: attribution.featureSelection))",
             ]
+            if model.activeAnalysisProfileDisplay?.language != .python {
+                lines.append(
+                    "Features: \(Self.displayName(for: attribution.featureSelection))"
+                )
+            }
             if let statusDetail { lines.append(statusDetail) }
             detail = lines.joined(separator: "\n")
         } else {
@@ -3337,7 +3384,7 @@ final class SidebarViewController: NSViewController,
         switch kind {
         case .fn: "function"
         case .method: "m.square"
-        case .struct: "shippingbox"
+        case .struct, .class: "shippingbox"
         case .enum: "list.bullet"
         case .trait: "point.3.connected.trianglepath.dotted"
         case .impl: "hammer"
@@ -4289,7 +4336,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         recentPaths: [String],
         failed: Bool,
         onChooseProject: @escaping () -> Void,
-        onOpenProject: @escaping (URL) -> Void,
+        onOpenRecent: @escaping (URL) -> Void,
+        onOpenDropped: @escaping (URL) -> Void,
         onRetry: @escaping () -> Void
     ) {
         loadViewIfNeeded()
@@ -4303,7 +4351,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             recentPaths: recentPaths,
             failed: failed,
             onChooseProject: onChooseProject,
-            onOpenProject: onOpenProject,
+            onOpenRecent: onOpenRecent,
+            onOpenDropped: onOpenDropped,
             onRetry: onRetry
         )
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false

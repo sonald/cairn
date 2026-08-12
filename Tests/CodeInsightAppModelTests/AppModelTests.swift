@@ -676,17 +676,17 @@ func projectOpenPublishesFileTreeAsynchronously() async throws {
 func unsupportedLanguageOpenIsSynchronousAndAtomic() async {
     let service = ControlledIndexService()
     let model = AppModel(indexService: service)
-    let root = URL(fileURLWithPath: "/tmp/python-project", isDirectory: true)
+    let root = URL(fileURLWithPath: "/tmp/typescript-project", isDirectory: true)
     let originalGeneration = model.generation
 
     do {
-        try model.openProject(root: root, language: .python)
+        try model.openProject(root: root, language: .typescript)
         Issue.record("expected unsupported language")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("python") == true
+                .contains("typescript") == true
         )
     } catch {
         Issue.record("unexpected error: \(error)")
@@ -700,6 +700,105 @@ func unsupportedLanguageOpenIsSynchronousAndAtomic() async {
     #expect(model.projectRoot == nil)
     #expect(model.generation == originalGeneration)
     #expect(await service.requestedLanguages().isEmpty)
+}
+
+@MainActor
+@Test
+func realIndexServiceOpensPythonProjectAndPublishesPythonSession() async throws {
+    let root = try temporaryProject([
+        "main.py": "def hello():\n    return 1\n",
+        "ignored.rs": "fn main() {}",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+
+    try model.openProject(root: root, language: .python)
+
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
+        model.snapshotPhase == .fullReady
+    })
+    #expect(model.projectLanguage == .python)
+    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
+    #expect(model.fileTree?.fileCount == 1)
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected ready Python session")
+        return
+    }
+    #expect(session.analysisProfile.language == .python)
+    #expect(session.manifest.files.map {
+        session.paths.resolve($0.pathID)
+    } == ["main.py"])
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: model.generation
+    )
+    #expect(try session.searchSymbols(
+        query: "hello",
+        limit: 10,
+        boost: SearchBoost(),
+        context: context
+    ).map(\.path) == ["main.py"])
+    var contentMatches: [SearchMatch] = []
+    for try await batch in try session.search(
+        ContentSearchQuery(pattern: "return 1"),
+        context: context
+    ) {
+        contentMatches.append(contentsOf: batch.matchesByPath.values.flatMap { $0 })
+    }
+    #expect(contentMatches.map { session.paths.resolve($0.pathID) } == ["main.py"])
+    #expect(model.availableFeatureSelections == [.defaultFeatures])
+}
+
+@MainActor
+@Test
+func pythonProfileLimitsFeatureChoicesAndSwitchingIsNoOp() async throws {
+    let root = try temporaryProject(["main.rs": "fn main() {}"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let rustSession = try ProjectIndexer().index(root: root)
+    let pythonSession = EngineSession(
+        store: rustSession.store,
+        snapshotView: SnapshotView(
+            reprofiling: rustSession.snapshotView,
+            analysisProfile: .placeholder(
+                language: .python,
+                root: rustSession.analysisProfile.projectRoot
+            )
+        )
+    )
+    let service = ControlledIndexService()
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: root)
+    #expect(await service.waitUntilRequested(root: root))
+    await service.complete(root: root, result: .success(rustSession))
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
+        model.snapshotPhase == .fullReady
+    })
+
+    #expect(model.transition(to: .indexing(root: root, startedAt: .now)))
+    #expect(model.transition(to: .ready(
+        pythonSession,
+        QueryContext(
+            snapshotID: pythonSession.snapshotID,
+            analysisProfileID: pythonSession.analysisProfile.id,
+            generation: model.generation
+        )
+    )))
+    #expect(model.availableFeatureSelections == [.defaultFeatures])
+    #expect(model.currentFeatureSelection == .defaultFeatures)
+
+    let generationBeforeSwitch = model.generation
+    model.switchFeatureSelection(.allFeatures)
+
+    #expect(model.generation == generationBeforeSwitch)
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected python ready session")
+        return
+    }
+    #expect(session.analysisProfile.id == pythonSession.analysisProfile.id)
+    #expect(session.analysisProfile.featureSelection == .defaultFeatures)
+    #expect(model.currentFeatureSelection == .defaultFeatures)
 }
 
 @MainActor
@@ -851,12 +950,12 @@ func projectIndexServiceRejectsUnsupportedLanguageBeforeIO() async {
 
     let service = ProjectIndexService()
     for operation in [
-        { try await service.index(root: root, language: .python) as Any },
+        { try await service.index(root: root, language: .typescript) as Any },
         {
             try await service.captureSnapshot(
                 root: root,
                 revision: "HEAD",
-                language: .typescript
+                language: .javascript
             ) as Any
         },
     ] {

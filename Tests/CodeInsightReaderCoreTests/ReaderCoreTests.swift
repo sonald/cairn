@@ -44,7 +44,7 @@ func explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() throws {
 @Test
 func unsupportedDocumentModeFailsBeforeParsing() throws {
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
-    let loader = DocumentLoader(source: { _ in Array("def greet(): pass\n".utf8) })
+    let loader = DocumentLoader(source: { _ in Array("const x: number = 1\n".utf8) })
 
     do {
         _ = try RustExtractor.$parseObserver.withValue({
@@ -52,12 +52,12 @@ func unsupportedDocumentModeFailsBeforeParsing() throws {
         }) {
             try loader.load(
                 file: URL(fileURLWithPath: "/fixture.py"),
-                languageMode: LanguageMode(language: .python)
+                languageMode: LanguageMode(language: .typescript)
             )
         }
-        Issue.record("DocumentLoader accepted an unsupported Python mode")
+        Issue.record("DocumentLoader accepted an unsupported TypeScript mode")
     } catch RustHighlighterError.unsupportedLanguage(let language) {
-        #expect(language == .python)
+        #expect(language == .typescript)
     } catch {
         Issue.record("DocumentLoader returned the wrong error: \(error)")
     }
@@ -75,8 +75,8 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
         }
     )
     let document = ReaderDocument(
-        bytes: Array("def greet(): pass\n".utf8),
-        languageMode: LanguageMode(language: .python)
+        bytes: Array("const x = 1\n".utf8),
+        languageMode: LanguageMode(language: .typescript)
     )
 
     let completed = await withCheckedContinuation { continuation in
@@ -86,15 +86,166 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
     }
     switch completed {
     case .success:
-        Issue.record("Detached syntax accepted an unsupported Python mode")
+        Issue.record("Detached syntax accepted an unsupported TypeScript mode")
     case .failure(.unsupportedLanguage(let language)):
-        #expect(language == .python)
+        #expect(language == .typescript)
     case .failure(let error):
         Issue.record("Detached syntax returned the wrong error: \(error)")
     }
     #expect(resolutionCount.withLock { $0 } == 0)
 }
+@Test
+func pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() throws {
+    let source = """
+        import os
+        import sys
+
+        class Greeter:
+            def hello(self, name):
+                return name
+
+        def top():
+            n = 7
+            g = "hi"
+            return hello(g)
+        """
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let result = try DocumentLoader.$pythonParseObserver.withValue({
+        parseCount.withLock { $0 += 1 }
+    }) {
+        try pythonReaderHighlightWithFolds(bytes: Array(source.utf8))
+    }
+
+    #expect(parseCount.withLock { $0 } == 1)
+    #expect(result.outlineFacets.map(\.kind) == [
+        OutlineKind.class, .method, .fn,
+    ])
+    #expect(result.folds.contains { $0.kind == .imports })
+    #expect(result.folds.contains { $0.kind == .container })
+    #expect(result.folds.contains { $0.kind == .declaration })
+    #expect(result.spans.contains { $0.kind == .keyword })
+    #expect(result.spans.contains { $0.kind == .number })
+    #expect(result.spans.contains { $0.kind == .string })
+    #expect(result.spans == result.spans.sorted {
+        ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
+            < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
+    })
+    let clickedString = try #require(result.spans.first {
+        $0.kind == .string
+    })
+    #expect(result.spans
+        .filter { $0.range.overlaps(clickedString.range) }
+        .allSatisfy { $0.kind == .string })
+}
 #endif
+
+@Test
+func pythonReaderLocalReferencesScopeAndRhsActivation() throws {
+    let source = """
+        def outer():
+            x = 1
+            x
+            def inner():
+                x = x + 1
+                x
+            inner()
+        def sibling():
+            x = 2
+            x
+        """
+    let bytes = Array(source.utf8)
+    let highlighted = try pythonReaderHighlightWithFolds(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        languageMode: LanguageMode(language: .python),
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+
+    let xs = tokenRanges(of: "x", in: source)
+    let outer = try #require(document.localBinding(at: xs[0].lowerBound))
+    let inner = try #require(document.localBinding(at: xs[2].lowerBound))
+    let sibling = try #require(document.localBinding(at: xs[5].lowerBound))
+
+    #expect(outer.references == [xs[1], xs[3]])
+    #expect(inner.references == [xs[4]])
+    #expect(sibling.references == [xs[6]])
+}
+
+@Test
+func pythonReaderFoldsCommentsAndImportsInsideFunctionBodies() throws {
+    let source = """
+        def work():
+            # one
+            # two
+            import os
+            import sys
+            return 1
+        """
+    let result = try pythonReaderHighlightWithFolds(bytes: Array(source.utf8))
+
+    #expect(result.folds.contains { $0.kind == .comment && $0.summary.itemCount == 2 })
+    #expect(result.folds.contains { $0.kind == .imports && $0.summary.itemCount == 2 })
+}
+
+@Test
+func pythonReaderSpansAndOutlineIncludeBasicSyntax() throws {
+    let source = [
+        "class Widget:",
+        "    def __init__(self, name):",
+        "        self.name = name  # comment",
+        "",
+        "    async def render(self):",
+        "        return f\"hi {self.name}\"",
+        "",
+        "@widget",
+        "def make() -> Widget:",
+        "    return Widget()",
+    ].joined(separator: "\n")
+
+    let result = try pythonReaderHighlightWithFolds(bytes: Array(source.utf8))
+
+    #expect(result.outlineFacets == [
+        OutlineFacet(
+            kind: .class,
+            name: "Widget",
+            range: ByteRange(lowerBound: 0, upperBound: 141),
+            nameRange: ByteRange(lowerBound: 6, upperBound: 12),
+            depth: 0
+        ),
+        OutlineFacet(
+            kind: .method,
+            name: "__init__",
+            range: ByteRange(lowerBound: 18, upperBound: 79),
+            nameRange: ByteRange(lowerBound: 22, upperBound: 30),
+            depth: 1
+        ),
+        OutlineFacet(
+            kind: .method,
+            name: "render",
+            range: ByteRange(lowerBound: 85, upperBound: 141),
+            nameRange: ByteRange(lowerBound: 95, upperBound: 101),
+            depth: 1
+        ),
+        OutlineFacet(
+            kind: .fn,
+            name: "make",
+            range: ByteRange(lowerBound: 143, upperBound: 192),
+            nameRange: ByteRange(lowerBound: 155, upperBound: 159),
+            depth: 0
+        ),
+    ])
+    let comments = result.spans.filter { $0.kind == .comment }
+    #expect(comments.count == 1)
+    let strings = result.spans.filter { $0.kind == .string }
+    #expect(strings.count == 1)
+    let defKeyword = try #require(result.spans.first {
+        text(in: source, range: $0.range) == "def"
+    })
+    #expect(defKeyword.kind == .keyword)
+}
 
 @Test
 func identifierOccurrencesUseTheDocumentLanguageMode() {
@@ -104,14 +255,21 @@ func identifierOccurrencesUseTheDocumentLanguageMode() {
         bytes: bytes,
         languageMode: LanguageMode(language: .rust)
     )
-    let unsupportedPython = ReaderDocument(
+    let python = ReaderDocument(
         bytes: bytes,
         languageMode: LanguageMode(language: .python)
     )
 
     #expect(convenience.identifierOccurrences(at: 0)
         == explicitRust.identifierOccurrences(at: 0))
-    #expect(unsupportedPython.identifierOccurrences(at: 0).isEmpty)
+    #expect(python.identifierOccurrences(at: 0)
+        == explicitRust.identifierOccurrences(at: 0))
+
+    let pythonKeyword = ReaderDocument(
+        bytes: Array("def def\n".utf8),
+        languageMode: LanguageMode(language: .python)
+    )
+    #expect(pythonKeyword.identifierOccurrences(at: 0).isEmpty)
 }
 
 @Test
@@ -733,7 +891,7 @@ func rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() throws {
         switch facet.kind {
         case .fn, .method:
             #expect(matching.map(\.kind) == [.functionName])
-        case .struct, .enum, .trait, .typeAlias:
+        case .struct, .enum, .trait, .typeAlias, .class:
             #expect(matching.map(\.kind) == [.declarationTitle])
         case .mod, .const, .static:
             #expect(matching.map(\.kind) == [.declarationEmphasis])
@@ -931,6 +1089,45 @@ func largeDocumentLoadsPlainTextBeforeDetachedSyntax() async throws {
     #expect(document.contentID == loaded.document.contentID)
     #expect(!document.highlightSpans.isEmpty)
     #expect(document.outlineFacets.count == 10_001)
+}
+
+@Test
+func pythonLargeDocumentLoadsPlainTextThenSyncSyntax() async throws {
+    let file = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightReaderCoreTests-\(UUID().uuidString).py")
+    let source = String(repeating: "def item():\n    pass\n", count: 10_001)
+    try source.write(to: file, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let loader = DocumentLoader()
+    let mode = LanguageMode(language: .python, variant: "large-test-mode")
+
+    let loaded = try loader.load(file: file, languageMode: mode)
+
+    #expect(loaded.tier == .large)
+    #expect(loaded.document.highlightSpans.isEmpty)
+    let document = try loader.loadSyntax(for: loaded.document)
+    #expect(!document.highlightSpans.isEmpty)
+    #expect(document.outlineFacets.count == 10_001)
+}
+
+@Test
+func pythonHugeDocumentHighlightProbe() throws {
+    var lines: [String] = []
+    lines.reserveCapacity(60_000)
+    for index in 0..<10_000 {
+        lines.append("# prose \(index)")
+        lines.append("def item_\(index)():")
+        lines.append("    return 1")
+        for _ in 0..<2 {
+            lines.append("# comment")
+        }
+    }
+    let result = try pythonReaderHighlightWithFolds(
+        bytes: Array(lines.joined(separator: "\n").utf8)
+    )
+
+    #expect(result.outlineFacets.count == 10_000)
+    #expect(!result.spans.isEmpty)
 }
 
 @Test

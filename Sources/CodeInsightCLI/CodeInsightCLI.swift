@@ -832,15 +832,25 @@ extension CodeInsight {
         @Flag(name: .long, help: "Persist extracted content indexes.")
         var persist = false
 
+        @Option(name: .long, help: "Language to evaluate (default: rust).")
+        var language: String = "rust"
+
         @OptionGroup var global: GlobalOptions
 
         func run() throws {
             let corpusURL = URL(fileURLWithPath: corpus, isDirectory: true)
-            try Self.validateCorpus(corpusURL)
+            let languageID: LanguageID
+            switch language {
+            case "rust": languageID = .rust
+            case "python": languageID = .python
+            default: throw ValidationError("unsupported language: \(language)")
+            }
+            try Self.validateCorpus(corpusURL, language: languageID)
             let report = try evaluateGoldSet(
                 at: URL(fileURLWithPath: goldFile),
                 corpus: corpusURL,
-                persist: persist
+                persist: persist,
+                language: languageID
             )
             if global.json {
                 try printJSON(report)
@@ -850,7 +860,10 @@ extension CodeInsight {
             if report.unexpectedFailures > 0 { throw ExitCode.failure }
         }
 
-        private static func validateCorpus(_ url: URL) throws {
+        private static func validateCorpus(
+            _ url: URL,
+            language: LanguageID = .rust
+        ) throws {
             let fm = FileManager.default
             var isDir: ObjCBool = false
 
@@ -884,15 +897,30 @@ extension CodeInsight {
                 )
             }
 
-            let cargoToml = url.appendingPathComponent("Cargo.toml")
-            guard fm.fileExists(atPath: cargoToml.path) else {
-                throw ValidationError(
-                    "corpus has no Cargo.toml: \(url.path)\n"
-                        + "Source files may have been destroyed.\n"
-                        + "Remove the directory and re-provision:\n"
-                        + "  rm -rf '\(url.path)'\n"
-                        + "  bash scripts/provision-corpora.sh"
-                )
+            switch language {
+            case .rust:
+                let cargoToml = url.appendingPathComponent("Cargo.toml")
+                guard fm.fileExists(atPath: cargoToml.path) else {
+                    throw ValidationError(
+                        "corpus has no Cargo.toml: \(url.path)\n"
+                            + "Source files may have been destroyed.\n"
+                            + "Remove the directory and re-provision:\n"
+                            + "  rm -rf '\(url.path)'\n"
+                            + "  bash scripts/provision-corpora.sh"
+                    )
+                }
+            case .python:
+                let pyproject = url.appendingPathComponent("pyproject.toml")
+                let uvLock = url.appendingPathComponent("uv.lock")
+                guard fm.fileExists(atPath: pyproject.path),
+                      fm.fileExists(atPath: uvLock.path)
+                else {
+                    throw ValidationError(
+                        "corpus has no pyproject.toml or uv.lock: \(url.path)\n"
+                    )
+                }
+            case .typescript, .javascript:
+                throw ValidationError("unsupported language: \(language)")
             }
         }
     }

@@ -48,14 +48,76 @@ func languageModeUsesStableIdentityAndOneRustPathClassifier() throws {
     #expect(composed == decomposed)
     #expect(decomposed.variant == "caf\u{e9}")
 
+    #expect(LanguageMode.classify(path: "src/lib.py", language: .python)
+        == LanguageMode(language: .python))
     #expect(LanguageMode.classify(path: "src/lib.rs", language: .rust)
         == LanguageMode(language: .rust))
     #expect(LanguageMode.classify(path: "src/LIB.RS", language: .rust) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.pyi", language: .python) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.pyw", language: .python) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.PY", language: .python) == nil)
     #expect(LanguageMode.classify(path: "src/lib.py", language: .rust) == nil)
     #expect(LanguageMode.classify(path: "src/lib.rs", language: .python) == nil)
 
     let encoded = try JSONEncoder().encode(decomposed)
     #expect(try JSONDecoder().decode(LanguageMode.self, from: encoded) == composed)
+}
+
+@Test
+func pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() throws {
+    let rawKinds: [(DeclarationKind, UInt8)] = [
+        (.rustFn, 0),
+        (.rustStruct, 1),
+        (.rustEnum, 2),
+        (.rustTrait, 3),
+        (.rustImpl, 4),
+        (.rustMod, 5),
+        (.rustConst, 6),
+        (.rustStatic, 7),
+        (.rustTypeAlias, 8),
+        (.rustMethod, 9),
+        (.rustField, 10),
+        (.pythonFunction, 11),
+        (.pythonClass, 12),
+    ]
+
+    for (kind, expected) in rawKinds {
+        #expect(kind.rawValue == expected)
+        #expect(DeclarationKind(rawValue: expected) == kind)
+        let encoded = try JSONEncoder().encode(kind)
+        #expect(try JSONDecoder().decode(DeclarationKind.self, from: encoded) == kind)
+    }
+}
+
+@Test
+func cacheKeyIsIsolatedByContentIDAndLanguageMode() throws {
+    let defID = ContentID.sha256(of: Array("def f(): pass".utf8))
+    let fnID = ContentID.sha256(of: Array("fn main() {}".utf8))
+    let rustKey = ContentIndexKey(
+        contentID: defID,
+        languageMode: LanguageMode(language: .rust),
+        grammarVersion: 1,
+        extractorVersion: 1
+    )
+    let pythonKey = ContentIndexKey(
+        contentID: defID,
+        languageMode: LanguageMode(language: .python),
+        grammarVersion: 1,
+        extractorVersion: 1
+    )
+    let otherPythonKey = ContentIndexKey(
+        contentID: fnID,
+        languageMode: LanguageMode(language: .python),
+        grammarVersion: 1,
+        extractorVersion: 1
+    )
+
+    #expect(rustKey != pythonKey)
+    #expect(pythonKey != otherPythonKey)
+    #expect(rustKey != otherPythonKey)
+
+    let encoded = try JSONEncoder().encode(pythonKey)
+    #expect(try JSONDecoder().decode(ContentIndexKey.self, from: encoded) == pythonKey)
 }
 
 @Test

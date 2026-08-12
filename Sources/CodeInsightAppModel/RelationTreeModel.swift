@@ -1359,9 +1359,9 @@ public final class RelationTreeModel {
         case (.notApplicable, .references):
             "Verified unavailable here: references not applicable"
         case (.legacy, .references):
-            "Verified unavailable: no rust-analyzer session"
+            "Verified unavailable: no exact provider session"
         case (.legacy, _):
-            "Verified unavailable: no rust-analyzer session"
+            "Verified unavailable: no exact provider session"
         case (.queried, _):
             nil
         }
@@ -1379,14 +1379,34 @@ public final class RelationTreeModel {
         }
         guard !previousPublished.isEmpty else { return children }
 
+        var previousRows: [CycleKey: Node] = [:]
+        for item in previousPublished {
+            if item.kind == .edge, let key = item.cycleKey {
+                previousRows[key] = item
+            } else if item.kind == .group {
+                for row in item.children ?? [] where row.kind == .edge {
+                    if let key = row.cycleKey {
+                        previousRows[key] = row
+                    }
+                }
+            }
+        }
+
         var currentRows: [CycleKey: Node] = [:]
+        var currentTopLevelKeys: Set<CycleKey> = []
+        var currentGroupRowKeys: [String: Set<CycleKey>] = [:]
         for child in children {
             if child.kind == .edge, let key = child.cycleKey {
                 currentRows[key] = child
+                currentTopLevelKeys.insert(key)
             }
             if child.kind == .group {
                 for row in child.children ?? [] where row.kind == .edge {
-                    if let key = row.cycleKey { currentRows[key] = row }
+                    if let key = row.cycleKey {
+                        currentRows[key] = row
+                        currentGroupRowKeys[Self.stableGroupName(child.title), default: []]
+                            .insert(key)
+                    }
                 }
             }
         }
@@ -1396,6 +1416,7 @@ public final class RelationTreeModel {
             if item.kind == .edge {
                 guard let key = item.cycleKey,
                       let current = currentRows[key],
+                      currentTopLevelKeys.contains(key),
                       let parent = item.parent ?? current.parent
                 else { continue }
                 consumed.insert(key)
@@ -1403,9 +1424,11 @@ public final class RelationTreeModel {
                 result.append(item)
                 continue
             }
+            let previousGroup = Self.stableGroupName(item.title)
             item.children = item.children?.compactMap { previous in
                 guard let key = previous.cycleKey,
-                      let current = currentRows[key]
+                      let current = currentRows[key],
+                      currentGroupRowKeys[previousGroup]?.contains(key) == true
                 else { return nil }
                 consumed.insert(key)
                 updatePublishedRow(previous, from: current, parent: item)
@@ -1426,14 +1449,30 @@ public final class RelationTreeModel {
                 guard let key = child.cycleKey,
                       !consumed.contains(key)
                 else { continue }
+                if let old = previousRows[key],
+                   let parent = child.parent ?? old.parent
+                {
+                    updatePublishedRow(old, from: child, parent: parent)
+                    result.append(old)
+                } else {
+                    result.append(child)
+                }
                 consumed.insert(key)
-                result.append(child)
                 continue
             }
             if child.kind == .group {
                 child.children = child.children?.filter { row in
                     guard let key = row.cycleKey else { return true }
                     return !consumed.contains(key)
+                }
+                child.children = child.children?.map { row in
+                    guard let key = row.cycleKey,
+                          let old = previousRows[key],
+                          consumed.contains(key) == false
+                    else { return row }
+                    consumed.insert(key)
+                    updatePublishedRow(old, from: row, parent: child)
+                    return old
                 }
                 guard child.children?.isEmpty == false else { continue }
                 if let existing = result.first(where: {
@@ -1583,7 +1622,7 @@ public final class RelationTreeModel {
                 : resolutionDispatchLabel(edge.dispatch)
             var modifiers: [String] = []
             if edge.certainty == .unresolved, edge.exactOrigin != nil {
-                modifiers.append("External · in dependency (rust-analyzer)")
+                modifiers.append("External · in dependency (exact provider)")
             }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
@@ -2038,6 +2077,9 @@ public final class RelationTreeModel {
         case .callers, .calls:
             return true
         case .implementations:
+            if session.analysisProfile.language == .python {
+                return true
+            }
             if facet.kind == .rustTrait { return true }
             guard facet.kind == .rustMethod,
                   let parent = facet.parentFacetIndex,

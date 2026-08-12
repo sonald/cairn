@@ -14,6 +14,776 @@ func exactReferencesCapabilityUsesTheNextUnusedBit() {
 }
 
 @Test
+func pyrightProviderCapabilitiesAreFixedMaximum() {
+    #expect(
+        PyrightProvider.supportedCapabilities
+            == [.definition, .references, .callHierarchy]
+    )
+    #expect(!PyrightProvider.supportedCapabilities.contains(.implementations))
+}
+
+@Test
+func executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath() {
+    let directories = executableSearchDirectories(
+        environment: ["PATH": ""],
+        projectRoot: nil
+    )
+
+    #expect(directories.map(\.path).contains("/opt/homebrew/bin"))
+    #expect(directories.map(\.path).contains("/usr/local/bin"))
+}
+
+@Test
+func executablePathScanExcludesCanonicalProjectAndAliasDirectories() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: project.path
+    )
+    try Data("".utf8).write(
+        to: project.appendingPathComponent("pyright-langserver")
+    )
+
+    let directories = executableSearchDirectories(
+        environment: [
+            "PATH": [
+                project.path,
+                alias.path,
+                project.appendingPathComponent("sub").path,
+                "/usr/local/bin",
+            ].joined(separator: ":")
+        ],
+        projectRoot: project
+    )
+
+    let canonicalProject = project.resolvingSymlinksInPath().path
+    #expect(directories.map { $0.resolvingSymlinksInPath().path }
+        .filter { $0 == canonicalProject || $0.hasPrefix(canonicalProject + "/") }
+        .isEmpty)
+    #expect(directories.map(\.path).contains("/usr/local/bin"))
+}
+
+@Test
+func sanitizedChildPathUsesCanonicalDirectories() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let out = root.appendingPathComponent("out", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createDirectory(
+        at: out,
+        withIntermediateDirectories: true
+    )
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: out.path
+    )
+
+    let clean = sanitizedChildEnvironment(
+        [
+            "PATH": [alias.path, project.path].joined(separator: ":"),
+            "PYTHONPATH": "delete-me",
+            "NODE_OPTIONS": "delete-me",
+        ],
+        projectRoot: project
+    )
+
+    #expect(clean["PYTHONPATH"] == nil)
+    #expect(clean["NODE_OPTIONS"] == nil)
+    #expect(!(clean["PATH"] ?? "").contains(project.path))
+    #expect(!(clean["PATH"] ?? "").contains(alias.path))
+    #expect((clean["PATH"] ?? "").contains(out.resolvingSymlinksInPath().path))
+    #expect(clean["PYTHONNOUSERSITE"] == "1")
+    #expect(clean["PYTHONDONTWRITEBYTECODE"] == "1")
+    #expect(clean["PYTHONSAFEPATH"] == "1")
+}
+
+@Test
+func pyrightSessionNegotiatesOnlySupportedCapabilitiesAndKeepsOfflineLimitation()
+    throws
+{
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target():\n    pass\n\nx = target()\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(
+        root: root,
+        files: ["main.py"]
+    )
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: true,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let profile = ExactProfileKey(
+        language: .python,
+        configFingerprint: "config",
+        environmentFingerprint: ""
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: ExactAttribution(
+            provider: "fake-pyright",
+            toolVersion: "fake",
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint,
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: [.dependenciesUnavailableOffline]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    #expect(session.negotiatedCapabilities == [.definition, .references, .callHierarchy])
+    #expect(!session.negotiatedCapabilities.contains(.implementations))
+    let definition = try session.definition(file: "main.py", byteOffset: 0)
+    guard case .completed(let targets) = definition else {
+        Issue.record("pyright definition did not complete")
+        return
+    }
+    #expect(targets.first?.location.file == "main.py")
+    #expect(session.attribution.environment.limitations.contains(.dependenciesUnavailableOffline))
+    #expect(session.attribution.environment.trustMode == .safe)
+    #expect(server.receivedLanguageID == "python")
+}
+
+@Test
+func pyrightDefinitionCompletesWithoutServerStatusNotification() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target():\n    pass\n\ntarget()\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: false,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 2,
+        closeGrace: 2,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    let result = try session.definition(file: "main.py", byteOffset: 0)
+    guard case .completed = result else {
+        Issue.record("pyright definition should complete")
+        return
+    }
+    #expect(server.serverStatusSent == 0)
+}
+
+@Test
+func pyrightInterpreterIdentityChangesWithCanonicalPathOrVersion() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let binA = root.appendingPathComponent("bin-a", isDirectory: true)
+    let binB = root.appendingPathComponent("bin-b", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    for bin in [binA, binB] {
+        try FileManager.default.createDirectory(
+            at: bin,
+            withIntermediateDirectories: true
+        )
+    }
+    func makeExec(_ bin: URL, version: String) throws {
+        let url = bin.appendingPathComponent("python3")
+        try Data("#!/bin/sh\nprintf 'Python \(version)\\n'\n".utf8)
+            .write(to: url)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: url.path
+        )
+    }
+    try makeExec(binA, version: "3.12.0")
+    try makeExec(binB, version: "3.13.0")
+
+    let identityA = PyrightProvider.interpreterIdentity(
+        projectURL: project,
+        cacheURL: root.appendingPathComponent("cache-a"),
+        environment: ["PATH": binA.path]
+    )
+    let identityB = PyrightProvider.interpreterIdentity(
+        projectURL: project,
+        cacheURL: root.appendingPathComponent("cache-b"),
+        environment: ["PATH": binB.path]
+    )
+
+    #expect(identityA.contains(binA.resolvingSymlinksInPath().path))
+    #expect(identityB.contains(binB.resolvingSymlinksInPath().path))
+    #expect(identityA != identityB)
+}
+
+@Test
+func pyrightBaseEnvironmentAlwaysCarriesOfflineLimitationForNoneDiagnostics()
+    throws
+{
+    let environment = PyrightProvider.baseEnvironment(trustMode: .safe)
+    #expect(
+        environment.limitations.contains(.dependenciesUnavailableOffline)
+    )
+}
+
+@Test
+func pyrightReferencesAndCallHierarchyUseSharedParsers() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("main.py")
+    try Data("def target():\n    pass\n\nx = target()\n\ndef caller():\n    target()\n".utf8)
+        .write(to: file)
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: false,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: ExactAttribution(
+            provider: "fake-pyright",
+            toolVersion: "fake",
+            configFingerprint: "config",
+            environmentFingerprint: "",
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: [.dependenciesUnavailableOffline]
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
+        )
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    let references = try #require(try session.references(
+        file: "main.py",
+        byteOffset: 0,
+        includeDeclaration: false
+    ))
+    #expect(references.count == 1)
+    #expect(references[0].line == 4)
+    #expect(references[0].column == 5)
+
+    let items = try #require(try session.prepareCallHierarchy(
+        file: "main.py",
+        byteOffset: 0
+    ))
+    #expect(items.first?.name == "target")
+    #expect(try session.implementations(file: "main.py", byteOffset: 0) == nil)
+}
+
+@Test
+func pyrightIncomingAndOutgoingCallsShareParsers() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("main.py")
+    try Data("""
+        def target():
+            pass
+
+        def caller():
+            target()
+        """.utf8).write(to: file)
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: false,
+        incoming: [
+            [
+                "from": [
+                    "name": "caller",
+                    "kind": 12,
+                    "uri": file.absoluteString,
+                    "range": lspRange(line: 3, character: 0),
+                    "selectionRange": lspRange(line: 3, character: 4),
+                ],
+                "fromRanges": [
+                    lspRange(line: 4, character: 4),
+                ],
+            ]
+        ],
+        outgoing: [
+            [
+                "to": [
+                    "name": "target",
+                    "kind": 12,
+                    "uri": file.absoluteString,
+                    "range": lspRange(line: 0, character: 0),
+                    "selectionRange": lspRange(line: 0, character: 4),
+                ],
+                "fromRanges": [
+                    lspRange(line: 4, character: 8),
+                ],
+            ]
+        ],
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    let items = try #require(try session.prepareCallHierarchy(
+        file: "main.py",
+        byteOffset: 0
+    ))
+    let incoming = try #require(try session.incomingCalls(item: items[0]))
+    #expect(incoming.count == 1)
+    #expect(incoming[0].item.name == "caller")
+    #expect(incoming[0].callSites.first?.line == 5)
+    let outgoing = try #require(try session.outgoingCalls(item: items[0]))
+    #expect(outgoing.count == 1)
+    #expect(outgoing[0].item.name == "target")
+}
+
+@Test
+func pyrightBatchCancelAllowsNewRequest() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target():\n    pass\n\ntarget()\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let responses = CancellationResponseState(
+        successURI: root.appendingPathComponent("main.py").absoluteString
+    )
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: false,
+        requestResponder: { method, _ in
+            method == "textDocument/definition"
+                ? responses.next() : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    let batch = ExactRequestBatch()
+    let finished = DispatchSemaphore(value: 0)
+    Thread.detachNewThread {
+        _ = try? session.definition(file: "main.py", byteOffset: 0, batch: batch)
+        finished.signal()
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+    session.cancel(batch: batch)
+    #expect(finished.wait(timeout: .now() + 1) == .success)
+
+    let current = try session.definition(file: "main.py", byteOffset: 0)
+    guard case .completed = current else {
+        Issue.record("new pyright request after batch cancel did not complete")
+        return
+    }
+    #expect(responses.count == 2)
+}
+
+@Test
+func pyrightExecutableFinderIgnoresProjectAndVenvMarkers() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let commands = [
+        "python3", "python", "node", "pyright-langserver", "pyright",
+    ]
+    for name in commands {
+        let marker = project.appendingPathComponent(name)
+        try Data("#!/bin/sh\necho marker-ran >> \"$CODEINSIGHT_MARKER_OUTPUT\"\n".utf8)
+            .write(to: marker)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: marker.path
+        )
+    }
+    let venvBin = project.appendingPathComponent(".venv/bin")
+    try FileManager.default.createDirectory(
+        at: venvBin,
+        withIntermediateDirectories: true
+    )
+    let venvPython = venvBin.appendingPathComponent("python")
+    try Data("#!/bin/sh\necho marker-ran >> \"$CODEINSIGHT_MARKER_OUTPUT\"\n".utf8)
+        .write(to: venvPython)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: venvPython.path
+    )
+    let markerOutput = root.appendingPathComponent("marker-output.txt")
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: project.path
+    )
+    let pathEntries = [
+        project.path,
+        alias.path,
+        project.appendingPathComponent(".venv/bin").path,
+    ]
+
+    for path in pathEntries {
+        if let found = PyrightProvider.findExecutable(
+            projectURL: project,
+            environment: [
+                "PATH": path,
+                "CODEINSIGHT_MARKER_OUTPUT": markerOutput.path,
+            ]
+        ) {
+            do {
+                try PyrightProvider.requireOutsideProject(
+                    found,
+                    projectURL: project
+                )
+            } catch {
+                Issue.record("found pyright candidate is inside project")
+            }
+        }
+        #expect(!FileManager.default.fileExists(atPath: markerOutput.path))
+    }
+
+    for path in ["", "."] {
+        if let found = PyrightProvider.findExecutable(
+            projectURL: project,
+            environment: [
+                "PATH": path,
+                "CODEINSIGHT_MARKER_OUTPUT": markerOutput.path,
+            ]
+        ) {
+            do {
+                try PyrightProvider.requireOutsideProject(
+                    found,
+                    projectURL: project
+                )
+            } catch {
+                Issue.record("found pyright candidate is inside project")
+            }
+        }
+        #expect(!FileManager.default.fileExists(atPath: markerOutput.path))
+    }
+}
+
+@Test
+func sanitizedChildPathPreventsProjectHelperMarkersFromExecuting() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let markerOutput = root.appendingPathComponent("marker-output.txt")
+    let commands = [
+        "python3", "python", "node", "pyright-langserver", "pyright",
+    ]
+    for name in commands {
+        let marker = project.appendingPathComponent(name)
+        try Data("#!/bin/sh\necho marker-ran >> \"$CODEINSIGHT_MARKER_OUTPUT\"\n".utf8)
+            .write(to: marker)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: marker.path
+        )
+    }
+    let venvBin = project.appendingPathComponent(".venv/bin")
+    try FileManager.default.createDirectory(
+        at: venvBin,
+        withIntermediateDirectories: true
+    )
+    let venvPython = venvBin.appendingPathComponent("python")
+    try Data("#!/bin/sh\necho marker-ran >> \"$CODEINSIGHT_MARKER_OUTPUT\"\n".utf8)
+        .write(to: venvPython)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: venvPython.path
+    )
+    let env = [
+        "PATH": [project.path, venvBin.path].joined(separator: ":"),
+        "CODEINSIGHT_MARKER_OUTPUT": markerOutput.path,
+    ]
+    let unsanitized = try runShell(
+        "python3 --version; python --version; node --version; pyright-langserver --version; pyright --version; true",
+        environment: env,
+        workingDirectory: project
+    )
+    #expect(unsanitized.status == 0)
+    #expect(FileManager.default.fileExists(atPath: markerOutput.path))
+
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: project.path
+    )
+    let pathCases = [
+        project.path,
+        [project.path, venvBin.path].joined(separator: ":"),
+        alias.path,
+        venvBin.path,
+        "",
+        ".",
+    ]
+    for path in pathCases {
+        try? FileManager.default.removeItem(at: markerOutput)
+        var entryEnv = env
+        entryEnv["PATH"] = path
+        let sanitizedEnv = sanitizedChildEnvironment(
+            entryEnv,
+            projectRoot: project
+        )
+        let sanitized = try runShell(
+            "python3 --version; python --version; node --version; pyright-langserver --version; pyright --version; true",
+            environment: sanitizedEnv,
+            workingDirectory: project
+        )
+        #expect(sanitized.status == 0)
+        #expect(!FileManager.default.fileExists(atPath: markerOutput.path))
+    }
+}
+
+@Test
+func pyrightProviderRejectsProjectServerEvenWhenExplicit() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let server = project.appendingPathComponent("pyright-langserver")
+    try Data("#!/bin/sh\nexit 77\n".utf8).write(to: server)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: server.path
+    )
+
+    do {
+        _ = try PyrightProvider(
+            projectURL: project,
+            executableURL: server
+        )
+        Issue.record("expected pyright unavailable for project server")
+    } catch ExactError.unavailable {
+        // expected
+    }
+}
+
+@Test
+func pyrightRequireOutsideProjectRejectsCanonicalProjectAndAlias() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    let inside = project.appendingPathComponent("bin", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: inside,
+        withIntermediateDirectories: true
+    )
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: project.path
+    )
+
+    for candidate in [
+        project.appendingPathComponent("pyright-langserver"),
+        alias.appendingPathComponent("pyright-langserver"),
+        inside.appendingPathComponent("pyright-langserver"),
+    ] {
+        do {
+            try PyrightProvider.requireOutsideProject(
+                candidate,
+                projectURL: project
+            )
+            Issue.record("expected pyright outside-project rejection")
+        } catch ExactError.unavailable {
+            // expected
+        }
+    }
+
+    let outside = root.appendingPathComponent(
+        "Users/project-var/tool",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: outside,
+        withIntermediateDirectories: true
+    )
+    do {
+        try PyrightProvider.requireOutsideProject(
+            outside.appendingPathComponent("pyright-langserver"),
+            projectURL: project
+        )
+    } catch {
+        Issue.record("outside path containing var component was rejected")
+    }
+}
+
+@Test
+func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target(): pass\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let firstClientToServer = Pipe()
+    let firstServerToClient = Pipe()
+    let firstDone = DispatchSemaphore(value: 0)
+    let firstServer = PyrightFakeServer(
+        input: firstClientToServer.fileHandleForReading,
+        output: firstServerToClient.fileHandleForWriting,
+        implementationProvider: false,
+        closeOutputAfterInitialize: true,
+        done: { firstDone.signal() }
+    )
+    firstServer.start()
+    let firstClient = LSPClient(
+        readHandle: firstServerToClient.fileHandleForReading,
+        writeHandle: firstClientToServer.fileHandleForWriting
+    )
+    let restartCounter = NSLockedCounter()
+    let session = try PyrightSession.start(
+        client: firstClient,
+        restartClient: {
+            restartCounter.increment()
+            let secondClientToServer = Pipe()
+            let secondServerToClient = Pipe()
+            let secondServer = PyrightFakeServer(
+                input: secondClientToServer.fileHandleForReading,
+                output: secondServerToClient.fileHandleForWriting,
+                implementationProvider: false,
+                closeOutputAfterInitialize: true,
+                done: {}
+            )
+            secondServer.start()
+            return LSPClient(
+                readHandle: secondServerToClient.fileHandleForReading,
+                writeHandle: secondClientToServer.fileHandleForWriting
+            )
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 0.2,
+        closeGrace: 0.05,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer { session.close() }
+
+    do {
+        _ = try session.definition(file: "main.py", byteOffset: 0)
+        Issue.record("expected pyright unavailable after restart exhaustion")
+    } catch ExactError.unavailable(let detail) {
+        #expect(detail.contains("pyright restart exhausted") || detail.contains("pyright restart failed"))
+        #expect(restartCounter.value == 1)
+        if case .unavailable(let reason) = session.readiness {
+            #expect(reason.contains("pyright restart"))
+        } else {
+            Issue.record("expected pyright session unavailable after second crash")
+        }
+    }
+    _ = firstDone.wait(timeout: .now() + 5)
+}
+
+@Test
 func frameDecoderReadsSingleFrame() throws {
     var decoder = LSPFrameDecoder()
     let messages = try decoder.append(
@@ -123,13 +893,13 @@ func exactProfileKeyHashesCargoFileBytes() throws {
         ) == profile
     )
     do {
-        _ = try ExactProfileKey(projectURL: root, language: .python)
+        _ = try ExactProfileKey(projectURL: root, language: .typescript)
         Issue.record("expected unsupported exact fingerprint language")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("python") == true
+                .contains("typescript") == true
         )
     }
 }
@@ -1618,6 +2388,97 @@ private func temporaryTestDirectory() throws -> URL {
     return url
 }
 
+private func runShell(
+    _ command: String,
+    environment: [String: String]? = nil,
+    workingDirectory: URL? = nil
+) throws -> ProcessResult {
+    try run(
+        executable: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", command],
+        environment: environment,
+        workingDirectory: workingDirectory
+    )
+}
+
+@discardableResult
+private func writeExecutableScript(
+    _ contents: String,
+    at url: URL
+) throws -> URL {
+    try Data(contents.utf8).write(to: url)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: url.path
+    )
+    return url
+}
+
+private func writeUnresponsivePyrightHelper(at url: URL) throws -> URL {
+    let script = """
+        #!/usr/bin/env python3
+        import os, signal, sys, time
+
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+        data = b""
+
+        def write_message(obj):
+            body = obj.encode("utf-8")
+            sys.stdout.buffer.write(
+                b"Content-Length: " + str(len(body)).encode() + b"\\r\\n\\r\\n" + body
+            )
+            sys.stdout.buffer.flush()
+
+        while True:
+            chunk = sys.stdin.buffer.read(1)
+            if not chunk:
+                break
+            data += chunk
+            if b"initialize" in data:
+                write_message(
+                    '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"definitionProvider":true}}}'
+                )
+                data = b""
+            if b"shutdown" in data:
+                write_message('{"jsonrpc":"2.0","id":2,"result":null}')
+                data = b""
+            if b"exit" in data:
+                sys.stdout.flush()
+                while True:
+                    time.sleep(1)
+        """
+    return try writeExecutableScript(script, at: url)
+}
+
+@Test
+func pyrightSessionCloseForceKillsAndReapsUnresponsiveProcess() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target(): pass\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let helper = try writeUnresponsivePyrightHelper(
+        at: root.appendingPathComponent("pyright-fake-helper")
+    )
+    let client = try LSPClient(
+        executableURL: helper,
+        arguments: []
+    )
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 0.05,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    session.close()
+    #expect(client.didForceKill)
+    #expect(client.didReap)
+}
+
 private func availableSandbox(
     project: URL,
     cache: URL,
@@ -2290,12 +3151,244 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     }
 }
 
+private final class PyrightFakeServer: @unchecked Sendable {
+    private let input: FileHandle
+    private let output: FileHandle
+    private let done: () -> Void
+    private let implementationProvider: Any?
+    private let incoming: Any
+    private let outgoing: Any
+    private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
+    private let closeOutputAfterInitialize: Bool
+    private let lock = NSLock()
+    private var _receivedLanguageID: String?
+    private var _receivedServerStatusCapability = false
+    private var _serverStatusSent = 0
+    private var _error: Error?
+
+    var receivedLanguageID: String? { locked { _receivedLanguageID } }
+    var receivedServerStatusCapability: Bool {
+        locked { _receivedServerStatusCapability }
+    }
+    var serverStatusSent: Int {
+        locked { _serverStatusSent }
+    }
+    var error: Error? { locked { _error } }
+
+    init(
+        input: FileHandle,
+        output: FileHandle,
+        implementationProvider: Any? = true,
+        incoming: Any = NSNull(),
+        outgoing: Any = NSNull(),
+        requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
+        closeOutputAfterInitialize: Bool = false,
+        done: @escaping () -> Void
+    ) {
+        self.input = input
+        self.output = output
+        self.implementationProvider = implementationProvider
+        self.incoming = incoming
+        self.outgoing = outgoing
+        self.requestResponder = requestResponder
+        self.closeOutputAfterInitialize = closeOutputAfterInitialize
+        self.done = done
+    }
+
+    func start() {
+        Thread.detachNewThread { self.run() }
+    }
+
+    private func run() {
+        var decoder = LSPFrameDecoder()
+        do {
+            while true {
+                let data = input.availableData
+                guard !data.isEmpty else { break }
+                for message in try decoder.append(data) {
+                    if try handle(message) { return }
+                }
+            }
+        } catch {
+            locked { _error = error }
+        }
+        done()
+    }
+
+    private func handle(_ message: [String: Any]) throws -> Bool {
+        if let method = message["method"] as? String {
+            if let id = (message["id"] as? NSNumber)?.intValue {
+                switch requestResponder?(method, id) ?? .useDefault {
+                case .result(let result):
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": result,
+                    ])
+                    return false
+                case let .error(code, message):
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "error": ["code": code, "message": message],
+                    ])
+                    return false
+                case .noResponse:
+                    return false
+                case .useDefault:
+                    break
+                }
+                switch method {
+                case "initialize":
+                    let capabilities = (message["params"] as? [String: Any])?["capabilities"]
+                        as? [String: Any]
+                    let experimental = capabilities?["experimental"]
+                        as? [String: Any]
+                    locked {
+                        _receivedServerStatusCapability =
+                            experimental?["serverStatusNotification"] as? Bool == true
+                    }
+                    var serverCapabilities: [String: Any] = [
+                        "definitionProvider": true,
+                        "referencesProvider": true,
+                        "callHierarchyProvider": true,
+                    ]
+                    if let implementationProvider {
+                        serverCapabilities["implementationProvider"] =
+                            implementationProvider
+                    }
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": ["capabilities": serverCapabilities],
+                    ])
+                    if closeOutputAfterInitialize {
+                        try output.close()
+                        done()
+                    }
+                case "textDocument/definition":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [
+                            "uri": (message["params"] as? [String: Any])
+                                .flatMap { $0["textDocument"] as? [String: Any] }
+                                .flatMap { $0["uri"] } ?? NSNull(),
+                            "range": [
+                                "start": ["line": 0, "character": 4],
+                                "end": ["line": 0, "character": 10],
+                            ],
+                        ] as [String: Any],
+                    ])
+                case "textDocument/references":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [[
+                            "uri": (message["params"] as? [String: Any])
+                                .flatMap { $0["textDocument"] as? [String: Any] }
+                                .flatMap { $0["uri"] } ?? "file:///tmp/main.py",
+                            "range": [
+                                "start": ["line": 3, "character": 4],
+                                "end": ["line": 3, "character": 10],
+                            ],
+                        ]],
+                    ])
+                case "textDocument/prepareCallHierarchy":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [[
+                            "name": "target",
+                            "kind": 12,
+                            "uri": (message["params"] as? [String: Any])
+                                .flatMap { $0["textDocument"] as? [String: Any] }
+                                .flatMap { $0["uri"] } ?? "file:///tmp/main.py",
+                            "range": [
+                                "start": ["line": 0, "character": 0],
+                                "end": ["line": 1, "character": 0],
+                            ],
+                            "selectionRange": [
+                                "start": ["line": 0, "character": 4],
+                                "end": ["line": 0, "character": 10],
+                            ],
+                        ]],
+                    ])
+                case "callHierarchy/incomingCalls":
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": incoming,
+                    ])
+                case "callHierarchy/outgoingCalls":
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": outgoing,
+                    ])
+                case "shutdown":
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": NSNull(),
+                    ])
+                default:
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": NSNull(),
+                    ])
+                }
+            } else if method == "initialized" {
+                // not a notification carrying languageId
+            } else if method == "textDocument/didOpen" {
+                let textDocument = (message["params"] as? [String: Any])?["textDocument"]
+                    as? [String: Any]
+                locked {
+                    _receivedLanguageID = textDocument?["languageId"] as? String
+                }
+            } else if method == "exit" {
+                try output.close()
+                done()
+                return true
+            }
+        }
+        return false
+    }
+
+    private func write(_ message: [String: Any]) throws {
+        try output.write(contentsOf: LSPFraming.encode(message))
+    }
+
+    private func locked<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+}
+
 private func exactTestMilliseconds(
     since start: ContinuousClock.Instant
 ) -> Double {
     let duration = start.duration(to: .now)
     return Double(duration.components.seconds) * 1_000
         + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+}
+
+private func exactTestAttribution(provider: String) -> ExactAttribution {
+    ExactAttribution(
+        provider: provider,
+        toolVersion: "fake",
+        configFingerprint: "config",
+        environmentFingerprint: "",
+        environment: ExactAnalysisEnvironment(
+            trustMode: .safe,
+            limitations: [.dependenciesUnavailableOffline]
+        ),
+        generatedAt: Date(timeIntervalSince1970: 0)
+    )
+}
+
+private final class NSLockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return count
+    }
+
+    func increment() {
+        lock.lock()
+        count += 1
+        lock.unlock()
+    }
 }
 
 private func withFakeRustAnalyzerSession<T>(

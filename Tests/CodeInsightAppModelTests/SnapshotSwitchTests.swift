@@ -58,6 +58,51 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
 
 @MainActor
 @Test
+func pythonSnapshotFirstPaintFiltersForeignPathsFromSelectionAndSource() async throws {
+    let root = try snapshotTemporaryProject(["main.py": "def current():\n    pass\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root, language: .python)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: ["C": TestSnapshot(label: "C", files: [
+            "main.py": "def committed():\n    pass\n",
+            "foreign.rs": "fn foreign() {}\n",
+        ])],
+        blockedCached: ["C"]
+    )
+    let model = AppModel(
+        indexService: service,
+        commitPicker: CommitPickerModel(commits: [
+            CommitInfo(
+                shortSHA: "C",
+                fullSHA: "C",
+                summary: "commit",
+                authorName: "test",
+                date: Date()
+            ),
+        ])
+    )
+    let foreign = root.appendingPathComponent("foreign.rs")
+
+    try model.openProject(root: root, language: .python)
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
+    model.navigate(to: foreign)
+    #expect(model.selectedFile == foreign.standardizedFileURL)
+
+    model.switchToCommit("C")
+    #expect(await testWaitUntil("model.snapshotPhase == .firstPaint") { model.snapshotPhase == .firstPaint })
+
+    #expect(model.selectedFile == nil)
+    #expect(model.selectedByteOffset == nil)
+    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
+    let source = try #require(model.documentSource)
+    #expect(throws: CocoaError.self) {
+        _ = try DocumentLoader(source: source).load(file: foreign)
+    }
+}
+
+@MainActor
+@Test
 func snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
     defer { try? FileManager.default.removeItem(at: root) }
@@ -796,7 +841,7 @@ func compareModelDoesNotPublishAnOlderModeCompletion() async throws {
     model.update(
         file: file,
         leftSource: { _ in Array("fn target() { 1 }\n".utf8) },
-        languageMode: LanguageMode(language: .python)
+        languageMode: LanguageMode(language: .typescript)
     )
 
     #expect(await testWaitUntil("new mode completion publishes") {

@@ -21,9 +21,9 @@ func explicitRustDiffMatchesConvenience() throws {
 #if DEBUG
 @Test
 func unsupportedDiffModeFailsBeforeParsing() throws {
-    let left = Array("def item(): return 1\n".utf8)
-    let right = Array("def item(): return 2\n".utf8)
-    let mode = LanguageMode(language: .python)
+    let left = Array("fn item() {}\n".utf8)
+    let right = Array("fn item() {}\n".utf8)
+    let mode = LanguageMode(language: .typescript)
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
     let core = DiffCore()
 
@@ -32,7 +32,7 @@ func unsupportedDiffModeFailsBeforeParsing() throws {
         Issue.record("DiffCore accepted Python line diff")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
     }
 
     do {
@@ -44,11 +44,87 @@ func unsupportedDiffModeFailsBeforeParsing() throws {
         Issue.record("DiffCore accepted Python syntax diff")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
     }
     #expect(parseCount.withLock { $0 } == 0)
 }
 #endif
+
+@Test
+func pythonLineDiffAndFunctionChangesUsePythonFacts() throws {
+    let left = Array("""
+        class Service:
+            def run(self):
+                return 1
+            def gone(self):
+                pass
+
+        def top():
+            return old()
+        """.utf8)
+    let right = Array("""
+        class Service:
+            def run(self):
+                return 2
+            def added(self):
+                pass
+
+        def top():
+            return new()
+        """.utf8)
+    let core = DiffCore()
+
+    let diff = try core.compare(left: left, right: right, languageMode: LanguageMode(language: .python))
+    #expect(!diff.truncated)
+    #expect(diff.changeCount > 0)
+
+    let changes = try core.functionChanges(left: left, right: right, languageMode: LanguageMode(language: .python))
+    let summaries = Set(changes.map { "\($0.kind):\($0.displayName):\($0.declarationKind)" })
+    #expect(summaries.contains("bodyChanged:Service.run:pythonFunction"))
+    #expect(summaries.contains("bodyChanged:top:pythonFunction"))
+    #expect(summaries.contains("removed:Service.gone:pythonFunction"))
+    #expect(summaries.contains("added:Service.added:pythonFunction"))
+}
+
+@Test
+func pythonFunctionChangeNamesUseDotsForClassAndNestedFunctions() throws {
+    let left = Array("""
+        class Service:
+            def run(self):
+                def inner():
+                    return 1
+                return inner()
+        """.utf8)
+    let right = Array("""
+        class Service:
+            def run(self):
+                def inner():
+                    return 2
+                return inner()
+        """.utf8)
+
+    let changes = try DiffCore().functionChanges(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .python)
+    )
+    #expect(Set(changes.map(\.displayName)) == [
+        "Service.run", "Service.run.inner",
+    ])
+}
+
+@Test
+func pythonLineDiffStillTruncatesAtLineBudget() throws {
+    let core = DiffCore()
+    let diff = try core.compare(
+        left: [],
+        right: Array(String(repeating: "x\n", count: 20_001).utf8),
+        languageMode: LanguageMode(language: .python)
+    )
+    #expect(diff.truncated)
+    #expect(diff.leftLineCount == 0)
+    #expect(diff.rightLineCount == 20_001)
+}
 
 @Test
 func lineDiffMarksAddedRemovedAndChangedLines() {

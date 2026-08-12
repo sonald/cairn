@@ -23,7 +23,12 @@ public struct LanguageMode: Codable, Hashable, Sendable {
                 return nil
             }
             return LanguageMode(language: .rust)
-        case .python, .typescript, .javascript:
+        case .python:
+            guard URL(fileURLWithPath: path).pathExtension == "py" else {
+                return nil
+            }
+            return LanguageMode(language: .python)
+        case .typescript, .javascript:
             return nil
         }
     }
@@ -60,6 +65,8 @@ public enum DeclarationKind: UInt8, Codable, Sendable {
     case rustTypeAlias
     case rustMethod
     case rustField
+    case pythonFunction = 11
+    case pythonClass = 12
 }
 
 public struct SymbolGroupID: Codable, Hashable, Sendable {

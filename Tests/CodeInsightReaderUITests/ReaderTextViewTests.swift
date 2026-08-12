@@ -5,6 +5,16 @@ import Foundation
 import Testing
 @testable import CodeInsightReaderUI
 
+@MainActor
+@Test
+func readerThemeColorResolvesFromDetachedExecutor() async throws {
+    let color = ReaderTheme(settings: ReaderSettings()).backgroundColor
+    let values = try await Task.detached(priority: .userInitiated) {
+        (0..<1000).map { _ in color.alphaComponent }
+    }.value
+    #expect(values.allSatisfy { $0 >= 0 && $0 <= 1 })
+}
+
 @Test
 func displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() throws {
     let source = "α\nfn outer() {\n    let emoji = \"😀é\";\n}\nω\n"

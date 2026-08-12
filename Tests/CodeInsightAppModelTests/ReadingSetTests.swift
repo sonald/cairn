@@ -36,18 +36,36 @@ func readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() throws {
     #expect(rust?.sourceText.contains("fn before") == false)
     #expect(rust?.sourceText.contains("fn after") == false)
 
-    #expect(makeReadingSetExcerpt(
+    let pythonSource = """
+        def before():
+            return "before"
+
+        def target():
+            return "target"
+
+        def after():
+            return "after"
+        """
+    let pythonBytes = Array(pythonSource.utf8)
+    let pythonTargetByte = try #require(
+        pythonBytes.firstRange(of: Array("target".utf8))?.lowerBound
+    )
+    let pythonContentID = ContentID.sha256(of: pythonBytes)
+    let python = makeReadingSetExcerpt(
         role: "Definition",
         symbol: "target",
         path: "src/lib.py",
-        targetByte: UInt32(targetByte),
+        targetByte: UInt32(pythonTargetByte),
         languageMode: LanguageMode(language: .python),
-        bytes: bytes,
-        contentID: contentID,
+        bytes: pythonBytes,
+        contentID: pythonContentID,
         revision: nil,
         sourceKind: .worktreeCaptured,
         inspector: inspector
-    ) == nil)
+    )
+    #expect(python?.sourceText.contains("def target") == true)
+    #expect(python?.sourceText.contains("def before") == false)
+    #expect(python?.sourceText.contains("def after") == false)
 }
 
 @MainActor

@@ -402,7 +402,10 @@ public final class AppModel {
     }
 
     public var availableFeatureSelections: [FeatureSelection] {
-        FeatureSelection.allCases
+        guard activeAnalysisProfileDisplay?.language == .python else {
+            return FeatureSelection.allCases
+        }
+        return [.defaultFeatures]
     }
 
     private let indexService: any IndexService
@@ -442,6 +445,7 @@ public final class AppModel {
         contextWindow.attachExactCoordinator(exactCoordinator)
         relationTree.attachExactCoordinator(exactCoordinator)
         relationTree.onContextsReset = { [weak self] in
+            self?.contextWindow.cancelExactUpgrade()
             self?.retainTrailExplanations()
         }
         relationTree.onExplanationChange = { [weak self] node in
@@ -982,6 +986,7 @@ public final class AppModel {
     public func switchFeatureSelection(_ featureSelection: FeatureSelection) {
         guard snapshotPhase == .fullReady,
               case let .ready(session, _) = projectState,
+              session.analysisProfile.language != .python,
               session.analysisProfile.featureSelection != featureSelection
         else { return }
         let activeRelation = relationTree.root?.symbol.map {
@@ -1706,7 +1711,9 @@ public final class AppModel {
             language: language
         ) else { return }
         let files = snapshot.listFiles()
-        let paths = files.map(\.path)
+        let paths = files.map(\.path).filter {
+            LanguageMode.classify(path: $0, language: language) != nil
+        }
         let selectedPath = selectedFile.flatMap {
             Self.relativePath(of: $0, under: root)
         }
@@ -1734,15 +1741,16 @@ public final class AppModel {
                 guard let path = Self.relativePath(of: file, under: root) else {
                     throw CocoaError(.fileReadNoSuchFile)
                 }
+                guard paths.contains(path) else {
+                    throw CocoaError(.fileReadNoSuchFile)
+                }
                 return try snapshot.readBytes(path: path)
             }
         }
         snapshotPhase = .firstPaint
         coverage = SnapshotCoverage(
             filesIndexed: 0,
-            filesTotal: paths.filter {
-                LanguageMode.classify(path: $0, language: language) != nil
-            }.count
+            filesTotal: paths.count
         )
         navigationGeneration &+= 1
         if let pending = pendingReplay {
@@ -2163,9 +2171,9 @@ public final class AppModel {
 
 private func validateProductSupport(_ language: LanguageID) throws {
     switch language {
-    case .rust:
+    case .rust, .python:
         return
-    case .python, .typescript, .javascript:
+    case .typescript, .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 "CodeInsight app does not support \(String(describing: language))",

@@ -1,0 +1,12 @@
+# Same-file direct call: create_client_server_memory_streams() resolves to its local def name.
+def src/mcp/shared/memory.py:66:17 -> src/mcp/shared/memory.py:29:11
+# Absolute named alias constructor: Server imported as MCPServer is instantiated.
+def src/mcp/server/fastmcp/server.py:147:28 -> src/mcp/server/lowlevel/server.py:133:7
+# Relative named alias: FastMCP imported from .server inside the package __init__.
+def src/mcp/server/fastmcp/__init__.py:5:30 -> src/mcp/server/fastmcp/server.py:133:7
+# Local bind: env_dict is assigned then consumed later in the same function.
+bind src/mcp/client/__main__.py:61:90 -> src/mcp/client/__main__.py:53:5
+# Method call on a dynamically received session stays Possible at most.
+nostrong src/mcp/client/__main__.py:48:33
+# Module-object member call mcp.stdio_client is deliberately unresolved.
+unresolved src/mcp/client/session_group.py:242:30

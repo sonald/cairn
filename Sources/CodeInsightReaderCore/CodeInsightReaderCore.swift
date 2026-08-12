@@ -99,6 +99,7 @@ public enum OutlineKind: String, Hashable, Sendable {
     case `const`
     case `static`
     case typeAlias
+    case `class`
 }
 
 public struct OutlineFacet: Equatable, Sendable {
@@ -313,9 +314,9 @@ public final class ReaderDocument: Sendable {
 
     public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
         switch languageMode.language {
-        case .rust:
+        case .rust, .python:
             break
-        case .python, .typescript, .javascript:
+        case .typescript, .javascript:
             return []
         }
         guard byteOffset < bytes.count,
@@ -345,7 +346,14 @@ public final class ReaderDocument: Sendable {
             upper = scalars.index(after: upper)
         }
         let selected = String(scalars[lower..<upper])
-        guard !RustHighlighter.isKeyword(selected) else { return [] }
+        switch languageMode.language {
+        case .rust:
+            guard !RustHighlighter.isKeyword(selected) else { return [] }
+        case .python:
+            guard !pythonReaderIsKeyword(selected) else { return [] }
+        case .typescript, .javascript:
+            return []
+        }
 
         var spanIndex = 0
         var result: [CodeInsightCore.ByteRange] = []
@@ -643,7 +651,7 @@ public struct RustHighlighter: Sendable {
         switch kind {
         case .fn, .method:
             .functionName
-        case .struct, .enum, .trait, .typeAlias:
+        case .struct, .enum, .trait, .typeAlias, .class:
             .declarationTitle
         case .mod, .const, .static:
             .declarationEmphasis
@@ -843,8 +851,9 @@ public struct DocumentLoader: Sendable {
         )
 
         if tier == .regular {
-            let highlighted = try RustHighlighter().highlightWithFolds(
+            let highlighted = try Self.highlightWithFolds(
                 bytes: bytes,
+                languageMode: languageMode,
                 resolutionObserver: foldResolutionObserver
             )
             return (ReaderDocument(
@@ -866,9 +875,9 @@ public struct DocumentLoader: Sendable {
 
     private static func requireSupported(_ languageMode: LanguageMode) throws {
         switch languageMode.language {
-        case .rust:
+        case .rust, .python:
             return
-        case .python, .typescript, .javascript:
+        case .typescript, .javascript:
             throw RustHighlighterError.unsupportedLanguage(languageMode.language)
         }
     }
@@ -877,8 +886,9 @@ public struct DocumentLoader: Sendable {
         for document: ReaderDocument
     ) throws -> ReaderDocument {
         try Self.requireSupported(document.languageMode)
-        let highlighted = try RustHighlighter().highlightWithFolds(
+        let highlighted = try Self.highlightWithFolds(
             bytes: document.bytes,
+            languageMode: document.languageMode,
             resolutionObserver: foldResolutionObserver
         )
         return ReaderDocument(
@@ -893,6 +903,31 @@ public struct DocumentLoader: Sendable {
             localBindings: highlighted.bindings,
             referencesByBinding: highlighted.referencesByBinding
         )
+    }
+
+    private static func highlightWithFolds(
+        bytes: [UInt8],
+        languageMode: LanguageMode,
+        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)?
+    ) throws -> (
+        spans: [HighlightSpan],
+        outlineFacets: [OutlineFacet],
+        folds: [FoldRegion],
+        bindings: [BindingRecord],
+        referencesByBinding: [[CodeInsightCore.ByteRange]]
+    ) {
+        switch languageMode.language {
+        case .rust:
+            return try RustHighlighter().highlightWithFolds(
+                bytes: bytes,
+                resolutionObserver: resolutionObserver
+            )
+        case .python:
+            try Self.requireSupported(languageMode)
+            return try pythonReaderHighlightWithFolds(bytes: bytes)
+        case .typescript, .javascript:
+            throw RustHighlighterError.unsupportedLanguage(languageMode.language)
+        }
     }
 
     public func loadSyntax(
@@ -912,3 +947,9 @@ public struct DocumentLoader: Sendable {
         }
     }
 }
+
+#if DEBUG
+extension DocumentLoader {
+    @TaskLocal package static var pythonParseObserver: (@Sendable () -> Void)?
+}
+#endif

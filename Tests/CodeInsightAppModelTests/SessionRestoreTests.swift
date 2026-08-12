@@ -11,7 +11,7 @@ func unsupportedSavedLanguageDoesNotMutateProjectState() async throws {
     defer { try? FileManager.default.removeItem(at: root) }
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
-        language: .python,
+        language: .typescript,
         revision: nil,
         activeTabOrdinal: nil,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -28,6 +28,40 @@ func unsupportedSavedLanguageDoesNotMutateProjectState() async throws {
     #expect(model.projectRoot == nil)
     #expect(model.projectLanguage == nil)
     #expect(model.generation == originalGeneration)
+}
+
+@MainActor
+@Test
+func savedPythonSessionRestoresWithPythonLanguageAndTree() async throws {
+    let root = try sessionRestoreProject([
+        "main.py": "def hello():\n    return 1\n",
+        "ignored.rs": "fn main() {}",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .python,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.projectLanguage == .python)
+    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
+    #expect(model.fileTree?.fileCount == 1)
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected ready Python session after restore")
+        return
+    }
+    #expect(session.analysisProfile.language == .python)
+    #expect(session.manifest.files.map {
+        session.paths.resolve($0.pathID)
+    } == ["main.py"])
 }
 
 @MainActor

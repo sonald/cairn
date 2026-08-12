@@ -139,7 +139,7 @@ struct RelationUXTests {
         #expect(accessibility.value.contains("heuristic also matched"))
         #expect(
             fixture.controller.selfTestBadgeToolTip(titled: title)
-                == "Verified by rust-analyzer"
+                == "Verified by exact provider"
         )
         #expect(accessibility.role != NSAccessibility.Role.textField.rawValue)
         #expect(accessibility.valueSettable == false)
@@ -176,7 +176,7 @@ struct RelationUXTests {
         #expect(text.contains("VERIFICATION"))
         #expect(text.contains("VERIFICATION AVAILABILITY"))
         #expect(text.contains { $0.contains("Candidate generation was complete") })
-        #expect(text.contains { $0.contains("rust-analyzer returned this target") })
+        #expect(text.contains { $0.contains("The exact provider returned this target") })
         #expect(text.contains { $0.contains("Safe") })
         #expect(!fixture.controller.selfTestInspectorAuditVisible)
         #expect(text.contains("Show full audit"))

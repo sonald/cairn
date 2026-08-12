@@ -1011,6 +1011,672 @@ func symbolSearchBoostsCurrentFileAndIsDeterministic() throws {
     }
 }
 
+@Test
+func pythonResolverResolvesAbsoluteAndRelativeNamedAliasesStrongly() throws {
+    let modelsSource = "def fetch():\n    pass\n"
+    let otherSource = "def make():\n    pass\n"
+    let mainSource = """
+        from .models import fetch as go
+        from pkg.other import make as build
+
+        go()
+        build()
+        """
+    let goCall = byteRange(of: "go()", in: mainSource)
+    let buildCall = byteRange(of: "build()", in: mainSource)
+    try withManualPythonProject([
+        PythonFileSpec(path: "pkg/__init__.py", source: ""),
+        PythonFileSpec(
+            path: "pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "fetch",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "fetch", in: modelsSource)
+                )
+            ]
+        ),
+        PythonFileSpec(
+            path: "pkg/other.py",
+            source: otherSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "make",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "make", in: otherSource)
+                )
+            ]
+        ),
+        PythonFileSpec(
+            path: "pkg/main.py",
+            source: mainSource,
+            imports: [
+                PythonTestImport(
+                    specifier: ".models",
+                    imported: "fetch",
+                    local: "go",
+                    kind: .named,
+                    range: byteRange(of: ".models import fetch", in: mainSource)
+                ),
+                PythonTestImport(
+                    specifier: "pkg.other",
+                    imported: "make",
+                    local: "build",
+                    kind: .named,
+                    range: byteRange(of: "pkg.other import make", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "go",
+                    kind: .directCall,
+                    range: ByteRange(
+            lowerBound: goCall.lowerBound,
+            upperBound: goCall.upperBound
+        ),
+                    nameRange: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    receiverRange: nil
+                ),
+                PythonTestCall(
+                    name: "build",
+                    kind: .directCall,
+                    range: ByteRange(
+            lowerBound: buildCall.lowerBound,
+            upperBound: buildCall.upperBound
+        ),
+                    nameRange: ByteRange(
+                        lowerBound: buildCall.lowerBound,
+                        upperBound: buildCall.lowerBound + 5
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let context = queryContext(for: session)
+        let mainPath = try #require(pathID("pkg/main.py", in: session))
+        let relative = try session.resolve(
+            file: mainPath,
+            offset: goCall.lowerBound,
+            context: context
+        )
+        let absolute = try session.resolve(
+            file: mainPath,
+            offset: buildCall.lowerBound,
+            context: context
+        )
+
+        #expect(session.paths.resolve(relative.first?.target.pathID ?? .init(rawValue: .max))
+            == "pkg/models.py")
+        #expect(relative.first?.certainty == .strong)
+        #expect(hasUniqueImport(relative.first?.evidence ?? []))
+        #expect(session.paths.resolve(absolute.first?.target.pathID ?? .init(rawValue: .max))
+            == "pkg/other.py")
+        #expect(absolute.first?.certainty == .strong)
+        #expect(hasUniqueImport(absolute.first?.evidence ?? []))
+    }
+}
+
+@Test
+func pythonResolverUsesSrcOnlyModuleIdentity() throws {
+    let modelsSource = "def fetch():\n    pass\n"
+    let mainSource = "from .models import fetch as go\ngo()\n"
+    let goCall = byteRange(of: "go()", in: mainSource)
+    try withManualPythonProject([
+        PythonFileSpec(path: "src/pkg/__init__.py", source: ""),
+        PythonFileSpec(
+            path: "src/pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "fetch",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "fetch", in: modelsSource)
+                )
+            ]
+        ),
+        PythonFileSpec(
+            path: "src/pkg/main.py",
+            source: mainSource,
+            imports: [
+                PythonTestImport(
+                    specifier: ".models",
+                    imported: "fetch",
+                    local: "go",
+                    kind: .named,
+                    range: byteRange(of: ".models import", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "go",
+                    kind: .directCall,
+                    range: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let mainPath = try #require(pathID("src/pkg/main.py", in: session))
+        let resolved = try session.resolve(
+            file: mainPath,
+            offset: goCall.lowerBound,
+            context: queryContext(for: session)
+        )
+
+        #expect(session.paths.resolve(resolved.first?.target.pathID ?? .init(rawValue: .max))
+            == "src/pkg/models.py")
+        #expect(resolved.first?.certainty == .strong)
+    }
+}
+
+@Test
+func pythonRelativeImportFromPackageInitKeepsCurrentPackage() throws {
+    let modelsSource = "def fetch():\n    pass\n"
+    let initSource = "from .models import fetch as go\ngo()\n"
+    let goCall = byteRange(of: "go()", in: initSource)
+    try withManualPythonProject([
+        PythonFileSpec(
+            path: "pkg/__init__.py",
+            source: initSource,
+            imports: [
+                PythonTestImport(
+                    specifier: ".models",
+                    imported: "fetch",
+                    local: "go",
+                    kind: .named,
+                    range: byteRange(of: ".models import", in: initSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "go",
+                    kind: .directCall,
+                    range: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        ),
+        PythonFileSpec(
+            path: "pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "fetch",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "fetch", in: modelsSource)
+                )
+            ]
+        )
+    ]) { session in
+        let path = try #require(pathID("pkg/__init__.py", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: goCall.lowerBound,
+            context: queryContext(for: session)
+        )
+
+        #expect(session.paths.resolve(resolved.first?.target.pathID ?? .init(rawValue: .max))
+            == "pkg/models.py")
+        #expect(resolved.first?.certainty == .strong)
+    }
+}
+
+@Test
+func pythonRelativeFromTopLevelModuleStaysUnresolved() throws {
+    let modelsSource = "def fetch():\n    pass\n"
+    let mainSource = "from .models import fetch as go\ngo()\n"
+    let goCall = byteRange(of: "go()", in: mainSource)
+    try withManualPythonProject([
+        PythonFileSpec(path: "models.py", source: modelsSource),
+        PythonFileSpec(
+            path: "main.py",
+            source: mainSource,
+            imports: [
+                PythonTestImport(
+                    specifier: ".models",
+                    imported: "fetch",
+                    local: "go",
+                    kind: .named,
+                    range: byteRange(of: ".models import", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "go",
+                    kind: .directCall,
+                    range: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let path = try #require(pathID("main.py", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: goCall.lowerBound,
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.first?.certainty == .unresolved)
+    }
+}
+
+@Test
+func pythonResolverRejectsSharedModuleConflictAcrossRootAndSrc() throws {
+    let modelsSource = "def fetch():\n    pass\n"
+    let mainSource = "from .models import fetch as go\ngo()\n"
+    let goCall = byteRange(of: "go()", in: mainSource)
+    try withManualPythonProject([
+        PythonFileSpec(
+            path: "pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "fetch",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "fetch", in: modelsSource)
+                )
+            ]
+        ),
+        PythonFileSpec(path: "src/pkg/__init__.py", source: ""),
+        PythonFileSpec(
+            path: "src/pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "fetch",
+                    kind: .pythonFunction,
+                    parent: nil,
+                    range: byteRange(of: "fetch", in: modelsSource)
+                )
+            ]
+        ),
+        PythonFileSpec(
+            path: "src/pkg/main.py",
+            source: mainSource,
+            imports: [
+                PythonTestImport(
+                    specifier: ".models",
+                    imported: "fetch",
+                    local: "go",
+                    kind: .named,
+                    range: byteRange(of: ".models import", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "go",
+                    kind: .directCall,
+                    range: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: goCall.lowerBound,
+                        upperBound: goCall.lowerBound + 2
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let path = try #require(pathID("src/pkg/main.py", in: session))
+        let resolved = try session.resolve(
+            file: path,
+            offset: goCall.lowerBound,
+            context: queryContext(for: session)
+        )
+
+        #expect(resolved.first?.certainty == .unresolved)
+    }
+}
+
+@Test
+func pythonResolverLeavesModuleObjectAndNamespaceImportsUnresolved() throws {
+    let modelsSource = "class Package:\n    pass\n"
+    let mainSource = """
+        import pkg.models as m
+        from no.init.mod import stable as s
+
+        m.run()
+        s()
+        """
+    let runCall = byteRange(of: "run()", in: mainSource)
+    let stableCall = byteRange(of: "s()", in: mainSource)
+    try withManualPythonProject([
+        PythonFileSpec(path: "pkg/__init__.py", source: ""),
+        PythonFileSpec(
+            path: "pkg/models.py",
+            source: modelsSource,
+            symbols: [
+                PythonTestSymbol(
+                    name: "Package",
+                    kind: .pythonClass,
+                    parent: nil,
+                    range: byteRange(of: "Package", in: modelsSource)
+                )
+            ]
+        ),
+        PythonFileSpec(path: "no/mod.py", source: modelsSource),
+        PythonFileSpec(
+            path: "entry.py",
+            source: mainSource,
+            imports: [
+                PythonTestImport(
+                    specifier: "pkg.models",
+                    imported: nil,
+                    local: "m",
+                    kind: .module,
+                    range: byteRange(of: "pkg.models", in: mainSource)
+                ),
+                PythonTestImport(
+                    specifier: "no.init.mod",
+                    imported: "stable",
+                    local: "s",
+                    kind: .named,
+                    range: byteRange(of: "no.init.mod", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "run",
+                    kind: .methodCall,
+                    range: ByteRange(
+                        lowerBound: runCall.lowerBound - 2,
+                        upperBound: runCall.upperBound
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: runCall.lowerBound,
+                        upperBound: runCall.upperBound - 2
+                    ),
+                    receiverRange: ByteRange(
+                        lowerBound: runCall.lowerBound - 2,
+                        upperBound: runCall.lowerBound - 1
+                    )
+                ),
+                PythonTestCall(
+                    name: "s",
+                    kind: .directCall,
+                    range: ByteRange(
+                        lowerBound: stableCall.lowerBound,
+                        upperBound: stableCall.upperBound
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: stableCall.lowerBound,
+                        upperBound: stableCall.lowerBound + 1
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let context = queryContext(for: session)
+        let path = try #require(pathID("entry.py", in: session))
+        let moduleObject = try session.resolve(
+            file: path,
+            offset: runCall.lowerBound,
+            context: context
+        )
+        let namespace = try session.resolve(
+            file: path,
+            offset: stableCall.lowerBound,
+            context: context
+        )
+
+        #expect(moduleObject.count == 1)
+        #expect(moduleObject.first?.certainty == .unresolved)
+        #expect(namespace.first?.certainty == .unresolved)
+    }
+}
+
+@Test
+func pythonResolverScoresClassConstructorsStrongAndMethodsPossible() throws {
+    let source = """
+        class Model:
+            def run(self):
+                pass
+
+        def probe(obj):
+            obj.run()
+
+        def call():
+            Model()
+        """
+    let methodCall = byteRange(of: "obj.run()", in: source)
+    let constructorCall = byteRange(of: "Model()", in: source)
+    let constructorName = ByteRange(
+        lowerBound: constructorCall.lowerBound,
+        upperBound: constructorCall.upperBound - 2
+    )
+    try withManualPythonProject([
+        PythonFileSpec(
+            path: "models.py",
+            source: source,
+            symbols: [
+                PythonTestSymbol(
+                    name: "Model",
+                    kind: .pythonClass,
+                    parent: nil,
+                    range: byteRange(of: "class Model", in: source)
+                ),
+                PythonTestSymbol(
+                    name: "run",
+                    kind: .pythonFunction,
+                    parent: 0,
+                    range: byteRange(of: "def run", in: source)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "run",
+                    kind: .methodCall,
+                    range: ByteRange(
+                        lowerBound: methodCall.lowerBound,
+                        upperBound: methodCall.upperBound
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: methodCall.lowerBound + 4,
+                        upperBound: methodCall.upperBound - 2
+                    ),
+                    receiverRange: ByteRange(
+                        lowerBound: methodCall.lowerBound,
+                        upperBound: methodCall.lowerBound + 3
+                    )
+                ),
+                PythonTestCall(
+                    name: "Model",
+                    kind: .directCall,
+                    range: constructorCall,
+                    nameRange: constructorName,
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let context = queryContext(for: session)
+        let path = try #require(pathID("models.py", in: session))
+        let method = try session.resolve(
+            file: path,
+            offset: methodCall.lowerBound,
+            context: context
+        )
+        let constructor = try session.resolve(
+            file: path,
+            offset: constructorName.lowerBound,
+            context: context
+        )
+
+        #expect(method.count == 1)
+        #expect(method.first?.certainty == .possible)
+        #expect(method.first?.dispatch == .dynamicDispatch)
+        #expect(method.first?.target.localKind == .declarationFacet)
+        #expect(constructor.first?.certainty == .strong)
+        #expect(constructor.first?.target.localIndex == 0)
+        #expect(try session.implementations(
+            ofTrait: "Model",
+            context: context
+        ).isEmpty)
+    }
+}
+
+@Test
+func pythonResolverKeepsMethodBoundaryForNestedClassFunctions() throws {
+    let source = """
+        class C:
+            def m(self):
+                def inner(self):
+                    pass
+
+        def probe(obj):
+            obj.m().inner()
+        """
+    let callChain = byteRange(of: "obj.m().inner()", in: source)
+    try withManualPythonProject([
+        PythonFileSpec(
+            path: "models.py",
+            source: source,
+            symbols: [
+                PythonTestSymbol(
+                    name: "C",
+                    kind: .pythonClass,
+                    parent: nil,
+                    range: byteRange(of: "class C", in: source)
+                ),
+                PythonTestSymbol(
+                    name: "m",
+                    kind: .pythonFunction,
+                    parent: 0,
+                    range: byteRange(of: "def m", in: source)
+                ),
+                PythonTestSymbol(
+                    name: "inner",
+                    kind: .pythonFunction,
+                    parent: 1,
+                    range: byteRange(of: "def inner", in: source)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "m",
+                    kind: .methodCall,
+                    range: ByteRange(
+                        lowerBound: callChain.lowerBound,
+                        upperBound: callChain.lowerBound + 4
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: callChain.lowerBound + 4,
+                        upperBound: callChain.lowerBound + 5
+                    ),
+                    receiverRange: ByteRange(
+                        lowerBound: callChain.lowerBound,
+                        upperBound: callChain.lowerBound + 3
+                    )
+                ),
+                PythonTestCall(
+                    name: "inner",
+                    kind: .methodCall,
+                    range: ByteRange(
+                        lowerBound: callChain.lowerBound + 6,
+                        upperBound: callChain.upperBound
+                    ),
+                    nameRange: ByteRange(
+                        lowerBound: callChain.lowerBound + 6,
+                        upperBound: callChain.lowerBound + 11
+                    ),
+                    receiverRange: nil
+                )
+            ]
+        )
+    ]) { session in
+        let path = try #require(pathID("models.py", in: session))
+        let resolvedM = try session.resolve(
+            file: path,
+            offset: callChain.lowerBound + 4,
+            context: queryContext(for: session)
+        )
+        let resolvedInner = try session.resolve(
+            file: path,
+            offset: callChain.lowerBound + 6,
+            context: queryContext(for: session)
+        )
+
+        #expect(resolvedM.count == 1)
+        #expect(resolvedM.first?.certainty == .possible)
+        #expect(resolvedInner.isEmpty)
+    }
+}
+
+@Test
+func rustModuleMapStillSupportsCrateAndSuperAfterPythonBranch() throws {
+    try withProject([
+        "main.rs": """
+            mod db;
+            use crate::db::connect;
+            fn main() { connect(); }
+            """,
+        "db.rs": """
+            pub mod nested;
+            pub fn connect() {}
+            """,
+        "db/nested.rs": "pub fn inner() {}\npub fn call() { super::connect(); }",
+    ]) { session in
+        let mainPath = try #require(pathID("main.rs", in: session))
+        let dbPath = try #require(pathID("db.rs", in: session))
+        let nestedPath = try #require(pathID("db/nested.rs", in: session))
+        let context = queryContext(for: session)
+        let mainSource = try #require(
+            session.sourceBytes(at: mainPath).map { String(decoding: $0, as: UTF8.self) }
+        )
+        let resolvedViaCrate = try session.resolve(
+            file: mainPath,
+            offset: offset(of: "connect();", in: mainSource),
+            context: context
+        )
+        #expect(resolvedViaCrate.first?.target.pathID == dbPath)
+
+        let nestedSource = try #require(
+            session.sourceBytes(at: nestedPath).map { String(decoding: $0, as: UTF8.self) }
+        )
+        let resolvedSuper = try session.resolve(
+            file: nestedPath,
+            offset: offset(of: "connect();", in: nestedSource, options: .backwards),
+            context: context
+        )
+        #expect(resolvedSuper.first?.target.pathID == dbPath)
+    }
+}
+
 private func withProject(
     _ files: [String: String],
     test: (EngineSession) throws -> Void
@@ -1175,4 +1841,218 @@ private func resolvedImplType(
           })
     else { return nil }
     return session.names.resolve(relation.typeNameID)
+}
+
+private struct PythonTestSymbol {
+    let name: String
+    let kind: DeclarationKind
+    let parent: UInt32?
+    let range: ByteRange
+}
+
+private struct PythonTestImport {
+    let specifier: String
+    let imported: String?
+    let local: String?
+    let kind: ImportKind
+    let range: ByteRange
+}
+
+private struct PythonTestCall {
+    let name: String
+    let kind: CallKind
+    let range: ByteRange
+    let nameRange: ByteRange
+    let receiverRange: ByteRange?
+}
+
+private struct PythonFileSpec {
+    let path: String
+    let source: String
+    var symbols: [PythonTestSymbol]
+    var imports: [PythonTestImport]
+    var calls: [PythonTestCall]
+
+    init(
+        path: String,
+        source: String,
+        symbols: [PythonTestSymbol] = [],
+        imports: [PythonTestImport] = [],
+        calls: [PythonTestCall] = []
+    ) {
+        self.path = path
+        self.source = source
+        self.symbols = symbols
+        self.imports = imports
+        self.calls = calls
+    }
+}
+
+private func withManualPythonProject(
+    _ files: [PythonFileSpec],
+    test: (EngineSession) throws -> Void
+) throws {
+    let store = ProjectIndexStore()
+    var occurrences: [FileOccurrence] = []
+    var entries: [(ContentIndex, [UInt8], Bool)] = []
+    var symbolsByPath: [String: [DeclarationFacet]] = [:]
+    var importsByPath: [String: [ImportBinding]] = [:]
+    var callsByPath: [String: [UnresolvedCall]] = [:]
+    let moduleScopeID = ScopeID(rawValue: 0)
+    let moduleRegionID = ExecutableRegionID(rawValue: 0)
+
+    for (index, file) in files.enumerated() {
+        let bytes = Array(file.source.utf8)
+        let contentID = ContentID.sha256(of: bytes)
+        let pathID = store.paths.intern(file.path)
+        occurrences.append(FileOccurrence(
+            occurrenceID: FileOccurrenceID(rawValue: UInt32(index)),
+            pathID: pathID,
+            contentID: contentID,
+            detectedLanguage: .python,
+            sourceKind: .untracked,
+            fileMode: .regular,
+            size: UInt64(bytes.count)
+        ))
+        symbolsByPath[file.path] = file.symbols.enumerated().map { offset, symbol in
+            DeclarationFacet(
+                symbolGroupID: SymbolGroupID(rawValue: UInt32(offset)),
+                space: .value,
+                kind: symbol.kind,
+                nameID: store.names.intern(symbol.name),
+                range: symbol.range,
+                nameRange: symbol.range,
+                parentFacetIndex: symbol.parent,
+                signatureFingerprint: nil,
+                bodyFingerprint: nil
+            )
+        }
+        importsByPath[file.path] = file.imports.map { binding in
+            ImportBinding(
+                moduleSpecifier: store.strings.intern(binding.specifier),
+                importedName: binding.imported.map(store.names.intern),
+                localName: binding.local.map(store.names.intern),
+                kind: binding.kind,
+                flags: [],
+                scopeID: moduleScopeID,
+                range: binding.range
+            )
+        }
+        callsByPath[file.path] = file.calls.map { call in
+            UnresolvedCall(
+                regionID: moduleRegionID,
+                nameID: store.names.intern(call.name),
+                range: call.range,
+                nameRange: call.nameRange,
+                syntacticKind: call.kind,
+                qualifierRange: nil,
+                receiverRange: call.receiverRange,
+                argumentCount: nil
+            )
+        }
+        let scope = ScopeRecord(
+            id: moduleScopeID,
+            parent: nil,
+            kind: .module,
+            range: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count))
+        )
+        let region = ExecutableRegionRecord(
+            id: moduleRegionID,
+            kind: .moduleInitializer,
+            range: scope.range,
+            enclosingScopeID: moduleScopeID,
+            associatedFacetIndex: nil
+        )
+        let key = ContentIndexKey(
+            contentID: contentID,
+            languageMode: LanguageMode(language: .python),
+            grammarVersion: PythonTestExtractor.grammarVersion,
+            extractorVersion: PythonTestExtractor.extractorVersion
+        )
+        let index = ContentIndex(
+            key: key,
+            scopes: [scope],
+            bindings: [],
+            executableRegions: [region],
+            symbols: symbolsByPath[file.path] ?? [],
+            calls: callsByPath[file.path] ?? [],
+            imports: importsByPath[file.path] ?? [],
+            exports: [],
+            lineTable: LineTable(bytes: bytes)
+        )
+        entries.append((index, bytes, false))
+    }
+    store.insert(entries)
+    let manifest = SnapshotManifest(
+        snapshotID: SnapshotID(rawValue: UUID()),
+        files: occurrences
+    )
+    let profile = AnalysisProfile.placeholder(language: .python, root: store.paths.intern("."))
+    let view = SnapshotView(
+        store: store,
+        manifest: manifest,
+        stats: IndexStats(
+            fileCount: manifest.files.count,
+            uniqueContentCount: store.contentIndexes.count,
+            scopeCount: 0,
+            bindingCount: 0,
+            symbolCount: symbolsByPath.values.reduce(0) { $0 + $1.count },
+            callCount: callsByPath.values.reduce(0) { $0 + $1.count },
+            importCount: importsByPath.values.reduce(0) { $0 + $1.count },
+            elapsedMilliseconds: 0,
+            filesWithErrorNodes: 0,
+            reusedCount: 0,
+            extractedCount: manifest.files.count
+        ),
+        analysisProfile: profile,
+        extractor: PythonTestExtractor()
+    )
+    try test(EngineSession(store: store, snapshotView: view))
+}
+
+private func byteRange(
+    of needle: String,
+    in source: String,
+    options: String.CompareOptions = []
+) -> ByteRange {
+    let start = offset(of: needle, in: source, options: options)
+    return ByteRange(
+        lowerBound: start,
+        upperBound: start + UInt32(needle.utf8.count)
+    )
+}
+
+private struct PythonTestExtractor: LanguageExtractor {
+    static let grammarVersion: UInt32 = 1
+    static let extractorVersion: UInt32 = 1
+
+    var language: LanguageID { .python }
+    var grammarVersion: UInt32 { Self.grammarVersion }
+    var extractorVersion: UInt32 { Self.extractorVersion }
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner _: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        (ContentIndex(
+            key: key,
+            scopes: [],
+            bindings: [],
+            executableRegions: [],
+            symbols: [],
+            calls: [],
+            imports: [],
+            exports: [],
+            lineTable: LineTable(bytes: bytes)
+        ), false)
+    }
+
+    func identifierRanges(
+        named _: String,
+        in bytes: [UInt8],
+        mode: LanguageMode
+    ) throws -> [ByteRange] {
+        []
+    }
 }

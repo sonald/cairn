@@ -1,6 +1,7 @@
 import CodeInsightCore
 @testable import CodeInsightEngine
 import CodeInsightGit
+import CodeInsightPythonExtractor
 import Foundation
 import Testing
 
@@ -174,15 +175,17 @@ func moduleMapIgnoresForeignOccurrenceWithActiveContentID() throws {
 @Test
 func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
     let indexer = ProjectIndexer(parallelism: 1)
-    let snapshot = CountingSnapshot()
+    let snapshot = CountingSnapshot(
+        files: ["never.ts": Array("never".utf8)]
+    )
     let store = ProjectIndexStore()
 
     do {
-        _ = try indexer.prepareSnapshot(snapshot, into: store, language: .python)
-        Issue.record("Python snapshot indexing unexpectedly succeeded")
+        _ = try indexer.prepareSnapshot(snapshot, into: store, language: .typescript)
+        Issue.record("TypeScript snapshot indexing unexpectedly succeeded")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("python") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
     } catch {
         Issue.record("Unexpected unsupported snapshot error: \(error)")
     }
@@ -202,6 +205,169 @@ func unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() {
     } catch {
         Issue.record("Unsupported preflight happened after filesystem access: \(error)")
     }
+}
+
+@Test
+func pythonIndexerIndexesFixtureCountsAndProfileAndSearchView() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightPythonIndexerFixture-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: root.appendingPathComponent("pkg"),
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    try "".write(to: root.appendingPathComponent("pkg/__init__.py"), atomically: true, encoding: .utf8)
+    try """
+        class Model:
+            def build(self):
+                return 1
+
+        def make():
+            return Model().build()
+        """.write(
+        to: root.appendingPathComponent("pkg/models.py"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try """
+        from .models import make as go
+
+        go()
+        """.write(
+        to: root.appendingPathComponent("main.py"),
+        atomically: true,
+        encoding: .utf8
+    )
+
+    let session = try ProjectIndexer(parallelism: 1).index(
+        root: root,
+        language: .python
+    )
+
+    #expect(session.analysisProfile.language == .python)
+    #expect(session.stats.fileCount == 3)
+    #expect(session.stats.uniqueContentCount == 3)
+    #expect(session.stats.symbolCount == 3)
+    #expect(session.stats.callCount == 3)
+    #expect(session.stats.importCount == 1)
+    let files = session.manifest.files.map { session.paths.resolve($0.pathID) }
+    #expect(files == ["main.py", "pkg/__init__.py", "pkg/models.py"])
+    #expect(try session.searchSymbols(
+        query: "Model",
+        limit: 10,
+        boost: SearchBoost(),
+        context: snapshotQueryContext(for: session)
+    ).map(\.path).contains("pkg/models.py"))
+}
+
+@Test
+func pythonAndRustSameContentKeysStayIsolated() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightPythonRustSameContent-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let bytes = Array("fn same() {}\n".utf8)
+    try FileManager.default.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    try Data(bytes).write(to: root.appendingPathComponent("same.py"))
+    try Data(bytes).write(to: root.appendingPathComponent("same.rs"))
+
+    let python = try ProjectIndexer(parallelism: 1).index(
+        root: root,
+        language: .python
+    )
+    let rust = try ProjectIndexer(parallelism: 1).index(
+        root: root,
+        language: .rust
+    )
+
+    #expect(python.manifest.files.allSatisfy {
+        $0.detectedLanguage == .python
+    })
+    #expect(rust.manifest.files.allSatisfy {
+        $0.detectedLanguage == .rust
+    })
+    #expect(python.contentIndexes.count == 1)
+    #expect(rust.contentIndexes.count == 1)
+    #expect(Set(python.contentIndexes.keys.map(\.languageMode.language))
+        == [.python])
+    #expect(Set(rust.contentIndexes.keys.map(\.languageMode.language))
+        == [.rust])
+    #expect(python.contentIndexes.keys.first?.contentID
+        == rust.contentIndexes.keys.first?.contentID)
+}
+
+@Test
+func pythonPersistentCacheExtractsOnceThenOnlyVersionMissesPython() throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightPythonCache-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let pythonBytes = Array("""
+        class Model:
+            def build(self):
+                return 1
+        """.utf8)
+    let rustBytes = Array("fn keep() {}\n".utf8)
+    try Data(pythonBytes).write(to: root.appendingPathComponent("models.py"))
+    try Data(rustBytes).write(to: root.appendingPathComponent("keep.rs"))
+
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    let writer = ProjectIndexer(parallelism: 1, cache: cache!)
+    let coldPython = try writer.index(root: root, language: .python)
+    _ = try writer.index(root: root, language: .rust)
+    writer.flushPersistentWrites()
+    cache?.flush()
+    cache = nil
+
+    let hotPython = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .python)
+    cache = try IndexCache(fileURL: cacheURL)
+    let hotRust = try ProjectIndexer(
+        parallelism: 1,
+        cache: cache
+    ).index(root: root, language: .rust)
+    cache?.flush()
+    cache = nil
+
+    #expect(coldPython.stats.uniqueContentCount == 1)
+    #expect(coldPython.stats.extractedCount == 1)
+    #expect(hotPython.stats.uniqueContentCount == 1)
+    #expect(hotPython.stats.reusedCount == 1)
+    #expect(hotPython.stats.extractedCount == 0)
+    #expect(hotRust.stats.uniqueContentCount == 1)
+    #expect(hotRust.stats.extractedCount == 0)
+    #expect(hotRust.stats.reusedCount == 1)
+
+    cache = try IndexCache(fileURL: cacheURL)
+    let bumped = try ProjectIndexer(
+        parallelism: 1,
+        cache: cache!,
+        extractor: VersionedPythonExtractor(version: 2)
+    ).index(root: root, language: .python)
+    cache?.flush()
+    cache = nil
+    let rustAfterPythonMiss = try ProjectIndexer(
+        parallelism: 1,
+        cache: try IndexCache(fileURL: cacheURL)
+    ).index(root: root, language: .rust)
+    #expect(bumped.stats.reusedCount == 0)
+    #expect(bumped.stats.extractedCount == 1)
+    #expect(bumped.stats.uniqueContentCount == 1)
+    #expect(rustAfterPythonMiss.stats.reusedCount == 1)
+    #expect(rustAfterPythonMiss.stats.extractedCount == 0)
 }
 
 @Test
@@ -802,6 +968,38 @@ private struct ContractExtractor: LanguageExtractor {
         mode _: LanguageMode
     ) throws -> [ByteRange] {
         []
+    }
+}
+
+private struct VersionedPythonExtractor: LanguageExtractor {
+    let version: UInt32
+
+    var language: LanguageID { .python }
+    var grammarVersion: UInt32 { PythonExtractor.grammarVersion }
+    var extractorVersion: UInt32 { version }
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        try PythonExtractor().extractWithDiagnostics(
+            bytes: bytes,
+            key: key,
+            interner: interner
+        )
+    }
+
+    func identifierRanges(
+        named name: String,
+        in bytes: [UInt8],
+        mode: LanguageMode
+    ) throws -> [ByteRange] {
+        try PythonExtractor().identifierRanges(
+            named: name,
+            in: bytes,
+            mode: mode
+        )
     }
 }
 

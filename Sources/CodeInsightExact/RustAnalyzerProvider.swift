@@ -57,18 +57,11 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
     public static func findExecutable(
         environment: [String: String] = ProcessInfo.processInfo.environment
     ) -> URL? {
-        for directory in environment["PATH", default: ""]
-            .split(separator: ":", omittingEmptySubsequences: false)
-        {
-            let root = directory.isEmpty ? "." : String(directory)
-            let candidate = URL(fileURLWithPath: root, isDirectory: true)
-                .appendingPathComponent("rust-analyzer")
-                .standardizedFileURL
-            if FileManager.default.isExecutableFile(atPath: candidate.path) {
-                return candidate
-            }
-        }
-        return nil
+        CodeInsightExact.findExecutable(
+            named: "rust-analyzer",
+            environment: environment,
+            projectRoot: nil
+        )
     }
 
     public func prepare(
@@ -211,6 +204,84 @@ public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
             .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return version.isEmpty ? "unknown" : version
     }
+}
+
+func findExecutable(
+    named name: String,
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    projectRoot: URL? = nil
+) -> URL? {
+    for directory in executableSearchDirectories(
+        environment: environment,
+        projectRoot: projectRoot
+    ) {
+        let candidate = directory.appendingPathComponent(name)
+        if FileManager.default.isExecutableFile(atPath: candidate.path) {
+            return candidate.standardizedFileURL
+        }
+    }
+    return nil
+}
+
+func executableSearchDirectories(
+    environment: [String: String] = ProcessInfo.processInfo.environment,
+    projectRoot: URL? = nil
+) -> [URL] {
+    var raw = environment["PATH", default: ""]
+        .split(separator: ":", omittingEmptySubsequences: false)
+        .map(String.init)
+    raw.append(contentsOf: ["/opt/homebrew/bin", "/usr/local/bin"])
+
+    let canonicalProject = projectRoot?.resolvingSymlinksInPath()
+        .standardizedFileURL.resolvingSymlinksInPath().path
+    var seen = Set<String>()
+    var result: [URL] = []
+    for entry in raw {
+        guard entry.hasPrefix("/"), !entry.isEmpty else { continue }
+        let url = URL(fileURLWithPath: entry)
+            .standardizedFileURL
+        let canonicalPath = url.resolvingSymlinksInPath().path
+        if let canonicalProject,
+           canonicalPath == canonicalProject
+               || (canonicalProject != "/"
+                   && canonicalPath.hasPrefix(canonicalProject + "/"))
+               || (canonicalProject == "/"
+                   && canonicalPath.hasPrefix("/"))
+        {
+            continue
+        }
+        guard seen.insert(canonicalPath).inserted else { continue }
+        result.append(url)
+    }
+    return result
+}
+
+func sanitizedChildEnvironment(
+    _ environment: [String: String],
+    projectRoot: URL
+) -> [String: String] {
+    var clean = environment
+    clean["PATH"] = executableSearchDirectories(
+        environment: environment,
+        projectRoot: projectRoot
+    )
+    .map { $0.resolvingSymlinksInPath().path }
+    .joined(separator: ":")
+    for key in [
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "VIRTUAL_ENV",
+        "CONDA_PREFIX",
+        "NODE_PATH",
+        "NODE_OPTIONS",
+    ] {
+        clean.removeValue(forKey: key)
+    }
+    clean["PYTHONNOUSERSITE"] = "1"
+    clean["PYTHONDONTWRITEBYTECODE"] = "1"
+    clean["PYTHONSAFEPATH"] = "1"
+    return clean
 }
 
 final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
@@ -921,7 +992,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         guard let url = URL(string: item.uri), url.isFileURL else {
             throw ExactError.invalidDefinitionResponse(item.uri)
         }
-        guard let path = projectRelativePath(of: url) else { return }
+        guard let path = projectRelativePath(
+            of: url,
+            projectURL: projectURL
+        ) else { return }
         try open(
             path: path,
             bytes: snapshot.readBytes(path: path),
@@ -932,43 +1006,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     private func parseCallHierarchyItems(
         _ value: Any
     ) throws -> [ExactCallHierarchyItem]? {
-        if value is NSNull { return nil }
-        guard let objects = value as? [[String: Any]] else {
-            throw ExactError.invalidDefinitionResponse(String(describing: value))
-        }
-        return try objects.map(parseCallHierarchyItem)
-    }
-
-    private func parseCallHierarchyItem(
-        _ object: [String: Any]
-    ) throws -> ExactCallHierarchyItem {
-        guard let name = object["name"] as? String,
-              let kind = (object["kind"] as? NSNumber)?.intValue,
-              let uri = object["uri"] as? String,
-              let range = object["range"] as? [String: Any],
-              let selectionRange = object["selectionRange"] as? [String: Any]
-        else {
-            throw ExactError.invalidDefinitionResponse(String(describing: object))
-        }
-        let data: Data?
-        if let value = object["data"] {
-            data = try JSONSerialization.data(
-                withJSONObject: value,
-                options: [.fragmentsAllowed, .sortedKeys]
-            )
-        } else {
-            data = nil
-        }
-        return ExactCallHierarchyItem(
-            name: name,
-            kind: kind,
-            uri: uri,
-            range: try parseLocation(["uri": uri, "range": range]),
-            selectionRange: try parseLocation([
-                "uri": uri,
-                "range": selectionRange,
-            ]),
-            data: data
+        try CodeInsightExact.parseCallHierarchyItems(
+            value,
+            projectURL: projectURL,
+            snapshot: snapshot
         )
     }
 
@@ -977,27 +1018,13 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         itemKey: String,
         callSiteURI: (ExactCallHierarchyItem) -> String
     ) throws -> [ExactCallRelation]? {
-        if value is NSNull { return nil }
-        guard let objects = value as? [[String: Any]] else {
-            throw ExactError.invalidDefinitionResponse(String(describing: value))
-        }
-        return try objects.map { object in
-            guard let itemObject = object[itemKey] as? [String: Any],
-                  let ranges = object["fromRanges"] as? [[String: Any]]
-            else {
-                throw ExactError.invalidDefinitionResponse(
-                    String(describing: object)
-                )
-            }
-            let item = try parseCallHierarchyItem(itemObject)
-            let uri = callSiteURI(item)
-            return ExactCallRelation(
-                item: item,
-                callSites: try ranges.map {
-                    try parseLocation(["uri": uri, "range": $0])
-                }
-            )
-        }
+        try CodeInsightExact.parseCallRelations(
+            value,
+            itemKey: itemKey,
+            callSiteURI: callSiteURI,
+            projectURL: projectURL,
+            snapshot: snapshot
+        )
     }
 
     private func callHierarchyItemObject(
@@ -1007,8 +1034,16 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             "name": item.name,
             "kind": item.kind,
             "uri": item.uri,
-            "range": try lspRange(for: item.range),
-            "selectionRange": try lspRange(for: item.selectionRange),
+            "range": try exactLSPRange(
+                for: item.range,
+                projectURL: projectURL,
+                snapshot: snapshot
+            ),
+            "selectionRange": try exactLSPRange(
+                for: item.selectionRange,
+                projectURL: projectURL,
+                snapshot: snapshot
+            ),
         ]
         if let data = item.data {
             object["data"] = try JSONSerialization.jsonObject(
@@ -1017,26 +1052,6 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             )
         }
         return object
-    }
-
-    private func lspRange(for location: ExactLocation) throws -> [String: Any] {
-        let bytes: [UInt8]
-        if location.file.hasPrefix("/") {
-            bytes = [UInt8](try Data(
-                contentsOf: URL(fileURLWithPath: location.file),
-                options: .mappedIfSafe
-            ))
-        } else {
-            bytes = try snapshot.readBytes(path: relativePath(location.file))
-        }
-        guard let map = LSPPositionMap(utf8: bytes) else {
-            throw ExactError.invalidUTF8(location.file)
-        }
-        guard let position = map.position(forByteOffset: location.byteOffset) else {
-            throw ExactError.invalidPosition(location.file, location.byteOffset)
-        }
-        let point = ["line": position.line, "character": position.character]
-        return ["start": point, "end": point]
     }
 
     private func parseDefinition(_ value: Any) throws -> ExactDefinitionQueryResult {
@@ -1055,71 +1070,19 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
     }
 
     private func parseLocations(_ value: Any) throws -> [ExactLocation]? {
-        if value is NSNull { return nil }
-        let objects: [[String: Any]]
-        if let dictionary = value as? [String: Any] {
-            objects = [dictionary]
-        } else if let array = value as? [[String: Any]] {
-            objects = array
-        } else {
-            throw ExactError.invalidDefinitionResponse(String(describing: value))
-        }
-        return try objects.map(parseLocation)
+        try exactLocations(value, projectURL: projectURL, snapshot: snapshot)
     }
 
     private func parseLocation(_ object: [String: Any]) throws -> ExactLocation {
-        guard let uri = (object["targetUri"] ?? object["uri"]) as? String,
-              let range = (object["targetSelectionRange"] ?? object["range"])
-                as? [String: Any],
-              let start = range["start"] as? [String: Any],
-              let line = (start["line"] as? NSNumber)?.intValue,
-              let character = (start["character"] as? NSNumber)?.intValue,
-              let url = URL(string: uri), url.isFileURL
-        else {
-            throw ExactError.invalidDefinitionResponse(String(describing: object))
-        }
-
-        let targetURL = url.standardizedFileURL
-        let relative = projectRelativePath(of: targetURL)
-        let bytes: [UInt8]
-        if let relative, let captured = try? snapshot.readBytes(path: relative) {
-            bytes = captured
-        } else {
-            bytes = [UInt8](try Data(contentsOf: targetURL, options: .mappedIfSafe))
-        }
-        guard let map = LSPPositionMap(utf8: bytes) else {
-            throw ExactError.invalidUTF8(targetURL.path)
-        }
-        guard let byteOffset = map.byteOffset(
-            for: LSPPosition(line: line, character: character)
-        ), let coordinate = map.lineAndByteColumn(at: byteOffset) else {
-            throw ExactError.invalidDefinitionResponse(
-                "position \(line):\(character) is outside \(targetURL.path)"
-            )
-        }
-        return ExactLocation(
-            file: relative ?? targetURL.path,
-            byteOffset: byteOffset,
-            line: coordinate.line,
-            column: coordinate.column
+        try parseExactLocation(
+            object,
+            projectURL: projectURL,
+            snapshot: snapshot
         )
     }
 
     private func relativePath(_ input: String) throws -> String {
-        let candidate = input.hasPrefix("/")
-            ? URL(fileURLWithPath: input)
-            : projectURL.appendingPathComponent(input)
-        guard let relative = projectRelativePath(of: candidate.standardizedFileURL),
-              !relative.isEmpty
-        else { throw ExactError.invalidPath(input) }
-        return relative
-    }
-
-    private func projectRelativePath(of url: URL) -> String? {
-        let rootComponents = projectURL.pathComponents
-        let components = url.standardizedFileURL.pathComponents
-        guard components.starts(with: rootComponents) else { return nil }
-        return components.dropFirst(rootComponents.count).joined(separator: "/")
+        try relativeProjectPath(input, projectURL: projectURL)
     }
 
     private func throwIfCancelled(_ method: String) throws {

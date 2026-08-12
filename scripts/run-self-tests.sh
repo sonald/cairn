@@ -2,14 +2,33 @@
 
 set -euo pipefail
 
-if [[ $# -ne 3 || ! -d "$1" || ! -d "$2" || ! -f "$3" ]]; then
-    echo "usage: bash scripts/run-self-tests.sh <git-repo> <non-git-dir> <open-file>" >&2
+if [[ $# -lt 3 || $# -gt 4 || ! -d "$1" || ! -d "$2" || ! -f "$3" || \
+      ($# -eq 4 && ! -d "$4") ]]; then
+    echo "usage: bash scripts/run-self-tests.sh <git-repo> <non-git-dir> <open-file> [<python-git-repo>]" >&2
     exit 2
 fi
 
 git_repo="$(cd "$1" && pwd -P)"
 non_git_root="$(cd "$2" && pwd -P)"
 open_file="$(cd "$(dirname "$3")" && pwd -P)/$(basename "$3")"
+
+python_repo=""
+if [[ $# -eq 4 ]]; then
+    python_repo="$(cd "$4" && pwd -P)"
+    if ! git -C "$python_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
+        echo "python-git-repo needs at least two commits: $python_repo" >&2
+        exit 2
+    fi
+    if [[ -n "$(git -C "$python_repo" status --porcelain)" ]]; then
+        echo "python-git-repo must be clean: $python_repo" >&2
+        exit 2
+    fi
+    if [[ ! -f "$python_repo/src/mcp/shared/memory.py" || \
+          ! -f "$python_repo/src/mcp/server/fastmcp/server.py" ]]; then
+        echo "python-git-repo missing fixed corpus files: $python_repo" >&2
+        exit 2
+    fi
+fi
 
 if ! git -C "$git_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
     echo "git-repo needs at least two commits: $git_repo" >&2
@@ -112,6 +131,20 @@ run_case history --self-test-history "$git_repo"
 run_case exact --self-test-exact "$git_repo"
 run_case switch --self-test-switch "$git_repo"
 run_case open --self-test-open "$open_file"
+
+if [[ -n "$python_repo" ]]; then
+    python_head_before="$(git -C "$python_repo" rev-parse HEAD)"
+    python_status_before="$(git -C "$python_repo" status --porcelain)"
+    run_case python --self-test-python "$python_repo"
+    python_head_after="$(git -C "$python_repo" rev-parse HEAD)"
+    python_status_after="$(git -C "$python_repo" status --porcelain)"
+    if [[ "$python_head_before" != "$python_head_after" || \
+          "$python_status_before" != "$python_status_after" || \
+          -n "$python_status_after" ]]; then
+        fail_count=$((fail_count + 1))
+        echo "FAIL python repo changed during self-test repo=$python_repo" >&2
+    fi
+fi
 
 echo "summary: pass=$pass_count fail=$fail_count hang=$hang_count"
 echo "artifacts: $output_dir"

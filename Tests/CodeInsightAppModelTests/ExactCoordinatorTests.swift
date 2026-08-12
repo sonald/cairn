@@ -118,7 +118,7 @@ func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
         try coordinator.prepare(
             projectURL: fixture.root,
             revision: nil,
-            analysisProfile: exactAnalysisProfile(language: .python),
+            analysisProfile: exactAnalysisProfile(language: .typescript),
             generation: 1
         )
         Issue.record("expected unsupported language")
@@ -126,7 +126,7 @@ func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("python") == true
+                .contains("typescript") == true
         )
     } catch {
         Issue.record("unexpected error: \(error)")
@@ -143,11 +143,233 @@ func exactCoordinatorRejectsUnsupportedLanguageWithoutChangingState() throws {
 
 @MainActor
 @Test
+func exactCoordinatorAcceptsPythonProfileAndUsesWorktreeDefaultSnapshot()
+    async throws
+{
+    let root = try exactTemporaryPythonProject([
+        "pyproject.toml": "[tool.pyright]\npythonVersion = \"3.12\"\n",
+        "main.py": "def target():\n    pass\n\ntarget()\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    let trustRegistry = TrustRegistry(
+        fileURL: root.appendingPathComponent("trust.json")
+    )
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(file: "main.py", byteOffset: 0, line: 1, column: 1)
+    }
+    let worktree = try WorktreeSnapshot(
+        repositoryURL: root,
+        language: .python
+    )
+    let expectedProfile = try ExactProfileKey(
+        snapshot: worktree,
+        language: .python
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        sandboxAvailable: { true },
+        trustRegistry: trustRegistry
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactAnalysisProfile(
+            language: .python,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: expectedProfile.configFingerprint,
+            environmentFingerprint: expectedProfile.environmentFingerprint,
+            featureSelection: .defaultFeatures
+        ),
+        generation: 1
+    )
+    #expect(
+        await testWaitUntil("python exact readiness == .ready || unavailable") {
+            coordinator.readiness != .preparing
+        }
+    )
+    guard case .ready = coordinator.readiness else {
+        if case .unavailable(let reason) = coordinator.readiness {
+            Issue.record("Python exact became unavailable: \(reason)")
+        }
+        return
+    }
+    #expect(state.prepareCount == 1)
+    let result = await coordinator.definition(
+        file: "main.py",
+        byteOffset: 0,
+        generation: 1
+    )
+    #expect(exactCompletedEntry(result)?.origin == .worktree)
+}
+
+@MainActor
+@Test
+func exactCoordinatorRejectsPythonProfileMismatchBeforeProvider() async throws {
+    let root = try exactTemporaryPythonProject([
+        "pyproject.toml": "[tool.pyright]\npythonVersion = \"3.12\"\n",
+        "main.py": "def target():\n    pass\n\ntarget()\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState()
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "pyproject.toml": "[tool.pyright]\npythonVersion = \"3.12\"\n",
+            "main.py": "def target():\n    pass\n\ntarget()\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactPythonProfile(
+            language: .python,
+            configFingerprint: "wrong-config",
+            environmentFingerprint: ""
+        ),
+        generation: 1
+    )
+
+    #expect(await testWaitUntil("python mismatch leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .unavailable(let reason) = coordinator.readiness else {
+        Issue.record("python profile mismatch did not fail")
+        return
+    }
+    #expect(reason.contains("profile"))
+    #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorFiltersPythonStubTargets() async throws {
+    let root = try exactTemporaryPythonProject([
+        "pyproject.toml": "[project]\nname = \"p\"\n",
+        "main.py": "def target():\n    pass\n\ntarget()\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState{ _, _, _ in
+        ExactLocation(file: "typeshed/foo.pyi", byteOffset: 0, line: 1, column: 1)
+    }
+    let expectedProfile = try ExactProfileKey(
+        projectURL: root,
+        language: .python
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "pyproject.toml": "[project]\nname = \"p\"\n",
+            "main.py": "def target():\n    pass\n\ntarget()\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactPythonProfile(
+            language: .python,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: expectedProfile.configFingerprint,
+            environmentFingerprint: expectedProfile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ready") { coordinator.readiness == .ready })
+
+    guard case .completed(let entries) = await coordinator.definition(
+        file: "main.py",
+        byteOffset: 0,
+        generation: 1
+    ) else {
+        Issue.record("python stub filter should complete empty")
+        return
+    }
+    #expect(entries.isEmpty)
+}
+
+@MainActor
+@Test
+func exactCoordinatorReportsPythonImplementationsUnsupported() async throws {
+    let root = try exactTemporaryPythonProject([
+        "main.py": "class Target:\n    pass\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState { _, _, _ in nil }
+    let profile = try ExactProfileKey(
+        projectURL: root,
+        language: .python
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "main.py": "class Target:\n    pass\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactPythonProfile(
+            language: .python,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("implementation unsupported ready") {
+        coordinator.readiness == .ready
+    })
+    guard case .unsupported = await coordinator.relations(
+        file: "main.py",
+        byteOffset: 0,
+        item: nil,
+        direction: .implementations,
+        generation: 1
+    )! else {
+        Issue.record("Python implementations should be unsupported")
+        return
+    }
+}
+
+@MainActor
+@Test
 func exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() async throws {
     let fixture = try ExactTestFixture()
     defer { fixture.remove() }
     let state = ExactProviderState()
     let factoryLanguage = ExactVersionBox("")
+    let profile = try ExactProfileKey(snapshot: ExactTestSnapshot(
+        files: fixture.files.merging(
+            ["Cargo.toml": "[package]\nname='exact-test'\nversion='0.1.0'\n"],
+            uniquingKeysWith: { _, new in new }
+        )
+    ))
     let coordinator = ExactCoordinator(
         providerFactory: { _, language in
             factoryLanguage.value = String(describing: language)
@@ -161,7 +383,12 @@ func exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() async throws
     try coordinator.prepare(
         projectURL: fixture.root,
         revision: nil,
-        analysisProfile: exactAnalysisProfile(language: .rust),
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            projectUnitName: "exact-test",
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
         generation: 1
     )
 
@@ -176,6 +403,94 @@ func exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() async throws
     #expect(reason.contains("rust"))
     #expect(factoryLanguage.value == "rust")
     #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorAcceptsRustProfileWithDifferentFingerprintRepresentation()
+    async throws
+{
+    let root = try exactTemporaryProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState()
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in ExactTestProvider(state: state) },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "Cargo.toml": "[package]\nname='exact-test'\nversion='0.1.0'\n",
+            "main.rs": "fn main() {}\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            configFingerprint: "analysis-aggregate-config",
+            environmentFingerprint: ""
+        ),
+        generation: 1
+    )
+
+    #expect(await testWaitUntil("rust fingerprint mismatch leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .ready = coordinator.readiness else {
+        Issue.record(
+            "rust fingerprint representation mismatch should not fail exact"
+        )
+        return
+    }
+    #expect(state.prepareCount > 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorReportsMissingPythonProviderWithoutSessions() async throws {
+    let root = try exactTemporaryPythonProject([
+        "main.py": "def target():\n    pass\n\ntarget()\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let profile = try ExactProfileKey(
+        projectURL: root,
+        language: .python
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, _ in
+            throw ExactError.unavailable("pyright-langserver is not installed")
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "main.py": "def target():\n    pass\n\ntarget()\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactPythonProfile(
+            language: .python,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("python missing provider leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    guard case .unavailable(let reason) = coordinator.readiness else {
+        Issue.record("missing provider did not fail")
+        return
+    }
+    #expect(reason.contains("pyright"))
 }
 
 @MainActor
@@ -523,7 +838,12 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     let state = ExactProviderState()
     let versions = ExactVersionBox("fake-1")
     let snapshots = ExactSnapshotFactoryState(files: fixture.files)
-    let analysisProfile = exactAnalysisProfile(language: .rust)
+    let exactProfile = try ExactProfileKey(projectURL: fixture.root)
+    let analysisProfile = exactAnalysisProfile(
+        language: .rust,
+        configFingerprint: exactProfile.configFingerprint,
+        environmentFingerprint: exactProfile.environmentFingerprint
+    )
     let coordinator = ExactCoordinator(
         providerFactory: { _ in
             ExactTestProvider(toolVersion: versions.value, state: state)
@@ -539,7 +859,13 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         analysisProfile: analysisProfile,
         generation: 1
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 1
     ) != nil)
@@ -550,7 +876,13 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         analysisProfile: analysisProfile,
         generation: 2
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 2
     ) != nil)
@@ -562,11 +894,19 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         revision: nil,
         analysisProfile: exactAnalysisProfile(
             language: .rust,
-            projectUnitName: "other-unit"
+            projectUnitName: "other-unit",
+            configFingerprint: exactProfile.configFingerprint,
+            environmentFingerprint: exactProfile.environmentFingerprint
         ),
         generation: 3
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 3
     ) != nil)
@@ -577,13 +917,27 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         atomically: true,
         encoding: .utf8
     )
+    let exactProfileAfterLock = try ExactProfileKey(
+        projectURL: fixture.root
+    )
+    let analysisProfileAfterLock = exactAnalysisProfile(
+        language: .rust,
+        configFingerprint: exactProfileAfterLock.configFingerprint,
+        environmentFingerprint: exactProfileAfterLock.environmentFingerprint
+    )
     try coordinator.prepare(
         projectURL: fixture.root,
         revision: nil,
-        analysisProfile: analysisProfile,
+        analysisProfile: analysisProfileAfterLock,
         generation: 4
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 4
     ) != nil)
@@ -593,10 +947,16 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
     try coordinator.prepare(
         projectURL: fixture.root,
         revision: nil,
-        analysisProfile: analysisProfile,
+        analysisProfile: analysisProfileAfterLock,
         generation: 5
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 5
     ) != nil)
@@ -607,13 +967,26 @@ func exactOverlayReusesVersionProfileAndToolButNotSnapshotID() async throws {
         atomically: true,
         encoding: .utf8
     )
+    let exactProfileAfterCargo = try ExactProfileKey(
+        projectURL: fixture.root
+    )
     try coordinator.prepare(
         projectURL: fixture.root,
         revision: nil,
-        analysisProfile: analysisProfile,
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            configFingerprint: exactProfileAfterCargo.configFingerprint,
+            environmentFingerprint: exactProfileAfterCargo.environmentFingerprint
+        ),
         generation: 6
     )
-    #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
+    #expect(await testWaitUntil("coordinator leaves preparing") {
+        coordinator.readiness != .preparing
+    })
+    if case .unavailable(let reason) = coordinator.readiness {
+        Issue.record("Exact overlay reuse became unavailable: \(reason)")
+        return
+    }
     #expect(await coordinator.definition(
         file: "main.rs", byteOffset: 0, generation: 6
     ) != nil)
@@ -759,7 +1132,17 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
         materializer: materializer
     )
 
-    coordinator.prepare(projectURL: root, revision: "HEAD", generation: 1)
+    try coordinator.prepare(
+        projectURL: root,
+        revision: "HEAD",
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            projectUnitName: "exact-test",
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
     #expect(await testWaitUntil("coordinator.readiness == .ready") { coordinator.readiness == .ready })
     let result = await coordinator.definition(
         file: "src/main.rs",
@@ -772,6 +1155,79 @@ func exactCoordinatorMaterializesCommitRootAndMapsResultPath() async throws {
         "materialized/\(snapshot.commitOID.hex)/"
     ))
     #expect(exactCompletedEntry(result)?.location.file == "src/lib.rs")
+    #expect(exactCompletedEntry(result)?.origin == .materialized(
+        commitOID: snapshot.commitOID.hex
+    ))
+}
+
+@MainActor
+@Test
+func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
+    async throws
+{
+    let root = try exactTemporaryPythonProject([
+        "main.py": "def target():\n    pass\n\ntarget()\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let snapshot = try CommitSnapshot(repositoryURL: root)
+    let profile = try ExactProfileKey(
+        snapshot: snapshot,
+        language: .python
+    )
+    let materializer = Materializer(
+        rootURL: root.appendingPathComponent("cache/materialized")
+    )
+    let expectedRoot = materializer.rootURL
+        .appendingPathComponent(snapshot.commitOID.hex)
+        .appendingPathComponent(profile.configFingerprint)
+    let providerRoot = ExactVersionBox("")
+    let state = ExactProviderState { _, _, _ in
+        ExactLocation(
+            file: expectedRoot.appendingPathComponent("main.py").path,
+            byteOffset: 4,
+            line: 1,
+            column: 5
+        )
+    }
+    let coordinator = ExactCoordinator(
+        providerFactory: { root, language in
+            providerRoot.value = root.path
+            return ExactTestProvider(language: language, state: state)
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        ),
+        materializer: materializer
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: "HEAD",
+        analysisProfile: exactPythonProfile(
+            language: .python,
+            projectUnitName: root.lastPathComponent,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("coordinator.readiness == .ready") {
+        coordinator.readiness == .ready
+    })
+    let result = await coordinator.definition(
+        file: "main.py",
+        byteOffset: 0,
+        generation: 1
+    )
+
+    #expect(providerRoot.value == expectedRoot.path)
+    #expect(exactCompletedEntry(result)?.location.file == "main.py")
     #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex
     ))
@@ -847,6 +1303,46 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
         commitOID: commitOID
     ))
     #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == true)
+}
+
+@MainActor
+@Test
+func pythonContextExactBadgeOmitsCargoFeatureDetail() async throws {
+    let source = "def target():\n    pass\n\ntarget()\n"
+    let root = try exactTemporaryPythonProject(["main.py": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(
+        file: "main.py",
+        offset: exactByteOffset(of: "target()", in: source)
+    )
+    #expect(await testWaitUntil("model.candidateCount == 1 && gate.count == 1") { model.candidateCount == 1 && gate.count == 1 })
+    gate.complete(0, with: exactEntry(
+        file: "main.py",
+        byteOffset: exactByteOffset(of: "def target", in: source)
+            + UInt32("def ".utf8.count),
+        featureSelection: .allFeatures
+    ))
+    #expect(await testWaitUntil("model.selectedCandidate?.certainty == .exact") {
+        model.selectedCandidate?.certainty == .exact
+    })
+    #expect(model.selectedCandidate?.provenanceBadge.contains("Exact") == true)
+    #expect(model.selectedCandidate?.provenanceBadge.contains(
+        "features:"
+    ) == false)
+    #expect(model.selectedCandidate?.provenanceBadge.contains(
+        "fake-exact"
+    ) == true)
 }
 
 @MainActor
@@ -1031,7 +1527,7 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
         { session, file, offset, context in
             try session.resolve(file: file, offset: offset, context: context)
         },
-        exactResolver: { _, _, _ in
+        exactResolver: { _, _, _, _ in
             .completed([exactEntry(
                 file: dependency.path,
                 byteOffset: exactByteOffset(
@@ -1442,14 +1938,17 @@ private final class ContextExactGate {
     private var nextID = 0
 
     var count: Int { nextID }
+    private(set) var batches: [ExactRequestBatch] = []
 
     func resolve(
         file: String,
         offset: UInt32,
-        generation: UInt64
+        generation: UInt64,
+        batch: ExactRequestBatch
     ) async -> ExactCoordinator.DefinitionResult? {
         let id = nextID
         nextID += 1
+        batches.append(batch)
         return await withCheckedContinuation { continuations[id] = $0 }
     }
 
@@ -1491,7 +1990,8 @@ private struct ExactTestFixture {
 private func exactEntry(
     file: String,
     byteOffset: UInt32,
-    origin: ExactOrigin = .worktree
+    origin: ExactOrigin = .worktree,
+    featureSelection: FeatureSelection = .defaultFeatures
 ) -> ExactOverlay.Entry {
     ExactOverlay.Entry(
         location: ExactLocation(
@@ -1500,7 +2000,15 @@ private func exactEntry(
             line: 1,
             column: Int(byteOffset) + 1
         ),
-        attribution: exactAttribution(),
+        attribution: ExactAttribution(
+            provider: "fake-exact",
+            toolVersion: "fake-1",
+            configFingerprint: "config",
+            environmentFingerprint: "environment",
+            featureSelection: featureSelection,
+            environment: exactAttribution().environment,
+            generatedAt: Date(timeIntervalSince1970: 0)
+        ),
         origin: origin
     )
 }
@@ -1583,6 +2091,47 @@ private func exactTemporaryProject(_ files: [String: String]) throws -> URL {
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
     return root
+}
+
+private func exactTemporaryPythonProject(
+    _ files: [String: String]
+) throws -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightExactCoordinatorPythonTests-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(
+        at: root,
+        withIntermediateDirectories: true
+    )
+    for (path, contents) in files {
+        let file = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try contents.write(to: file, atomically: true, encoding: .utf8)
+    }
+    return root
+}
+
+private func exactPythonProfile(
+    language: LanguageID,
+    projectUnitName: String = "python-test",
+    configFingerprint: String,
+    environmentFingerprint: String
+) -> AnalysisProfile {
+    AnalysisProfile(
+        language: language,
+        projectRoot: PathID(rawValue: 0),
+        projectUnitName: projectUnitName,
+        configFingerprint: configFingerprint,
+        environmentFingerprint: environmentFingerprint,
+        featureSelection: .defaultFeatures,
+        featureNames: [],
+        edition: nil,
+        trustMode: .safe
+    )
 }
 
 func exactDependencyFixture() -> URL {

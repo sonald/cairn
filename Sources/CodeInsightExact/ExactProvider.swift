@@ -146,20 +146,35 @@ public struct ExactProfileKey: Hashable, Sendable {
         language: LanguageID,
         featureSelection: FeatureSelection = .defaultFeatures
     ) throws {
-        try Self.requireRustFingerprint(language)
+        try Self.requireSupportedFingerprint(language)
         self.language = language
         let root = projectURL.standardizedFileURL
-        let cargo = root.appendingPathComponent("Cargo.toml")
-        guard FileManager.default.isReadableFile(atPath: cargo.path) else {
-            throw ExactError.missingConfiguration(cargo.path)
+        switch language {
+        case .rust:
+            let cargo = root.appendingPathComponent("Cargo.toml")
+            guard FileManager.default.isReadableFile(atPath: cargo.path) else {
+                throw ExactError.missingConfiguration(cargo.path)
+            }
+            configFingerprint = try Self.sha256(contentsOf: cargo)
+            let lock = root.appendingPathComponent("Cargo.lock")
+            environmentFingerprint = FileManager.default.isReadableFile(
+                atPath: lock.path
+            ) ? try Self.sha256(contentsOf: lock) : ""
+            self.featureSelection = featureSelection
+        case .python:
+            let fingerprints = pythonConfigIdentity { path in
+                try? [UInt8](Data(
+                    contentsOf: root.appendingPathComponent(path),
+                    options: .mappedIfSafe
+                ))
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .typescript, .javascript:
+            throw Self.unsupportedFingerprint(language)
         }
-        configFingerprint = try Self.sha256(contentsOf: cargo)
-
-        let lock = root.appendingPathComponent("Cargo.lock")
-        environmentFingerprint = FileManager.default.isReadableFile(
-            atPath: lock.path
-        ) ? try Self.sha256(contentsOf: lock) : ""
-        self.featureSelection = featureSelection
     }
 
     public init(
@@ -178,18 +193,32 @@ public struct ExactProfileKey: Hashable, Sendable {
         language: LanguageID,
         featureSelection: FeatureSelection = .defaultFeatures
     ) throws {
-        try Self.requireRustFingerprint(language)
+        try Self.requireSupportedFingerprint(language)
         self.language = language
-        let cargo: [UInt8]
-        do {
-            cargo = try snapshot.readBytes(path: "Cargo.toml")
-        } catch {
-            throw ExactError.missingConfiguration("Cargo.toml")
+        switch language {
+        case .rust:
+            let cargo: [UInt8]
+            do {
+                cargo = try snapshot.readBytes(path: "Cargo.toml")
+            } catch {
+                throw ExactError.missingConfiguration("Cargo.toml")
+            }
+            configFingerprint = Self.sha256(bytes: cargo)
+            environmentFingerprint = (try? snapshot.readBytes(
+                path: "Cargo.lock"
+            )).map(Self.sha256(bytes:)) ?? ""
+            self.featureSelection = featureSelection
+        case .python:
+            let fingerprints = pythonConfigIdentity { path in
+                try? snapshot.readBytes(path: path)
+            }
+            configFingerprint = fingerprints.config
+            environmentFingerprint = fingerprints.environment
+            try Self.requireDefaultFeatures(featureSelection)
+            self.featureSelection = .defaultFeatures
+        case .typescript, .javascript:
+            throw Self.unsupportedFingerprint(language)
         }
-        configFingerprint = Self.sha256(bytes: cargo)
-        environmentFingerprint = (try? snapshot.readBytes(path: "Cargo.lock"))
-            .map(Self.sha256(bytes:)) ?? ""
-        self.featureSelection = featureSelection
     }
 
     public init(
@@ -217,17 +246,35 @@ public struct ExactProfileKey: Hashable, Sendable {
         self.featureSelection = featureSelection
     }
 
-    private static func requireRustFingerprint(_ language: LanguageID) throws {
+    private static func requireSupportedFingerprint(
+        _ language: LanguageID
+    ) throws {
         switch language {
-        case .rust:
+        case .rust, .python:
             return
-        case .python, .typescript, .javascript:
-            throw CocoaError(.featureUnsupported, userInfo: [
-                NSLocalizedFailureReasonErrorKey:
-                    "Exact Cargo fingerprint does not support "
-                        + String(describing: language),
-            ])
+        case .typescript, .javascript:
+            throw Self.unsupportedFingerprint(language)
         }
+    }
+
+    private static func requireDefaultFeatures(
+        _ featureSelection: FeatureSelection
+    ) throws {
+        guard featureSelection == .defaultFeatures else {
+            throw ExactError.unavailable(
+                "Exact Python feature selection must be .defaultFeatures"
+            )
+        }
+    }
+
+    private static func unsupportedFingerprint(
+        _ language: LanguageID
+    ) -> CocoaError {
+        CocoaError(.featureUnsupported, userInfo: [
+            NSLocalizedFailureReasonErrorKey:
+                "Exact fingerprint does not support "
+                    + String(describing: language),
+        ])
     }
 
     private static func sha256(contentsOf url: URL) throws -> String {

@@ -205,7 +205,7 @@ func relationTreeEngineReferencesFindCrossFileTypeUses() async throws {
     #expect(references.count == 5)
     #expect(Set(references.compactMap { $0.target?.path }) == ["b.rs"])
     #expect(model.root?.children?.contains {
-        $0.title == "Verified unavailable: no rust-analyzer session"
+        $0.title == "Verified unavailable: no exact provider session"
     } == true)
 }
 
@@ -1246,10 +1246,166 @@ func relationTreeExactMergePreservesPublishedRowOrderAndIdentity() async throws 
     )
     #expect(finalRows.last?.title == "C")
     #expect(
-        model.root?.children?.first {
-            $0.kind == .group && $0.title == "Show 1 possible matches"
-        }?.children?.first === firstB
+        relationDirectRows(in: model.root).contains { $0 === firstB }
     )
+    #expect(model.root?.children?.contains {
+        $0.kind == .group
+            && $0.children?.contains { $0 === firstB } == true
+    } == false)
+}
+
+@MainActor
+@Test
+func relationTreeExactMoveFromPossibleGroupToTopLevelDoesNotRetainStaleGroupRow()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let exact = RelationAsyncGate()
+    let possible = RelationTreeModel.LoadedEdge(
+        title: "B",
+        certainty: .possible,
+        dispatch: .direct,
+        symbol: fixture.b,
+        path: "main.rs",
+        byteOffset: 9,
+        line: 1,
+        evidence: []
+    )
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(edges: [possible], isTruncated: false)
+        },
+        exactRelationsResolver: { _, _, _, _, _, _ in
+            await exact.wait()
+            return .relations(
+                [
+                    .init(
+                        name: "B",
+                        location: relationExactLocation(
+                            file: "main.rs",
+                            offset: 9
+                        ),
+                        item: nil,
+                        callSites: []
+                    ),
+                ],
+                origin: .worktree,
+                attribution: relationExactAttribution()
+            )
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    let load = model.setRoot(target: .engine(fixture.a), direction: .references)
+    try #require(await testWaitUntil(
+        "possible candidate row is published under possible group"
+    ) {
+        exact.isPending
+            && model.root?.children?.contains {
+                $0.kind == .group
+                    && $0.title.hasPrefix("Show ")
+                    && $0.children?.contains { $0.title == "B" } == true
+            } == true
+    })
+    let publishedB = try #require(
+        model.root?.children?.compactMap { $0.children ?? [] }
+            .flatMap { $0 }.first { $0.title == "B" }
+    )
+
+    exact.release()
+    await load?.value
+
+    #expect(relationDirectRows(in: model.root).contains {
+        $0.title == "B" && $0.badge == "Verified"
+    })
+    #expect(relationDirectRows(in: model.root).first { $0.title == "B" }
+        === publishedB)
+    #expect(model.root?.children?.contains {
+        $0.kind == .group
+            && $0.children?.contains { $0.title == "B" } == true
+    } == false)
+}
+
+@MainActor
+@Test
+func relationTreePreservesCorrectedGroupChildIdentityAfterGroupMigration()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let exact = RelationAsyncGate()
+    let candidateOffset: UInt32 = 30
+    var definitionCalls = 0
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in
+            .init(
+                edges: [
+                    .init(
+                        title: "B",
+                        certainty: .possible,
+                        dispatch: .direct,
+                        symbol: nil,
+                        path: "main.rs",
+                        byteOffset: candidateOffset,
+                        line: 1,
+                        evidence: [],
+                        candidate: CandidateObservation(
+                            target: .occurrence(fixture.b),
+                            certainty: .possible,
+                            dispatch: .direct,
+                            provenance: .fuzzyResolver,
+                            completeness: .complete,
+                            evidence: []
+                        ),
+                        exactQuery: ("main.rs", candidateOffset, 1),
+                        fuzzyTarget: ("main.rs", candidateOffset)
+                    ),
+                ],
+                isTruncated: false
+            )
+        },
+        exactResolver: { _, offset, _, _ in
+            definitionCalls += 1
+            return .completed([
+                relationExactEntry(file: "main.rs", byteOffset: 3),
+            ])
+        },
+        exactRelationsResolver: { _, _, _, _, _, _ in
+            await exact.wait()
+            return .unsupported
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    let load = model.setRoot(target: .engine(fixture.a), direction: .references)
+    try #require(await testWaitUntil("possible group publishes before exact") {
+        exact.isPending
+            && relationVisibleEdgeRows(model.root).map(\.title) == ["B"]
+    })
+    let publishedB = try #require(relationVisibleEdgeRows(model.root).first)
+
+    var validationPublished = false
+    model.onNodeChange = { _ in validationPublished = true }
+    model.validatePossible(try relationPossibleRows(in: model.root))
+    #expect(await testWaitUntil("validation published") { validationPublished })
+    #expect(definitionCalls == 1)
+    #expect(model.root?.children?.contains { parent in
+        parent.kind == .group
+            && parent.title.hasPrefix("Show corrected candidates")
+            && parent.children?.contains { $0 === publishedB } == true
+    } == true)
+    #expect(publishedB.badge == "Inferred")
+
+    validationPublished = false
+    exact.release()
+    await load?.value
+    #expect(await testWaitUntil("validation published after exact root") { validationPublished })
+
+    let stillInGroup = model.root?.children?.contains { parent in
+        parent.kind == .group
+            && parent.children?.contains { $0 === publishedB } == true
+    } == true
+    #expect(stillInGroup)
+    #expect(publishedB.badge == "Inferred")
 }
 
 @MainActor
@@ -1488,6 +1644,34 @@ func relationTreeUsesFiveDistinctExactEmptyStates() async throws {
 
 @MainActor
 @Test
+func relationTreePythonImplementationsShowExactUnsupportedState() async throws {
+    let root = try relationTemporaryProject([
+        "main.py": "def build():\n    return 1\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(
+        root: root,
+        language: .python
+    )
+    let context = relationQueryContext(for: session)
+    let symbol = try #require(
+        session.definitions(of: "build", context: context).first?.0
+    )
+
+    let title = try await relationExactEmptyTitle(
+        session: session,
+        context: context,
+        symbol: symbol,
+        direction: .implementations,
+        result: .unsupported
+    )
+
+    #expect(title
+        == "Verified unavailable: server does not support implementations")
+}
+
+@MainActor
+@Test
 func relationTreeUsesFourDistinctExactReferenceStates() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -1527,7 +1711,7 @@ func relationTreeUsesFourDistinctExactReferenceStates() async throws {
     #expect(notApplicable
         == "Verified unavailable here: references not applicable")
     #expect(queried == "No verified references")
-    #expect(legacy == "Verified unavailable: no rust-analyzer session")
+    #expect(legacy == "Verified unavailable: no exact provider session")
     #expect(Set([unsupported, notApplicable, queried, legacy]).count == 4)
 }
 
@@ -1637,7 +1821,7 @@ func relationTreeUsesBadgesAndOnePossibleDisclosure() async throws {
     let direct = relationDirectRows(in: model.root)
     let possible = try relationPossibleRows(in: model.root)
     #expect(try relationVerifiedStatus(in: model.root)
-        == "Verified unavailable: no rust-analyzer session")
+        == "Verified unavailable: no exact provider session")
     #expect(direct.contains {
         $0.title == "strong_target"
             && $0.badge == "Inferred"
@@ -2388,6 +2572,54 @@ func relationTreeSwitchStopsQueuedPossibleValidationBeforeProviderEntry()
 
 @MainActor
 @Test
+func relationRootResetsContextExactUpgradeBatchBeforeExactResolverEnters()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let contextGate = ContextExactUpgradeGate()
+    let resolverCandidate = ResolutionCandidate(
+        target: fixture.b,
+        certainty: .strong,
+        dispatch: .direct,
+        provenance: .fuzzyResolver,
+        completeness: .complete,
+        evidence: []
+    )
+    let context = ContextWindowModel(
+        { _, _, _, _ in
+            [resolverCandidate]
+        },
+        exactResolver: { _, _, _, batch in
+            await contextGate.wait(file: "main.rs", offset: 0, batch: batch)
+        }
+    )
+    context.updateProjectState(
+        ProjectState.ready(fixture.session, fixture.context),
+        root: fixture.root
+    )
+    context.tokenClicked(file: "main.rs", offset: 9)
+    #expect(await testWaitUntil("context exact batch reaches fake") { await contextGate.entered })
+
+    let exactBatches = BatchProbe()
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: [], isTruncated: false) },
+        exactRelationsResolver: { _, _, _, _, _, batch in
+            exactBatches.record(batch)
+            return .relations([], origin: .worktree, attribution: relationExactAttribution())
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    model.onContextsReset = {
+        context.cancelExactUpgrade()
+    }
+    model.setRoot(target: .engine(fixture.a), direction: .references)
+    #expect(await testWaitUntil("relation exact resolver entered") { exactBatches.completed })
+    #expect(await testWaitUntil("context exact upgrade batch cancelled") { await contextGate.isCancelled })
+}
+
+@MainActor
+@Test
 func relationTreeStartsHeuristicAndRootExactQueriesConcurrently() async throws {
     let fixture = try RelationFixture()
     defer { fixture.remove() }
@@ -2743,7 +2975,7 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
         { session, file, offset, context in
             try session.resolve(file: file, offset: offset, context: context)
         },
-        exactResolver: { _, _, _ in
+        exactResolver: { _, _, _, _ in
             .completed([relationExactEntry(
                 file: dependency.path,
                 byteOffset: dependencyOffset
@@ -2751,7 +2983,7 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
         }
     )
     contextModel.updateProjectState(
-        .ready(fixture.session, fixture.context),
+        ProjectState.ready(fixture.session, fixture.context),
         root: fixture.root
     )
     contextModel.tokenClicked(file: "main.rs", offset: 9)
@@ -3896,6 +4128,42 @@ private final class QueuedRelationExactProvider: ExactProvider, @unchecked Senda
         trustMode: TrustMode
     ) throws -> any ExactSession {
         session
+    }
+}
+
+private actor ContextExactUpgradeGate {
+    private var _entered = false
+    private var _isCancelled = false
+
+    var entered: Bool {
+        _entered
+    }
+
+    var isCancelled: Bool {
+        _isCancelled
+    }
+
+    func wait(
+        file: String,
+        offset: UInt32,
+        batch: ExactRequestBatch
+    ) async -> ExactCoordinator.DefinitionResult? {
+        _entered = true
+        let deadline = ContinuousClock.now + .seconds(5)
+        while batch.isCurrent, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        _isCancelled = !batch.isCurrent
+        return nil
+    }
+}
+
+@MainActor
+private final class BatchProbe: @unchecked Sendable {
+    var completed = false
+
+    func record(_ batch: ExactRequestBatch) {
+        completed = true
     }
 }
 

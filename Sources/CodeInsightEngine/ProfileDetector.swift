@@ -7,10 +7,23 @@ enum ProfileDetector {
         root: URL,
         projectRoot: PathID
     ) -> AnalysisProfile {
-        let root = root.standardizedFileURL
+        detect(
+            projectURL: root,
+            language: .rust,
+            projectRoot: projectRoot
+        )
+    }
+
+    static func detect(
+        projectURL: URL,
+        language: LanguageID,
+        projectRoot: PathID
+    ) -> AnalysisProfile {
+        let root = projectURL.standardizedFileURL
         return detect(
             projectRootName: root.lastPathComponent,
-            projectRoot: projectRoot
+            projectRoot: projectRoot,
+            language: language
         ) { path in
             try? [UInt8](Data(
                 contentsOf: root.appendingPathComponent(path),
@@ -25,13 +38,75 @@ enum ProfileDetector {
     ) -> AnalysisProfile {
         detect(
             projectRootName: snapshot.projectRootName,
-            projectRoot: projectRoot
+            projectRoot: projectRoot,
+            language: .rust
+        ) { path in
+            try? snapshot.readBytes(path: path)
+        }
+    }
+
+    static func detect(
+        snapshot: any Snapshot,
+        language: LanguageID,
+        projectRoot: PathID
+    ) -> AnalysisProfile {
+        detect(
+            projectRootName: snapshot.projectRootName,
+            projectRoot: projectRoot,
+            language: language
         ) { path in
             try? snapshot.readBytes(path: path)
         }
     }
 
     private static func detect(
+        projectRootName: String,
+        projectRoot: PathID,
+        language: LanguageID,
+        readBytes: (String) -> [UInt8]?
+    ) -> AnalysisProfile {
+        switch language {
+        case .rust:
+            return rustProfile(
+                projectRootName: projectRootName,
+                projectRoot: projectRoot,
+                readBytes: readBytes
+            )
+        case .python:
+            return pythonProfile(
+                projectRootName: projectRootName,
+                projectRoot: projectRoot,
+                readBytes: readBytes
+            )
+        case .typescript, .javascript:
+            return fallback(
+                projectRootName: projectRootName,
+                projectRoot: projectRoot,
+                language: language
+            )
+        }
+    }
+
+    private static func pythonProfile(
+        projectRootName: String,
+        projectRoot: PathID,
+        readBytes: (String) -> [UInt8]?
+    ) -> AnalysisProfile {
+        let fingerprints = pythonConfigIdentity(readBytes: readBytes)
+        return AnalysisProfile(
+            language: .python,
+            projectRoot: projectRoot,
+            projectUnitName: projectRootName,
+            configFingerprint: fingerprints.config,
+            environmentFingerprint: fingerprints.environment,
+            featureSelection: .defaultFeatures,
+            featureNames: [],
+            edition: nil,
+            trustMode: .safe
+        )
+    }
+
+    private static func rustProfile(
         projectRootName: String,
         projectRoot: PathID,
         readBytes: (String) -> [UInt8]?
@@ -41,7 +116,8 @@ enum ProfileDetector {
         else {
             return fallback(
                 projectRootName: projectRootName,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                language: .rust
             )
         }
 
@@ -63,7 +139,8 @@ enum ProfileDetector {
             guard let member = normalizedMemberPath(member) else {
                 return fallback(
                     projectRootName: projectRootName,
-                    projectRoot: projectRoot
+                    projectRoot: projectRoot,
+                    language: .rust
                 )
             }
             let path = member.isEmpty ? "Cargo.toml" : "\(member)/Cargo.toml"
@@ -73,7 +150,8 @@ enum ProfileDetector {
             else {
                 return fallback(
                     projectRootName: projectRootName,
-                    projectRoot: projectRoot
+                    projectRoot: projectRoot,
+                    language: .rust
                 )
             }
             fingerprintBytes += bytes
@@ -88,7 +166,8 @@ enum ProfileDetector {
         guard rootManifest.packageName != nil || rootManifest.hasWorkspace else {
             return fallback(
                 projectRootName: projectRootName,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                language: .rust
             )
         }
         let unitName: String
@@ -99,7 +178,8 @@ enum ProfileDetector {
         } else {
             return fallback(
                 projectRootName: projectRootName,
-                projectRoot: projectRoot
+                projectRoot: projectRoot,
+                language: .rust
             )
         }
         return AnalysisProfile(
@@ -119,10 +199,11 @@ enum ProfileDetector {
 
     private static func fallback(
         projectRootName: String,
-        projectRoot: PathID
+        projectRoot: PathID,
+        language: LanguageID
     ) -> AnalysisProfile {
         AnalysisProfile(
-            language: .rust,
+            language: language,
             projectRoot: projectRoot,
             projectUnitName: projectRootName,
             configFingerprint: "",

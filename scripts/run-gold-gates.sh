@@ -6,6 +6,7 @@
 #   bash scripts/run-gold-gates.sh --tokio-only      # tokio only
 #   bash scripts/run-gold-gates.sh --ripgrep-only     # ripgrep only
 #   bash scripts/run-gold-gates.sh --corpus-root DIR  # override root
+#   bash scripts/run-gold-gates.sh --python-corpus DIR --python-revision SHA
 #
 # Reads corpus root from: --corpus-root, $CAIRN_CORPUS_ROOT, or ~/.cache/cairn-corpora
 # Exits non-zero with a specific diagnostic when a corpus is missing or degraded.
@@ -14,19 +15,25 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+fixed_python_revision="f55831ee798cd4d7bafab4d50d6dba46e6fce387"
 root="${CAIRN_CORPUS_ROOT:-$HOME/.cache/cairn-corpora}"
 run_tokio=true
 run_ripgrep=true
+run_python=false
 persist_flag=""
+python_corpus=""
+python_revision=""
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --corpus-root) root="$2"; shift 2 ;;
         --tokio-only)  run_ripgrep=false; shift ;;
         --ripgrep-only) run_tokio=false; shift ;;
+        --python-corpus) python_corpus="$2"; run_python=true; shift 2 ;;
+        --python-revision) python_revision="$2"; shift 2 ;;
         --persist)     persist_flag="--persist"; shift ;;
         --help|-h)
-            head -12 "$0" | tail -10 | sed 's/^# \?//'
+            head -15 "$0" | tail -13 | sed 's/^# \?//'
             exit 0 ;;
         *)
             echo "unknown option: $1" >&2
@@ -37,6 +44,88 @@ done
 # ---------- pre-flight checks ----------
 
 preflight_ok=true
+python_snapshot_before=""
+
+check_python_corpus_snapshot() {
+    check_python_corpus_state | shasum -a 256 | awk '{ print $1 }'
+}
+
+check_python_corpus_state() {
+    git -C "$python_corpus" rev-parse HEAD
+    git -C "$python_corpus" status --porcelain
+    git -C "$python_corpus" ls-files -s '*.py' pyproject.toml uv.lock
+}
+
+check_python_corpus() {
+    if ! $run_python; then
+        return 0
+    fi
+
+    if [[ "$python_corpus" != /* ]]; then
+        echo "ERROR: --python-corpus must be an absolute path: $python_corpus" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    if [[ -z "$python_revision" ]]; then
+        echo "ERROR: --python-corpus requires --python-revision" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    if [[ "$python_revision" != "$fixed_python_revision" ]]; then
+        echo "ERROR: python corpus revision must be fixed $fixed_python_revision" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    if [[ ! -d "$python_corpus/.git" ]]; then
+        echo "ERROR: python corpus has no .git directory: $python_corpus" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    local head status py_count
+    head="$(git -C "$python_corpus" rev-parse HEAD 2>/dev/null || true)"
+    if [[ "$head" != "$python_revision" ]]; then
+        echo "ERROR: python corpus HEAD mismatch: want $python_revision got $head" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    status="$(git -C "$python_corpus" status --porcelain)"
+    if [[ -n "$status" ]]; then
+        echo "ERROR: python corpus is not clean:" >&2
+        echo "$status" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    py_count="$(git -C "$python_corpus" ls-files '*.py' | wc -l | tr -d ' ')"
+    if [[ "$py_count" -ne 204 ]]; then
+        echo "ERROR: python corpus tracked .py count: want 204 got $py_count" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    if [[ ! -f "$python_corpus/pyproject.toml" || ! -f "$python_corpus/uv.lock" ]]; then
+        echo "ERROR: python corpus missing pyproject.toml or uv.lock" >&2
+        preflight_ok=false
+        return 1
+    fi
+
+    python_snapshot_before="$(check_python_corpus_snapshot)"
+    echo "  ok  python corpus frozen: $head"
+}
+
+assert_python_corpus_unchanged() {
+    local after
+    after="$(check_python_corpus_snapshot)"
+    if [[ "$after" != "$python_snapshot_before" ]]; then
+        echo "ERROR: python corpus changed during gold gate" >&2
+        return 1
+    fi
+}
 
 check_corpus() {
     local dir="$1" label="$2"
@@ -93,6 +182,7 @@ check_corpus() {
 echo "corpus root: $root"
 $run_tokio   && check_corpus "$root/tokio-tokio-1.47.1" "tokio"   || true
 $run_ripgrep && check_corpus "$root/ripgrep-14.1.1"     "ripgrep" || true
+$run_python  && check_python_corpus || true
 
 if ! $preflight_ok; then
     echo "" >&2
@@ -152,10 +242,12 @@ bash scripts/run-fold-perf.sh \
 failures=0
 
 run_gold() {
-    local gold_file="$1" corpus="$2" label="$3"
+    local gold_file="$1" corpus="$2" label="$3" language=""
     echo ""
     echo "--- $label ---"
-    if "$binary" goldset "$gold_file" --corpus "$corpus" $persist_flag; then
+    if [[ $# -gt 3 ]]; then language="$4"; fi
+    if "$binary" goldset "$gold_file" --corpus "$corpus" $persist_flag \
+        ${language:+--language "$language"}; then
         echo "PASS  $label"
     else
         echo "FAIL  $label" >&2
@@ -165,6 +257,10 @@ run_gold() {
 
 $run_tokio   && run_gold goldset/tokio.gold   "$root/tokio-tokio-1.47.1" "tokio gold"
 $run_ripgrep && run_gold goldset/ripgrep.gold "$root/ripgrep-14.1.1"     "ripgrep gold"
+if $run_python; then
+    run_gold goldset/mcp-python-sdk.gold "$python_corpus" "mcp-python-sdk gold" "python"
+    assert_python_corpus_unchanged || failures=$((failures + 1))
+fi
 
 echo ""
 if [[ $failures -ne 0 ]]; then

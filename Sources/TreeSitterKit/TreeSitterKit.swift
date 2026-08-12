@@ -95,6 +95,12 @@ public struct Node {
         return Node(raw: child, tree: tree)
     }
 
+    package func child(namedField name: String) -> Node? {
+        let field = ts_node_child_by_field_name(raw, name, UInt32(name.utf8.count))
+        guard !ts_node_is_null(field) else { return nil }
+        return Node(raw: field, tree: tree)
+    }
+
     public var namedChildren: [Node] {
         (0..<ts_node_named_child_count(raw)).map { index in
             Node(raw: ts_node_named_child(raw, index), tree: tree)
