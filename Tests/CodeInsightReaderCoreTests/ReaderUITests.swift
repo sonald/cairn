@@ -707,6 +707,7 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
             == Set([
                 regions.imports.id,
                 regions.cfgTest.id,
+                regions.comment.id,
                 regions.topLevelDeclaration.id,
             ]))
     #expect(
@@ -715,7 +716,12 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
                 document.lineTable.lineColumn(at: nestedOffset)
             ).line)
     )
-    try await Task.sleep(nanoseconds: 1_300_000_000)
+    let markerDeadline = ContinuousClock.now + .seconds(3)
+    while reader.navigationLandingLineForTesting != nil,
+          ContinuousClock.now < markerDeadline
+    {
+        try await Task.sleep(for: .milliseconds(10))
+    }
     #expect(reader.navigationLandingLineForTesting == nil)
 }
 
