@@ -153,6 +153,52 @@ func pythonClassOutlineGutterColorAndFoldSummaryAreMapped() throws {
 
 @MainActor
 @Test
+func typeScriptReaderGenericTransportRendersOutlineFoldAndLocalRefs() throws {
+    let source = """
+        type Label = string;
+        const Button = ({ label }: { label: Label }) => {
+            const prefix = ">>";
+            const full = prefix + label;
+            return <button title="ok">{full}</button>;
+        };
+        class Box {
+            run() {
+                return Button({ label: "ok" });
+            }
+        }
+        """
+    let bytes = Array(source.utf8)
+    let document = try DocumentLoader(source: { _ in bytes })
+        .load(
+            file: URL(fileURLWithPath: "/fixture.tsx"),
+            languageMode: LanguageMode(language: .typescript, variant: "tsx")
+        )
+        .document
+    #expect(document.languageMode
+        == LanguageMode(language: .typescript, variant: "tsx"))
+    #expect(document.outlineFacets.contains { $0.kind == .fn && $0.name == "Button" })
+    #expect(document.outlineFacets.contains { $0.kind == .class && $0.name == "Box" })
+    #expect(document.outlineFacets.contains { $0.kind == .method && $0.name == "run" })
+    #expect(document.foldRegions.contains { $0.kind == .declaration })
+    #expect(document.foldRegions.contains { $0.kind == .container })
+    #expect(!document.localBindings.isEmpty)
+    #expect(!document.localReferences(
+        intersectingBytes: 0..<UInt32(document.bytes.count),
+        buffer: 0
+    ).isEmpty)
+
+    let (reader, _, window) = renderOffscreen(document)
+    #expect(reader.renderingCoordinator.styledFragmentCount > 0)
+    let fold = try #require(document.foldRegions.first { $0.kind == .declaration })
+    #expect(reader.toggleFold(id: fold.id))
+    window.displayIfNeeded()
+    #expect(reader.renderedFoldIDsForTesting.contains(fold.id))
+    #expect(reader.view.string.contains("Button"))
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
 func readerInstallsLineNumberRulerByDefault() {
     let reader = ReaderTextView()
     let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))

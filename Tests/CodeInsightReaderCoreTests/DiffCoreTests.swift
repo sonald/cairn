@@ -1,6 +1,7 @@
 import CodeInsightCore
 import CodeInsightReaderCore
 import CodeInsightRustExtractor
+import CodeInsightTypeScriptExtractor
 import Foundation
 import os
 import Testing
@@ -20,35 +21,153 @@ func explicitRustDiffMatchesConvenience() throws {
 
 #if DEBUG
 @Test
-func unsupportedDiffModeFailsBeforeParsing() throws {
+func javascriptAndBadTypeScriptVariantFailBeforeParsing() throws {
     let left = Array("fn item() {}\n".utf8)
     let right = Array("fn item() {}\n".utf8)
-    let mode = LanguageMode(language: .typescript)
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
     let core = DiffCore()
 
     do {
-        _ = try core.compare(left: left, right: right, languageMode: mode)
-        Issue.record("DiffCore accepted Python line diff")
+        _ = try core.compare(
+            left: left,
+            right: right,
+            languageMode: LanguageMode(language: .javascript)
+        )
+        Issue.record("DiffCore accepted JavaScript line diff")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
     }
 
     do {
         _ = try RustExtractor.$parseObserver.withValue({
             parseCount.withLock { $0 += 1 }
         }) {
-            try core.functionChanges(left: left, right: right, languageMode: mode)
+            try core.functionChanges(
+                left: left,
+                right: right,
+                languageMode: LanguageMode(language: .javascript)
+            )
         }
-        Issue.record("DiffCore accepted Python syntax diff")
+        Issue.record("DiffCore accepted JavaScript syntax diff")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
-        #expect((error as NSError).localizedFailureReason?.contains("typescript") == true)
+        #expect((error as NSError).localizedFailureReason?.contains("javascript") == true)
+    }
+    #expect(parseCount.withLock { $0 } == 0)
+}
+
+@Test
+func badTypeScriptVariantFailsBeforeComparisonOrParsing() throws {
+    let left = Array("const x = 1;\n".utf8)
+    let right = Array("const y = 2;\n".utf8)
+    let mode = LanguageMode(language: .typescript, variant: "bad")
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let core = DiffCore()
+
+    do {
+        _ = try core.compare(left: left, right: right, languageMode: mode)
+        Issue.record("DiffCore accepted bad TypeScript variant line diff")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("tsx") == false)
+        #expect((error as NSError).localizedFailureReason?.contains("bad") == true)
+    }
+
+    do {
+        _ = try TypeScriptExtractor.$parseObserver.withValue({
+            parseCount.withLock { $0 += 1 }
+        }) {
+            try core.functionChanges(left: left, right: right, languageMode: mode)
+        }
+        Issue.record("DiffCore accepted bad TypeScript variant syntax diff")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains("bad") == true)
     }
     #expect(parseCount.withLock { $0 } == 0)
 }
 #endif
+
+@Test
+func typeScriptLineDiffAndBadVariantGate() throws {
+    let left = Array("const a = 1;\nkeep\nconst gone = 2;\n".utf8)
+    let right = Array("const a = 2;\nkeep\nconst added = 3;\n".utf8)
+    let core = DiffCore()
+
+    let ts = try core.compare(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .typescript)
+    )
+    #expect(!ts.truncated)
+    #expect(ts.changeCount > 0)
+    #expect(ts.leftMarkers == [1: .changed, 3: .changed])
+    #expect(ts.rightMarkers == [1: .changed, 3: .changed])
+
+    let tsx = try core.compare(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .typescript, variant: "tsx")
+    )
+    #expect(!tsx.truncated)
+    #expect(tsx.changeCount > 0)
+}
+
+@Test
+func typeScriptFunctionDiffUsesDotSeparatedClassMethodChain() throws {
+    let left = Array("""
+        export class Box {
+            run(value: number) {
+                return oldBody(value);
+            }
+            gone() {}
+        }
+        function top() { return 1; }
+        """.utf8)
+    let right = Array("""
+        export class Box {
+            run(value: string) {
+                return newBody(value);
+            }
+            added(value: number) {}
+        }
+        function top() { return 2; }
+        """.utf8)
+    let changes = try DiffCore().functionChanges(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .typescript)
+    )
+    let summaries = Set(changes.map { "\($0.kind):\($0.displayName):\($0.declarationKind)" })
+    #expect(summaries.contains("signatureChanged:Box.run:typescriptFunction"))
+    #expect(summaries.contains("bodyChanged:Box.run:typescriptFunction"))
+    #expect(summaries.contains("added:Box.added:typescriptFunction"))
+    #expect(summaries.contains("removed:Box.gone:typescriptFunction"))
+    #expect(changes.contains { $0.displayName == "top" && $0.kind == .bodyChanged })
+}
+
+@Test
+func typeScriptArrowComponentAndTsxJsxBodyChangesAreDetected() throws {
+    let left = Array("""
+        const Button = ({ label }: { label: string }) => {
+            return <button title="old">{label}</button>;
+        };
+        """.utf8)
+    let right = Array("""
+        const Button = ({ label }: { label: string }) => {
+            return <button title="new">{label}</button>;
+        };
+        """.utf8)
+    let changes = try DiffCore().functionChanges(
+        left: left,
+        right: right,
+        languageMode: LanguageMode(language: .typescript, variant: "tsx")
+    )
+    #expect(changes.map(\.displayName) == ["Button"])
+    #expect(changes.map(\.kind) == [.bodyChanged])
+    #expect(changes.map(\.declarationKind) == [.typescriptFunction])
+}
 
 @Test
 func pythonLineDiffAndFunctionChangesUsePythonFacts() throws {

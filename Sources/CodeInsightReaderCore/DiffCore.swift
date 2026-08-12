@@ -1,6 +1,7 @@
 import CodeInsightCore
 import CodeInsightPythonExtractor
 import CodeInsightRustExtractor
+import CodeInsightTypeScriptExtractor
 import Foundation
 
 public struct DiffCore: Sendable {
@@ -64,7 +65,12 @@ public struct DiffCore: Sendable {
         public let rightRange: CodeInsightCore.ByteRange?
 
         public var displayName: String {
-            nameChain.joined(separator: declarationKind == .pythonFunction ? "." : "::")
+            switch declarationKind {
+            case .pythonFunction, .typescriptFunction:
+                return nameChain.joined(separator: ".")
+            case _:
+                return nameChain.joined(separator: "::")
+            }
         }
     }
 
@@ -337,6 +343,12 @@ public struct DiffCore: Sendable {
                         continue
                     }
                     chain.append(names.resolve(parentFacet.nameID))
+                } else if languageMode.language == .typescript {
+                    guard isFunction(parentFacet.kind) || parentFacet.kind == .typescriptClass else {
+                        parent = parentFacet.parentFacetIndex
+                        continue
+                    }
+                    chain.append(names.resolve(parentFacet.nameID))
                 } else {
                     chain.append(names.resolve(parentFacet.nameID))
                 }
@@ -354,7 +366,15 @@ public struct DiffCore: Sendable {
         switch languageMode.language {
         case .rust, .python:
             return
-        case .typescript, .javascript:
+        case .typescript:
+            guard languageMode.variant == nil || languageMode.variant == "tsx" else {
+                throw CocoaError(.featureUnsupported, userInfo: [
+                    NSLocalizedFailureReasonErrorKey:
+                        "DiffCore does not support TypeScript variant '\(languageMode.variant ?? "")'",
+                ])
+            }
+            return
+        case .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "DiffCore does not support \(String(describing: languageMode.language))",
@@ -368,13 +388,16 @@ public struct DiffCore: Sendable {
             PythonExtractor()
         case .rust:
             RustExtractor()
-        case .typescript, .javascript:
+        case .typescript:
+            TypeScriptExtractor()
+        case .javascript:
             preconditionFailure("DiffCore requireSupported must reject \(languageMode.language)")
         }
     }
 
     private func isFunction(_ kind: DeclarationKind) -> Bool {
         kind == .rustFn || kind == .rustMethod || kind == .pythonFunction
+            || kind == .typescriptFunction
     }
 
     private func change(
