@@ -2,7 +2,7 @@
 
 > Started: 2026-08-12 (Asia/Shanghai)
 > Source plan: `docs/plans/l2-typescript-plan.md` (untracked user input)
-> Status: F0 recorded; P0 evidence written; P0a GO, P0b NO-GO/BLOCKED, P0c static anchors frozen with semantic/fold/Exact gates incomplete. Production implementation not started.
+> Status: F0 recorded; P0 rerun evidence appended below; P0a GO, P0b GO, P0c GO; Overall P0 GO for plan gate. `.typescript` product support remains unsupported until F7b.
 
 ## F0 live baseline
 
@@ -183,3 +183,116 @@ F0 conclusion: **PASS** for the requested baseline, with the two known/controlle
 `rulerEdgeLineDoesNotBleedAboveTheScrollView` fails at `CGWindowListCreateImage` unavailability in this
 host, and the outer Codex sandbox blocks real nested provider sandboxing (`sandbox-exec`);
 the host 15-channel Python path passed. No production files changed.
+
+## P0 rerun
+
+### Gate
+
+- P0a: GO (unchanged).
+- P0b: GO after lifecycle fix `0637a7e`.
+- P0c: GO with semantic anchors frozen on `morphic`.
+- Overall P0: GO for the plan gate; App still `.typescript` unsupported until F7b.
+
+P0b TSX exact gate uses the basic TSX Badge fixture under
+`/private/tmp/basic-tsx-component`: import identifier at `main.tsx 0:9..0:14`
+resolves to `definition.tsx 0:16..0:21`, declaration refs
+`includeDeclaration=true` return 3 (decl/import/JSX use).
+
+### Main test result
+
+Full `CodeInsightExactTests` focused lifecycle suite: 6/6 passed on the
+current lifecycle fix tree. Path-discovery focused test
+`executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath` PASSED in
+the real rerun.
+
+The full `CodeInsightExactTests` suite result 74/74 is recorded from this
+round's main acceptance command, which exited 0.
+
+### Focused lifecycle group A (6/6)
+
+1. `closeForceKillsAndReapsUnresponsiveProcess`
+2. `childProcessRegistryRegistersAndUnregistersConcurrently`
+3. `crashGuardKillsRegisteredGrandchildAndReraisesAbort`
+4. `terminationGuardKillsRegisteredGrandchildAndPreservesDefaultSignal`
+5. `reaperKillsRegisteredGrandchildAfterParentSIGKILL`
+6. `ciProcessGuardUnregisterKillsOwnedGroupLeaderAndGrandchild`
+
+### Focused discovery/cancel/restart/guard group B (6/6)
+
+1. `executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath`
+2. `rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue`
+3. `pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable`
+4. `closeForceKillsAndReapsUnresponsiveProcess`
+5. `crashGuardKillsRegisteredGrandchildAndReraisesAbort`
+6. `reaperKillsRegisteredGrandchildAfterParentSIGKILL`
+
+Both groups were observed as 6/6 PASS in this round's captured log.
+
+The shared production `ExactRequestBatch` test asserts cancelled old-batch
+requests never enter the provider after the operation-queue gate; old response
+count stays frozen at 1 and a new current request totals 2 (source
+expectations), and is kept as the deterministic cross-provider regression.
+
+Real TLS cancel transcript `/private/tmp/p0b-evidence/cancel-real.txt`:
+`cancelResult=cancelled("workspace/symbol") late=no`, after 1.44 ms; new
+`workspace/symbol` request succeeded; close `forceKill=false reap=true`.
+
+### Lifecycle
+
+Captured PID/PPID/PGID rows summarized:
+```text
+ABRT 29009 29013 29014 29015 29016
+KILL 29039 29043 29044 29045 29046
+after=empty
+```
+
+`forceKill=false` arm: `28984 28985 28986` before close, after empty; the
+existing `closeForceKillsAndReapsUnresponsiveProcess` test covers the
+production `forceKill=true` path. The restart feasibility session was
+`29378 -> restart 29383 -> 29389`, `restart_count=1`,
+`second_crash_unavailable=connectionClosed`.
+
+Real TLS forced transcript `/private/tmp/p0b-evidence/forced-tls.txt`: root
+`34519` + children
+`34532/34533` same PGID `34519`; close `grace=0.1 forceKill=false`, children
+immediately reparented then captured set zero within 2s via group guard. Not
+called a forced path; `closeForceKillsAndReapsUnresponsiveProcess` separately
+proves `didForceKill=true`.
+
+### Security / project / cache
+
+Adv marker tree (fake `node/npm/npx/bun/yarn/pnpm/tls/tsserver/plugin/helper`)
+full-tree hash before == after. `marker_exists=false marker_bytes=0`.
+Safe argv includes `--disableAutomaticTypingAcquisition` and does not include
+`--globalPlugins`. Plugin control argv includes
+`--globalPlugins fake --pluginProbeLocations .../fake-plugin.js`, proving
+plugin/ATA options are forwarded in the argv; the marker itself was not
+written (fake plugin API is not compatible).
+
+`sandbox_write status=0 project_created=false cache_created=true`.
+Network denied to local listener: yes, with sandbox `(deny network*)`.
+
+Historical Materializer probe wrote 72 files for `HEAD~1`, and def/refs from
+the materialized root returned URIs under
+`.../materialized-root/431e5c5e.../p0c-identity-probe` and worktree root
+switched to `/Users/siancao/work/ai/morphic`; no location/content drift.
+
+### P0 discovery scope
+
+PATH empty focused real PASS plus current normal-process canonical toolchain
+paths are recorded for **P0 toolchain discovery feasibility** only.
+LaunchServices real probe (temp bundle `dev.p0b.LaunchServicesProbe`) exited 0
+via `/usr/bin/open --env P0B_LS_LAUNCH=1 -W`; inside the bundle argv0 was the
+bundle executable path, PATH contained `/opt/homebrew/bin` and
+`/usr/local/bin`, and the production `executableSearchDirectories` seam
+diffed clean (0 lines changed; content hash
+`abbf47c30bc2cc8610f2ad9e236379ae1caf64970c18657a55e0071229336e3c`).
+Canonical tools: node `v26.7.0`, typescript-language-server `3.3.0`, tsserver
+executable (TypeScript package version 5.0.2). This covers P0 toolchain
+discovery feasibility;
+final bundle discovery remains C3/V0.
+
+### Do not infer product support
+
+No production TS extractor / provider / Reader / `.typescript` cutover exists
+yet. P0 GO only opens F1.
