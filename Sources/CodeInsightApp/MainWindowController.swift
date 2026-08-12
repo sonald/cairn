@@ -1873,11 +1873,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let base = "\(Self.displayName(for: profile.language))"
             + " · \(profile.projectUnitName)"
         guard profile.language == .rust else {
-            return base
-                + " · \(Self.displayName(for: profile.featureSelection))"
-                + " · \(trust)"
+            return base + " · \(trust)"
         }
-        return base + " · \(trust)"
+        return base
+            + " · \(Self.displayName(for: profile.featureSelection))"
+            + " · \(trust)"
     }
 
     private static func displayName(for language: LanguageID) -> String {

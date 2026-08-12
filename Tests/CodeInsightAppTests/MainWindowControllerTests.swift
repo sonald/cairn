@@ -176,6 +176,10 @@ func pythonProfileDisplayHidesCargoFeatureAndEdition() async throws {
     #expect(!controller.selfTestProfileTitle.localizedCaseInsensitiveContains(
         "features"
     ))
+    #expect(
+        controller.selfTestProfileTitle
+            == "Python · \(session.analysisProfile.projectUnitName) · Safe"
+    )
     let menuText = controller.selfTestProfileMenuTitles.joined(separator: " · ")
     #expect(!menuText.localizedCaseInsensitiveContains("features"))
     #expect(!menuText.localizedCaseInsensitiveContains("edition"))
@@ -231,6 +235,10 @@ func typescriptProfileAndFeatureSwitchMatchNonRustRules() async throws {
     #expect(!controller.selfTestProfileTitle.localizedCaseInsensitiveContains(
         "features"
     ))
+    #expect(
+        controller.selfTestProfileTitle
+            == "TypeScript · \(typescriptSession.analysisProfile.projectUnitName) · Safe"
+    )
     let menuText = controller.selfTestProfileMenuTitles.joined(separator: " · ")
     #expect(!menuText.localizedCaseInsensitiveContains("features"))
     #expect(!menuText.localizedCaseInsensitiveContains("edition"))
@@ -247,6 +255,38 @@ func typescriptProfileAndFeatureSwitchMatchNonRustRules() async throws {
     #expect(session.analysisProfile.id == typescriptSession.analysisProfile.id)
     #expect(session.analysisProfile.featureSelection == .defaultFeatures)
     #expect(model.currentFeatureSelection == .defaultFeatures)
+}
+
+@MainActor
+@Test
+func rustProfileTitleKeepsFeatureSelectionSegment() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "src/lib.rs": "pub fn f() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = AppModel(
+        indexService: MainWindowFailingIndexService(session: session)
+    )
+    try model.openProject(root: root)
+    try #require(await mainWindowWaitUntil(
+        model.snapshotPhase == .fullReady
+    ))
+    try #require(await mainWindowWaitUntil(
+        model.exactCoordinator.trustMode != nil
+    ))
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+
+    #expect(
+        controller.selfTestProfileTitle
+            == "Rust · \(session.analysisProfile.projectUnitName) · default · Safe"
+    )
 }
 
 @MainActor
