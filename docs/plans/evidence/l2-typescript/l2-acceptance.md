@@ -2,7 +2,7 @@
 
 > Started: 2026-08-12 (Asia/Shanghai)
 > Source plan: `docs/plans/l2-typescript-plan.md` (untracked user input)
-> Status: F0 baseline recorded. P0 and later slices not started.
+> Status: F0 recorded; P0 evidence written; P0a GO, P0b NO-GO/BLOCKED, P0c static anchors frozen with semantic/fold/Exact gates incomplete. Production implementation not started.
 
 ## F0 live baseline
 
