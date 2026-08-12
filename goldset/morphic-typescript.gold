@@ -1,0 +1,25 @@
+# Relative named import ChatPanel from ./chat-panel resolves to the TSX ChatPanel facet.
+def components/chat.tsx:3:10 -> components/chat-panel.tsx:11:17
+# Relative named import UserMessage from ./user-message resolves to the TSX UserMessage facet.
+def components/chat-panel.tsx:5:10 -> components/user-message.tsx:9:14
+# Relative named import Skeleton from ./ui/skeleton resolves to the TSX Skeleton facet.
+def components/search-skeleton.tsx:4:10 -> components/ui/skeleton.tsx:3:10
+# Relative named import Badge from ./ui/badge resolves to the TSX Badge facet.
+def components/tool-badge.tsx:3:10 -> components/ui/badge.tsx:30:10
+# Root alias @/lib/utils is deliberately unresolved by the fuzzy resolver.
+unresolved components/chat-panel.tsx:4:10
+# Root alias to the only barrel in the fixed corpus: @/lib/agents must remain
+# fuzzy-unresolved because non-relative specifiers are deliberately not routed
+# through the @/* alias/re-export path in this slice.
+unresolved app/action.tsx:12:19
+# Method call on a form event must stay non-strong.
+nostrong components/chat-panel.tsx:28:18
+# Direct local call tavilySearch resolves to its same-file function declaration.
+def lib/agents/researcher.tsx:83:25 -> lib/agents/researcher.tsx:166:16
+# Direct local call exaSearch resolves to its same-file function declaration.
+def lib/agents/researcher.tsx:84:25 -> lib/agents/researcher.tsx:195:16
+# Local binding of twMerge is seen in the .ts implementation file.
+bind lib/utils/index.ts:5:10 -> lib/utils/index.ts:2:10
+# Re-export note: the only barrel in the fixed corpus is lib/agents/index.tsx.
+# Its root-alias imports are fuzzy-unresolved by design; the barrel's own
+# wildcard re-export rows return no direct target in this slice.

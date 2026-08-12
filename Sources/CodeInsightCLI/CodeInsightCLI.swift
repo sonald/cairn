@@ -843,6 +843,7 @@ extension CodeInsight {
             switch language {
             case "rust": languageID = .rust
             case "python": languageID = .python
+            case "typescript": languageID = .typescript
             default: throw ValidationError("unsupported language: \(language)")
             }
             try Self.validateCorpus(corpusURL, language: languageID)
@@ -919,7 +920,19 @@ extension CodeInsight {
                         "corpus has no pyproject.toml or uv.lock: \(url.path)\n"
                     )
                 }
-            case .typescript, .javascript:
+            case .typescript:
+                let tsconfig = url.appendingPathComponent("tsconfig.json")
+                let package = url.appendingPathComponent("package.json")
+                let bunLock = url.appendingPathComponent("bun.lockb")
+                guard fm.fileExists(atPath: tsconfig.path),
+                      fm.fileExists(atPath: package.path),
+                      fm.fileExists(atPath: bunLock.path)
+                else {
+                    throw ValidationError(
+                        "corpus is missing tsconfig.json, package.json, or bun.lockb: \(url.path)\n"
+                    )
+                }
+            case .javascript:
                 throw ValidationError("unsupported language: \(language)")
             }
         }
