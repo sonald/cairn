@@ -64,7 +64,17 @@ public struct ModuleMap: Sendable {
             })
             pythonRootsByFile = rootsByFile
             moduleChildren = [:]
-        case .typescript, .javascript:
+        case .typescript:
+            self.language = .typescript
+            parentModules = [:]
+            crateRoots = []
+            pythonModuleFiles = [:]
+            pathsByID = Dictionary(uniqueKeysWithValues: files.map {
+                ($0.pathID, paths.resolve($0.pathID))
+            })
+            pythonRootsByFile = [:]
+            moduleChildren = [:]
+        case .javascript:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
     }
@@ -189,7 +199,13 @@ public struct ModuleMap: Sendable {
                 from: source,
                 strings: strings
             )
-        case .typescript, .javascript:
+        case .typescript:
+            return typescriptTargetFile(
+                for: importBinding,
+                from: source,
+                strings: strings
+            )
+        case .javascript:
             fatalError("ModuleMap does not support \(String(describing: language))")
         }
     }
@@ -271,6 +287,56 @@ public struct ModuleMap: Sendable {
         }
 
         return resolveModule(specifier)
+    }
+
+    private func typescriptTargetFile(
+        for importBinding: ImportBinding,
+        from source: PathID,
+        strings: Interner<StringID>
+    ) -> PathID? {
+        let specifier = strings.resolve(importBinding.moduleSpecifier)
+        guard specifier.hasPrefix("./") || specifier.hasPrefix("../") else {
+            return nil
+        }
+        guard let sourcePath = pathsByID[source] else { return nil }
+        let relative = sourcePath.split(separator: "/").dropLast()
+            .map(String.init)
+        let parts = specifier.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).map(String.init)
+        guard let first = parts.first, first == "." || first == ".." else {
+            return nil
+        }
+        var dir = relative
+        for part in parts {
+            switch part {
+            case ".":
+                continue
+            case "..":
+                guard !dir.isEmpty else { return nil }
+                dir.removeLast()
+            default:
+                guard !part.isEmpty else { return nil }
+                dir.append(part)
+            }
+        }
+        let targetPath = dir.joined(separator: "/")
+        if let direct = pathsByID.first(where: { $0.value == targetPath })?.key,
+           LanguageMode.classify(path: targetPath, language: .typescript) != nil
+        {
+            return direct
+        }
+        let candidates = [
+            targetPath + ".ts",
+            targetPath + ".tsx",
+            targetPath + "/index.ts",
+            targetPath + "/index.tsx",
+        ]
+        let matches = candidates.compactMap { candidate in
+            pathsByID.first(where: { $0.value == candidate })?.key
+        }
+        return matches.count == 1 ? matches[0] : nil
     }
 
     private func pythonPackageComponents(

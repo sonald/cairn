@@ -661,6 +661,8 @@ public final class EngineSession: Sendable {
         case .rustField: 0
         case .pythonFunction: 24
         case .pythonClass: 22
+        case .typescriptFunction: 24
+        case .typescriptClass: 22
         }
     }
 }

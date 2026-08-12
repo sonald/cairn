@@ -37,9 +37,11 @@ struct Resolver {
             )
         }
         if case .methodCall? = kind {
-            if session.analysisProfile.language == .python {
+            if session.analysisProfile.language == .python
+                || session.analysisProfile.language == .typescript
+            {
                 if let receiver = located.call.flatMap({
-                    pythonReceiverModuleImportCandidates(
+                    receiverModuleImportCandidates(
                         call: $0,
                         from: file,
                         index: index,
@@ -48,7 +50,7 @@ struct Resolver {
                 }) {
                     return receiver
                 }
-                return pythonMethodCandidates(
+                return methodCandidates(
                     methodNameID: located.nameID,
                     from: file,
                     context: context
@@ -157,6 +159,8 @@ struct Resolver {
         }
         if !imported.isEmpty { return sorted(imported, from: file) }
         if !unresolved.isEmpty { return unresolved }
+
+        if session.analysisProfile.language == .typescript { return [] }
 
         let definitions = session.definitionOccurrences(named: located.nameID).filter {
             guard located.identifierFallback else { return true }
@@ -296,6 +300,22 @@ struct Resolver {
         kind: CallKind?,
         context: QueryContext
     ) -> [ResolutionCandidate] {
+        let isTs = session.analysisProfile.language == .typescript
+        if isTs && (binding.flags.contains(.typeOnly)
+            || binding.kind == .default
+            || (binding.kind == .namespace
+                && !binding.flags.contains(.reexport)))
+        {
+            return [candidate(
+                pathID: source,
+                localKind: .importBinding,
+                localIndex: importIndex,
+                certainty: .unresolved,
+                dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                context: context
+            )]
+        }
         var visited: Set<SymbolOccurrenceID> = []
         if let resolved = importCandidate(
             index: importIndex,
@@ -309,7 +329,20 @@ struct Resolver {
         ) {
             return [resolved]
         }
-        guard let importedName = binding.importedName else { return [] }
+        if isTs {
+            return [candidate(
+                pathID: source,
+                localKind: .importBinding,
+                localIndex: importIndex,
+                certainty: .unresolved,
+                dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: importIndex)],
+                context: context
+            )]
+        }
+        guard let importedName = binding.importedName else {
+            return []
+        }
         return globalCandidates(
             nameID: importedName,
             from: source,
@@ -331,6 +364,22 @@ struct Resolver {
         requestedName: NameID? = nil,
         visited: inout Set<SymbolOccurrenceID>
     ) -> ResolutionCandidate? {
+        let isTs = session.analysisProfile.language == .typescript
+        if isTs && (binding.flags.contains(.typeOnly)
+            || binding.kind == .default
+            || (binding.kind == .namespace
+                && !binding.flags.contains(.reexport)))
+        {
+            return candidate(
+                pathID: source,
+                localKind: .importBinding,
+                localIndex: importIndex,
+                certainty: .unresolved,
+                dispatch: dispatch(for: kind),
+                evidence: [.uniqueImport(importBindingIndex: evidenceIndex)],
+                context: context
+            )
+        }
         let occurrence = SymbolOccurrenceID(
             snapshotID: context.snapshotID,
             pathID: source,
@@ -363,15 +412,27 @@ struct Resolver {
                 && $0.element.nameID == importedName
                 && $0.element.kind != .rustImpl
         }
+        if session.analysisProfile.language == .typescript,
+           !matches.isEmpty,
+           !targetIndex.exports.contains(where: {
+               $0.exportedName == importedName
+           })
+        {
+            return nil
+        }
         if matches.count == 1,
            let facetIndex = UInt32(exactly: matches[0].offset)
         {
             return candidate(
                 pathID: targetFile,
                 localIndex: facetIndex,
-                certainty: capped(.strong, for: kind),
+                certainty: session.analysisProfile.language == .typescript
+                    ? min(.probable, capped(.strong, for: kind))
+                    : capped(.strong, for: kind),
                 dispatch: dispatch(for: kind),
                 evidence: [.uniqueImport(importBindingIndex: evidenceIndex)],
+                completeness: session.analysisProfile.language == .typescript
+                    ? .partial : .complete,
                 context: context
             )
         }
@@ -525,7 +586,7 @@ struct Resolver {
         return sorted(candidates, from: source)
     }
 
-    private func pythonReceiverModuleImportCandidates(
+    private func receiverModuleImportCandidates(
         call: UnresolvedCall,
         from source: PathID,
         index: ContentIndex,
@@ -549,7 +610,9 @@ struct Resolver {
         ).map(\.id))
         let moduleImport = index.imports.enumerated().first { item in
             item.element.localName == receiverNameID
-                && item.element.kind == .module
+                && (session.analysisProfile.language == .typescript
+                    ? item.element.kind == .namespace
+                    : item.element.kind == .module)
                 && visibleScopes.contains(item.element.scopeID)
         }
         guard let moduleImport,
@@ -566,18 +629,27 @@ struct Resolver {
         )]
     }
 
-    private func pythonMethodCandidates(
+    private func methodCandidates(
         methodNameID: NameID,
         from source: PathID,
         context: QueryContext
     ) -> [ResolutionCandidate] {
         let results = session.definitionOccurrences(named: methodNameID).compactMap {
             occurrence, facet, _ -> ResolutionCandidate? in
-            guard facet.kind == .pythonFunction,
+            let methodKind: DeclarationKind
+            let parentKind: DeclarationKind
+            if session.analysisProfile.language == .typescript {
+                methodKind = .typescriptFunction
+                parentKind = .typescriptClass
+            } else {
+                methodKind = .pythonFunction
+                parentKind = .pythonClass
+            }
+            guard facet.kind == methodKind,
                   let parent = facet.parentFacetIndex,
                   let (_, targetIndex) = session.content(at: occurrence.pathID),
                   targetIndex.symbols.indices.contains(Int(parent)),
-                  targetIndex.symbols[Int(parent)].kind == .pythonClass
+                  targetIndex.symbols[Int(parent)].kind == parentKind
             else { return nil }
             return candidate(
                 pathID: occurrence.pathID,
@@ -624,6 +696,7 @@ struct Resolver {
         certainty: Certainty,
         dispatch: DispatchKind,
         evidence: [ResolutionEvidence],
+        completeness: Completeness = .complete,
         context: QueryContext
     ) -> ResolutionCandidate {
         // Design red line: this heuristic engine may emit Strong, never Exact.
@@ -637,7 +710,7 @@ struct Resolver {
             certainty: min(certainty, .strong),
             dispatch: dispatch,
             provenance: .fuzzyResolver,
-            completeness: .complete,
+            completeness: completeness,
             evidence: evidence
         )
     }

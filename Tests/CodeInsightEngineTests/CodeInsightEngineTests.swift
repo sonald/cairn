@@ -1677,6 +1677,460 @@ func rustModuleMapStillSupportsCrateAndSuperAfterPythonBranch() throws {
     }
 }
 
+@Test
+func typeScriptModuleMapResolvesRelativeManifestSubset() throws {
+    let mainSource = "import { load } from './service'\nload()\n"
+    let serviceSource = "export function load() {}\n"
+    try withManualTypeScriptProject([
+        TypeScriptFileSpec(
+            path: "main.ts",
+            source: mainSource,
+            imports: [
+                TypeScriptImportSpec(
+                    specifier: "./service",
+                    imported: "load",
+                    local: "load",
+                    kind: .named,
+                    flags: [],
+                    range: byteRange(of: "'./service'", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "load",
+                    kind: .directCall,
+                    range: byteRange(of: "load()", in: mainSource),
+                    nameRange: byteRange(of: "load", in: mainSource),
+                    receiverRange: nil
+                )
+            ]
+        ),
+        TypeScriptFileSpec(
+            path: "service.ts",
+            source: serviceSource,
+            symbols: [
+                TypeScriptSymbolSpec(
+                    name: "load",
+                    kind: .typescriptFunction,
+                    parent: nil,
+                    range: byteRange(of: "load", in: serviceSource)
+                )
+            ],
+            exports: ["load"]
+        )
+    ]) { session in
+        let mainPath = try #require(pathID("main.ts", in: session))
+        let index = try #require(session.content(at: mainPath)?.1)
+        let importBinding = try #require(index.imports.first)
+        let target = try #require(session.moduleMap.targetFile(
+            for: importBinding,
+            from: mainPath,
+            names: session.names,
+            strings: session.strings
+        ))
+
+        #expect(session.paths.resolve(target) == "service.ts")
+
+        let context = queryContext(for: session)
+        let resolved = try session.resolve(
+            file: mainPath,
+            offset: offset(of: "load()", in: mainSource),
+            context: context
+        )
+        let top = try #require(resolved.first)
+        #expect(top.certainty == .probable)
+        #expect(top.completeness == .partial)
+        #expect(session.paths.resolve(top.target.pathID) == "service.ts")
+
+        let callers = try session.callers(
+            of: "load",
+            context: context
+        )
+        let caller = try #require(callers.first)
+        #expect(session.paths.resolve(caller.callSite.pathID) == "main.ts")
+    }
+}
+
+@Test
+func typeScriptResolverSupportsExactExtensionlessDirectoryAndTsxTargets() throws {
+    let mainSource = "import { run } from '../nested/service'\nrun()\n"
+    let componentSource = "export function run() {}\n"
+    try withManualTypeScriptProject([
+        TypeScriptFileSpec(path: "src/main.ts", source: mainSource, imports: [
+            TypeScriptImportSpec(
+                specifier: "../nested/service",
+                imported: "run",
+                local: "run",
+                kind: .named,
+                flags: [],
+                range: byteRange(of: "'../nested/service'", in: mainSource)
+            )
+        ], calls: [
+            PythonTestCall(
+                name: "run",
+                kind: .directCall,
+                range: byteRange(of: "run()", in: mainSource),
+                nameRange: byteRange(of: "run", in: mainSource),
+                receiverRange: nil
+            )
+        ]),
+        TypeScriptFileSpec(path: "nested/service.tsx", source: componentSource, symbols: [
+            TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: componentSource))
+        ], exports: ["run"])
+    ]) { session in
+        let mainPath = try #require(pathID("src/main.ts", in: session))
+        let resolved = try session.resolve(
+            file: mainPath,
+            offset: offset(of: "run()", in: mainSource),
+            context: queryContext(for: session)
+        )
+        let top = try #require(resolved.first)
+        #expect(session.paths.resolve(top.target.pathID) == "nested/service.tsx")
+        #expect(top.certainty == .probable)
+        #expect(top.completeness == .partial)
+    }
+}
+
+@Test
+func typeScriptResolverCoversManifestPathAndUnresolvedMatrix() throws {
+    let mainSource = """
+        import { good } from './exact'
+        import { missing } from './absent'
+        import { same } from '../nope'
+        import alias from './def'
+        import * as ns from './all'
+        import type { TypeOnly } from './type'
+
+        good()
+        missing()
+        same()
+        alias()
+        ns.run()
+        TypeOnly()
+        """
+    try withManualTypeScriptProject([
+        TypeScriptFileSpec(path: "main.ts", source: mainSource, imports: [
+            TypeScriptImportSpec(specifier: "./exact", imported: "good", local: "good", kind: .named, flags: [], range: byteRange(of: "'./exact'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./absent", imported: "missing", local: "missing", kind: .named, flags: [], range: byteRange(of: "'./absent'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "../nope", imported: "same", local: "same", kind: .named, flags: [], range: byteRange(of: "'../nope'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./def", imported: nil, local: "alias", kind: .default, flags: [], range: byteRange(of: "'./def'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./all", imported: nil, local: "ns", kind: .namespace, flags: [.wildcard], range: byteRange(of: "'./all'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./type", imported: "TypeOnly", local: "TypeOnly", kind: .named, flags: [.typeOnly], range: byteRange(of: "'./type'", in: mainSource))
+        ], calls: [
+            PythonTestCall(name: "good", kind: .directCall, range: byteRange(of: "good()", in: mainSource), nameRange: byteRange(of: "good", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "missing", kind: .directCall, range: byteRange(of: "missing()", in: mainSource), nameRange: byteRange(of: "missing", in: mainSource, options: .backwards), receiverRange: nil),
+            PythonTestCall(name: "same", kind: .directCall, range: byteRange(of: "same()", in: mainSource), nameRange: byteRange(of: "same", in: mainSource, options: .backwards), receiverRange: nil),
+            PythonTestCall(name: "alias", kind: .directCall, range: byteRange(of: "alias()", in: mainSource), nameRange: byteRange(of: "alias", in: mainSource, options: .backwards), receiverRange: nil),
+            PythonTestCall(name: "run", kind: .methodCall, range: byteRange(of: "ns.run()", in: mainSource), nameRange: byteRange(of: "run", in: mainSource, options: .backwards), receiverRange: byteRange(of: "ns", in: mainSource)),
+            PythonTestCall(name: "TypeOnly", kind: .directCall, range: byteRange(of: "TypeOnly()", in: mainSource), nameRange: byteRange(of: "TypeOnly", in: mainSource, options: .backwards), receiverRange: nil)
+        ]),
+        TypeScriptFileSpec(path: "exact.ts", source: "export function good() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "good", kind: .typescriptFunction, parent: nil, range: byteRange(of: "good", in: "export function good() {}\n"))
+        ], exports: ["good"]),
+        TypeScriptFileSpec(path: "def.ts", source: "export default function def() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "def", kind: .typescriptFunction, parent: nil, range: byteRange(of: "def", in: "export default function def() {}\n"))
+        ]),
+        TypeScriptFileSpec(path: "all.ts", source: "export function run() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: "export function run() {}\n"))
+        ], exports: ["run"]),
+        TypeScriptFileSpec(path: "type.ts", source: "export type TypeOnly = string\n", symbols: [
+            TypeScriptSymbolSpec(name: "TypeOnly", kind: .typescriptFunction, parent: nil, range: byteRange(of: "TypeOnly", in: "export type TypeOnly = string\n"))
+        ], exports: ["TypeOnly"])
+    ]) { session in
+        let mainPath = try #require(pathID("main.ts", in: session))
+        let context = queryContext(for: session)
+        func resolve(
+            _ needle: String,
+            options: String.CompareOptions = []
+        ) throws -> [ResolutionCandidate] {
+            try session.resolve(
+                file: mainPath,
+                offset: offset(of: needle, in: mainSource, options: options),
+                context: context
+            )
+        }
+
+        let good = try #require((try resolve("good()")).first)
+        #expect(session.paths.resolve(good.target.pathID) == "exact.ts")
+        #expect(good.certainty == .probable)
+        #expect(good.completeness == .partial)
+        #expect(try resolve("missing()").first?.certainty == .unresolved)
+        #expect(try resolve("same()").first?.certainty == .unresolved)
+        #expect(try resolve("alias()").first?.certainty == .unresolved)
+
+        let nsResult = try resolve("run")
+        #expect(nsResult.first?.certainty == .unresolved || nsResult.first?.certainty == .possible)
+        #expect(nsResult.allSatisfy { $0.dispatch == .dynamicDispatch })
+        #expect(try resolve("TypeOnly()").first?.certainty == .unresolved)
+    }
+}
+
+@Test
+func typeScriptResolverSupportsReexportAndExportVisibility() throws {
+    let mainSource = "import { run } from './barrel0'\nrun()\n"
+    let leafSource = "export function run() {}\n"
+    var specs: [TypeScriptFileSpec] = [
+        TypeScriptFileSpec(path: "main.ts", source: mainSource, imports: [
+            TypeScriptImportSpec(specifier: "./barrel0", imported: "run", local: "run", kind: .named, flags: [], range: byteRange(of: "'./barrel0'", in: mainSource))
+        ], calls: [
+            PythonTestCall(name: "run", kind: .directCall, range: byteRange(of: "run()", in: mainSource), nameRange: byteRange(of: "run", in: mainSource, options: .backwards), receiverRange: nil)
+        ])
+    ]
+    for hop in 0..<4 {
+        let file = "barrel\(hop).ts"
+        let source = "export { run } from './barrel\(hop + 1)'\n"
+        specs.append(TypeScriptFileSpec(
+            path: file,
+            source: source,
+            imports: [
+                TypeScriptImportSpec(
+                    specifier: "./barrel\(hop + 1)",
+                    imported: "run",
+                    local: "run",
+                    kind: .named,
+                    flags: [.reexport],
+                    range: byteRange(of: "'./barrel\(hop + 1)'", in: source)
+                )
+            ],
+            reexports: [
+                TypeScriptReexportSpec(imported: "run", exported: "run", importIndex: 0)
+            ]
+        ))
+    }
+    specs.append(TypeScriptFileSpec(path: "barrel4.ts", source: leafSource, symbols: [
+        TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: leafSource))
+    ], exports: ["run"]))
+    try withManualTypeScriptProject(specs) { session in
+        let mainPath = try #require(pathID("main.ts", in: session))
+        let resolved = try session.resolve(
+            file: mainPath,
+            offset: offset(of: "run()", in: mainSource),
+            context: queryContext(for: session)
+        )
+        let top = try #require(resolved.first)
+        #expect(session.paths.resolve(top.target.pathID) == "barrel4.ts")
+        #expect(top.certainty == .probable)
+        #expect(top.completeness == .partial)
+    }
+}
+
+
+@Test
+func typeScriptModuleMapRejectsUnsupportedAndAmbiguousTargets() throws {
+    let mainSource = "import { run } from './x'\nrun()\n"
+    try withManualTypeScriptProject([
+        TypeScriptFileSpec(
+            path: "main.ts",
+            source: mainSource,
+            imports: [
+                TypeScriptImportSpec(
+                    specifier: "./x",
+                    imported: "run",
+                    local: "run",
+                    kind: .named,
+                    flags: [],
+                    range: byteRange(of: "'./x'", in: mainSource)
+                )
+            ],
+            calls: [
+                PythonTestCall(
+                    name: "run",
+                    kind: .directCall,
+                    range: byteRange(of: "run()", in: mainSource),
+                    nameRange: byteRange(of: "run", in: mainSource),
+                    receiverRange: nil
+                )
+            ]
+        ),
+        TypeScriptFileSpec(path: "x.ts", source: "export function run() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: "export function run() {}\n"))
+        ], exports: ["run"]),
+        TypeScriptFileSpec(path: "x.tsx", source: "export function run() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: "export function run() {}\n"))
+        ], exports: ["run"]),
+        TypeScriptFileSpec(path: "x.json", source: "{}", symbols: [], exports: [])
+    ]) { session in
+        let mainPath = try #require(pathID("main.ts", in: session))
+        let index = try #require(session.content(at: mainPath)?.1)
+        let binding = try #require(index.imports.first)
+        let target = session.moduleMap.targetFile(
+            for: binding,
+            from: mainPath,
+            names: session.names,
+            strings: session.strings
+        )
+
+        #expect(target == nil)
+        #expect(try session.resolve(
+            file: mainPath,
+            offset: offset(of: "run()", in: mainSource),
+            context: queryContext(for: session)
+        ).first?.certainty == .unresolved)
+    }
+}
+
+@Test
+func typeScriptResolverCompositeRemainingContract() throws {
+    let mainSource = """
+        import { run } from './entry'
+        import { hidden } from './hidden'
+        import { chain } from './typebarrel'
+        import { method } from './wildbarrel'
+        import { exact } from './exact.ts'
+        import { dir } from './dir'
+        import { missing } from './depth5'
+        import { obj } from './obj'
+
+        run()
+        hidden()
+        chain()
+        method()
+        exact()
+        dir()
+        missing()
+        ghost()
+        obj.method()
+        """
+    try withManualTypeScriptProject([
+        TypeScriptFileSpec(path: "main.ts", source: mainSource, imports: [
+            TypeScriptImportSpec(specifier: "./entry", imported: "run", local: "run", kind: .named, flags: [], range: byteRange(of: "'./entry'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./hidden", imported: "hidden", local: "hidden", kind: .named, flags: [], range: byteRange(of: "'./hidden'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./typebarrel", imported: "chain", local: "chain", kind: .named, flags: [], range: byteRange(of: "'./typebarrel'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./wildbarrel", imported: "method", local: "method", kind: .named, flags: [], range: byteRange(of: "'./wildbarrel'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./exact.ts", imported: "exact", local: "exact", kind: .named, flags: [], range: byteRange(of: "'./exact.ts'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./dir", imported: "dir", local: "dir", kind: .named, flags: [], range: byteRange(of: "'./dir'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./depth5", imported: "missing", local: "missing", kind: .named, flags: [], range: byteRange(of: "'./depth5'", in: mainSource)),
+            TypeScriptImportSpec(specifier: "./obj", imported: "obj", local: "obj", kind: .named, flags: [], range: byteRange(of: "'./obj'", in: mainSource))
+        ], calls: [
+            PythonTestCall(name: "run", kind: .directCall, range: byteRange(of: "run()", in: mainSource), nameRange: byteRange(of: "run", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "hidden", kind: .directCall, range: byteRange(of: "hidden()", in: mainSource), nameRange: byteRange(of: "hidden", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "chain", kind: .directCall, range: byteRange(of: "chain()", in: mainSource), nameRange: byteRange(of: "chain", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "method", kind: .directCall, range: byteRange(of: "method()", in: mainSource), nameRange: byteRange(of: "method", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "exact", kind: .directCall, range: byteRange(of: "exact()", in: mainSource), nameRange: byteRange(of: "exact", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "dir", kind: .directCall, range: byteRange(of: "dir()", in: mainSource), nameRange: byteRange(of: "dir", in: mainSource), receiverRange: nil),
+            PythonTestCall(name: "missing", kind: .directCall, range: byteRange(of: "missing()", in: mainSource), nameRange: byteRange(of: "missing", in: mainSource, options: .backwards), receiverRange: nil),
+            PythonTestCall(name: "ghost", kind: .directCall, range: byteRange(of: "ghost()", in: mainSource), nameRange: byteRange(of: "ghost", in: mainSource, options: .backwards), receiverRange: nil),
+            PythonTestCall(
+                name: "method",
+                kind: .methodCall,
+                range: ByteRange(
+                    lowerBound: offset(of: "obj.method()", in: mainSource),
+                    upperBound: offset(of: "obj.method()", in: mainSource)
+                        + UInt32("obj.method()".utf8.count)
+                ),
+                nameRange: ByteRange(
+                    lowerBound: offset(of: "obj.method()", in: mainSource)
+                        + UInt32("obj.".utf8.count),
+                    upperBound: offset(of: "obj.method()", in: mainSource)
+                        + UInt32("obj.method".utf8.count)
+                ),
+                receiverRange: ByteRange(
+                    lowerBound: offset(of: "obj.method()", in: mainSource),
+                    upperBound: offset(of: "obj.method()", in: mainSource)
+                        + UInt32("obj".utf8.count)
+                )
+            )
+        ]),
+        TypeScriptFileSpec(path: "entry.ts", source: "export { run } from './a1'\n", imports: [
+            TypeScriptImportSpec(specifier: "./a1", imported: "run", local: "run", kind: .named, flags: [.reexport], range: byteRange(of: "'./a1'", in: "export { run } from './a1'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "run", exported: "run", importIndex: 0)]),
+        TypeScriptFileSpec(path: "a1.ts", source: "export { run } from './a2'\n", imports: [
+            TypeScriptImportSpec(specifier: "./a2", imported: "run", local: "run", kind: .named, flags: [.reexport], range: byteRange(of: "'./a2'", in: "export { run } from './a2'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "run", exported: "run", importIndex: 0)]),
+        TypeScriptFileSpec(path: "a2.ts", source: "export { run } from './a3'\n", imports: [
+            TypeScriptImportSpec(specifier: "./a3", imported: "run", local: "run", kind: .named, flags: [.reexport], range: byteRange(of: "'./a3'", in: "export { run } from './a3'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "run", exported: "run", importIndex: 0)]),
+        TypeScriptFileSpec(path: "a3.ts", source: "export { run } from './a4'\n", imports: [
+            TypeScriptImportSpec(specifier: "./a4", imported: "run", local: "run", kind: .named, flags: [.reexport], range: byteRange(of: "'./a4'", in: "export { run } from './a4'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "run", exported: "run", importIndex: 0)]),
+        TypeScriptFileSpec(path: "a4.ts", source: "export function run() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "run", kind: .typescriptFunction, parent: nil, range: byteRange(of: "run", in: "export function run() {}\n"))
+        ], exports: ["run"]),
+        TypeScriptFileSpec(path: "hidden.ts", source: "export function hidden() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "hidden", kind: .typescriptFunction, parent: nil, range: byteRange(of: "hidden", in: "export function hidden() {}\n"))
+        ]),
+        TypeScriptFileSpec(path: "typebarrel.ts", source: "export type { chain } from './leaf'\n", imports: [
+            TypeScriptImportSpec(specifier: "./leaf", imported: "chain", local: "chain", kind: .named, flags: [.reexport, .typeOnly], range: byteRange(of: "'./leaf'", in: "export type { chain } from './leaf'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "chain", exported: "chain", importIndex: 0)]),
+        TypeScriptFileSpec(path: "leaf.ts", source: "export function chain() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "chain", kind: .typescriptFunction, parent: nil, range: byteRange(of: "chain", in: "export function chain() {}\n"))
+        ], exports: ["chain"]),
+        TypeScriptFileSpec(path: "wildbarrel.ts", source: "export * from './impl'\n", imports: [
+            TypeScriptImportSpec(specifier: "./impl", imported: nil, local: nil, kind: .namespace, flags: [.reexport, .wildcard], range: byteRange(of: "'./impl'", in: "export * from './impl'\n"))
+        ]),
+        TypeScriptFileSpec(path: "impl.ts", source: "export function method() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "method", kind: .typescriptFunction, parent: nil, range: byteRange(of: "method", in: "export function method() {}\n"))
+        ], exports: ["method"]),
+        TypeScriptFileSpec(path: "exact.ts", source: "export function exact() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "exact", kind: .typescriptFunction, parent: nil, range: byteRange(of: "exact", in: "export function exact() {}\n"))
+        ], exports: ["exact"]),
+        TypeScriptFileSpec(path: "dir/index.tsx", source: "export function dir() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "dir", kind: .typescriptFunction, parent: nil, range: byteRange(of: "dir", in: "export function dir() {}\n"))
+        ], exports: ["dir"]),
+        TypeScriptFileSpec(path: "depth5.ts", source: "export { missing } from './d1'\n", imports: [
+            TypeScriptImportSpec(specifier: "./d1", imported: "missing", local: "missing", kind: .named, flags: [.reexport], range: byteRange(of: "'./d1'", in: "export { missing } from './d1'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "missing", exported: "missing", importIndex: 0)]),
+        TypeScriptFileSpec(path: "d1.ts", source: "export { missing } from './d2'\n", imports: [
+            TypeScriptImportSpec(specifier: "./d2", imported: "missing", local: "missing", kind: .named, flags: [.reexport], range: byteRange(of: "'./d2'", in: "export { missing } from './d2'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "missing", exported: "missing", importIndex: 0)]),
+        TypeScriptFileSpec(path: "d2.ts", source: "export { missing } from './d3'\n", imports: [
+            TypeScriptImportSpec(specifier: "./d3", imported: "missing", local: "missing", kind: .named, flags: [.reexport], range: byteRange(of: "'./d3'", in: "export { missing } from './d3'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "missing", exported: "missing", importIndex: 0)]),
+        TypeScriptFileSpec(path: "d3.ts", source: "export { missing } from './d4'\n", imports: [
+            TypeScriptImportSpec(specifier: "./d4", imported: "missing", local: "missing", kind: .named, flags: [.reexport], range: byteRange(of: "'./d4'", in: "export { missing } from './d4'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "missing", exported: "missing", importIndex: 0)]),
+        TypeScriptFileSpec(path: "d4.ts", source: "export { missing } from './leaf99'\n", imports: [
+            TypeScriptImportSpec(specifier: "./leaf99", imported: "missing", local: "missing", kind: .named, flags: [.reexport], range: byteRange(of: "'./leaf99'", in: "export { missing } from './leaf99'\n"))
+        ], reexports: [TypeScriptReexportSpec(imported: "missing", exported: "missing", importIndex: 0)]),
+        TypeScriptFileSpec(path: "ghost.ts", source: "export function ghost() {}\n", symbols: [
+            TypeScriptSymbolSpec(name: "ghost", kind: .typescriptFunction, parent: nil, range: byteRange(of: "ghost", in: "export function ghost() {}\n"))
+        ], exports: ["ghost"]),
+        TypeScriptFileSpec(path: "obj.ts", source: "export class Obj { method() {} }\n", symbols: [
+            TypeScriptSymbolSpec(name: "Obj", kind: .typescriptClass, parent: nil, range: byteRange(of: "Obj", in: "export class Obj { method() {} }\n")),
+            TypeScriptSymbolSpec(name: "method", kind: .typescriptFunction, parent: 0, range: byteRange(of: "method", in: "export class Obj { method() {} }\n"))
+        ], exports: ["Obj"])
+    ]) { session in
+        let mainPath = try #require(pathID("main.ts", in: session))
+        let context = queryContext(for: session)
+        func resolve(
+            _ needle: String,
+            options: String.CompareOptions = []
+        ) throws -> [ResolutionCandidate] {
+            try session.resolve(
+                file: mainPath,
+                offset: offset(of: needle, in: mainSource, options: options),
+                context: context
+            )
+        }
+
+        let entry = try #require(try resolve("run()").first)
+        #expect(session.paths.resolve(entry.target.pathID) == "a4.ts")
+        #expect(entry.certainty == .probable)
+        #expect(try resolve("hidden()").first?.certainty == .unresolved)
+        #expect(try resolve("chain()").first?.certainty == .unresolved)
+        let directMethod = try #require(try resolve("method()").first)
+        #expect(session.paths.resolve(directMethod.target.pathID) == "impl.ts")
+        #expect(directMethod.certainty == .probable)
+        let methodOffset = offset(of: "obj.method()", in: mainSource)
+            + UInt32("obj.".utf8.count)
+        let method = try #require(try session.resolve(
+            file: mainPath,
+            offset: methodOffset,
+            context: context
+        ).first)
+        #expect(method.certainty == .possible)
+        #expect(method.dispatch == .dynamicDispatch)
+        #expect(try resolve("exact()").first.map { session.paths.resolve($0.target.pathID) }
+            == "exact.ts")
+        #expect(try resolve("dir()").first.map { session.paths.resolve($0.target.pathID) }
+            == "dir/index.tsx")
+        let missing = try resolve("missing()", options: .backwards)
+        #expect(missing.first?.certainty == .unresolved)
+        #expect(missing.first?.target.localKind == .importBinding)
+        #expect(try resolve("ghost()").isEmpty)
+    }
+}
+
 private func withProject(
     _ files: [String: String],
     test: (EngineSession) throws -> Void
@@ -1885,6 +2339,234 @@ private struct PythonFileSpec {
         self.symbols = symbols
         self.imports = imports
         self.calls = calls
+    }
+}
+
+private struct TypeScriptSymbolSpec {
+    let name: String
+    let kind: DeclarationKind
+    let parent: UInt32?
+    let range: ByteRange
+}
+
+private struct TypeScriptImportSpec {
+    let specifier: String
+    let imported: String?
+    let local: String?
+    let kind: ImportKind
+    let flags: ImportFlags
+    let range: ByteRange
+}
+
+private struct TypeScriptFileSpec {
+    let path: String
+    let source: String
+    var symbols: [TypeScriptSymbolSpec]
+    var imports: [TypeScriptImportSpec]
+    var exports: [String]
+    var reexports: [TypeScriptReexportSpec]
+    var calls: [PythonTestCall]
+
+    init(
+        path: String,
+        source: String,
+        symbols: [TypeScriptSymbolSpec] = [],
+        imports: [TypeScriptImportSpec] = [],
+        exports: [String] = [],
+        reexports: [TypeScriptReexportSpec] = [],
+        calls: [PythonTestCall] = []
+    ) {
+        self.path = path
+        self.source = source
+        self.symbols = symbols
+        self.imports = imports
+        self.exports = exports
+        self.reexports = reexports
+        self.calls = calls
+    }
+}
+
+private struct TypeScriptReexportSpec {
+    let imported: String
+    let exported: String
+    let importIndex: UInt32
+}
+
+private func withManualTypeScriptProject(
+    _ files: [TypeScriptFileSpec],
+    test: (EngineSession) throws -> Void
+) throws {
+    let store = ProjectIndexStore()
+    var occurrences: [FileOccurrence] = []
+    var entries: [(ContentIndex, [UInt8], Bool)] = []
+    let moduleScopeID = ScopeID(rawValue: 0)
+    let moduleRegionID = ExecutableRegionID(rawValue: 0)
+    var symbolCount = 0
+    var importCount = 0
+    var callCount = 0
+
+    let active = files.filter {
+        LanguageMode.classify(path: $0.path, language: .typescript) != nil
+    }
+    for (index, file) in active.enumerated() {
+        let bytes = Array(file.source.utf8)
+        let contentID = ContentID.sha256(of: bytes)
+        let pathID = store.paths.intern(file.path)
+        occurrences.append(FileOccurrence(
+            occurrenceID: FileOccurrenceID(rawValue: UInt32(index)),
+            pathID: pathID,
+            contentID: contentID,
+            detectedLanguage: .typescript,
+            sourceKind: .untracked,
+            fileMode: .regular,
+            size: UInt64(bytes.count)
+        ))
+        let symbols = file.symbols.enumerated().map { offset, symbol in
+            DeclarationFacet(
+                symbolGroupID: SymbolGroupID(rawValue: UInt32(offset)),
+                space: .value,
+                kind: symbol.kind,
+                nameID: store.names.intern(symbol.name),
+                range: symbol.range,
+                nameRange: symbol.range,
+                parentFacetIndex: symbol.parent,
+                signatureFingerprint: nil,
+                bodyFingerprint: nil
+            )
+        }
+        let exports = file.exports.map { export in
+            ExportRecord(
+                exportedName: store.names.intern(export),
+                sourceBindingIndex: nil,
+                range: byteRange(of: export, in: file.source)
+            )
+        }
+        let reexports = file.reexports.map { reexport in
+            ExportRecord(
+                exportedName: store.names.intern(reexport.exported),
+                sourceBindingIndex: reexport.importIndex,
+                range: byteRange(of: reexport.exported, in: file.source)
+            )
+        }
+        let imports = file.imports.map { binding in
+            ImportBinding(
+                moduleSpecifier: store.strings.intern(binding.specifier),
+                importedName: binding.imported.map(store.names.intern),
+                localName: binding.local.map(store.names.intern),
+                kind: binding.kind,
+                flags: binding.flags,
+                scopeID: moduleScopeID,
+                range: binding.range
+            )
+        }
+        let calls = file.calls.map { call in
+            UnresolvedCall(
+                regionID: moduleRegionID,
+                nameID: store.names.intern(call.name),
+                range: call.range,
+                nameRange: call.nameRange,
+                syntacticKind: call.kind,
+                qualifierRange: nil,
+                receiverRange: call.receiverRange,
+                argumentCount: nil
+            )
+        }
+        let scope = ScopeRecord(
+            id: moduleScopeID,
+            parent: nil,
+            kind: .module,
+            range: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count))
+        )
+        let region = ExecutableRegionRecord(
+            id: moduleRegionID,
+            kind: .moduleInitializer,
+            range: scope.range,
+            enclosingScopeID: moduleScopeID,
+            associatedFacetIndex: nil
+        )
+        guard let mode = LanguageMode.classify(path: file.path, language: .typescript) else {
+            continue
+        }
+        let key = ContentIndexKey(
+            contentID: contentID,
+            languageMode: mode,
+            grammarVersion: 1,
+            extractorVersion: 1
+        )
+        let index = ContentIndex(
+            key: key,
+            scopes: [scope],
+            bindings: [],
+            executableRegions: [region],
+            symbols: symbols,
+            calls: calls,
+            imports: imports,
+            exports: exports + reexports,
+            lineTable: LineTable(bytes: bytes)
+        )
+        entries.append((index, bytes, false))
+        symbolCount += symbols.count
+        importCount += imports.count
+        callCount += calls.count
+    }
+    store.insert(entries)
+    let stats = IndexStats(
+        fileCount: files.count,
+        uniqueContentCount: files.count,
+        scopeCount: 0,
+        bindingCount: 0,
+        symbolCount: symbolCount,
+        callCount: callCount,
+        importCount: importCount,
+        elapsedMilliseconds: 0,
+        filesWithErrorNodes: 0,
+        reusedCount: 0,
+        extractedCount: files.count
+    )
+    let manifest = SnapshotManifest(
+        snapshotID: SnapshotID(rawValue: UUID()),
+        files: occurrences
+    )
+    let profile = AnalysisProfile.placeholder(language: .typescript, root: store.paths.intern("."))
+    let view = SnapshotView(
+        store: store,
+        manifest: manifest,
+        stats: stats,
+        analysisProfile: profile,
+        extractor: TypeScriptManualExtractor()
+    )
+    try test(EngineSession(store: store, snapshotView: view))
+}
+
+private struct TypeScriptManualExtractor: LanguageExtractor {
+    var language: LanguageID { .typescript }
+    var grammarVersion: UInt32 { 1 }
+    var extractorVersion: UInt32 { 1 }
+
+    func extractWithDiagnostics(
+        bytes: [UInt8],
+        key: ContentIndexKey,
+        interner _: ExtractionInterners
+    ) throws -> (index: ContentIndex, containsErrorNodes: Bool) {
+        (ContentIndex(
+            key: key,
+            scopes: [],
+            bindings: [],
+            executableRegions: [],
+            symbols: [],
+            calls: [],
+            imports: [],
+            exports: [],
+            lineTable: LineTable(bytes: bytes)
+        ), false)
+    }
+
+    func identifierRanges(
+        named _: String,
+        in bytes: [UInt8],
+        mode: LanguageMode
+    ) throws -> [ByteRange] {
+        []
     }
 }
 
