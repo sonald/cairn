@@ -23,6 +23,606 @@ func pyrightProviderCapabilitiesAreFixedMaximum() {
 }
 
 @Test
+func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions() throws {
+    #expect(
+        TypeScriptLanguageServerProvider.supportedCapabilities
+            == [.definition, .implementations, .callHierarchy, .references]
+    )
+    let canonicalPath = "/opt/homebrew/lib/node_modules/typescript/bin/tsserver.js"
+    let canonicalOptions = TypeScriptLanguageServerProvider.initializationOptions(
+        tsserverPath: URL(fileURLWithPath: canonicalPath)
+    )
+    let canonicalTSServer = canonicalOptions["tsserver"] as? [String: Any]
+    #expect(canonicalTSServer?["path"] as? String == canonicalPath)
+    #expect(canonicalTSServer?["logVerbosity"] as? String == "off")
+    #expect(canonicalTSServer?["trace"] as? String == "off")
+    #expect(canonicalTSServer?["useSyntaxServer"] as? String == "never")
+    #expect(canonicalOptions["disableAutomaticTypingAcquisition"] as? Bool == true)
+    #expect((canonicalOptions["plugins"] as? [String])?.isEmpty == true)
+
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("// 你😀\nexport function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: canonicalOptions,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    #expect(
+        session.negotiatedCapabilities
+            == [.definition, .implementations, .references, .callHierarchy]
+    )
+    #expect(server.initializationTSServerPath
+        == canonicalPath)
+    let options = server.initializationOptions as? [String: Any]
+    let tsserver = options?["tsserver"] as? [String: Any]
+    #expect(tsserver?["path"] as? String
+        == canonicalPath)
+    #expect(tsserver?["logVerbosity"] as? String == "off")
+    #expect(tsserver?["trace"] as? String == "off")
+    #expect(tsserver?["useSyntaxServer"] as? String == "never")
+    #expect(options?["disableAutomaticTypingAcquisition"] as? Bool == true)
+    #expect((options?["plugins"] as? [String])?.isEmpty == true)
+
+    let bytes = try snapshot.readBytes(path: "main.ts")
+    #expect(try #require(LSPPositionMap(utf8: bytes)).position(
+        forByteOffset: 10
+    ) == LSPPosition(line: 0, character: 6))
+
+    let definition = try session.definition(file: "main.ts", byteOffset: 10)
+    guard case .completed(let targets) = definition else {
+        Issue.record("TypeScript definition did not complete")
+        return
+    }
+    #expect(targets.first?.location.file == "main.ts")
+    #expect(server.receivedLanguageIDs == ["typescript"])
+    #expect(server.definedPositions.first?["character"] as? Int == 6)
+
+    let references = try session.references(
+        file: "main.ts",
+        byteOffset: 10,
+        includeDeclaration: true
+    )
+    #expect(references?.count == 1)
+    #expect(references?.first?.byteOffset == 0)
+    #expect(server.referencesPositions.first?["character"] as? Int == 6)
+}
+
+@Test
+func typeScriptProviderFinderFindsExternalStandardDirsAndExcludesProjectLocal() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let markerPath = root.appendingPathComponent("marker-ran")
+    for name in [
+        "node", "typescript-language-server", "tsserver",
+        "typescript-language-server.js",
+    ] {
+        let marker = project.appendingPathComponent(name)
+        try Data("#!/bin/sh\necho marker >> \"$CODEINSIGHT_MARKER_OUTPUT\"\n".utf8)
+            .write(to: marker)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: marker.path
+        )
+    }
+    let alias = root.appendingPathComponent("alias", isDirectory: true)
+    try FileManager.default.createSymbolicLink(
+        atPath: alias.path,
+        withDestinationPath: project.path
+    )
+    for path in [
+        project.path,
+        alias.path,
+        project.appendingPathComponent("bin").path,
+    ] {
+        if let found = TypeScriptLanguageServerProvider.findExecutable(
+            named: "node",
+            projectURL: project,
+            environment: ["PATH": path]
+        ) {
+            do {
+                try TypeScriptLanguageServerProvider.requireOutsideProject(
+                    found,
+                    projectURL: project
+                )
+            } catch {
+                Issue.record("TS finder returned project-local candidate: \(found.path)")
+            }
+        }
+        #expect(!FileManager.default.fileExists(atPath: markerPath.path))
+    }
+
+    let foundStandard = TypeScriptLanguageServerProvider.findExecutable(
+        named: "node",
+        projectURL: project,
+        environment: ["PATH": ""]
+    )
+    #expect(foundStandard != nil)
+}
+
+@Test
+func typeScriptProviderConstructorRejectsProjectLocalToolchainBeforeLaunch() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    for name in [
+        "node", "typescript-language-server", "tsserver.js", "package.json",
+    ] {
+        let path = project.appendingPathComponent(name)
+        try Data("x".utf8).write(to: path)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: path.path
+        )
+    }
+    let server = project.appendingPathComponent("typescript-language-server")
+    let tsserver = project.appendingPathComponent("tsserver.js")
+    let package = project.appendingPathComponent("package.json")
+    let outsideNode = URL(fileURLWithPath: "/usr/bin/node")
+    for nodeURL in [project.appendingPathComponent("node"), outsideNode] {
+        do {
+            _ = try TypeScriptLanguageServerProvider(
+                projectURL: project,
+                nodeURL: nodeURL,
+                languageServerURL: server,
+                tsserverURL: tsserver,
+                typescriptPackageURL: package
+            )
+            Issue.record("Expected TS constructor to reject project-local toolchain")
+        } catch ExactError.unavailable {
+            // expected
+        }
+    }
+}
+
+@Test
+func typeScriptProviderConstructorRejectsMissingExternalToolchainFiles() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let node = URL(fileURLWithPath: "/usr/bin/node")
+    let server = root.appendingPathComponent("typescript-language-server")
+    try Data("#!/bin/sh\n".utf8).write(to: server)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: server.path
+    )
+    let missingTsserver = root.appendingPathComponent("typescript/lib/tsserver.js")
+    let missingPackage = root.appendingPathComponent("typescript/package.json")
+    do {
+        _ = try TypeScriptLanguageServerProvider(
+            projectURL: project,
+            nodeURL: node,
+            languageServerURL: server,
+            tsserverURL: missingTsserver,
+            typescriptPackageURL: missingPackage
+        )
+        Issue.record("Expected missing tsserver to be unavailable early")
+    } catch ExactError.unavailable {
+        // expected
+    }
+}
+
+@Test
+func typeScriptProviderRejectsSymlinksResolvingInsideProject() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let project = root.appendingPathComponent("project", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: project,
+        withIntermediateDirectories: true
+    )
+    let bin = root.appendingPathComponent("bin", isDirectory: true)
+    try FileManager.default.createDirectory(at: bin, withIntermediateDirectories: true)
+    let projectNode = project.appendingPathComponent("node")
+    try Data("#!/bin/sh\n".utf8).write(to: projectNode)
+    try FileManager.default.setAttributes(
+        [.posixPermissions: 0o755],
+        ofItemAtPath: projectNode.path
+    )
+    for (externalName, projectName) in [
+        ("node", "node"),
+        ("typescript-language-server", "typescript-language-server"),
+        ("typescript-language-server.js", "typescript-language-server.js"),
+        ("package.json", "package.json"),
+    ] {
+        let external = bin.appendingPathComponent(externalName)
+        try? FileManager.default.removeItem(at: external)
+        try FileManager.default.createSymbolicLink(
+            atPath: external.path,
+            withDestinationPath: project.appendingPathComponent(projectName).path
+        )
+        if externalName != "package.json" {
+            try Data("x".utf8).write(to: project.appendingPathComponent(projectName))
+            try FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: project.appendingPathComponent(projectName).path
+            )
+        } else {
+            try Data("{\"version\":\"1\"}\n".utf8)
+                .write(to: project.appendingPathComponent(projectName))
+        }
+    }
+
+    let sentinel = URL(fileURLWithPath: "/usr/bin/node")
+    for (candidate, label) in [
+        (bin.appendingPathComponent("node"), "node"),
+        (bin.appendingPathComponent("typescript-language-server.js"), "cli"),
+        (bin.appendingPathComponent("package.json"), "package"),
+        (bin.appendingPathComponent("typescript-language-server"), "server"),
+    ] {
+        do {
+            try TypeScriptLanguageServerProvider.requireOutsideProject(
+                candidate,
+                projectURL: project
+            )
+            Issue.record("expected \(label) symlink to project-local to be rejected")
+        } catch ExactError.unavailable {
+            // expected
+        }
+    }
+    let finder = TypeScriptLanguageServerProvider.findExecutable(
+        named: "node",
+        projectURL: project,
+        environment: ["PATH": bin.path]
+    )
+    #expect(finder == nil)
+    do {
+        _ = try TypeScriptLanguageServerProvider(
+            projectURL: project,
+            nodeURL: sentinel,
+            languageServerURL: bin.appendingPathComponent("typescript-language-server.js"),
+            tsserverURL: bin.appendingPathComponent("typescript-language-server.js"),
+            typescriptPackageURL: bin.appendingPathComponent("package.json")
+        )
+        Issue.record("expected constructor to reject symlinked project-local TLS")
+    } catch ExactError.unavailable {
+        // expected
+    }
+}
+
+@Test
+func typeScriptSessionUsesTSReactLanguageIDForDidOpen() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export const view = <div />\n".utf8)
+        .write(to: root.appendingPathComponent("view.tsx"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["view.tsx"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    _ = try session.definition(file: "view.tsx", byteOffset: 0)
+    #expect(server.receivedLanguageIDs == ["typescriptreact"])
+}
+
+@Test
+func typeScriptSessionRejectsMissingDefinitionCapability() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        definitionProvider: false,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+
+    do {
+        _ = try TypeScriptLanguageServerSession.start(
+            client: client,
+            restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+            projectURL: root,
+            snapshot: snapshot,
+            initializationOptions: [:],
+            requestTimeout: 5,
+            closeGrace: 5,
+            attribution: exactTestAttribution(provider: "fake-typescript")
+        )
+        Issue.record("expected TypeScript missing definition to be unavailable")
+    } catch ExactError.unavailable(let reason) {
+        #expect(reason.contains("definition and references"))
+    }
+    _ = done.wait(timeout: .now() + 5)
+}
+
+@Test
+func typeScriptSessionRejectsMissingReferencesCapability() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        referencesProvider: false,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+
+    do {
+        _ = try TypeScriptLanguageServerSession.start(
+            client: client,
+            restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+            projectURL: root,
+            snapshot: snapshot,
+            initializationOptions: [:],
+            requestTimeout: 5,
+            closeGrace: 5,
+            attribution: exactTestAttribution(provider: "fake-typescript")
+        )
+        Issue.record("Expected TypeScript missing references to be unavailable")
+    } catch ExactError.unavailable(let reason) {
+        #expect(reason.contains("definition and references"))
+    }
+    _ = done.wait(timeout: .now() + 5)
+}
+
+@Test
+func typeScriptSessionRejectsDisallowedTypeScriptPathsBeforeAnyRequest() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    for name in [
+        "decl.d.ts", "module.mts", "common.cts",
+        "legacy.js", "legacy.jsx", "Mixed.TS",
+    ] {
+        try Data("export const value = 1\n".utf8)
+            .write(to: root.appendingPathComponent(name))
+    }
+    let snapshot = try DirectorySnapshot(
+        root: root,
+        files: [
+            "decl.d.ts", "module.mts", "common.cts",
+            "legacy.js", "legacy.jsx", "Mixed.TS",
+        ]
+    )
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    for path in [
+        "decl.d.ts", "module.mts", "common.cts",
+        "legacy.js", "legacy.jsx", "Mixed.TS",
+    ] {
+        do {
+            _ = try session.definition(file: path, byteOffset: 0)
+            Issue.record("Expected invalid TypeScript path rejected: \(path)")
+        } catch ExactError.invalidPath {
+            // expected
+        }
+    }
+    #expect(server.receivedLanguageIDs.isEmpty)
+}
+
+@Test
+func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let firstClientToServer = Pipe()
+    let firstServerToClient = Pipe()
+    let firstDone = DispatchSemaphore(value: 0)
+    let firstServer = TypeScriptFakeServer(
+        input: firstClientToServer.fileHandleForReading,
+        output: firstServerToClient.fileHandleForWriting,
+        closeOutputAfterInitialize: true,
+        done: { firstDone.signal() }
+    )
+    firstServer.start()
+    let firstClient = LSPClient(
+        readHandle: firstServerToClient.fileHandleForReading,
+        writeHandle: firstClientToServer.fileHandleForWriting
+    )
+    let restartCounter = NSLockedCounter()
+    let session = try TypeScriptLanguageServerSession.start(
+        client: firstClient,
+        restartClient: {
+            restartCounter.increment()
+            let secondClientToServer = Pipe()
+            let secondServerToClient = Pipe()
+            let secondServer = TypeScriptFakeServer(
+                input: secondClientToServer.fileHandleForReading,
+                output: secondServerToClient.fileHandleForWriting,
+                closeOutputAfterInitialize: true,
+                done: {}
+            )
+            secondServer.start()
+            return LSPClient(
+                readHandle: secondServerToClient.fileHandleForReading,
+                writeHandle: secondClientToServer.fileHandleForWriting
+            )
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 0.2,
+        closeGrace: 0.05,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer { session.close() }
+
+    do {
+        _ = try session.definition(file: "main.ts", byteOffset: 0)
+        Issue.record("expected TypeScript unavailable after restart exhaustion")
+    } catch ExactError.unavailable(let detail) {
+        #expect(detail.contains("typescript restart exhausted")
+            || detail.contains("typescript restart failed"))
+        #expect(restartCounter.value == 1)
+        if case .unavailable(let reason) = session.readiness {
+            #expect(reason.contains("typescript restart"))
+        } else {
+            Issue.record("expected TypeScript session unavailable after second crash")
+        }
+    }
+    _ = firstDone.wait(timeout: .now() + 5)
+}
+
+@Test
+func typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target() {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let responses = CancellationResponseState(
+        successURI: root.appendingPathComponent("main.ts").absoluteString
+    )
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            method == "textDocument/definition"
+                ? responses.next() : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    let batch = ExactRequestBatch()
+    let finished = DispatchSemaphore(value: 0)
+    Thread.detachNewThread {
+        _ = try? session.definition(file: "main.ts", byteOffset: 0, batch: batch)
+        finished.signal()
+    }
+    Thread.sleep(forTimeInterval: 0.05)
+    session.cancel(batch: batch)
+    #expect(finished.wait(timeout: .now() + 1) == .success)
+
+    let current = try session.definition(file: "main.ts", byteOffset: 0)
+    guard case .completed = current else {
+        Issue.record("new TypeScript request after batch cancel did not complete")
+        return
+    }
+    #expect(responses.count == 2)
+}
+
+@Test
 func executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath() {
     let directories = executableSearchDirectories(
         environment: ["PATH": ""],
@@ -3351,6 +3951,185 @@ private final class PyrightFakeServer: @unchecked Sendable {
                     as? [String: Any]
                 locked {
                     _receivedLanguageID = textDocument?["languageId"] as? String
+                }
+            } else if method == "exit" {
+                try output.close()
+                done()
+                return true
+            }
+        }
+        return false
+    }
+
+    private func write(_ message: [String: Any]) throws {
+        try output.write(contentsOf: LSPFraming.encode(message))
+    }
+
+    private func locked<T>(_ operation: () -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return operation()
+    }
+}
+
+private final class TypeScriptFakeServer: @unchecked Sendable {
+    private let input: FileHandle
+    private let output: FileHandle
+    private let done: () -> Void
+    private let definitionProvider: Bool
+    private let referencesProvider: Bool
+    private let closeOutputAfterInitialize: Bool
+    private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
+    private let lock = NSLock()
+    private var _initializationOptions: Any?
+    private var _receivedLanguageIDs: [String] = []
+    private var _definedPositions: [[String: Any]] = []
+    private var _referencesPositions: [[String: Any]] = []
+    private var _requestMethods: [String] = []
+    private var _error: Error?
+
+    var initializationOptions: Any? { locked { _initializationOptions } }
+    var initializationTSServerPath: String? {
+        let options = initializationOptions as? [String: Any]
+        return (options?["tsserver"] as? [String: Any])?["path"] as? String
+    }
+    var receivedLanguageIDs: [String] { locked { _receivedLanguageIDs } }
+    var definedPositions: [[String: Any]] { locked { _definedPositions } }
+    var referencesPositions: [[String: Any]] { locked { _referencesPositions } }
+    var requestMethods: [String] { locked { _requestMethods } }
+    var error: Error? { locked { _error } }
+
+    init(
+        input: FileHandle,
+        output: FileHandle,
+        definitionProvider: Bool = true,
+        referencesProvider: Bool = true,
+        closeOutputAfterInitialize: Bool = false,
+        requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
+        done: @escaping () -> Void
+    ) {
+        self.input = input
+        self.output = output
+        self.definitionProvider = definitionProvider
+        self.referencesProvider = referencesProvider
+        self.closeOutputAfterInitialize = closeOutputAfterInitialize
+        self.requestResponder = requestResponder
+        self.done = done
+    }
+
+    func start() {
+        Thread.detachNewThread { self.run() }
+    }
+
+    private func run() {
+        var decoder = LSPFrameDecoder()
+        do {
+            while true {
+                let data = input.availableData
+                guard !data.isEmpty else { break }
+                for message in try decoder.append(data) {
+                    if try handle(message) { return }
+                }
+            }
+        } catch {
+            locked { _error = error }
+        }
+        done()
+    }
+
+    private func handle(_ message: [String: Any]) throws -> Bool {
+        if let method = message["method"] as? String {
+            if let id = (message["id"] as? NSNumber)?.intValue {
+                locked { _requestMethods.append(method) }
+                switch requestResponder?(method, id) ?? .useDefault {
+                case .result(let result):
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": result,
+                    ])
+                    return false
+                case let .error(code, message):
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "error": ["code": code, "message": message],
+                    ])
+                    return false
+                case .noResponse:
+                    return false
+                case .useDefault:
+                    break
+                }
+                switch method {
+                case "initialize":
+                    locked {
+                        _initializationOptions =
+                            (message["params"] as? [String: Any])?[
+                                "initializationOptions"
+                            ]
+                    }
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [
+                            "capabilities": [
+                                "definitionProvider": definitionProvider,
+                                "referencesProvider": referencesProvider,
+                                "implementationProvider": true,
+                                "callHierarchyProvider": true,
+                            ],
+                        ],
+                    ])
+                    if closeOutputAfterInitialize {
+                        try output.close()
+                        done()
+                    }
+                case "textDocument/definition":
+                    let params = message["params"] as? [String: Any]
+                    let position = (params?["position"] as? [String: Any]) ?? [:]
+                    locked { _definedPositions.append(position) }
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [
+                            "uri": params
+                                .flatMap { $0["textDocument"] as? [String: Any] }
+                                .flatMap { $0["uri"] } ?? "file:///tmp/main.ts",
+                            "range": [
+                                "start": ["line": 0, "character": 0],
+                                "end": ["line": 0, "character": 1],
+                            ],
+                        ] as [String: Any],
+                    ])
+                case "textDocument/references":
+                    let params = message["params"] as? [String: Any]
+                    let position = (params?["position"] as? [String: Any]) ?? [:]
+                    locked { _referencesPositions.append(position) }
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": [[
+                            "uri": params
+                                .flatMap { $0["textDocument"] as? [String: Any] }
+                                .flatMap { $0["uri"] } ?? "file:///tmp/main.ts",
+                            "range": [
+                                "start": ["line": 0, "character": 0],
+                                "end": ["line": 0, "character": 1],
+                            ],
+                        ]],
+                    ])
+                case "shutdown":
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": NSNull(),
+                    ])
+                default:
+                    try write([
+                        "jsonrpc": "2.0", "id": id, "result": NSNull(),
+                    ])
+                }
+            } else if method == "textDocument/didOpen" {
+                let textDocument = (message["params"] as? [String: Any])?[
+                    "textDocument"
+                ] as? [String: Any]
+                locked {
+                    if let languageId = textDocument?["languageId"] as? String {
+                        _receivedLanguageIDs.append(languageId)
+                    }
                 }
             } else if method == "exit" {
                 try output.close()
