@@ -2171,9 +2171,9 @@ public final class AppModel {
 
 private func validateProductSupport(_ language: LanguageID) throws {
     switch language {
-    case .rust, .python:
+    case .rust, .python, .typescript:
         return
-    case .typescript, .javascript:
+    case .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
                 "CodeInsight app does not support \(String(describing: language))",

@@ -6,12 +6,12 @@ import Testing
 
 @MainActor
 @Test
-func unsupportedSavedLanguageDoesNotMutateProjectState() async throws {
+func unsupportedSavedJavaScriptDoesNotMutateProjectState() async throws {
     let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
     let snapshot = SessionCodec.Snapshot(
         projectRoot: root.path,
-        language: .typescript,
+        language: .javascript,
         revision: nil,
         activeTabOrdinal: nil,
         panelPreset: PanelPresetModel.reading.rawValue,
@@ -62,6 +62,40 @@ func savedPythonSessionRestoresWithPythonLanguageAndTree() async throws {
     #expect(session.manifest.files.map {
         session.paths.resolve($0.pathID)
     } == ["main.py"])
+}
+
+@MainActor
+@Test
+func savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() async throws {
+    let root = try sessionRestoreProject([
+        "src/a.ts": "export const a = 1\n",
+        "src/b.tsx": "export const b = <div />\n",
+        "ignored.js": "export const js = 1\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .typescript,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.projectLanguage == .typescript)
+    #expect(model.fileTree?.fileCount == 2)
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected ready TypeScript session after restore")
+        return
+    }
+    #expect(session.analysisProfile.language == .typescript)
+    #expect(session.manifest.files.map {
+        session.paths.resolve($0.pathID)
+    }.sorted() == ["src/a.ts", "src/b.tsx"])
 }
 
 @MainActor

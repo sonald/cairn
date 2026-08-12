@@ -128,15 +128,15 @@ func explicitOpenProjectForwardsLanguageAndRecordsPendingAsPython() {
 
 @MainActor
 @Test
-func unsupportedExplicitOpenDoesNotFallbackToRust() {
+func unsupportedJavaScriptExplicitOpenDoesNotFallbackToRust() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }
     let root = URL(fileURLWithPath: "/projects/unsupported", isDirectory: true)
 
-    fixture.controller.openProject(root: root, language: .typescript)
+    fixture.controller.openProject(root: root, language: .javascript)
 
-    #expect(fixture.controller.pendingRecentProjectLanguage == .typescript)
-    #expect(fixture.controller.lastOpenedProjectLanguage == .typescript)
+    #expect(fixture.controller.pendingRecentProjectLanguage == .javascript)
+    #expect(fixture.controller.lastOpenedProjectLanguage == .javascript)
     #expect(fixture.store.paths == [])
     guard case .empty = fixture.model.projectState else {
         Issue.record("unsupported open must stay empty, not fall back to Rust")
@@ -144,6 +144,26 @@ func unsupportedExplicitOpenDoesNotFallbackToRust() {
     }
     #expect(fixture.model.projectLanguage == nil)
     #expect(fixture.model.projectRoot == nil)
+}
+
+@MainActor
+@Test
+func explicitTypeScriptOpenForwardsLanguageAndBeginsIndexing() {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    let root = URL(fileURLWithPath: "/projects/ts-open", isDirectory: true)
+
+    fixture.controller.openProject(root: root, language: .typescript)
+
+    #expect(fixture.controller.pendingRecentProjectLanguage == .typescript)
+    #expect(fixture.controller.lastOpenedProjectLanguage == .typescript)
+    #expect(fixture.store.paths == [])
+    guard case .indexing = fixture.model.projectState else {
+        Issue.record("expected TypeScript open to begin indexing")
+        return
+    }
+    #expect(fixture.model.projectLanguage == .typescript)
+    #expect(fixture.model.projectRoot == root.standardizedFileURL)
 }
 
 @MainActor

@@ -545,6 +545,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         openProject(root: root, language: recentProjectsStore.language(for: root.standardizedFileURL.path))
     }
 
+    func retryLastOpenedProject() {
+        if let root = lastOpenedProjectRoot {
+            openProject(
+                root: root,
+                language: lastOpenedProjectLanguage ?? .rust
+            )
+        } else {
+            onChooseProject()
+        }
+    }
+
     func restoreSession(_ snapshot: SessionCodec.Snapshot) {
         cancelSessionRestore()
         let root = URL(
@@ -2018,15 +2029,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
 
         let retry = { [weak self] in
-            guard let self else { return }
-            if let root = lastOpenedProjectRoot {
-                openProject(
-                    root: root,
-                    language: lastOpenedProjectLanguage ?? .rust
-                )
-            } else {
-                onChooseProject()
-            }
+            _ = self?.retryLastOpenedProject()
         }
         switch model.projectState {
         case .empty:

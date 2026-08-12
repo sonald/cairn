@@ -2,9 +2,17 @@
 
 set -euo pipefail
 
-if [[ $# -lt 3 || $# -gt 4 || ! -d "$1" || ! -d "$2" || ! -f "$3" || \
-      ($# -eq 4 && ! -d "$4") ]]; then
-    echo "usage: bash scripts/run-self-tests.sh <git-repo> <non-git-dir> <open-file> [<python-git-repo>]" >&2
+if [[ $# -lt 3 || $# -gt 5 || ! -d "$1" || ! -d "$2" || ! -f "$3" || \
+      ($# -ge 4 && ! -d "$4") || ($# -eq 5 && ! -d "$5") ]]; then
+    cat >&2 <<'EOF'
+usage: bash scripts/run-self-tests.sh <git-repo> <non-git-dir> <open-file> [<python-git-repo> [<typescript-git-repo>]]
+
+Positional channels are frozen:
+  3 args            = 14 base channels
+  4th arg must be   Python (channel 15)
+  5th arg must be   Python then TypeScript (channel 16)
+Passing TypeScript as the 4th arg is not supported.
+EOF
     exit 2
 fi
 
@@ -13,7 +21,7 @@ non_git_root="$(cd "$2" && pwd -P)"
 open_file="$(cd "$(dirname "$3")" && pwd -P)/$(basename "$3")"
 
 python_repo=""
-if [[ $# -eq 4 ]]; then
+if [[ $# -ge 4 ]]; then
     python_repo="$(cd "$4" && pwd -P)"
     if ! git -C "$python_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
         echo "python-git-repo needs at least two commits: $python_repo" >&2
@@ -26,6 +34,32 @@ if [[ $# -eq 4 ]]; then
     if [[ ! -f "$python_repo/src/mcp/shared/memory.py" || \
           ! -f "$python_repo/src/mcp/server/fastmcp/server.py" ]]; then
         echo "python-git-repo missing fixed corpus files: $python_repo" >&2
+        exit 2
+    fi
+fi
+
+typescript_repo=""
+if [[ $# -eq 5 ]]; then
+    typescript_repo="$(cd "$5" && pwd -P)"
+    if ! git -C "$typescript_repo" rev-parse --verify 'HEAD~1^{commit}' >/dev/null 2>&1; then
+        echo "typescript-git-repo needs at least two commits: $typescript_repo" >&2
+        exit 2
+    fi
+    if [[ -n "$(git -C "$typescript_repo" status --porcelain)" ]]; then
+        echo "typescript-git-repo must be clean: $typescript_repo" >&2
+        exit 2
+    fi
+    ts_count="$(git -C "$typescript_repo" ls-files '*.ts' | \
+        grep -vc '\.d\.ts$' || true)"
+    tsx_count="$(git -C "$typescript_repo" ls-files '*.tsx' | wc -l | tr -d ' ')"
+    if [[ "$ts_count" -ne 2 || "$tsx_count" -ne 51 ]]; then
+        echo "typescript-git-repo must be pinned morphic ts=2 tsx=51 got ts=$ts_count tsx=$tsx_count" >&2
+        exit 2
+    fi
+    if [[ ! -f "$typescript_repo/tsconfig.json" || \
+          ! -f "$typescript_repo/package.json" || \
+          ! -f "$typescript_repo/bun.lockb" ]]; then
+        echo "typescript-git-repo missing tsconfig.json, package.json, or bun.lockb" >&2
         exit 2
     fi
 fi
@@ -143,6 +177,20 @@ if [[ -n "$python_repo" ]]; then
           -n "$python_status_after" ]]; then
         fail_count=$((fail_count + 1))
         echo "FAIL python repo changed during self-test repo=$python_repo" >&2
+    fi
+fi
+
+if [[ -n "$typescript_repo" ]]; then
+    typescript_head_before="$(git -C "$typescript_repo" rev-parse HEAD)"
+    typescript_status_before="$(git -C "$typescript_repo" status --porcelain)"
+    run_case typescript --self-test-typescript "$typescript_repo"
+    typescript_head_after="$(git -C "$typescript_repo" rev-parse HEAD)"
+    typescript_status_after="$(git -C "$typescript_repo" status --porcelain)"
+    if [[ "$typescript_head_before" != "$typescript_head_after" || \
+          "$typescript_status_before" != "$typescript_status_after" || \
+          -n "$typescript_status_after" ]]; then
+        fail_count=$((fail_count + 1))
+        echo "FAIL typescript repo changed during self-test repo=$typescript_repo" >&2
     fi
 fi
 

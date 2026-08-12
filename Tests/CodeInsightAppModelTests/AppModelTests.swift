@@ -673,20 +673,20 @@ func projectOpenPublishesFileTreeAsynchronously() async throws {
 
 @MainActor
 @Test
-func unsupportedLanguageOpenIsSynchronousAndAtomic() async {
+func unsupportedJavaScriptOpenIsSynchronousAndAtomic() async {
     let service = ControlledIndexService()
     let model = AppModel(indexService: service)
-    let root = URL(fileURLWithPath: "/tmp/typescript-project", isDirectory: true)
+    let root = URL(fileURLWithPath: "/tmp/javascript-project", isDirectory: true)
     let originalGeneration = model.generation
 
     do {
-        try model.openProject(root: root, language: .typescript)
+        try model.openProject(root: root, language: .javascript)
         Issue.record("expected unsupported language")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("typescript") == true
+                .contains("javascript") == true
         )
     } catch {
         Issue.record("unexpected error: \(error)")
@@ -700,6 +700,40 @@ func unsupportedLanguageOpenIsSynchronousAndAtomic() async {
     #expect(model.projectRoot == nil)
     #expect(model.generation == originalGeneration)
     #expect(await service.requestedLanguages().isEmpty)
+}
+
+@MainActor
+@Test
+func realIndexServiceOpensTypeScriptProjectAndPublishesTypeScriptSession() async throws {
+    let root = try temporaryProject([
+        "src/a.ts": "export const a = 1\n",
+        "src/b.tsx": "export const b = <div />\n",
+        "ignored.js": "export const js = 1\n",
+        "ignored.rs": "fn main() {}",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+
+    try model.openProject(root: root, language: .typescript)
+
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
+        model.snapshotPhase == .fullReady
+    })
+    #expect(model.projectLanguage == .typescript)
+    #expect(model.fileTree?.fileCount == 2)
+    #expect(model.fileTree?.selectionPath(
+        for: root.appendingPathComponent("src/a.ts")
+    )?.map(\.name) == ["src", "a.ts"])
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected ready TypeScript session")
+        return
+    }
+    #expect(session.analysisProfile.language == .typescript)
+    let manifestFiles = session.manifest.files.map {
+        session.paths.resolve($0.pathID)
+    }.sorted()
+    #expect(manifestFiles == ["src/a.ts", "src/b.tsx"])
+    #expect(model.availableFeatureSelections == [.defaultFeatures])
 }
 
 @MainActor
@@ -925,7 +959,7 @@ func realIndexServiceBuildsFixtureSession() async throws {
 }
 
 @Test
-func projectIndexServiceRejectsUnsupportedLanguageBeforeIO() async {
+func projectIndexServiceRejectsJavaScriptBeforeIO() async {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupportedService-\(UUID().uuidString)")
     let resolvedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
@@ -950,7 +984,7 @@ func projectIndexServiceRejectsUnsupportedLanguageBeforeIO() async {
 
     let service = ProjectIndexService()
     for operation in [
-        { try await service.index(root: root, language: .typescript) as Any },
+        { try await service.index(root: root, language: .javascript) as Any },
         {
             try await service.captureSnapshot(
                 root: root,
@@ -961,11 +995,11 @@ func projectIndexServiceRejectsUnsupportedLanguageBeforeIO() async {
     ] {
         do {
             _ = try await operation()
-            Issue.record("unsupported service operation unexpectedly succeeded")
+            Issue.record("unsupported JavaScript service operation unexpectedly succeeded")
         } catch let error as CocoaError {
             #expect(error.code == .featureUnsupported)
         } catch {
-            Issue.record("unsupported service operation reached I/O: \(error)")
+            Issue.record("unsupported JavaScript service operation reached I/O: \(error)")
         }
     }
     #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })

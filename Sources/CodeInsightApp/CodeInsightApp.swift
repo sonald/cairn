@@ -155,6 +155,14 @@ private struct CodeInsightApplication {
             ))
             Darwin.exit(2)
         }
+        let typescriptSelfTestRoot = arguments.firstIndex(of: "--self-test-typescript")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        if arguments.contains("--self-test-typescript"), typescriptSelfTestRoot == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-typescript <typescript-git-repo>\n".utf8
+            ))
+            Darwin.exit(2)
+        }
         let app = NSApplication.shared
         if let foldPerformance {
             app.setActivationPolicy(.prohibited)
@@ -307,17 +315,17 @@ private struct CodeInsightApplication {
             let runsSelfTest = arguments.contains {
                 $0.hasPrefix("--self-test") || $0.hasPrefix("--fold-perf")
             }
-            if pythonSelfTestRoot != nil {
+            if pythonSelfTestRoot != nil || typescriptSelfTestRoot != nil {
                 let pythonSelfTestID = UUID().uuidString
                 let pythonRecentStore = RecentProjectsStore(defaults: UserDefaults(
-                    suiteName: "CodeInsightPythonSelfTest-\(pythonSelfTestID)"
+                    suiteName: "CodeInsightLanguageSelfTest-\(pythonSelfTestID)"
                 )!)
                 delegate = AppDelegate(
                     startedAt: startedAt,
                     model: AppModel(
                         sessionURL: FileManager.default.temporaryDirectory
                             .appendingPathComponent(
-                                "CodeInsightPythonSelfTest-\(pythonSelfTestID).json"
+                                "CodeInsightLanguageSelfTest-\(pythonSelfTestID).json"
                             )
                     ),
                     recentProjectsStore: pythonRecentStore
@@ -336,6 +344,18 @@ private struct CodeInsightApplication {
                 Task { @MainActor in
                     await delegate.runPythonSelfTest(root: URL(
                         fileURLWithPath: pythonRoot,
+                        isDirectory: true
+                    ))
+                }
+                app.run()
+            }
+            return
+        }
+        if let typescriptRoot = typescriptSelfTestRoot {
+            withExtendedLifetime(delegate) {
+                Task { @MainActor in
+                    await delegate.runTypeScriptSelfTest(root: URL(
+                        fileURLWithPath: typescriptRoot,
                         isDirectory: true
                     ))
                 }
@@ -542,15 +562,19 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 fileMenu?.item(withTitle: "Quick Open…")?.keyEquivalent == "p"
                 && fileMenu?.item(withTitle: "Quick Open…")?
                     .keyEquivalentModifierMask == .command,
-            "fileMenuHasRustAndPythonOpen":
+            "fileMenuHasRustPythonAndTypeScriptOpen":
                 fileMenu?.item(withTitle: "Open Project…") != nil
-                && fileMenu?.item(withTitle: "Open Python Project…") != nil,
-            "paletteCollectsRustAndPythonOpen":
+                && fileMenu?.item(withTitle: "Open Python Project…") != nil
+                && fileMenu?.item(withTitle: "Open TypeScript Project…") != nil,
+            "paletteCollectsRustPythonAndTypeScriptOpen":
                 paletteCommands.contains {
                     $0.title == "File ▸ Open Project…"
                 }
                 && paletteCommands.contains {
                     $0.title == "File ▸ Open Python Project…"
+                }
+                && paletteCommands.contains {
+                    $0.title == "File ▸ Open TypeScript Project…"
                 },
             "commandPaletteUsesShiftCommandP":
                 goMenu?.item(withTitle: "Command Palette…")?
@@ -6087,6 +6111,604 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runTypeScriptSelfTest(root inputRoot: URL) async -> Never {
+        launch(offscreen: true, measuresIdleFootprint: false)
+        let startedAt = ContinuousClock.now
+        let root = inputRoot.standardizedFileURL
+        let tsxFile = root.appendingPathComponent(
+            "components/search-results-image.tsx"
+        ).standardizedFileURL
+        let tsFile = root.appendingPathComponent("lib/utils/index.ts")
+            .standardizedFileURL
+        let tsRelative = "lib/utils/index.ts"
+        let tsxRelative = "components/search-results-image.tsx"
+        let tsModel = self.model
+        let tsRecentStore = self.recentProjectsStore
+
+        func tsReady() -> Bool {
+            if case let .ready(session, _) = tsModel.projectState {
+                return session.analysisProfile.language == .typescript
+            }
+            return false
+        }
+        func finish(_ error: String) -> Never {
+            finishTypeScriptSelfTest(
+                error: error,
+                startedAt: startedAt
+            )
+        }
+        func tsWait(
+            timeout: TimeInterval,
+            _ condition: @escaping () -> Bool
+        ) async -> Bool {
+            let deadline = Date(timeIntervalSinceNow: timeout)
+            while Date() < deadline {
+                if condition() { return true }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            return condition()
+        }
+
+        guard let controller = windowController else {
+            finish("window unavailable")
+        }
+        guard previousCommitRevision(root: root) != nil else {
+            finish("HEAD~1 unavailable")
+        }
+
+        controller.openProject(root: root, language: .typescript)
+        guard await tsWait(timeout: 180, {
+            if case .failed = tsModel.projectState { return true }
+            if case .ready = tsModel.projectState {
+                return tsModel.fileTree != nil
+                    && !tsModel.commitPicker.isLoading
+                    && tsModel.snapshotPhase == .fullReady
+                    && tsReady()
+            }
+            return false
+        }), case let .ready(session, context) = tsModel.projectState,
+              tsModel.snapshotPhase == .fullReady,
+              tsModel.fileTree != nil,
+              session.analysisProfile.language == .typescript,
+              let previousRevision = tsModel.commitPicker.commits
+                .dropFirst().first?.fullSHA
+        else {
+            finish("typescript project or HEAD~1 commit unavailable")
+        }
+        let coldSession = session
+        let coldContext = context
+        let coldStats = coldSession.stats
+        let manifestFiles = coldSession.manifest.files.map {
+            coldSession.paths.resolve($0.pathID)
+        }.sorted()
+        let badManifestPaths = manifestFiles.filter {
+            !($0.hasSuffix(".ts") || $0.hasSuffix(".tsx"))
+                || $0.hasSuffix(".d.ts")
+        }
+        let treeFiles = pythonFiles(in: tsModel.fileTree?.children ?? [])
+        let tsCount = treeFiles.filter { $0.pathExtension == "ts" }.count
+        let tsxCount = treeFiles.filter { $0.pathExtension == "tsx" }.count
+        let treeOnlyTS = !treeFiles.isEmpty && treeFiles.allSatisfy {
+            $0.pathExtension == "ts" || $0.pathExtension == "tsx"
+        }
+        let manifestHasTsAndTsx = manifestFiles.contains(tsRelative)
+            && manifestFiles.contains(tsxRelative)
+        let manifestNoJavaScript = !manifestFiles.contains {
+            $0.hasSuffix(".js") || $0.hasSuffix(".jsx")
+        }
+        guard treeOnlyTS, badManifestPaths.isEmpty,
+              manifestHasTsAndTsx, manifestNoJavaScript
+        else {
+            finish("TypeScript tree/manifest contained unsupported paths: "
+                + "\(badManifestPaths) files=\(manifestFiles)")
+        }
+        let profileUnit = coldSession.analysisProfile.projectUnitName
+        Self.writeJSON([
+            "step": "cold-open",
+            "language": "typescript",
+            "projectUnit": profileUnit,
+            "tsCount": tsCount,
+            "tsxCount": tsxCount,
+            "fileCount": treeFiles.count,
+            "reused": coldStats.reusedCount,
+            "extracted": coldStats.extractedCount,
+            "snapshotPhase": tsModel.snapshotPhase?.rawValue as Any,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        guard await tsWait(timeout: 90, {
+            tsModel.exactCoordinator.readiness == .ready
+        }), let attribution = tsModel.exactCoordinator.attribution
+        else {
+            finish("TypeScript provider missing/unready: "
+                + "\(tsModel.exactCoordinator.readiness)")
+        }
+
+        var searchHitTSX = false
+        do {
+            let contentHits = try await contentSearchHits(
+                session: coldSession,
+                context: coldContext,
+                query: ContentSearchQuery(
+                    pattern: "SearchResultsImageSection",
+                    caseSensitive: true
+                )
+            )
+            let symbolHits = try coldSession.searchSymbols(
+                query: "SearchResultsImageSection",
+                limit: 20,
+                boost: SearchBoost(),
+                context: coldContext
+            )
+            guard contentHits.contains(where: {
+                $0.hasSuffix(tsxRelative)
+            }), symbolHits.contains(where: {
+                $0.path.hasSuffix(tsxRelative)
+            })
+            else {
+                finish("search did not hit search-results-image.tsx")
+            }
+            searchHitTSX = true
+            Self.writeJSON([
+                "step": "search",
+                "contentHit": tsxRelative,
+                "symbolHit": tsxRelative,
+                "elapsedMS": milliseconds(since: startedAt),
+            ])
+        } catch {
+            finish("search failed: \(error)")
+        }
+
+        for (label, file, mode) in [
+            ("ts", tsFile, LanguageMode(language: .typescript)),
+            ("tsx", tsxFile, LanguageMode(language: .typescript, variant: "tsx")),
+        ] {
+            guard controller.selectFileInSidebar(file),
+                  await tsWait(timeout: 30, {
+                      controller.displayedReaderFile?.standardizedFileURL
+                          == file.standardizedFileURL
+                          && tsModel.tabStrip.activeDocument != nil
+                          && controller.selfTestStyledFragmentCount > 0
+                  }),
+                  let activeDocument = tsModel.tabStrip.activeDocument,
+                  !activeDocument.outlineFacets.isEmpty,
+                  !activeDocument.foldRegions.isEmpty,
+                  activeDocument.languageMode == mode
+            else {
+                finish("Reader/outline/fold/mode unavailable for " + label)
+            }
+        }
+
+        let activeDocument = tsModel.tabStrip.activeDocument
+        let tsxModeExplicit = activeDocument?.languageMode.variant == "tsx"
+        let outlineCount = activeDocument?.outlineFacets.count ?? 0
+        let bindingCount = activeDocument?.localBindings.count ?? 0
+        let localReferenceCount = activeDocument?.referencesByBinding
+            .compactMap(\.count).reduce(0, +) ?? 0
+        let foldRegions = activeDocument?.foldRegions.count ?? 0
+        let styledFragments = controller.selfTestStyledFragmentCount
+        guard tsxModeExplicit, outlineCount > 0, bindingCount > 0,
+              localReferenceCount > 0, foldRegions > 0,
+              styledFragments > 0
+        else {
+            finish("TSX Reader/outline/local reference unavailable")
+        }
+        let profileTitle = controller.selfTestProfileTitle
+        let profileMenu = controller.selfTestProfileMenuTitles
+        let profileMenuText = profileMenu.joined(separator: " ")
+        let profileHasNoCargo = profileTitle.localizedCaseInsensitiveContains(
+            "TypeScript"
+        )
+            && profileTitle.localizedCaseInsensitiveContains("tsconfig")
+            && !profileTitle.localizedCaseInsensitiveContains("features")
+            && !profileMenuText.localizedCaseInsensitiveContains(
+                "features"
+            )
+            && !profileMenuText.localizedCaseInsensitiveContains(
+                "edition"
+            )
+            && profileMenuText.contains("Trust This Repository")
+        let tsxSource = (try? String(
+            contentsOf: tsxFile,
+            encoding: .utf8
+        )) ?? ""
+        let relativeFile = "components/chat.tsx"
+        let relativeSource = (try? String(
+            contentsOf: root.appendingPathComponent(relativeFile),
+            encoding: .utf8
+        )) ?? ""
+        let relativeImportOffset: UInt32
+        if let range = relativeSource.range(of: "import { ChatPanel }"),
+           let tokenStart = relativeSource.range(
+               of: "ChatPanel",
+               range: range.lowerBound..<relativeSource.endIndex
+           )?.lowerBound,
+           let offset = UInt32(exactly: relativeSource.utf8.distance(
+               from: relativeSource.utf8.startIndex,
+               to: tokenStart
+        ))
+        {
+            relativeImportOffset = offset
+        } else {
+            finish("relative import ChatPanel token offset unavailable")
+        }
+        let relativeResolutions = (try? coldSession.resolve(
+            file: coldSession.paths.intern(relativeFile),
+            offset: relativeImportOffset,
+            context: coldContext
+        )) ?? []
+        let relativeCandidate = relativeResolutions.first
+        let relativeTarget = relativeCandidate.map {
+            coldSession.paths.resolve($0.target.pathID)
+        }
+        let fuzzyRelativeResolved =
+            relativeTarget == "components/chat-panel.tsx"
+            && relativeCandidate?.certainty == .probable
+            && relativeCandidate?.completeness == .partial
+        guard fuzzyRelativeResolved else {
+            finish(
+                "fuzzy-relative did not match frozen import binding contract: "
+                    + "target=\(relativeTarget as Any)"
+                    + " certainty=\(String(describing: relativeCandidate?.certainty))"
+                    + " completeness=\(String(describing: relativeCandidate?.completeness))"
+            )
+        }
+        Self.writeJSON([
+            "step": "fuzzy-relative",
+            "file": relativeFile,
+            "offset": Int(relativeImportOffset),
+            "resolved": fuzzyRelativeResolved,
+            "target": relativeTarget as Any,
+            "certainty": relativeResolutions.map { $0.certainty.rawValue },
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let aliasImportOffset: UInt32
+        if let range = tsxSource.range(of: "Card"),
+           let offset = UInt32(exactly: tsxSource.utf8.distance(
+               from: tsxSource.utf8.startIndex,
+               to: range.lowerBound
+           ))
+        {
+            aliasImportOffset = offset
+        } else {
+            finish("alias import offset unavailable")
+        }
+        let aliasResolutions = (try? coldSession.resolve(
+            file: coldSession.paths.intern(tsxRelative),
+            offset: aliasImportOffset,
+            context: coldContext
+        )) ?? []
+        let fuzzyAliasUnresolved = aliasResolutions.isEmpty
+            || aliasResolutions.allSatisfy {
+                $0.certainty == .unresolved
+            }
+        let exactCardDefinitions = await tsModel.exactCoordinator.definition(
+            file: tsxRelative,
+            byteOffset: aliasImportOffset,
+            generation: coldContext.generation
+        )
+        let exactCardResolved = if case .completed(let entries) =
+            exactCardDefinitions
+        {
+            !entries.isEmpty && entries.contains {
+                $0.location.file.hasSuffix("components/ui/card.tsx")
+            }
+        } else {
+            false
+        }
+        let attributionMatches = attribution.provider
+            == "typescript-language-server"
+        Self.writeJSON([
+            "step": "alias",
+            "file": tsxRelative,
+            "offset": Int(aliasImportOffset),
+            "fuzzyUnresolved": fuzzyAliasUnresolved,
+            "exactCardResolved": exactCardResolved,
+            "provider": attribution.provider,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        guard fuzzyAliasUnresolved, exactCardResolved, attributionMatches else {
+            finish("alias fuzzy should stay unresolved, exact Card must resolve, provider must be typescript-language-server")
+        }
+
+        guard let sectionSymbol = (
+            try? coldSession.searchSymbols(
+                query: "SearchResultsImageSection",
+                limit: 20,
+                boost: SearchBoost(),
+                context: coldContext
+            ).first(where: {
+                $0.path.hasSuffix("components/search-results-image.tsx")
+            })?.occurrence
+        ) else {
+            finish("SearchResultsImageSection symbol unavailable")
+        }
+        await tsModel.relationTree.setRoot(
+            target: .engine(sectionSymbol),
+            direction: .references
+        )?.value
+        var exactReferences = false
+        let refsDeadline = Date(timeIntervalSinceNow: 60)
+        while Date() < refsDeadline {
+            if let root = tsModel.relationTree.root,
+               !(root.children?.contains { $0.kind == .loading } ?? true)
+            {
+                exactReferences = !exactRelationEdges(in: tsModel).isEmpty
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        if exactReferences == false {
+            exactReferences = !exactRelationEdges(in: tsModel).isEmpty
+        }
+        guard exactReferences else {
+            finish("TypeScript references unavailable")
+        }
+        Self.writeJSON([
+            "step": "real-typescript-exact",
+            "provider": attribution.provider,
+            "toolVersion": attribution.toolVersion,
+            "definitionTargets": exactCardDefinitions.map {
+                if case .completed(let entries) = $0 {
+                    return entries.count
+                }
+                return 0
+            } ?? 0,
+            "exactReferences": exactReferences,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let compareFile = tsxFile
+        guard let worktreeBytes = try? Array(Data(contentsOf: compareFile)),
+              let commitSnapshot = try? CommitSnapshot(
+                  repositoryURL: root,
+                  revision: previousRevision
+              ),
+              let commitBytes = try? commitSnapshot.readBytes(
+                  path: tsxRelative
+              ),
+              worktreeBytes != commitBytes
+        else {
+            finish("compare fixture or HEAD~1 diff unavailable")
+        }
+        controller.openFileForSelfTest(compareFile)
+        guard await tsWait(timeout: 30, {
+            tsModel.selectedFile?.standardizedFileURL
+                == compareFile.standardizedFileURL
+                && controller.displayedReaderFile?.standardizedFileURL
+                    == compareFile.standardizedFileURL
+        }) else {
+            finish("compare main reader did not open")
+        }
+        controller.applyPanelPreset(.compare)
+        guard controller.selectCompareCommit(previousRevision) else {
+            finish("compare commit picker did not select")
+        }
+        guard await tsWait(timeout: 60, {
+            tsModel.compare.diff != nil
+                && tsModel.compare.diff?.hunks.isEmpty == false
+                && tsModel.compare.diff?.truncated == false
+                && tsModel.compare.rightRevision == previousRevision
+                && controller.selfTestRightReaderBytes != nil
+        }) else {
+            finish("compare HEAD~1 did not finish")
+        }
+        let rightBytes = controller.selfTestRightReaderBytes ?? []
+        let compareRightMatchesCommit = rightBytes == commitBytes
+        let compareRightDiffersFromWorktree = rightBytes != worktreeBytes
+        let compareHunksNonempty =
+            (tsModel.compare.diff?.hunks.isEmpty == false)
+        guard compareRightMatchesCommit, compareRightDiffersFromWorktree else {
+            finish("compare right reader mismatch")
+        }
+        Self.writeJSON([
+            "step": "compare",
+            "diffHunks": tsModel.compare.diff?.hunks.count ?? 0,
+            "truncated": tsModel.compare.diff?.truncated ?? true,
+            "rightReaderMatchesCommit": compareRightMatchesCommit,
+            "rightReaderDiffersFromWorktree": compareRightDiffersFromWorktree,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        var switchToCommitTypeScript = false
+        tsModel.switchToCommit(previousRevision)
+        guard await tsWait(timeout: 180, {
+            tsModel.snapshotPhase == .fullReady
+                && tsModel.currentRevision != nil
+                && tsModel.exactCoordinator.readiness == .ready
+                && tsReady()
+        }) else {
+            finish("switchToCommit did not finish TypeScript")
+        }
+        switchToCommitTypeScript = true
+        let commitStats = if case let .ready(s, _) = tsModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        var switchToWorktreeTypeScript = false
+        tsModel.switchToWorktree()
+        guard await tsWait(timeout: 180, {
+            tsModel.currentRevision == nil
+                && tsModel.snapshotPhase == .fullReady
+                && tsModel.exactCoordinator.readiness == .ready
+                && tsReady()
+        }) else {
+            finish("switchToWorktree did not finish TypeScript")
+        }
+        switchToWorktreeTypeScript = true
+        let worktreeStats = if case let .ready(s, _) = tsModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        Self.writeJSON([
+            "step": "switch",
+            "commitReused": commitStats.reusedCount,
+            "commitExtracted": commitStats.extractedCount,
+            "worktreeReused": worktreeStats.reusedCount,
+            "worktreeExtracted": worktreeStats.extractedCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        var retryReopenTypeScript = false
+        controller.retryLastOpenedProject()
+        guard await tsWait(timeout: 180, {
+            tsModel.snapshotPhase == .fullReady
+                && tsModel.exactCoordinator.readiness == .ready
+                && tsReady()
+        }) else {
+            finish("retry reopen did not finish TypeScript")
+        }
+        let retryStats = if case let .ready(s, _) = tsModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        retryReopenTypeScript = true
+        Self.writeJSON([
+            "step": "retry-reopen",
+            "fileCount": tsModel.fileTree?.fileCount ?? 0,
+            "reused": retryStats.reusedCount,
+            "extracted": retryStats.extractedCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        controller.checkpointSessionSynchronously()
+        guard let persisted = tsModel.loadSessionSnapshot().snapshot,
+              persisted.language == .typescript
+        else {
+            finish("session checkpoint language not TypeScript")
+        }
+        tsRecentStore.record(root, language: .typescript)
+        var recentReopenTypeScript = false
+        controller.openRecentProject(root)
+        guard await tsWait(timeout: 180, {
+            tsModel.snapshotPhase == .fullReady
+                && tsModel.exactCoordinator.readiness == .ready
+                && tsReady()
+        }) else {
+            finish("recent reopen did not finish TypeScript")
+        }
+        recentReopenTypeScript = true
+        let hotStats = if case let .ready(s, _) = tsModel.projectState {
+            s.stats
+        } else {
+            coldStats
+        }
+        guard hotStats.reusedCount > 0 else {
+            finish("recent reopen did not reuse cache")
+        }
+        Self.writeJSON([
+            "step": "hot-recent",
+            "fileCount": tsModel.fileTree?.fileCount ?? 0,
+            "reused": hotStats.reusedCount,
+            "extracted": hotStats.extractedCount,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let generationBeforeRestore = tsModel.generation
+        var sessionRestoreTypeScript = false
+        controller.restoreSession(persisted)
+        guard await tsWait(timeout: 180, {
+            tsModel.generation != generationBeforeRestore
+                && tsModel.snapshotPhase == .fullReady
+                && tsModel.exactCoordinator.readiness == .ready
+                && tsReady()
+        }) else {
+            finish("session restore did not finish TypeScript")
+        }
+        sessionRestoreTypeScript = true
+        tsRecentStore.clear()
+
+        let checks = [
+            "treeOnlyTypeScript": treeOnlyTS,
+            "treeHasTsAndTsx": tsCount == 2 && tsxCount == 51,
+            "manifestHasTsAndTsx": manifestHasTsAndTsx,
+            "manifestNoJavaScript": manifestNoJavaScript,
+            "searchHitTSX": searchHitTSX,
+            "profileUnitTSConfig": profileUnit == "tsconfig.json",
+            "profileHasNoCargo": profileHasNoCargo,
+            "coldReusedZero": coldStats.reusedCount == 0,
+            "coldExtractedPositive": coldStats.extractedCount > 0,
+            "tsxReaderExplicitMode": tsxModeExplicit,
+            "readerOutlineReady": outlineCount > 0,
+            "localReferencesReady": localReferenceCount > 0,
+            "styledFragmentsReady": styledFragments > 0,
+            "foldRegionsReady": foldRegions > 0,
+            "fuzzyRelativeResolved": fuzzyRelativeResolved,
+            "fuzzyAliasUnresolved": fuzzyAliasUnresolved,
+            "exactCardDefinition": exactCardResolved,
+            "exactReferences": exactReferences,
+            "providerMatchesTypeScriptLanguageServer": attributionMatches,
+            "compareHunksNonempty": compareHunksNonempty,
+            "compareRightMatchesCommit": compareRightMatchesCommit,
+            "compareRightDiffers": compareRightDiffersFromWorktree,
+            "switchToCommitTypeScript": switchToCommitTypeScript,
+            "switchToWorktreeTypeScript": switchToWorktreeTypeScript,
+            "retryReopenTypeScript": retryReopenTypeScript,
+            "recentReopenTypeScript": recentReopenTypeScript,
+            "hotReusedPositive": hotStats.reusedCount > 0,
+            "sessionRestoreTypeScript": sessionRestoreTypeScript,
+        ]
+        finishTypeScriptSelfTest(
+            coldFileCount: treeFiles.count,
+            coldReused: coldStats.reusedCount,
+            coldExtracted: coldStats.extractedCount,
+            hotFileCount: tsModel.fileTree?.fileCount ?? 0,
+            hotReused: hotStats.reusedCount,
+            hotExtracted: hotStats.extractedCount,
+            checks: checks,
+            startedAt: startedAt
+        )
+    }
+
+    private func finishTypeScriptSelfTest(
+        coldFileCount: Int,
+        coldReused: Int,
+        coldExtracted: Int,
+        hotFileCount: Int,
+        hotReused: Int,
+        hotExtracted: Int,
+        checks: [String: Bool],
+        startedAt: ContinuousClock.Instant
+    ) -> Never {
+        let passed = checks.values.allSatisfy { $0 }
+        Self.writeJSON([
+            "step": "summary",
+            "channel": "typescript",
+            "passed": passed,
+            "cold": [
+                "fileCount": coldFileCount,
+                "reused": coldReused,
+                "extracted": coldExtracted,
+            ],
+            "hot": [
+                "fileCount": hotFileCount,
+                "reused": hotReused,
+                "extracted": hotExtracted,
+            ],
+            "checks": checks,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        Self.exitSelfTest(channel: "typescript", status: passed ? 0 : 1)
+    }
+
+    private func finishTypeScriptSelfTest(
+        error: String,
+        startedAt: ContinuousClock.Instant
+    ) -> Never {
+        Self.writeJSON([
+            "step": "summary",
+            "channel": "typescript",
+            "passed": false,
+            "error": error,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        Self.exitSelfTest(channel: "typescript", status: 1)
+    }
+
     // Pixel-level acceptance for the gutter-aligned vertical line that used to
     // bleed from the reader ruler into the tab strip (macOS 14+ clipsToBounds
     // default change). Opens a real on-screen window, opens one and two tabs,
@@ -6471,6 +7093,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         chooseProject(language: .python)
     }
 
+    @objc private func openTypeScriptProject(_ sender: Any?) {
+        chooseProject(language: .typescript)
+    }
+
     private func chooseProject(language: LanguageID) {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
@@ -6498,6 +7124,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         } ?? "Choose the project language."
         alert.addButton(withTitle: "Rust")
         alert.addButton(withTitle: "Python")
+        alert.addButton(withTitle: "TypeScript")
         alert.addButton(withTitle: "Cancel")
         switch alert.runModal() {
         case .alertFirstButtonReturn:
@@ -6511,6 +7138,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 windowController?.openProject(root: root, language: .python)
             } else {
                 chooseProject(language: .python)
+            }
+        case .alertThirdButtonReturn:
+            if let root {
+                windowController?.openProject(root: root, language: .typescript)
+            } else {
+                chooseProject(language: .typescript)
             }
         default:
             break
@@ -6881,6 +7514,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openPythonItem.target = self
         fileMenu.addItem(openPythonItem)
+        let openTypeScriptItem = NSMenuItem(
+            title: "Open TypeScript Project…",
+            action: #selector(openTypeScriptProject(_:)),
+            keyEquivalent: ""
+        )
+        openTypeScriptItem.target = self
+        fileMenu.addItem(openTypeScriptItem)
         let quickOpenItem = NSMenuItem(
             title: "Quick Open…",
             action: #selector(quickOpen(_:)),
