@@ -29,6 +29,17 @@ public struct LanguageMode: Codable, Hashable, Sendable {
             }
             return LanguageMode(language: .python)
         case .typescript, .javascript:
+            guard language == .typescript else { return nil }
+            if path.hasSuffix(".ts")
+                && !path.hasSuffix(".d.ts")
+                && !path.hasSuffix(".mts")
+                && !path.hasSuffix(".cts")
+            {
+                return LanguageMode(language: .typescript)
+            }
+            if path.hasSuffix(".tsx") {
+                return LanguageMode(language: .typescript, variant: "tsx")
+            }
             return nil
         }
     }

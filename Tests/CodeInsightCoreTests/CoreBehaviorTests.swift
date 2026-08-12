@@ -64,6 +64,46 @@ func languageModeUsesStableIdentityAndOneRustPathClassifier() throws {
 }
 
 @Test
+func typescriptClassifierMatchesF1bMatrixAndKeepsTsTsxKeysDistinct() throws {
+    func mode(_ path: String, _ expected: LanguageMode?) {
+        #expect(LanguageMode.classify(path: path, language: .typescript) == expected)
+    }
+
+    mode("src/lib.ts", LanguageMode(language: .typescript))
+    mode("src/lib.tsx", LanguageMode(language: .typescript, variant: "tsx"))
+    mode("src/lib.d.ts", nil)
+    mode("src/lib.mts", nil)
+    mode("src/lib.cts", nil)
+    mode("src/lib.d.mts", nil)
+    mode("src/lib.d.cts", nil)
+    mode("src/lib.js", nil)
+    mode("src/lib.jsx", nil)
+    mode("src/lib.TS", nil)
+    mode("src/lib.Tsx", nil)
+    mode("src/lib.tSX", nil)
+    mode("src/lib.d.TS", nil)
+
+    let bytes = Array("export const value = 1\n".utf8)
+    let contentID = ContentID.sha256(of: bytes)
+    let tsKey = ContentIndexKey(
+        contentID: contentID,
+        languageMode: LanguageMode(language: .typescript),
+        grammarVersion: 1,
+        extractorVersion: 1
+    )
+    let tsxKey = ContentIndexKey(
+        contentID: contentID,
+        languageMode: LanguageMode(language: .typescript, variant: "tsx"),
+        grammarVersion: 1,
+        extractorVersion: 1
+    )
+    #expect(tsKey != tsxKey)
+
+    let encoded = try JSONEncoder().encode(tsxKey)
+    #expect(try JSONDecoder().decode(ContentIndexKey.self, from: encoded) == tsxKey)
+}
+
+@Test
 func pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() throws {
     let rawKinds: [(DeclarationKind, UInt8)] = [
         (.rustFn, 0),

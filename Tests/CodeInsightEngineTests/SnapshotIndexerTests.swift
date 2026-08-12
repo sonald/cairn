@@ -20,6 +20,12 @@ func cacheKeyUsesStableLengthFramedLanguageModeIdentity() {
     )
 
     #expect(cacheKey(for: key) == "1:2#00ab:0:n:1:7")
+    #expect(cacheKey(for: ContentIndexKey(
+        contentID: key.contentID,
+        languageMode: LanguageMode(language: .python),
+        grammarVersion: key.grammarVersion,
+        extractorVersion: key.extractorVersion
+    )) == "1:2#00ab:1:n:1:7")
 
     func typescriptKey(variant: String?) -> String {
         cacheKey(for: ContentIndexKey(
@@ -35,8 +41,11 @@ func cacheKeyUsesStableLengthFramedLanguageModeIdentity() {
         typescriptKey(variant: ""),
         typescriptKey(variant: "a:b"),
     ]).count == 3)
+    #expect(typescriptKey(variant: "ts") == "1:2#00ab:2:v2#7473:1:7")
+    #expect(typescriptKey(variant: "tsx") == "1:2#00ab:2:v3#747378:1:7")
     #expect(typescriptKey(variant: "caf\u{e9}")
         == typescriptKey(variant: "cafe\u{301}"))
+    #expect(typescriptKey(variant: "caf\u{e9}") == "1:2#00ab:2:v5#636166c3a9:1:7")
 }
 
 @Test
