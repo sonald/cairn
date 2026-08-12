@@ -462,3 +462,111 @@ Package.resolved                                     a24e48a32ea8f7c994a712f1265
 `git diff --check` exits `0`. The only modified file in this C2 evidence
 pass is `docs/plans/evidence/l2-typescript/l2-acceptance.md`; nothing staged or
 committed.
+
+## C3 Exact checkpoint
+
+> Executed against HEAD `eb067f4a9af0a2f70baf45227272093596ea9acc`.
+> Scope: `docs/plans/l2-typescript-plan.md` C3; verification is a mixture of
+> live runs below and P0-recorded evidence reused for provider-level security/
+> lifecycle behavior. This checkpoint does not claim a fresh real rerun for
+> items explicitly marked "P0 recorded + focused test coverage".
+
+### Focused suites (live, this checkpoint)
+
+Commands used the repo-local `CLANG_MODULE_CACHE_PATH` /
+`SWIFTPM_MODULECACHE_OVERRIDE` convention from `scripts/ci.sh`.
+
+```text
+CodeInsightExactTests   85/85 PASS (exit 0)
+ExactCoordinatorTests    38/38 PASS (exit 0)
+SnapshotSwitchTests      19/19 PASS (exit 0)
+CodeInsightAppModelTests 231/231 PASS (exit 0)
+```
+
+`CodeInsightExactTests` includes provider negotiation, fake TS session
+definition/references, batch cancel, restart-exhaustion, descendant/process
+group cleanup, sandbox deny-network, and materializer tests. The previous
+stale `exactProfileKeyHashesCargoFileBytes` expectation (which still asserted
+`.typescript` was not a supported exact fingerprint) was fixed on `eb067f4`,
+so the suite is now green.
+
+`ExactCoordinatorTests` includes the TS-specific contract cases:
+`exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly`,
+`exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider`,
+`exactCoordinatorReportsMissingTypeScriptProvider`,
+`exactTypeScriptProfileTracksConfigPackageAndLockFingerprints`,
+`exactCoordinatorFiltersDeferredTypeScriptTargets`, and
+`exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath`.
+
+### App validator still rejects TypeScript
+
+Live `CodeInsightAppModelTests` include:
+
+- `unsupportedLanguageOpenIsSynchronousAndAtomic`: `AppModel.openProject(
+  root:, language: .typescript)` throws `featureUnsupported` before I/O and
+  does not mutate project state.
+- `projectIndexServiceRejectsUnsupportedLanguageBeforeIO`: project indexing
+  service rejects `.typescript` before I/O.
+- `unsupportedSavedLanguageDoesNotMutateProjectState`: a saved session with a
+  `.typescript` language is not restored.
+
+Production validator still rejects:
+
+```text
+Sources/CodeInsightAppModel/AppModel.swift
+private func validateProductSupport(_ language: LanguageID) throws
+  case .rust, .python: return
+  case .typescript, .javascript: throw .featureUnsupported
+```
+
+### Host real provider probe (live, exit 0)
+
+Temporary harness `/private/tmp/ts-f6a-provider-harness` (hot modified only
+under `Sources/harness/main.swift`, not repo-owned) ran against the production
+`TypeScriptLanguageServerProvider` with `swift run --disable-sandbox harness`.
+It sends TS and TSX didOpen/definition/references through the same provider and
+session code paths.
+
+```text
+TOOL_VERSION language-server 3.3.0 | typescript 5.0.2 | node v26.7.0
+TS_DEF_OFFSET 27 -> completed(main.ts byteOffset 27)
+TS_REFS main.ts byteOffset 27
+
+component.tsx:
+  TSX_DEF_OFFSET 16 -> completed(component.tsx byteOffset 16)
+  TSX_EXPORT_REFS -> component.tsx byteOffset 16
+consumer.tsx (cross-file):
+  TSX_CONSUMER_IMPORT_DEF -> component.tsx byteOffset 16
+  TSX_CONSUMER_IMPORT_REFS -> consumer.tsx byteOffset 9,
+        consumer.tsx byteOffset 58 (JSX use), component.tsx byteOffset 16
+  TSX_JSX_USE_OFFSET 58 -> same three locations
+CLOSED DONE
+```
+
+After `CLOSED DONE`, a process check found no remaining
+`typescript-language-server`, `tsserver`, or `cli.mjs` process.
+
+### Security/lifecycle/historical matrix
+
+The following are **not** claimed as fresh real reruns in this session; they
+are P0 recorded evidence plus current focused test coverage:
+
+| Requirement | Source |
+|---|---|
+| deny-network / zero-write / no-plugin | P0 recorded sandbox args `(deny network*)`, project-write/cache-write rows, ATA/plugin argv control; current `CodeInsightExactTests` sandbox deny tests (`sandboxDeniesNetworkToLocalListener`, `sandboxDeniesProjectWrites`, etc.) |
+| cancel / restart / descendant cleanup | P0 recorded real cancel transcript and ABRT/KILL/restart rows; current `ExactRequestBatch`, `typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable`, and lifecycle/process-guard tests |
+| historical materialization | P0 recorded Materializer `HEAD~1` evidence; current `exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath` pass |
+
+No real-provider security/lifecycle row was claimed as a fresh live rerun in
+this C3 checkpoint unless explicitly labeled "live" above.
+
+### Corpus and repo state
+
+Morphic stayed at `f31fe4a9ce2d355c3a44203fcb6add9296cc9b61` with a clean
+porcelain status before and after the suites and the harness run. The
+repository checkout remained clean apart from this evidence file; nothing was
+staged or committed.
+
+C3 does not make a full CI/V0 product-support claim: the product validator
+still rejects `.typescript`, and several provider-level security/lifecycle rows
+remain P0-recorded rather than rerun in this checkpoint.
