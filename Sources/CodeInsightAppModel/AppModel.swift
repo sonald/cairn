@@ -402,10 +402,10 @@ public final class AppModel {
     }
 
     public var availableFeatureSelections: [FeatureSelection] {
-        guard activeAnalysisProfileDisplay?.language == .python else {
-            return FeatureSelection.allCases
+        guard activeAnalysisProfileDisplay?.language == .rust else {
+            return [.defaultFeatures]
         }
-        return [.defaultFeatures]
+        return FeatureSelection.allCases
     }
 
     private let indexService: any IndexService
@@ -986,7 +986,7 @@ public final class AppModel {
     public func switchFeatureSelection(_ featureSelection: FeatureSelection) {
         guard snapshotPhase == .fullReady,
               case let .ready(session, _) = projectState,
-              session.analysisProfile.language != .python,
+              session.analysisProfile.language == .rust,
               session.analysisProfile.featureSelection != featureSelection
         else { return }
         let activeRelation = relationTree.root?.symbol.map {

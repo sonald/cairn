@@ -38,6 +38,32 @@ func sessionCodecPersistsLanguageAndMigratesMissingLanguageToRust() throws {
 }
 
 @Test
+func sessionCodecRoundTripsTypeScriptRawValueTwo() throws {
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/ts-project",
+        language: .typescript,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let object = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    #expect(object["language"] as? Int == 2)
+    #expect(try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    ).language == .typescript)
+}
+
+@Test
 func sessionCodecRoundTripsTaggedTabsAndEveryFrozenInspectorField() throws {
     let capturedAt = Date(timeIntervalSince1970: 1_786_270_000.125)
     let excerpt = sessionExcerpt(capturedAt: capturedAt)

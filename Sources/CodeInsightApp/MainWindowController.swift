@@ -1872,7 +1872,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         let base = "\(Self.displayName(for: profile.language))"
             + " · \(profile.projectUnitName)"
-        guard profile.language == .python else {
+        guard profile.language == .rust else {
             return base
                 + " · \(Self.displayName(for: profile.featureSelection))"
                 + " · \(trust)"
@@ -1948,12 +1948,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let edition = profile.edition.map { "edition \($0)" }
             ?? "edition unknown"
         let currentTitle: String
-        if profile.language == .python {
-            currentTitle = "Current unit: \(profile.projectUnitName) · \(trust)"
-        } else {
+        if profile.language == .rust {
             currentTitle = "Current unit: \(profile.projectUnitName)"
                 + " · features: \(Self.displayName(for: profile.featureSelection))"
                 + " · \(edition) · \(trust)"
+        } else {
+            currentTitle = "Current unit: \(profile.projectUnitName) · \(trust)"
         }
         let current = NSMenuItem(
             title: currentTitle,
@@ -1962,7 +1962,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         current.isEnabled = false
         menu.addItem(current)
-        if profile.language != .python {
+        if profile.language == .rust {
             menu.addItem(.separator())
             for featureSelection in model.availableFeatureSelections {
                 let title = switch featureSelection {
@@ -1992,7 +1992,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         trustItem.target = NSApplication.shared.delegate
         menu.addItem(trustItem)
-        if profile.language != .python {
+        if profile.language == .rust {
             menu.addItem(.separator())
             let explanation = NSMenuItem(
                 title: "Switch features here; the current unit is detected",

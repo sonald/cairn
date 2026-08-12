@@ -66,6 +66,21 @@ func recentProjectClickForwardsStoredLanguage() {
 
 @MainActor
 @Test
+func recentProjectStoresTypeScriptRawValueTwoAndForwards() {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    let root = URL(fileURLWithPath: "/projects/ts-recent", isDirectory: true)
+    fixture.store.record(root.standardizedFileURL, language: .typescript)
+
+    fixture.controller.openRecentProject(root)
+
+    #expect(fixture.store.language(for: root.standardizedFileURL.path) == .typescript)
+    #expect(fixture.controller.pendingRecentProjectLanguage == .typescript)
+    #expect(fixture.controller.lastOpenedProjectLanguage == .typescript)
+}
+
+@MainActor
+@Test
 func recentProjectWithoutLanguageForwardedAsRust() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }
@@ -147,6 +162,9 @@ func pythonProfileDisplayHidesCargoFeatureAndEdition() async throws {
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady
     ))
+    try #require(await mainWindowWaitUntil(
+        model.exactCoordinator.trustMode != nil
+    ))
     let controller = MainWindowController(
         model: model,
         settings: ReaderSettings(),
@@ -162,6 +180,73 @@ func pythonProfileDisplayHidesCargoFeatureAndEdition() async throws {
     #expect(!menuText.localizedCaseInsensitiveContains("features"))
     #expect(!menuText.localizedCaseInsensitiveContains("edition"))
     #expect(menuText.contains("Trust This Repository"))
+}
+
+@MainActor
+@Test
+func typescriptProfileAndFeatureSwitchMatchNonRustRules() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "lib.ts": "export function f(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let rustSession = try ProjectIndexer().index(root: root)
+    let typescriptSession = try ProjectIndexer().index(
+        root: root,
+        language: .typescript
+    )
+    let model = AppModel(
+        indexService: MainWindowFailingIndexService(session: rustSession)
+    )
+    try model.openProject(root: root)
+    try #require(await mainWindowWaitUntil(
+        model.snapshotPhase == .fullReady
+    ))
+    try #require(await mainWindowWaitUntil(
+        model.exactCoordinator.trustMode != nil
+    ))
+
+    #expect(model.transition(to: .indexing(
+        root: root,
+        startedAt: .now
+    )))
+    #expect(model.transition(to: .ready(
+        typescriptSession,
+        QueryContext(
+            snapshotID: typescriptSession.snapshotID,
+            analysisProfileID: typescriptSession.analysisProfile.id,
+            generation: model.generation
+        )
+    )))
+
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+
+    #expect(controller.selfTestProfileTitle.contains("TypeScript"))
+    #expect(!controller.selfTestProfileTitle.localizedCaseInsensitiveContains(
+        "features"
+    ))
+    let menuText = controller.selfTestProfileMenuTitles.joined(separator: " · ")
+    #expect(!menuText.localizedCaseInsensitiveContains("features"))
+    #expect(!menuText.localizedCaseInsensitiveContains("edition"))
+    #expect(menuText.contains("Trust This Repository"))
+
+    #expect(model.availableFeatureSelections == [.defaultFeatures])
+    let generationBeforeSwitch = model.generation
+    model.switchFeatureSelection(.allFeatures)
+    #expect(model.generation == generationBeforeSwitch)
+    guard case let .ready(session, _) = model.projectState else {
+        Issue.record("expected ready TypeScript session")
+        return
+    }
+    #expect(session.analysisProfile.id == typescriptSession.analysisProfile.id)
+    #expect(session.analysisProfile.featureSelection == .defaultFeatures)
+    #expect(model.currentFeatureSelection == .defaultFeatures)
 }
 
 @MainActor
