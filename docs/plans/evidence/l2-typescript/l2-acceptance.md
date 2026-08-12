@@ -319,3 +319,146 @@ no TypeScript resolver/profile/adapter/registry type, cache/session schemas
 unchanged. `App.validateProductSupport` still rejects `.typescript`.
 
 No full CI or F4 claim is made from this checkpoint.
+
+## C2 Reader / Diff checkpoint
+
+HEAD: `3dc9d72b57f7fdb68df4c360f0d2f1fc359743bf`
+`test: preserve compare mode staleness coverage`.
+Worktree was clean except one unrelated pre-existing modification
+`Tests/CodeInsightExactTests/CodeInsightExactTests.swift`
+(not authored by this C2 evidence pass; not staged).
+
+### Test suites
+
+Recorded on `3dc9d72` (fixed `compareModelDoesNotPublishAnOlderModeCompletion`
+baseline; prior `cfd6264` reruns are not used for the final counts):
+
+```text
+CodeInsightReaderCoreTests       104 pass / 0 fail (Swift Testing summary line
+                                 is not emitted in the captured file, so the
+                                 verified pass count is a lower bound)
+CodeInsightReaderUITests         13 pass / 1 fail  (14 tests, 1 issue in
+                                 rulerEdgeLineDoesNotBleedAboveTheScrollView)
+CodeInsightAppModelTests         231 passed / 0 failed
+SnapshotSwitchTests              19/19 PASS
+```
+
+`CodeInsightReaderUITests` failure is the same frozen F0 baseline:
+`rulerEdgeLineDoesNotBleedAboveTheScrollView` renders a real window and
+pixel-scans the header band; on this host the vertical ruler hairline still
+reports bleed at the expected columns. The standalone test fails stably.
+The L2 TSX UI transport test that matters for C2,
+`typeScriptReaderGenericTransportRendersOutlineFoldAndLocalRefs`, passes in
+`CodeInsightReaderCoreTests`; the same TypeScript/Reader/Diff-focused filter
+run also passed it together with
+`typeScriptDocumentReadsTsAndTsxModes`,
+`typeScriptArrowComponentAndTsxJsxBodyChangesAreDetected`,
+`typeScriptFunctionDiffUsesDotSeparatedClassMethodChain`,
+`typeScriptLineDiffAndBadVariantGate`,
+`badTypeScriptVariantFailsBeforeComparisonOrParsing`.
+
+### AppModel language-mode suites
+
+On `3dc9d72`:
+
+```text
+compareModelUsesTheExplicitModeForDiffAndFunctionChanges      PASS
+compareModelDoesNotPublishAnOlderModeCompletion               PASS
+exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly
+                                                               PASS
+recentProjectsStoreTracksLanguageByPathAndOverridesOnReRecord PASS
+recentProjectsStoreLanguageFallsBackForMissingAndInvalidMapValues PASS
+unsupportedLanguageOpenIsSynchronousAndAtomic                  PASS
+projectIndexServiceRejectsUnsupportedLanguageBeforeIO          PASS
+snapshotFullSessionLanguageMismatchFailsBeforeFullPublication  PASS
+exactCoordinatorFiltersDeferredTypeScriptTargets               PASS
+exactCoordinatorRejectsJavaScriptWithoutChangingState          PASS
+exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider PASS
+```
+
+Those exact named tests were observed passing in the `CodeInsightAppModelTests`
+run on `3dc9d72`; the full target summary is `231 tests / 0 failed`.
+
+### Self-tests
+
+Run on `3dc9d72` directly against `.build/debug/codeinsight-app`:
+
+```sh
+.build/debug/codeinsight-app --self-test-reading
+.build/debug/codeinsight-app --self-test-fold
+.build/debug/codeinsight-app --self-test-diff /Users/siancao/work/ai/vibecoding/codeinsight
+```
+
+All three channels finished with `SELF_TEST_FINISH ... exit=0`:
+
+```text
+reading: SELF_TEST_FINISH ... channel=reading exit=0
+fold:    SELF_TEST_FINISH ... channel=fold exit=0
+diff:    SELF_TEST_FINISH ... channel=diff exit=0
+```
+
+### Structure audit
+
+The only production Swift files that reference the TypeScript grammar C
+symbols are:
+
+```text
+Sources/CodeInsightTypeScriptExtractor/TypeScriptExtractor.swift
+Sources/CodeInsightReaderCore/TypeScriptReaderSyntax.swift
+```
+
+No direct TS parser usage outside the extractor/Reader boundary was found in
+`Sources` (search for `tree_sitter_tsx` / `tree_sitter_typescript` /
+`import CTreeSitterTypeScript`). The shared `TreeSitterKit` parser host is
+generic by design and does not select a TS grammar.
+
+Context/Relation/Compare are driven by the active session:
+
+```text
+Sources/CodeInsightAppModel/ContextWindowModel.swift
+  session.content(at:)?.0.languageMode (line ~135)
+  session.analysisProfile.language        (lines ~555, ~632, ~672, ~835)
+Sources/CodeInsightAppModel/RelationTreeModel.swift
+  session.content(at: file.pathID)?.0.languageMode == document.languageMode
+                                         (line ~328-329)
+  session.analysisProfile.language        (line ~2080)
+```
+
+Compare uses explicit mode for diff/function names:
+`compareModelUsesTheExplicitModeForDiffAndFunctionChanges` and
+`compareModelDoesNotPublishAnOlderModeCompletion` are both in the named pass
+set above. The App product validator still rejects TypeScript:
+
+```text
+Sources/CodeInsightAppModel/AppModel.swift
+private func validateProductSupport(_ language: LanguageID) throws
+  case .rust, .python: return
+  case .typescript, .javascript: throw .featureUnsupported
+```
+
+No full CI/V0 product-support claim is made from this checkpoint.
+
+### Protected paths / diff check
+
+Blob/tree hashes at `3dc9d72` (via `git rev-parse 3dc9d72:<path>`) match the
+F0 freeze exactly:
+
+```text
+Sources/CodeInsightEngine/CanonicalDump.swift        20ddd6f08d326d7e15074a7fb684680e7a8477bf
+Prototypes                                         27ff155fede12ff663030e1dd0cf52e6f8458887
+goldset/tokio.gold                                  debbe499edd3bf6c3c75a37c2e59aa6e8e0f3db4
+goldset/ripgrep.gold                                b67ce3150035f29ce4aa3162bd15de65c9a5d159
+goldset/mcp-python-sdk.gold                         8acc33fa09ad2a16571c96b8e2f4c25c942a4edb
+goldset/fixtures/                                   c3ecb4ec45e3c7ab2c6733b5fd72b16bbbf70c47
+Tests/RustExtractorTests/Fixtures/                  82f1d4251fb71da9ec20a904e6427c0c39451e6a
+Tests/CodeInsightExactTests/Fixtures/               57d053cf1845fe174c1f894be74e1ac484a80cf8
+docs/plans/evidence/m11/                             4b1b7c00dddc18077c16d4b2cd555704f5f059e4
+Sources/CTreeSitter/                                14a506fa4b2a3712efb34cdbc42ccd4d10a8e033
+Sources/CTreeSitterRust/                            61f5fb9e9a0ffcdca398eae02b338592f7e45b94
+Sources/CTreeSitterPython/                          ae3bce11867d148decbaacecdb963325fa0b30ca
+Package.resolved                                     a24e48a32ea8f7c994a712f1265ba1b3104a374e
+```
+
+`git diff --check` exits `0`. The only modified file in this C2 evidence
+pass is `docs/plans/evidence/l2-typescript/l2-acceptance.md`; nothing staged or
+committed.
