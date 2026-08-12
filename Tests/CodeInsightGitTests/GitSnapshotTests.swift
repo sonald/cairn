@@ -255,18 +255,16 @@ func unsupportedWorktreeLanguagesFailBeforeOpeningARepository() {
     let nonexistent = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupported-\(UUID().uuidString)")
 
-    for language in [LanguageID.typescript, .javascript] {
-        do {
-            _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: language)
-            Issue.record("Unsupported language unexpectedly succeeded: \(language)")
-        } catch let error as CocoaError {
-            #expect(error.code == .featureUnsupported)
-            #expect((error as NSError).localizedFailureReason?.contains(
-                String(describing: language)
-            ) == true)
-        } catch {
-            Issue.record("Unsupported preflight happened after repository access: \(error)")
-        }
+    do {
+        _ = try WorktreeSnapshot(repositoryURL: nonexistent, language: .javascript)
+        Issue.record("Unsupported language unexpectedly succeeded: \(LanguageID.javascript)")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?.contains(
+            String(describing: LanguageID.javascript)
+        ) == true)
+    } catch {
+        Issue.record("Unsupported preflight happened after repository access: \(error)")
     }
 }
 
@@ -399,6 +397,53 @@ func trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() throws {
     #expect(worktree.listFiles().contains { $0.path == "ignored.rs" })
     #expect(try commit.readBytes(path: "ignored.rs") == contents)
     #expect(try worktree.readBytes(path: "ignored.rs") == contents)
+}
+
+@Test
+func typescriptWorktreeSnapshotCapturesOnlyClassifierApprovedTsAndRootConfigs() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "src/a.ts": "export const a = 1\n",
+        "src/b.tsx": "export const b = 1\n",
+        "src/ignored.d.ts": "export declare const x: number\n",
+        "src/ignored.js": "const ignored = 1\n",
+        "src/ignored.rs": "fn rust() {}\n",
+        "nested/tsconfig.json": "{}\n",
+        ".gitignore": "node_modules/\n",
+        "node_modules/pkg.ts": "export const pkg = 1\n",
+        ".build/generated.ts": "export const built = 1\n",
+        "tsconfig.json": "{}\n",
+        "package.json": "{}\n",
+        "bun.lockb": Array(repeating: UInt8(ascii: "B"), count: 8).map(String.init).joined(),
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("src/link.ts").path,
+        withDestinationPath: "b.tsx"
+    )
+
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root, language: .typescript)
+
+    #expect(snapshot.listFiles().map(\.path) == ["src/a.ts", "src/b.tsx"])
+    #expect(try snapshot.readBytes(path: "tsconfig.json") == Array(files["tsconfig.json"]!.utf8))
+    #expect(try snapshot.readBytes(path: "package.json") == Array(files["package.json"]!.utf8))
+    #expect(try snapshot.readBytes(path: "bun.lockb") == Array(files["bun.lockb"]!.utf8))
+    do {
+        _ = try snapshot.readBytes(path: "nested/tsconfig.json")
+        Issue.record("Nested TS config unexpectedly entered the snapshot")
+    } catch let GitError.missingPath(path) {
+        #expect(path == "nested/tsconfig.json")
+    } catch {
+        Issue.record("Unexpected nested config read error: \(error)")
+    }
 }
 
 private final class GitFixture {

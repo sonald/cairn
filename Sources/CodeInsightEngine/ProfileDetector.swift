@@ -78,13 +78,40 @@ enum ProfileDetector {
                 projectRoot: projectRoot,
                 readBytes: readBytes
             )
-        case .typescript, .javascript:
+        case .typescript:
+            return typescriptProfile(
+                projectRootName: projectRootName,
+                projectRoot: projectRoot,
+                readBytes: readBytes
+            )
+        case .javascript:
             return fallback(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,
                 language: language
             )
         }
+    }
+
+    private static func typescriptProfile(
+        projectRootName: String,
+        projectRoot: PathID,
+        readBytes: (String) -> [UInt8]?
+    ) -> AnalysisProfile {
+        let fingerprints = typescriptConfigIdentity(readBytes: readBytes)
+        return AnalysisProfile(
+            language: .typescript,
+            projectRoot: projectRoot,
+            projectUnitName: readBytes("tsconfig.json") == nil
+                ? projectRootName
+                : "tsconfig.json",
+            configFingerprint: fingerprints.config,
+            environmentFingerprint: fingerprints.environment,
+            featureSelection: .defaultFeatures,
+            featureNames: [],
+            edition: nil,
+            trustMode: .safe
+        )
     }
 
     private static func pythonProfile(

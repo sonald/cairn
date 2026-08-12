@@ -27,6 +27,40 @@ package func pythonConfigIdentity(
     return (configFingerprint, environmentFingerprint)
 }
 
+package func typescriptConfigIdentity(
+    readBytes: (String) -> [UInt8]?
+) -> (config: String, environment: String) {
+    let candidates: [(String, [UInt8])] = [
+        ("tsconfig.json", readBytes("tsconfig.json")),
+        ("package.json", readBytes("package.json")),
+    ].compactMap { name, bytes in
+        bytes.map { (name, $0) }
+    }
+
+    var configBytes: [UInt8] = []
+    for (name, bytes) in candidates {
+        let nameBytes = Array(name.utf8)
+        configBytes += Array(String(nameBytes.count).utf8)
+        configBytes.append(UInt8(ascii: ":"))
+        configBytes += nameBytes
+        configBytes += Array(String(describing: bytes.count).utf8)
+        configBytes.append(UInt8(ascii: ":"))
+        configBytes += bytes
+    }
+    let configFingerprint = (candidates.isEmpty
+        ? ContentID.sha256(of: Array("typescript-config\0none".utf8))
+        : ContentID.sha256(of: configBytes)
+    ).bytes.map { String(format: "%02x", $0) }.joined()
+
+    let environmentFingerprint = readBytes("bun.lockb").map { bytes in
+        ContentID.sha256(of: Array("bun.lockb".utf8) + [0] + bytes)
+            .bytes
+            .map { String(format: "%02x", $0) }
+            .joined()
+    } ?? ""
+    return (configFingerprint, environmentFingerprint)
+}
+
 public struct AnalysisProfileID: Hashable, Sendable {
     public let rawValue: UUID
 

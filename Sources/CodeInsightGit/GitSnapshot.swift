@@ -276,7 +276,9 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         switch language {
         case .rust, .python:
             break
-        case .typescript, .javascript:
+        case .typescript:
+            break
+        case .javascript:
             throw CocoaError(.featureUnsupported, userInfo: [
                 NSLocalizedFailureReasonErrorKey:
                     "Worktree snapshot does not support \(String(describing: language))",
@@ -315,7 +317,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         case .python:
             configurationURLs = ["pyrightconfig.json", "pyproject.toml", "uv.lock"]
                 .map(root.appendingPathComponent)
-        case .typescript, .javascript:
+        case .typescript:
+            configurationURLs = ["tsconfig.json", "package.json", "bun.lockb"]
+                .map(root.appendingPathComponent)
+        case .javascript:
             configurationURLs = []
         }
         for file in configurationURLs {

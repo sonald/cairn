@@ -460,6 +460,205 @@ func reprofileSharesContentAndRejectsTheOldContext() throws {
     }
 }
 
+@Test
+func snapshotTypeScriptProfileMatchesWorktreeFixedVector() throws {
+    let snapshot = ProfileSnapshot(
+        projectRootName: "snapshot-typescript",
+        visiblePaths: ["src/a.ts", "src/b.tsx"],
+        bytesByPath: [
+            "src/a.ts": Array("export const a = 1\n".utf8),
+            "src/b.tsx": Array("export const b = 1\n".utf8),
+            "tsconfig.json": Array("{}".utf8),
+            "package.json": Array("{\"name\":\"sample\"}".utf8),
+            "bun.lockb": Array(repeating: 0x62, count: 4),
+        ]
+    )
+
+    let one = ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .typescript,
+        projectRoot: PathID(rawValue: 21)
+    )
+    let two = ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .typescript,
+        projectRoot: PathID(rawValue: 22)
+    )
+    let worktreeParent = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "TypeScriptWorktreeIdentity-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    let worktreeRoot = worktreeParent.appendingPathComponent(
+        "snapshot-typescript",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: worktreeRoot, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: worktreeParent) }
+    try Data("{}".utf8).write(to: worktreeRoot.appendingPathComponent("tsconfig.json"))
+    try Data("{\"name\":\"sample\"}".utf8).write(
+        to: worktreeRoot.appendingPathComponent("package.json")
+    )
+    try Data([0x62, 0x62, 0x62, 0x62]).write(
+        to: worktreeRoot.appendingPathComponent("bun.lockb")
+    )
+    let worktree = ProfileDetector.detect(
+        projectURL: worktreeRoot,
+        language: .typescript,
+        projectRoot: PathID(rawValue: 23)
+    )
+
+    let lock = Array(repeating: UInt8(ascii: "b"), count: 4)
+    #expect(one.language == .typescript)
+    #expect(one.projectUnitName == "tsconfig.json")
+    #expect(one.configFingerprint ==
+        "8e301229d858189807c55a25575c30ce65c4fa46f1ed73f32dc9e5987b1f910c")
+    #expect(one.environmentFingerprint == sha256Hex(
+        Array("bun.lockb\0".utf8) + lock
+    ))
+    #expect(worktree.configFingerprint == one.configFingerprint)
+    #expect(worktree.environmentFingerprint == one.environmentFingerprint)
+    #expect(one.id == two.id)
+    #expect(worktree.id == one.id)
+    #expect(one.featureSelection == .defaultFeatures)
+    #expect(one.featureNames.isEmpty)
+    #expect(one.edition == nil)
+}
+
+@Test
+func typescriptProfileChangesOnlyMatchingIdentityAndMissingConfigUsesSentinel() throws {
+    try withProfileProject([
+        "src/a.ts": "export const a = 1\n",
+        "tsconfig.json": "{}",
+        "package.json": "{\"version\":\"1\"}",
+    ]) { root in
+        try Data(repeating: 0x61, count: 3).write(
+            to: root.appendingPathComponent("bun.lockb")
+        )
+        let initial = ProfileDetector.detect(
+            projectURL: root,
+            language: .typescript,
+            projectRoot: PathID(rawValue: 24)
+        )
+        try Data("{\"compilerOptions\":{}}".utf8).write(
+            to: root.appendingPathComponent("tsconfig.json")
+        )
+        let afterTsconfig = ProfileDetector.detect(
+            projectURL: root,
+            language: .typescript,
+            projectRoot: PathID(rawValue: 24)
+        )
+        try Data("{\"version\":\"2\"}".utf8).write(
+            to: root.appendingPathComponent("package.json")
+        )
+        let afterPackage = ProfileDetector.detect(
+            projectURL: root,
+            language: .typescript,
+            projectRoot: PathID(rawValue: 24)
+        )
+        try Data([0x62, 0x62]).write(to: root.appendingPathComponent("bun.lockb"))
+        let afterLock = ProfileDetector.detect(
+            projectURL: root,
+            language: .typescript,
+            projectRoot: PathID(rawValue: 24)
+        )
+
+        #expect(afterTsconfig.configFingerprint != initial.configFingerprint)
+        #expect(afterTsconfig.environmentFingerprint == initial.environmentFingerprint)
+        #expect(afterPackage.configFingerprint != afterTsconfig.configFingerprint)
+        #expect(afterPackage.environmentFingerprint == afterTsconfig.environmentFingerprint)
+        #expect(afterLock.configFingerprint == afterPackage.configFingerprint)
+        #expect(afterLock.environmentFingerprint != afterPackage.environmentFingerprint)
+    }
+
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightMissingTypeScript-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let missing = ProfileDetector.detect(
+        projectURL: root,
+        language: .typescript,
+        projectRoot: PathID(rawValue: 25)
+    )
+    #expect(missing.language == .typescript)
+    #expect(missing.projectUnitName == root.lastPathComponent)
+    #expect(missing.configFingerprint != "")
+    #expect(missing.environmentFingerprint == "")
+}
+
+@Test
+func typescriptCommitAndWorktreeProfilesShareRootConfigIdentity() throws {
+    try withGitProject([
+        "src/a.ts": Data("export const a = 1\n".utf8),
+        "tsconfig.json": Data("{}".utf8),
+        "package.json": Data("{\"name\":\"sample\"}\n".utf8),
+        "bun.lockb": Data(repeating: UInt8(ascii: "b"), count: 4),
+    ]) { root in
+        let worktree = ProfileDetector.detect(
+            snapshot: try WorktreeSnapshot(
+                repositoryURL: root,
+                language: .typescript
+            ),
+            language: .typescript,
+            projectRoot: PathID(rawValue: 31)
+        )
+        let commit = ProfileDetector.detect(
+            snapshot: try CommitSnapshot(repositoryURL: root),
+            language: .typescript,
+            projectRoot: PathID(rawValue: 32)
+        )
+
+        #expect(commit.language == .typescript)
+        #expect(commit.projectUnitName == worktree.projectUnitName)
+        #expect(commit.configFingerprint == worktree.configFingerprint)
+        #expect(commit.environmentFingerprint == worktree.environmentFingerprint)
+        #expect(commit.id == worktree.id)
+    }
+}
+
+private func withGitProject(
+    _ files: [String: Data],
+    body: (URL) throws -> Void
+) throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightProfileGit-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try git(in: root, "init", "-q")
+    for (path, contents) in files {
+        let url = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try contents.write(to: url)
+    }
+    try git(in: root, "add", ".")
+    try git(
+        in: root,
+        "-c", "user.name=CodeInsight",
+        "-c", "user.email=codeinsight@example.com",
+        "commit", "-q", "-m", "fixture"
+    )
+    try body(root)
+}
+
+private func git(in root: URL, _ arguments: String...) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path] + arguments
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw CocoaError(.fileWriteUnknown, userInfo: [
+            NSLocalizedFailureReasonErrorKey: "git failed with \(process.terminationStatus)"
+        ])
+    }
+}
+
 private func expectFallback(_ profile: AnalysisProfile, rootName: String) {
     #expect(profile.projectUnitName == rootName)
     #expect(profile.configFingerprint == "")
