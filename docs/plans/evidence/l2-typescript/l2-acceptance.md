@@ -296,3 +296,26 @@ final bundle discovery remains C3/V0.
 
 No production TS extractor / provider / Reader / `.typescript` cutover exists
 yet. P0 GO only opens F1.
+
+## C1 grammar / extractor / profile / resolver checkpoint
+
+HEAD: `419287ca9d60fc5c40e786b0becbb48853538236`.
+
+Recorded verification:
+
+```text
+Core 14/14 PASS
+TreeSitterKit 8/8 PASS
+TypeScriptExtractor 18/18 PASS
+Git 14/14 PASS
+Engine 103/103 PASS
+TypeScript-named 17/17 PASS
+git diff --check clean
+```
+
+Production type audit: one `TypeScriptExtractor`, one
+`TypeScriptLanguageServerProvider`, one `TypeScriptLanguageServerSession`,
+no TypeScript resolver/profile/adapter/registry type, cache/session schemas
+unchanged. `App.validateProductSupport` still rejects `.typescript`.
+
+No full CI or F4 claim is made from this checkpoint.
