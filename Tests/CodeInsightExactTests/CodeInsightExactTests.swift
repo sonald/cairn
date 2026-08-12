@@ -1898,7 +1898,7 @@ func childProcessRegistryRegistersAndUnregistersConcurrently() async {
             group.addTask {
                 let pid = pid_t(2_000_000 + worker)
                 for _ in 0..<500 {
-                    guard ci_process_guard_register(pid),
+                    guard ci_process_guard_register(pid, false),
                           ci_process_guard_contains(pid),
                           ci_process_guard_unregister(pid)
                     else {
@@ -1995,6 +1995,26 @@ func reaperKillsRegisteredGrandchildAfterParentSIGKILL() async throws {
 
     #expect(deliveredSignal == SIGKILL)
     #expect(orphanDisappeared)
+}
+
+@Test
+func ciProcessGuardUnregisterKillsOwnedGroupLeaderAndGrandchild() throws {
+    var leaderPID: pid_t = 0
+    var grandchildPID: pid_t = 0
+    var grandchildAliveAfterUnregister = false
+    try #require(ci_test_spawn_guard_leader(
+        true,
+        &leaderPID,
+        &grandchildPID,
+        &grandchildAliveAfterUnregister
+    ))
+    #expect(!processExists(leaderPID))
+    #expect(!processExists(grandchildPID))
+    print(
+        "process-guard owned-pgid cleanup"
+            + " grandchildAliveAfterUnregister=\(grandchildAliveAfterUnregister)"
+    )
+    #expect(!grandchildAliveAfterUnregister)
 }
 
 @Test

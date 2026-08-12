@@ -17,4 +17,11 @@ bool ci_test_spawn_signal_helper(
     pid_t *fake_child_pid
 );
 
+bool ci_test_spawn_guard_leader(
+    bool guard_enabled,
+    pid_t *guard_leader_pid,
+    pid_t *grandchild_pid,
+    bool *grandchild_alive_after_unregister
+);
+
 #endif

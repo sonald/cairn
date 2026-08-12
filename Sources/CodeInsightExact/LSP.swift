@@ -402,8 +402,15 @@ public final class LSPClient: @unchecked Sendable {
             releaseHandles()
             throw error
         }
-        guard ci_process_guard_register(process.processIdentifier) else {
-            Darwin.kill(process.processIdentifier, SIGKILL)
+        guard ci_process_guard_register(
+            process.processIdentifier,
+            getpgid(process.processIdentifier) == process.processIdentifier
+        ) else {
+            let pid = process.processIdentifier
+            if getpgid(pid) == pid {
+                Darwin.kill(-pid, SIGKILL)
+            }
+            Darwin.kill(pid, SIGKILL)
             process.waitUntilExit()
             releaseHandles()
             throw LSPError.childProcessGuardUnavailable

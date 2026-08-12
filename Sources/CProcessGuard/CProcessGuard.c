@@ -26,11 +26,29 @@ static const int crash_signals[] = {
 
 static void kill_children(_Atomic int *pids) {
     for (int i = 0; i < CI_PROCESS_GUARD_CAPACITY; i++) {
-        pid_t pid = atomic_load_explicit(&pids[i], memory_order_relaxed);
+        int slot = atomic_load_explicit(&pids[i], memory_order_relaxed);
+        if (slot == 0) {
+            continue;
+        }
+        bool own_group = slot < 0;
+        pid_t pid = slot < 0 ? (pid_t)-slot : (pid_t)slot;
         if (pid > 1) {
+            if (own_group) {
+                kill(-pid, SIGKILL);
+            }
             kill(pid, SIGKILL);
         }
     }
+}
+
+static int find_pid_slot(pid_t pid) {
+    for (int i = 0; i < CI_PROCESS_GUARD_CAPACITY; i++) {
+        int slot = atomic_load_explicit(&child_pids[i], memory_order_relaxed);
+        if (slot == pid || slot == -pid) {
+            return i;
+        }
+    }
+    return -1;
 }
 
 static void kill_registered_children(void) {
@@ -173,22 +191,31 @@ bool ci_process_guard_install(void) {
     return install_signal_handlers() && start_reaper();
 }
 
-bool ci_process_guard_register(pid_t pid) {
+bool ci_process_guard_register(pid_t pid, bool pid_is_group_leader) {
     if (pid <= 1) {
         return false;
     }
     for (int i = 0; i < CI_PROCESS_GUARD_CAPACITY; i++) {
-        int expected = 0;
-        if (atomic_compare_exchange_strong_explicit(
-                &child_pids[i],
-                &expected,
-                pid,
-                memory_order_relaxed,
-                memory_order_relaxed)) {
-            return true;
-        }
-        if (expected == pid) {
-            return true;
+        int current = atomic_load_explicit(&child_pids[i], memory_order_relaxed);
+        for (;;) {
+            if (current == -pid) {
+                return true;
+            }
+            if (current != 0 && current != pid && current != -pid) {
+                break;
+            }
+            if (current == pid && !pid_is_group_leader) {
+                return true;
+            }
+            int encoded = pid_is_group_leader ? -pid : pid;
+            if (atomic_compare_exchange_strong_explicit(
+                    &child_pids[i],
+                    &current,
+                    encoded,
+                    memory_order_relaxed,
+                    memory_order_relaxed)) {
+                return true;
+            }
         }
     }
     return false;
@@ -196,13 +223,23 @@ bool ci_process_guard_register(pid_t pid) {
 
 bool ci_process_guard_unregister(pid_t pid) {
     for (int i = 0; i < CI_PROCESS_GUARD_CAPACITY; i++) {
-        int expected = pid;
+        int current = pid;
         if (atomic_compare_exchange_strong_explicit(
                 &child_pids[i],
-                &expected,
+                &current,
                 0,
                 memory_order_relaxed,
                 memory_order_relaxed)) {
+            return true;
+        }
+        current = -pid;
+        if (atomic_compare_exchange_strong_explicit(
+                &child_pids[i],
+                &current,
+                0,
+                memory_order_relaxed,
+                memory_order_relaxed)) {
+            kill(-pid, SIGKILL);
             return true;
         }
     }
@@ -210,10 +247,5 @@ bool ci_process_guard_unregister(pid_t pid) {
 }
 
 bool ci_process_guard_contains(pid_t pid) {
-    for (int i = 0; i < CI_PROCESS_GUARD_CAPACITY; i++) {
-        if (atomic_load_explicit(&child_pids[i], memory_order_relaxed) == pid) {
-            return true;
-        }
-    }
-    return false;
+    return find_pid_slot(pid) >= 0;
 }
