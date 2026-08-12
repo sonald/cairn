@@ -412,6 +412,38 @@ func gutterRepaintsItsBackgroundWhenThemeChanges() throws {
 
 @MainActor
 @Test
+func foldGutterHoverTracksTheWholeColumnInsteadOfOneFoldRow() throws {
+    let source = """
+        fn first() {
+            let one = 1;
+            let two = 2;
+        }
+        fn second() {
+            let three = 3;
+            let four = 4;
+        }
+        """
+    let file = URL(fileURLWithPath: "/fold-hover.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) })
+        .load(file: file).document
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    reader.configureGutter(in: scrollView, lineNumbers: true)
+    reader.display(document: document, fileURL: file)
+
+    reader.setFoldGutterHoverForTesting(NSPoint(
+        x: reader.rulerThickness - 7,
+        y: 1
+    ))
+    #expect(reader.foldGutterIsHovered)
+    reader.setFoldGutterHoverForTesting(nil)
+    #expect(!reader.foldGutterIsHovered)
+}
+
+@MainActor
+@Test
 func mismatchedStorageSkipsTypography() throws {
     let reader = ReaderTextView()
     reader.display(document: try highlightedDocument())

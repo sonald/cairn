@@ -1394,9 +1394,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.isCollapsed = layout.relationsCollapsed
         secondaryReaderItem.isCollapsed = !layout.readerSplit
 
-        sidebarItem.holdingPriority = .init(rawValue: 251)
-        readerGroupItem.holdingPriority = .init(rawValue: 253)
-        relationItem.holdingPriority = .init(rawValue: 250)
+        sidebarItem.holdingPriority = .init(rawValue: 253)
+        readerGroupItem.holdingPriority = .init(rawValue: 250)
+        relationItem.holdingPriority = .init(rawValue: 252)
         contextItem.holdingPriority = .init(rawValue: 250)
         secondaryReaderItem.holdingPriority = .init(rawValue: 251)
         applyPanelSizes(layout)
@@ -1478,6 +1478,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     {
         readerController.selfTestReadingHeightHeader
     }
+
+    var selfTestUpperPaneWidths: (sidebar: CGFloat, reader: CGFloat) {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let panes = upperSplitController.splitView.arrangedSubviews
+        guard panes.count >= 2 else { return (0, 0) }
+        return (panes[0].frame.width, panes[1].frame.width)
+    }
+
+    var selfTestContentView: NSView? { window?.contentView }
 
     private func applyPanelSizes(_ layout: PanelLayoutDescription) {
         window?.contentView?.layoutSubtreeIfNeeded()
@@ -3440,7 +3449,7 @@ private final class TabStripView: NSView {
     }
 
     func refresh() {
-        isHidden = (model?.tabs.count ?? 0) <= 1
+        isHidden = model?.tabs.isEmpty != false
         setAccessibilityValue(model?.activeTab?.title ?? "")
         needsDisplay = true
     }
@@ -3456,25 +3465,9 @@ private final class TabStripView: NSView {
         paragraph.lineBreakMode = .byTruncatingMiddle
         for index in model.tabs.indices {
             let rect = tabRect(index: index, count: model.tabs.count)
-            let backgroundRect = rect.insetBy(dx: 3, dy: 3)
-            if index == model.activeIndex {
-                let background = NSBezierPath(
-                    roundedRect: backgroundRect,
-                    xRadius: 6,
-                    yRadius: 6
-                )
+            if model.tabs.count > 1, index == model.activeIndex {
                 theme.backgroundColor.setFill()
-                background.fill()
-                theme.chromeDividerColor.setStroke()
-                background.lineWidth = 1
-                background.stroke()
-                theme.accentColor.setFill()
-                NSRect(
-                    x: backgroundRect.minX + 6,
-                    y: backgroundRect.maxY - 2,
-                    width: max(0, backgroundRect.width - 12),
-                    height: 2
-                ).fill()
+                rect.fill()
             }
             let titleRect = rect.insetBy(dx: 10, dy: 7)
             let closeWidth: CGFloat = 18
@@ -3681,7 +3674,6 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private let findNextButton = NSButton()
     private let findStatusLabel = NSTextField(labelWithString: "")
     private let findCloseButton = NSButton()
-    private let tabAndReaderArea = NSStackView()
     private weak var scrollView: NSScrollView?
     private(set) var displayedFile: URL?
     private var displayedSnapshotID: SnapshotID?
@@ -3780,23 +3772,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             configureReaderHeader()
             configureScopeHeader()
             configureFindBar()
-            tabAndReaderArea.setViews([scopeHeader, readerArea], in: .leading)
-            tabAndReaderArea.orientation = .vertical
-            tabAndReaderArea.alignment = .width
-            tabAndReaderArea.distribution = .fill
-            tabAndReaderArea.spacing = 0
             let stack = NSStackView(views: [
                 readerHeader,
                 findBar,
-                tabAndReaderArea,
+                readerArea,
             ])
             stack.orientation = .vertical
             stack.alignment = .width
             stack.distribution = .fill
             stack.spacing = 0
             NSLayoutConstraint.activate([
-                tabAndReaderArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
-                readerArea.widthAnchor.constraint(equalTo: tabAndReaderArea.widthAnchor),
+                readerArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
                 findBar.heightAnchor.constraint(equalToConstant: 31),
             ])
@@ -3885,6 +3871,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             .defaultLow,
             for: .horizontal)
         fileNameLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tabStripView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tabStripView.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
         readingHeightShortcutLabel.font = .systemFont(ofSize: 10)
         readingHeightControl.target = self
         readingHeightControl.action = #selector(changeReadingHeight(_:))
@@ -3943,9 +3934,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         scopeHeaderContent.translatesAutoresizingMaskIntoConstraints = false
         scopeHeaderDivider.wantsLayer = true
         scopeHeaderDivider.translatesAutoresizingMaskIntoConstraints = false
+        readerArea.addSubview(scopeHeader)
         scopeHeader.addSubview(scopeHeaderContent)
         scopeHeader.addSubview(scopeHeaderDivider)
         NSLayoutConstraint.activate([
+            scopeHeader.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            scopeHeader.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            scopeHeader.topAnchor.constraint(equalTo: readerArea.topAnchor),
             scopeHeader.heightAnchor.constraint(equalToConstant: 26),
             scopeHeaderContent.leadingAnchor.constraint(
                 equalTo: scopeHeader.leadingAnchor,
@@ -4452,7 +4447,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             readingHeightControl.convert(readingHeightControl.bounds, to: nil),
             scopeHeader.convert(scopeHeader.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
-            tabAndReaderArea.convert(tabAndReaderArea.bounds, to: nil),
+            readerArea.convert(readerArea.bounds, to: nil),
             tabStripView.isHidden,
             scopeHeader.isHidden,
             tabStripView.isHiddenOrHasHiddenAncestor

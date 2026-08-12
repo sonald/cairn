@@ -508,7 +508,7 @@ public final class ReaderTextView {
     private var visibleFoldRegionsCache: [FoldRegion] = []
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
-    private var hoveredFoldID: FoldID?
+    private var foldGutterHovered = false
     private var navigationLandingLine: Int?
     private var navigationMarkerGeneration = 0
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
@@ -815,7 +815,7 @@ public final class ReaderTextView {
         visibleDeclarationMarkerLines = []
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
-        hoveredFoldID = nil
+        foldGutterHovered = false
         navigationLandingLine = nil
         navigationMarkerGeneration += 1
         refreshFoldExposures(in: document)
@@ -862,7 +862,7 @@ public final class ReaderTextView {
         visibleFoldRegionsCache = []
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
-        hoveredFoldID = nil
+        foldGutterHovered = false
         navigationLandingLine = nil
         navigationMarkerGeneration += 1
         diffMarkers = [:]
@@ -1845,6 +1845,13 @@ public final class ReaderTextView {
         ruler?.ruleThickness ?? 0
     }
 
+    package var foldGutterIsHovered: Bool { foldGutterHovered }
+
+    package func setFoldGutterHoverForTesting(_ point: NSPoint?) {
+        guard let ruler else { return }
+        updateFoldHover(at: point, in: ruler)
+    }
+
     public var gutterShowsLineNumbersAndDiff: Bool {
         lineNumbers && !diffMarkers.isEmpty && rulerThickness > diffColumnWidth
     }
@@ -2528,7 +2535,7 @@ public final class ReaderTextView {
                 }
             }
             if let fold = foldsByLine[line],
-               hoveredFoldID == fold.id
+               foldGutterHovered
             {
                 drawFoldChevron(
                     collapsed: renderedFoldIDs.contains(fold.id),
@@ -2597,9 +2604,14 @@ public final class ReaderTextView {
     }
 
     func updateFoldHover(at point: NSPoint?, in ruler: NSRulerView) {
-        let next = point.flatMap { foldRegion(at: $0, in: ruler)?.id }
-        guard next != hoveredFoldID else { return }
-        hoveredFoldID = next
+        let foldX = lineNumberColumnWidth + declarationColumnWidth
+        let next = point.map {
+            foldColumnWidth > 0
+                && $0.x >= foldX
+                && $0.x <= foldX + foldColumnWidth
+        } ?? false
+        guard next != foldGutterHovered else { return }
+        foldGutterHovered = next
         ruler.needsDisplay = true
     }
 
@@ -3170,6 +3182,11 @@ private final class ReaderRulerView: NSRulerView {
     init(scrollView: NSScrollView, reader: ReaderTextView) {
         self.reader = reader
         super.init(scrollView: scrollView, orientation: .verticalRuler)
+        // NSRulerView strokes its built-in edge hairline across the full dirty
+        // rect. Since macOS 14 views no longer clip to bounds by default, that
+        // hairline bleeds above the scroll view into sibling header views as a
+        // short vertical line at x == ruleThickness. Clip to keep it inside.
+        clipsToBounds = true
         ruleThickness = 7
         clientView = reader.view
     }

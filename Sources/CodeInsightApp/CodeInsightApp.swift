@@ -399,6 +399,13 @@ private struct CodeInsightApplication {
                     fileURLWithPath: arguments[index + 1],
                     isDirectory: true
                 ))
+            } else if let index = arguments.firstIndex(
+                of: "--self-test-gutter-line"
+            ), arguments.indices.contains(index + 1) {
+                delegate.runGutterLineSelfTest(root: URL(
+                    fileURLWithPath: arguments[index + 1],
+                    isDirectory: true
+                ))
             } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
             } else {
@@ -1038,7 +1045,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let oneTabGeometry = Self.tabGeometryChecks(
             controller.selfTestTabGeometry,
             prefix: "oneTab",
-            expectsVisibleStrip: false
+            expectsVisibleStrip: true
         )
         let openedA = controller.selfTestTabCount == 1
             && controller.selfTestActiveTabIndex == 0
@@ -1156,7 +1163,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let hiddenAfterCloseGeometry = Self.tabGeometryChecks(
             controller.selfTestTabGeometry,
             prefix: "oneTabAfterClose",
-            expectsVisibleStrip: false
+            expectsVisibleStrip: true
         )
         Self.writeJSON([
             "step": "closeB",
@@ -6080,6 +6087,162 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    // Pixel-level acceptance for the gutter-aligned vertical line that used to
+    // bleed from the reader ruler into the tab strip (macOS 14+ clipsToBounds
+    // default change). Opens a real on-screen window, opens one and two tabs,
+    // captures the window at native (Retina) resolution, and scans the header
+    // band around x == ruler.maxX for a stray vertical line.
+    func runGutterLineSelfTest(root: URL) -> Never {
+        let channel = "gutterLine"
+        launch(offscreen: true)
+        guard let controller = windowController,
+              let window = controller.window
+        else {
+            Self.writeJSON(["channel": channel, "error": "window unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        window.setContentSize(NSSize(width: 1_200, height: 800))
+        window.setFrameOrigin(NSPoint(x: 80, y: 80))
+        window.orderFrontRegardless()
+        pumpRunLoop()
+
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 60, condition: {
+            if case .ready = self.model.projectState { return true }
+            return false
+        }) else {
+            Self.writeJSON(["channel": channel, "error": "project not ready"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+
+        let fileA = root.appendingPathComponent("tokio/src/lib.rs")
+            .standardizedFileURL
+        let fileB = root.appendingPathComponent("tokio/src/blocking.rs")
+            .standardizedFileURL
+
+        controller.openFileForSelfTest(fileA)
+        guard waitUntil(timeout: 15, condition: {
+            controller.displayedReaderFile?.standardizedFileURL == fileA
+        }) else {
+            Self.writeJSON(["channel": channel, "error": "could not open lib.rs"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let oneTab = gutterLineScan(
+            controller: controller,
+            window: window,
+            label: "oneTab"
+        )
+
+        controller.openFileInNewTabForSelfTest(fileB)
+        guard waitUntil(timeout: 15, condition: {
+            controller.displayedReaderFile?.standardizedFileURL == fileB
+        }) else {
+            Self.writeJSON(
+                ["channel": channel, "error": "could not open blocking.rs"]
+            )
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let twoTabs = gutterLineScan(
+            controller: controller,
+            window: window,
+            label: "twoTabs"
+        )
+
+        Self.writeJSON([
+            "channel": channel,
+            "oneTab": oneTab.json,
+            "twoTabs": twoTabs.json,
+        ])
+        Self.exitSelfTest(
+            channel: channel,
+            status: oneTab.pass && twoTabs.pass ? 0 : 1
+        )
+    }
+
+    private func gutterLineScan(
+        controller: MainWindowController,
+        window: NSWindow,
+        label: String
+    ) -> (pass: Bool, json: [String: Any]) {
+        window.displayIfNeeded()
+        for _ in 0..<12 {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        }
+        let reading = controller.selfTestReadingGeometry
+        let tabs = controller.selfTestTabGeometry
+        guard let image = CGWindowListCreateImage(
+            .null,
+            .optionIncludingWindow,
+            CGWindowID(window.windowNumber),
+            [.boundsIgnoreFraming, .bestResolution]
+        ) else {
+            return (false, ["error": "window capture failed"])
+        }
+        let bitmap = NSBitmapImageRep(cgImage: image)
+        let frame = window.frame
+        let scale = Double(bitmap.pixelsWide) / Double(frame.width)
+        let captureDirectory = ProcessInfo.processInfo.environment[
+            "CAIRN_GUTTER_CAPTURE_DIR"
+        ] ?? "/tmp/cairn-gutter-line"
+        try? FileManager.default.createDirectory(
+            atPath: captureDirectory,
+            withIntermediateDirectories: true
+        )
+        let pngPath = "\(captureDirectory)/\(label).png"
+        try? bitmap.representation(using: .png, properties: [:])?
+            .write(to: URL(fileURLWithPath: pngPath))
+
+        // Window points (bottom-left origin) → image pixels (top-left origin).
+        func pixelX(_ x: CGFloat) -> Int { Int((Double(x) * scale).rounded()) }
+        func pixelY(_ y: CGFloat) -> Int {
+            Int(((Double(frame.height) - Double(y)) * scale).rounded())
+        }
+
+        let gutterX = reading.rulerFrame.maxX
+        let header = tabs.headerFrame
+        let rowStart = max(0, pixelY(header.maxY - 3))
+        let rowEnd = min(bitmap.pixelsHigh, pixelY(header.minY + 3))
+        let columnStart = max(0, pixelX(gutterX - 8))
+        let columnEnd = min(bitmap.pixelsWide, pixelX(gutterX + 8))
+        guard rowEnd > rowStart, columnEnd > columnStart else {
+            return (false, ["error": "empty scan region", "png": pngPath])
+        }
+
+        var brightnessByColumn: [Int: [Double]] = [:]
+        var allSamples: [Double] = []
+        for px in columnStart..<columnEnd {
+            var column: [Double] = []
+            for py in rowStart..<rowEnd {
+                guard let color = bitmap.colorAt(x: px, y: py)?
+                    .usingColorSpace(.sRGB) else { continue }
+                let value = Double(color.brightnessComponent)
+                column.append(value)
+                allSamples.append(value)
+            }
+            brightnessByColumn[px] = column
+        }
+        let background = allSamples.sorted()[allSamples.count / 2]
+        func coverage(_ px: Int) -> Double {
+            guard let column = brightnessByColumn[px], !column.isEmpty else {
+                return 0
+            }
+            let deviant = column.filter { abs($0 - background) > 0.06 }.count
+            return Double(deviant) / Double(column.count)
+        }
+        let lineColumns = (columnStart..<columnEnd).filter { coverage($0) >= 0.7 }
+        let json: [String: Any] = [
+            "png": pngPath,
+            "gutterWindowX": Double(gutterX),
+            "rulerThickness": Double(reading.rulerThickness),
+            "headerBandWindowY": [Double(header.minY), Double(header.maxY)],
+            "scanColumnsPx": [columnStart, columnEnd],
+            "scanRowsPx": [rowStart, rowEnd],
+            "lineColumnsPx": lineColumns,
+            "lineDetected": !lineColumns.isEmpty,
+        ]
+        return (lineColumns.isEmpty, json)
+    }
+
     func runOpenSelfTest(file: URL) {
         let textView = ReaderTextView()
         let scrollView = NSScrollView(
@@ -7131,7 +7294,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             dx: -tolerance,
             dy: -tolerance
         )
-        let scopeHeight = geometry.scopeHidden ? 0 : geometry.scopeFrame.height
         if expectsVisibleStrip {
             return [
                 "\(prefix)StripVisible":
@@ -7160,7 +7322,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "\(prefix)ReaderFillsContainerHeight":
                     abs(
                         geometry.readerFrame.height
-                            + scopeHeight
                             - geometry.containerFrame.height
                     ) <= tolerance,
                 "\(prefix)ReaderFillsContainerWidth":
@@ -7176,7 +7337,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && geometry.stripHiddenOrHasHiddenAncestor,
             "\(prefix)ReaderRestoresFullHeight":
                 abs(
-                    geometry.readerFrame.height + scopeHeight
+                    geometry.readerFrame.height
                         - geometry.containerFrame.height
                 ) <= tolerance,
             "\(prefix)ReaderRestoresFullWidth":
@@ -7186,7 +7347,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 ) <= tolerance,
             "\(prefix)ReaderRestoresContainerTop":
                 abs(
-                    geometry.readerFrame.maxY + scopeHeight
+                    geometry.readerFrame.maxY
                         - geometry.containerFrame.maxY
                 ) <= tolerance,
             "\(prefix)ReaderRestoresContainerBottom":

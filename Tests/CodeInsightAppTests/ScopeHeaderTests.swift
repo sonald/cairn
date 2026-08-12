@@ -6,7 +6,7 @@ import Testing
 
 @MainActor
 @Test
-func scopeHeaderMatchesPrototypeAndCollapsesOutsideDeclarations() throws {
+func scopeHeaderMatchesPrototypeWithoutMovingTheReader() throws {
     _ = NSApplication.shared
     let source = """
         use std::future::Future;
@@ -61,8 +61,8 @@ func scopeHeaderMatchesPrototypeAndCollapsesOutsideDeclarations() throws {
     }
     #expect(signatureHeader.accessibilityLabel
         == "Current scope: impl Runtime, fn spawn_on, scope-header.rs line 4")
-    #expect(abs(signatureHeader.frame.minY - signatureHeader.readerFrame.maxY) < 1)
-    #expect(abs(hidden.readerFrame.height - signatureHeader.readerFrame.height - 26) < 1)
+    #expect(abs(signatureHeader.frame.maxY - signatureHeader.readerFrame.maxY) < 1)
+    #expect(abs(hidden.readerFrame.height - signatureHeader.readerFrame.height) < 1)
 
     let closingBrace = try #require(source.utf8Offset(of: "    }\n}"))
     _ = controller.selfTestActivate(at: UInt32(closingBrace))

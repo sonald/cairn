@@ -164,6 +164,44 @@ func pythonProfileDisplayHidesCargoFeatureAndEdition() async throws {
     #expect(menuText.contains("Trust This Repository"))
 }
 
+@MainActor
+@Test
+func windowGrowthKeepsSidebarWidthAndGivesSpaceToReader() {
+    _ = NSApplication.shared
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    fixture.controller.applyPanelPreset(.reading)
+    fixture.controller.window?.setContentSize(NSSize(width: 1_200, height: 800))
+    fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let before = fixture.controller.selfTestUpperPaneWidths
+
+    fixture.controller.window?.setContentSize(NSSize(width: 1_600, height: 800))
+    fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let after = fixture.controller.selfTestUpperPaneWidths
+
+    #expect(abs(after.sidebar - before.sidebar) <= 1)
+    #expect(after.reader - before.reader >= 399)
+    if let directory = ProcessInfo.processInfo.environment[
+        "CODEINSIGHT_UI_CAPTURE_DIR"
+    ], let view = fixture.controller.selfTestContentView {
+        try? mainWindowCapturePNG(
+            view,
+            at: URL(fileURLWithPath: directory)
+                .appendingPathComponent("window-resize.png")
+        )
+    }
+}
+
+@MainActor
+private func mainWindowCapturePNG(_ view: NSView, at url: URL) throws {
+    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+    else { throw CocoaError(.fileWriteUnknown) }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    guard let data = bitmap.representation(using: .png, properties: [:])
+    else { throw CocoaError(.fileWriteUnknown) }
+    try data.write(to: url)
+}
+
 private func mainWindowTemporaryProject(
     _ files: [String: String]
 ) throws -> URL {
