@@ -78,6 +78,8 @@ public enum DeclarationKind: UInt8, Codable, Sendable {
     case rustField
     case pythonFunction = 11
     case pythonClass = 12
+    case typescriptFunction = 13
+    case typescriptClass = 14
 }
 
 public struct SymbolGroupID: Codable, Hashable, Sendable {

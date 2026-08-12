@@ -136,6 +136,14 @@ let package = Package(
             ]
         ),
         .target(
+            name: "CodeInsightTypeScriptExtractor",
+            dependencies: [
+                "CodeInsightCore",
+                "TreeSitterKit",
+                "CTreeSitterTypeScript",
+            ]
+        ),
+        .target(
             name: "CodeInsightExact",
             dependencies: [
                 "CProcessGuard",
@@ -253,6 +261,14 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightPythonExtractor",
+            ],
+            exclude: ["Fixtures"]
+        ),
+        .testTarget(
+            name: "TypeScriptExtractorTests",
+            dependencies: [
+                "CodeInsightCore",
+                "CodeInsightTypeScriptExtractor",
             ],
             exclude: ["Fixtures"]
         ),

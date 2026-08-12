@@ -1,0 +1,27 @@
+facets:
+  - model kind=13 parent=-
+  - hidden kind=13 parent=-
+  - Widget kind=14 parent=-
+  - method kind=13 parent=2
+  - run kind=13 parent=-
+bindings:
+  - value kind=0 scope=1
+  - label kind=0 scope=4
+  - run kind=1 scope=0
+  - input kind=0 scope=5
+  - renamed kind=2 scope=0
+  - TypeOnly kind=2 scope=0
+  - all kind=2 scope=0
+calls:
+imports:
+  - ./models kind=1 flags=0
+  - ./types kind=1 flags=4
+  - ./all kind=3 flags=1
+  - ./barrel kind=1 flags=2
+  - ./wild kind=3 flags=3
+exports:
+  - model
+  - Widget
+  - run
+  - alias
+  - renamed
