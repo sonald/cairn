@@ -1493,13 +1493,13 @@ func exactProfileKeyHashesCargoFileBytes() throws {
         ) == profile
     )
     do {
-        _ = try ExactProfileKey(projectURL: root, language: .typescript)
+        _ = try ExactProfileKey(projectURL: root, language: .javascript)
         Issue.record("expected unsupported exact fingerprint language")
     } catch let error as CocoaError {
         #expect(error.code == .featureUnsupported)
         #expect(
             (error.userInfo[NSLocalizedFailureReasonErrorKey] as? String)?
-                .contains("typescript") == true
+                .contains("javascript") == true
         )
     }
 }
