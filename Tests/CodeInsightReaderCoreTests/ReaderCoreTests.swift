@@ -1,5 +1,6 @@
 import CodeInsightCore
 import CodeInsightRustExtractor
+import CodeInsightTypeScriptExtractor
 import Foundation
 import os
 import Testing
@@ -42,20 +43,39 @@ func explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() throws {
 
 #if DEBUG
 @Test
-func unsupportedDocumentModeFailsBeforeParsing() throws {
+func javascriptAndInvalidTypeScriptVariantFailBeforeParsing() throws {
     let parseCount = OSAllocatedUnfairLock(initialState: 0)
     let loader = DocumentLoader(source: { _ in Array("const x: number = 1\n".utf8) })
 
     do {
-        _ = try RustExtractor.$parseObserver.withValue({
+        _ = try TypeScriptExtractor.$parseObserver.withValue({
             parseCount.withLock { $0 += 1 }
         }) {
             try loader.load(
-                file: URL(fileURLWithPath: "/fixture.py"),
-                languageMode: LanguageMode(language: .typescript)
+                file: URL(fileURLWithPath: "/fixture.js"),
+                languageMode: LanguageMode(language: .javascript)
             )
         }
-        Issue.record("DocumentLoader accepted an unsupported TypeScript mode")
+        Issue.record("DocumentLoader accepted JavaScript")
+    } catch RustHighlighterError.unsupportedLanguage(let language) {
+        #expect(language == .javascript)
+    } catch {
+        Issue.record("DocumentLoader returned the wrong error: \(error)")
+    }
+
+    do {
+        _ = try TypeScriptExtractor.$parseObserver.withValue({
+            parseCount.withLock { $0 += 1 }
+        }) {
+            try loader.load(
+                file: URL(fileURLWithPath: "/fixture.ts"),
+                languageMode: LanguageMode(
+                    language: .typescript,
+                    variant: "bad"
+                )
+            )
+        }
+        Issue.record("DocumentLoader accepted an invalid TypeScript variant")
     } catch RustHighlighterError.unsupportedLanguage(let language) {
         #expect(language == .typescript)
     } catch {
@@ -63,6 +83,51 @@ func unsupportedDocumentModeFailsBeforeParsing() throws {
     }
 
     #expect(parseCount.withLock { $0 } == 0)
+}
+
+@Test
+func typeScriptReaderUsesOneParseForBothHighlightAndOutline() throws {
+    let source = """
+        function top() {
+            const name: string = "ok";
+            const value: number = 1;
+            return value;
+        }
+        class Box {
+            open() {
+                return 1;
+            }
+        }
+        const render = () => { return <div />; };
+        """
+    let parseCount = OSAllocatedUnfairLock(initialState: 0)
+    let result = try TypeScriptExtractor.$parseObserver.withValue({
+        parseCount.withLock { $0 += 1 }
+    }) {
+        try typeScriptReaderHighlightWithFolds(
+            bytes: Array(source.utf8),
+            mode: LanguageMode(language: .typescript, variant: "tsx")
+        )
+    }
+
+    #expect(parseCount.withLock { $0 } == 1)
+    let kinds = result.outlineFacets.map(\.kind)
+    let depths = result.outlineFacets.map(\.depth)
+    #expect(kinds == [
+        OutlineKind.fn, .class, .method, .fn,
+    ])
+    #expect(depths == [0, 0, 1, 0])
+    #expect(result.spans.contains { $0.kind == HighlightKind.keyword })
+    #expect(result.spans.contains { $0.kind == HighlightKind.number })
+    #expect(result.spans.contains { $0.kind == HighlightKind.string })
+    #expect(!result.spans.contains {
+        $0.kind == HighlightKind.typeName
+            && text(in: source, range: $0.range) == "div"
+    })
+    #expect(result.spans == result.spans.sorted {
+        ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
+            < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
+    })
 }
 
 @Test
@@ -76,7 +141,7 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
     )
     let document = ReaderDocument(
         bytes: Array("const x = 1\n".utf8),
-        languageMode: LanguageMode(language: .typescript)
+        languageMode: LanguageMode(language: .javascript)
     )
 
     let completed = await withCheckedContinuation { continuation in
@@ -86,13 +151,316 @@ func unsupportedAsyncSyntaxModeFailsBeforeHighlighting() async {
     }
     switch completed {
     case .success:
-        Issue.record("Detached syntax accepted an unsupported TypeScript mode")
+        Issue.record("Detached syntax accepted JavaScript")
     case .failure(.unsupportedLanguage(let language)):
-        #expect(language == .typescript)
+        #expect(language == .javascript)
     case .failure(let error):
         Issue.record("Detached syntax returned the wrong error: \(error)")
     }
     #expect(resolutionCount.withLock { $0 } == 0)
+}
+
+@Test
+func typeScriptDocumentReadsTsAndTsxModes() throws {
+    let source: DocumentLoader.ContentSource = { file in
+        if file.pathExtension == "tsx" {
+            return Array("const A = () => { return <div />; };\n".utf8)
+        }
+        return Array("function f() { return 1; }\n".utf8)
+    }
+    let loader = DocumentLoader(source: source)
+    let tsDocument = try loader.load(
+        file: URL(fileURLWithPath: "/fixture.ts"),
+        languageMode: LanguageMode(language: .typescript)
+    )
+    let tsxDocument = try loader.load(
+        file: URL(fileURLWithPath: "/fixture.tsx"),
+        languageMode: LanguageMode(language: .typescript, variant: "tsx")
+    )
+
+    #expect(tsDocument.document.languageMode
+        == LanguageMode(language: .typescript))
+    #expect(tsxDocument.document.languageMode
+        == LanguageMode(language: .typescript, variant: "tsx"))
+    #expect(!tsDocument.document.outlineFacets.isEmpty)
+    #expect(!tsxDocument.document.outlineFacets.isEmpty)
+}
+
+@Test
+func typeScriptReaderFoldsBlockDeclarationsAndLaminarRegions() throws {
+    let source = """
+        import { a } from "./a";
+        import { b } from "./b";
+
+        function work(value: number) {
+            if (value > 0) {
+                return 1;
+            }
+            const arrow = () => { return 2; };
+            return arrow;
+        }
+
+        class Box {
+            run() {
+                try {
+                    work(1);
+                } catch (error) {
+                    throw error;
+                }
+            }
+        }
+
+        // one
+        // two
+        const single = x => x + 1;
+        """
+    let result = try typeScriptReaderHighlightWithFolds(
+        bytes: Array(source.utf8),
+        mode: LanguageMode(language: .typescript)
+    )
+
+    #expect(Set(result.folds.map(\.kind)) == Set([
+        FoldKind.imports, .container, .declaration, .block, .comment,
+    ]))
+    #expect(result.folds.contains {
+        $0.kind == .declaration
+            && text(in: source, range: $0.headerRange).contains("function work")
+    })
+    #expect(result.folds.contains {
+        $0.kind == .block
+            && text(in: source, range: $0.headerRange).contains("if (value > 0)")
+    })
+    #expect(result.folds.contains {
+        $0.kind == .container
+            && text(in: source, range: $0.headerRange).contains("class Box")
+    })
+    #expect(!result.folds.contains {
+        $0.kind == .block
+            && text(in: source, range: $0.headerRange).contains("=>")
+    })
+    #expect(foldsAreLaminar(result.folds))
+}
+
+@Test
+func typeScriptReaderLocalReferencesActivateAfterDeclarationAndShadowScopes() throws {
+    let source = """
+        function outer(value: number) {
+            let x = value;
+            x;
+            if (true) {
+                let x = x + 1;
+                x;
+            }
+            x;
+        }
+        interface Box {
+            value: number;
+        }
+        const obj = {
+            value: 1,
+        };
+        """
+    let result = try typeScriptDocumentWithLocalReferences(
+        source: source,
+        mode: LanguageMode(language: .typescript)
+    )
+    let xs = tokenRanges(of: "x", in: source)
+    let outerDeclaration = xs[0]
+    let innerDeclaration = xs[2]
+    let outerIndex = try #require(result.localBindings.firstIndex(where: {
+        $0.declarationRange == outerDeclaration
+    }))
+    let innerIndex = try #require(result.localBindings.firstIndex(where: {
+        $0.declarationRange == innerDeclaration
+    }))
+    let outerBinding = result.localBindings[outerIndex]
+    let innerBinding = result.localBindings[innerIndex]
+
+    #expect(outerBinding.kind == .letBinding)
+    #expect(result.referencesByBinding[outerIndex] == [xs[1], xs[3], xs[5]])
+    #expect(innerBinding.kind == .letBinding)
+    #expect(result.referencesByBinding[innerIndex] == [xs[4]])
+}
+
+@Test
+func typeScriptReaderNestedParameterScopesDoNotLeakAcrossFunctions() throws {
+    let source = """
+        function outer(a: number) {
+            function inner(a: number) {
+                return a;
+            }
+            return a;
+        }
+        """
+    let result = try typeScriptDocumentWithLocalReferences(
+        source: source,
+        mode: LanguageMode(language: .typescript)
+    )
+    let aRanges = tokenRanges(of: "a", in: source)
+
+    let outerIndex = try #require(result.localBindings.firstIndex(where: {
+        $0.kind == .param && $0.declarationRange == aRanges[0]
+    }))
+    let innerIndex = try #require(result.localBindings.firstIndex(where: {
+        $0.kind == .param && $0.declarationRange == aRanges[1]
+    }))
+    let outer = result.localBindings[outerIndex]
+    let inner = result.localBindings[innerIndex]
+
+    #expect(outer.scopeID != inner.scopeID)
+    #expect(result.referencesByBinding[innerIndex] == [aRanges[2]])
+    #expect(result.referencesByBinding[outerIndex] == [aRanges[3]])
+    let declarationRanges = result.localBindings.map(\.declarationRange)
+    #expect(declarationRanges.allSatisfy { range in
+        declarationRanges.first(where: { $0 == range })
+            == declarationRanges.last(where: { $0 == range })
+    })
+}
+
+@Test
+func typeScriptReaderSiblingScopesGetDistinctStableIDs() throws {
+    let source = """
+        function first(a: number) { return a; }
+        function second(b: number) { return b; }
+        {
+            let c = 1;
+            c;
+        }
+        {
+            let d = 2;
+            d;
+        }
+        """
+    let result = try typeScriptDocumentWithLocalReferences(
+        source: source,
+        mode: LanguageMode(language: .typescript)
+    )
+    let ids = Set(result.localBindings.map(\.scopeID.rawValue))
+
+    #expect(ids.count == result.localBindings.count)
+}
+
+@Test
+func typeScriptReaderExcludesPropertyAndTypeReferences() throws {
+    let source = """
+        type Name = string;
+        const value = {
+            name: "ok",
+            child: {
+                name: 1,
+            },
+        };
+        value.name;
+        """
+    let result = try typeScriptDocumentWithLocalReferences(
+        source: source,
+        mode: LanguageMode(language: .typescript)
+    )
+    let nameRanges = tokenRanges(of: "name", in: source)
+
+    #expect(nameRanges.count == 3)
+    #expect(result.referencesByBinding.flatMap { $0 }
+        .filter { nameRanges.contains($0) }.isEmpty)
+}
+
+@Test
+func typeScriptReaderFoldCandidatesAreStableAcrossRuns() throws {
+    let source = """
+        function work(value: number) {
+            if (value > 0) {
+                return 1;
+            }
+            return value;
+        }
+        """
+    let first = try typeScriptReaderHighlightWithFolds(
+        bytes: Array(source.utf8),
+        mode: LanguageMode(language: .typescript)
+    )
+    let second = try typeScriptReaderHighlightWithFolds(
+        bytes: Array(source.utf8),
+        mode: LanguageMode(language: .typescript)
+    )
+
+    #expect(first.folds == second.folds)
+    #expect(!first.folds.isEmpty)
+}
+
+@Test
+func typeScriptReaderTsxParseAndSingleLineArrowFolds() throws {
+    let source = """
+        const A = ({ label }: { label: string }) => {
+            return <div title="hi">{label}</div>;
+        };
+        const single = (x: number) => x + 1;
+        """
+    let result = try typeScriptDocumentWithLocalReferences(
+        source: source,
+        mode: LanguageMode(language: .typescript, variant: "tsx")
+    )
+
+    #expect(result.outlineFacets.map(\.kind) == [OutlineKind.fn])
+    #expect(result.foldRegions.contains { $0.kind == .declaration })
+    #expect(!result.foldRegions.contains {
+        $0.kind == .declaration
+            && text(in: source, range: $0.headerRange).contains("single")
+    })
+    #expect(result.highlightSpans.contains {
+        $0.kind == HighlightKind.keyword
+            && text(in: source, range: $0.range) == "return"
+    })
+}
+
+@Test
+func typeScriptLargeDocumentLoadsPlainThenDetachedSyntax() async throws {
+    let file = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightReaderCoreTests-\(UUID().uuidString).ts")
+    let sourceLines = (0..<10_001).map { index in
+        "function item_\(index)() { return \(index); }"
+    }
+    let source = sourceLines.joined(separator: "\n") + "\n"
+    try source.write(to: file, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: file) }
+    let loader = DocumentLoader()
+    let mode = LanguageMode(language: .typescript, variant: "tsx")
+
+    let loaded = try loader.load(file: file, languageMode: mode)
+    #expect(loaded.tier == .large)
+    #expect(loaded.document.highlightSpans.isEmpty)
+    let completed = await withCheckedContinuation { continuation in
+        loader.loadSyntax(for: loaded.document) { result in
+            continuation.resume(returning: result)
+        }
+    }
+    let document = try completed.get()
+    #expect(document.languageMode == mode)
+    #expect(!document.highlightSpans.isEmpty)
+    #expect(document.outlineFacets.count == 10_001)
+}
+
+@Test
+func typeScriptByteErrorsRejectWithoutParserObserver() throws {
+    let parserCount = OSAllocatedUnfairLock(initialState: 0)
+    let badSources = [
+        [0xEF, 0xBB, 0xBF] + Array("const x = 1\n".utf8),
+        Array([0x61, 0xFF, 0x62]),
+    ]
+    for bytes in badSources {
+        do {
+            _ = try TypeScriptExtractor.$parseObserver.withValue({
+                parserCount.withLock { $0 += 1 }
+            }) {
+                try typeScriptReaderHighlightWithFolds(
+                    bytes: bytes,
+                    mode: LanguageMode(language: .typescript)
+                )
+            }
+            Issue.record("TypeScript reader accepted invalid source bytes")
+        } catch {
+            #expect(error is CocoaError)
+        }
+    }
+    #expect(parserCount.withLock { $0 } == 0)
 }
 @Test
 func pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() throws {
@@ -1226,6 +1594,28 @@ private func localReferenceDocument(_ source: String) throws -> ReaderDocument {
         bytes: bytes,
         highlightSpans: highlighted.spans,
         outlineFacets: highlighted.outlineFacets,
+        localBindings: highlighted.bindings,
+        referencesByBinding: highlighted.referencesByBinding
+    )
+}
+
+private func typeScriptDocumentWithLocalReferences(
+    source: String,
+    mode: LanguageMode
+) throws -> ReaderDocument {
+    let bytes = Array(source.utf8)
+    let highlighted = try typeScriptReaderHighlightWithFolds(
+        bytes: bytes,
+        mode: mode
+    )
+    return ReaderDocument(
+        bytes: bytes,
+        languageMode: mode,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets,
+        foldRegions: highlighted.folds,
         localBindings: highlighted.bindings,
         referencesByBinding: highlighted.referencesByBinding
     )

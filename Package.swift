@@ -193,9 +193,11 @@ let package = Package(
                 "CodeInsightCore",
                 "CodeInsightPythonExtractor",
                 "CodeInsightRustExtractor",
+                "CodeInsightTypeScriptExtractor",
                 "TreeSitterKit",
                 "CTreeSitterRust",
                 "CTreeSitterPython",
+                "CTreeSitterTypeScript",
             ]
         ),
         .target(
@@ -295,7 +297,11 @@ let package = Package(
         ),
         .testTarget(
             name: "CodeInsightReaderCoreTests",
-            dependencies: ["CodeInsightReaderCore", "CodeInsightReaderUI"]
+            dependencies: [
+                "CodeInsightReaderCore",
+                "CodeInsightReaderUI",
+                "CodeInsightTypeScriptExtractor",
+            ]
         ),
         .testTarget(
             name: "CodeInsightReaderUITests",

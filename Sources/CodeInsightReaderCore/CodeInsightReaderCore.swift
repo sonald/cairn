@@ -877,7 +877,9 @@ public struct DocumentLoader: Sendable {
         switch languageMode.language {
         case .rust, .python:
             return
-        case .typescript, .javascript:
+        case .typescript:
+            try requireSupportedTypeScriptReaderMode(languageMode)
+        case .javascript:
             throw RustHighlighterError.unsupportedLanguage(languageMode.language)
         }
     }
@@ -925,7 +927,13 @@ public struct DocumentLoader: Sendable {
         case .python:
             try Self.requireSupported(languageMode)
             return try pythonReaderHighlightWithFolds(bytes: bytes)
-        case .typescript, .javascript:
+        case .typescript:
+            try Self.requireSupported(languageMode)
+            return try typeScriptReaderHighlightWithFolds(
+                bytes: bytes,
+                mode: languageMode
+            )
+        case .javascript:
             throw RustHighlighterError.unsupportedLanguage(languageMode.language)
         }
     }
