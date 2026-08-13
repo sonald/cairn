@@ -50,6 +50,7 @@ struct ReaderFindTests {
         #expect(state.status == "Line breaks are not supported")
         #expect(!state.previousEnabled && !state.nextEnabled)
 
+        let blockedFindDelay = Duration.seconds(300)
         let firstFile = URL(fileURLWithPath: "/reader-find-first.rs")
         let secondFile = URL(fileURLWithPath: "/reader-find-second.rs")
         fixture.controller.display(
@@ -58,7 +59,7 @@ struct ReaderFindTests {
         )
         let cancellationsBeforeFile =
             fixture.controller.findCancelledWorkerCountForTesting
-        fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
+        fixture.controller.selfTestSetFind("old", delay: blockedFindDelay)
         try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         fixture.controller.display(
             secondFile,
@@ -83,7 +84,7 @@ struct ReaderFindTests {
         )
         let cancellationsBeforeSnapshot =
             fixture.controller.findCancelledWorkerCountForTesting
-        fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
+        fixture.controller.selfTestSetFind("old", delay: blockedFindDelay)
         try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         fixture.controller.display(
             snapshotFile,
@@ -99,7 +100,7 @@ struct ReaderFindTests {
 
         let cancellationsBeforeClose =
             fixture.controller.findCancelledWorkerCountForTesting
-        fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
+        fixture.controller.selfTestSetFind("old", delay: blockedFindDelay)
         try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         #expect(fixture.controller.closeFindBar())
         #expect(!fixture.controller.selfTestFindState.visible)

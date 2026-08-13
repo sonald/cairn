@@ -4817,6 +4817,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         findCaseButton.state = caseSensitive ? .on : .off
         findField.stringValue = query
         scheduleFind(immediate: true)
+        findScanDelayForTesting = .zero
     }
     func selfTestNavigateFind(by delta: Int) {
         navigateFind(by: delta)
