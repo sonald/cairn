@@ -391,6 +391,18 @@ public final class LSPClient: @unchecked Sendable {
         inputHandle = input.fileHandleForWriting
         outputHandle = output.fileHandleForReading
         errorHandle = errors.fileHandleForReading
+        guard Darwin.fcntl(
+            inputHandle.fileDescriptor,
+            F_SETNOSIGPIPE,
+            1
+        ) != -1 else {
+            let error = NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno)
+            )
+            releaseHandles()
+            throw error
+        }
         guard ci_process_guard_install() else {
             releaseHandles()
             throw LSPError.childProcessGuardUnavailable
@@ -425,6 +437,10 @@ public final class LSPClient: @unchecked Sendable {
         inputHandle = writeHandle
         outputHandle = readHandle
         errorHandle = nil
+        precondition(
+            Darwin.fcntl(inputHandle.fileDescriptor, F_SETNOSIGPIPE, 1) != -1,
+            "failed to disable SIGPIPE for LSP transport"
+        )
         installHandlers()
     }
 
@@ -680,7 +696,11 @@ public final class LSPClient: @unchecked Sendable {
         let data = try LSPFraming.encode(message)
         writeLock.lock()
         defer { writeLock.unlock() }
-        try inputHandle.write(contentsOf: data)
+        do {
+            try inputHandle.write(contentsOf: data)
+        } catch {
+            throw LSPError.connectionClosed
+        }
     }
 
     private func receive(_ data: Data) {

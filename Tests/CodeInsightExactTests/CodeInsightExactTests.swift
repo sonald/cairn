@@ -1440,6 +1440,36 @@ func frameDecoderCountsUTF8Bytes() throws {
 }
 
 @Test
+func lspClientReportsClosedWritePipeWithoutTerminatingProcess() throws {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    try #require(
+        Darwin.fcntl(
+            clientToServer.fileHandleForWriting.fileDescriptor,
+            F_GETNOSIGPIPE
+        ) == 1
+    )
+    try clientToServer.fileHandleForReading.close()
+    defer {
+        client.close(grace: 0.01)
+        try? serverToClient.fileHandleForWriting.close()
+    }
+
+    do {
+        try client.notify("test/closed-pipe")
+        Issue.record("expected a closed LSP transport")
+    } catch LSPError.connectionClosed {
+        // expected
+    } catch {
+        Issue.record("expected connectionClosed, got \(error)")
+    }
+}
+
+@Test
 func byteAndLSPUTF16PositionsRoundTrip() throws {
     let bytes = Array("a你😀z\n汉🙂b".utf8)
     let map = try #require(LSPPositionMap(utf8: bytes))
