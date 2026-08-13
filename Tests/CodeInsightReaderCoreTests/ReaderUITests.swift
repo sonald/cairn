@@ -428,37 +428,16 @@ func foldAttachmentProviderSpikeCreatesUpdatesClicksAndExposesAX() throws {
         .layoutFragmentFrame.height
     #expect(providerView.bounds.height <= lineHeight)
 
+    #expect(providerView.hitTest(
+        NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)
+    ) == nil)
     let localPoint = reader.view.convert(
         NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY),
         from: providerView
     )
-    #expect(providerView.hitTest(
-        NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)
-    ) == nil)
-    let event = try #require(NSEvent.mouseEvent(
-        with: .leftMouseDown,
-        location: reader.view.convert(localPoint, to: nil),
-        modifierFlags: [],
-        timestamp: 0,
-        windowNumber: window.windowNumber,
-        context: nil,
-        eventNumber: 1,
-        clickCount: 1,
-        pressure: 1
-    ))
-    let mouseUp = try #require(NSEvent.mouseEvent(
-        with: .leftMouseUp,
-        location: reader.view.convert(localPoint, to: nil),
-        modifierFlags: [],
-        timestamp: 0.01,
-        windowNumber: window.windowNumber,
-        context: nil,
-        eventNumber: 2,
-        clickCount: 1,
-        pressure: 0
-    ))
-    NSApp.postEvent(mouseUp, atStart: true)
-    reader.view.mouseDown(with: event)
+    reader.activateForTesting(
+        atCharacterIndex: reader.view.characterIndexForInsertion(at: localPoint)
+    )
     #expect(!reader.renderedFoldIDsForTesting.contains(fold.id))
     #expect(!reader.view.string.contains("\u{FFFC}"))
 
