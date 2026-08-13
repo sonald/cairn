@@ -19,7 +19,12 @@ if [[ -n "${CODEX_SANDBOX:-}" ]]; then
 fi
 
 swift build ${swift_options[@]+"${swift_options[@]}"}
-swift test ${swift_options[@]+"${swift_options[@]}"}
+swift_test_log=.build/ci-swift-test.log
+swift test ${swift_options[@]+"${swift_options[@]}"} 2>&1 | tee "$swift_test_log"
+if ! grep -Eq '^✔ Test run with [1-9][0-9]* tests? .* passed after ' "$swift_test_log"; then
+    echo "FAIL: swift test 未报告完整成功的测试运行" >&2
+    exit 1
+fi
 
 if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
     Sources/CodeInsightReaderUI/ \
