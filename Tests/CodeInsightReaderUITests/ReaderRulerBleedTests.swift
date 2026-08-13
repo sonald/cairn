@@ -9,7 +9,8 @@ import Testing
 // dirty rect, and macOS 14+ views no longer clip to bounds by default. Without
 // clipping, the ruler paints a short vertical line at x == ruleThickness into
 // sibling views laid out above the scroll view (the reader tab strip).
-// This renders a real window and pixel-scans the header band above the ruler.
+// This renders the real view hierarchy and pixel-scans the header band above
+// the ruler without depending on screen-capture permission.
 @MainActor
 @Test
 func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
@@ -44,30 +45,28 @@ func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
         backing: .buffered,
         defer: false
     )
-    defer { window.orderOut(nil) }
     window.contentView = container
-    window.orderFrontRegardless()
     window.layoutIfNeeded()
-    window.display()
-    for _ in 0..<10 {
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-    }
+    window.displayIfNeeded()
 
-    let image = try #require(CGWindowListCreateImage(
-        .null,
-        .optionIncludingWindow,
-        CGWindowID(window.windowNumber),
-        [.boundsIgnoreFraming, .bestResolution]
-    ))
-    let bitmap = NSBitmapImageRep(cgImage: image)
+    let bitmap = try #require(
+        container.bitmapImageRepForCachingDisplay(in: container.bounds)
+    )
+    container.cacheDisplay(in: container.bounds, to: bitmap)
     let scale = max(1, bitmap.pixelsWide / 400)
+    let ruler = try #require(scrollView.verticalRulerView)
+    let gutterFrame = ruler.convert(ruler.bounds, to: container)
+    let scanColumns = max(0, Int(gutterFrame.minX) * scale)..<min(
+        bitmap.pixelsWide,
+        Int(gutterFrame.maxX.rounded(.up)) * scale + 1
+    )
 
     // The header band occupies the top 32pt of the window. Any column with a
-    // near-full-height run of non-white pixels is a bled vertical line.
+    // near-full-height run of non-white pixels at the gutter edge is a bleed.
     var bledColumns: [Int] = []
-    for px in 0..<bitmap.pixelsWide {
+    for px in scanColumns {
         var dark = 0
-        for py in (2 * scale)..<(30 * scale) {
+        for py in (202 * scale)..<(230 * scale) {
             guard let color = bitmap.colorAt(x: px, y: py)?
                 .usingColorSpace(.sRGB) else { continue }
             if color.brightnessComponent < 0.97 { dark += 1 }
