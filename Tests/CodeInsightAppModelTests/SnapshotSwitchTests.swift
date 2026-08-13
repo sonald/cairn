@@ -283,6 +283,9 @@ func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady") { model.snapshotPhase == .fullReady })
     model.switchToCommit("C")
     #expect(await testWaitUntil("model.snapshotPhase == .cachedReady") { model.snapshotPhase == .cachedReady })
+    try #require(await testWaitUntil("C full snapshot started") {
+        await service.hasStartedFull("C")
+    })
 
     let cSnapshotID = model.currentSnapshotID
     model.switchToCommit("D")
@@ -937,6 +940,7 @@ private actor ControlledSnapshotIndexService: IndexService {
     private var blockedCached: Set<String>
     private var blockedFull: Set<String>
     private var labelsBySnapshotID: [SnapshotID: String] = [:]
+    private var fullStarted: Set<String> = []
     private var cancelled: Set<String> = []
     private var indexLanguages: [LanguageID] = []
     private var captureLanguages: [LanguageID] = []
@@ -1001,6 +1005,7 @@ private actor ControlledSnapshotIndexService: IndexService {
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession {
         let label = try label(for: prepared.cachedSession.snapshotID)
+        fullStarted.insert(label)
         do {
             while blockedFull.contains(label) {
                 try Task.checkCancellation()
@@ -1029,6 +1034,7 @@ private actor ControlledSnapshotIndexService: IndexService {
     func setWorktreeSnapshot(_ snapshot: TestSnapshot) {
         worktreeSnapshot = snapshot
     }
+    func hasStartedFull(_ label: String) -> Bool { fullStarted.contains(label) }
     func wasCancelled(_ label: String) -> Bool { cancelled.contains(label) }
     func snapshotID(for label: String) -> SnapshotID? { snapshots[label]?.snapshotID }
     func receivedLanguages() -> (
