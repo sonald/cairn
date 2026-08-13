@@ -348,15 +348,48 @@ bash scripts/run-fold-perf.sh \
 
 failures=0
 
+if unsupported_output="$(
+    "$binary" goldset goldset/tokio.gold \
+        --corpus /nonexistent \
+        --language javascript \
+        --json 2>&1
+)"; then
+    echo "FAIL  unsupported CLI language was accepted" >&2
+    failures=$((failures + 1))
+elif [[ "$unsupported_output" == *"unsupported language: javascript"* ]]; then
+    echo "PASS  unsupported CLI language exits non-zero"
+else
+    echo "$unsupported_output" >&2
+    echo "FAIL  unsupported CLI language returned the wrong diagnostic" >&2
+    failures=$((failures + 1))
+fi
+
 run_gold() {
-    local gold_file="$1" corpus="$2" label="$3" language=""
+    local gold_file="$1" corpus="$2" label="$3" language="" output=""
     echo ""
     echo "--- $label ---"
     if [[ $# -gt 3 ]]; then language="$4"; fi
-    if "$binary" goldset "$gold_file" --corpus "$corpus" $persist_flag \
-        ${language:+--language "$language"}; then
+    if output="$(
+        "$binary" goldset "$gold_file" --corpus "$corpus" $persist_flag \
+            ${language:+--language "$language"} --json
+    )"; then
+        printf '%s\n' "$output"
+        if ! jq -e '
+            type == "object"
+            and (.total | type == "number") and .total > 0
+            and (.defTop1Passed >= 0 and .defTop1Passed <= .defTop1Total)
+            and (.def5Top5Passed >= 0 and .def5Top5Passed <= .def5Top5Total)
+            and (.unresolvedPassed >= 0 and .unresolvedPassed <= .unresolvedTotal)
+            and (.knownFailures >= 0)
+            and (.failures | type == "array" and length == 0)
+        ' <<<"$output" >/dev/null; then
+            echo "FAIL  $label emitted invalid JSON metrics" >&2
+            failures=$((failures + 1))
+            return
+        fi
         echo "PASS  $label"
     else
+        printf '%s\n' "$output"
         echo "FAIL  $label" >&2
         failures=$((failures + 1))
     fi
