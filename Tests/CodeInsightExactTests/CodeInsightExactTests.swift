@@ -48,9 +48,40 @@ func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions
     let clientToServer = Pipe()
     let serverToClient = Pipe()
     let done = DispatchSemaphore(value: 0)
+    let mainURI = root.appendingPathComponent("main.ts").absoluteString
+    let hierarchyItem: [String: Any] = [
+        "name": "target",
+        "kind": 12,
+        "uri": mainURI,
+        "range": lspRange(line: 1, character: 0),
+        "selectionRange": lspRange(line: 1, character: 16),
+    ]
     let server = TypeScriptFakeServer(
         input: clientToServer.fileHandleForReading,
         output: serverToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            switch method {
+            case "textDocument/implementation":
+                return .result([[
+                    "uri": mainURI,
+                    "range": lspRange(line: 1, character: 16),
+                ]])
+            case "textDocument/prepareCallHierarchy":
+                return .result([hierarchyItem])
+            case "callHierarchy/incomingCalls":
+                return .result([[
+                    "from": hierarchyItem,
+                    "fromRanges": [lspRange(line: 1, character: 7)],
+                ]])
+            case "callHierarchy/outgoingCalls":
+                return .result([[
+                    "to": hierarchyItem,
+                    "fromRanges": [lspRange(line: 1, character: 23)],
+                ]])
+            default:
+                return .useDefault
+            }
+        },
         done: { done.signal() }
     )
     server.start()
@@ -111,6 +142,28 @@ func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions
     #expect(references?.count == 1)
     #expect(references?.first?.byteOffset == 0)
     #expect(server.referencesPositions.first?["character"] as? Int == 6)
+
+    let implementations = try #require(try session.implementations(
+        file: "main.ts",
+        byteOffset: 10
+    ))
+    #expect(implementations.count == 1)
+    #expect(implementations[0].file == "main.ts")
+
+    let items = try #require(try session.prepareCallHierarchy(
+        file: "main.ts",
+        byteOffset: 10
+    ))
+    #expect(items.count == 1)
+    #expect(items[0].name == "target")
+    let incoming = try #require(try session.incomingCalls(item: items[0]))
+    #expect(incoming.count == 1)
+    #expect(incoming[0].item.name == "target")
+    #expect(incoming[0].callSites.first?.line == 2)
+    let outgoing = try #require(try session.outgoingCalls(item: items[0]))
+    #expect(outgoing.count == 1)
+    #expect(outgoing[0].item.name == "target")
+    #expect(outgoing[0].callSites.first?.line == 2)
 }
 
 @Test
