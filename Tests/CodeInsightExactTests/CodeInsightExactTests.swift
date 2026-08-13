@@ -2032,6 +2032,57 @@ func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
 }
 
 @Test
+func rustAnalyzerRestartFactoryFailureBecomesUnavailable() throws {
+    let root = exactFixtureURL()
+    let snapshot = try DirectorySnapshot(
+        root: root,
+        files: ["src/lib.rs", "src/main.rs"]
+    )
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PipeFakeLSPServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        done: { done.signal() }
+    )
+    server.start()
+    let session = try RustAnalyzerSession.start(
+        client: LSPClient(
+            readHandle: serverToClient.fileHandleForReading,
+            writeHandle: clientToServer.fileHandleForWriting
+        ),
+        restartClient: {
+            throw ExactError.unavailable("restart factory failed")
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 1,
+        closeGrace: 0.05,
+        diagnosticObserver: nil,
+        attribution: exactTestAttribution(provider: "fake-rust-analyzer")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    try clientToServer.fileHandleForWriting.close()
+
+    do {
+        _ = try session.definition(file: "src/lib.rs", byteOffset: 7)
+        Issue.record("expected restart factory failure")
+    } catch ExactError.unavailable(let detail) {
+        #expect(detail.contains("restart factory failed"))
+    }
+    guard case .unavailable(let reason) = session.readiness else {
+        Issue.record("expected unavailable readiness after restart factory failure")
+        return
+    }
+    #expect(reason.contains("rust-analyzer restart exhausted"))
+}
+
+@Test
 func rustAnalyzerParsesSingleLocationImplementation() throws {
     let location: [String: Any] = [
         "uri": exactFixtureURL()

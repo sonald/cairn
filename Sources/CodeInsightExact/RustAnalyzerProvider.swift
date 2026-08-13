@@ -908,7 +908,17 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
         oldClient.close(grace: closeGrace)
         Thread.sleep(forTimeInterval: 0.1)
-        let newClient = try restartClient()
+        let newClient: LSPClient
+        do {
+            newClient = try restartClient()
+        } catch {
+            stateLock.lock()
+            if state != .closed {
+                state = .unavailable("rust-analyzer restart exhausted: \(error)")
+            }
+            stateLock.unlock()
+            throw error
+        }
         stateLock.lock()
         guard state != .closed else {
             stateLock.unlock()
