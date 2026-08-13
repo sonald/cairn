@@ -314,9 +314,9 @@ public final class ReaderDocument: Sendable {
 
     public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
         switch languageMode.language {
-        case .rust, .python:
+        case .rust, .python, .typescript:
             break
-        case .typescript, .javascript:
+        case .javascript:
             return []
         }
         guard byteOffset < bytes.count,
@@ -327,21 +327,21 @@ public final class ReaderDocument: Sendable {
                   limitedBy: source.utf8.endIndex
               )?.samePosition(in: source.unicodeScalars),
               selectedIndex < source.unicodeScalars.endIndex,
-              Self.isIdentifierContinue(source.unicodeScalars[selectedIndex])
+              isIdentifierContinue(source.unicodeScalars[selectedIndex])
         else { return [] }
 
         let scalars = source.unicodeScalars
         var lower = selectedIndex
         while lower > scalars.startIndex {
             let previous = scalars.index(before: lower)
-            guard Self.isIdentifierContinue(scalars[previous]) else { break }
+            guard isIdentifierContinue(scalars[previous]) else { break }
             lower = previous
         }
-        guard Self.isIdentifierStart(scalars[lower]) else { return [] }
+        guard isIdentifierStart(scalars[lower]) else { return [] }
 
         var upper = selectedIndex
         while upper < scalars.endIndex,
-              Self.isIdentifierContinue(scalars[upper])
+              isIdentifierContinue(scalars[upper])
         {
             upper = scalars.index(after: upper)
         }
@@ -351,7 +351,9 @@ public final class ReaderDocument: Sendable {
             guard !RustHighlighter.isKeyword(selected) else { return [] }
         case .python:
             guard !pythonReaderIsKeyword(selected) else { return [] }
-        case .typescript, .javascript:
+        case .typescript:
+            guard !typeScriptReaderIsKeyword(selected) else { return [] }
+        case .javascript:
             return []
         }
 
@@ -361,7 +363,7 @@ public final class ReaderDocument: Sendable {
         var bytePosition: UInt32 = 0
         while index < scalars.endIndex {
             let scalar = scalars[index]
-            guard Self.isIdentifierStart(scalar) else {
+            guard isIdentifierStart(scalar) else {
                 bytePosition += UInt32(scalar.utf8.count)
                 index = scalars.index(after: index)
                 continue
@@ -370,7 +372,7 @@ public final class ReaderDocument: Sendable {
             let tokenStart = index
             let lowerByte = bytePosition
             while index < scalars.endIndex,
-                  Self.isIdentifierContinue(scalars[index])
+                  isIdentifierContinue(scalars[index])
             {
                 bytePosition += UInt32(scalars[index].utf8.count)
                 index = scalars.index(after: index)
@@ -405,12 +407,16 @@ public final class ReaderDocument: Sendable {
         return result
     }
 
-    private static func isIdentifierStart(_ scalar: Unicode.Scalar) -> Bool {
-        scalar == "_" || scalar.properties.isXIDStart
+    private func isIdentifierStart(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "_"
+            || (languageMode.language == .typescript && scalar == "$")
+            || scalar.properties.isXIDStart
     }
 
-    private static func isIdentifierContinue(_ scalar: Unicode.Scalar) -> Bool {
-        scalar == "_" || scalar.properties.isXIDContinue
+    private func isIdentifierContinue(_ scalar: Unicode.Scalar) -> Bool {
+        scalar == "_"
+            || (languageMode.language == .typescript && scalar == "$")
+            || scalar.properties.isXIDContinue
     }
 
     private static func excludesOccurrences(_ kind: HighlightKind) -> Bool {

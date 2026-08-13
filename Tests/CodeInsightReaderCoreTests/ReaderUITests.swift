@@ -1314,6 +1314,34 @@ func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() throws {
 
 @MainActor
 @Test
+func typeScriptIdentifierClickHighlightsLexicalOccurrences() throws {
+    let source = """
+        const $value = 1;
+        const alias = $value;
+        const object = { $value };
+        object.$value;
+        const $valueExtra = "$value";
+        // $value
+        """
+    let bytes = Array(source.utf8)
+    let loaded = try DocumentLoader(source: { _ in bytes }).load(
+        file: URL(fileURLWithPath: "/fixture.ts"),
+        languageMode: LanguageMode(language: .typescript)
+    )
+    let (reader, _, window) = renderOffscreen(loaded.document)
+    let selected = try #require(source.range(of: "$value"))
+    let selectedOffset = UInt32(source[..<selected.lowerBound].utf8.count)
+    let keyword = try #require(source.range(of: "const"))
+    let keywordOffset = UInt32(source[..<keyword.lowerBound].utf8.count)
+
+    #expect(reader.activate(atByteOffset: selectedOffset) == 4)
+    window.displayIfNeeded()
+    #expect(reader.occurrenceCount == 4)
+    #expect(reader.activate(atByteOffset: keywordOffset) == 0)
+}
+
+@MainActor
+@Test
 func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
     let source = "struct Widget;\nfn make(value: Widget) -> Widget { value }\n"
     let bytes = Array(source.utf8)
