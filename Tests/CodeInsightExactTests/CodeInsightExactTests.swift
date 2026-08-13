@@ -658,14 +658,30 @@ func typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() throws {
         _ = done.wait(timeout: .now() + 5)
     }
     let batch = ExactRequestBatch()
-    let finished = DispatchSemaphore(value: 0)
-    Thread.detachNewThread {
-        _ = try? session.definition(file: "main.ts", byteOffset: 0, batch: batch)
-        finished.signal()
+    let cancellationFailures = NSLockedCounter()
+    let staleDone = DispatchGroup()
+    for _ in 0..<2 {
+        staleDone.enter()
+        Thread.detachNewThread {
+            defer { staleDone.leave() }
+            let result = Result {
+                try session.definition(
+                    file: "main.ts",
+                    byteOffset: 0,
+                    batch: batch
+                )
+            }
+            if case .success(.cancelled) = result {} else {
+                cancellationFailures.increment()
+            }
+        }
     }
-    Thread.sleep(forTimeInterval: 0.05)
+    #expect(waitUntil("first TypeScript batch request starts", timeout: 1) {
+        responses.count == 1
+    })
     session.cancel(batch: batch)
-    #expect(finished.wait(timeout: .now() + 1) == .success)
+    #expect(staleDone.wait(timeout: .now() + 1) == .success)
+    #expect(cancellationFailures.value == 0)
 
     let current = try session.definition(file: "main.ts", byteOffset: 0)
     guard case .completed = current else {
@@ -1114,14 +1130,30 @@ func pyrightBatchCancelAllowsNewRequest() throws {
         _ = done.wait(timeout: .now() + 5)
     }
     let batch = ExactRequestBatch()
-    let finished = DispatchSemaphore(value: 0)
-    Thread.detachNewThread {
-        _ = try? session.definition(file: "main.py", byteOffset: 0, batch: batch)
-        finished.signal()
+    let cancellationFailures = NSLockedCounter()
+    let staleDone = DispatchGroup()
+    for _ in 0..<2 {
+        staleDone.enter()
+        Thread.detachNewThread {
+            defer { staleDone.leave() }
+            let result = Result {
+                try session.definition(
+                    file: "main.py",
+                    byteOffset: 0,
+                    batch: batch
+                )
+            }
+            if case .success(.cancelled) = result {} else {
+                cancellationFailures.increment()
+            }
+        }
     }
-    Thread.sleep(forTimeInterval: 0.05)
+    #expect(waitUntil("first pyright batch request starts", timeout: 1) {
+        responses.count == 1
+    })
     session.cancel(batch: batch)
-    #expect(finished.wait(timeout: .now() + 1) == .success)
+    #expect(staleDone.wait(timeout: .now() + 1) == .success)
+    #expect(cancellationFailures.value == 0)
 
     let current = try session.definition(file: "main.py", byteOffset: 0)
     guard case .completed = current else {
@@ -2607,6 +2639,7 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
     ) { session in
         let staleBatch = ExactRequestBatch()
         let staleFanout = 32
+        let cancellationFailures = NSLockedCounter()
         let started = DispatchSemaphore(value: 0)
         let staleDone = DispatchGroup()
         for _ in 0..<staleFanout {
@@ -2614,11 +2647,16 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
             Thread.detachNewThread {
                 defer { staleDone.leave() }
                 started.signal()
-                _ = try? session.definition(
-                    file: "src/main.rs",
-                    byteOffset: 0,
-                    batch: staleBatch
-                )
+                let result = Result {
+                    try session.definition(
+                        file: "src/main.rs",
+                        byteOffset: 0,
+                        batch: staleBatch
+                    )
+                }
+                if case .success(.cancelled) = result {} else {
+                    cancellationFailures.increment()
+                }
             }
         }
         for _ in 0..<staleFanout {
@@ -2631,6 +2669,7 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
 
         session.cancel(batch: staleBatch)
         #expect(staleDone.wait(timeout: .now() + 3) == .success)
+        #expect(cancellationFailures.value == 0)
         let staleRequestsAfterCancel = responses.count
         Thread.sleep(forTimeInterval: 0.05)
         #expect(responses.count == staleRequestsAfterCancel)

@@ -576,7 +576,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         var attempt = 0
         while true {
             do {
-                let readyClient: LSPClient = try withOperationLock(batch: batch) {
+                let prepared: LSPClient? = try withOperationLock(
+                    batch: batch,
+                    cancelledResult: nil
+                ) {
                     stateLock.lock()
                     cancelled = false
                     activeBatch = batch
@@ -595,6 +598,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                     try throwIfCancelled(method)
                     return currentClient
                 }
+                guard let readyClient = prepared else { return nil }
                 try readyClient.waitForQuiescence(
                     method: method,
                     timeout: requestTimeout,
@@ -603,6 +607,8 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                         return batch?.isCurrent != false && !self.isCancelled
                     }
                 )
+            } catch LSPError.cancelled {
+                return nil
             } catch LSPError.processExited where !retriedAfterCrash {
                 activeClient = try restartAfterCrash()
                 retriedAfterCrash = true
@@ -624,7 +630,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 retry: Bool,
                 countsTowardRetry: Bool,
                 restarted: Bool
-            ) = try withOperationLock(batch: batch) {
+            ) = try withOperationLock(
+                batch: batch,
+                cancelledResult: (nil, false, false, false)
+            ) {
                 stateLock.lock()
                 activeBatch = batch
                 stateLock.unlock()
@@ -680,6 +689,8 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                     throw self.exhaustedError()
                 } catch LSPError.connectionClosed {
                     throw self.exhaustedError()
+                } catch LSPError.cancelled {
+                    return (nil, false, false, false)
                 }
             }
             if outcome.restarted { continue }
@@ -692,6 +703,7 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
 
     private func withOperationLock<Result>(
         batch: ExactRequestBatch?,
+        cancelledResult: Result,
         _ operation: () throws -> Result
     ) throws -> Result {
         if let batch {
@@ -701,12 +713,12 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                 ) {
                     guard batch.isCurrent else {
                         operationLock.unlock()
-                        throw CancellationError()
+                        return cancelledResult
                     }
                     break
                 }
             }
-            guard batch.isCurrent else { throw CancellationError() }
+            guard batch.isCurrent else { return cancelledResult }
         } else {
             operationLock.lock()
         }

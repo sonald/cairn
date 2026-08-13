@@ -664,7 +664,10 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
         var retriedAfterCrash = false
         while true {
             do {
-                _ = try withOperationLock(batch: batch) {
+                let prepared: LSPClient? = try withOperationLock(
+                    batch: batch,
+                    cancelledResult: nil
+                ) {
                     stateLock.lock()
                     cancelled = false
                     activeBatch = batch
@@ -682,6 +685,9 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
                     try throwIfCancelled(method)
                     return currentClient
                 }
+                guard prepared != nil else { return nil }
+            } catch LSPError.cancelled {
+                return nil
             } catch LSPError.processExited where !retriedAfterCrash {
                 activeClient = try restartAfterCrash()
                 retriedAfterCrash = true
@@ -697,7 +703,10 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
             }
             markReady()
             let outcome: (result: Any?, restart: Bool, cancelled: Bool) =
-                try withOperationLock(batch: batch) {
+                try withOperationLock(
+                    batch: batch,
+                    cancelledResult: (nil, false, true)
+                ) {
                 stateLock.lock()
                 activeBatch = batch
                 stateLock.unlock()
@@ -747,6 +756,7 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
 
     private func withOperationLock<Result>(
         batch: ExactRequestBatch?,
+        cancelledResult: Result,
         _ operation: () throws -> Result
     ) throws -> Result {
         if let batch {
@@ -756,12 +766,12 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
                 ) {
                     guard batch.isCurrent else {
                         operationLock.unlock()
-                        throw CancellationError()
+                        return cancelledResult
                     }
                     break
                 }
             }
-            guard batch.isCurrent else { throw CancellationError() }
+            guard batch.isCurrent else { return cancelledResult }
         } else {
             operationLock.lock()
         }
