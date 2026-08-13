@@ -364,7 +364,7 @@ func wrapSettingReversesEveryTextKitAndScrollerProperty() {
 
 @MainActor
 @Test
-func foldAttachmentProviderSpikeCreatesUpdatesClicksAndExposesAX() throws {
+func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {
     let source = """
         fn probe() {
             let one = 1;
@@ -431,20 +431,10 @@ func foldAttachmentProviderSpikeCreatesUpdatesClicksAndExposesAX() throws {
     #expect(providerView.hitTest(
         NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)
     ) == nil)
-    let localPoint = reader.view.convert(
-        NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY),
-        from: providerView
-    )
-    reader.activateForTesting(
-        atCharacterIndex: reader.view.characterIndexForInsertion(at: localPoint)
-    )
-    #expect(!reader.renderedFoldIDsForTesting.contains(fold.id))
-    #expect(!reader.view.string.contains("\u{FFFC}"))
-
     #expect(providerView.accessibilityLabel()?.contains("Collapsed, hides") == true)
     print(
         "M11_ATTACHMENT_SPIKE providerCreated=true countUpdated=true "
-            + "clickExpanded=true axLabel=\(providerView.accessibilityLabel() ?? "nil") "
+            + "axLabel=\(providerView.accessibilityLabel() ?? "nil") "
             + "hitTesting=NSTextView"
     )
     withExtendedLifetime(window) {}

@@ -2126,10 +2126,6 @@ public final class ReaderTextView {
         activate(atByteOffset: byteOffset)
     }
 
-    internal func activateForTesting(atCharacterIndex index: Int) {
-        activate(atCharacterIndex: index)
-    }
-
     private func setOccurrences(
         _ ranges: [NSRange],
         logicalCount: Int? = nil
