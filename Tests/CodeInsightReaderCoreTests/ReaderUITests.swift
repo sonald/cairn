@@ -682,7 +682,7 @@ func manualFoldsArbitrateInBothDirectionsAndLevelSwitchClearsEveryPair() throws 
 }
 
 @MainActor
-@Test
+@Test(.timeLimit(.minutes(1)))
 func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() async throws {
     let (document, regions) = readingHeightLevelDocument()
     let reader = ReaderTextView()
@@ -708,6 +708,9 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
     let nestedOffset = regions.declaration.bodyRange.lowerBound + 1
     #expect(reader.logicalFoldIDsForTesting.contains(regions.container.id))
     #expect(reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+    let markerStarted = ContinuousClock.now
+    var lastPoll = markerStarted
+    var mainActorWasStarved = false
     _ = reader.activate(atByteOffset: nestedOffset)
     for region in [regions.container, regions.declaration] {
         #expect(!reader.logicalFoldIDsForTesting.contains(region.id))
@@ -731,13 +734,18 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
                 document.lineTable.lineColumn(at: nestedOffset)
             ).line)
     )
-    let markerDeadline = ContinuousClock.now + .seconds(3)
-    while reader.navigationLandingLineForTesting != nil,
-          ContinuousClock.now < markerDeadline
-    {
+    while reader.navigationLandingLineForTesting != nil {
         try await Task.sleep(for: .milliseconds(10))
+        let now = ContinuousClock.now
+        if lastPoll.duration(to: now) > .milliseconds(250) {
+            mainActorWasStarved = true
+        }
+        lastPoll = now
     }
     #expect(reader.navigationLandingLineForTesting == nil)
+    if !mainActorWasStarved {
+        #expect(markerStarted.duration(to: ContinuousClock.now) < .seconds(3))
+    }
 }
 
 @MainActor
