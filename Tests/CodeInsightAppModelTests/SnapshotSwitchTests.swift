@@ -291,7 +291,9 @@ func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     #expect(await testWaitUntil("model.snapshotPhase == .fullReady && model.currentRevision == \"D\"") {
         model.snapshotPhase == .fullReady && model.currentRevision == "D"
     })
-    #expect(await service.wasCancelled("C"))
+    #expect(await testWaitUntil("C snapshot cancellation") {
+        await service.wasCancelled("C")
+    })
     #expect(model.generation == 3)
     #expect(model.fileTree?.children.map(\.name) == ["d.rs"])
     guard case let .ready(session, context) = model.projectState else {
