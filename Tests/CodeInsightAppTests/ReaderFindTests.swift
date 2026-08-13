@@ -129,6 +129,7 @@ private func makeFindFixture(
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
     window.contentViewController = controller
     window.contentView?.layoutSubtreeIfNeeded()
     return (controller, window)
