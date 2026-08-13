@@ -660,6 +660,10 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
                     retriedAfterCrash = true
                     attempt = 0
                     return (nil, false, false, true)
+                } catch LSPError.processExited {
+                    throw self.exhaustedError()
+                } catch LSPError.connectionClosed {
+                    throw self.exhaustedError()
                 }
             }
             if outcome.restarted { continue }
@@ -1110,6 +1114,14 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         stateLock.unlock()
     }
 
+    private func exhaustedError() -> ExactError {
+        stateLock.lock()
+        if state != .closed {
+            state = .unavailable("rust-analyzer restart exhausted")
+        }
+        stateLock.unlock()
+        return ExactError.unavailable("rust-analyzer restart exhausted")
+    }
 }
 
 func rustAnalyzerEnvironment(

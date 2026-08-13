@@ -1903,6 +1903,88 @@ func rustAnalyzerParsesEveryLocationLinkImplementation() throws {
 }
 
 @Test
+func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
+    let root = exactFixtureURL()
+    let snapshot = try DirectorySnapshot(
+        root: root,
+        files: ["src/lib.rs", "src/main.rs"]
+    )
+    let firstClientToServer = Pipe()
+    let firstServerToClient = Pipe()
+    let firstDone = DispatchSemaphore(value: 0)
+    let firstServer = PipeFakeLSPServer(
+        input: firstClientToServer.fileHandleForReading,
+        output: firstServerToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            guard method == "textDocument/definition" else {
+                return .useDefault
+            }
+            try? firstServerToClient.fileHandleForWriting.close()
+            return .noResponse
+        },
+        done: { firstDone.signal() }
+    )
+    let secondClientToServer = Pipe()
+    let secondServerToClient = Pipe()
+    let secondDone = DispatchSemaphore(value: 0)
+    let secondServer = PipeFakeLSPServer(
+        input: secondClientToServer.fileHandleForReading,
+        output: secondServerToClient.fileHandleForWriting,
+        requestResponder: { method, _ in
+            guard method == "textDocument/definition" else {
+                return .useDefault
+            }
+            try? secondServerToClient.fileHandleForWriting.close()
+            return .noResponse
+        },
+        done: { secondDone.signal() }
+    )
+    firstServer.start()
+    let restartCounter = NSLockedCounter()
+    let session = try RustAnalyzerSession.start(
+        client: LSPClient(
+            readHandle: firstServerToClient.fileHandleForReading,
+            writeHandle: firstClientToServer.fileHandleForWriting
+        ),
+        restartClient: {
+            restartCounter.increment()
+            secondServer.start()
+            return LSPClient(
+                readHandle: secondServerToClient.fileHandleForReading,
+                writeHandle: secondClientToServer.fileHandleForWriting
+            )
+        },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: [:],
+        requestTimeout: 1,
+        closeGrace: 0.05,
+        diagnosticObserver: nil,
+        attribution: exactTestAttribution(provider: "fake-rust-analyzer")
+    )
+    defer {
+        session.close()
+        _ = firstDone.wait(timeout: .now() + 5)
+        _ = secondDone.wait(timeout: .now() + 5)
+    }
+
+    do {
+        _ = try session.definition(file: "src/lib.rs", byteOffset: 7)
+        Issue.record("expected rust-analyzer unavailable after restart exhaustion")
+    } catch ExactError.unavailable(let detail) {
+        #expect(detail.contains("rust-analyzer restart exhausted"))
+        #expect(restartCounter.value == 1)
+        if case .unavailable(let reason) = session.readiness {
+            #expect(reason.contains("rust-analyzer restart"))
+        } else {
+            Issue.record("expected rust-analyzer unavailable after second crash")
+        }
+    } catch {
+        Issue.record("expected ExactError.unavailable, got \(error)")
+    }
+}
+
+@Test
 func rustAnalyzerParsesSingleLocationImplementation() throws {
     let location: [String: Any] = [
         "uri": exactFixtureURL()
