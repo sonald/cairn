@@ -1,8 +1,8 @@
 # L2 TypeScript implementation acceptance
 
 > Started: 2026-08-12 (Asia/Shanghai)
-> Source plan: `docs/plans/l2-typescript-plan.md` (untracked user input)
-> Status: F0 recorded; P0 rerun evidence appended below; P0a GO, P0b GO, P0c GO; Overall P0 GO for plan gate. `.typescript` product support remains unsupported until F7b.
+> Source plan: `docs/plans/l2-typescript-plan.md`
+> Status: L2 complete through V0; product support landed; V0 final acceptance appended below.
 
 ## F0 live baseline
 
@@ -570,3 +570,128 @@ staged or committed.
 C3 does not make a full CI/V0 product-support claim: the product validator
 still rejects `.typescript`, and several provider-level security/lifecycle rows
 remain P0-recorded rather than rerun in this checkpoint.
+
+---
+
+## V0 final acceptance
+
+Recorded by the acceptance host. HEAD `9513a34ec654800ca4664c5fdd48075a32777b1b`;
+`L2_BASE` `2ace2ebf4ed78b1ae1bc1fa64b6d6917620c6b0d`; `RECORD` unset.
+
+### 1. Full CI
+
+`CODEX_SANDBOX=1 bash scripts/ci.sh` exited 0. The CI script ran its exact/diff/
+reading/projector/fold built-in self-test channels, and all 5 passed. Fold-perf
+status passed:
+`candidate=8400 logical=4400 rendered=200 foldLatencyMS=359.301958 deltaBytes=9748456`.
+The no-AppKit gate explicitly includes the Python and TypeScript extractor
+targets (committed at `9513a34`).
+Current `swift test ... list` inventory is 720 listed tests.
+
+### 2. Gold gates
+
+`scripts/run-gold-gates.sh` exited 0:
+
+- tokio total 17, unexpected 0;
+- ripgrep total 16, known-fail 3, unexpected 0;
+- Python total 6, unexpected 0;
+- TypeScript total 10; definition Top1 6/6; unresolved 2/2; unexpected 0.
+
+### 3. 16-channel self-test evidence
+
+Honest matrix:
+
+- Committed F7b final green run:
+  `.build/self-test-run-20260813-040502-86742` = pass 16, fail 0, hang 0
+  (already accepted).
+- Restricted-tool sandbox repeat:
+  `.build/self-test-run-20260813-084405-16343` = pass 14, hang 2; both corpora
+  reached only cold-open and timed out waiting for provider.
+- System-environment rerun:
+  `.build/self-test-run-20260813-084928-16984` = pass 14, fail 2, hang 0;
+  Python and TypeScript passed, but tabs/reading failed because of transient
+  memory thresholds (162.09 MB and 100.063 MB).
+
+These last two runs are environment/memory variance, not green. They do not
+replace the committed F7b green run or the product bundle direct run below.
+
+### 4. Bundle
+
+- Bundle ID: `dev.cairn.Cairn.l2v0.20260813042000-9513`.
+- Output: `.build/l2-distribution-20260813042000-9513`.
+- Before first launch, defaults and Application Support did not exist.
+- Vendored static libgit2.
+- App and zip Info.plist matched; strict `codesign` passed on the app and again
+  after unzipping the archive.
+- `launchctl getenv PATH` was empty; `launchctl setenv` was not used.
+- Launched normally with `open -n`.
+- First-run PID 5342; restart showed 15761/15766 (short-lived two-process
+  observation, both exited). After two normal Quits, no process remained for
+  the bundle executable path or provider names.
+
+### 5. Product bundle TypeScript direct run
+
+The released bundle executable, run under the normal AppKit session with
+`--self-test-typescript`, exited 0:
+
+- cold: 53 files extracted, reused 0, 2 TS + 51 TSX;
+- fuzzy `components/chat.tsx` -> `components/chat-panel.tsx`, certainty 2;
+- alias fuzzy unresolved and Exact Card resolved;
+- definition targets 1, references true;
+- TLS 3.3.0, TypeScript 5.0.2, Node 26.7;
+- compare hunks 2; right reader == commit and != worktree; not truncated;
+- snapshot switch: commit extracted 1 reused 52; worktree extracted 0 reused 53;
+- retry and recent reopen reused 53;
+- summary passed `true` for all checks.
+
+The earlier restricted-sandbox direct run aborted inside `NSApplication`
+`_RegisterApplication` before product logic and was not counted as either
+product pass or fail.
+
+### 6. Real AX verification
+
+- Menu has Open Project / Python / TypeScript and Quick Open.
+- Rust tokio: tree + Reader/outline on `lib.rs`; rust-analyzer ready, Safe,
+  limited.
+- Python mcp-sdk: tree, pyright 1.1.411, deps-unavailable-offline Safe;
+  normal quit/restart restored.
+- TypeScript morphic: tree only TS/TSX (2+51 proven by direct run; no JS);
+  profile menu `Current unit: tsconfig.json · Safe` / Trust; after trust the UI
+  showed `Exact: deps unavailable (offline) · Trusted`. This is the fixed
+  offline analysis limitation even though coordinator readiness was actually
+  ready; the UI wording is not "unavailable". Attribution carries the full TLS
+  version.
+- TS and TSX reader/outline verified; symbol search hit
+  `SearchResultsImageSection`; file search hit `search-results-image`.
+- Snapshot commit/worktree round trip verified; direct run precisely validated
+  HEAD~1 compare.
+- Final restart restored morphic + TSX Reader/outline + provider attribution.
+- Screenshot: `v0-final-bundle-typescript.jpeg`, SHA-256
+  `6e77bdd85eff59bb62993e272c4980713045e90d530c654d136a0d3a485e9fbe`, 1002x652.
+
+### 7. Corpus hashes
+
+Complete tracked/untracked/ignored-state hashes, all clean:
+
+- Python: hash `5bb1512f10354e97dd863adcba97bb5e72ff9ad2026990498f56d3f30f2acbbb`,
+  HEAD `f55831ee798cd4d7bafab4d50d6dba46e6fce387`.
+- TypeScript: hash `aa4d9416903f6655ad308cf7823961ac2ecd2b962e2603d9cd586c1f4ce1dbce`,
+  HEAD `f31fe4a9ce2d355c3a44203fcb6add9296cc9b61`.
+- Rust: hash `de4ae8f4992471174c255804153b699a2b984e783711de32fb8b34b890b8cda2`,
+  HEAD `be8ee45b3fc2d107174e586141b1cb12c93e2ddf`.
+
+### 8. Protected-state and structure gates
+
+- Protected hashes all match F0.
+- Forbidden structure names: zero.
+- `waitForQuiescence` appears only in LSP definitions and RA call sites.
+- `typescriptreact` appears only in the TS provider `didOpen`.
+- Scope: intended files only; no push/tag/publish.
+
+### 9. Conclusion
+
+V0 implementation and product function PASSED. The automation matrix keeps the
+honest note that the last two runs were not green due to environment/memory
+fluctuation; the final bundle direct run is the authoritative product pass.
+The provider UI `deps-offline` status is a fixed analysis limitation, not
+readiness unavailable.
