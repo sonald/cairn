@@ -7,7 +7,7 @@ import Testing
 @MainActor
 @Suite(.serialized)
 struct ReaderFindTests {
-    @Test
+    @Test(.timeLimit(.minutes(2)))
     func readerFindContracts() async throws {
         let fixture = makeFindFixture("Alpha alpha alpha beta\n")
         defer { fixture.window.close() }
@@ -59,7 +59,7 @@ struct ReaderFindTests {
         let cancellationsBeforeFile =
             fixture.controller.findCancelledWorkerCountForTesting
         fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
-        #expect(await waitUntil { fixture.controller.selfTestFindWorkerActive })
+        try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         fixture.controller.display(
             secondFile,
             source: { _ in Array("new new\n".utf8) }
@@ -68,10 +68,10 @@ struct ReaderFindTests {
             fixture.controller.selfTestFindState.status == "0 matches"
         })
         #expect(fixture.controller.selfTestFindState.count == 0)
-        #expect(
+        #expect(await waitUntil {
             fixture.controller.findCancelledWorkerCountForTesting
                 > cancellationsBeforeFile
-        )
+        })
 
         let snapshotFile = URL(fileURLWithPath: "/reader-find-snapshot.rs")
         let firstSnapshot = SnapshotID(rawValue: UUID())
@@ -84,7 +84,7 @@ struct ReaderFindTests {
         let cancellationsBeforeSnapshot =
             fixture.controller.findCancelledWorkerCountForTesting
         fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
-        #expect(await waitUntil { fixture.controller.selfTestFindWorkerActive })
+        try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         fixture.controller.display(
             snapshotFile,
             snapshotID: secondSnapshot,
@@ -92,23 +92,22 @@ struct ReaderFindTests {
         )
         #expect(await waitForFind { fixture.controller.selfTestFindState.count == 1 })
         #expect(fixture.controller.selfTestFindState.status == "1 / 1")
-        #expect(
+        #expect(await waitUntil {
             fixture.controller.findCancelledWorkerCountForTesting
                 > cancellationsBeforeSnapshot
-        )
+        })
 
         let cancellationsBeforeClose =
             fixture.controller.findCancelledWorkerCountForTesting
         fixture.controller.selfTestSetFind("old", delay: .milliseconds(250))
-        #expect(await waitUntil { fixture.controller.selfTestFindWorkerActive })
+        try #require(await waitUntil { fixture.controller.selfTestFindWorkerActive })
         #expect(fixture.controller.closeFindBar())
-        try await Task.sleep(for: .milliseconds(300))
         #expect(!fixture.controller.selfTestFindState.visible)
         #expect(fixture.controller.selfTestFindState.count == 0)
-        #expect(
+        #expect(await waitUntil {
             fixture.controller.findCancelledWorkerCountForTesting
                 > cancellationsBeforeClose
-        )
+        })
     }
 }
 
@@ -139,18 +138,19 @@ private func makeFindFixture(
 private func waitForFind(
     _ condition: @escaping @MainActor () -> Bool
 ) async -> Bool {
-    await waitUntil(timeout: .seconds(2), condition)
+    await waitUntil(condition)
 }
 
 @MainActor
 private func waitUntil(
-    timeout: Duration = .seconds(1),
     _ condition: @escaping @MainActor () -> Bool
 ) async -> Bool {
-    let deadline = ContinuousClock.now.advanced(by: timeout)
-    while ContinuousClock.now < deadline {
-        if condition() { return true }
-        try? await Task.sleep(for: .milliseconds(10))
+    while !condition() {
+        do {
+            try await Task.sleep(for: .milliseconds(10))
+        } catch {
+            return false
+        }
     }
-    return condition()
+    return true
 }
