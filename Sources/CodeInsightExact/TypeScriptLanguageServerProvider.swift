@@ -783,23 +783,37 @@ final class TypeScriptLanguageServerSession: ExactSession, @unchecked Sendable {
         var activeClient: LSPClient?
         var retriedAfterCrash = false
         while true {
-            _ = try withOperationLock(batch: batch) {
-                stateLock.lock()
-                cancelled = false
-                activeBatch = batch
-                stateLock.unlock()
-                guard batch?.isCurrent != false else {
-                    throw LSPError.cancelled(method)
+            do {
+                _ = try withOperationLock(batch: batch) {
+                    stateLock.lock()
+                    cancelled = false
+                    activeBatch = batch
+                    stateLock.unlock()
+                    guard batch?.isCurrent != false else {
+                        throw LSPError.cancelled(method)
+                    }
+                    if activeClient == nil {
+                        activeClient = try clientForRequest()
+                    }
+                    guard let currentClient = activeClient else {
+                        throw LSPError.cancelled(method)
+                    }
+                    try beforeRequest(currentClient)
+                    try throwIfCancelled(method)
+                    return currentClient
                 }
-                if activeClient == nil {
-                    activeClient = try clientForRequest()
-                }
-                guard let currentClient = activeClient else {
-                    throw LSPError.cancelled(method)
-                }
-                try beforeRequest(currentClient)
-                try throwIfCancelled(method)
-                return currentClient
+            } catch LSPError.processExited where !retriedAfterCrash {
+                activeClient = try restartAfterCrash()
+                retriedAfterCrash = true
+                continue
+            } catch LSPError.connectionClosed where !retriedAfterCrash {
+                activeClient = try restartAfterCrash()
+                retriedAfterCrash = true
+                continue
+            } catch LSPError.processExited {
+                throw exhaustedError()
+            } catch LSPError.connectionClosed {
+                throw exhaustedError()
             }
             markReady()
             let outcome: (result: Any?, restart: Bool, cancelled: Bool) =

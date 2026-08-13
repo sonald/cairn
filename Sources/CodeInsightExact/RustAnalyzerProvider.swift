@@ -575,33 +575,49 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         var retriedAfterCrash = false
         var attempt = 0
         while true {
-            let readyClient: LSPClient = try withOperationLock(batch: batch) {
-                stateLock.lock()
-                cancelled = false
-                activeBatch = batch
-                stateLock.unlock()
-                guard batch?.isCurrent != false else {
-                    throw LSPError.cancelled(method)
-                }
+            do {
+                let readyClient: LSPClient = try withOperationLock(batch: batch) {
+                    stateLock.lock()
+                    cancelled = false
+                    activeBatch = batch
+                    stateLock.unlock()
+                    guard batch?.isCurrent != false else {
+                        throw LSPError.cancelled(method)
+                    }
 
-                if activeClient == nil {
-                    activeClient = try clientForRequest()
+                    if activeClient == nil {
+                        activeClient = try clientForRequest()
+                    }
+                    guard let currentClient = activeClient else {
+                        throw LSPError.cancelled(method)
+                    }
+                    try beforeRequest(currentClient)
+                    try throwIfCancelled(method)
+                    return currentClient
                 }
-                guard let currentClient = activeClient else {
-                    throw LSPError.cancelled(method)
-                }
-                try beforeRequest(currentClient)
-                try throwIfCancelled(method)
-                return currentClient
+                try readyClient.waitForQuiescence(
+                    method: method,
+                    timeout: requestTimeout,
+                    shouldContinue: { [weak self] in
+                        guard let self else { return false }
+                        return batch?.isCurrent != false && !self.isCancelled
+                    }
+                )
+            } catch LSPError.processExited where !retriedAfterCrash {
+                activeClient = try restartAfterCrash()
+                retriedAfterCrash = true
+                attempt = 0
+                continue
+            } catch LSPError.connectionClosed where !retriedAfterCrash {
+                activeClient = try restartAfterCrash()
+                retriedAfterCrash = true
+                attempt = 0
+                continue
+            } catch LSPError.processExited {
+                throw exhaustedError()
+            } catch LSPError.connectionClosed {
+                throw exhaustedError()
             }
-            try readyClient.waitForQuiescence(
-                method: method,
-                timeout: requestTimeout,
-                shouldContinue: { [weak self] in
-                    guard let self else { return false }
-                    return batch?.isCurrent != false && !self.isCancelled
-                }
-            )
             markReady()
             let outcome: (
                 result: Result?,

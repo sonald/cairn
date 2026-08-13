@@ -511,7 +511,6 @@ func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
     let firstServer = TypeScriptFakeServer(
         input: firstClientToServer.fileHandleForReading,
         output: firstServerToClient.fileHandleForWriting,
-        closeOutputAfterInitialize: true,
         done: { firstDone.signal() }
     )
     firstServer.start()
@@ -546,6 +545,7 @@ func typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         attribution: exactTestAttribution(provider: "fake-typescript")
     )
     defer { session.close() }
+    try firstClientToServer.fileHandleForWriting.close()
 
     do {
         _ = try session.definition(file: "main.ts", byteOffset: 0)
@@ -1332,7 +1332,6 @@ func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         input: firstClientToServer.fileHandleForReading,
         output: firstServerToClient.fileHandleForWriting,
         implementationProvider: false,
-        closeOutputAfterInitialize: true,
         done: { firstDone.signal() }
     )
     firstServer.start()
@@ -1367,6 +1366,7 @@ func pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         attribution: exactTestAttribution(provider: "fake-pyright")
     )
     defer { session.close() }
+    try firstClientToServer.fileHandleForWriting.close()
 
     do {
         _ = try session.definition(file: "main.py", byteOffset: 0)
@@ -1915,13 +1915,6 @@ func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
     let firstServer = PipeFakeLSPServer(
         input: firstClientToServer.fileHandleForReading,
         output: firstServerToClient.fileHandleForWriting,
-        requestResponder: { method, _ in
-            guard method == "textDocument/definition" else {
-                return .useDefault
-            }
-            try? firstServerToClient.fileHandleForWriting.close()
-            return .noResponse
-        },
         done: { firstDone.signal() }
     )
     let secondClientToServer = Pipe()
@@ -1967,6 +1960,7 @@ func rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() throws {
         _ = firstDone.wait(timeout: .now() + 5)
         _ = secondDone.wait(timeout: .now() + 5)
     }
+    try firstClientToServer.fileHandleForWriting.close()
 
     do {
         _ = try session.definition(file: "src/lib.rs", byteOffset: 7)
