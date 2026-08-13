@@ -259,13 +259,13 @@ struct RelationUXTests {
 
         #expect(fixture.controller.selfTestSelectCorrectedCandidate(titled: "first"))
         #expect(opens.isEmpty)
+        fixture.controller.selfTestOpenSelection()
         #expect(fixture.controller.selfTestInspectorText.contains(
             "VERIFICATION CONFLICT"
         ))
         #expect(fixture.controller.selfTestInspectorText.contains(
             "Open former candidate"
         ))
-        fixture.controller.selfTestOpenSelection()
         fixture.controller.selfTestOpenSelection()
         #expect(opens.isEmpty)
         fixture.controller.selfTestOpenFormerCandidate()
