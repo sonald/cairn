@@ -1,0 +1,83 @@
+name: Three-language product quality
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: product-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  product-quality:
+    name: Three-language product gate
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      CODEINSIGHT_SELF_TEST_TIMEOUT_SECONDS: 240
+      CAIRN_CORPUS_ROOT: ${{ runner.temp }}/cairn-corpora
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      RUSTUP_TOOLCHAIN: 1.97.1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26.7.0
+
+      - name: Install pinned product tools
+        run: |
+          brew install libgit2 ripgrep
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" \
+            --profile minimal --component rust-analyzer
+          npm install --global \
+            pyright@1.1.411 \
+            typescript-language-server@3.3.0 \
+            typescript@5.0.2
+          echo "$(npm root --global)/typescript/lib" >> "$GITHUB_PATH"
+
+      - name: Checkout frozen Python and TypeScript corpora
+        run: |
+          git clone https://github.com/modelcontextprotocol/python-sdk \
+            "$RUNNER_TEMP/mcp-python-sdk"
+          git -C "$RUNNER_TEMP/mcp-python-sdk" checkout \
+            f55831ee798cd4d7bafab4d50d6dba46e6fce387
+          git clone https://github.com/miurla/morphic \
+            "$RUNNER_TEMP/morphic"
+          git -C "$RUNNER_TEMP/morphic" checkout \
+            f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
+
+      - name: Provision frozen Rust corpora
+        run: |
+          set -o pipefail
+          mkdir -p .build
+          bash scripts/provision-corpora.sh 2>&1 | tee .build/corpora.log
+
+      - name: Run three-language product gate
+        run: |
+          set -o pipefail
+          bash scripts/run-product-gates.sh \
+            "$RUNNER_TEMP/mcp-python-sdk" \
+            "$RUNNER_TEMP/morphic" 2>&1 | tee .build/product-gates.log
+
+      - name: Upload product evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-quality-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            .build/corpora.log
+            .build/product-gates.log
+            .build/ci-swift-test.log
+            .build/self-test-run-*
+            .build/m11-fold-perf
