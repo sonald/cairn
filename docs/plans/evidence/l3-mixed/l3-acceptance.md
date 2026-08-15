@@ -1,0 +1,174 @@
+# L3 mixed-language implementation acceptance
+
+> Started: 2026-08-15 (Asia/Shanghai)
+> Source plan: `docs/plans/l3-mixed-language-plan.md`
+> Current status: F0 PASS; production cutover remains closed.
+
+## F0 live baseline
+
+### A. Baseline identity and repository state
+
+The approved plan and P0 evidence were committed as `9cbca29`. The live implementation baseline
+was then stabilized by `bfcc8a0c4798d9cd6e2492bd9601fba739503b95` before any L3 production
+slice began.
+
+```text
+HEAD:     bfcc8a0c4798d9cd6e2492bd9601fba739503b95
+branch:   main
+upstream: origin/main
+ahead:    23
+behind:   0
+worktree: clean
+index:    clean
+untracked: none
+RECORD:   unset
+```
+
+Repository secret scan result: clean. The scan excluded `.git/` and `.build/` and checked the
+tracked source/docs surface for AWS access-key IDs, GitHub classic tokens, and private-key
+headers.
+
+### B. Toolchain and fixed external corpora
+
+```text
+macOS:                      26.6.1 (25G76)
+Xcode:                      26.6 (17F113)
+Swift:                      6.3.3
+rust-analyzer:              0.0.0 (b54a82b321 2026-08-02)
+Pyright:                    1.1.411
+typescript-language-server: 3.3.0
+Node:                       v26.7.0
+npm:                        11.19.0
+```
+
+The real provider corpora remained clean before and after the gates:
+
+```text
+Python:     /Users/siancao/work/ai/mcp/mcp-python-sdk
+revision:   f55831ee798cd4d7bafab4d50d6dba46e6fce387
+status:     clean
+
+TypeScript: /Users/siancao/work/ai/morphic
+revision:   f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
+status:     clean
+```
+
+### C. Required CI and product gate
+
+Sandbox-equivalent CI command:
+
+```sh
+CODEX_SANDBOX=1 bash scripts/ci.sh
+```
+
+Result: shell exit `0`. The complete Swift Testing run reported:
+
+```text
+Test run with 724 tests in 3 suites passed after 70.043 seconds.
+```
+
+The CI self-tests for Exact, Diff, Reading, Projector, and Fold all emitted
+`SELF_TEST_FINISH ... exit=0`. Release fold performance also passed:
+
+```text
+candidateCount=8400
+logicalFoldCount=4400
+renderedFoldCount=200
+foldLatencyMs=352.595
+deltaBytes=5881832
+status=pass
+```
+
+Host product command:
+
+```sh
+bash scripts/run-product-gates.sh \
+  /Users/siancao/work/ai/mcp/mcp-python-sdk \
+  /Users/siancao/work/ai/morphic
+```
+
+Result: shell exit `0`. The host CI passed, followed by the complete product matrix:
+
+```text
+PASS base
+PASS project-git
+PASS project-non-git
+PASS tabs
+PASS search
+PASS reading
+PASS projector
+PASS fold
+PASS diff
+PASS pin
+PASS history
+PASS exact
+PASS switch
+PASS open
+PASS python
+PASS typescript
+summary: pass=16 fail=0 hang=0
+```
+
+Artifacts: `.build/self-test-run-20260815-113058-31205`.
+
+The Exact summary contains `realProvider=passed` and `realOfflineCoverage=passed`; no provider
+skip was accepted. The Reading summary passed with `regularFootprintMB=44.079`, 201 verified
+reference rows, honest partial coverage, geometry, navigation-history, and styling checks all
+true.
+
+### D. F0 prerequisite stabilization record
+
+The first host product run exposed an existing deterministic gate defect rather than an L3
+production regression:
+
+```text
+artifact: .build/self-test-run-20260815-105151-17460
+summary:  pass=15 fail=1 hang=0
+failure:  reading regularFootprintMB=100.126, all other reading checks true
+```
+
+The reading fixture had indexed its later 18,001-candidate reference-scale workload before
+recording the regular-reader footprint. Commit `bfcc8a0` stages that workload only after the
+regular measurement, reopens the same project, and waits for `.fullReady` before running the
+unchanged reference checks. The 100 MiB budget was not changed. Independent focused replay and
+the two complete gates above all passed.
+
+### E. Frozen Gold totals
+
+All four suites completed with no unexpected failures and no strong-resolution violations:
+
+| Gold suite | Total | Definition Top-1 | Definition Top-5 | Unresolved | Known failures | Unexpected |
+|---|---:|---:|---:|---:|---:|---:|
+| tokio | 17 | 8/8 | 3/3 | 2/2 | 0 | 0 |
+| ripgrep | 16 | 5/6 | 2/3 | 2/2 | 3 | 0 |
+| mcp-python-sdk | 6 | 3/3 | 0/0 | 1/1 | 0 | 0 |
+| morphic-typescript | 10 | 6/6 | 0/0 | 2/2 | 0 | 0 |
+
+### F. Protected blob and tree freeze
+
+The following `git rev-parse HEAD:<path>` identities are the F0 protection baseline:
+
+| Scope | Blob or tree |
+|---|---|
+| `Sources/CodeInsightEngine/CanonicalDump.swift` | `20ddd6f08d326d7e15074a7fb684680e7a8477bf` |
+| `Prototypes/` | `27ff155fede12ff663030e1dd0cf52e6f8458887` |
+| `goldset/tokio.gold` | `debbe499edd3bf6c3c75a37c2e59aa6e8e0f3db4` |
+| `goldset/ripgrep.gold` | `b67ce3150035f29ce4aa3162bd15de65c9a5d159` |
+| `goldset/mcp-python-sdk.gold` | `8acc33fa09ad2a16571c96b8e2f4c25c942a4edb` |
+| `goldset/morphic-typescript.gold` | `0b7c210f12d7184bcf06fa100da01281c1f64ef1` |
+| `Tests/Fixtures/` | `0bf01b2d933cc801e6ad3a49df24c4e0ce9fce57` |
+| `Tests/CodeInsightExactTests/Fixtures/` | `57d053cf1845fe174c1f894be74e1ac484a80cf8` |
+| `Tests/RustExtractorTests/Fixtures/` | `82f1d4251fb71da9ec20a904e6427c0c39451e6a` |
+| `Tests/PythonExtractorTests/Fixtures/` | `40c228b4a99d8ea2e3290dcb5898498aa4e3f186` |
+| `Tests/TypeScriptExtractorTests/Fixtures/` | `c1683a05d57c249dce684eb087f72d2687cc1d50` |
+| `Sources/CTreeSitter/` | `14a506fa4b2a3712efb34cdbc42ccd4d10a8e033` |
+| `Sources/CTreeSitterRust/` | `61f5fb9e9a0ffcdca398eae02b338592f7e45b94` |
+| `Sources/CTreeSitterPython/` | `ae3bce11867d148decbaacecdb963325fa0b30ca` |
+| `Sources/CTreeSitterTypeScript/` | `dedc56757c32a44bf3bd30d8e26f18a3a70c363c` |
+| `docs/plans/evidence/m11/` | `4b1b7c00dddc18077c16d4b2cd555704f5f059e4` |
+| `docs/plans/evidence/l1-python/` | `cfb9e242d583961e86b44133f664d618bda1ab90` |
+| `docs/plans/evidence/l2-typescript/` | `5034cd030d9b2a4f204d71dfc7d67dd631883517` |
+| `Package.resolved` | `a24e48a32ea8f7c994a712f1265ba1b3104a374e` |
+| `Package.swift` | `913b1de039b81d67c32b3f54cb627d4abbadc546` |
+
+F0 verdict: **PASS**. L3 production remains rejected until the later cutover slice.
