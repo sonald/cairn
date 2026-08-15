@@ -54,6 +54,290 @@ func exactCoordinatorAttributionObservationTracksPrepareAndInvalidate()
 
 @MainActor
 @Test
+func exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile()
+    async throws
+{
+    let root = try exactTemporaryProject([
+        "tools/ts/package.json": "{}\n",
+        "tools/ts/tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "tools/ts/main.ts": "export function target(): void {}\n",
+        "tools/ts/other.ts": "export function other(): void {}\n",
+        "outside.ts": "export function forbidden(): void {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let profilePrefix = "tools/ts"
+    let state = ExactProviderState { _, file, _ in
+        switch file {
+        case "main.ts":
+            ExactLocation(
+                file: "main.ts",
+                byteOffset: 0,
+                line: 1,
+                column: 1
+            )
+        case "other.ts":
+            ExactLocation(
+                file: "other.ts",
+                byteOffset: 0,
+                line: 1,
+                column: 1
+            )
+        case "external.ts":
+            ExactLocation(
+                file: "/tmp/real-external/defs.ts",
+                byteOffset: 0,
+                line: 1,
+                column: 1
+            )
+        case "absOutside.ts":
+            ExactLocation(
+                file: root.appendingPathComponent("outside.ts").path,
+                byteOffset: 0,
+                line: 1,
+                column: 1
+            )
+        default:
+            nil
+        }
+    }
+    let providerRootBox = ExactVersionBox("")
+    let snapshot = ExactTestSnapshot(files: [
+        "tools/ts/package.json": "{}\n",
+        "tools/ts/tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "tools/ts/main.ts": "export function target(): void {}\n",
+        "tools/ts/other.ts": "export function other(): void {}\n",
+        "outside.ts": "export function forbidden(): void {}\n",
+    ])
+    let expectedProfile = try ExactProfileKey(
+        snapshot: snapshot,
+        language: .typescript,
+        pathPrefix: profilePrefix
+    )
+    let coordinator = ExactCoordinator(
+        providerFactory: { projectURL, language in
+            providerRootBox.value = projectURL.path
+            return ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: { _, _ in snapshot },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactTypeScriptProfile(
+            language: .typescript,
+            projectUnitName: profilePrefix,
+            configFingerprint: expectedProfile.configFingerprint,
+            environmentFingerprint: expectedProfile.environmentFingerprint
+        ),
+        profileRoot: profilePrefix,
+        generation: 1
+    )
+
+    #expect(await testWaitUntil("nested profile ready") {
+        coordinator.readiness == .ready
+    })
+    #expect(URL(fileURLWithPath: providerRootBox.value).lastPathComponent == "ts")
+    #expect(state.prepareCount == 1)
+
+    let inProfile = await coordinator.definition(
+        file: "tools/ts/main.ts",
+        byteOffset: 0,
+        generation: 1
+    )
+    #expect(exactCompletedEntry(inProfile)?.location.file == "tools/ts/main.ts")
+    #expect(state.filesRequested == ["main.ts"])
+
+    guard case .completed(let absoluteEntries) = await coordinator.definition(
+        file: "tools/ts/external.ts",
+        byteOffset: 0,
+        generation: 1
+    ) else {
+        Issue.record("provider external dependency should preserve location")
+        return
+    }
+    #expect(absoluteEntries.count == 1)
+    #expect(absoluteEntries[0].location.file == "/tmp/real-external/defs.ts")
+
+    let outsideResult = await coordinator.definition(
+        file: "tools/ts/absOutside.ts",
+        byteOffset: 0,
+        generation: 1
+    )
+    guard case .completed(let outsideEntries) = outsideResult else {
+        Issue.record("absolute outside-profile query should complete empty")
+        return
+    }
+    #expect(outsideEntries.isEmpty)
+    #expect(state.filesRequested == ["main.ts", "external.ts", "absOutside.ts"])
+}
+
+@MainActor
+@Test
+func exactCoordinatorRejectsInvalidProfileRootBeforeInvalidate() throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+
+    let state = ExactProviderState()
+    let providerCalls = ExactVersionBox("not called")
+    let coordinator = ExactCoordinator(
+        providerFactory: { _ in
+            providerCalls.value = "called"
+            return ExactTestProvider(state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: fixture.files).make,
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    let originalReadiness = coordinator.readiness
+    #expect(throws: ExactError.self) {
+        try coordinator.prepare(
+            projectURL: fixture.root,
+            revision: nil,
+            analysisProfile: exactAnalysisProfile(
+                language: .typescript,
+                projectUnitName: "tools/ts",
+                configFingerprint: "x",
+                environmentFingerprint: ""
+            ),
+            profileRoot: "../outside",
+            generation: 1
+        )
+    }
+    #expect(coordinator.readiness == originalReadiness)
+    #expect(providerCalls.value == "not called")
+    #expect(state.prepareCount == 0)
+}
+
+@MainActor
+@Test
+func exactCoordinatorPreparesNestedProfilesAcrossLanguageNavigation() async throws {
+    let root = try exactTemporaryProject([
+        "crates/r/Cargo.toml": "[package]\nname = \"r\"\n",
+        "crates/r/src/lib.rs": "pub fn f() {}\n",
+        "pyproject.toml": "[project]\nname = \"p\"\n",
+        "lib.py": "def f():\n    pass\n",
+        "tools/ts/package.json": "{}\n",
+        "tools/ts/tsconfig.json": "{}\n",
+        "tools/ts/src/lib.ts": "export function f() {}\n",
+    ])
+    try FileManager.default.removeItem(at: root.appendingPathComponent("Cargo.toml"))
+    try exactGit(root, "init", "-q")
+    try exactGit(root, "config", "user.name", "CodeInsight Tests")
+    try exactGit(root, "config", "user.email", "tests@codeinsight.invalid")
+    try exactGit(root, "add", "-A")
+    try exactGit(root, "commit", "-q", "-m", "fixture")
+    let indexService = ProjectIndexService()
+    defer {
+        indexService.flushPersistentIndexCache()
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    let state = ExactProviderState()
+    let model = AppModel(
+        indexService: indexService,
+        exactCoordinator: ExactCoordinator(
+            providerFactory: { projectURL, language in
+                state.recordPrepare(language: language, root: projectURL)
+                return ExactTestProvider(
+                    language: language,
+                    state: state
+                )
+            },
+            sandboxAvailable: { true },
+            trustRegistry: TrustRegistry(
+                fileURL: root.appendingPathComponent("trust.json")
+            )
+        )
+    )
+    try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+    #expect(await testWaitUntil("initial exact prepare count=1") {
+        state.prepareCount == 1
+    })
+    #expect(model.querySessions.map {
+        $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+    } == ["crates/r", ".", "tools/ts"])
+
+    model.navigate(to: root.appendingPathComponent("crates/r/src/lib.rs"))
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(state.prepareCount == 1)
+    #expect(state.prepareRoots.last?.lastPathComponent == "r")
+    #expect(state.prepareLanguages == [.rust])
+
+    model.navigate(to: root.appendingPathComponent("lib.py"))
+    #expect(await testWaitUntil("python exact prepare count=2") {
+        state.prepareCount == 2
+    })
+    #expect(state.prepareLanguages.last == .python)
+    #expect(state.prepareRoots.last?.path == root.path)
+    #expect(state.closedSessions.contains(1))
+
+    model.navigate(to: root.appendingPathComponent("tools/ts/src/lib.ts"))
+    #expect(await testWaitUntil("ts exact prepare count=3") {
+        state.prepareCount == 3
+    })
+    #expect(state.prepareRoots.last?.path == root.appendingPathComponent("tools/ts").path)
+
+    model.navigate(to: root.appendingPathComponent("crates/r/src/lib.rs"))
+    #expect(await testWaitUntil("rust exact prepare count=4") {
+        state.prepareCount == 4
+    })
+    #expect(state.prepareLanguages == [.rust, .python, .typescript, .rust])
+    #expect(state.closedSessions.count == 3)
+}
+
+@MainActor
+@Test
+func exactCoordinatorGateOldPrepareBeforeNewProviderPrepare() async throws {
+    let fixture = try ExactTestFixture()
+    defer { fixture.remove() }
+
+    let oldPrepareEntered = ExactVersionBox("not started")
+    let secondPrepareEntered = ExactVersionBox("not started")
+    let releaseOldPrepare = DispatchSemaphore(value: 0)
+    let state = ExactProviderState()
+    let providerFactoryCalls = ExactVersionBox("0")
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, _ in
+            let count = Int(providerFactoryCalls.value) ?? 0
+            providerFactoryCalls.value = String(count + 1)
+            if count == 0 {
+                oldPrepareEntered.value = "started"
+                releaseOldPrepare.wait()
+            } else {
+                secondPrepareEntered.value = "started"
+            }
+            return ExactTestProvider(state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: fixture.files).make,
+        sandboxAvailable: { true },
+        trustRegistry: fixture.trustRegistry
+    )
+
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 1)
+    #expect(await testWaitUntil("old provider prepare entered") {
+        oldPrepareEntered.value == "started"
+    })
+    coordinator.prepare(projectURL: fixture.root, revision: nil, generation: 2)
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(secondPrepareEntered.value == "not started")
+    releaseOldPrepare.signal()
+    #expect(await testWaitUntil("new profile ready") {
+        coordinator.readiness == .ready
+    })
+    #expect(state.prepareCount == 2)
+    #expect(providerFactoryCalls.value == "2")
+    #expect(state.closedSessions.contains(1))
+}
+
+@MainActor
+@Test
 func exactCoordinatorPublishesTrustBeforeSessionReadyAndClearsOnInvalidate()
     async throws
 {
@@ -626,6 +910,62 @@ func exactCoordinatorReportsPythonImplementationsUnsupported() async throws {
         generation: 1
     )! else {
         Issue.record("Python implementations should be unsupported")
+        return
+    }
+}
+
+@MainActor
+@Test
+func exactCoordinatorReturnsUnsupportedForForeignLanguageRelationTargets()
+    async throws
+{
+    let root = try exactTemporaryProject([
+        "Cargo.toml": "[package]\nname='exact-test'\nversion='0.1.0'\n",
+        "main.rs": "fn target() {}\nfn main() { target(); }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let state = ExactProviderState(references: [
+        ExactLocation(
+            file: "main.py",
+            byteOffset: 0,
+            line: 1,
+            column: 1
+        )
+    ])
+    let profile = try ExactProfileKey(projectURL: root)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, language in
+            ExactTestProvider(language: language, state: state)
+        },
+        snapshotFactory: ExactSnapshotFactoryState(files: [
+            "Cargo.toml": "[package]\nname='exact-test'\nversion='0.1.0'\n",
+            "main.rs": "fn target() {}\nfn main() { target(); }\n",
+        ]).make,
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(
+            fileURL: root.appendingPathComponent("trust.json")
+        )
+    )
+    try coordinator.prepare(
+        projectURL: root,
+        revision: nil,
+        analysisProfile: exactAnalysisProfile(
+            language: .rust,
+            configFingerprint: profile.configFingerprint,
+            environmentFingerprint: profile.environmentFingerprint
+        ),
+        generation: 1
+    )
+    #expect(await testWaitUntil("ready") { coordinator.readiness == .ready })
+    let result = await coordinator.relations(
+        file: "main.rs",
+        byteOffset: 0,
+        item: nil,
+        direction: .references,
+        generation: 1
+    )
+    guard case .unsupported = result! else {
+        Issue.record("foreign language relation should be unsupported")
         return
     }
 }
@@ -1510,11 +1850,12 @@ func exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath()
 @Test
 func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throws {
     let root = try exactTemporaryTypeScriptProject([
-        "tsconfig.json": "{ \"compilerOptions\": {} }\n",
-        "package.json": "{}\n",
-        "src/lib.ts": "export function target(): void {}\n",
-        "src/main.ts": "import { target } from './lib'; target();\n",
+        "tools/ts/tsconfig.json": "{ \"compilerOptions\": {} }\n",
+        "tools/ts/package.json": "{}\n",
+        "tools/ts/src/lib.ts": "export function target(): void {}\n",
+        "tools/ts/src/main.ts": "import { target } from './lib'; target();\n",
     ])
+    let profilePrefix = "tools/ts"
     defer { try? FileManager.default.removeItem(at: root) }
     try exactGit(root, "init", "-q")
     try exactGit(root, "config", "user.name", "CodeInsight Tests")
@@ -1524,7 +1865,8 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
     let snapshot = try CommitSnapshot(repositoryURL: root)
     let profile = try ExactProfileKey(
         snapshot: snapshot,
-        language: .typescript
+        language: .typescript,
+        pathPrefix: profilePrefix
     )
     let materializer = Materializer(
         rootURL: root.appendingPathComponent("cache/materialized")
@@ -1532,10 +1874,14 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
     let expectedRoot = materializer.rootURL
         .appendingPathComponent(snapshot.commitOID.hex)
         .appendingPathComponent(profile.configFingerprint)
+    let expectedProviderRoot = expectedRoot.appendingPathComponent(
+        profilePrefix,
+        isDirectory: true
+    )
     let providerRoot = ExactVersionBox("")
     let state = ExactProviderState { _, _, _ in
         ExactLocation(
-            file: expectedRoot.appendingPathComponent("src/lib.ts").path,
+            file: expectedProviderRoot.appendingPathComponent("src/lib.ts").path,
             byteOffset: 4,
             line: 1,
             column: 5
@@ -1564,23 +1910,24 @@ func exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() async throw
         revision: "HEAD",
         analysisProfile: exactTypeScriptProfile(
             language: .typescript,
-            projectUnitName: root.lastPathComponent,
+            projectUnitName: profilePrefix,
             configFingerprint: profile.configFingerprint,
             environmentFingerprint: profile.environmentFingerprint
         ),
+        profileRoot: profilePrefix,
         generation: 1
     )
     #expect(await testWaitUntil("ts commit ready") {
         coordinator.readiness == .ready
     })
     let result = await coordinator.definition(
-        file: "src/main.ts",
+        file: "tools/ts/src/main.ts",
         byteOffset: 0,
         generation: 1
     )
 
-    #expect(providerRoot.value == expectedRoot.path)
-    #expect(exactCompletedEntry(result)?.location.file == "src/lib.ts")
+    #expect(providerRoot.value == expectedProviderRoot.path)
+    #expect(exactCompletedEntry(result)?.location.file == "tools/ts/src/lib.ts")
     #expect(exactCompletedEntry(result)?.origin == .materialized(
         commitOID: snapshot.commitOID.hex
     ))
@@ -1904,7 +2251,11 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
 }
 
 private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
-    let capabilities: ExactCapabilities = [.definition]
+    var capabilities: ExactCapabilities {
+        state.hasReferencesCapability
+            ? [.definition, .references]
+            : [.definition]
+    }
     let language: LanguageID
     let toolVersion: String
     private let state: ExactProviderState
@@ -1948,28 +2299,41 @@ private final class ExactProviderState: @unchecked Sendable {
 
     private let lock = NSLock()
     private let behavior: Behavior
+    private let referencesValue: [ExactLocation]?
     private var prepares = 0
     private var definitions = 0
     private var modes: [String] = []
     private var features: [FeatureSelection] = []
+    private var languages: [LanguageID] = []
+    private var roots: [URL] = []
+    private var requestFiles: [String] = []
     private var closed: Set<Int> = []
     private weak var latestSession: ExactStateSession?
 
     init(
         behavior: @escaping Behavior = { _, _, _ in
             ExactLocation(file: "main.rs", byteOffset: 0, line: 1, column: 1)
-        }
+        },
+        references: [ExactLocation]? = nil
     ) {
         self.behavior = behavior
+        referencesValue = references
     }
 
     var prepareCount: Int { locked { prepares } }
     var definitionCount: Int { locked { definitions } }
+    var filesRequested: [String] { locked { requestFiles } }
+    var prepareLanguages: [LanguageID] { locked { languages } }
+    var prepareRoots: [URL] { locked { roots } }
     var trustModes: [String] { locked { modes } }
     var featureSelections: [FeatureSelection] { locked { features } }
     var closedSessions: Set<Int> { locked { closed } }
+    var references: [ExactLocation]? { referencesValue }
+    var hasReferencesCapability: Bool { referencesValue != nil }
 
-    func makeSession(attribution: ExactAttribution) -> ExactStateSession {
+    func makeSession(
+        attribution: ExactAttribution
+    ) -> ExactStateSession {
         let ordinal = locked {
             prepares += 1
             let mode = switch attribution.environment.trustMode {
@@ -1989,8 +2353,18 @@ private final class ExactProviderState: @unchecked Sendable {
         return session
     }
 
+    func recordPrepare(language: LanguageID, root: URL) {
+        locked {
+            languages.append(language)
+            roots.append(root)
+        }
+    }
+
     func define(ordinal: Int, file: String, byteOffset: Int) throws -> ExactLocation? {
-        locked { definitions += 1 }
+        locked {
+            definitions += 1
+            requestFiles.append(file)
+        }
         return try behavior(ordinal, file, byteOffset)
     }
 
@@ -2010,7 +2384,11 @@ private final class ExactProviderState: @unchecked Sendable {
 }
 
 private final class ExactStateSession: ExactSession, @unchecked Sendable {
-    let negotiatedCapabilities: ExactCapabilities = [.definition]
+    var negotiatedCapabilities: ExactCapabilities {
+        state.hasReferencesCapability
+            ? [.definition, .references]
+            : [.definition]
+    }
     let readiness: ExactReadiness = .ready
     private let lock = NSLock()
     private var storedAttribution: ExactAttribution
@@ -2072,7 +2450,7 @@ private final class ExactStateSession: ExactSession, @unchecked Sendable {
         byteOffset: Int,
         includeDeclaration: Bool
     ) throws -> [ExactLocation]? {
-        nil
+        state.references
     }
 
     func prepareCallHierarchy(
@@ -2314,7 +2692,10 @@ private final class ContextExactGate {
 
 private struct ExactTestFixture {
     let root: URL
-    let files = ["main.rs": "fn target() {}\nfn main() { target(); }\n"]
+    let files = [
+        "Cargo.toml": "[package]\nname='exact-test'\nversion='0.1.0'\n",
+        "main.rs": "fn target() {}\nfn main() { target(); }\n",
+    ]
     let trustRegistry: TrustRegistry
     let trustFile: URL
 

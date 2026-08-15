@@ -2168,6 +2168,9 @@ public final class AppModel {
                 projectURL: projectRoot,
                 revision: currentRevision,
                 analysisProfile: session.analysisProfile,
+                profileRoot: session.paths.resolve(
+                    session.analysisProfile.projectRoot
+                ),
                 generation: generation
             )
         } catch {
@@ -2195,6 +2198,7 @@ public final class AppModel {
            let root = projectRoot
         {
             publishProjectState(.ready(active.0, active.1), root: root)
+            prepareExact(generation: active.1.generation)
         }
         updateCompareFile()
     }

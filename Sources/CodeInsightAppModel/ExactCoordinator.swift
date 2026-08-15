@@ -151,6 +151,8 @@ public final class ExactCoordinator {
         let snapshot: any Snapshot
         let profile: ExactProfileKey
         let trustMode: TrustMode
+        let workspaceRoot: URL
+        let profilePrefix: String
         let materializedRoot: URL?
     }
 
@@ -174,6 +176,7 @@ public final class ExactCoordinator {
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
     @ObservationIgnored private var epoch: UInt64 = 0
     @ObservationIgnored private var expectedGeneration: UInt64 = 0
+    @ObservationIgnored private var closeTask: Task<Void, Never>?
 
     public init(
         providerFactory: @escaping ProviderFactory = { projectURL, language in
@@ -290,14 +293,24 @@ public final class ExactCoordinator {
     public func invalidate(generation: UInt64) {
         epoch &+= 1
         expectedGeneration = generation
+        let previousClose = closeTask
+        let previousPrepare = prepareTask
+        let oldSession = active?.session
+        oldSession?.cancel()
         prepareTask?.cancel()
         prepareTask = nil
-        let oldSession = active?.session
-        active = nil
-        oldSession?.cancel()
-        if let oldSession {
-            Task.detached { oldSession.close() }
+        if previousClose != nil || previousPrepare != nil || oldSession != nil {
+            closeTask = Task.detached(priority: .utility) {
+                await previousClose?.value
+                await previousPrepare?.value
+                if let oldSession {
+                    oldSession.close()
+                }
+            }
+        } else {
+            closeTask = nil
         }
+        active = nil
         readiness = .preparing
         analysisEnvironment = nil
         trustMode = nil
@@ -307,6 +320,8 @@ public final class ExactCoordinator {
         epoch &+= 1
         prepareTask?.cancel()
         prepareTask = nil
+        closeTask?.cancel()
+        closeTask = nil
         let oldSession = active?.session
         active = nil
         oldSession?.cancel()
@@ -341,6 +356,7 @@ public final class ExactCoordinator {
                 edition: nil,
                 trustMode: .safe
             ),
+            profileRoot: "",
             verifyProfileMatches: false,
             generation: generation
         )
@@ -352,11 +368,29 @@ public final class ExactCoordinator {
         analysisProfile: AnalysisProfile,
         generation: UInt64
     ) throws {
+        try prepare(
+            projectURL: projectURL,
+            revision: revision,
+            analysisProfile: analysisProfile,
+            profileRoot: ".",
+            generation: generation
+        )
+    }
+
+    public func prepare(
+        projectURL: URL,
+        revision: String?,
+        analysisProfile: AnalysisProfile,
+        profileRoot: String,
+        generation: UInt64
+    ) throws {
         try validateExactLanguage(analysisProfile.language)
+        let profilePrefix = try exactProfilePrefix(profileRoot)
         prepareSupported(
             projectURL: projectURL,
             revision: revision,
             analysisProfile: analysisProfile,
+            profileRoot: profilePrefix,
             verifyProfileMatches: true,
             generation: generation
         )
@@ -366,12 +400,14 @@ public final class ExactCoordinator {
         projectURL: URL,
         revision: String?,
         analysisProfile: AnalysisProfile,
+        profileRoot: String,
         verifyProfileMatches: Bool,
         generation: UInt64
     ) {
         let root = projectURL.standardizedFileURL
         let language = analysisProfile.language
         let featureSelection = analysisProfile.featureSelection
+        let profilePrefix = profileRoot
         invalidate(generation: generation)
         let currentEpoch = epoch
         let verifyProfileMatches = verifyProfileMatches
@@ -381,18 +417,24 @@ public final class ExactCoordinator {
         let trustRegistry = trustRegistry
         let materializer = materializer
 
+        let priorClose = closeTask
         prepareTask = Task { [weak self] in
+            await priorClose?.value
+            guard let self else { return }
+            let currentEpoch = currentEpoch
+            let generation = generation
+            guard self.epoch == currentEpoch else { return }
             let trustMode = await trustRegistry.query(root) ?? .safe
             let trustedRepositories = await trustRegistry.trustedRepositories()
-            guard let self, epoch == currentEpoch,
-                  expectedGeneration == generation,
+            guard self.epoch == currentEpoch,
+                  self.expectedGeneration == generation,
                   !Task.isCancelled
             else { return }
             self.trustedRepositories = trustedRepositories
             self.trustMode = trustMode
             guard trustMode != .safe || sandboxAvailable() else {
-                readiness = .off("Safe exact disabled: sandbox-exec unavailable")
-                prepareTask = nil
+                self.readiness = .off("Safe exact disabled: sandbox-exec unavailable")
+                self.prepareTask = nil
                 return
             }
 
@@ -415,7 +457,8 @@ public final class ExactCoordinator {
                         profile = try ExactProfileKey(
                             snapshot: commit,
                             language: language,
-                            featureSelection: featureSelection
+                            featureSelection: featureSelection,
+                            pathPrefix: profilePrefix
                         )
                         if verifyProfileMatches {
                             try validateProfile(
@@ -424,18 +467,22 @@ public final class ExactCoordinator {
                                 language: language
                             )
                         }
-                        let resolvedRoot = try materializer.materialize(
+                        let resolvedWorkspaceRoot = try materializer.materialize(
                             commit,
                             configFingerprint: profile.configFingerprint
                         ).url
-                        materializedRoot = resolvedRoot
-                        providerRoot = resolvedRoot
+                        materializedRoot = resolvedWorkspaceRoot
+                        providerRoot = profileRootURL(
+                            workspaceRoot: resolvedWorkspaceRoot,
+                            prefix: profilePrefix
+                        )
                         versionIdentity = commit.commitOID.hex
                     } else {
                         profile = try ExactProfileKey(
-                            projectURL: root,
+                            snapshot: snapshot,
                             language: language,
-                            featureSelection: featureSelection
+                            featureSelection: featureSelection,
+                            pathPrefix: profilePrefix
                         )
                         if verifyProfileMatches {
                             try validateProfile(
@@ -444,10 +491,13 @@ public final class ExactCoordinator {
                                 language: language
                             )
                         }
-                        providerRoot = root
+                        providerRoot = profileRootURL(
+                            workspaceRoot: root,
+                            prefix: profilePrefix
+                        )
                         materializedRoot = nil
                         versionIdentity =
-                            "worktree:\(root.resolvingSymlinksInPath().path)"
+                            "worktree:\(providerRoot.resolvingSymlinksInPath().path)"
                     }
                     let provider = try providerFactory(providerRoot, language)
                     guard provider.language == language else {
@@ -480,38 +530,40 @@ public final class ExactCoordinator {
                         snapshot: snapshot,
                         profile: profile,
                         trustMode: trustMode,
+                        workspaceRoot: root,
+                        profilePrefix: profilePrefix,
                         materializedRoot: materializedRoot
                     ))
                 }.value
-                guard epoch == currentEpoch,
-                      expectedGeneration == generation,
-                      !Task.isCancelled
+                guard self.epoch == currentEpoch,
+                  self.expectedGeneration == generation,
+                  !Task.isCancelled
                 else {
-                    Task.detached { prepared.active.session.close() }
+                    await Task.detached { prepared.active.session.close() }.value
                     return
                 }
-                active = prepared.active
-                observeEnvironment(from: prepared.active)
-                analysisEnvironment = prepared.active.session.attribution.environment
+                self.active = prepared.active
+                self.observeEnvironment(from: prepared.active)
+                self.analysisEnvironment = prepared.active.session.attribution.environment
                 switch prepared.active.session.readiness {
                 case .unavailable(let reason):
-                    readiness = .unavailable(reason)
+                    self.readiness = .unavailable(reason)
                 case .closed:
-                    readiness = .unavailable("exact session closed during prepare")
+                    self.readiness = .unavailable("exact session closed during prepare")
                 case .preparing, .ready:
-                    readiness = .ready
+                    self.readiness = .ready
                 }
             } catch is CancellationError {
                 return
             } catch {
-                guard epoch == currentEpoch,
-                      expectedGeneration == generation
+                guard self.epoch == currentEpoch,
+                      self.expectedGeneration == generation
                 else { return }
-                readiness = trustMode == .safe && isSandboxUnavailable(error)
+                self.readiness = trustMode == .safe && isSandboxUnavailable(error)
                     ? .off("Safe exact disabled: \(error)")
                     : .unavailable(String(describing: error))
             }
-            if epoch == currentEpoch { prepareTask = nil }
+            if self.epoch == currentEpoch { self.prepareTask = nil }
         }
     }
 
@@ -538,6 +590,8 @@ public final class ExactCoordinator {
 
     public func clearMaterializedCache() async throws {
         epoch &+= 1
+        let previousClose = closeTask
+        let previousPrepare = prepareTask
         prepareTask?.cancel()
         prepareTask = nil
         let oldSession = active?.session
@@ -547,8 +601,12 @@ public final class ExactCoordinator {
         analysisEnvironment = nil
         trustMode = nil
         let materializer = materializer
+        await previousClose?.value
+        await previousPrepare?.value
         try await Task.detached(priority: .utility) {
-            oldSession?.close()
+            if let oldSession {
+                oldSession.close()
+            }
             try materializer.clear()
         }.value
     }
@@ -571,6 +629,12 @@ public final class ExactCoordinator {
             return .unavailable(String(describing: readiness))
         }
         guard current.generation == generation else { return nil }
+        guard let requestFile = providerRelativeRequestPath(
+            file: file,
+            source: current
+        ) else {
+            return .completed([])
+        }
         let offset = Int(byteOffset)
         if let cached = overlay.definition(
             for: current.key,
@@ -583,7 +647,7 @@ public final class ExactCoordinator {
         do {
             let result = try await request(
                 session: current.session,
-                file: file,
+                file: requestFile,
                 byteOffset: offset,
                 batch: batch
             )
@@ -599,7 +663,7 @@ public final class ExactCoordinator {
         {
             return await restartOnce(
                 current,
-                file: file,
+                file: requestFile,
                 byteOffset: offset,
                 batch: batch
             )
@@ -626,11 +690,15 @@ public final class ExactCoordinator {
               let current = active,
               current.generation == generation
         else { return nil }
+        guard let requestFile = providerRelativeRequestPath(
+            file: file,
+            source: current
+        ) else { return nil }
 
         do {
             let result = try await requestRelations(
                 session: current.session,
-                file: file,
+                file: requestFile,
                 byteOffset: Int(byteOffset),
                 item: item,
                 direction: direction,
@@ -643,7 +711,7 @@ public final class ExactCoordinator {
         {
             return await restartRelationsOnce(
                 current,
-                file: file,
+                file: requestFile,
                 byteOffset: Int(byteOffset),
                 item: item,
                 direction: direction,
@@ -680,7 +748,7 @@ public final class ExactCoordinator {
                 )
             }.value
             guard batch?.isCurrent != false, isCurrent(previous) else {
-                Task.detached { newSession.close() }
+                await Task.detached { newSession.close() }.value
                 return batch?.isCurrent == false ? .cancelled : nil
             }
             let restarted = Active(
@@ -691,6 +759,8 @@ public final class ExactCoordinator {
                 snapshot: previous.snapshot,
                 profile: previous.profile,
                 trustMode: previous.trustMode,
+                workspaceRoot: previous.workspaceRoot,
+                profilePrefix: previous.profilePrefix,
                 materializedRoot: previous.materializedRoot
             )
             active = restarted
@@ -868,7 +938,7 @@ public final class ExactCoordinator {
                 )
             }.value
             guard batch?.isCurrent != false, isCurrent(previous) else {
-                Task.detached { newSession.close() }
+                await Task.detached { newSession.close() }.value
                 return nil
             }
             let restarted = Active(
@@ -879,6 +949,8 @@ public final class ExactCoordinator {
                 snapshot: previous.snapshot,
                 profile: previous.profile,
                 trustMode: previous.trustMode,
+                workspaceRoot: previous.workspaceRoot,
+                profilePrefix: previous.profilePrefix,
                 materializedRoot: previous.materializedRoot
             )
             active = restarted
@@ -927,13 +999,17 @@ public final class ExactCoordinator {
             ?? source.session.attribution.environment
         guard case .completed(let targets) = result else { return nil }
         let entries = targets.compactMap { target -> ExactOverlay.Entry? in
+            guard let workspaceLocation = providerAdmissibleLocation(
+                location: target.location,
+                source: source
+            ) else { return nil }
             guard supportedTarget(
-                file: target.location.file,
+                file: workspaceLocation.file,
                 language: source.profile.language
             )
             else { return nil }
             return ExactOverlay.Entry(
-                location: mapped(target.location, from: source.materializedRoot),
+                location: workspaceLocation,
                 attribution: source.session.attribution,
                 origin: source.materializedRoot != nil
                     ? .materialized(commitOID: source.key.versionIdentity)
@@ -956,51 +1032,74 @@ public final class ExactCoordinator {
         let origin: ExactOrigin = source.materializedRoot != nil
             ? .materialized(commitOID: source.key.versionIdentity)
             : .worktree
-        return switch result {
+        let value: RelationQueryResult
+        switch result {
         case .unsupported:
-            .unsupported
+            value = .unsupported
         case .notApplicable:
-            .notApplicable
+            value = .notApplicable
         case .calls(let relations):
-            .relations(relations.compactMap {
-                guard supportedTarget(
-                    file:
-                    $0.item.selectionRange.file,
-                    language: source.profile.language
+            var foreignDropped = false
+            let mapped = relations.compactMap { raw -> Relation? in
+                guard let itemLocation = providerAdmissibleLocation(
+                    location: raw.item.selectionRange,
+                    source: source
                 ) else { return nil }
-                let callSites = $0.callSites.filter {
-                    supportedTarget(
-                        file: $0.file,
+                if !supportedTarget(
+                    file: itemLocation.file,
+                    language: source.profile.language
+                ) {
+                    foreignDropped = true
+                    return nil
+                }
+                let callSites = raw.callSites.compactMap {
+                    providerAdmissibleLocation(location: $0, source: source)
+                }.filter { location in
+                    if !supportedTarget(
+                        file: location.file,
                         language: source.profile.language
-                    )
+                    ) {
+                        foreignDropped = true
+                        return false
+                    }
+                    return true
                 }
                 return Relation(
-                    name: $0.item.name,
-                    location: mapped(
-                        $0.item.selectionRange,
-                        from: source.materializedRoot
-                    ),
-                    item: $0.item,
-                    callSites: callSites.map {
-                        mapped($0, from: source.materializedRoot)
-                    }
+                    name: raw.item.name,
+                    location: itemLocation,
+                    item: raw.item,
+                    callSites: callSites
                 )
-            }, origin: origin, attribution: source.session.attribution)
+            }
+            value = foreignDropped
+                ? .unsupported
+                : .relations(mapped, origin: origin, attribution: source.session.attribution)
         case .locations(let locations):
-            .relations(locations.compactMap {
-                guard supportedTarget(
-                    file: $0.file,
+            var foreignDropped = false
+            let mapped = locations.compactMap { location -> Relation? in
+                guard let itemLocation = providerAdmissibleLocation(
+                    location: location,
+                    source: source
+                ) else { return nil }
+                if !supportedTarget(
+                    file: itemLocation.file,
                     language: source.profile.language
-                )
-                else { return nil }
+                ) {
+                    foreignDropped = true
+                    return nil
+                }
                 return Relation(
                     name: nil,
-                    location: mapped($0, from: source.materializedRoot),
+                    location: itemLocation,
                     item: nil,
                     callSites: []
                 )
-            }, origin: origin, attribution: source.session.attribution)
+            }
+            value = foreignDropped
+                ? .unsupported
+                : .relations(mapped, origin: origin, attribution: source.session.attribution)
         }
+        return value
     }
 
     private func observeEnvironment(from source: Active) {
@@ -1019,23 +1118,71 @@ public final class ExactCoordinator {
         }
     }
 
-    private func mapped(
-        _ location: ExactLocation,
-        from materializedRoot: URL?
-    ) -> ExactLocation {
-        guard let materializedRoot,
-              location.file.hasPrefix("/"),
-              let path = try? Materializer.snapshotPath(
-                  for: URL(fileURLWithPath: location.file),
-                  under: materializedRoot
-              )
-        else { return location }
+    private func providerRelativeRequestPath(
+        file: String,
+        source: Active
+    ) -> String? {
+        guard !file.hasPrefix("/") else { return nil }
+        guard safeRelativeComponents(file) else { return nil }
+        guard !source.profilePrefix.isEmpty else { return file }
+        return file.hasPrefix("\(source.profilePrefix)/")
+            ? String(file.dropFirst(source.profilePrefix.count + 1))
+            : nil
+    }
+
+    private func providerAdmissibleLocation(
+        location: ExactLocation,
+        source: Active
+    ) -> ExactLocation? {
+        let file: String
+        if location.file.hasPrefix("/") {
+            var mappedUnderWorkspace: String?
+            let roots = [
+                source.materializedRoot,
+                source.workspaceRoot,
+            ].compactMap { $0 }
+            for root in roots {
+                if let path = try? Materializer.snapshotPath(
+                    for: URL(fileURLWithPath: location.file),
+                    under: root
+                ) {
+                    mappedUnderWorkspace = path
+                    break
+                }
+            }
+            if let path = mappedUnderWorkspace {
+                guard source.profilePrefix.isEmpty
+                    || path.hasPrefix("\(source.profilePrefix)/")
+                else {
+                    return nil
+                }
+                file = path
+            } else {
+                file = location.file
+            }
+        } else {
+            guard safeRelativeComponents(location.file) else { return nil }
+            let prefix = source.profilePrefix
+            file = !prefix.isEmpty
+                && location.file.hasPrefix("\(prefix)/")
+                ? location.file
+                : prefix.isEmpty ? location.file : "\(prefix)/\(location.file)"
+        }
         return ExactLocation(
-            file: path,
+            file: file,
             byteOffset: location.byteOffset,
             line: location.line,
             column: location.column
         )
+    }
+
+    private func safeRelativeComponents(
+        _ file: String
+    ) -> Bool {
+        !file.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        ).contains { $0 == "." || $0 == ".." || $0.isEmpty }
     }
 
     private func isCurrent(_ candidate: Active) -> Bool {
@@ -1075,6 +1222,31 @@ private func validateExactLanguage(_ language: LanguageID) throws {
             NSLocalizedFailureReasonErrorKey:
                 "Exact analysis does not support \(String(describing: language))",
         ])
+    }
+}
+
+private func exactProfilePrefix(_ profileRoot: String) throws -> String {
+    guard !profileRoot.isEmpty, profileRoot != "." else { return "" }
+    let components = profileRoot.split(
+        separator: "/",
+        omittingEmptySubsequences: false
+    )
+    guard !profileRoot.hasPrefix("/"),
+          !components.isEmpty,
+          components.allSatisfy({
+              $0 != "." && $0 != ".." && !$0.isEmpty
+          })
+    else { throw ExactError.invalidPath(profileRoot) }
+    return components.joined(separator: "/")
+}
+
+private func profileRootURL(
+    workspaceRoot: URL,
+    prefix: String
+) -> URL {
+    guard !prefix.isEmpty else { return workspaceRoot }
+    return prefix.split(separator: "/").reduce(workspaceRoot) {
+        $0.appendingPathComponent(String($1))
     }
 }
 
