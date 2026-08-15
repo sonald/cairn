@@ -1,4 +1,4 @@
-name: Three-language product quality
+name: Mixed-language product quality
 
 on:
   pull_request:
@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   product-quality:
-    name: Three-language product gate
+    name: Mixed-language product gate
     runs-on: macos-15
     timeout-minutes: 45
     env:
@@ -55,18 +55,66 @@ jobs:
           git -C "$RUNNER_TEMP/morphic" checkout \
             f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
 
+      - name: Checkout frozen mixed-language corpus
+        run: |
+          set -o pipefail
+          mkdir -p .build
+          git clone https://github.com/sonald/llm-tools.git \
+            "$RUNNER_TEMP/llm-tools"
+          git -C "$RUNNER_TEMP/llm-tools" checkout \
+            457b66e72da1967c2432131a7ff8adc4341eb337
+          test -z "$(git -C "$RUNNER_TEMP/llm-tools" status --porcelain=v1)"
+          test -z "$(git -C "$RUNNER_TEMP/llm-tools" ls-files --others --exclude-standard)"
+          test -z "$(git -C "$RUNNER_TEMP/llm-tools" ls-files --others --ignored --exclude-standard)"
+          rust_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.rs' | wc -l | tr -d ' ')"
+          python_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.py' | wc -l | tr -d ' ')"
+          ts_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.ts' | \
+              grep -vc '\.d\.ts$' || true)"
+          tsx_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.tsx' | wc -l | tr -d ' ')"
+          dts_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.d.ts' | wc -l | tr -d ' ')"
+          js_count="$(git -C "$RUNNER_TEMP/llm-tools" ls-files '*.js' '*.jsx' | wc -l | tr -d ' ')"
+          if [[ "$rust_count" -ne 11 || "$python_count" -ne 8 || \
+                "$ts_count" -ne 22 || "$tsx_count" -ne 4 || \
+                "$dts_count" -ne 1 || "$js_count" -ne 0 ]]; then
+            echo "mixed corpus counts want rust=11 python=8 ts=22 tsx=4 dts=1 js=0 got rust=$rust_count python=$python_count ts=$ts_count tsx=$tsx_count dts=$dts_count js=$js_count" >&2
+            exit 1
+          fi
+          configs=(
+            "pyproject.toml 0c48694c3cc9668d7e062a03e98ab41d53a5b68a7500bd977da826e5f01273e6"
+            "uv.lock 562ebad06578ceca1bbcd1888942fcb8bf001340dbd63ce6c4d5737c144dbe4c"
+            "crates/qrcode2txt/Cargo.toml e0079b229039a8a02b440878c4235f6ac05a0c5e6db71b6cf61fcf28eee947a2"
+            "tools/model-files-web/tsconfig.json 770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808"
+            "tools/model-files-web/package.json 798565f0dc3bcb30375457bd8e003d7c30b14679f0e79bc6a1c50ddd0d63eb6c"
+            "tools/model-files-web/package-lock.json 8373619bda0840fb24893976201504404cd0fde71f61621057b529dfc1719d31"
+          )
+          for entry in "${configs[@]}"; do
+            read -r path want <<< "$entry"
+            got="$(shasum -a 256 "$RUNNER_TEMP/llm-tools/$path" | awk '{print $1}')"
+            if [[ "$got" != "$want" ]]; then
+              echo "config hash mismatch $path want=$want got=$got" >&2
+              exit 1
+            fi
+          done
+          printf '%s\n' \
+            "fixed_head=457b66e72da1967c2432131a7ff8adc4341eb337" \
+            "clean=yes" \
+            "counts rust=$rust_count python=$python_count ts=$ts_count tsx=$tsx_count dts=$dts_count js=$js_count" \
+            "config sha-256 checks pass" \
+            | tee .build/mixed-corpus.log
+
       - name: Provision frozen Rust corpora
         run: |
           set -o pipefail
           mkdir -p .build
           bash scripts/provision-corpora.sh 2>&1 | tee .build/corpora.log
 
-      - name: Run three-language product gate
+      - name: Run mixed-language product gate
         run: |
           set -o pipefail
           bash scripts/run-product-gates.sh \
             "$RUNNER_TEMP/mcp-python-sdk" \
-            "$RUNNER_TEMP/morphic" 2>&1 | tee .build/product-gates.log
+            "$RUNNER_TEMP/morphic" \
+            "$RUNNER_TEMP/llm-tools" 2>&1 | tee .build/product-gates.log
 
       - name: Upload product evidence
         if: always()
@@ -78,6 +126,11 @@ jobs:
           path: |
             .build/corpora.log
             .build/product-gates.log
+            .build/mixed-corpus.log
             .build/ci-swift-test.log
             .build/self-test-run-*
+            .build/self-test-run-*/mixed.stdout
+            .build/self-test-run-*/mixed.stderr
+            .build/self-test-run-*/mixed.timeout
+            .build/self-test-run-*/mixed.sample.txt
             .build/m11-fold-perf

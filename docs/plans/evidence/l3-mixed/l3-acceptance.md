@@ -2,7 +2,8 @@
 
 > Started: 2026-08-15 (Asia/Shanghai)
 > Source plan: `docs/plans/l3-mixed-language-plan.md`
-> Current status: C3 PASS; product cutover remains closed until F7.
+> Current status: F7/F8 implementation and fresh-cache host evidence recorded; F9 workflow
+> definition updated but remote macOS-15 run UNVERIFIED/BLOCKED.
 
 ## F0 live baseline
 
@@ -280,3 +281,48 @@ existing single `ExactCoordinator`. It adds no provider pool, registry, protocol
 semantic type, and does not refactor the three concrete provider implementations.
 
 C3 verdict: **PASS**. The product entry remains rejected until the final F7 cutover.
+
+## F7/F8/F9 fresh-cache evidence
+
+Implementation commits through F8:
+
+```text
+660311b
+78ae080
+7a5e9a3
+0d4daac
+a1448d2
+4c6adee
+1c5fc8b
+```
+
+Fresh-cache 17/17 product gate artifact:
+
+```text
+.build/self-test-run-20260815-234738-57251
+```
+
+Mixed cold/hot stats and provider/latency evidence from `mixed.stdout`:
+
+```text
+coldStats: rust files=11 extracted=11 reused=0 python files=8 extracted=8 reused=0 typescript files=26 extracted=26 reused=0
+hotStats:  rust files=11 extracted=0 reused=11 python files=8 extracted=0 reused=8 typescript files=26 extracted=0 reused=26
+exact defs/references: rust-analyzer def=1 ref=1 pyright def=1 ref=1 typescript-language-server def=1 ref=7
+compare: leftLineCount=62 rightLineCount=45 changeCount=17 hunkCount=2
+provider/latency: all readyMS and switch/latency values below 30 seconds
+```
+
+Four Gold suites completed with full PASS and no unexpected failures.
+
+Release fold performance final result:
+
+```text
+foldLatencyMs=358.480416
+deltaBytes=6209512
+```
+
+F9 workflow definition has been updated to check out fixed `sonald/llm-tools`
+and pass the third corpus to `scripts/run-product-gates.sh`.
+
+F9 verdict: **UNVERIFIED/BLOCKED**. A remote macOS-15 workflow run has not executed against
+the updated workflow definition, so the GitHub Actions PASS is not claimed.
