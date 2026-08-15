@@ -9387,6 +9387,7 @@ struct ExactSelfTestDirectorySnapshot: Snapshot {
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.untracked
+    let configurationPaths = ["Cargo.toml"]
     private let root: URL
     private let files = ["src/lib.rs", "src/main.rs"]
 
@@ -9395,6 +9396,10 @@ struct ExactSelfTestDirectorySnapshot: Snapshot {
         for file in files {
             _ = try Data(contentsOf: self.root.appendingPathComponent(file))
         }
+        _ = try Data(
+            contentsOf: root.appendingPathComponent("Cargo.toml"),
+            options: .mappedIfSafe
+        )
     }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
@@ -9405,6 +9410,12 @@ struct ExactSelfTestDirectorySnapshot: Snapshot {
     }
 
     func readBytes(path: String) throws -> [UInt8] {
+        if path == "Cargo.toml" {
+            return [UInt8](try Data(
+                contentsOf: root.appendingPathComponent(path),
+                options: .mappedIfSafe
+            ))
+        }
         guard files.contains(path) else { throw GitError.missingPath(path) }
         return [UInt8](try Data(
             contentsOf: root.appendingPathComponent(path),
