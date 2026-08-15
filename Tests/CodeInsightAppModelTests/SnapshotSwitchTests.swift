@@ -1125,6 +1125,59 @@ func compareModelDoesNotPublishAnOlderModeCompletion() async throws {
 
 @MainActor
 @Test
+func mixedCompareUsesSelectedFileModeAndDiscardsStaleDiffAfterLanguageRoute()
+    async throws
+{
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn target() {}\n",
+        "lib.py": "def target():\n    pass\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let service = ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: ["C": TestSnapshot(label: "C", files: [
+            "main.rs": "fn target() { next }\n",
+            "lib.py": "def target():\n    return 1\n",
+        ])],
+        blockedCached: ["C"],
+        blockedFull: ["C"]
+    )
+    let model = AppModel(
+        indexService: service,
+        commitPicker: CommitPickerModel(commits: [
+            CommitInfo(
+                shortSHA: "C",
+                fullSHA: "C",
+                summary: "commit",
+                authorName: "test",
+                date: Date()
+            ),
+        ])
+    )
+    try await model.openProject(root: root, languages: [.rust, .python])
+
+    model.navigate(to: root.appendingPathComponent("main.rs"))
+    model.selectCompareCommit("C")
+    #expect(await testWaitUntil("rust compare completes") {
+        model.compare.rightRevision == "C" && model.compare.diff != nil
+    })
+    #expect(model.compare.functionChanges.contains {
+        $0.kind == .bodyChanged
+    })
+
+    model.navigate(to: root.appendingPathComponent("lib.py"))
+    #expect(model.compare.diff == nil)
+    #expect(model.compare.functionChanges.isEmpty)
+    #expect(model.compare.rightRevision == "C")
+    #expect(await testWaitUntil("python compare completes") {
+        model.compare.diff != nil
+    })
+    await service.releaseFull("C")
+}
+
+@MainActor
+@Test
 func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn current() {}"])
     defer { try? FileManager.default.removeItem(at: root) }

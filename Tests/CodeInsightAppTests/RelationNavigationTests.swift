@@ -822,6 +822,115 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
 
 @MainActor
 @Test
+func mixedProjectUnsupportedSelectionClearsReaderWithoutActiveLanguageFallback()
+    async throws
+{
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+            && fixture.controller.selfTestLeftReaderBytes
+                == Array(fixture.mainSource.utf8)
+    })
+
+    let unsupported = fixture.root.appendingPathComponent("notes.js")
+    fixture.controller.openFileForSelfTest(unsupported)
+    #expect(fixture.model.selectedFile?.standardizedFileURL
+        == unsupported.standardizedFileURL)
+    #expect(fixture.model.languageMode(for: unsupported) == nil)
+    #expect(fixture.controller.displayedReaderFile?.standardizedFileURL
+        == unsupported.standardizedFileURL)
+    #expect(fixture.controller.selfTestLeftReaderBytes == nil)
+    #expect(fixture.controller.selfTestReaderPlaceholderText
+        == "Unsupported file language")
+}
+
+@MainActor
+@Test
+func mixedProjectReaderDisplaysFourModesWithTsxVariant() async throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightRelationRoute-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    try "fn target() {}\n".write(
+        to: root.appendingPathComponent("main.rs"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try "def target():\n    pass\n".write(
+        to: root.appendingPathComponent("lib.py"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try "export function target() {}\n".write(
+        to: root.appendingPathComponent("a.ts"),
+        atomically: true,
+        encoding: .utf8
+    )
+    try "export const button = <div />\n".write(
+        to: root.appendingPathComponent("b.tsx"),
+        atomically: true,
+        encoding: .utf8
+    )
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path, "init", "-q"]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        try? FileManager.default.removeItem(at: root)
+        throw CocoaError(.fileWriteUnknown)
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer {
+        controller.close()
+        try? FileManager.default.removeItem(at: root)
+    }
+    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+    try #require(await relationTestWaitUntil(
+        "mixed project ready"
+    ) {
+        model.snapshotPhase == .fullReady
+            && model.projectLanguages == [.rust, .python, .typescript]
+    })
+
+    for (name, source) in [
+        ("main.rs", "fn target() {}\n"),
+        ("lib.py", "def target():\n    pass\n"),
+        ("a.ts", "export function target() {}\n"),
+        ("b.tsx", "export const button = <div />\n"),
+    ] {
+        let file = root.appendingPathComponent(name)
+        controller.openFileForSelfTest(file)
+        try #require(await relationTestWaitUntil("\(name) displays") {
+            controller.displayedReaderFile?.standardizedFileURL
+                == file.standardizedFileURL
+                && controller.selfTestLeftReaderBytes == Array(source.utf8)
+        })
+        #expect(model.languageMode(for: file) != nil)
+        #expect(controller.selfTestReaderPlaceholderText == nil)
+    }
+    #expect(model.languageMode(for: root.appendingPathComponent("a.ts"))
+        == LanguageMode(language: .typescript))
+    #expect(model.languageMode(for: root.appendingPathComponent("b.tsx"))
+        == LanguageMode(language: .typescript, variant: "tsx"))
+}
+
+@MainActor
+@Test
 func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throws {
     let stateRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightSessionCheckpoint-\(UUID().uuidString)",

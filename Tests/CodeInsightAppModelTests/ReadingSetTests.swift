@@ -461,6 +461,131 @@ func trailReadingSetKeepsFiveObservedEdgesInPathOrderAndSkipsOldWorktree()
     ])
 }
 
+@MainActor
+@Test
+func trailReadingSetSkipsExtensionlessDependencyAfterLeavingOriginRoute() async throws {
+    let root = try readingSetTemporaryProject(source: "fn target() {}\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ReadingSetIndexService())
+    model.openProject(root: root)
+    #expect(await testWaitUntil("project ready") {
+        if case .ready = model.projectState { return true }
+        return false
+    })
+
+    let projectBytes = try #require(model.capturedProjectSource(at: "src/lib.rs")?.bytes)
+    let projectID = try #require(model.currentSnapshotID)
+    let project = JumpRecord(
+        path: "src/lib.rs",
+        contentID: .sha256(of: projectBytes),
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "target",
+        snapshotID: projectID
+    )
+    let depPath = "/tmp/vendor/make-tool"
+    let depBytes = Array("target:\n\techo target\n".utf8)
+    let dep = JumpRecord(
+        path: depPath,
+        contentID: .sha256(of: depBytes),
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "target",
+        snapshotID: projectID
+    )
+    let id = model.readingTrail.recordNavigation(
+        from: project,
+        to: dep,
+        explanation: NavigationExplanation(
+            explanationID: ResolutionExplanationID(),
+            observedAtNavigation: readingSetExplanationSnapshot(),
+            frozenInspectorDisplay: readingSetInspector(symbol: "make"),
+            readingSetRole: "DEPENDENCY"
+        )
+    )
+    let opened = model.trailReadingSet(to: id)
+    #expect(opened.excerpts.isEmpty)
+    #expect(opened.skippedReasons == [
+        "recorded source language is unsupported",
+    ])
+}
+
+@MainActor
+@Test
+func readingTrailCommitRouteFrozenAcrossWorktreeAndCommit() async throws {
+    let root = try readingSetTemporaryProject(source: "fn target() {}\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    try? readingSetGit(root, "init", "-q")
+    try readingSetGit(root, "add", "src/lib.rs")
+    try readingSetGit(
+        root,
+        "-c", "user.name=CodeInsight",
+        "-c", "user.email=codeinsight@example.com",
+        "commit", "-q", "-m", "base"
+    )
+
+    let model = AppModel(indexService: ReadingSetIndexService())
+    model.openProject(root: root)
+    _ = await testWaitUntil("worktree ready") {
+        model.snapshotPhase == .fullReady && model.currentRevision == nil
+    }
+    let worktreeID = try #require(model.currentSnapshotID)
+    let worktreeBytes = try #require(
+        model.capturedProjectSource(at: "src/lib.rs")?.bytes
+    )
+    let worktreeJump = JumpRecord(
+        path: "src/lib.rs",
+        contentID: .sha256(of: worktreeBytes),
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "target",
+        snapshotID: worktreeID
+    )
+    let trailID = model.readingTrail.recordNavigation(
+        from: worktreeJump,
+        to: worktreeJump,
+        explanation: NavigationExplanation(
+            explanationID: ResolutionExplanationID(),
+            observedAtNavigation: readingSetExplanationSnapshot(),
+            frozenInspectorDisplay: readingSetInspector(symbol: "target"),
+            readingSetRole: "TARGET"
+        )
+    )
+    let trail = model.trailReadingSet(to: trailID)
+    #expect(trail.excerpts.map(\.symbol) == ["target"])
+    #expect(trail.excerpts[0].sourceKind == .worktreeCaptured)
+
+    let revision = try readingSetGit(root, "rev-parse", "HEAD")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    let commitJump = JumpRecord(
+        path: "src/lib.rs",
+        contentID: .sha256(of: worktreeBytes),
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "target",
+        snapshotID: SnapshotID(rawValue: UUID()),
+        revision: revision
+    )
+    let commitTrailID = model.readingTrail.recordNavigation(
+        from: worktreeJump,
+        to: commitJump,
+        explanation: NavigationExplanation(
+            explanationID: ResolutionExplanationID(),
+            observedAtNavigation: readingSetExplanationSnapshot(),
+            frozenInspectorDisplay: readingSetInspector(symbol: "committed"),
+            readingSetRole: "COMMIT"
+        )
+    )
+    let commitTrail = model.trailReadingSet(to: commitTrailID)
+    #expect(commitTrail.excerpts.map(\.role) == ["TARGET", "COMMIT"])
+    #expect(commitTrail.excerpts[1].sourceKind == .projectCommit)
+    #expect(commitTrail.excerpts[1].revision == revision)
+}
+
 private func readingSetTestExcerpt(
     source: String,
     line: UInt32,

@@ -1575,6 +1575,10 @@ public final class AppModel {
             let bytes: [UInt8]?
             if exactLocationIsInDependency(jump.path) {
                 sourceKind = .dependencyCaptured
+                guard languageMode(for: URL(fileURLWithPath: jump.path)) != nil else {
+                    skippedReasons.append("recorded source language is unsupported")
+                    continue
+                }
                 bytes = (try? Data(
                     contentsOf: URL(fileURLWithPath: jump.path),
                     options: .mappedIfSafe
@@ -2338,11 +2342,6 @@ public final class AppModel {
             languages: projectLanguages
         ) {
             return classified
-        }
-        if file.pathExtension.isEmpty,
-           case let .ready(session, _) = projectState
-        {
-            return LanguageMode(language: session.analysisProfile.language)
         }
         return nil
     }
