@@ -78,10 +78,13 @@ public protocol Snapshot: Sendable {
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)]
     func readBytes(path: String) throws -> [UInt8]
+
+    var configurationPaths: [String] { get }
 }
 
 public extension Snapshot {
     var projectRootName: String { "." }
+    var configurationPaths: [String] { [] }
 }
 
 public final class GitRepository {
@@ -153,6 +156,7 @@ public final class CommitSnapshot: Snapshot, Sendable {
     public let revision: String
     public let commitOID: GitOID
     public let projectRootName: String
+    public let configurationPaths: [String]
 
     public init(repositoryURL: URL, revision: String = "HEAD") throws {
         let loaded: ([String: CapturedFile], GitObjectFormat, GitOID) =
@@ -228,7 +232,18 @@ public final class CommitSnapshot: Snapshot, Sendable {
         self.revision = revision
         commitOID = loaded.2
         projectRootName = repositoryURL.standardizedFileURL.lastPathComponent
-        files = loaded.0
+        let capturedFiles = loaded.0
+        files = capturedFiles
+        configurationPaths = capturedFiles.keys
+            .filter { entry in
+                guard configurationLanguage(
+                    for: URL(fileURLWithPath: entry).lastPathComponent
+                ) != nil,
+                      capturedFiles[entry]?.fileMode != .symlink
+                else { return false }
+                return true
+            }
+            .sorted()
     }
 
     public func listFiles() -> [(
@@ -264,6 +279,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
     public let projectRootName: String
+    public let configurationPaths: [String]
     // A directory import has no per-file Git status in the M1 model, so all
     // captured worktree files retain the existing .untracked convention.
     public let sourceKind: SourceKind = .untracked
@@ -272,18 +288,12 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         try self.init(repositoryURL: repositoryURL, language: .rust)
     }
 
-    public init(repositoryURL: URL, language: LanguageID) throws {
-        switch language {
-        case .rust, .python:
-            break
-        case .typescript:
-            break
-        case .javascript:
-            throw CocoaError(.featureUnsupported, userInfo: [
-                NSLocalizedFailureReasonErrorKey:
-                    "Worktree snapshot does not support \(String(describing: language))",
-            ])
-        }
+    public convenience init(repositoryURL: URL, language: LanguageID) throws {
+        try self.init(repositoryURL: repositoryURL, languages: [language])
+    }
+
+    public init(repositoryURL: URL, languages: [LanguageID]) throws {
+        let selectedLanguages = try LanguageMode.normalize(languages: languages)
         let repositoryInfo: (URL, GitObjectFormat) = try LibGit2Executor.sync {
             let repository = try GitRepository(url: repositoryURL)
             guard let workdir = git_repository_workdir(repository.raw) else {
@@ -300,9 +310,13 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         let root = repositoryInfo.0
 
         var captured: [String: CapturedFile] = [:]
-        for file in try Self.sourceFiles(under: root, language: language) {
+        for file in try Self.sourceFiles(
+            under: root,
+            languages: selectedLanguages
+        ) {
             let bytes = [UInt8](try Data(contentsOf: file, options: .mappedIfSafe))
-            captured[Self.relativePath(of: file, under: root)] = CapturedFile(
+            let relative = Self.relativePath(of: file, under: root)
+            captured[relative] = CapturedFile(
                 bytes: bytes,
                 contentID: ContentID.sha256(of: bytes),
                 fileMode: capturedFileMode(bytes, fallback: .regular)
@@ -310,20 +324,8 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         }
 
         var configurationFiles: [String: CapturedFile] = [:]
-        let configurationURLs: [URL]
-        switch language {
-        case .rust:
-            configurationURLs = (try? Self.configurationFiles(under: root)) ?? []
-        case .python:
-            configurationURLs = ["pyrightconfig.json", "pyproject.toml", "uv.lock"]
-                .map(root.appendingPathComponent)
-        case .typescript:
-            configurationURLs = ["tsconfig.json", "package.json", "bun.lockb"]
-                .map(root.appendingPathComponent)
-        case .javascript:
-            configurationURLs = []
-        }
-        for file in configurationURLs {
+        for file in (try? Self.configurationFiles(under: root,
+            selected: selectedLanguages)) ?? [] {
             guard let data = try? Data(contentsOf: file, options: .mappedIfSafe)
             else { continue }
             let bytes = [UInt8](data)
@@ -339,6 +341,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         projectRootName = root.lastPathComponent
         files = captured
         self.configurationFiles = configurationFiles
+        configurationPaths = configurationFiles.keys.sorted()
     }
 
     public func listFiles() -> [(
@@ -364,7 +367,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
 
     private static func sourceFiles(
         under root: URL,
-        language: LanguageID
+        languages: [LanguageID]
     ) throws -> [URL] {
         var result: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(
@@ -381,9 +384,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 guard values.isSymbolicLink != true,
                       !skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                result += try sourceFiles(under: url, language: language)
-            } else if values.isRegularFile == true,
-                      LanguageMode.classify(path: url.path, language: language) != nil
+                result += try sourceFiles(under: url, languages: languages)
+            } else if values.isSymbolicLink != true,
+                      values.isRegularFile == true,
+                      LanguageMode.classify(path: url.path, languages: languages) != nil
             {
                 result.append(url)
             }
@@ -391,7 +395,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         return result.sorted { $0.path < $1.path }
     }
 
-    private static func configurationFiles(under root: URL) throws -> [URL] {
+    private static func configurationFiles(
+        under root: URL,
+        selected: [LanguageID]
+    ) throws -> [URL] {
         var result: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(
             at: root,
@@ -406,10 +413,11 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 guard values.isSymbolicLink != true,
                       !skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                result += try configurationFiles(under: url)
-            } else if values.isRegularFile == true,
-                      url.lastPathComponent == "Cargo.toml"
-                        || url.lastPathComponent == "Cargo.lock"
+                result += try configurationFiles(under: url, selected: selected)
+            } else if values.isSymbolicLink != true,
+                      values.isRegularFile == true,
+                      configurationLanguage(for: url.lastPathComponent)
+                        .map(selected.contains) == true
             {
                 result.append(url)
             }
@@ -421,6 +429,19 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         file.standardizedFileURL.pathComponents
             .dropFirst(root.pathComponents.count)
             .joined(separator: "/")
+    }
+}
+
+private func configurationLanguage(for name: String) -> LanguageID? {
+    switch name {
+    case "Cargo.toml", "Cargo.lock":
+        return .rust
+    case "pyrightconfig.json", "pyproject.toml", "uv.lock":
+        return .python
+    case "tsconfig.json", "package.json", "bun.lockb":
+        return .typescript
+    default:
+        return nil
     }
 }
 

@@ -251,6 +251,232 @@ func explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() throws {
 }
 
 @Test
+func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "src/main.rs": "fn main() {}\n",
+        "src/lib.rs": "pub fn lib() {}\n",
+        "src/lib.py": "class Service: pass\n",
+        "src/a.ts": "export const a = 1\n",
+        "src/b.tsx": "export const b = 1\n",
+        "src/ignored.d.ts": "export declare const x: number\n",
+        "src/ignored.js": "const ignored = 1\n",
+        "src/ignored.pyi": "class Stub: ...\n",
+        "src/ignored.mts": "export const m = 1\n",
+        "src/ignored.cts": "export const c = 1\n",
+        "src/ignored.rs.old": "fn old() {}\n",
+        "Cargo.toml": "[package]\nname = \"fixture\"\n",
+        "Cargo.lock": "version = 4\n",
+        "pyproject.toml": "[project]\nname = \"sample\"\n",
+        "uv.lock": "version = 1\n",
+        "tsconfig.json": "{}\n",
+        "package.json": "{}\n",
+        "node_modules/pkg.ts": "export const pkg = 1\n",
+        ".build/generated.ts": "export const built = 1\n",
+        "nested/Cargo.toml": "[package]\nname = \"nested\"\n",
+        "nested/Cargo.lock": "# nested lock\n",
+        "nested/pyproject.toml": "[project]\nname = \"nested\"\n",
+        "nested/uv.lock": "version = 1\n",
+        "nested/tsconfig.json": "{}\n",
+        "nested/package.json": "{}\n",
+        "nested/bun.lockb": Array(repeating: UInt8(ascii: "B"), count: 4).map(String.init).joined(),
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+    let projectBytes = try Data(
+        contentsOf: fixture.root.appendingPathComponent("Cargo.toml")
+    )
+    let skippedBytes = try Data(
+        contentsOf: fixture.root.appendingPathComponent("node_modules/pkg.ts")
+    )
+    try FileManager.default.createDirectory(
+        at: fixture.root.appendingPathComponent("src/config-link"),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("src/config-link/tsconfig.json").path,
+        withDestinationPath: "../../tsconfig.json"
+    )
+
+    let snapshot = try WorktreeSnapshot(
+        repositoryURL: fixture.root,
+        languages: [.rust, .python, .typescript]
+    )
+
+    #expect(snapshot.listFiles().map(\.path) == [
+        "src/a.ts",
+        "src/b.tsx",
+        "src/lib.py",
+        "src/lib.rs",
+        "src/main.rs",
+    ])
+    #expect(Set(snapshot.configurationPaths) == Set([
+        "Cargo.toml",
+        "Cargo.lock",
+        "pyproject.toml",
+        "uv.lock",
+        "tsconfig.json",
+        "package.json",
+        "nested/Cargo.toml",
+        "nested/Cargo.lock",
+        "nested/pyproject.toml",
+        "nested/uv.lock",
+        "nested/tsconfig.json",
+        "nested/package.json",
+        "nested/bun.lockb",
+    ]))
+    #expect(snapshot.configurationPaths.contains("src/config-link/tsconfig.json") == false)
+    #expect(snapshot.listFiles().contains {
+        $0.path.contains("Cargo")
+            || $0.path.contains("pyproject")
+            || $0.path.contains("tsconfig")
+            || $0.path.hasSuffix(".lock")
+            || $0.path.hasSuffix("package.json")
+    } == false)
+    #expect(try Data(contentsOf: fixture.root.appendingPathComponent("Cargo.toml"))
+        == projectBytes)
+    #expect(try Data(contentsOf: fixture.root.appendingPathComponent("node_modules/pkg.ts"))
+        == skippedBytes)
+}
+
+@Test
+func worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() {
+    let nonexistent = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightUnionRejects-\(UUID().uuidString)")
+
+    let invalid: [[LanguageID]] = [
+        [],
+        [.rust, .rust],
+        [.python, .python, .rust],
+        [.javascript],
+        [.rust, .javascript],
+    ]
+    for languages in invalid {
+        do {
+            _ = try WorktreeSnapshot(
+                repositoryURL: nonexistent,
+                languages: languages
+            )
+            Issue.record("Invalid union languages unexpectedly succeeded: \(languages)")
+        } catch let error as CocoaError {
+            #expect(error.code == .featureUnsupported)
+        } catch {
+            Issue.record("Invalid union preflight happened after repository access: \(error)")
+        }
+    }
+}
+
+@Test
+func worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "src/main.rs": "fn main() {}\n",
+        "src/ignored.py": "def ignored(): pass\n",
+        "Cargo.toml": "[package]\nname = \"fixture\"\n",
+        "Cargo.lock": "# version = 4\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+
+    let singleton = try WorktreeSnapshot(repositoryURL: fixture.root, language: .rust)
+    let union = try WorktreeSnapshot(
+        repositoryURL: fixture.root,
+        languages: [.rust]
+    )
+
+    #expect(union.listFiles().map(\.path) == singleton.listFiles().map(\.path))
+    #expect(union.configurationPaths == singleton.configurationPaths)
+    for (path, file) in zip(singleton.listFiles(), union.listFiles()) {
+        #expect(path.contentID == file.contentID)
+        #expect(path.fileMode == file.fileMode)
+        #expect(try singleton.readBytes(path: file.path) == union.readBytes(path: file.path))
+    }
+}
+
+@Test
+func commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMarkers() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: String] = [
+        "src/main.rs": "fn main() {}\n",
+        "src/lib.py": "def f(): pass\n",
+        "src/a.ts": "export const a = 1\n",
+        "src/ignored.d.ts": "export declare const x: number\n",
+        "src/ignored.js": "const ignored = 1\n",
+        "Cargo.toml": "[package]\nname = \"fixture\"\n",
+        "Cargo.lock": "# lock\n",
+        "pyrightconfig.json": "{}\n",
+        "uv.lock": "version = 1\n",
+        "tsconfig.json": "{}\n",
+        "package.json": "{}\n",
+        "nested/Cargo.toml": "[package]\nname = \"nested\"\n",
+        "nested/pyproject.toml": "[project]\nname = \"nested\"\n",
+        "nested/tsconfig.json": "{}\n",
+    ]
+    for (path, contents) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: url)
+    }
+    try FileManager.default.createDirectory(
+        at: fixture.root.appendingPathComponent("nested/link"),
+        withIntermediateDirectories: true
+    )
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("nested/link/Cargo.toml").path,
+        withDestinationPath: "../../Cargo.toml"
+    )
+    try fixture.git("add", ".")
+    try fixture.commit("base")
+
+    let first = try CommitSnapshot(repositoryURL: fixture.root)
+    let firstPaths = Set(first.configurationPaths)
+    #expect(firstPaths.contains("Cargo.toml"))
+    #expect(firstPaths.contains("Cargo.lock"))
+    #expect(firstPaths.contains("pyrightconfig.json"))
+    #expect(firstPaths.contains("pyproject.toml") == false)
+    #expect(firstPaths.contains("tsconfig.json"))
+    #expect(firstPaths.contains("package.json"))
+    #expect(firstPaths.contains("nested/Cargo.toml"))
+    #expect(firstPaths.contains("nested/pyproject.toml"))
+    #expect(firstPaths.contains("nested/tsconfig.json"))
+    #expect(firstPaths.contains("nested/link/Cargo.toml") == false)
+
+    try fixture.git("rm", "-q", "nested/Cargo.toml")
+    try Data("# new marker\n".utf8).write(
+        to: fixture.root.appendingPathComponent("nested/Cargo.lock")
+    )
+    try fixture.git("add", "nested/Cargo.lock")
+    try fixture.commit("nested marker inventory change")
+
+    let second = try CommitSnapshot(repositoryURL: fixture.root)
+    let secondPaths = Set(second.configurationPaths)
+    #expect(secondPaths.contains("nested/Cargo.lock"))
+    #expect(secondPaths.contains("nested/Cargo.toml") == false)
+    #expect(try second.readBytes(path: "nested/Cargo.lock")
+        == Array("# new marker\n".utf8))
+    #expect(firstPaths != secondPaths)
+    #expect(first.commitOID != second.commitOID)
+}
+
+@Test
 func unsupportedWorktreeLanguagesFailBeforeOpeningARepository() {
     let nonexistent = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupported-\(UUID().uuidString)")
@@ -308,14 +534,8 @@ func pythonWorktreeSnapshotCapturesOnlyPythonFilesAndRootConfigs() throws {
         == Array(files["pyproject.toml"]!.utf8))
     #expect(try snapshot.readBytes(path: "uv.lock")
         == Array(files["uv.lock"]!.utf8))
-    do {
-        _ = try snapshot.readBytes(path: "nested/pyproject.toml")
-        Issue.record("Nested Python config unexpectedly entered the snapshot")
-    } catch let GitError.missingPath(path) {
-        #expect(path == "nested/pyproject.toml")
-    } catch {
-        Issue.record("Unexpected nested config read error: \(error)")
-    }
+    #expect(try snapshot.readBytes(path: "nested/pyproject.toml")
+        == Array(files["nested/pyproject.toml"]!.utf8))
 }
 
 @Test
@@ -436,14 +656,8 @@ func typescriptWorktreeSnapshotCapturesOnlyClassifierApprovedTsAndRootConfigs() 
     #expect(try snapshot.readBytes(path: "tsconfig.json") == Array(files["tsconfig.json"]!.utf8))
     #expect(try snapshot.readBytes(path: "package.json") == Array(files["package.json"]!.utf8))
     #expect(try snapshot.readBytes(path: "bun.lockb") == Array(files["bun.lockb"]!.utf8))
-    do {
-        _ = try snapshot.readBytes(path: "nested/tsconfig.json")
-        Issue.record("Nested TS config unexpectedly entered the snapshot")
-    } catch let GitError.missingPath(path) {
-        #expect(path == "nested/tsconfig.json")
-    } catch {
-        Issue.record("Unexpected nested config read error: \(error)")
-    }
+    #expect(try snapshot.readBytes(path: "nested/tsconfig.json")
+        == Array(files["nested/tsconfig.json"]!.utf8))
 }
 
 private final class GitFixture {

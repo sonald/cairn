@@ -104,6 +104,52 @@ func typescriptClassifierMatchesF1bMatrixAndKeepsTsTsxKeysDistinct() throws {
 }
 
 @Test
+func languageArrayClassifierMatchesSelectedLanguageUnionMatrix() {
+    let selected = [
+        LanguageID.rust,
+        LanguageID.python,
+        LanguageID.typescript,
+    ]
+
+    #expect(LanguageMode.classify(path: "src/lib.rs", languages: selected)
+        == LanguageMode(language: .rust))
+    #expect(LanguageMode.classify(path: "src/lib.py", languages: selected)
+        == LanguageMode(language: .python))
+    #expect(LanguageMode.classify(path: "src/lib.ts", languages: selected)
+        == LanguageMode(language: .typescript))
+    #expect(LanguageMode.classify(path: "src/lib.tsx", languages: selected)
+        == LanguageMode(language: .typescript, variant: "tsx"))
+    #expect(LanguageMode.classify(path: "src/lib.d.ts", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.mts", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.cts", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.js", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.jsx", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.pyi", languages: selected) == nil)
+    #expect(LanguageMode.classify(path: "src/lib.pyw", languages: selected) == nil)
+}
+
+@Test
+func languageArrayNormalizationRejectsInvalidDuplicateOrJavaScriptAtBoundary() throws {
+    #expect(try LanguageMode.normalize(languages: [.rust, .python, .typescript])
+        == [LanguageID.rust, .python, .typescript])
+    #expect(try LanguageMode.normalize(languages: [.python, .rust])
+        == [.rust, .python])
+
+    let invalid: [[LanguageID]] = [
+        [],
+        [.rust, .rust],
+        [.python, .python, .rust],
+        [.javascript],
+        [.rust, .javascript],
+    ]
+    for languages in invalid {
+        #expect(throws: CocoaError.self) {
+            _ = try LanguageMode.normalize(languages: languages)
+        }
+    }
+}
+
+@Test
 func pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() throws {
     let rawKinds: [(DeclarationKind, UInt8)] = [
         (.rustFn, 0),

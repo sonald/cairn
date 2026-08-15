@@ -43,6 +43,48 @@ public struct LanguageMode: Codable, Hashable, Sendable {
             return nil
         }
     }
+
+    package static func classify(
+        path: String,
+        languages: [LanguageID]
+    ) -> LanguageMode? {
+        for language in languages {
+            if let mode = classify(path: path, language: language) {
+                return mode
+            }
+        }
+        return nil
+    }
+
+    package static func normalize(
+        languages: [LanguageID]
+    ) throws -> [LanguageID] {
+        guard !languages.isEmpty else {
+            throw invalidLanguages(languages)
+        }
+        var seen = Set<LanguageID>()
+        var normalized: [LanguageID] = []
+        for language in languages {
+            switch language {
+            case .rust, .python, .typescript:
+                break
+            case .javascript:
+                throw invalidLanguages(languages)
+            }
+            guard seen.insert(language).inserted else {
+                throw invalidLanguages(languages)
+            }
+            normalized.append(language)
+        }
+        return normalized.sorted { $0.rawValue < $1.rawValue }
+    }
+}
+
+private func invalidLanguages(_ languages: [LanguageID]) -> CocoaError {
+    CocoaError(.featureUnsupported, userInfo: [
+        NSLocalizedFailureReasonErrorKey:
+            "Unsupported language selection: \(String(describing: languages))",
+    ])
 }
 
 public struct ContentIndexKey: Codable, Hashable, Sendable {
