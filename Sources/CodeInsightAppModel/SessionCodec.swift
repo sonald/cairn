@@ -4,7 +4,7 @@ import Foundation
 package enum SessionCodec {
     package struct Snapshot: Sendable {
         package let projectRoot: String
-        package let language: LanguageID
+        package let languages: [LanguageID]
         package let revision: String?
         package let activeTabOrdinal: Int?
         package let panelPreset: String
@@ -19,11 +19,31 @@ package enum SessionCodec {
             tabs: [Tab]
         ) {
             self.projectRoot = projectRoot
-            self.language = language
+            self.languages = [language]
             self.revision = revision
             self.activeTabOrdinal = activeTabOrdinal
             self.panelPreset = panelPreset
             self.tabs = tabs
+        }
+
+        package init(
+            projectRoot: String,
+            languages: [LanguageID],
+            revision: String?,
+            activeTabOrdinal: Int?,
+            panelPreset: String,
+            tabs: [Tab]
+        ) {
+            self.projectRoot = projectRoot
+            self.languages = languages
+            self.revision = revision
+            self.activeTabOrdinal = activeTabOrdinal
+            self.panelPreset = panelPreset
+            self.tabs = tabs
+        }
+
+        package var language: LanguageID {
+            languages.first ?? .rust
         }
     }
 
@@ -113,7 +133,8 @@ package enum SessionCodec {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
         let envelope = try decoder.decode(Envelope.self, from: data)
-        guard envelope.schemaVersion == 1 else { throw CodecError.invalid }
+        guard envelope.schemaVersion == 1 || envelope.schemaVersion == 2
+        else { throw CodecError.invalid }
         let snapshot = try envelope.snapshot()
         try validate(
             snapshot,
@@ -132,6 +153,8 @@ package enum SessionCodec {
               !snapshot.projectRoot.isEmpty,
               snapshot.projectRoot.hasPrefix("/"),
               byteCount(snapshot.projectRoot) <= 4_096,
+              (try? LanguageMode.normalize(languages: snapshot.languages))
+                  == snapshot.languages,
               snapshot.tabs.count <= maximumTabCount,
               snapshot.activeTabOrdinal.map({ $0 >= 0 }) ?? true,
               PanelPresetModel(rawValue: snapshot.panelPreset) != nil,
@@ -247,6 +270,7 @@ package enum SessionCodec {
     private struct Envelope: Codable {
         let schemaVersion: Int
         let projectRoot: String
+        let languages: [LanguageID]?
         let language: LanguageID?
         let revision: String?
         let activeTabOrdinal: Int?
@@ -254,9 +278,10 @@ package enum SessionCodec {
         let tabs: [TabDTO]
 
         init(_ snapshot: Snapshot) {
-            schemaVersion = 1
+            schemaVersion = 2
             projectRoot = snapshot.projectRoot
-            language = snapshot.language
+            languages = snapshot.languages
+            language = nil
             revision = snapshot.revision
             activeTabOrdinal = snapshot.activeTabOrdinal
             panelPreset = snapshot.panelPreset
@@ -264,14 +289,32 @@ package enum SessionCodec {
         }
 
         func snapshot() throws -> Snapshot {
-            Snapshot(
-                projectRoot: projectRoot,
-                language: language ?? .rust,
-                revision: revision,
-                activeTabOrdinal: activeTabOrdinal,
-                panelPreset: panelPreset,
-                tabs: try tabs.map { try $0.tab() }
-            )
+            switch schemaVersion {
+            case 1:
+                guard languages == nil else { throw CodecError.invalid }
+                return Snapshot(
+                    projectRoot: projectRoot,
+                    language: language ?? .rust,
+                    revision: revision,
+                    activeTabOrdinal: activeTabOrdinal,
+                    panelPreset: panelPreset,
+                    tabs: try tabs.map { try $0.tab() }
+                )
+            case 2:
+                guard language == nil,
+                      let languages
+                else { throw CodecError.invalid }
+                return Snapshot(
+                    projectRoot: projectRoot,
+                    languages: languages,
+                    revision: revision,
+                    activeTabOrdinal: activeTabOrdinal,
+                    panelPreset: panelPreset,
+                    tabs: try tabs.map { try $0.tab() }
+                )
+            default:
+                throw CodecError.invalid
+            }
         }
     }
 

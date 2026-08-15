@@ -4,7 +4,7 @@ import Testing
 @testable import CodeInsightAppModel
 
 @Test
-func sessionCodecPersistsLanguageAndMigratesMissingLanguageToRust() throws {
+func sessionCodecWritesV2LanguageArrayAndDecodesV1Singleton() throws {
     let snapshot = SessionCodec.Snapshot(
         projectRoot: "/tmp/project",
         language: .python,
@@ -18,23 +18,36 @@ func sessionCodecPersistsLanguageAndMigratesMissingLanguageToRust() throws {
         maximumTabCount: 10,
         dependencyAllowed: { _ in false }
     )
-    var object = try #require(
+    let object = try #require(
         JSONSerialization.jsonObject(with: data) as? [String: Any]
     )
-    #expect(object["language"] as? Int == Int(LanguageID.python.rawValue))
+    #expect(object["schemaVersion"] as? Int == 2)
+    #expect(object["languages"] as? [Int] == [Int(LanguageID.python.rawValue)])
+    #expect(object["language"] == nil)
     #expect(try SessionCodec.decode(
         data,
         maximumTabCount: 10,
         dependencyAllowed: { _ in false }
-    ).language == .python)
+    ).languages == [.python])
 
-    object.removeValue(forKey: "language")
-    let legacy = try JSONSerialization.data(withJSONObject: object)
+    var v1Explicit = object
+    v1Explicit["schemaVersion"] = 1
+    v1Explicit["language"] = NSNumber(value: LanguageID.typescript.rawValue)
+    v1Explicit.removeValue(forKey: "languages")
+    let explicit = try JSONSerialization.data(withJSONObject: v1Explicit)
     #expect(try SessionCodec.decode(
-        legacy,
+        explicit,
         maximumTabCount: 10,
         dependencyAllowed: { _ in false }
-    ).language == .rust)
+    ).languages == [.typescript])
+
+    v1Explicit.removeValue(forKey: "language")
+    let missing = try JSONSerialization.data(withJSONObject: v1Explicit)
+    #expect(try SessionCodec.decode(
+        missing,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    ).languages == [.rust])
 }
 
 @Test
@@ -55,12 +68,192 @@ func sessionCodecRoundTripsTypeScriptRawValueTwo() throws {
     let object = try #require(
         JSONSerialization.jsonObject(with: data) as? [String: Any]
     )
-    #expect(object["language"] as? Int == 2)
+    #expect(object["languages"] as? [Int] == [2])
     #expect(try SessionCodec.decode(
         data,
         maximumTabCount: 10,
         dependencyAllowed: { _ in false }
-    ).language == .typescript)
+    ).languages == [.typescript])
+}
+
+@Test
+func sessionCodecRoundTripsCanonicalLanguageArrayWithSortedKeys() throws {
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust, .python, .typescript],
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(decoded.languages == [.rust, .python, .typescript])
+    #expect(decoded.language == .rust)
+
+    let json = try #require(String(data: data, encoding: .utf8))
+    #expect(json == "{\"languages\":[0,1,2],\"panelPreset\":\"reading\",\"projectRoot\":\"\\/tmp\\/project\",\"schemaVersion\":2,\"tabs\":[]}")
+}
+
+@Test
+func sessionCodecRejectsV2InvalidLanguageArraysAndMixedV1V2Fields() throws {
+    let valid = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust, .python],
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let data = try SessionCodec.encode(
+        valid,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: "reading",
+                tabs: []
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.rust, .rust],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: "reading",
+                tabs: []
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.python, .rust],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: "reading",
+                tabs: []
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.javascript],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: "reading",
+                tabs: []
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.rust, .python, .typescript, .rust],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: "reading",
+                tabs: []
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+
+    var object = try #require(
+        JSONSerialization.jsonObject(with: data) as? [String: Any]
+    )
+    object["languages"] = nil
+    object["language"] = Int(LanguageID.rust.rawValue)
+    let mixed = try JSONSerialization.data(withJSONObject: object)
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.decode(
+            mixed,
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+
+    let invalidLanguageArrays: [[Int]] = [
+        [],
+        [0, 0],
+        [1, 0],
+        [3],
+        [99],
+        [0, 1, 2, 0],
+    ]
+    for languages in invalidLanguageArrays {
+        var invalid = object
+        invalid["schemaVersion"] = 2
+        invalid["languages"] = languages
+        invalid.removeValue(forKey: "language")
+        let data = try JSONSerialization.data(withJSONObject: invalid)
+        #expect(sessionCodecFails {
+            _ = try SessionCodec.decode(
+                data,
+                maximumTabCount: 10,
+                dependencyAllowed: { _ in false }
+            )
+        })
+    }
+}
+
+@Test
+func sessionCodecNeverAddsLanguageOrProfileToTabJSON() throws {
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust, .python],
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "src/lib.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let json = try #require(String(data: data, encoding: .utf8))
+    #expect(!json.contains("languageMode"))
+    #expect(!json.contains("analysisProfileID"))
 }
 
 @Test
@@ -194,8 +387,8 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
     let json = try #require(String(data: data, encoding: .utf8))
     let unknown = try #require(
         json.replacingOccurrences(
-            of: "\"schemaVersion\":1",
-            with: "\"schemaVersion\":2"
+            of: "\"schemaVersion\":2",
+            with: "\"schemaVersion\":9"
         ).data(using: .utf8)
     )
     #expect(sessionCodecFails {
