@@ -163,6 +163,14 @@ private struct CodeInsightApplication {
             ))
             Darwin.exit(2)
         }
+        let mixedSelfTestRoot = arguments.firstIndex(of: "--self-test-mixed")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        if arguments.contains("--self-test-mixed"), mixedSelfTestRoot == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-mixed <mixed-git-repo>\n".utf8
+            ))
+            Darwin.exit(2)
+        }
         let app = NSApplication.shared
         if let foldPerformance {
             app.setActivationPolicy(.prohibited)
@@ -315,7 +323,10 @@ private struct CodeInsightApplication {
             let runsSelfTest = arguments.contains {
                 $0.hasPrefix("--self-test") || $0.hasPrefix("--fold-perf")
             }
-            if pythonSelfTestRoot != nil || typescriptSelfTestRoot != nil {
+            if pythonSelfTestRoot != nil
+                || typescriptSelfTestRoot != nil
+                || mixedSelfTestRoot != nil
+            {
                 let pythonSelfTestID = UUID().uuidString
                 let pythonRecentStore = RecentProjectsStore(defaults: UserDefaults(
                     suiteName: "CodeInsightLanguageSelfTest-\(pythonSelfTestID)"
@@ -344,6 +355,18 @@ private struct CodeInsightApplication {
                 Task { @MainActor in
                     await delegate.runPythonSelfTest(root: URL(
                         fileURLWithPath: pythonRoot,
+                        isDirectory: true
+                    ))
+                }
+                app.run()
+            }
+            return
+        }
+        if let mixedRoot = mixedSelfTestRoot {
+            withExtendedLifetime(delegate) {
+                Task { @MainActor in
+                    await delegate.runMixedSelfTest(root: URL(
+                        fileURLWithPath: mixedRoot,
                         isDirectory: true
                     ))
                 }
@@ -6711,6 +6734,936 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             checks: checks,
             startedAt: startedAt
         )
+    }
+
+    func runMixedSelfTest(root inputRoot: URL) async -> Never {
+        let startedAt = ContinuousClock.now
+        let root = inputRoot.standardizedFileURL
+        func finish(_ error: String) -> Never {
+            Self.writeJSON([
+                "step": "summary",
+                "channel": "mixed",
+                "passed": false,
+                "error": error,
+                "elapsedMS": milliseconds(since: startedAt),
+            ])
+            Self.exitSelfTest(channel: "mixed", status: 1)
+        }
+        func git(_ arguments: [String]) throws -> String {
+            let process = Process()
+            let output = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-C", root.path] + arguments
+            process.standardOutput = output
+            process.standardError = output
+            try process.run()
+            process.waitUntilExit()
+            let data = output.fileHandleForReading.readDataToEndOfFile()
+            guard process.terminationStatus == 0
+            else {
+                throw CocoaError(.fileReadUnknown, userInfo: [
+                    NSLocalizedFailureReasonErrorKey:
+                        "git \(arguments.joined(separator: " ")) failed ("
+                        + "\(process.terminationStatus)): "
+                        + String(decoding: data, as: UTF8.self)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                ])
+            }
+            return String(decoding: data, as: UTF8.self)
+        }
+
+        let fixedCommit = "457b66e72da1967c2432131a7ff8adc4341eb337"
+        let expectedConfigHashes: [String: String] = [
+            "pyproject.toml":
+                "0c48694c3cc9668d7e062a03e98ab41d53a5b68a7500bd977da826e5f01273e6",
+            "uv.lock":
+                "562ebad06578ceca1bbcd1888942fcb8bf001340dbd63ce6c4d5737c144dbe4c",
+            "crates/qrcode2txt/Cargo.toml":
+                "e0079b229039a8a02b440878c4235f6ac05a0c5e6db71b6cf61fcf28eee947a2",
+            "tools/model-files-web/tsconfig.json":
+                "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+            "tools/model-files-web/package.json":
+                "798565f0dc3bcb30375457bd8e003d7c30b14679f0e79bc6a1c50ddd0d63eb6c",
+            "tools/model-files-web/package-lock.json":
+                "8373619bda0840fb24893976201504404cd0fde71f61621057b529dfc1719d31",
+        ]
+        do {
+            let head = try git(["rev-parse", "HEAD"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard head == fixedCommit else {
+                finish("mixed HEAD \(head) != fixed \(fixedCommit)")
+            }
+            let status = try git([
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard status.isEmpty else {
+                finish("mixed git worktree is not clean")
+            }
+            let listed = try git(["ls-files"])
+                .split(separator: "\n").map(String.init)
+            let rustFiles = listed.filter { $0.hasSuffix(".rs") }
+            let pythonFiles = listed.filter {
+                $0.hasSuffix(".py") && !$0.hasSuffix(".pyi")
+            }
+            let dtsFiles = listed.filter { $0.hasSuffix(".d.ts") }
+            let tsFiles = listed.filter {
+                $0.hasSuffix(".ts")
+                    && !$0.hasSuffix(".d.ts")
+                    && !$0.hasSuffix(".mts")
+                    && !$0.hasSuffix(".cts")
+            }
+            let tsxFiles = listed.filter { $0.hasSuffix(".tsx") }
+            let jsFiles = listed.filter {
+                $0.hasSuffix(".js") || $0.hasSuffix(".jsx")
+            }
+            guard rustFiles.count == 11,
+                  pythonFiles.count == 8,
+                  tsFiles.count == 22,
+                  tsxFiles.count == 4,
+                  dtsFiles.count == 1,
+                  jsFiles.isEmpty
+            else {
+                finish("preflight counts rust=\(rustFiles.count) "
+                    + "python=\(pythonFiles.count) ts=\(tsFiles.count) "
+                    + "tsx=\(tsxFiles.count) dts=\(dtsFiles.count) "
+                    + "js=\(jsFiles.count) mismatch")
+            }
+            for (path, hash) in expectedConfigHashes {
+                guard listed.contains(path),
+                      let data = try? Data(contentsOf: root.appendingPathComponent(path)),
+                      ContentID.sha256(of: data).bytes
+                        .map({ String(format: "%02x", $0) }).joined() == hash
+                else {
+                    finish("preflight config hash mismatch \(path)")
+                }
+            }
+        } catch {
+            finish("mixed git preflight failed: \(error)")
+        }
+
+        launch(offscreen: true, measuresIdleFootprint: false)
+        guard let controller = windowController else {
+            finish("window unavailable")
+        }
+        controller.openProject(
+            root: root,
+            languages: [.rust, .python, .typescript]
+        )
+
+        var sawFirstPaint = false
+        let deadline = Date(timeIntervalSinceNow: 30)
+        while Date() < deadline {
+            if model.snapshotPhase == .firstPaint {
+                sawFirstPaint = true
+            }
+            if model.snapshotPhase == .fullReady,
+               model.querySessions.count == 3
+            {
+                break
+            }
+            if case .failed = model.projectState {
+                finish("mixed project failed during cold open")
+            }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        guard sawFirstPaint,
+              model.snapshotPhase == .fullReady,
+              model.projectLanguages == [.rust, .python, .typescript],
+              model.querySessions.count == 3,
+              model.fileTree?.root.standardizedFileURL == root
+        else {
+            finish("mixed cold open did not reach firstPaint/fullReady")
+        }
+
+        let sessions = model.querySessions
+        var sessionOutputs: [[String: Any]] = []
+        var rustCount = 0
+        var pythonCount = 0
+        var tsCount = 0
+        var tsxCount = 0
+        var dtsCount = 0
+        var snapshotIDs = Set<SnapshotID>()
+
+        for (session, _) in sessions {
+            let paths = session.manifest.files.map {
+                session.paths.resolve($0.pathID)
+            }
+            let language = session.analysisProfile.language
+            let languagePaths = paths.filter {
+                LanguageMode.classify(
+                    path: $0,
+                    language: language
+                ) != nil
+            }
+            snapshotIDs.insert(session.snapshotID)
+            for path in languagePaths {
+                if path.hasSuffix(".rs") {
+                    rustCount += 1
+                } else if path.hasSuffix(".py"), !path.hasSuffix(".pyi") {
+                    pythonCount += 1
+                } else if path.hasSuffix(".d.ts") {
+                    dtsCount += 1
+                } else if path.hasSuffix(".tsx") {
+                    tsxCount += 1
+                } else if path.hasSuffix(".ts") {
+                    tsCount += 1
+                }
+            }
+            sessionOutputs.append([
+                "language": session.analysisProfile.language.rawValue,
+                "files": languagePaths.count,
+                "extracted": session.stats.extractedCount,
+                "reused": session.stats.reusedCount,
+                "profileRoot": session.paths.resolve(
+                    session.analysisProfile.projectRoot
+                ),
+            ])
+        }
+        guard sessions.contains(where: {
+            $0.0.analysisProfile.language == .rust
+                && $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+                    == "crates/qrcode2txt"
+        }), sessions.contains(where: {
+            $0.0.analysisProfile.language == .python
+                && $0.0.paths.resolve($0.0.analysisProfile.projectRoot) == "."
+        }), sessions.contains(where: {
+            $0.0.analysisProfile.language == .typescript
+                && $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+                    == "tools/model-files-web"
+        }) else {
+            finish("mixed profile roots do not match fixed corpus")
+        }
+        guard snapshotIDs.count == 1 else {
+            finish("mixed sessions do not share one snapshot")
+        }
+        guard rustCount == 11,
+              pythonCount == 8,
+              tsCount == 22,
+              tsxCount == 4,
+              dtsCount == 0
+        else {
+            finish("mixed counts rust=\(rustCount) python=\(pythonCount) "
+                + "ts=\(tsCount) tsx=\(tsxCount) d.ts=\(dtsCount) mismatch")
+        }
+
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_COLD",
+            "channel": "mixed",
+            "passed": true,
+            "commit": fixedCommit,
+            "languages": [0, 1, 2],
+            "root": root.path,
+            "sessionSnapshot": snapshotIDs.first!.rawValue.uuidString,
+            "treeFileCount": model.fileTree?.fileCount as Any,
+            "counts": [
+                "rust": rustCount,
+                "python": pythonCount,
+                "ts": tsCount,
+                "tsx": tsxCount,
+                "dts": dtsCount,
+            ],
+            "sessions": sessionOutputs,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        var searchContentPaths: [String: [String]] = [:]
+        var searchSymbolPaths: [String: [String]] = [:]
+        var contentLanguageCounts: [String: Int] = [:]
+        var symbolLanguageCounts: [String: Int] = [:]
+        for (session, context) in sessions {
+            let language = session.analysisProfile.language
+            let languageKey = String(describing: language)
+            do {
+                let contentHits = try await contentSearchHits(
+                    session: session,
+                    context: context,
+                    query: ContentSearchQuery(
+                        pattern: "main",
+                        caseSensitive: false
+                    )
+                )
+                let contentLanguagePaths = contentHits.filter {
+                    LanguageMode.classify(path: $0, language: language) != nil
+                }
+                contentLanguageCounts[languageKey, default: 0] +=
+                    contentLanguagePaths.count
+                searchContentPaths[languageKey] =
+                    (searchContentPaths[languageKey] ?? [])
+                        + contentLanguagePaths
+            } catch {
+                finish("mixed content search failed for \(languageKey): \(error)")
+            }
+            do {
+                let symbolHits = try session.searchSymbols(
+                    query: "main",
+                    limit: 50,
+                    boost: SearchBoost(),
+                    context: context
+                )
+                let languageSymbols = symbolHits.map(\.path)
+                symbolLanguageCounts[languageKey, default: 0] +=
+                    languageSymbols.count
+                searchSymbolPaths[languageKey] =
+                    (searchSymbolPaths[languageKey] ?? [])
+                    + languageSymbols
+            } catch {
+                finish("mixed symbol search failed for \(languageKey): \(error)")
+            }
+        }
+        guard contentLanguageCounts.values.filter({ $0 > 0 }).count >= 2,
+              symbolLanguageCounts.values.filter({ $0 > 0 }).count >= 2
+        else {
+            finish("mixed search did not cover at least two languages")
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_SEARCH",
+            "channel": "mixed",
+            "passed": true,
+            "languageContentMatches": contentLanguageCounts,
+            "languageSymbolMatches": symbolLanguageCounts,
+            "contentPaths": searchContentPaths.mapValues {
+                Array(Set($0)).sorted()
+            },
+            "symbolPaths": searchSymbolPaths.mapValues {
+                Array(Set($0)).sorted()
+            },
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let readerCases: [
+            (LanguageID, String, LanguageMode, String?, Bool, Int)
+        ] = [
+            (.rust,
+                "crates/qrcode2txt/src/lib.rs",
+                LanguageMode(language: .rust),
+                "from_results",
+                false,
+                1),
+            (.python,
+                "src/tools/analysis/analysis.py",
+                LanguageMode(language: .python),
+                "get_top_tokens",
+                false,
+                1),
+            (.typescript,
+                "tools/model-files-web/src/core/tokenizer.ts",
+                LanguageMode(language: .typescript),
+                "isRecord",
+                false,
+                1),
+            (.typescript,
+                "tools/model-files-web/src/App.tsx",
+                LanguageMode(language: .typescript, variant: "tsx"),
+                "loadRepository",
+                true,
+                0),
+        ]
+        var readerOutputs: [[String: Any]] = []
+        for item in readerCases {
+            let language = item.0
+            let path = item.1
+            let mode = item.2
+            let needle = item.3
+            let allowNoRelation = item.4
+            let needleIndex = item.5
+            let file = root.appendingPathComponent(path)
+                .standardizedFileURL
+            controller.openFileForSelfTest(file)
+            let readerDeadline = Date(timeIntervalSinceNow: 60)
+            var readerReady = false
+            while Date() < readerDeadline {
+                if case let .ready(session, _) = model.projectState,
+                   session.analysisProfile.language == language,
+                   controller.displayedReaderFile?.standardizedFileURL
+                    == file.standardizedFileURL,
+                   let document = model.tabStrip.activeDocument,
+                   document.languageMode == mode,
+                   controller.selfTestStyledFragmentCount > 0,
+                   !document.outlineFacets.isEmpty,
+                   !document.foldRegions.isEmpty
+                {
+                    readerReady = true
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(10))
+            }
+            guard readerReady else {
+                finish("mixed reader did not ready \(path)")
+            }
+            guard let document = model.tabStrip.activeDocument else {
+                finish("mixed reader document unavailable \(path)")
+            }
+            var output: [String: Any] = [
+                "path": path,
+                "mode": mode.variant ?? "base",
+                "styled": controller.selfTestStyledFragmentCount,
+                "outline": document.outlineFacets.count,
+                "folds": document.foldRegions.count,
+                "activeLanguage": String(describing: language),
+            ]
+            var relationCount = 0
+            var contextResolved = false
+            let previousRelationRoot = model.relationTree.root
+            if let needle,
+               let bytes = controller.selfTestLeftReaderBytes
+            {
+                let offsets = utf8Offsets(of: needle, in: bytes)
+                    .dropFirst(needleIndex)
+                if let offset = offsets.first.map(UInt32.init) {
+                    let candidate = await model.contextWindow.resolvedCandidate(
+                        file: path,
+                        offset: offset
+                    )
+                    contextResolved = candidate != nil
+                    if let candidate {
+                        controller.selfTestReaderRelation(
+                            offset: offset,
+                            direction: .references
+                        )
+                        let relationDeadline = Date(timeIntervalSinceNow: 60)
+                        var capturedRoot: RelationTreeModel.Node?
+                        while Date() < relationDeadline {
+                            if let root = model.relationTree.root,
+                               root !== previousRelationRoot,
+                               !(root.children?.contains {
+                                   $0.kind == .loading
+                               } ?? true)
+                            {
+                                capturedRoot = root
+                                break
+                            }
+                            try? await Task.sleep(for: .milliseconds(10))
+                        }
+                        let edges = capturedRoot.map {
+                            relationEdgeNodes(in: $0)
+                        } ?? []
+                        let foreign = edges.filter { edge in
+                            guard let target = edge.target else { return true }
+                            let mode = LanguageMode.classify(
+                                path: target.path,
+                                languages: [language]
+                            )
+                            return mode?.language != language
+                        }
+                        guard foreign.isEmpty && !edges.isEmpty else {
+                            finish("mixed relation foreign for \(path)")
+                        }
+                        relationCount = edges.count
+                    }
+                }
+            }
+            if !contextResolved && !allowNoRelation {
+                finish("mixed context did not resolve \(path)")
+            }
+            output["context"] = contextResolved
+            output["relationEdges"] = relationCount
+            readerOutputs.append(output)
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_READER",
+            "channel": "mixed",
+            "passed": true,
+            "readers": readerOutputs,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let exactCases: [
+            (LanguageID, String, String, Int, String)
+        ] = [
+            (
+                .rust,
+                "crates/qrcode2txt/src/lib.rs",
+                "from_results",
+                1,
+                "rust-analyzer"
+            ),
+            (
+                .python,
+                "src/tools/analysis/analysis.py",
+                "get_top_tokens",
+                1,
+                "pyright"
+            ),
+            (
+                .typescript,
+                "tools/model-files-web/src/core/tokenizer.ts",
+                "inspectTokenizerStructure",
+                0,
+                "typescript-language-server"
+            ),
+        ]
+        var exactOutputs: [[String: Any]] = []
+        for item in exactCases {
+            let language = item.0
+            let path = item.1
+            let needle = item.2
+            let needleIndex = item.3
+            let provider = item.4
+            let file = root.appendingPathComponent(path).standardizedFileURL
+            controller.openFileForSelfTest(file)
+            let exactReadyStarted = ContinuousClock.now
+            let exactReadyDeadline = Date(timeIntervalSinceNow: 30)
+            while Date() < exactReadyDeadline {
+                if model.exactCoordinator.readiness == .ready,
+                   model.exactCoordinator.attribution?.provider == provider,
+                   case let .ready(session, _) = model.projectState,
+                   session.analysisProfile.language == language,
+                   controller.displayedReaderFile?.standardizedFileURL == file
+                {
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard model.exactCoordinator.readiness == .ready,
+                  let attribution = model.exactCoordinator.attribution,
+                  attribution.provider == provider,
+                  case let .ready(session, context) = model.projectState,
+                  session.analysisProfile.language == language,
+                  controller.displayedReaderFile?.standardizedFileURL == file,
+                  controller.selfTestLeftReaderBytes != nil
+            else {
+                finish("mixed exact \(provider) not ready for \(path): "
+                    + "\(String(describing: model.exactCoordinator.readiness))"
+                    + " attribution=\(String(describing: model.exactCoordinator.attribution?.provider))"
+                )
+            }
+            let readyMS = milliseconds(since: exactReadyStarted)
+            guard let bytes = try? Data(contentsOf: file) else {
+                finish("mixed exact file missing \(path)")
+            }
+            let offsets = utf8Offsets(of: needle, in: Array(bytes))
+                .dropFirst(needleIndex)
+            guard let offset = offsets.first.map(UInt32.init) else {
+                finish("mixed exact needle unavailable \(path)")
+            }
+            guard case let .completed(definitions) =
+                await model.exactCoordinator.definition(
+                    file: path,
+                    byteOffset: offset,
+                    generation: context.generation
+                ),
+                  !definitions.isEmpty
+            else {
+                finish("mixed exact definition failed for \(path)")
+            }
+            let previousExactRelationRoot = model.relationTree.root
+            controller.selfTestReaderRelation(
+                offset: offset,
+                direction: .references
+            )
+            let exactRelationDeadline = Date(timeIntervalSinceNow: 30)
+            var exactEdges: [RelationTreeModel.Node] = []
+            while Date() < exactRelationDeadline {
+                if let root = model.relationTree.root,
+                   root !== previousExactRelationRoot,
+                   !(root.children?.contains { $0.kind == .loading } ?? true)
+                {
+                    exactEdges = exactRelationEdges(in: model)
+                    if !exactEdges.isEmpty { break }
+                }
+                try? await Task.sleep(for: .milliseconds(20))
+            }
+            guard !exactEdges.isEmpty else {
+                finish("mixed exact references empty for \(path)")
+            }
+            exactOutputs.append([
+                "provider": attribution.provider,
+                "toolVersion": attribution.toolVersion,
+                "definitionCount": definitions.count,
+                "verifiedReferenceCount": exactEdges.count,
+                "readyMS": readyMS,
+                "profileRoot": session.paths.resolve(
+                    session.analysisProfile.projectRoot
+                ),
+            ])
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_EXACT",
+            "channel": "mixed",
+            "passed": true,
+            "exact": exactOutputs,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let fixedHistoricalCommit = "6cc5b52f9f1bef28b27133155bbb858b2891c829"
+        let fixedCompareFile = "crates/qrcode2txt/tests/qrcode_monkey_fixtures.rs"
+        let coldSnapshotID = snapshotIDs.first!.rawValue.uuidString
+        let coldProfileRoots = sessions.map {
+            $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+        }.sorted()
+        var coldByLanguage: [String: [String: Any]] = [:]
+        for (session, _) in sessions {
+            let activeFiles = session.manifest.files.map {
+                session.paths.resolve($0.pathID)
+            }.filter {
+                LanguageMode.classify(
+                    path: $0,
+                    language: session.analysisProfile.language
+                ) != nil
+            }
+            coldByLanguage[String(describing: session.analysisProfile.language)] = [
+                "files": activeFiles.count,
+                "extracted": session.stats.extractedCount,
+                "reused": session.stats.reusedCount,
+            ]
+        }
+
+        let commitSwitchStarted = ContinuousClock.now
+        model.switchToCommit(fixedHistoricalCommit)
+        let overrideDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < overrideDeadline {
+            if model.currentRevision == fixedHistoricalCommit,
+               model.snapshotPhase == .fullReady,
+               model.querySessions.count == 3
+            {
+                break
+            }
+            if case .failed = model.projectState {
+                finish("mixed snapshot commit failed")
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard model.currentRevision == fixedHistoricalCommit,
+              model.snapshotPhase == .fullReady,
+              model.querySessions.count == 3,
+              model.projectLanguages == [.rust, .python, .typescript]
+        else {
+            finish("mixed snapshot commit did not reach fullReady")
+        }
+        let commitSwitchMS = milliseconds(since: commitSwitchStarted)
+        let historicalSessions = model.querySessions
+        var historicalRust = 0, historicalPython = 0, historicalTS = 0
+        for (session, _) in historicalSessions {
+            let paths = session.manifest.files.map {
+                session.paths.resolve($0.pathID)
+            }
+            if session.analysisProfile.language == .rust {
+                historicalRust = paths.filter { $0.hasSuffix(".rs") }.count
+            } else if session.analysisProfile.language == .python {
+                historicalPython = paths.filter {
+                    $0.hasSuffix(".py") && !$0.hasSuffix(".pyi")
+                }.count
+            } else if session.analysisProfile.language == .typescript {
+                historicalTS = paths.filter { $0.hasSuffix(".ts") || $0.hasSuffix(".tsx") }.count
+            }
+        }
+        let historicalSnapshotID = model.currentSnapshotID!.rawValue.uuidString
+        let historicalProfileRoots = historicalSessions.map {
+            $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+        }.sorted()
+        var historicalRootByLanguage: [LanguageID: String] = [:]
+        for (session, _) in historicalSessions {
+            historicalRootByLanguage[session.analysisProfile.language] =
+                session.paths.resolve(session.analysisProfile.projectRoot)
+        }
+        guard Set(historicalSessions.map { $0.0.analysisProfile.language })
+                == Set([.rust, .python, .typescript]),
+              historicalRootByLanguage[.rust] == "crates/qrcode2txt",
+              historicalRootByLanguage[.python] == ".",
+              historicalRootByLanguage[.typescript] == ".",
+              historicalRust == 11,
+              historicalPython == 9,
+              historicalTS == 0,
+              historicalSessions.contains(where: {
+                  $0.0.analysisProfile.language == .typescript
+              })
+        else {
+            finish("historical snapshot language/profile/counts mismatch "
+                + "rust=\(historicalRust) python=\(historicalPython) "
+                + "ts=\(historicalTS) roots=\(historicalProfileRoots)")
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_SNAPSHOT",
+            "channel": "mixed",
+            "coldSnapshot": coldSnapshotID,
+            "commitSnapshot": historicalSnapshotID,
+            "commit": fixedHistoricalCommit,
+            "switchMS": commitSwitchMS,
+            "languages": historicalSessions.map { String(describing: $0.0.analysisProfile.language) },
+            "counts": [
+                "rust": historicalRust,
+                "python": historicalPython,
+                "ts": historicalTS,
+            ],
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let worktreeSwitchStarted = ContinuousClock.now
+        model.switchToWorktree()
+        let worktreeDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < worktreeDeadline {
+            if model.currentRevision == nil,
+               model.snapshotPhase == .fullReady,
+               model.querySessions.count == 3,
+               model.exactCoordinator.readiness == .ready
+            {
+                break
+            }
+            if case .failed = model.projectState {
+                finish("worktree switch failed")
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard model.currentRevision == nil,
+              model.snapshotPhase == .fullReady,
+              model.querySessions.count == 3,
+              model.exactCoordinator.readiness == .ready
+        else {
+            finish("worktree switch did not reach ready")
+        }
+        let worktreeSwitchMS = milliseconds(since: worktreeSwitchStarted)
+        let worktreeSnapshotID = model.currentSnapshotID!.rawValue.uuidString
+        let worktreeProfileRoots = model.querySessions.map {
+            $0.0.paths.resolve($0.0.analysisProfile.projectRoot)
+        }.sorted()
+        guard Set(worktreeProfileRoots) == Set(coldProfileRoots) else {
+            finish("worktree profile roots did not restore to cold")
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_WORKTREE",
+            "channel": "mixed",
+            "worktreeSnapshot": worktreeSnapshotID,
+            "ready": String(describing: model.exactCoordinator.readiness),
+            "switchMS": worktreeSwitchMS,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let compareFile = root.appendingPathComponent(fixedCompareFile)
+        controller.openFileForSelfTest(compareFile)
+        let compareDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < compareDeadline {
+            if controller.displayedReaderFile?.standardizedFileURL
+                == compareFile.standardizedFileURL,
+               model.tabStrip.activeDocument != nil
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard controller.displayedReaderFile?.standardizedFileURL
+            == compareFile.standardizedFileURL
+        else {
+            finish("compare file did not open")
+        }
+        controller.applyPanelPreset(.compare)
+        let comparePicked = controller.selectCompareCommit(fixedHistoricalCommit)
+        let compareWaitDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < compareWaitDeadline {
+            if model.compare.diff != nil,
+               controller.selfTestRightReaderBytes != nil
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard comparePicked,
+              model.compare.diff != nil,
+              controller.selfTestRightReaderBytes != nil
+        else {
+            finish("compare picker/diff did not complete")
+        }
+        guard let diff = model.compare.diff,
+              diff.hunks.isEmpty == false,
+              diff.truncated == false,
+              diff.leftLineCount == 62,
+              diff.rightLineCount == 45,
+              diff.changeCount == 17,
+              let commitSnapshot = try? CommitSnapshot(
+                  repositoryURL: root,
+                  revision: fixedHistoricalCommit
+              ),
+              let commitBytes = try? commitSnapshot.readBytes(path: fixedCompareFile),
+              controller.selfTestRightReaderBytes == commitBytes,
+              controller.selfTestRightReaderBytes
+                != (try? Data(contentsOf: compareFile)).map(Array.init)
+        else {
+            finish("compare fixed Rust hunk mismatch")
+        }
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_COMPARE",
+            "channel": "mixed",
+            "revision": fixedHistoricalCommit,
+            "leftLineCount": diff.leftLineCount,
+            "rightLineCount": diff.rightLineCount,
+            "changeCount": diff.changeCount,
+            "truncated": diff.truncated,
+            "hunkCount": diff.hunks.count,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        let checkpointTsxFile = root.appendingPathComponent(
+            "tools/model-files-web/src/App.tsx"
+        ).standardizedFileURL
+        controller.openFileForSelfTest(checkpointTsxFile)
+        let tsxReadyDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < tsxReadyDeadline {
+            if model.tabStrip.activeDocument?.languageMode
+                == LanguageMode(language: .typescript, variant: "tsx"),
+               controller.displayedReaderFile?.standardizedFileURL
+                == checkpointTsxFile
+            {
+                break
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard model.tabStrip.activeDocument?.languageMode
+            == LanguageMode(language: .typescript, variant: "tsx"),
+              controller.displayedReaderFile?.standardizedFileURL == checkpointTsxFile
+        else {
+            finish("checkpoint TSX reader was not active")
+        }
+        controller.checkpointSessionSynchronously()
+        guard let savedSnapshot = model.loadSessionSnapshot().snapshot else {
+            finish("checkpoint did not persist session")
+        }
+        guard savedSnapshot.languages == [.rust, .python, .typescript],
+              savedSnapshot.revision == nil
+        else {
+            finish("checkpoint languages/revision mismatch")
+        }
+        let savedLangs = savedSnapshot.languages
+        let recentStore = recentProjectsStore
+        recentStore.record(root, languages: savedLangs)
+        model.exactCoordinator.shutdown()
+        controller.openRecentProject(root)
+        let reopenDeadline = Date(timeIntervalSinceNow: 30)
+        var reopenOK = false
+        while Date() < reopenDeadline {
+            if model.snapshotPhase == .fullReady,
+               model.querySessions.count == 3,
+               model.exactCoordinator.readiness == .ready
+            {
+                reopenOK = true
+                break
+            }
+            if case .failed = model.projectState { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard reopenOK else {
+            finish("hot recent reopen did not reach fullReady")
+        }
+        let hotSessions = model.querySessions
+        var hotByLanguage: [String: [String: Any]] = [:]
+        var hotReused = 0
+        for (session, _) in hotSessions {
+            let key = String(describing: session.analysisProfile.language)
+            let activePaths = session.manifest.files.map {
+                session.paths.resolve($0.pathID)
+            }.filter {
+                LanguageMode.classify(
+                    path: $0,
+                    language: session.analysisProfile.language
+                ) != nil
+            }
+            hotByLanguage[key] = [
+                "files": activePaths.count,
+                "extracted": session.stats.extractedCount,
+                "reused": session.stats.reusedCount,
+            ]
+            hotReused += session.stats.reusedCount
+        }
+        guard hotReused > 0 else {
+            finish("hot reopen did not reuse cache")
+        }
+        let generationBeforeRestore = model.generation
+        controller.restoreSession(savedSnapshot)
+        let restoreDeadline = Date(timeIntervalSinceNow: 30)
+        while Date() < restoreDeadline {
+            if model.generation != generationBeforeRestore,
+               model.snapshotPhase == .fullReady,
+               model.querySessions.count == 3,
+               model.exactCoordinator.readiness == .ready,
+               controller.displayedReaderFile?.standardizedFileURL == checkpointTsxFile,
+               model.tabStrip.activeDocument?.languageMode
+                == LanguageMode(language: .typescript, variant: "tsx"),
+               model.exactCoordinator.attribution?.provider
+                == "typescript-language-server"
+            {
+                break
+            }
+            if case .failed = model.projectState { break }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+        guard model.generation != generationBeforeRestore,
+              model.snapshotPhase == .fullReady,
+              model.querySessions.count == 3,
+              model.projectLanguages == [.rust, .python, .typescript],
+              model.exactCoordinator.readiness == .ready,
+              controller.displayedReaderFile?.standardizedFileURL
+                == checkpointTsxFile,
+              model.tabStrip.activeDocument?.languageMode
+                == LanguageMode(language: .typescript, variant: "tsx"),
+              model.exactCoordinator.attribution?.provider
+                == "typescript-language-server"
+        else {
+            finish("checkpoint restore did not reach mixed fullReady")
+        }
+        recentStore.clear()
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_HOT",
+            "channel": "mixed",
+            "savedLanguages": savedSnapshot.languages.map { String(describing: $0) },
+            "hotReused": hotReused,
+            "restoreGeneration": model.generation,
+            "restoreTSX": true,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+
+        do {
+            let head = try git(["rev-parse", "HEAD"])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let status = try git([
+                "status",
+                "--porcelain=v1",
+                "--untracked-files=all",
+                "--ignored=matching",
+            ])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard head == fixedCommit, status.isEmpty else {
+                finish("post journey repo HEAD/status changed")
+            }
+        } catch {
+            finish("post journey git check failed")
+        }
+        let checks: [String: Bool] = [
+            "cold": true,
+            "search": true,
+            "reader": true,
+            "exact": true,
+            "snapshot": true,
+            "compare": true,
+            "hot": true,
+            "restore": true,
+            "cleanHead": true,
+        ]
+        Self.writeJSON([
+            "step": "MIXED_SELF_TEST_SUMMARY",
+            "channel": "mixed",
+            "passed": true,
+            "checks": checks,
+            "coldSnapshot": coldSnapshotID,
+            "commitSnapshot": historicalSnapshotID,
+            "worktreeSnapshot": worktreeSnapshotID,
+            "profileRoots": coldProfileRoots,
+            "coldStats": coldByLanguage,
+            "hotStats": hotByLanguage,
+            "providerVersions": exactOutputs.map {
+                [
+                    "provider": $0["provider"]!,
+                    "toolVersion": $0["toolVersion"]!,
+                    "readyMS": $0["readyMS"]!,
+                ]
+            },
+            "commitSwitchMS": commitSwitchMS,
+            "worktreeSwitchMS": worktreeSwitchMS,
+            "elapsedMS": milliseconds(since: startedAt),
+        ])
+        model.exactCoordinator.shutdown()
+        Self.exitSelfTest(channel: "mixed", status: 0)
     }
 
     private func finishTypeScriptSelfTest(
