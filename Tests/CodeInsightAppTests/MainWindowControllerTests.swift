@@ -153,6 +153,28 @@ func retryForwardsCompleteLanguageSet() async throws {
 
 @MainActor
 @Test
+func mixedOpenFailureDoesNotRecordRecentPath() async throws {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    let root = URL(
+        fileURLWithPath: "/projects/mixed-failure",
+        isDirectory: true
+    )
+
+    fixture.controller.openProject(
+        root: root,
+        languages: [.typescript, .rust, .python]
+    )
+    try #require(await mainWindowWaitUntil(
+        mainWindowProjectStateFailed(fixture.model)
+    ))
+    #expect(fixture.store.paths == [])
+    #expect(fixture.controller.pendingRecentProjectLanguage == .rust)
+    #expect(fixture.model.projectLanguages == [.rust, .python, .typescript])
+}
+
+@MainActor
+@Test
 func explicitOpenProjectForwardsLanguageAndRecordsPendingAsPython() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }
@@ -460,6 +482,12 @@ private func mainWindowTemporaryGitProject(
         throw CocoaError(.fileWriteUnknown)
     }
     return root
+}
+
+@MainActor
+private func mainWindowProjectStateFailed(_ model: AppModel) -> Bool {
+    if case .failed = model.projectState { return true }
+    return false
 }
 
 @MainActor
