@@ -959,6 +959,133 @@ func realIndexServiceBuildsFixtureSession() async throws {
     #expect(session.stats.importCount == 1)
 }
 
+@MainActor
+@Test
+func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async throws {
+    let root = try temporaryGitProject([
+        "crates/r/src/lib.rs": "pub fn f() {}\n",
+        "crates/r/Cargo.toml": "[package]\nname = \"r\"\n",
+        "pkg.py": "def f():\n    pass\n",
+        "pyproject.toml": "[project]\nname = \"p\"\n",
+        "tools/ts/src/a.ts": "export function a() {}\n",
+        "tools/ts/src/b.tsx": "export const b = 1\n",
+        "tools/ts/tsconfig.json": "{}",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+
+    #expect(model.projectLanguages == [.rust, .python, .typescript])
+    #expect(model.querySessions.map { $0.0.analysisProfile.language }
+        == [.rust, .python, .typescript])
+    #expect(Set(model.querySessions.map { $0.0.snapshotID }).count == 1)
+    #expect(model.fileTree?.fileCount == 4)
+    if case .failed = model.projectState {
+        Issue.record("mixed open failed unexpectedly")
+    }
+
+    func activeLanguage() -> LanguageID? {
+        guard case let .ready(session, _) = model.projectState else { return nil }
+        return session.analysisProfile.language
+    }
+
+    model.navigate(to: root.appendingPathComponent("crates/r/src/lib.rs"))
+    #expect(activeLanguage() == .rust)
+    #expect(model.languageMode(for: root.appendingPathComponent("crates/r/src/lib.rs"))
+        == LanguageMode(language: .rust))
+
+    model.navigate(to: root.appendingPathComponent("pkg.py"))
+    #expect(activeLanguage() == .python)
+    #expect(model.languageMode(for: root.appendingPathComponent("pkg.py"))
+        == LanguageMode(language: .python))
+    let pySource = try #require(model.capturedProjectSource(at: "pkg.py")?.bytes)
+    #expect(String(bytes: pySource, encoding: .utf8) == "def f():\n    pass\n")
+
+    model.navigate(to: root.appendingPathComponent("tools/ts/src/a.ts"))
+    #expect(activeLanguage() == .typescript)
+    #expect(model.languageMode(for: root.appendingPathComponent("tools/ts/src/a.ts"))
+        == LanguageMode(language: .typescript))
+
+    model.navigate(to: root.appendingPathComponent("tools/ts/src/b.tsx"))
+    #expect(activeLanguage() == .typescript)
+    #expect(model.languageMode(for: root.appendingPathComponent("tools/ts/src/b.tsx"))
+        == LanguageMode(language: .typescript, variant: "tsx"))
+    let tsxSource = try #require(model.capturedProjectSource(at: "tools/ts/src/b.tsx")?.bytes)
+    #expect(String(bytes: tsxSource, encoding: .utf8) == "export const b = 1\n")
+
+    guard case let .ready(_, beforeUnsupported) = model.projectState else {
+        Issue.record("missing ready before unsupported navigation")
+        return
+    }
+    let unsupported = root.appendingPathComponent("notes.js")
+    model.navigate(to: unsupported)
+    #expect(model.languageMode(for: unsupported) == nil)
+    guard case let .ready(_, afterUnsupported) = model.projectState else {
+        Issue.record("unsupported navigation must not clear active project state")
+        return
+    }
+    #expect(beforeUnsupported.analysisProfileID == afterUnsupported.analysisProfileID)
+
+    model.navigate(to: root.appendingPathComponent("tools/ts/src/a.ts"))
+    guard case let .ready(_, sameModeContext) = model.projectState else {
+        Issue.record("Expected ready after same-mode navigation")
+        return
+    }
+    #expect(sameModeContext.analysisProfileID == afterUnsupported.analysisProfileID)
+    #expect(sameModeContext.generation == afterUnsupported.generation)
+}
+
+@MainActor
+@Test
+func rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() async throws {
+    let root = try temporaryGitProject([
+        "main.rs": "fn a() {}\n",
+        "lib.py": "def b():\n    pass\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    try await model.openProject(root: root, languages: [.rust, .python])
+
+    let pythonBefore = model.querySessions.filter {
+        $0.0.analysisProfile.language == .python
+    }.map { $0.1.analysisProfileID }
+    model.switchFeatureSelection(.allFeatures)
+    guard case let .ready(active, context) = model.projectState else {
+        Issue.record("Expected ready after Rust feature switch")
+        return
+    }
+    #expect(active.analysisProfile.featureSelection == .allFeatures)
+    #expect(model.querySessions.count == 2)
+    #expect(model.querySessions.filter {
+        $0.0.analysisProfile.language == .python
+    }.map { $0.1.analysisProfileID } == pythonBefore)
+    #expect(context.analysisProfileID == active.analysisProfile.id)
+
+    model.navigate(to: root.appendingPathComponent("lib.py"))
+    guard case let .ready(pythonSession, pythonContext) = model.projectState else {
+        Issue.record("Expected Python route after Rust feature switch")
+        return
+    }
+    let pythonProfileID = pythonSession.analysisProfile.id
+    let pythonProfileGeneration = pythonContext.generation
+    model.switchFeatureSelection(.defaultFeatures)
+    guard case let .ready(session, context) = model.projectState else {
+        Issue.record("Expected active state preserved after non-Rust no-op")
+        return
+    }
+    #expect(session.analysisProfile.language == .python)
+    #expect(session.analysisProfile.id == pythonProfileID)
+    #expect(context.generation == pythonProfileGeneration)
+}
+
 @Test
 func projectIndexServiceRejectsJavaScriptBeforeIO() async throws {
     let root = FileManager.default.temporaryDirectory

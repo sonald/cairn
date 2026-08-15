@@ -363,6 +363,21 @@ public struct FileTreeModel: Sendable {
         fileCount = Self.fileCount(in: children)
     }
 
+    public init(
+        root: URL,
+        snapshotPaths: [String],
+        languages: [LanguageID]
+    ) {
+        self.root = root.standardizedFileURL
+        let paths = snapshotPaths
+            .filter { path in
+                LanguageMode.classify(path: path, languages: languages) != nil
+            }
+            .map { $0.split(separator: "/").map(String.init) }
+        children = Self.children(from: paths, under: self.root)
+        fileCount = Self.fileCount(in: children)
+    }
+
     public func selectionPath(for selectedFile: URL?) -> [FileTreeNode]? {
         guard let selectedFile else { return nil }
         return Self.selectionPath(
@@ -473,7 +488,11 @@ public final class AppModel {
 
     public private(set) var projectState: ProjectState = .empty
     public private(set) var generation: UInt64 = 0
-    package private(set) var projectLanguage: LanguageID?
+    package private(set) var projectLanguages: [LanguageID] = []
+    package var projectLanguage: LanguageID? {
+        projectLanguages.count == 1 ? projectLanguages.first : nil
+    }
+    private var workspaceSessions: [AnalysisProfileID: EngineSession] = [:]
     public private(set) var snapshotPhase: SnapshotPhase?
     public private(set) var coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
     public var currentRevision: String? { commitPicker.currentRevision }
@@ -514,6 +533,16 @@ public final class AppModel {
             profile.featureSelection,
             profile.edition
         )
+    }
+
+    package var querySessions: [(EngineSession, QueryContext)] {
+        guard case .ready = projectState,
+              snapshotPhase == .fullReady || snapshotPhase == .cachedReady,
+              workspaceSessions.count == projectLanguages.count
+        else {
+            return []
+        }
+        return querySessionTuples()
     }
 
     public var currentFeatureSelection: FeatureSelection? {
@@ -619,13 +648,13 @@ public final class AppModel {
         guard sessionURL != nil else { return }
         sessionCheckpointTask?.cancel()
         let checkpointGeneration = lastInstalledGeneration
-        let checkpointLanguage = projectLanguage
+        let checkpointLanguages = projectLanguages
         sessionCheckpointTask = Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(250))
             guard !Task.isCancelled,
                   let self,
                   lastInstalledGeneration == checkpointGeneration,
-                  projectLanguage == checkpointLanguage
+                  projectLanguages == checkpointLanguages
             else { return }
             try? writeSessionCheckpointNow(
                 panelPreset: panelPreset,
@@ -705,7 +734,8 @@ public final class AppModel {
         allowsPendingTopology: Bool
     ) -> SessionCodec.Snapshot? {
         guard let root = projectRoot,
-              let language = projectLanguage,
+              projectLanguages.count == 1,
+              let language = projectLanguages.first,
               lastInstalledProjectRoot?.standardizedFileURL
                 == root.standardizedFileURL,
               allowsPendingTopology || lastInstalledGeneration == generation
@@ -746,6 +776,142 @@ public final class AppModel {
             panelPreset: panelPreset.rawValue,
             tabs: entries
         )
+    }
+
+    public func openProject(root: URL, languages: [LanguageID]) async throws {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        let root = root.standardizedFileURL
+        snapshotTask?.cancel()
+        compareSnapshotTask?.cancel()
+        replayTask?.cancel()
+        compare.clear()
+        generation &+= 1
+        let openGeneration = generation
+        exactCoordinator.invalidate(generation: openGeneration)
+        projectRoot = root
+        projectLanguages = normalized
+        workspaceSessions.removeAll(keepingCapacity: true)
+        commitPicker.setCurrentRevision(nil)
+        commitPicker.load(repositoryURL: root)
+        snapshotDestinations.removeAll(keepingCapacity: true)
+        pendingReplay = nil
+        documentSource = nil
+        transition(to: .indexing(root: root, startedAt: .now))
+        snapshotPhase = nil
+        coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
+        currentSnapshotID = nil
+        fileTree = nil
+        selectedFile = nil
+        selectedByteOffset = nil
+        navigationGeneration &+= 1
+        navigationHistory.reset()
+        readingTrail.reset()
+        resolutionExplanations.removeAll()
+        replayNotice = nil
+        tabStrip.reset()
+
+        do {
+            let snapshot = try await indexService.captureSnapshot(
+                root: root,
+                revision: nil,
+                languages: normalized
+            )
+            try Task.checkCancellation()
+            guard canPublishWorkspaceResult(
+                generation: openGeneration,
+                root: root,
+                languages: normalized
+            ) else { return }
+            publishFirstPaint(
+                snapshot,
+                root: root,
+                revision: nil,
+                generation: openGeneration,
+                languages: normalized
+            )
+            try Task.checkCancellation()
+            guard canPublishWorkspaceResult(
+                generation: openGeneration,
+                root: root,
+                languages: normalized
+            ) else { return }
+
+            let prepared = try await indexService.prepareSnapshots(
+                snapshot,
+                root: root,
+                languages: normalized
+            )
+            try Task.checkCancellation()
+            guard canPublishWorkspaceResult(
+                generation: openGeneration,
+                root: root,
+                languages: normalized
+            ) else { return }
+            guard installWorkspaceSessions(
+                prepared.map(\.cachedSession),
+                generation: openGeneration,
+                root: root,
+                languages: normalized,
+                expectedSnapshotID: snapshot.snapshotID,
+                phase: .cachedReady
+            ) else {
+                failWorkspace(
+                    generation: openGeneration,
+                    root: root,
+                    languages: normalized
+                )
+                return
+            }
+
+            var completed: [AnalysisProfileID: EngineSession] = [:]
+            for item in prepared {
+                let session = try await indexService.completeSnapshot(item)
+                completed[session.analysisProfile.id] = session
+            }
+            guard installWorkspaceSessions(
+                completed.values.map(\.self),
+                generation: openGeneration,
+                root: root,
+                languages: normalized,
+                expectedSnapshotID: snapshot.snapshotID,
+                phase: .fullReady
+            ) else {
+                workspaceSessions.removeAll(keepingCapacity: true)
+                failWorkspace(
+                    generation: openGeneration,
+                    root: root,
+                    languages: normalized
+                )
+                return
+            }
+            lastInstalledRevision = currentRevision
+            lastInstalledProjectRoot = projectRoot
+            lastInstalledGeneration = generation
+            prepareExact(generation: openGeneration)
+        } catch is CancellationError {
+            return
+        } catch {
+            failWorkspace(
+                generation: openGeneration,
+                root: root,
+                languages: normalized
+            )
+        }
+    }
+
+    private func failWorkspace(
+        generation expectedGeneration: UInt64,
+        root expectedRoot: URL,
+        languages expectedLanguages: [LanguageID]
+    ) {
+        guard canPublishWorkspaceResult(
+            generation: expectedGeneration,
+            root: expectedRoot,
+            languages: expectedLanguages
+        ) else { return }
+        pendingReplay = nil
+        workspaceSessions.removeAll(keepingCapacity: true)
+        publishProjectState(.failed, root: expectedRoot)
     }
 
     package func restoreSession(_ snapshot: SessionCodec.Snapshot) async -> Bool {
@@ -1016,7 +1182,8 @@ public final class AppModel {
         let openGeneration = generation
         exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
-        projectLanguage = language
+        projectLanguages = [language]
+        workspaceSessions.removeAll(keepingCapacity: true)
         commitPicker.setCurrentRevision(nil)
         commitPicker.load(repositoryURL: root)
         currentSnapshotID = nil
@@ -1067,7 +1234,15 @@ public final class AppModel {
             } catch is CancellationError {
                 return
             } catch {
-                self?.failIndexing(
+                guard let self,
+                      canPublishProjectResult(
+                          generation: openGeneration,
+                          root: root,
+                          language: language
+                      )
+                else { return }
+                workspaceSessions.removeAll(keepingCapacity: true)
+                failIndexing(
                     generation: openGeneration,
                     root: root,
                     language: language
@@ -1114,6 +1289,9 @@ public final class AppModel {
         generation &+= 1
         let profileGeneration = generation
         let reprofiled = session.reprofiled(featureSelection: featureSelection)
+        let oldProfileID = session.analysisProfile.id
+        workspaceSessions[oldProfileID] = nil
+        workspaceSessions[reprofiled.analysisProfile.id] = reprofiled
         guard transition(to: .ready(
             reprofiled,
             QueryContext(
@@ -1165,24 +1343,25 @@ public final class AppModel {
 
     public func selectCompareCommit(_ revision: String) {
         guard let root = projectRoot,
-              let language = projectLanguage
+              !projectLanguages.isEmpty
         else { return }
         compareSnapshotTask?.cancel()
         let compareGeneration = compare.beginLoading(revision: revision)
         let mainGeneration = generation
+        let languages = projectLanguages
         compareSnapshotTask = Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
                     revision: revision,
-                    language: language
+                    languages: languages
                 )
                 try Task.checkCancellation()
                 guard let self,
-                      canPublishProjectResult(
+                      canPublishWorkspaceResult(
                           generation: mainGeneration,
                           root: root,
-                          language: language
+                          languages: languages
                       )
                 else { return }
                 guard compare.install(
@@ -1196,10 +1375,10 @@ public final class AppModel {
                 return
             } catch {
                 guard let self,
-                      canPublishProjectResult(
+                      canPublishWorkspaceResult(
                           generation: mainGeneration,
                           root: root,
-                          language: language
+                          languages: languages
                       )
                 else { return }
                 compare.fail(generation: compareGeneration, error: error)
@@ -1295,7 +1474,16 @@ public final class AppModel {
     package func capturedProjectSource(
         at path: String
     ) -> (contentID: ContentID, bytes: [UInt8])? {
-        guard case .ready(let session, _) = projectState else { return nil }
+        let language = LanguageMode.classify(
+            path: path,
+            languages: projectLanguages
+        )?.language
+        guard let language else { return nil }
+        let session = workspaceSessions.values.first {
+            $0.snapshotID == currentSnapshotID
+                && $0.analysisProfile.language == language
+        }
+        guard let session else { return nil }
         return session.capturedSource(atManifestPath: path)
     }
 
@@ -1677,10 +1865,11 @@ public final class AppModel {
             )
             return
         }
+        workspaceSessions = [session.analysisProfile.id: session]
         currentSnapshotID = session.snapshotID
         snapshotDestinations[session.snapshotID] = .worktree
         snapshotPhase = .fullReady
-        coverage = Self.coverage(for: session)
+        coverage = Self.sessionCoverage(for: session)
         guard transition(to: .ready(
             session,
             QueryContext(
@@ -1708,6 +1897,7 @@ public final class AppModel {
             root: root,
             language: language
         ) else { return }
+        workspaceSessions.removeAll(keepingCapacity: true)
         pendingReplay = nil
         guard transition(to: .failed) else {
             assertionFailure("Illegal project state transition to failed")
@@ -1717,7 +1907,7 @@ public final class AppModel {
 
     private func switchSnapshot(revision: String?) {
         guard let root = projectRoot,
-              let language = projectLanguage
+              !projectLanguages.isEmpty
         else { return }
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
@@ -1727,23 +1917,25 @@ public final class AppModel {
         let switchGeneration = generation
         exactCoordinator.invalidate(generation: switchGeneration)
         commitPicker.setCurrentRevision(revision)
+        workspaceSessions.removeAll(keepingCapacity: true)
         snapshotPhase = nil
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
         publishProjectState(.indexing(root: root, startedAt: .now), root: root)
 
+        let expectedLanguages = projectLanguages
         snapshotTask = Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
                     revision: revision,
-                    language: language
+                    languages: expectedLanguages
                 )
                 try Task.checkCancellation()
                 guard let self,
-                      canPublishProjectResult(
+                      canPublishWorkspaceResult(
                           generation: switchGeneration,
                           root: root,
-                          language: language
+                          languages: expectedLanguages
                       )
                 else { return }
                 publishFirstPaint(
@@ -1751,67 +1943,92 @@ public final class AppModel {
                     root: root,
                     revision: revision,
                     generation: switchGeneration,
-                    language: language
+                    languages: expectedLanguages
                 )
                 await Task.yield()
-                guard canPublishProjectResult(
+                guard canPublishWorkspaceResult(
                     generation: switchGeneration,
                     root: root,
-                    language: language
+                    languages: expectedLanguages
                 ) else { return }
 
-                let prepared = try await indexService.prepareSnapshot(
+                let prepared = try await indexService.prepareSnapshots(
                     snapshot,
-                    language: language
+                    root: root,
+                    languages: expectedLanguages
                 )
                 try Task.checkCancellation()
-                guard canPublishProjectResult(
+                guard canPublishWorkspaceResult(
                     generation: switchGeneration,
                     root: root,
-                    language: language
+                    languages: expectedLanguages
                 ) else { return }
-                guard publishSession(
-                    prepared.cachedSession,
-                    phase: .cachedReady,
+                guard installWorkspaceSessions(
+                    prepared.map(\.cachedSession),
                     generation: switchGeneration,
                     root: root,
-                    language: language
-                ) else { return }
+                    languages: expectedLanguages,
+                    expectedSnapshotID: snapshot.snapshotID,
+                    phase: .cachedReady
+                ) else {
+                    failWorkspace(
+                        generation: switchGeneration,
+                        root: root,
+                        languages: expectedLanguages
+                    )
+                    return
+                }
                 await Task.yield()
-                guard canPublishProjectResult(
+                guard canPublishWorkspaceResult(
                     generation: switchGeneration,
                     root: root,
-                    language: language
+                    languages: expectedLanguages
                 ) else { return }
 
-                let session = try await indexService.completeSnapshot(prepared)
-                try Task.checkCancellation()
-                guard canPublishProjectResult(
+                var completed: [EngineSession] = []
+                for item in prepared {
+                    let session = try await indexService.completeSnapshot(item)
+                    completed.append(session)
+                    try Task.checkCancellation()
+                    guard canPublishWorkspaceResult(
+                        generation: switchGeneration,
+                        root: root,
+                        languages: expectedLanguages
+                    ) else { return }
+                }
+                guard installWorkspaceSessions(
+                    completed,
                     generation: switchGeneration,
                     root: root,
-                    language: language
-                ) else { return }
-                _ = publishSession(
-                    session,
-                    phase: .fullReady,
-                    generation: switchGeneration,
-                    root: root,
-                    language: language
-                )
+                    languages: expectedLanguages,
+                    expectedSnapshotID: snapshot.snapshotID,
+                    phase: .fullReady
+                ) else {
+                    failWorkspace(
+                        generation: switchGeneration,
+                        root: root,
+                        languages: expectedLanguages
+                    )
+                    return
+                }
+                lastInstalledRevision = currentRevision
+                lastInstalledProjectRoot = projectRoot
+                lastInstalledGeneration = generation
+                prepareExact(generation: generation)
             } catch is CancellationError {
                 return
             } catch {
                 guard let self,
-                      canPublishProjectResult(
+                      canPublishWorkspaceResult(
                           generation: switchGeneration,
                           root: root,
-                          language: language
+                          languages: expectedLanguages
                       )
                 else { return }
-                failIndexing(
+                failWorkspace(
                     generation: switchGeneration,
                     root: root,
-                    language: language
+                    languages: expectedLanguages
                 )
             }
         }
@@ -1822,16 +2039,16 @@ public final class AppModel {
         root: URL,
         revision: String?,
         generation: UInt64,
-        language: LanguageID
+        languages: [LanguageID]
     ) {
-        guard canPublishProjectResult(
+        guard canPublishWorkspaceResult(
             generation: generation,
             root: root,
-            language: language
+            languages: languages
         ) else { return }
         let files = snapshot.listFiles()
         let paths = files.map(\.path).filter {
-            LanguageMode.classify(path: $0, language: language) != nil
+            LanguageMode.classify(path: $0, languages: languages) != nil
         }
         let selectedPath = selectedFile.flatMap {
             Self.relativePath(of: $0, under: root)
@@ -1839,7 +2056,7 @@ public final class AppModel {
         fileTree = FileTreeModel(
             root: root,
             snapshotPaths: paths,
-            language: language
+            languages: languages
         )
         if let selectedPath, paths.contains(selectedPath) {
             selectedFile = root.appendingPathComponent(selectedPath)
@@ -1884,68 +2101,36 @@ public final class AppModel {
         }
     }
 
-    @discardableResult
-    private func publishSession(
-        _ session: EngineSession,
-        phase: SnapshotPhase,
-        generation: UInt64,
-        root: URL,
-        language: LanguageID
-    ) -> Bool {
-        guard canPublishProjectResult(
-            generation: generation,
-            root: root,
-            language: language
-        ) else { return false }
-        guard session.analysisProfile.language == language else {
-            failIndexing(
-                generation: generation,
-                root: root,
-                language: language
-            )
-            return false
-        }
-        currentSnapshotID = session.snapshotID
-        snapshotPhase = phase
-        coverage = Self.coverage(for: session)
-        let context = QueryContext(
-            snapshotID: session.snapshotID,
-            analysisProfileID: session.analysisProfile.id,
-            generation: generation
-        )
-        guard transition(to: .ready(session, context)) else {
-            assertionFailure("Illegal project state transition to ready")
-            return false
-        }
-        if phase == .fullReady {
-            lastInstalledRevision = currentRevision
-            lastInstalledProjectRoot = projectRoot
-            lastInstalledGeneration = generation
-            prepareExact(generation: generation)
-        }
-        return true
-    }
-
     private func canPublishProjectResult(
         generation expectedGeneration: UInt64,
         root expectedRoot: URL,
         language expectedLanguage: LanguageID
     ) -> Bool {
+        canPublishWorkspaceResult(
+            generation: expectedGeneration,
+            root: expectedRoot,
+            languages: [expectedLanguage]
+        )
+    }
+
+    private func canPublishWorkspaceResult(
+        generation expectedGeneration: UInt64,
+        root expectedRoot: URL,
+        languages expectedLanguages: [LanguageID]
+    ) -> Bool {
         !Task.isCancelled
             && generation == expectedGeneration
             && projectRoot?.standardizedFileURL == expectedRoot.standardizedFileURL
-            && projectLanguage == expectedLanguage
+            && projectLanguages == expectedLanguages
     }
 
     private func prepareExact(generation: UInt64) {
         guard let projectRoot,
-              let projectLanguage,
               case let .ready(session, _) = projectState,
-              session.analysisProfile.language == projectLanguage,
-              canPublishProjectResult(
+              canPublishWorkspaceResult(
                   generation: generation,
                   root: projectRoot,
-                  language: projectLanguage
+                  languages: projectLanguages
               )
         else { return }
         do {
@@ -1974,6 +2159,13 @@ public final class AppModel {
         selectedByteOffset = byteOffset
         navigationGeneration &+= 1
         navigationSink(file, byteOffset)
+        if let active = routedSession(for: file),
+           case let .ready(_, context) = projectState,
+           context.analysisProfileID != active.1.analysisProfileID,
+           let root = projectRoot
+        {
+            publishProjectState(.ready(active.0, active.1), root: root)
+        }
         updateCompareFile()
     }
 
@@ -1995,7 +2187,7 @@ public final class AppModel {
         relationTree.updateProjectState(state)
     }
 
-    private static func coverage(for session: EngineSession) -> SnapshotCoverage {
+    private static func sessionCoverage(for session: EngineSession) -> SnapshotCoverage {
         let language = session.analysisProfile.language
         let activeFiles = session.manifest.files.filter {
             LanguageMode.classify(
@@ -2008,6 +2200,99 @@ public final class AppModel {
                 session.content(at: $0.pathID) != nil
             }.count,
             filesTotal: activeFiles.count
+        )
+    }
+
+    private func querySessionTuples() -> [(EngineSession, QueryContext)] {
+        let languages = projectLanguages
+        guard !languages.isEmpty,
+              workspaceSessions.count == languages.count
+        else { return [] }
+        var result: [(EngineSession, QueryContext)] = []
+        result.reserveCapacity(languages.count)
+        var snapshotID: SnapshotID?
+        for language in languages {
+            let matches = workspaceSessions.values.filter {
+                $0.analysisProfile.language == language
+            }
+            guard matches.count == 1, let session = matches.first else { return [] }
+            if let snapshotID, snapshotID != session.snapshotID { return [] }
+            snapshotID = session.snapshotID
+            result.append((
+                session,
+                QueryContext(
+                    snapshotID: session.snapshotID,
+                    analysisProfileID: session.analysisProfile.id,
+                    generation: generation
+                )
+            ))
+        }
+        guard Set(result.map(\.0.snapshotID)).count == 1 else { return [] }
+        return result
+    }
+
+    private func installWorkspaceSessions(
+        _ candidates: [EngineSession],
+        generation expectedGeneration: UInt64,
+        root expectedRoot: URL,
+        languages expectedLanguages: [LanguageID],
+        expectedSnapshotID: SnapshotID,
+        phase: SnapshotPhase
+    ) -> Bool {
+        guard canPublishWorkspaceResult(
+            generation: expectedGeneration,
+            root: expectedRoot,
+            languages: expectedLanguages
+        ) else { return false }
+        var byProfile: [AnalysisProfileID: EngineSession] = [:]
+        for session in candidates {
+            byProfile[session.analysisProfile.id] = session
+        }
+        guard byProfile.count == expectedLanguages.count,
+              byProfile.values.allSatisfy({ $0.snapshotID == expectedSnapshotID }),
+              Set(byProfile.keys) == Set(byProfile.values.map { $0.analysisProfile.id }),
+              Set(byProfile.values.map { $0.snapshotID }).count == 1,
+              Set(byProfile.values.map { $0.analysisProfile.language }) == Set(expectedLanguages),
+              Set(byProfile.values.map { ObjectIdentifier($0.paths) }).count == 1
+        else {
+            return false
+        }
+        workspaceSessions = byProfile
+        snapshotPhase = phase
+        coverage = workspaceCoverage()
+        if let active = selectedFile.flatMap(routedSession(for:)) {
+            publishProjectState(.ready(active.0, active.1), root: expectedRoot)
+        } else {
+            let tuples = querySessionTuples()
+            let active = tuples.first(where: {
+                Self.sessionCoverage(for: $0.0).filesTotal > 0
+            }) ?? tuples.first
+            guard let active else { return false }
+            publishProjectState(.ready(active.0, active.1), root: expectedRoot)
+        }
+        return true
+    }
+
+    private func workspaceCoverage() -> SnapshotCoverage {
+        let sessions = workspaceSessions.values
+        let indexed = sessions.reduce(0) { $0 + Self.sessionCoverage(for: $1).filesIndexed }
+        let total = sessions.reduce(0) { $0 + Self.sessionCoverage(for: $1).filesTotal }
+        return SnapshotCoverage(filesIndexed: indexed, filesTotal: total)
+    }
+
+    private func routedSession(for file: URL) -> (EngineSession, QueryContext)? {
+        guard let mode = languageMode(for: file),
+              let session = workspaceSessions.values.first(where: {
+                  $0.analysisProfile.language == mode.language
+              })
+        else { return nil }
+        return (
+            session,
+            QueryContext(
+                snapshotID: session.snapshotID,
+                analysisProfileID: session.analysisProfile.id,
+                generation: generation
+            )
         )
     }
 
@@ -2025,26 +2310,41 @@ public final class AppModel {
     }
 
     package func languageMode(for file: URL) -> LanguageMode? {
-        guard let root = projectRoot,
-              let language = projectLanguage
+        guard let root = projectRoot
         else { return nil }
         let file = file.standardizedFileURL
         if let path = Self.relativePath(of: file, under: root) {
-            if case let .ready(session, _) = projectState,
+            let classified = LanguageMode.classify(
+                path: path,
+                languages: projectLanguages
+            )
+            if let classified,
+               let session = workspaceSessions.values.first(where: {
+                   $0.analysisProfile.language == classified.language
+               }),
                let occurrence = session.manifest.files.first(where: {
                    session.paths.resolve($0.pathID) == path
                }),
-               let key = session.content(at: occurrence.pathID)?.0
+               let key = session.content(at: occurrence.pathID)?.0,
+               key.languageMode == classified
             {
                 return key.languageMode
             }
-            return LanguageMode.classify(path: path, language: language)
+            return classified
         }
         guard exactLocationIsInDependency(file.path) else { return nil }
-        return LanguageMode.classify(path: file.path, language: language)
-            ?? (file.pathExtension.isEmpty
-                ? LanguageMode(language: language)
-                : nil)
+        if let classified = LanguageMode.classify(
+            path: file.path,
+            languages: projectLanguages
+        ) {
+            return classified
+        }
+        if file.pathExtension.isEmpty,
+           case let .ready(session, _) = projectState
+        {
+            return LanguageMode(language: session.analysisProfile.language)
+        }
+        return nil
     }
 
     private func trailJump(
@@ -2130,9 +2430,7 @@ public final class AppModel {
         replayedAgainstCurrentWorktree: Bool = false,
         opensInNewTab: Bool = false
     ) {
-        guard let root = fileTree?.root,
-              let language = projectLanguage
-        else { return }
+        guard let root = fileTree?.root else { return }
         let jump = record.jump
         let dependency = exactLocationIsInDependency(jump.path)
         let file = dependency
@@ -2163,10 +2461,10 @@ public final class AppModel {
                 return
             }
             guard let self,
-                  canPublishProjectResult(
+                  canPublishWorkspaceResult(
                       generation: replayGeneration,
                       root: root,
-                      language: language
+                      languages: projectLanguages
                   ),
                   navigationGeneration == replayNavigationGeneration,
                   currentSnapshotID == replaySnapshotID,
