@@ -1,5 +1,7 @@
 import CodeInsightCore
 import CodeInsightEngine
+@testable import CodeInsightEngine
+import CodeInsightGit
 import Foundation
 import Testing
 @testable import CodeInsightAppModel
@@ -371,10 +373,249 @@ func openingAnotherProjectCancelsTheOlderAutomaticRestore() async throws {
     #expect(model.tabStrip.tabs.isEmpty)
 }
 
+@MainActor
+@Test
+func mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() async throws {
+    let root = try sessionRestoreGitProject([
+        "main.rs": "fn rustFn() {}\n",
+        "lib.py": "def py_fn():\n    pass\n",
+        "app.ts": "export function tsFn() {}\n",
+        "Cargo.toml": "[package]\nname = \"mixed\"\n",
+        "pyproject.toml": "[project]\nname = \"mixed\"\n",
+        "tsconfig.json": "{}",
+    ])
+    try sessionRestoreGit(root, "add", ".")
+    try sessionRestoreGit(
+        root,
+        "-c", "user.name=CodeInsight",
+        "-c", "user.email=codeinsight@example.com",
+        "commit", "-m", "mixed save", "-q"
+    )
+    let revision = try sessionRestoreCurrentHEAD(root)
+    let sessionURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightMixedCheckpoint-\(UUID().uuidString)")
+        .appendingPathComponent("session.json")
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(
+            at: sessionURL.deletingLastPathComponent()
+        )
+    }
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    try await model.openProject(
+        root: root,
+        languages: [.typescript, .rust, .python]
+    )
+    try #require(await testWaitUntil("mixed fullReady") {
+        model.snapshotPhase == .fullReady
+            && model.querySessions.count == 3
+    })
+    let rustFile = root.appendingPathComponent("main.rs")
+    model.switchToCommit(revision)
+    try #require(await testWaitUntil("mixed fullReady at saved revision") {
+        model.snapshotPhase == .fullReady && model.currentRevision == revision
+    })
+    model.openInNewTab(rustFile)
+    model.navigate(to: root.appendingPathComponent("lib.py"))
+    model.openInNewTab(rustFile)
+    model.openInNewTab(root.appendingPathComponent("app.ts"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+
+    let snapshot = try #require(model.loadSessionSnapshot().snapshot)
+    #expect(snapshot.languages == [.rust, .python, .typescript])
+    #expect(snapshot.revision == revision)
+    #expect(snapshot.activeTabOrdinal == model.tabStrip.activeIndex)
+    let fileTabs = snapshot.tabs.compactMap { tab -> String? in
+        guard case .file(let file) = tab else { return nil }
+        return file.path
+    }
+    #expect(fileTabs.contains("main.rs"))
+    #expect(fileTabs.contains("lib.py"))
+    #expect(fileTabs.contains("app.ts"))
+}
+
+@MainActor
+@Test
+func mixedRestoreOpensFullSetAndRestoresEachTabByMode() async throws {
+    let root = try sessionRestoreGitProject([
+        "main.rs": "pub fn checkpoint() {}\n",
+        "lib.py": "def checkpoint():\n    pass\n",
+        "app.ts": "export function checkpoint() {}\n",
+        "Cargo.toml": "[package]\nname = \"mixed\"\n",
+        "pyproject.toml": "[project]\nname = \"mixed\"\n",
+        "tsconfig.json": "{}",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        languages: [.typescript, .rust, .python],
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "app.ts",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: "lib.py",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.projectLanguages == [.rust, .python, .typescript])
+    #expect(model.querySessions.map { $0.0.analysisProfile.language }
+        == [.rust, .python, .typescript])
+    #expect(model.tabStrip.activeIndex == 1)
+    #expect(model.tabStrip.activeTab?.fileURL?.path == root
+        .appendingPathComponent("lib.py").path)
+    let titles = model.tabStrip.tabs.compactMap { tab in
+        tab.fileURL?.lastPathComponent
+    }
+    #expect(titles == ["app.ts", "lib.py", "main.rs"])
+    let modes: [LanguageID] = model.tabStrip.tabs.compactMap { tab in
+        tab.fileURL.flatMap { model.languageMode(for: $0)?.language }
+    }
+    #expect(modes == [.typescript, .python, .rust])
+}
+
+@MainActor
+@Test
+func mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() async throws {
+    let root = try sessionRestoreGitProject([
+        "main.rs": "fn rustFn() {}\n",
+        "lib.py": "def pythonFn():\n    pass\n",
+    ])
+    let dependency = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightMixedDependency-\(UUID().uuidString)")
+    try "dependency".write(to: dependency, atomically: true, encoding: .utf8)
+    let pythonDependency = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightMixedDependency-\(UUID().uuidString).py"
+        )
+    try "def external():\n    pass\n"
+        .write(to: pythonDependency, atomically: true, encoding: .utf8)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: dependency)
+        try? FileManager.default.removeItem(at: pythonDependency)
+    }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        languages: [.rust, .python],
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: pythonDependency.path,
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: dependency.path,
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: "lib.py",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.projectLanguages == [.rust, .python])
+    #expect(model.tabStrip.tabs.count == 3)
+    let paths = model.tabStrip.tabs.compactMap { $0.fileURL?.path }
+    #expect(paths.contains(root.appendingPathComponent("main.rs").path))
+    #expect(paths.contains(root.appendingPathComponent("lib.py").path))
+    #expect(paths.contains(pythonDependency.path))
+    #expect(!paths.contains(dependency.path))
+    #expect(model.tabStrip.activeIndex == 1)
+    #expect(model.tabStrip.activeTab?.fileURL?.path
+        == pythonDependency.path)
+}
+
 private struct SessionRestoreIndexService: IndexService {
     func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached {
             try ProjectIndexer().index(root: root, language: language)
+        }.value
+    }
+
+    func captureSnapshot(
+        root: URL,
+        revision: String?,
+        languages: [LanguageID]
+    ) async throws -> any Snapshot {
+        try await Task.detached {
+            if let revision {
+                return try CommitSnapshot(
+                    repositoryURL: root,
+                    revision: revision
+                ) as any Snapshot
+            }
+            return try WorktreeSnapshot(
+                repositoryURL: root,
+                languages: LanguageMode.normalize(languages: languages)
+            ) as any Snapshot
+        }.value
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        try await Task.detached {
+            let normalized = try LanguageMode.normalize(languages: languages)
+            let store = ProjectIndexStore()
+            return try normalized.map { language in
+                try ProjectIndexer().prepareSnapshot(
+                    snapshot,
+                    into: store,
+                    language: language,
+                    discoverUnitRoot: true
+                )
+            }
+        }.value
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> EngineSession {
+        try await Task.detached {
+            try ProjectIndexer().completeSnapshot(prepared)
         }.value
     }
 }
@@ -418,4 +659,43 @@ private func sessionRestoreProject(_ files: [String: String]) throws -> URL {
         try contents.write(to: file, atomically: true, encoding: .utf8)
     }
     return root
+}
+
+private func sessionRestoreGitProject(
+    _ files: [String: String]
+) throws -> URL {
+    let root = try sessionRestoreProject(files)
+    try sessionRestoreGit(root, "init", "-q")
+    return root
+}
+
+private func sessionRestoreGit(
+    _ root: URL,
+    _ arguments: String...
+) throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path] + arguments
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+}
+
+private func sessionRestoreCurrentHEAD(_ root: URL) throws -> String {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path, "rev-parse", "HEAD"]
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0,
+          let data = try pipe.fileHandleForReading.readToEnd()
+    else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    return String(decoding: data, as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
 }

@@ -734,12 +734,12 @@ public final class AppModel {
         allowsPendingTopology: Bool
     ) -> SessionCodec.Snapshot? {
         guard let root = projectRoot,
-              projectLanguages.count == 1,
-              let language = projectLanguages.first,
               lastInstalledProjectRoot?.standardizedFileURL
                 == root.standardizedFileURL,
               allowsPendingTopology || lastInstalledGeneration == generation
         else { return nil }
+        let languages = projectLanguages
+        guard !languages.isEmpty else { return nil }
         var entries: [SessionCodec.Tab] = []
         entries.reserveCapacity(tabStrip.tabs.count)
         for tab in tabStrip.tabs {
@@ -770,7 +770,7 @@ public final class AppModel {
         }
         return SessionCodec.Snapshot(
             projectRoot: root.path,
-            language: language,
+            languages: languages,
             revision: lastInstalledRevision,
             activeTabOrdinal: tabStrip.activeIndex,
             panelPreset: panelPreset.rawValue,
@@ -919,19 +919,34 @@ public final class AppModel {
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
         ).standardizedFileURL
-        let language = snapshot.language
+        let languages: [LanguageID]
         do {
-            try openProject(root: root, language: language)
+            languages = try LanguageMode.normalize(languages: snapshot.languages)
         } catch {
             return false
         }
-        let worktreeGeneration = generation
-        let worktreeTask = snapshotTask
-        await worktreeTask?.value
-        guard canPublishProjectResult(
+        let worktreeGeneration: UInt64
+        if languages.count == 1 {
+            do {
+                try openProject(root: root, language: languages[0])
+            } catch {
+                return false
+            }
+            worktreeGeneration = generation
+            let worktreeTask = snapshotTask
+            await worktreeTask?.value
+        } else {
+            worktreeGeneration = generation &+ 1
+            do {
+                try await openProject(root: root, languages: languages)
+            } catch {
+                return false
+            }
+        }
+        guard canPublishWorkspaceResult(
                   generation: worktreeGeneration,
                   root: root,
-                  language: language
+                  languages: languages
               ),
               snapshotPhase == .fullReady
         else { return false }
@@ -944,10 +959,10 @@ public final class AppModel {
                     revision: revision
                 )) != nil
             }.value
-            guard canPublishProjectResult(
+            guard canPublishWorkspaceResult(
                 generation: worktreeGeneration,
                 root: root,
-                language: language
+                languages: languages
             )
             else { return false }
             if revisionExists {
@@ -955,26 +970,37 @@ public final class AppModel {
                 let revisionGeneration = generation
                 let revisionTask = snapshotTask
                 await revisionTask?.value
-                guard canPublishProjectResult(
+                guard canPublishWorkspaceResult(
                     generation: revisionGeneration,
                     root: root,
-                    language: language
+                    languages: languages
                 )
                 else { return false }
                 if snapshotPhase != .fullReady {
                     revisionUnavailable = true
+                    let fallbackGeneration: UInt64
                     do {
-                        try openProject(root: root, language: language)
+                        if languages.count == 1 {
+                            try openProject(root: root, language: languages[0])
+                            fallbackGeneration = generation
+                        } else {
+                            fallbackGeneration = generation &+ 1
+                            try await openProject(
+                                root: root,
+                                languages: languages
+                            )
+                        }
                     } catch {
                         return false
                     }
-                    let fallbackGeneration = generation
-                    let fallbackTask = snapshotTask
-                    await fallbackTask?.value
-                    guard canPublishProjectResult(
+                    if languages.count == 1 {
+                        let fallbackTask = snapshotTask
+                        await fallbackTask?.value
+                    }
+                    guard canPublishWorkspaceResult(
                               generation: fallbackGeneration,
                               root: root,
-                              language: language
+                              languages: languages
                           ),
                           snapshotPhase == .fullReady
                     else { return false }
@@ -993,10 +1019,10 @@ public final class AppModel {
         )] = [:]
         var successfulOrdinals: [Int] = []
         for (oldOrdinal, entry) in snapshot.tabs.enumerated() {
-            guard canPublishProjectResult(
+            guard canPublishWorkspaceResult(
                 generation: restoreGeneration,
                 root: root,
-                language: language
+                languages: languages
             )
             else { return false }
             switch entry {
@@ -1019,10 +1045,10 @@ public final class AppModel {
                     revision: currentRevision,
                     languageMode: languageMode
                 )
-                let canPublish = canPublishProjectResult(
+                let canPublish = canPublishWorkspaceResult(
                     generation: restoreGeneration,
                     root: root,
-                    language: language
+                    languages: languages
                 )
                 guard canPublish,
                       self.languageMode(for: file) == languageMode,
@@ -1060,10 +1086,10 @@ public final class AppModel {
                 successfulOrdinals.append(oldOrdinal)
             }
         }
-        guard canPublishProjectResult(
+        guard canPublishWorkspaceResult(
             generation: restoreGeneration,
             root: root,
-            language: language
+            languages: languages
         )
         else { return false }
 

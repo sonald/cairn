@@ -108,6 +108,51 @@ func oldOpenProjectDelegatesToRustAndKeepsRustLastOpenedLanguage() {
 
 @MainActor
 @Test
+func recentProjectClickForwardsStoredLanguageSet() async throws {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    let root = URL(fileURLWithPath: "/projects/mixed", isDirectory: true)
+    fixture.store.record(
+        root.standardizedFileURL,
+        languages: [.typescript, .rust]
+    )
+
+    fixture.controller.openRecentProject(root)
+
+    #expect(fixture.controller.pendingRecentProjectLanguage == .rust)
+    #expect(fixture.controller.lastOpenedProjectLanguage == .rust)
+    let indexingStarted: () -> Bool = {
+        if case .indexing = fixture.model.projectState { return true }
+        return false
+    }
+    try #require(await mainWindowWaitUntil(indexingStarted()))
+    #expect(fixture.model.projectLanguages == [.rust, .typescript])
+}
+
+@MainActor
+@Test
+func retryForwardsCompleteLanguageSet() async throws {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    let root = URL(fileURLWithPath: "/projects/mixed-retry", isDirectory: true)
+    fixture.controller.openProject(
+        root: root,
+        languages: [.typescript, .rust, .python]
+    )
+
+    fixture.controller.retryLastOpenedProject()
+
+    #expect(fixture.controller.lastOpenedProjectLanguage == .rust)
+    let indexingStarted: () -> Bool = {
+        if case .indexing = fixture.model.projectState { return true }
+        return false
+    }
+    try #require(await mainWindowWaitUntil(indexingStarted()))
+    #expect(fixture.model.projectLanguages == [.rust, .python, .typescript])
+}
+
+@MainActor
+@Test
 func explicitOpenProjectForwardsLanguageAndRecordsPendingAsPython() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }

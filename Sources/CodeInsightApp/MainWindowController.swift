@@ -73,9 +73,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var panelPreset = PanelPresetModel.reading
     private var readingSetLayoutActive = false
     private var lastOpenedProjectRoot: URL?
-    var lastOpenedProjectLanguage: LanguageID?
+    private var lastOpenedProjectLanguages: [LanguageID]?
+    var lastOpenedProjectLanguage: LanguageID? {
+        lastOpenedProjectLanguages?.first
+    }
     private var pendingRecentProjectRoot: URL?
-    var pendingRecentProjectLanguage: LanguageID?
+    private var pendingRecentProjectLanguages: [LanguageID]?
+    var pendingRecentProjectLanguage: LanguageID? {
+        pendingRecentProjectLanguages?.first
+    }
     private var pendingTabRestore: TabStripModel.Tab?
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
@@ -534,22 +540,47 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         cancelSessionRestore()
         let root = root.standardizedFileURL
         lastOpenedProjectRoot = root
-        lastOpenedProjectLanguage = language
+        lastOpenedProjectLanguages = [language]
         pendingRecentProjectRoot = root
-        pendingRecentProjectLanguage = language
+        pendingRecentProjectLanguages = [language]
         try? model.openProject(root: root, language: language)
         render()
     }
 
+    func openProject(root: URL, languages: [LanguageID]) {
+        guard let normalized = try? LanguageMode.normalize(languages: languages)
+        else { return }
+        cancelSessionRestore()
+        let root = root.standardizedFileURL
+        lastOpenedProjectRoot = root
+        lastOpenedProjectLanguages = normalized
+        pendingRecentProjectRoot = root
+        pendingRecentProjectLanguages = normalized
+        guard normalized.count > 1 else {
+            try? model.openProject(root: root, language: normalized[0])
+            render()
+            return
+        }
+        Task {
+            try? await model.openProject(root: root, languages: normalized)
+        }
+        render()
+    }
+
     func openRecentProject(_ root: URL) {
-        openProject(root: root, language: recentProjectsStore.language(for: root.standardizedFileURL.path))
+        openProject(
+            root: root,
+            languages: recentProjectsStore.languages(
+                for: root.standardizedFileURL.path
+            )
+        )
     }
 
     func retryLastOpenedProject() {
         if let root = lastOpenedProjectRoot {
             openProject(
                 root: root,
-                language: lastOpenedProjectLanguage ?? .rust
+                languages: lastOpenedProjectLanguages ?? [.rust]
             )
         } else {
             onChooseProject()
@@ -563,9 +594,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             isDirectory: true
         ).standardizedFileURL
         lastOpenedProjectRoot = root
-        lastOpenedProjectLanguage = snapshot.language
+        lastOpenedProjectLanguages = snapshot.languages
         pendingRecentProjectRoot = root
-        pendingRecentProjectLanguage = snapshot.language
+        pendingRecentProjectLanguages = snapshot.languages
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
             applyPanelPreset(preset)
         }
@@ -2021,11 +2052,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             if recordsRecentProjects {
                 recentProjectsStore.record(
                     root,
-                    language: pendingRecentProjectLanguage ?? .rust
+                    languages: pendingRecentProjectLanguages ?? [.rust]
                 )
             }
             pendingRecentProjectRoot = nil
-            pendingRecentProjectLanguage = nil
+            pendingRecentProjectLanguages = nil
         }
 
         let retry = { [weak self] in
