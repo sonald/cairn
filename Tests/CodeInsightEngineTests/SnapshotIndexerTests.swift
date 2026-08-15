@@ -710,6 +710,75 @@ func ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() throws {
 }
 
 @Test
+func perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() throws {
+    let snapshot = CountingSnapshot(files: [
+        "src/lib.rs": Array("pub fn rs() {}\n".utf8),
+        "src/app.py": Array("def py():\n    pass\n".utf8),
+        "src/a.ts": Array("export function ts() {}\n".utf8),
+        "src/a.tsx": Array("export const tsx = view\n".utf8),
+        "Cargo.toml": Array("[package]\nname = \"x\"\n".utf8),
+        "pyproject.toml": Array("[project]\nname = \"x\"\n".utf8),
+        "tsconfig.json": Array("{}".utf8),
+    ], configurationPaths: ["Cargo.toml", "pyproject.toml", "tsconfig.json"])
+    let cacheURL = temporaryCacheURL()
+    defer { try? FileManager.default.removeItem(at: cacheURL.deletingLastPathComponent()) }
+    var cache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    let coldStore = ProjectIndexStore()
+    let coldIndexer = ProjectIndexer(parallelism: 1, cache: cache)
+    let coldRust = try coldIndexer.prepareSnapshot(
+        snapshot, into: coldStore, language: .rust, discoverUnitRoot: true
+    )
+    let coldPython = try coldIndexer.prepareSnapshot(
+        snapshot, into: coldStore, language: .python, discoverUnitRoot: true
+    )
+    let coldTS = try coldIndexer.prepareSnapshot(
+        snapshot, into: coldStore, language: .typescript, discoverUnitRoot: true
+    )
+    let coldCached = [coldRust, coldPython, coldTS].map(\.cachedSession)
+    #expect(coldCached.map { $0.analysisProfile.language }
+        == [.rust, .python, .typescript])
+    #expect(Set(coldCached.map { $0.snapshotID }).count == 1)
+    #expect(Set(coldCached.map { ObjectIdentifier($0.store) }).count == 1)
+
+    var coldFull: [EngineSession] = []
+    for prepared in [coldRust, coldPython, coldTS] {
+        coldFull.append(try coldIndexer.completeSnapshot(prepared))
+    }
+    #expect(coldFull.map { $0.stats.extractedCount } == [1, 1, 2])
+    #expect(coldFull.map { $0.stats.reusedCount } == [0, 0, 0])
+    #expect(Set(coldFull[2].contentIndexes.keys.map(\.languageMode.variant))
+        == Set([nil, "tsx"] as [String?]))
+    coldIndexer.flushPersistentWrites()
+    cache?.flush()
+    cache = nil
+
+    let hotCache: IndexCache? = try IndexCache(fileURL: cacheURL)
+    let hotStore = ProjectIndexStore()
+    let hotIndexer = ProjectIndexer(parallelism: 1, cache: hotCache)
+    let hotRust = try hotIndexer.prepareSnapshot(
+        snapshot, into: hotStore, language: .rust, discoverUnitRoot: true
+    )
+    let hotPython = try hotIndexer.prepareSnapshot(
+        snapshot, into: hotStore, language: .python, discoverUnitRoot: true
+    )
+    let hotTS = try hotIndexer.prepareSnapshot(
+        snapshot, into: hotStore, language: .typescript, discoverUnitRoot: true
+    )
+    #expect([hotRust, hotPython, hotTS].map(\.pendingExtractionCount) == [0, 0, 0])
+    let hotCached = [hotRust, hotPython, hotTS].map(\.cachedSession)
+    #expect(Set(hotCached.map { ObjectIdentifier($0.store) }).count == 1)
+    #expect(Set(hotCached.map { $0.analysisProfile.id }).count == 3)
+
+    var hotFull: [EngineSession] = []
+    for hot in [hotRust, hotPython, hotTS] {
+        hotFull.append(try hotIndexer.completeSnapshot(hot))
+    }
+    #expect(hotFull.map { $0.stats.reusedCount } == [1, 1, 2])
+    #expect(hotFull.map { $0.stats.extractedCount } == [0, 0, 0])
+    hotIndexer.flushPersistentWrites()
+}
+
+@Test
 func publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutsideSource() throws {
     let snapshot = CountingSnapshot(files: [
         "nested/src/inside.rs": Array("fn inside() {}\n".utf8),

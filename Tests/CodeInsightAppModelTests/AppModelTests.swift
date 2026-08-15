@@ -1,4 +1,5 @@
 import CodeInsightCore
+import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -959,24 +960,10 @@ func realIndexServiceBuildsFixtureSession() async throws {
 }
 
 @Test
-func projectIndexServiceRejectsJavaScriptBeforeIO() async {
+func projectIndexServiceRejectsJavaScriptBeforeIO() async throws {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightUnsupportedService-\(UUID().uuidString)")
-    let resolvedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
-    let digest = ContentID.sha256(of: Data(resolvedPath.utf8)).bytes
-        .map { String(format: "%02x", $0) }
-        .joined()
-    guard let applicationSupport = FileManager.default.urls(
-        for: .applicationSupportDirectory,
-        in: .userDomainMask
-    ).first else {
-        Issue.record("application support directory unavailable")
-        return
-    }
-    let cache = applicationSupport
-        .appendingPathComponent("CodeInsight/index-cache")
-        .appendingPathComponent("\(digest).sqlite3")
-    let cachePaths = ["", "-wal", "-shm"].map { cache.path + $0 }
+    let cachePaths = try indexCachePaths(for: root)
     defer {
         for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
     }
@@ -1004,6 +991,236 @@ func projectIndexServiceRejectsJavaScriptBeforeIO() async {
     }
     #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
     #expect(!FileManager.default.fileExists(atPath: root.path))
+}
+
+@Test
+func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() async throws {
+    let root = try temporaryGitProject([
+        "crates/r/src/lib.rs": "pub fn f() {}\n",
+        "crates/r/Cargo.toml": "[package]\nname = \"r\"\n",
+        "pkg.py": "def f():\n    pass\n",
+        "pyproject.toml": "[project]\nname = \"p\"\n",
+        "tools/ts/src/a.ts": "export function a() {}\n",
+        "tools/ts/src/b.tsx": "export const b = 1\n",
+        "tools/ts/tsconfig.json": "{}",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    let service = ProjectIndexService()
+    let snapshot = try await service.captureSnapshot(
+        root: root,
+        revision: nil,
+        languages: [.typescript, .rust, .python]
+    )
+    let paths = snapshot.listFiles().map(\.path)
+    #expect(Set(paths) == Set([
+        "crates/r/src/lib.rs",
+        "pkg.py",
+        "tools/ts/src/a.ts",
+        "tools/ts/src/b.tsx",
+    ]))
+
+    let prepared = try await service.prepareSnapshots(
+        snapshot,
+        root: root,
+        languages: [.typescript, .rust, .python]
+    )
+    #expect(prepared.map { $0.cachedSession.analysisProfile.language }
+        == [.rust, .python, .typescript])
+    #expect(Set(prepared.map { $0.cachedSession.snapshotID }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.store) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.paths) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.names) }).count == 1)
+    #expect(Set(prepared.map { ObjectIdentifier($0.cachedSession.strings) }).count == 1)
+    #expect(prepared.map {
+        $0.cachedSession.paths.resolve($0.cachedSession.analysisProfile.projectRoot)
+    } == ["crates/r", ".", "tools/ts"])
+
+    let cached = prepared.map(\.cachedSession)
+    var full: [EngineSession] = []
+    for item in prepared {
+        full.append(try await service.completeSnapshot(item))
+    }
+    #expect(full.map { $0.analysisProfile.language }
+        == cached.map { $0.analysisProfile.language })
+    #expect(full.map { $0.analysisProfile.projectRoot }
+        == cached.map { $0.analysisProfile.projectRoot })
+    #expect(full.map { $0.analysisProfile.id }
+        == cached.map { $0.analysisProfile.id })
+    #expect(full.map { $0.stats.extractedCount } == [1, 1, 2])
+
+    service.flushPersistentIndexCache()
+}
+
+@Test
+func ambiguousAndNonGitFailBeforePersistentCache() async throws {
+    let nonGit = try temporaryProject([
+        "a.rs": "fn a() {}\n",
+    ])
+    let nonGitCache = try indexCachePaths(for: nonGit)
+    defer {
+        for path in nonGitCache { try? FileManager.default.removeItem(atPath: path) }
+        try? FileManager.default.removeItem(at: nonGit)
+    }
+    do {
+        _ = try await ProjectIndexService().captureSnapshot(
+            root: nonGit,
+            revision: nil,
+            languages: [.rust, .python]
+        )
+        Issue.record("mixed non-Git capture unexpectedly succeeded")
+    } catch is GitError {
+    } catch {
+        Issue.record("unexpected mixed non-Git error: \(error)")
+    }
+    do {
+        _ = try await ProjectIndexService().prepareSnapshots(
+            CountingIndexSnapshot(
+                files: ["a.rs": Array("fn a() {}\n".utf8)],
+                configurationPaths: []
+            ),
+            root: nonGit,
+            languages: [.rust, .python]
+        )
+        Issue.record("mixed non-Git prepare unexpectedly succeeded")
+    } catch is GitError {
+    } catch {
+        Issue.record("unexpected mixed non-Git prepare error: \(error)")
+    }
+    #expect(nonGitCache.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+
+    let ambiguousRoot = try temporaryGitProject([
+        "a/src/main.rs": "fn a() {}\n",
+        "b/src/main.rs": "fn b() {}\n",
+        "a/Cargo.toml": "[package]\nname = \"a\"\n",
+        "b/Cargo.toml": "[package]\nname = \"b\"\n",
+        "p.py": "def p():\n    pass\n",
+    ])
+    let ambiguousPaths = try indexCachePaths(for: ambiguousRoot)
+    defer {
+        for path in ambiguousPaths { try? FileManager.default.removeItem(atPath: path) }
+        try? FileManager.default.removeItem(at: ambiguousRoot)
+    }
+    let snapshot = try await ProjectIndexService().captureSnapshot(
+        root: ambiguousRoot,
+        revision: nil,
+        languages: [.rust, .python]
+    )
+    do {
+        _ = try await ProjectIndexService().prepareSnapshots(
+            snapshot,
+            root: ambiguousRoot,
+            languages: [.rust, .python]
+        )
+        Issue.record("ambiguous mixed prepare unexpectedly succeeded")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+    } catch {
+        Issue.record("ambiguous mixed prepare threw unexpected error: \(error)")
+    }
+    #expect(ambiguousPaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+}
+
+@Test
+func preparedSnapshotIdentityMismatchFailsWithoutPartial() async throws {
+    let root = try temporaryGitProject([
+        "src/lib.rs": "fn f() {}\n",
+        "Cargo.toml": "[package]\nname = \"x\"\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let snapshot = CountingIndexSnapshot(
+        files: ["src/lib.rs": Array("fn f() {}\n".utf8)],
+        configurationPaths: ["Cargo.toml"],
+        stableIdentity: false
+    )
+    do {
+        _ = try await ProjectIndexService().prepareSnapshots(
+            snapshot,
+            root: root,
+            languages: [.rust, .python]
+        )
+        Issue.record("identity mismatch unexpectedly prepared")
+    } catch let error as CocoaError {
+        #expect(error.code == .coderInvalidValue)
+    }
+    #expect(cachePaths.allSatisfy { !FileManager.default.fileExists(atPath: $0) })
+}
+
+@Test
+func indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets() async throws {
+    let service = CountingIndexService()
+    let root = try temporaryProject([:])
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    do {
+        _ = try await service.captureSnapshot(
+            root: root,
+            revision: nil,
+            languages: [.rust]
+        )
+    } catch {
+        Issue.record("singleton capture forward failed: \(String(describing: error))")
+    }
+    #expect(await service.capturedLanguages == [.rust])
+
+    do {
+        _ = try await service.prepareSnapshots(
+            CountingIndexSnapshot(files: [:], configurationPaths: []),
+            root: root,
+            languages: [.python]
+        )
+    } catch Failure.expected {
+        // CountingIndexService intentionally throws after recording scalar call.
+    } catch {
+        Issue.record("singleton prepare forward failed: \(error)")
+    }
+    #expect(await service.preparedLanguages == [.python])
+
+    let invalid: [[LanguageID]] = [
+        [],
+        [.rust, .rust],
+        [.javascript],
+        [.rust, .python],
+    ]
+    for languages in invalid {
+        do {
+            _ = try await service.captureSnapshot(
+                root: root,
+                revision: nil,
+                languages: languages
+            )
+            Issue.record("invalid/mixed capture unexpectedly succeeded: \(languages)")
+        } catch let error as CocoaError {
+            #expect(error.code == .featureUnsupported)
+        } catch {
+            Issue.record("unexpected invalid capture error: \(error)")
+        }
+    }
+    #expect(await service.capturedLanguages == [.rust])
+
+    for languages in invalid {
+        do {
+            _ = try await service.prepareSnapshots(
+                CountingIndexSnapshot(files: [:], configurationPaths: []),
+                root: root,
+                languages: languages
+            )
+            Issue.record("invalid/mixed prepare unexpectedly succeeded: \(languages)")
+        } catch let error as CocoaError {
+            #expect(error.code == .featureUnsupported)
+        } catch {
+            Issue.record("unexpected invalid prepare error: \(error)")
+        }
+    }
+    #expect(await service.preparedLanguages == [.python])
 }
 
 @MainActor
@@ -1804,6 +2021,74 @@ private struct FailingIndexService: IndexService {
     }
 }
 
+private actor CountingIndexService: IndexService {
+    private(set) var capturedLanguages: [LanguageID] = []
+    private(set) var preparedLanguages: [LanguageID] = []
+
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+        throw Failure.expected
+    }
+
+    func captureSnapshot(
+        root: URL,
+        revision: String?,
+        language: LanguageID
+    ) async throws -> any Snapshot {
+        capturedLanguages.append(language)
+        return CountingIndexSnapshot(files: [:], configurationPaths: [])
+    }
+
+    func prepareSnapshot(
+        _ snapshot: any Snapshot,
+        language: LanguageID
+    ) async throws -> ProjectIndexer.PreparedSnapshot {
+        preparedLanguages.append(language)
+        throw Failure.expected
+    }
+
+    func completeSnapshot(
+        _ prepared: ProjectIndexer.PreparedSnapshot
+    ) async throws -> EngineSession {
+        throw Failure.expected
+    }
+
+    nonisolated func flushPersistentIndexCache() {}
+}
+
+private struct CountingIndexSnapshot: Snapshot {
+    var snapshotID: SnapshotID {
+        stableIdentity ? SnapshotID(rawValue: stableUUID) : SnapshotID(rawValue: UUID())
+    }
+    let objectFormat = GitObjectFormat.sha1
+    let sourceKind = SourceKind.tracked
+    let configurationPaths: [String]
+    private let files: [String: [UInt8]]
+    private let stableIdentity: Bool
+    private let stableUUID: UUID
+
+    init(
+        files: [String: [UInt8]],
+        configurationPaths: [String],
+        stableIdentity: Bool = true
+    ) {
+        self.files = files
+        self.configurationPaths = configurationPaths
+        self.stableIdentity = stableIdentity
+        stableUUID = UUID()
+    }
+
+    func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
+        files.map {
+            ($0.key, ContentID.sha256(of: $0.value), .regular)
+        }.sorted { $0.path < $1.path }
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        guard let bytes = files[path] else { throw Failure.expected }
+        return bytes
+    }
+}
+
 private enum Failure: Error {
     case expected
 }
@@ -1816,6 +2101,44 @@ private func temporaryProject(_ files: [String: String]) throws -> URL {
         try write(contents, to: root.appendingPathComponent(path))
     }
     return root
+}
+
+private func temporaryGitProject(_ files: [String: String]) throws -> URL {
+    let root = try temporaryProject(files)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path, "init", "-q"]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw CocoaError(.fileWriteUnknown)
+    }
+    return root
+}
+
+private func indexCachePaths(for root: URL) throws -> [String] {
+    let resolvedPath = root.resolvingSymlinksInPath().standardizedFileURL.path
+    let digest = ContentID.sha256(of: Data(resolvedPath.utf8)).bytes
+        .map { String(format: "%02x", $0) }
+        .joined()
+    let rootDir: URL
+    if let envRoot = ProcessInfo.processInfo.environment["CODEINSIGHT_INDEX_CACHE_ROOT"],
+       !envRoot.isEmpty
+    {
+        rootDir = URL(fileURLWithPath: envRoot, isDirectory: true)
+    } else if let applicationSupport = FileManager.default.urls(
+        for: .applicationSupportDirectory,
+        in: .userDomainMask
+    ).first {
+        rootDir = applicationSupport.appendingPathComponent(
+            "CodeInsight/index-cache",
+            isDirectory: true
+        )
+    } else {
+        throw CocoaError(.fileNoSuchFile)
+    }
+    let cache = rootDir.appendingPathComponent("\(digest).sqlite3")
+    return ["", "-wal", "-shm"].map { cache.path + $0 }
 }
 
 private func write(_ contents: String, to file: URL) throws {

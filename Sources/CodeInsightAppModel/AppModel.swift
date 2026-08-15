@@ -48,10 +48,20 @@ public protocol IndexService: Sendable {
         revision: String?,
         language: LanguageID
     ) async throws -> any Snapshot
+    func captureSnapshot(
+        root: URL,
+        revision: String?,
+        languages: [LanguageID]
+    ) async throws -> any Snapshot
     func prepareSnapshot(
         _ snapshot: any Snapshot,
         language: LanguageID
     ) async throws -> ProjectIndexer.PreparedSnapshot
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot]
     func completeSnapshot(
         _ prepared: ProjectIndexer.PreparedSnapshot
     ) async throws -> EngineSession
@@ -71,11 +81,41 @@ public extension IndexService {
         throw CocoaError(.featureUnsupported)
     }
 
+    func captureSnapshot(
+        root: URL,
+        revision: String?,
+        languages: [LanguageID]
+    ) async throws -> any Snapshot {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        guard normalized.count == 1 else {
+            throw CocoaError(.featureUnsupported)
+        }
+        return try await captureSnapshot(
+            root: root,
+            revision: revision,
+            language: normalized[0]
+        )
+    }
+
     func prepareSnapshot(
         _ snapshot: any Snapshot,
         language: LanguageID
     ) async throws -> ProjectIndexer.PreparedSnapshot {
         throw CocoaError(.featureUnsupported)
+    }
+
+    func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        guard normalized.count == 1 else {
+            throw CocoaError(.featureUnsupported)
+        }
+        return [
+            try await prepareSnapshot(snapshot, language: normalized[0]),
+        ]
     }
 
     func captureSnapshot(root: URL, revision: String?) async throws -> any Snapshot {
@@ -171,6 +211,85 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
                 language: language
             )
         }
+    }
+
+    public func captureSnapshot(
+        root: URL,
+        revision: String?,
+        languages: [LanguageID]
+    ) async throws -> any Snapshot {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        return try await detachedValue {
+            try Task.checkCancellation()
+            let snapshot: any Snapshot = if let revision {
+                try CommitSnapshot(repositoryURL: root, revision: revision)
+            } else {
+                try WorktreeSnapshot(repositoryURL: root, languages: normalized)
+            }
+            try Task.checkCancellation()
+            return snapshot
+        }
+    }
+
+    public func prepareSnapshots(
+        _ snapshot: any Snapshot,
+        root: URL,
+        languages: [LanguageID]
+    ) async throws -> [ProjectIndexer.PreparedSnapshot] {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        let expectedSnapshotID = snapshot.snapshotID
+        let store = store
+        let indexer = ProjectIndexer()
+        let expectedProfiles = try await detachedValue {
+            if normalized.count > 1 {
+                _ = try GitRepository(url: root)
+            }
+            return try indexer.validatedProfiles(
+                snapshot: snapshot,
+                languages: normalized,
+                store: store
+            )
+        }
+        guard expectedProfiles.map(\.language) == normalized else {
+            throw CocoaError(.coderInvalidValue, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    "mixed profile languages did not match requested set",
+            ])
+        }
+        guard snapshot.snapshotID == expectedSnapshotID else {
+            throw CocoaError(.coderInvalidValue, userInfo: [
+                NSLocalizedFailureReasonErrorKey:
+                    "snapshot identity changed before persistence",
+            ])
+        }
+        let persistent = ProjectIndexer(persistingProjectAt: root)
+        lock.withLock { self.indexer = persistent }
+        let prepared = try await detachedValue {
+            try normalized.map { language in
+                try persistent.prepareSnapshot(
+                    snapshot,
+                    into: store,
+                    language: language,
+                    discoverUnitRoot: true
+                )
+            }
+        }
+        for index in prepared.indices {
+            let prepared = prepared[index]
+            let language = normalized[index]
+            let expected = expectedProfiles[index]
+            guard prepared.cachedSession.analysisProfile.language == language,
+                  prepared.cachedSession.analysisProfile.projectRoot == expected.projectRoot,
+                  prepared.cachedSession.analysisProfile.id == expected.id,
+                  prepared.cachedSession.snapshotID == expectedSnapshotID
+            else {
+                throw CocoaError(.coderInvalidValue, userInfo: [
+                    NSLocalizedFailureReasonErrorKey:
+                        "mixed prepared profile identity mismatch",
+                ])
+            }
+        }
+        return prepared
     }
 
     public func completeSnapshot(

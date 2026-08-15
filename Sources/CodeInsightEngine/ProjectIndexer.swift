@@ -214,7 +214,7 @@ public struct ProjectIndexer: Sendable {
         )
     }
 
-    func prepareSnapshot(
+    package func prepareSnapshot(
         _ snapshot: any Snapshot,
         into store: ProjectIndexStore,
         language: LanguageID,
@@ -225,21 +225,13 @@ public struct ProjectIndexer: Sendable {
         let startedAt = Date()
         let stored = store.snapshot()
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
-        let profile = if discoverUnitRoot {
-            try ProfileDetector.detect(
-                snapshot: snapshot,
-                language: language,
-                sourcePaths: files.map(\.path),
-                configurationPaths: snapshot.configurationPaths,
-                internPath: { store.paths.intern($0) }
-            )
-        } else {
-            try analysisProfile(
-                snapshot: snapshot,
-                language: language,
-                projectRoot: store.paths.intern(".")
-            )
-        }
+        let profile = try profile(
+            snapshot: snapshot,
+            language: language,
+            sourcePaths: files.map(\.path),
+            store: store,
+            discoverUnitRoot: discoverUnitRoot
+        )
         var occurrences: [FileOccurrence] = []
         var newInputs: [ExtractionInput] = []
         var missingKeys: Set<ContentIndexKey> = []
@@ -337,6 +329,50 @@ public struct ProjectIndexer: Sendable {
             cache: cache,
             reusedCount: reusedKeys.count,
             startedAt: startedAt
+        )
+    }
+
+    package func validatedProfiles(
+        snapshot: any Snapshot,
+        languages: [LanguageID],
+        store: ProjectIndexStore
+    ) throws -> [AnalysisProfile] {
+        let files = snapshot.listFiles()
+        let sourcePaths = files.map(\.path)
+        return try languages.map { language in
+            try profile(
+                snapshot: snapshot,
+                language: language,
+                sourcePaths: sourcePaths,
+                store: store,
+                discoverUnitRoot: true
+            )
+        }
+    }
+
+    private func profile(
+        snapshot: any Snapshot,
+        language: LanguageID,
+        sourcePaths: [String],
+        store: ProjectIndexStore,
+        discoverUnitRoot: Bool
+    ) throws -> AnalysisProfile {
+        if discoverUnitRoot {
+            return try validated(
+                ProfileDetector.detect(
+                    snapshot: snapshot,
+                    language: language,
+                    sourcePaths: sourcePaths,
+                    configurationPaths: snapshot.configurationPaths,
+                    internPath: { store.paths.intern($0) }
+                ),
+                for: language
+            )
+        }
+        return try analysisProfile(
+            snapshot: snapshot,
+            language: language,
+            projectRoot: store.paths.intern(".")
         )
     }
 
