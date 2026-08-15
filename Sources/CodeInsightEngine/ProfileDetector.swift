@@ -59,30 +59,144 @@ enum ProfileDetector {
         }
     }
 
+    static func detect(
+        snapshot: any Snapshot,
+        language: LanguageID,
+        sourcePaths: [String],
+        configurationPaths: [String],
+        internPath: (String) -> PathID
+    ) throws -> AnalysisProfile {
+        let selectedRoot = try unitRoot(
+            language: language,
+            sourcePaths: sourcePaths,
+            configurationPaths: configurationPaths
+        )
+        return detect(
+            projectRootName: selectedRoot == "." ? snapshot.projectRootName :
+                URL(fileURLWithPath: selectedRoot).lastPathComponent,
+            projectRoot: internPath(selectedRoot),
+            language: language,
+            selectedRoot: selectedRoot
+        ) { path in
+            try? snapshot.readBytes(path: path)
+        }
+    }
+
+    private static func unitRoot(
+        language: LanguageID,
+        sourcePaths: [String],
+        configurationPaths: [String]
+    ) throws -> String {
+        try validateRelativePaths(sourcePaths + configurationPaths)
+        let sources = sourcePaths.filter {
+            LanguageMode.classify(path: $0, language: language) != nil
+        }
+        if sources.isEmpty {
+            return "."
+        }
+        let markers = configurationPaths.filter { isMarker($0, language: language) }
+        let markerRoots = markers.map(parentDirectory)
+        if markerRoots.isEmpty {
+            return "."
+        }
+        let valid = markerRoots.filter { root in
+            sources.allSatisfy { isWithin(root: root, path: $0) }
+        }
+        guard !valid.isEmpty else {
+            throw multipleUnits(language)
+        }
+        return valid.min {
+            ($0.isEmpty ? 0 : $0.split(separator: "/").count)
+                < ($1.isEmpty ? 0 : $1.split(separator: "/").count)
+        } ?? "."
+    }
+
+    private static func validateRelativePaths(_ paths: [String]) throws {
+        for path in paths {
+            guard !path.isEmpty,
+                  !path.hasPrefix("/"),
+                  !path.contains("//"),
+                  !path.components(separatedBy: "/").contains(where: {
+                      $0.isEmpty || $0 == "." || $0 == ".."
+                  })
+            else {
+                throw invalidUnitRoot(path)
+            }
+        }
+    }
+
+    private static func isMarker(
+        _ path: String,
+        language: LanguageID
+    ) -> Bool {
+        switch language {
+        case .rust:
+            return URL(fileURLWithPath: path).lastPathComponent == "Cargo.toml"
+        case .python:
+            let name = URL(fileURLWithPath: path).lastPathComponent
+            return name == "pyrightconfig.json" || name == "pyproject.toml"
+        case .typescript:
+            return URL(fileURLWithPath: path).lastPathComponent == "tsconfig.json"
+        case .javascript:
+            return false
+        }
+    }
+
+    private static func parentDirectory(_ path: String) -> String {
+        let parts = path.split(separator: "/").dropLast()
+        return parts.isEmpty ? "." : parts.joined(separator: "/")
+    }
+
+    private static func isWithin(root: String, path: String) -> Bool {
+        if root == "." || root.isEmpty {
+            return true
+        }
+        return path == root
+            || path.hasPrefix(root + "/")
+    }
+
+    private static func invalidUnitRoot(_ path: String) -> CocoaError {
+        CocoaError(.fileReadInvalidFileName, userInfo: [
+            NSLocalizedFailureReasonErrorKey:
+                "invalid relative path for project unit root: \(path)",
+        ])
+    }
+
+    private static func multipleUnits(_ language: LanguageID) -> CocoaError {
+        CocoaError(.featureUnsupported, userInfo: [
+            NSLocalizedFailureReasonErrorKey:
+                "multiple \(language) project units are not supported in L3 V0",
+        ])
+    }
+
     private static func detect(
         projectRootName: String,
         projectRoot: PathID,
         language: LanguageID,
-        readBytes: (String) -> [UInt8]?
+        selectedRoot: String = ".",
+        readBytes: @escaping (String) -> [UInt8]?
     ) -> AnalysisProfile {
+        let reader: (String) -> [UInt8]? = { path in
+            readBytes(selectedRoot == "." ? path : "\(selectedRoot)/\(path)")
+        }
         switch language {
         case .rust:
             return rustProfile(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,
-                readBytes: readBytes
+                reader: reader
             )
         case .python:
             return pythonProfile(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,
-                readBytes: readBytes
+                reader: reader
             )
         case .typescript:
             return typescriptProfile(
                 projectRootName: projectRootName,
                 projectRoot: projectRoot,
-                readBytes: readBytes
+                reader: reader
             )
         case .javascript:
             return fallback(
@@ -96,13 +210,13 @@ enum ProfileDetector {
     private static func typescriptProfile(
         projectRootName: String,
         projectRoot: PathID,
-        readBytes: (String) -> [UInt8]?
+        reader: @escaping (String) -> [UInt8]?
     ) -> AnalysisProfile {
-        let fingerprints = typescriptConfigIdentity(readBytes: readBytes)
+        let fingerprints = typescriptConfigIdentity(readBytes: reader)
         return AnalysisProfile(
             language: .typescript,
             projectRoot: projectRoot,
-            projectUnitName: readBytes("tsconfig.json") == nil
+            projectUnitName: reader("tsconfig.json") == nil
                 ? projectRootName
                 : "tsconfig.json",
             configFingerprint: fingerprints.config,
@@ -117,9 +231,9 @@ enum ProfileDetector {
     private static func pythonProfile(
         projectRootName: String,
         projectRoot: PathID,
-        readBytes: (String) -> [UInt8]?
+        reader: @escaping (String) -> [UInt8]?
     ) -> AnalysisProfile {
-        let fingerprints = pythonConfigIdentity(readBytes: readBytes)
+        let fingerprints = pythonConfigIdentity(readBytes: reader)
         return AnalysisProfile(
             language: .python,
             projectRoot: projectRoot,
@@ -136,9 +250,9 @@ enum ProfileDetector {
     private static func rustProfile(
         projectRootName: String,
         projectRoot: PathID,
-        readBytes: (String) -> [UInt8]?
+        reader: @escaping (String) -> [UInt8]?
     ) -> AnalysisProfile {
-        guard let rootBytes = readBytes("Cargo.toml"),
+        guard let rootBytes = reader("Cargo.toml"),
               let rootManifest = CargoManifestSubset(bytes: rootBytes)
         else {
             return fallback(
@@ -158,7 +272,7 @@ enum ProfileDetector {
         let selectedMemberPath = rootManifest.packageName == nil
             ? rootManifest.workspaceMembers.first.flatMap(normalizedMemberPath)
             : nil
-        if let lockBytes = readBytes("Cargo.lock") {
+        if let lockBytes = reader("Cargo.lock") {
             fingerprintBytes += lockBytes
         }
 
@@ -171,7 +285,7 @@ enum ProfileDetector {
                 )
             }
             let path = member.isEmpty ? "Cargo.toml" : "\(member)/Cargo.toml"
-            guard let bytes = readBytes(path),
+            guard let bytes = reader(path),
                   let manifest = CargoManifestSubset(bytes: bytes),
                   manifest.packageName != nil
             else {

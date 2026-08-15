@@ -196,6 +196,234 @@ func snapshotPythonProfileReadsRootConfigBytesForDeterministicIdentity() throws 
 }
 
 @Test
+func snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() throws {
+    let rust = Array("fn main() {}\n".utf8)
+    let cargo = Array("[package]\nname = \"qrcode2txt\"\n".utf8)
+    let tsConfig = Array("{\"compilerOptions\":{}}\n".utf8)
+    let package = Array("{\"name\":\"model-files-web\"}\n".utf8)
+    let bunLock = Array(repeating: UInt8(ascii: "b"), count: 4)
+    let pyProject = Array("[project]\nname = \"llm-tools\"\n".utf8)
+    let uvLock = Array("version = 1\n".utf8)
+    let snapshot = ProfileSnapshot(
+        projectRootName: "llm-tools",
+        visiblePaths: [
+            "crates/qrcode2txt/src/main.rs",
+            "tools/model-files-web/src/app.ts",
+            "lib.py",
+        ],
+        configurationPaths: [
+            "crates/qrcode2txt/Cargo.toml",
+            "tools/model-files-web/tsconfig.json",
+            "tools/model-files-web/package.json",
+            "tools/model-files-web/bun.lockb",
+            "package.json",
+            "bun.lockb",
+            "pyproject.toml",
+            "uv.lock",
+        ],
+        bytesByPath: [
+            "crates/qrcode2txt/src/main.rs": rust,
+            "crates/qrcode2txt/Cargo.toml": cargo,
+            "tools/model-files-web/src/app.ts": Array("export const a = 1\n".utf8),
+            "tools/model-files-web/tsconfig.json": tsConfig,
+            "tools/model-files-web/package.json": package,
+            "tools/model-files-web/bun.lockb": bunLock,
+            "package.json": Array("{\"name\":\"root\"}\n".utf8),
+            "bun.lockb": Array(repeating: UInt8(ascii: "x"), count: 2),
+            "lib.py": Array("x = 1\n".utf8),
+            "pyproject.toml": pyProject,
+            "uv.lock": uvLock,
+        ]
+    )
+
+    let interner = Interner<PathID>()
+    let rustProfile = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .rust,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+
+    #expect(rustProfile.projectRoot == interner.intern("crates/qrcode2txt"))
+    #expect(rustProfile.projectUnitName == "qrcode2txt")
+    #expect(rustProfile.configFingerprint == sha256Hex(cargo))
+
+    let tsProfile = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .typescript,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+    let expectedTS = typescriptConfigIdentity { path in
+        switch path {
+        case "tsconfig.json": return tsConfig
+        case "package.json": return package
+        case "bun.lockb": return bunLock
+        default: return nil
+        }
+    }
+    #expect(tsProfile.projectRoot == interner.intern("tools/model-files-web"))
+    #expect(tsProfile.projectUnitName == "tsconfig.json")
+    #expect(tsProfile.configFingerprint == expectedTS.config)
+    #expect(tsProfile.environmentFingerprint == expectedTS.environment)
+
+    let expectedPython = pythonConfigIdentity { path in
+        switch path {
+        case "pyproject.toml": return pyProject
+        case "uv.lock": return uvLock
+        default: return nil
+        }
+    }
+    let pythonProfile = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .python,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+    #expect(pythonProfile.projectRoot == interner.intern("."))
+    #expect(pythonProfile.projectUnitName == "llm-tools")
+    #expect(pythonProfile.configFingerprint == expectedPython.config)
+    #expect(pythonProfile.environmentFingerprint == expectedPython.environment)
+}
+
+@Test
+func profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() throws {
+    let interner = Interner<PathID>()
+    let snapshot = ProfileSnapshot(
+        projectRootName: "workspace",
+        visiblePaths: [
+            "tools/py2/app.ts",
+            "tools/py2/mod.py",
+            "lib/no-marker.rs",
+        ],
+        configurationPaths: [
+            "tools/py/tsconfig.json",
+            "src/tsconfig.json",
+        ],
+        bytesByPath: [
+            "tools/py2/app.ts": Array("export const a = 1\n".utf8),
+            "tools/py2/mod.py": Array("x = 1\n".utf8),
+            "tools/py/tsconfig.json": Array("{}".utf8),
+            "src/tsconfig.json": Array("{}".utf8),
+            "lib/no-marker.rs": Array("fn main() {}\n".utf8),
+        ]
+    )
+
+    #expect(throws: CocoaError.self) {
+        _ = try ProfileDetector.detect(
+            snapshot: snapshot,
+            language: .typescript,
+            sourcePaths: snapshot.visiblePaths,
+            configurationPaths: snapshot.configurationPaths,
+            internPath: { interner.intern($0) }
+        )
+    }
+    let rust = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .rust,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+
+    #expect(rust.projectRoot == interner.intern("."))
+    #expect(rust.projectUnitName == "workspace")
+    #expect(rust.configFingerprint == "")
+}
+
+@Test
+func snapshotZeroSourceKeepsEmptyProfile() throws {
+    let interner = Interner<PathID>()
+    let snapshot = ProfileSnapshot(
+        projectRootName: "empty-revision",
+        visiblePaths: [],
+        configurationPaths: [],
+        bytesByPath: [:]
+    )
+
+    let rust = try ProfileDetector.detect(
+        snapshot: snapshot,
+        language: .rust,
+        sourcePaths: snapshot.visiblePaths,
+        configurationPaths: snapshot.configurationPaths,
+        internPath: { interner.intern($0) }
+    )
+
+    #expect(rust.projectRoot == interner.intern("."))
+    #expect(rust.projectUnitName == "empty-revision")
+    #expect(rust.configFingerprint == "")
+}
+
+@Test
+func unsafeRelativePathsAreRejectedBeforeRootSelection() throws {
+    let interner = Interner<PathID>()
+    let snapshot = ProfileSnapshot(
+        projectRootName: "bad",
+        visiblePaths: [
+            "",
+            "../escape.rs",
+            "foo//bar.ts",
+            "foo/./bar.py",
+            "foo/../bar.rs",
+            "/absolute.py",
+        ],
+        configurationPaths: [
+            "../Cargo.toml",
+            "tools//tsconfig.json",
+            "tools/./package.json",
+            "tools/../pyproject.toml",
+            "/pyrightconfig.json",
+        ],
+        bytesByPath: [:]
+    )
+
+    for language in [LanguageID.rust, .python, .typescript] {
+        #expect(throws: CocoaError.self) {
+            _ = try ProfileDetector.detect(
+                snapshot: snapshot,
+                language: language,
+                sourcePaths: snapshot.visiblePaths,
+                configurationPaths: snapshot.configurationPaths,
+                internPath: { interner.intern($0) }
+            )
+        }
+    }
+}
+
+@Test
+func singleMarkerNotCoveringAllSourceFailsInsteadOfFallingBackToDot() throws {
+    let interner = Interner<PathID>()
+    let snapshot = ProfileSnapshot(
+        projectRootName: "partial",
+        visiblePaths: [
+            "a/src/inside.rs",
+            "outside.rs",
+        ],
+        configurationPaths: [
+            "a/Cargo.toml",
+        ],
+        bytesByPath: [
+            "a/src/inside.rs": Array("fn inside() {}\n".utf8),
+            "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
+            "outside.rs": Array("fn outside() {}\n".utf8),
+        ]
+    )
+
+    #expect(throws: CocoaError.self) {
+        _ = try ProfileDetector.detect(
+            snapshot: snapshot,
+            language: .rust,
+            sourcePaths: snapshot.visiblePaths,
+            configurationPaths: snapshot.configurationPaths,
+            internPath: { interner.intern($0) }
+        )
+    }
+}
+
+@Test
 func profileDetectorReadsPackageFeaturesEditionAndLockfile() throws {
     try withProfileProject([
         "Cargo.toml": """
@@ -703,6 +931,19 @@ private struct ProfileSnapshot: Snapshot {
     let projectRootName: String
     let visiblePaths: [String]
     let bytesByPath: [String: [UInt8]]
+    let configurationPaths: [String]
+
+    init(
+        projectRootName: String,
+        visiblePaths: [String],
+        configurationPaths: [String] = [],
+        bytesByPath: [String: [UInt8]]
+    ) {
+        self.projectRootName = projectRootName
+        self.visiblePaths = visiblePaths
+        self.configurationPaths = configurationPaths
+        self.bytesByPath = bytesByPath
+    }
 
     func listFiles() -> [(
         path: String,

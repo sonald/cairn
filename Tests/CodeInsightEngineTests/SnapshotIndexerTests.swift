@@ -679,6 +679,64 @@ func indexerRejectsExtractorAndResultIdentityMismatches() throws {
 }
 
 @Test
+func ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() throws {
+    let snapshot = CountingSnapshot(files: [
+        "a/src/main.rs": Array("fn main() {}\n".utf8),
+        "b/src/main.rs": Array("fn b() {}\n".utf8),
+        "a/Cargo.toml": Array("[package]\nname = \"a\"\n".utf8),
+        "b/Cargo.toml": Array("[package]\nname = \"b\"\n".utf8),
+    ], configurationPaths: [
+        "a/Cargo.toml",
+        "b/Cargo.toml",
+    ])
+    let store = ProjectIndexStore()
+    let beforePaths = store.paths.values
+
+    do {
+        _ = try ProjectIndexer(parallelism: 1).prepareSnapshot(
+            snapshot,
+            into: store,
+            language: .rust,
+            discoverUnitRoot: true
+        )
+        Issue.record("Ambiguous same-language roots unexpectedly indexed")
+    } catch let error as CocoaError {
+        #expect(error.code == .featureUnsupported)
+        #expect((error as NSError).localizedFailureReason?
+            .contains("multiple rust project units") == true)
+    }
+    #expect(snapshot.counts.read == 0)
+    #expect(store.paths.values == beforePaths)
+}
+
+@Test
+func publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutsideSource() throws {
+    let snapshot = CountingSnapshot(files: [
+        "nested/src/inside.rs": Array("fn inside() {}\n".utf8),
+        "outside.rs": Array("fn outside() {}\n".utf8),
+        "nested/Cargo.toml": Array("[package]\nname = \"nested\"\n".utf8),
+    ], configurationPaths: [
+        "nested/Cargo.toml",
+    ])
+
+    let singleton = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust
+    )
+    #expect(singleton.paths.resolve(singleton.analysisProfile.projectRoot) == ".")
+
+    #expect(throws: CocoaError.self) {
+        _ = try ProjectIndexer(parallelism: 1).prepareSnapshot(
+            snapshot,
+            into: ProjectIndexStore(),
+            language: .rust,
+            discoverUnitRoot: true
+        )
+    }
+}
+
+@Test
 func snapshotIndexingIsDeterministicForTheSameSequence() throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
@@ -701,13 +759,17 @@ func snapshotIndexingIsDeterministicForTheSameSequence() throws {
 func repositoryAdjacentCommitReuseExceedsEightyPercent() throws {
     let indexer = ProjectIndexer()
     let store = ProjectIndexStore()
-    let head = try CommitSnapshot(repositoryURL: snapshotIndexerRepositoryRoot)
+    let head = try countingCopyOf(
+        CommitSnapshot(repositoryURL: snapshotIndexerRepositoryRoot)
+    )
     _ = try indexer.indexSnapshot(head, into: store)
 
     let startedAt = Date()
-    let previous = try CommitSnapshot(
-        repositoryURL: snapshotIndexerRepositoryRoot,
-        revision: "HEAD~1"
+    let previous = try countingCopyOf(
+        CommitSnapshot(
+            repositoryURL: snapshotIndexerRepositoryRoot,
+            revision: "HEAD~1"
+        )
     )
     let session = try indexer.indexSnapshot(previous, into: store)
     let elapsed = Date().timeIntervalSince(startedAt) * 1_000
@@ -1176,6 +1238,7 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.tracked
+    let configurationPaths: [String]
 
     private let files: [String: [UInt8]]
     private let lock = NSLock()
@@ -1184,8 +1247,9 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
 
     init(files: [String: [UInt8]] = [
         "never.rs": Array("never".utf8),
-    ]) {
+    ], configurationPaths: [String] = []) {
         self.files = files
+        self.configurationPaths = configurationPaths
     }
 
     var counts: (list: Int, read: Int) {
@@ -1204,6 +1268,14 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
         guard let bytes = files[path] else { throw GitError.missingPath(path) }
         return bytes
     }
+}
+
+private func countingCopyOf(_ snapshot: any Snapshot) throws -> CountingSnapshot {
+    var bytes: [String: [UInt8]] = [:]
+    for file in snapshot.listFiles() {
+        bytes[file.path] = try snapshot.readBytes(path: file.path)
+    }
+    return CountingSnapshot(files: bytes)
 }
 
 private struct ContractExtractor: LanguageExtractor {

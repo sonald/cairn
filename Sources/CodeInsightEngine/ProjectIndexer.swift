@@ -206,11 +206,40 @@ public struct ProjectIndexer: Sendable {
         into store: ProjectIndexStore,
         language: LanguageID
     ) throws -> PreparedSnapshot {
+        try prepareSnapshot(
+            snapshot,
+            into: store,
+            language: language,
+            discoverUnitRoot: false
+        )
+    }
+
+    func prepareSnapshot(
+        _ snapshot: any Snapshot,
+        into store: ProjectIndexStore,
+        language: LanguageID,
+        discoverUnitRoot: Bool
+    ) throws -> PreparedSnapshot {
         let extractor = try languageExtractor(for: language)
         try Task.checkCancellation()
         let startedAt = Date()
         let stored = store.snapshot()
         let files = snapshot.listFiles().sorted { $0.path < $1.path }
+        let profile = if discoverUnitRoot {
+            try ProfileDetector.detect(
+                snapshot: snapshot,
+                language: language,
+                sourcePaths: files.map(\.path),
+                configurationPaths: snapshot.configurationPaths,
+                internPath: { store.paths.intern($0) }
+            )
+        } else {
+            try analysisProfile(
+                snapshot: snapshot,
+                language: language,
+                projectRoot: store.paths.intern(".")
+            )
+        }
         var occurrences: [FileOccurrence] = []
         var newInputs: [ExtractionInput] = []
         var missingKeys: Set<ContentIndexKey> = []
@@ -281,11 +310,6 @@ public struct ProjectIndexer: Sendable {
             snapshotID: snapshot.snapshotID,
             files: occurrences
         )
-        let analysisProfile = try analysisProfile(
-            snapshot: snapshot,
-            language: language,
-            projectRoot: store.paths.intern(".")
-        )
         let stats = try snapshotStats(
             manifest: manifest,
             paths: store.paths,
@@ -299,14 +323,14 @@ public struct ProjectIndexer: Sendable {
             store: store,
             manifest: manifest,
             stats: stats,
-            analysisProfile: analysisProfile,
+            analysisProfile: profile,
             extractor: extractor
         )
         return PreparedSnapshot(
             cachedSession: EngineSession(store: store, snapshotView: view),
             store: store,
             manifest: manifest,
-            analysisProfile: analysisProfile,
+            analysisProfile: profile,
             extractor: extractor,
             missingInputs: missingInputs,
             deferredDrafts: deferredDrafts,
