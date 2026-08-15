@@ -2,7 +2,7 @@
 
 > Started: 2026-08-15 (Asia/Shanghai)
 > Source plan: `docs/plans/l3-mixed-language-plan.md`
-> Current status: C2 PASS; Exact and product cutover remain closed.
+> Current status: C3 PASS; product cutover remains closed until F7.
 
 ## F0 live baseline
 
@@ -209,3 +209,74 @@ CodeInsightEngine, CodeInsightReaderCore, or CodeInsightReaderUI. An added-entit
 mixed/session router, registry, aggregate, DTO, or new Core/Engine/Reader semantic abstraction.
 
 C2 verdict: **PASS**. Mixed Exact and the product entry remain rejected until C3/F7.
+
+## C3 Exact checkpoint
+
+Nested profile fingerprints and provider switching are recorded by these stage commits:
+
+```text
+e2091cf feat: read exact profiles from nested roots
+d587d8c feat: switch exact providers across mixed profiles
+```
+
+The complete Exact and AppModel targets were run against the committed implementation. Both
+commands exited `0`:
+
+| Target | Result |
+|---|---:|
+| `CodeInsightExactTests` | 91 passed |
+| `CodeInsightAppModelTests --no-parallel` | 275 passed |
+
+The five focused F6b tests also passed together. They cover nested worktree and commit provider
+roots, workspace-relative result mapping, active-profile boundary rejection, preservation of a
+true external dependency, invalid-prefix atomicity, Rust -> Python -> TypeScript -> Rust session
+closure, one-warm prepare serialization, same-profile reuse, and foreign-language relation
+rejection. The legacy root-profile path was separately characterized after fixing `.` prefix
+normalization.
+
+### Real provider repeat
+
+The existing P0 probe was rebuilt from the current repository and run against the disposable,
+clean clone below:
+
+```text
+repository: /private/tmp/codeinsight-l3-p0.tKX4qX/llm-tools
+revision:   457b66e72da1967c2432131a7ff8adc4341eb337
+index hash: 5bc1b2d621663fa2e74715e925013c285f80add410654339c24749487867065d
+```
+
+Live provider versions had advanced since P0 and were therefore re-recorded rather than assumed:
+
+```text
+rust-analyzer:              0.0.0 (f938641be5 2026-08-10)
+Pyright:                    1.1.412
+Python interpreter:         3.14.7
+typescript-language-server: 3.3.0
+TypeScript:                 5.0.2
+Node:                       v26.7.0
+```
+
+Safe mode completed the fixed one-at-a-time sequence with exit `0`:
+
+| Profile | Definition | References | Ready + query elapsed |
+|---|---:|---:|---:|
+| Rust `crates/qrcode2txt` | 1 | 2 | 4.084 s |
+| Python `.` | 1 | 2 | 0.489 s |
+| TypeScript `tools/model-files-web` | 1 | 8 | 1.570 s |
+| Rust again | 1 | 2 | 2.473 s |
+
+Trusted mode repeated the same sequence with exit `0`: 3.092 s, 0.437 s, 0.545 s, and
+4.021 s. Every switch remained below the existing 30 second boundary. The provider capability
+sets remained language-specific; no generic lifecycle or provider pool was introduced.
+
+After both runs the clone remained at the same revision with empty status, worktree and index
+diff exit `0`, and the same index hash. A host process scan found zero remaining rust-analyzer,
+pyright-langserver, typescript-language-server, `tsserver.js`, or `cli.mjs` processes. The Exact
+target's host sandbox tests also passed project-write denial, network denial, Trusted Rust
+`target/` allowance, batch cancellation, forced close, and child-process reaping.
+
+The production source diff adds only scalar root/prefix state and private path helpers to the
+existing single `ExactCoordinator`. It adds no provider pool, registry, protocol, DTO, or public
+semantic type, and does not refactor the three concrete provider implementations.
+
+C3 verdict: **PASS**. The product entry remains rejected until the final F7 cutover.
