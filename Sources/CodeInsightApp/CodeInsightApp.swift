@@ -1626,6 +1626,46 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         let referenceProjectFixture = root.appendingPathComponent(
             "m6_reference_density.rs"
         )
+        do {
+            try FileManager.default.copyItem(
+                at: referenceFixture,
+                to: referenceProjectFixture
+            )
+        } catch {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "M6 reference scale copy failed: \(error)"
+            )
+        }
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 30, condition: {
+            if case .failed = self.model.projectState { return true }
+            if self.model.fileTree != nil
+                && self.model.snapshotPhase == .fullReady
+            {
+                return true
+            }
+            return false
+        }) && model.fileTree != nil
+            && model.snapshotPhase == .fullReady
+        else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "reference fixture project unavailable"
+            )
+        }
+        controller.openFileForSelfTest(regular)
+        guard waitUntil(timeout: 5, condition: {
+            controller.selfTestLeftReaderBytes == regularBytes
+        }) else {
+            finish(
+                checks: checks,
+                metrics: [:],
+                error: "reference reader did not reopen"
+            )
+        }
         let referenceUsesFixture = root.appendingPathComponent(
             "a_reference_use.rs"
         )
@@ -9110,10 +9150,6 @@ private func makeReadingSelfTestDirectory() throws -> URL {
         try FileManager.default.copyItem(
             at: referenceFixture,
             to: root.appendingPathComponent("target/m6_reference_density.rs")
-        )
-        try FileManager.default.copyItem(
-            at: referenceFixture,
-            to: root.appendingPathComponent("m6_reference_density.rs")
         )
         try Data("fn use_reference() { p0(); }\n".utf8).write(
             to: root.appendingPathComponent("a_reference_use.rs")
