@@ -2,7 +2,7 @@
 
 > Started: 2026-08-15 (Asia/Shanghai)
 > Source plan: `docs/plans/l3-mixed-language-plan.md`
-> Current status: F0 PASS; production cutover remains closed.
+> Current status: C2 PASS; Exact and product cutover remain closed.
 
 ## F0 live baseline
 
@@ -172,3 +172,40 @@ The following `git rev-parse HEAD:<path>` identities are the F0 protection basel
 | `Package.swift` | `913b1de039b81d67c32b3f54cb627d4abbadc546` |
 
 F0 verdict: **PASS**. L3 production remains rejected until the later cutover slice.
+
+## C2 App/query/Reader/persistence checkpoint
+
+The implementation through F5b is recorded by these stage commits:
+
+```text
+53a54f9 feat: publish mixed workspace sessions atomically
+ed4453d feat: fence active session consumers by profile
+57300e4 feat: search all workspace sessions
+915ee38 feat: persist mixed language selections
+15099ad feat: search symbols across workspace sessions
+03de769 fix: route mixed reader state by file mode
+d7c0072 feat: restore mixed workspace sessions
+```
+
+The four checkpoint targets were run serially from a clean worktree with repository-local
+SwiftPM and Clang module caches. Every command exited `0`:
+
+| Target | Result |
+|---|---:|
+| `CodeInsightAppModelTests` | 270 passed |
+| `CodeInsightReaderCoreTests` | 113 passed |
+| `CodeInsightReaderUITests` | 14 passed |
+| `CodeInsightAppTests` | 75 passed |
+
+Total: **472 passed, 0 failed**.
+
+Focused deterministic tests cover workspace content and symbol search forwarding, cross-language
+Reader/Context/Relation/Compare routing, snapshot/profile/generation stale completion rejection,
+SessionCodec v1 compatibility, v2 canonical language arrays, mixed checkpoint/restore, Open Recent,
+Retry, supported-suffix dependencies, and extensionless dependency rejection.
+
+The production diff from C1 commit `af3d106` through C2 does not touch CodeInsightCore,
+CodeInsightEngine, CodeInsightReaderCore, or CodeInsightReaderUI. An added-entity scan found no
+mixed/session router, registry, aggregate, DTO, or new Core/Engine/Reader semantic abstraction.
+
+C2 verdict: **PASS**. Mixed Exact and the product entry remain rejected until C3/F7.
