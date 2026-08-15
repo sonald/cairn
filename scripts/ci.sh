@@ -74,7 +74,12 @@ fi
 
 .build/debug/codeinsight-app --self-test-exact .
 .build/debug/codeinsight-app --self-test-diff .
-.build/debug/codeinsight-app --self-test-reading
+reading_cache="$(mktemp -d "${TMPDIR:-/private/tmp}/codeinsight-ci-reading-cache.XXXXXX")"
+trap 'rm -rf "$reading_cache"' EXIT
+CODEINSIGHT_INDEX_CACHE_ROOT="$reading_cache" \
+    .build/debug/codeinsight-app --self-test-reading
+rm -rf "$reading_cache"
+trap - EXIT
 .build/debug/codeinsight-app --self-test-projector
 .build/debug/codeinsight-app --self-test-fold
 
