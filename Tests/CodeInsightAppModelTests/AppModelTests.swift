@@ -1368,6 +1368,38 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
 }
 
 @Test
+func singletonCollectionPreparePreservesLegacyRootWithoutUnitDiscovery() async throws {
+    let root = try temporaryGitProject([
+        "a/src/main.rs": "fn a() {}\n",
+        "b/src/main.rs": "fn b() {}\n",
+        "a/Cargo.toml": "[package]\nname = \"a\"\n",
+        "b/Cargo.toml": "[package]\nname = \"b\"\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+        try? FileManager.default.removeItem(at: root)
+    }
+    let service = ProjectIndexService()
+    let snapshot = try await service.captureSnapshot(
+        root: root,
+        revision: nil,
+        languages: [.rust]
+    )
+    let prepared = try await service.prepareSnapshots(
+        snapshot,
+        root: root,
+        languages: [.rust]
+    )
+
+    #expect(prepared.count == 1)
+    #expect(prepared[0].cachedSession.analysisProfile.language == .rust)
+    #expect(prepared[0].cachedSession.paths.resolve(
+        prepared[0].cachedSession.analysisProfile.projectRoot
+    ) == ".")
+}
+
+@Test
 func ambiguousAndNonGitFailBeforePersistentCache() async throws {
     let nonGit = try temporaryProject([
         "a.rs": "fn a() {}\n",

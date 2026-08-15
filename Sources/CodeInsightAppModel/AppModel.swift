@@ -237,6 +237,14 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         languages: [LanguageID]
     ) async throws -> [ProjectIndexer.PreparedSnapshot] {
         let normalized = try LanguageMode.normalize(languages: languages)
+        if normalized.count == 1 {
+            return [
+                try await prepareSnapshot(
+                    snapshot,
+                    language: normalized[0]
+                ),
+            ]
+        }
         let expectedSnapshotID = snapshot.snapshotID
         let store = store
         let indexer = ProjectIndexer()
