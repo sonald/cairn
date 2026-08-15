@@ -323,6 +323,56 @@ struct PaletteTests {
     }
 
     @Test
+    func projectSymbolModeForwardsFullWorkspaceSessions() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PaletteTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try "fn shared() {}\n".write(
+            to: root.appendingPathComponent("main.rs"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "def shared():\n    pass\n".write(
+            to: root.appendingPathComponent("lib.py"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "export function shared() {}\n".write(
+            to: root.appendingPathComponent("app.ts"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["-C", root.path, "init", "-q"]
+        try git.run()
+        git.waitUntilExit()
+        guard git.terminationStatus == 0 else {
+            try? FileManager.default.removeItem(at: root)
+            throw CocoaError(.fileWriteUnknown)
+        }
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let model = AppModel(indexService: ProjectIndexService())
+        try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+        #expect(await waitUntil {
+            model.querySessions.count == 3
+        })
+
+        let panel = PalettePanel(
+            appModel: model,
+            settings: ReaderSettings(),
+            onOpen: { _, _ in }
+        )
+        defer { panel.close() }
+        panel.show(prefill: "#shared", relativeTo: nil)
+        #expect(await waitUntil {
+            panel.rowsForTesting.count == 3
+                && panel.rowsForTesting.allSatisfy { $0.title == "shared" }
+        })
+    }
+
+    @Test
     func readingSetDisablesOnlyTheTwoActiveFilePaletteModes() {
         _ = NSApplication.shared
         let model = AppModel()

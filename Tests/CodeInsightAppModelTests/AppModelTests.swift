@@ -1123,6 +1123,7 @@ func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
     #expect(model.contextWindow.selectedCandidate?.path == "lib.py")
 }
 
+
 @MainActor
 @Test
 func crossLanguageSameNameContextStaysInActivePythonSession() async throws {
@@ -1610,6 +1611,173 @@ func symbolSearchPathCacheRefreshesForANewSession() async throws {
         guard case let .result(name, hit) = model.rows.first else { return false }
         return name == "target" && hit.path == "z.rs"
     })
+}
+
+@MainActor
+private func makeMixedSymbolWorkspace() async throws -> (
+    root: URL,
+    model: AppModel,
+    sessions: [(EngineSession, QueryContext)],
+    cachePaths: [String]
+) {
+    let root = try temporaryGitProject([
+        "main.rs": "pub fn alpha() {}\npub fn target() {}\n",
+        "lib.py": "def alpha():\n    pass\n\ndef target():\n    pass\n",
+        "app.ts": "export function alpha() {}\nexport function target() {}\n",
+        "pyproject.toml": "[project]\nname = \"fixture\"\n",
+        "Cargo.toml": "[package]\nname = \"fixture\"\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    let model = AppModel(indexService: ProjectIndexService())
+    try await model.openProject(root: root, languages: [.rust, .python, .typescript])
+    let sessions = model.querySessions
+    guard sessions.count == 3 else {
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+        try? FileManager.default.removeItem(at: root)
+        throw CocoaError(.featureUnsupported)
+    }
+    return (root, model, sessions, cachePaths)
+}
+
+@MainActor
+@Test
+func symbolSearchWorkspaceMergesAllSessionsWithStableOrdering() async throws {
+    let fixture = try await makeMixedSymbolWorkspace()
+    defer {
+        for path in fixture.cachePaths {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let model = SymbolSearchPanelModel()
+
+    model.updateQuery("alpha", sessions: fixture.sessions)
+    #expect(await testWaitUntil("model.rows.count == 3") { model.rows.count == 3 })
+    let paths = model.rows.compactMap { row -> String? in
+        guard case let .result(_, hit) = row else { return nil }
+        return hit.path
+    }
+    #expect(paths == ["app.ts", "lib.py", "main.rs"])
+}
+
+@MainActor
+@Test
+func symbolSearchWorkspaceKeepsSameNamesAndUsesSharedPathBoost() async throws {
+    let fixture = try await makeMixedSymbolWorkspace()
+    defer {
+        for path in fixture.cachePaths {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let model = SymbolSearchPanelModel()
+
+    model.updateQuery(
+        "target",
+        sessions: fixture.sessions,
+        currentPath: "main.rs"
+    )
+    #expect(await testWaitUntil("model.rows.count == 3") { model.rows.count == 3 })
+    let rows = model.rows.compactMap { row -> (name: String, path: String)? in
+        guard case let .result(name, hit) = row else { return nil }
+        return (name, hit.path)
+    }
+    #expect(rows.map(\.path) == ["main.rs", "app.ts", "lib.py"])
+    #expect(rows.map(\.name).allSatisfy { $0 == "target" })
+}
+
+@MainActor
+@Test
+func symbolSearchNewQueryDropsStaleWorkspaceDetachedCompletion() async throws {
+    let fixture = try await makeMixedSymbolWorkspace()
+    defer {
+        for path in fixture.cachePaths {
+            try? FileManager.default.removeItem(atPath: path)
+        }
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let gate = SymbolSearchGate()
+    let model = SymbolSearchPanelModel(symbolSearcher: gate.search)
+
+    await gate.blockFirst("old")
+    model.updateQuery("old", sessions: fixture.sessions)
+    #expect(await testWaitUntil("gate.isPending(\"old\")") {
+        await gate.isPending("old")
+    })
+    model.updateQuery("new", sessions: Array(fixture.sessions.prefix(1)))
+    #expect(await testWaitUntil("model.rows.count == 1") { model.rows.count == 1 })
+    await gate.release("old", fixture: fixture, count: 3)
+    #expect(await testWaitUntil("gate.completed(\"old\")") {
+        await gate.completed("old")
+    })
+    #expect(model.rows.count == 1)
+}
+
+private actor SymbolSearchGate {
+    private var blocked: Set<String> = []
+    private var continuations: [String: CheckedContinuation<[SymbolSearchHit], Error>] = [:]
+    private var completedQueries: [String: Int] = [:]
+
+    func search(
+        session: EngineSession,
+        query: String,
+        boost: SearchBoost,
+        context: QueryContext
+    ) async throws -> [SymbolSearchHit] {
+        if !blocked.contains(query) {
+            completedQueries[query, default: 0] += 1
+            return try session.searchSymbols(
+                query: "target",
+                limit: .max,
+                boost: boost,
+                context: context
+            )
+        }
+        blocked.remove(query)
+        return try await withCheckedThrowingContinuation { continuation in
+            continuations[query] = continuation
+        }
+    }
+
+    func isPending(_ query: String) -> Bool {
+        continuations[query] != nil
+    }
+
+    func blockFirst(_ query: String) {
+        blocked.insert(query)
+    }
+
+    func completed(_ query: String) -> Bool {
+        completedQueries[query] ?? 0 >= 3
+    }
+
+    func release(
+        _ query: String,
+        fixture: (
+            root: URL,
+            model: AppModel,
+            sessions: [(EngineSession, QueryContext)],
+            cachePaths: [String]
+        ),
+        count: Int
+    ) {
+        guard let session = fixture.sessions.first(where: {
+            $0.0.analysisProfile.language == .rust
+        })?.0 else { return }
+        let context = fixture.sessions.first(where: {
+            $0.0.analysisProfile.language == .rust
+        })?.1
+        guard let context else { return }
+        let hits = (try? session.searchSymbols(
+            query: "target",
+            limit: count,
+            boost: SearchBoost(),
+            context: context
+        )) ?? []
+        completedQueries[query, default: 0] += 1
+        continuations[query]?.resume(returning: hits)
+        continuations[query] = nil
+    }
 }
 
 @MainActor

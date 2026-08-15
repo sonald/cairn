@@ -18,8 +18,81 @@ public final class SymbolSearchPanelModel {
 
     @ObservationIgnored private var pathIDsSnapshotID: SnapshotID?
     @ObservationIgnored private var pathIDsByPath: [String: PathID] = [:]
+    private let symbolSearcher: @Sendable (
+        EngineSession,
+        String,
+        SearchBoost,
+        QueryContext
+    ) async throws -> [SymbolSearchHit]
 
-    public init() {}
+    public init() {
+        symbolSearcher = { session, query, boost, context in
+            try session.searchSymbols(
+                query: query,
+                limit: .max,
+                boost: boost,
+                context: context
+            )
+        }
+    }
+
+    init(
+        symbolSearcher: @escaping @Sendable (
+            EngineSession,
+            String,
+            SearchBoost,
+            QueryContext
+        ) async throws -> [SymbolSearchHit]
+    ) {
+        self.symbolSearcher = symbolSearcher
+    }
+
+    public func updateQuery(
+        _ query: String,
+        sessions: [(EngineSession, QueryContext)],
+        currentPath: String? = nil,
+        recentPaths: [String] = []
+    ) {
+        self.query = query
+        requestID &+= 1
+        let currentRequestID = requestID
+        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            rows = []
+            selectedIndex = nil
+            return
+        }
+        guard !sessions.isEmpty else {
+            rows = []
+            selectedIndex = nil
+            return
+        }
+
+        let capturedSnapshotID = sessions.first?.0.snapshotID
+        let capturedSessions = sessions
+        let capturedCurrentPath = currentPath
+        let capturedRecentPaths = recentPaths
+        let symbolSearcher = symbolSearcher
+        Task { [weak self] in
+            let rows = await Task.detached(priority: .userInitiated) {
+                try? await capturesRows(
+                    query: query,
+                    sessions: capturedSessions,
+                    currentPath: capturedCurrentPath,
+                    recentPaths: capturedRecentPaths,
+                    pathIDsSnapshotID: capturedSnapshotID,
+                    symbolSearcher: symbolSearcher
+                )
+            }.value
+            guard let self, self.requestID == currentRequestID else { return }
+            guard let rows, !rows.isEmpty else {
+                self.rows = []
+                self.selectedIndex = nil
+                return
+            }
+            self.rows = rows
+            self.selectedIndex = 0
+        }
+    }
 
     public func updateQuery(
         _ query: String,
@@ -123,5 +196,54 @@ public final class SymbolSearchPanelModel {
         self.selectedIndex = selectable[
             (position + delta + selectable.count) % selectable.count
         ]
+    }
+}
+
+private func capturesRows(
+    query: String,
+    sessions: [(EngineSession, QueryContext)],
+    currentPath: String?,
+    recentPaths: [String],
+    pathIDsSnapshotID: SnapshotID?,
+    symbolSearcher: @escaping @Sendable (
+        EngineSession,
+        String,
+        SearchBoost,
+        QueryContext
+    ) async throws -> [SymbolSearchHit]
+) async throws -> [SymbolSearchRow] {
+    var result: [SymbolSearchRow] = []
+    result.reserveCapacity(sessions.count)
+    for (session, context) in sessions {
+        guard session.snapshotID == pathIDsSnapshotID else { return [] }
+        let pathsByPath = Dictionary(uniqueKeysWithValues: session.manifest.files.map {
+            (session.paths.resolve($0.pathID), $0.pathID)
+        })
+        let boost = SearchBoost(
+            currentFile: currentPath.flatMap { pathsByPath[$0] },
+            recentFiles: recentPaths.compactMap { pathsByPath[$0] }
+        )
+        let hits = try await symbolSearcher(
+            session,
+            query,
+            boost,
+            context
+        )
+        result.append(contentsOf: hits.map {
+            .result(name: session.names.resolve($0.nameID), hit: $0)
+        })
+    }
+    return result.sorted { lhs, rhs in
+        guard case let .result(_, lhsHit) = lhs,
+              case let .result(_, rhsHit) = rhs
+        else { return false }
+        if lhsHit.score != rhsHit.score { return lhsHit.score > rhsHit.score }
+        if lhsHit.path != rhsHit.path { return lhsHit.path < rhsHit.path }
+        let lhsRange = lhsHit.facet.nameRange
+        let rhsRange = rhsHit.facet.nameRange
+        if lhsRange.lowerBound != rhsRange.lowerBound {
+            return lhsRange.lowerBound < rhsRange.lowerBound
+        }
+        return lhsRange.upperBound < rhsRange.upperBound
     }
 }

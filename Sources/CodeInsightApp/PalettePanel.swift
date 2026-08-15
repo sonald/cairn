@@ -411,11 +411,20 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 install([], emptyMessage: "Type a project symbol")
                 return
             }
-            symbolModel.updateQuery(
-                parsed.query,
-                projectState: appModel.projectState,
-                currentPath: selectedProjectPath
-            )
+            let sessions = appModel.querySessions
+            if sessions.isEmpty {
+                symbolModel.updateQuery(
+                    parsed.query,
+                    projectState: appModel.projectState,
+                    currentPath: selectedProjectPath
+                )
+            } else {
+                symbolModel.updateQuery(
+                    parsed.query,
+                    sessions: sessions,
+                    currentPath: selectedProjectPath
+                )
+            }
             installProjectSymbolRows()
         case .line:
             symbolModel.reset()
