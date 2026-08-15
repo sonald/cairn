@@ -3458,10 +3458,55 @@ func relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() async thr
     model.updateProjectState(.ready(fixture.session, fixture.context))
 
     model.setRoot(target: .engine(fixture.a), direction: .references)
-    #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
+    #expect(await testWaitUntil("await fake.isPending(fixture.a)") {
+        await fake.isPending(fixture.a)
+    })
     model.updateProjectState(.ready(fixture.session, fixture.context))
     await fake.release(fixture.a)
     for _ in 0..<10 { await Task.yield() }
+
+    #expect(model.root == nil)
+}
+
+@MainActor
+@Test
+func relationTreeDiscardsStaleProjectReferencesAfterProfileChangeAtSameGeneration()
+    async throws
+{
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let stale = RelationTreeModel.LoadedEdge(
+        title: "stale-reference",
+        certainty: .possible,
+        dispatch: .direct,
+        symbol: nil,
+        path: "main.rs",
+        byteOffset: 0,
+        line: 1,
+        evidence: []
+    )
+    let fake = FakeRelationLoader(
+        responses: [
+            fixture.a: .init(edges: [stale], isTruncated: false),
+        ],
+        gated: [fixture.a]
+    )
+    let model = RelationTreeModel(loader: fake.load)
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+
+    model.setRoot(target: .engine(fixture.a), direction: .references)
+    #expect(await testWaitUntil("await fake.isPending(fixture.a)") { await fake.isPending(fixture.a) })
+    let secondSession = fixture.session.reprofiled(featureSelection: .allFeatures)
+    let nextContext = QueryContext(
+        snapshotID: fixture.context.snapshotID,
+        analysisProfileID: secondSession.analysisProfile.id,
+        generation: fixture.context.generation
+    )
+    model.updateProjectState(.ready(secondSession, nextContext))
+    await fake.release(fixture.a)
+    #expect(await testWaitUntil("fake completed stale project reference load") {
+        await fake.hasCompleted(fixture.a)
+    })
 
     #expect(model.root == nil)
 }
@@ -4237,6 +4282,7 @@ private actor FakeRelationLoader {
     private var gated: Set<SymbolOccurrenceID>
     private var waitingCounts: [SymbolOccurrenceID: Int] = [:]
     private var counts: [SymbolOccurrenceID: Int] = [:]
+    private var completions: Set<SymbolOccurrenceID> = []
 
     init(
         responses: [SymbolOccurrenceID: RelationTreeModel.LoadResult],
@@ -4253,6 +4299,7 @@ private actor FakeRelationLoader {
         direction: RelationTreeModel.Direction
     ) async throws -> RelationTreeModel.LoadResult {
         counts[symbol, default: 0] += 1
+        let wasGated = gated.contains(symbol)
         if gated.contains(symbol) {
             waitingCounts[symbol, default: 0] += 1
             defer {
@@ -4274,7 +4321,11 @@ private actor FakeRelationLoader {
                 )
             }
         }
-        return responses[symbol] ?? .init(edges: [], isTruncated: false)
+        let result = responses[symbol] ?? .init(edges: [], isTruncated: false)
+        if wasGated {
+            completions.insert(symbol)
+        }
+        return result
     }
 
     func count(for symbol: SymbolOccurrenceID) -> Int {
@@ -4287,6 +4338,10 @@ private actor FakeRelationLoader {
 
     func release(_ symbol: SymbolOccurrenceID) {
         gated.remove(symbol)
+    }
+
+    func hasCompleted(_ symbol: SymbolOccurrenceID) -> Bool {
+        completions.contains(symbol)
     }
 }
 

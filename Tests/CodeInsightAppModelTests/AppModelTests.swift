@@ -1,7 +1,9 @@
 import CodeInsightCore
+import CodeInsightExact
 import CodeInsightGit
 import CodeInsightReaderCore
 import Foundation
+import os
 import Testing
 @testable import CodeInsightAppModel
 @testable import CodeInsightEngine
@@ -1041,6 +1043,135 @@ func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async thr
 
 @MainActor
 @Test
+func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
+    let rustSource = "fn target() {}\nfn use_rust() { target(); }\n"
+    let pySource = "def target():\n    pass\n\ndef use_py():\n    target()\n"
+    let root = try temporaryGitProject([
+        "main.rs": rustSource,
+        "lib.py": pySource,
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let gate = ControlledContextResolver()
+    let model = AppModel(
+        indexService: ProjectIndexService(),
+        contextWindow: ContextWindowModel(gate.resolve)
+    )
+    try await model.openProject(root: root, languages: [.rust, .python])
+
+    let rustURL = root.appendingPathComponent("main.rs")
+    let pythonURL = root.appendingPathComponent("lib.py")
+    let rustOffset = byteOffset(of: "target();", in: rustSource)
+    let pythonOffset = byteOffset(of: "target()\n", in: pySource)
+    model.navigate(to: rustURL)
+    model.contextWindow.tokenClicked(file: "main.rs", offset: rustOffset)
+    #expect(await testWaitUntil("gate.isPending(rustOffset)") {
+        gate.isPending(rustOffset)
+    })
+
+    model.navigate(to: pythonURL)
+    let rustSession = try #require(model.querySessions.first {
+        $0.0.analysisProfile.language == .rust
+    }.map(\.0))
+    let pythonSession = try #require(model.querySessions.first {
+        $0.0.analysisProfile.language == .python
+    }.map(\.0))
+    let rustPath = try #require(pathID("main.rs", in: rustSession))
+    let pythonPath = try #require(pathID("lib.py", in: pythonSession))
+    let rustContext = QueryContext(
+        snapshotID: rustSession.snapshotID,
+        analysisProfileID: rustSession.analysisProfile.id,
+        generation: model.generation
+    )
+    let pythonContext = QueryContext(
+        snapshotID: pythonSession.snapshotID,
+        analysisProfileID: pythonSession.analysisProfile.id,
+        generation: model.generation
+    )
+    gate.complete(
+        rustOffset,
+        with: try rustSession.resolve(
+            file: rustPath,
+            offset: rustOffset,
+            context: rustContext
+        )
+    )
+    #expect(await testWaitUntil("gate.hasCompleted(rustOffset)") {
+        gate.hasCompleted(rustOffset)
+    })
+    #expect(model.contextWindow.candidateCount == 0)
+
+    model.contextWindow.tokenClicked(file: "lib.py", offset: pythonOffset)
+    #expect(await testWaitUntil("gate.isPending(pythonOffset)") {
+        gate.isPending(pythonOffset)
+    })
+    #expect(gate.callLanguages().last == .python)
+    gate.complete(
+        pythonOffset,
+        with: try pythonSession.resolve(
+            file: pythonPath,
+            offset: pythonOffset,
+            context: pythonContext
+        )
+    )
+    #expect(await testWaitUntil("model.contextWindow.selectedCandidate != nil") {
+        model.contextWindow.selectedCandidate != nil
+    })
+    #expect(model.contextWindow.selectedCandidate?.path == "lib.py")
+}
+
+@MainActor
+@Test
+func crossLanguageSameNameContextStaysInActivePythonSession() async throws {
+    let rustSource = "pub fn shared() {}\n"
+    let pySource = "def shared():\n    pass\n\ndef use_py():\n    shared()\n"
+    let root = try temporaryGitProject([
+        "main.rs": rustSource,
+        "lib.py": pySource,
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let model = AppModel(indexService: ProjectIndexService())
+    try await model.openProject(root: root, languages: [.rust, .python])
+
+    model.navigate(to: root.appendingPathComponent("lib.py"))
+    let offset = byteOffset(of: "shared()\n", in: pySource)
+    model.contextWindow.tokenClicked(file: "lib.py", offset: offset)
+    #expect(await testWaitUntil("model.contextWindow.selectedCandidate != nil") {
+        model.contextWindow.selectedCandidate != nil
+    })
+    #expect(model.contextWindow.selectedCandidate?.path == "lib.py")
+    #expect(model.contextWindow.selectedCandidate?.excerpt.isEmpty != true)
+    #expect(model.contextWindow.selectedCandidate?.symbol?.snapshotID == model.currentSnapshotID)
+    let pythonSession = try #require(model.querySessions.first {
+        $0.0.analysisProfile.language == .python
+    }.map(\.0))
+    let pythonContext = QueryContext(
+        snapshotID: pythonSession.snapshotID,
+        analysisProfileID: pythonSession.analysisProfile.id,
+        generation: model.generation
+    )
+    let pythonPath = try #require(pathID("lib.py", in: pythonSession))
+    let resolved = try pythonSession.resolve(
+        file: pythonPath,
+        offset: offset,
+        context: pythonContext
+    )
+    let resolvedPaths = resolved.map {
+        pythonSession.paths.resolve($0.target.pathID)
+    }
+    #expect(!resolvedPaths.isEmpty)
+    #expect(resolvedPaths.allSatisfy { $0 == "lib.py" })
+}
+
+@MainActor
+@Test
 func rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() async throws {
     let root = try temporaryGitProject([
         "main.rs": "fn a() {}\n",
@@ -1084,6 +1215,58 @@ func rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() async throws {
     #expect(session.analysisProfile.language == .python)
     #expect(session.analysisProfile.id == pythonProfileID)
     #expect(context.generation == pythonProfileGeneration)
+}
+
+@MainActor
+@Test
+func sameProfileNavigationDoesNotResetContextOrRelationIdentity() async throws {
+    let root = try temporaryGitProject([
+        "main.rs": "fn a() {}\n",
+        "other.rs": "fn c() {}\n",
+        "lib.py": "def b():\n    pass\n",
+    ])
+    let cachePaths = try indexCachePaths(for: root)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        for path in cachePaths { try? FileManager.default.removeItem(atPath: path) }
+    }
+    let exactCalls = OSAllocatedUnfairLock(initialState: 0)
+    let model = AppModel(
+        indexService: ProjectIndexService(),
+        exactCoordinator: ExactCoordinator(
+            providerFactory: { _, _ in
+                exactCalls.withLock { $0 += 1 }
+                throw ExactError.unavailable("test")
+            },
+            sandboxAvailable: { true },
+            trustRegistry: TrustRegistry(
+                fileURL: root.appendingPathComponent("trust.json")
+            )
+        )
+    )
+    try await model.openProject(root: root, languages: [.rust, .python])
+
+    let firstURL = root.appendingPathComponent("main.rs")
+    model.navigate(to: firstURL)
+    guard case let .ready(_, firstContext) = model.projectState else {
+        Issue.record("expected ready Rust context")
+        return
+    }
+    let relationGeneration = model.relationTree.generation
+    #expect(await testWaitUntil("Exact readiness settles") {
+        if case .unavailable = model.exactCoordinator.readiness { return true }
+        return false
+    })
+    let beforeCalls = exactCalls.withLock { $0 }
+    model.navigate(to: root.appendingPathComponent("other.rs"), byteOffset: 2)
+    guard case let .ready(_, nextContext) = model.projectState else {
+        Issue.record("expected ready Rust context after same profile navigation")
+        return
+    }
+    #expect(nextContext.analysisProfileID == firstContext.analysisProfileID)
+    #expect(model.relationTree.generation == relationGeneration)
+    #expect(exactCalls.withLock { $0 } == beforeCalls)
+    #expect(model.generation == firstContext.generation)
 }
 
 @Test
@@ -1636,6 +1819,56 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
 
 @MainActor
 @Test
+func contextWindowDiscardsResultAfterProfileChangeAtSameGeneration() async throws {
+    let source = "fn alpha() {}\nfn beta() {}\nfn main() { alpha(); beta(); }"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let secondSession = session.reprofiled(featureSelection: .allFeatures)
+    let firstProfile = queryContext(for: session)
+    let secondProfile = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: secondSession.analysisProfile.id,
+        generation: firstProfile.generation
+    )
+    let path = try #require(pathID("main.rs", in: session))
+    let alpha = byteOffset(of: "alpha();", in: source)
+    let beta = byteOffset(of: "beta();", in: source)
+    let gate = ControlledContextResolver()
+    let model = ContextWindowModel(gate.resolve)
+    model.updateProjectState(.ready(session, firstProfile), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: alpha)
+    #expect(await testWaitUntil("gate.isPending(alpha)") { gate.isPending(alpha) })
+    model.updateProjectState(.ready(secondSession, secondProfile), root: root)
+    gate.complete(
+        alpha,
+        with: try session.resolve(
+            file: path,
+            offset: alpha,
+            context: firstProfile
+        )
+    )
+    #expect(await testWaitUntil("gate.hasCompleted(alpha)") { gate.hasCompleted(alpha) })
+    #expect(model.candidateCount == 0)
+
+    model.tokenClicked(file: "main.rs", offset: beta)
+    #expect(await testWaitUntil("gate.isPending(beta)") { gate.isPending(beta) })
+    gate.complete(
+        beta,
+        with: try secondSession.resolve(
+            file: path,
+            offset: beta,
+            context: secondProfile
+        )
+    )
+    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset != nil") {
+        model.selectedCandidate?.targetByteOffset != nil
+    })
+}
+
+@MainActor
+@Test
 func resolvedContextCandidateRejectsAnOlderProfileGeneration() async throws {
     let source = "fn target() {}\nfn main() { target(); }"
     let root = try temporaryProject(["main.rs": source])
@@ -2111,6 +2344,8 @@ private actor ControlledIndexService: IndexService {
 @MainActor
 private final class ControlledContextResolver {
     private var pending: [UInt32: CheckedContinuation<[ResolutionCandidate], Never>] = [:]
+    private var completed: Set<UInt32> = []
+    private var calls: [(language: LanguageID, profileID: AnalysisProfileID, offset: UInt32)] = []
 
     func resolve(
         session: EngineSession,
@@ -2118,7 +2353,10 @@ private final class ControlledContextResolver {
         offset: UInt32,
         context: QueryContext
     ) async throws -> [ResolutionCandidate] {
-        await withCheckedContinuation { pending[offset] = $0 }
+        calls.append((session.analysisProfile.language, session.analysisProfile.id, offset))
+        let result = await withCheckedContinuation { pending[offset] = $0 }
+        completed.insert(offset)
+        return result
     }
 
     func isPending(_ offset: UInt32) -> Bool {
@@ -2128,6 +2366,15 @@ private final class ControlledContextResolver {
     func complete(_ offset: UInt32, with candidates: [ResolutionCandidate]) {
         pending.removeValue(forKey: offset)?.resume(returning: candidates)
     }
+
+    func hasCompleted(_ offset: UInt32) -> Bool {
+        completed.contains(offset)
+    }
+
+    func callLanguages() -> [LanguageID] {
+        calls.map(\.language)
+    }
+
 }
 
 private actor CountingContextLoader {

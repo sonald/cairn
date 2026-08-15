@@ -186,10 +186,14 @@ public final class ContextWindowModel {
         root: URL?,
         contentSource: DocumentLoader.ContentSource? = nil
     ) {
-        let previousGeneration = if case let .ready(_, context) = projectState {
-            context.generation
+        let previousIdentity = if case let .ready(_, context) = projectState {
+            (context.snapshotID, context.analysisProfileID, context.generation)
         } else {
-            nil as UInt64?
+            nil as (
+                snapshotID: SnapshotID,
+                analysisProfileID: AnalysisProfileID,
+                generation: UInt64
+            )?
         }
         let normalizedRoot = root?.standardizedFileURL
         if self.root != normalizedRoot {
@@ -211,8 +215,17 @@ public final class ContextWindowModel {
             displayedToken = nil
             stage = .indexBuilding
         case let .ready(_, context):
-            if let previousGeneration,
-               previousGeneration != context.generation
+            if let previousIdentity,
+               previousIdentity.snapshotID != context.snapshotID
+                || previousIdentity.analysisProfileID != context.analysisProfileID
+            {
+                requestID &+= 1
+                cancelExactUpgrade()
+                locatedToken = nil
+                displayedToken = nil
+                stage = .idle
+            } else if let previousIdentity,
+                      previousIdentity.generation != context.generation
             {
                 requestID &+= 1
                 cancelExactUpgrade()
