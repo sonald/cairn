@@ -190,38 +190,45 @@ public struct ExactProfileKey: Hashable, Sendable {
 
     public init(
         snapshot: any Snapshot,
-        featureSelection: FeatureSelection = .defaultFeatures
+        featureSelection: FeatureSelection = .defaultFeatures,
+        pathPrefix: String = ""
     ) throws {
         try self.init(
             snapshot: snapshot,
             language: .rust,
-            featureSelection: featureSelection
+            featureSelection: featureSelection,
+            pathPrefix: pathPrefix
         )
     }
 
     public init(
         snapshot: any Snapshot,
         language: LanguageID,
-        featureSelection: FeatureSelection = .defaultFeatures
+        featureSelection: FeatureSelection = .defaultFeatures,
+        pathPrefix: String = ""
     ) throws {
+        let resolvedPrefix = try Self.resolvePrefix(pathPrefix)
+        func prefixed(_ path: String) -> String {
+            resolvedPrefix.isEmpty ? path : "\(resolvedPrefix)/\(path)"
+        }
         try Self.requireSupportedFingerprint(language)
         self.language = language
         switch language {
         case .rust:
             let cargo: [UInt8]
             do {
-                cargo = try snapshot.readBytes(path: "Cargo.toml")
+                cargo = try snapshot.readBytes(path: prefixed("Cargo.toml"))
             } catch {
-                throw ExactError.missingConfiguration("Cargo.toml")
+                throw ExactError.missingConfiguration(prefixed("Cargo.toml"))
             }
             configFingerprint = Self.sha256(bytes: cargo)
             environmentFingerprint = (try? snapshot.readBytes(
-                path: "Cargo.lock"
+                path: prefixed("Cargo.lock")
             )).map(Self.sha256(bytes:)) ?? ""
             self.featureSelection = featureSelection
         case .python:
             let fingerprints = pythonConfigIdentity { path in
-                try? snapshot.readBytes(path: path)
+                try? snapshot.readBytes(path: prefixed(path))
             }
             configFingerprint = fingerprints.config
             environmentFingerprint = fingerprints.environment
@@ -229,7 +236,7 @@ public struct ExactProfileKey: Hashable, Sendable {
             self.featureSelection = .defaultFeatures
         case .typescript:
             let fingerprints = typescriptConfigIdentity { path in
-                try? snapshot.readBytes(path: path)
+                try? snapshot.readBytes(path: prefixed(path))
             }
             configFingerprint = fingerprints.config
             environmentFingerprint = fingerprints.environment
@@ -284,6 +291,21 @@ public struct ExactProfileKey: Hashable, Sendable {
                 "Exact non-Rust feature selection must be .defaultFeatures"
             )
         }
+    }
+
+    private static func resolvePrefix(_ pathPrefix: String) throws -> String {
+        guard !pathPrefix.isEmpty, pathPrefix != "." else { return "" }
+        let components = pathPrefix.split(
+            separator: "/",
+            omittingEmptySubsequences: false
+        )
+        guard !pathPrefix.hasPrefix("/"),
+              !components.isEmpty,
+              components.allSatisfy({
+                  $0 != "." && $0 != ".." && !$0.isEmpty
+              })
+        else { throw ExactError.invalidPath(pathPrefix) }
+        return components.joined(separator: "/")
     }
 
     private static func unsupportedFingerprint(

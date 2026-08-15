@@ -1620,6 +1620,174 @@ func exactProfileKeyHashesCargoFileBytes() throws {
 }
 
 @Test
+func exactProfileKeySnapshotReadsNestedConfigurationPrefixes() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    func write(_ contents: String, to path: String) throws {
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(path).deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(contents.utf8).write(to: root.appendingPathComponent(path))
+    }
+
+    let cargo = "[package]\nname = 'fx'\nversion = '0.1.0'\n"
+    let lock = "version = 3\n"
+    try write(cargo, to: "Cargo.toml")
+    try write(lock, to: "Cargo.lock")
+    try write(cargo, to: "crates/engine/Cargo.toml")
+    try write(lock, to: "crates/engine/Cargo.lock")
+    let rustSnapshot = try DirectorySnapshot(
+        root: root,
+        files: [
+            "Cargo.toml",
+            "Cargo.lock",
+            "crates/engine/Cargo.toml",
+            "crates/engine/Cargo.lock",
+        ]
+    )
+    let rustRoot = try ExactProfileKey(snapshot: rustSnapshot, language: .rust)
+    let rustNested = try ExactProfileKey(
+        snapshot: rustSnapshot,
+        language: .rust,
+        pathPrefix: "crates/engine"
+    )
+    #expect(rustRoot == (try ExactProfileKey(
+        snapshot: rustSnapshot,
+        language: .rust,
+        pathPrefix: ""
+    )))
+    #expect(rustRoot == (try ExactProfileKey(
+        snapshot: rustSnapshot,
+        language: .rust,
+        pathPrefix: "."
+    )))
+    #expect(rustNested.configFingerprint == rustRoot.configFingerprint)
+    #expect(rustNested.environmentFingerprint == rustRoot.environmentFingerprint)
+
+    let pyproject = "[project]\nname = 'p'\n"
+    let uvLock = "uv.lock\n"
+    try write(pyproject, to: "pyproject.toml")
+    try write(uvLock, to: "uv.lock")
+    try write(pyproject, to: "tools/py/pyproject.toml")
+    try write(uvLock, to: "tools/py/uv.lock")
+    let pythonSnapshot = try DirectorySnapshot(
+        root: root,
+        files: [
+            "pyproject.toml",
+            "uv.lock",
+            "tools/py/pyproject.toml",
+            "tools/py/uv.lock",
+        ]
+    )
+    let pythonRoot = try ExactProfileKey(
+        snapshot: pythonSnapshot,
+        language: .python
+    )
+    let pythonNested = try ExactProfileKey(
+        snapshot: pythonSnapshot,
+        language: .python,
+        pathPrefix: "tools/py"
+    )
+    #expect(pythonNested.configFingerprint == pythonRoot.configFingerprint)
+    #expect(pythonNested.environmentFingerprint == pythonRoot.environmentFingerprint)
+
+    let tsConfig = "{ }\n"
+    let package = "{ \"name\": \"p\" }\n"
+    let bunLock = "lock\n"
+    try write(tsConfig, to: "tsconfig.json")
+    try write(package, to: "package.json")
+    try write(bunLock, to: "bun.lockb")
+    try write(tsConfig, to: "web/ts/tsconfig.json")
+    try write(package, to: "web/ts/package.json")
+    try write(bunLock, to: "web/ts/bun.lockb")
+    let typescriptSnapshot = try DirectorySnapshot(
+        root: root,
+        files: [
+            "tsconfig.json",
+            "package.json",
+            "bun.lockb",
+            "web/ts/tsconfig.json",
+            "web/ts/package.json",
+            "web/ts/bun.lockb",
+        ]
+    )
+    let typescriptRoot = try ExactProfileKey(
+        snapshot: typescriptSnapshot,
+        language: .typescript
+    )
+    let typescriptNested = try ExactProfileKey(
+        snapshot: typescriptSnapshot,
+        language: .typescript,
+        pathPrefix: "web/ts"
+    )
+    #expect(typescriptNested.configFingerprint == typescriptRoot.configFingerprint)
+    #expect(
+        typescriptNested.environmentFingerprint
+            == typescriptRoot.environmentFingerprint
+    )
+}
+
+@Test
+func exactProfileKeySnapshotMissingNestedRustConfigReportsJoinedPath() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("[package]\nname = 'fx'\n".utf8)
+        .write(to: root.appendingPathComponent("Cargo.toml"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["Cargo.toml"])
+
+    do {
+        _ = try ExactProfileKey(
+            snapshot: snapshot,
+            language: .rust,
+            pathPrefix: "crates/engine"
+        )
+        Issue.record("expected missing nested cargo configuration")
+    } catch let error as ExactError {
+        guard case .missingConfiguration(let path) = error else {
+            Issue.record("expected missingConfiguration, got \(error)")
+            return
+        }
+        #expect(path == "crates/engine/Cargo.toml")
+    }
+}
+
+@Test
+func exactProfileKeySnapshotRejectsUnsafeProfilePrefixes() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("[package]\nname = 'fx'\n".utf8)
+        .write(to: root.appendingPathComponent("Cargo.toml"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["Cargo.toml"])
+
+    for prefix in [
+        "/absolute",
+        "nested/..",
+        "nested/../engine",
+        "./nested",
+        "nested/.",
+        "nested//engine",
+        "nested/",
+    ] {
+        do {
+            _ = try ExactProfileKey(
+                snapshot: snapshot,
+                language: .rust,
+                pathPrefix: prefix
+            )
+            Issue.record("expected invalid path prefix: \(prefix)")
+        } catch let error as ExactError {
+            guard case .invalidPath(let path) = error else {
+                Issue.record("expected invalidPath, got \(error)")
+                return
+            }
+            #expect(path == prefix)
+        }
+    }
+}
+
+@Test
 func rustAnalyzerMapsFeatureSelectionsToInitializationOptions() {
     let defaultOptions = RustAnalyzerProvider.initializationOptions(
         trustMode: .safe,
