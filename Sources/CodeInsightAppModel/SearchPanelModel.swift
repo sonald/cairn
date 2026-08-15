@@ -54,6 +54,7 @@ public final class SearchPanelModel {
 
     private let searcher: Searcher
     @ObservationIgnored private var searchTask: Task<Void, Never>?
+    @ObservationIgnored private var workspaceSessions: [(EngineSession, QueryContext)] = []
     @ObservationIgnored private var projectState = ProjectState.empty
     @ObservationIgnored private var groupsByPath: [PathID: Group] = [:]
     @ObservationIgnored private var matchedPathIDs: Set<PathID> = []
@@ -74,6 +75,13 @@ public final class SearchPanelModel {
 
     public func updateProjectState(_ state: ProjectState) {
         projectState = state
+        workspaceSessions = []
+        restart()
+    }
+
+    public func updateWorkspaceSessions(_ sessions: [(EngineSession, QueryContext)]) {
+        workspaceSessions = sessions
+        projectState = .empty
         restart()
     }
 
@@ -135,31 +143,45 @@ public final class SearchPanelModel {
         searchTask = nil
         clearResults()
 
-        switch projectState {
-        case .empty:
-            placeholder = "Open a project to search."
-        case .indexing:
-            placeholder = "Indexing project…"
-        case .failed:
-            placeholder = "Project indexing failed."
-        case let .ready(session, context):
-            guard !query.isEmpty else {
-                placeholder = "Enter a search query."
+        let sessions: [(EngineSession, QueryContext)]
+        if !workspaceSessions.isEmpty {
+            sessions = workspaceSessions
+        } else {
+            switch projectState {
+            case .empty:
+                placeholder = "Open a project to search."
                 return
+            case .indexing:
+                placeholder = "Indexing project…"
+                return
+            case .failed:
+                placeholder = "Project indexing failed."
+                return
+            case let .ready(session, context):
+                sessions = [(session, context)]
             }
-            placeholder = ""
-            isSearching = true
-            let query = ContentSearchQuery(
-                pattern: query,
-                isRegex: isRegex,
-                caseSensitive: isCaseSensitive
-            )
-            let searcher = searcher
-            searchTask = Task { [weak self] in
-                do {
-                    try await Task.sleep(for: .milliseconds(150))
-                    guard let self,
-                          !Task.isCancelled,
+        }
+        guard !query.isEmpty else {
+            placeholder = "Enter a search query."
+            return
+        }
+        placeholder = ""
+        isSearching = true
+        let query = ContentSearchQuery(
+            pattern: query,
+            isRegex: isRegex,
+            caseSensitive: isCaseSensitive
+        )
+        let searcher = searcher
+        searchTask = Task { [weak self] in
+            do {
+                try await Task.sleep(for: .milliseconds(150))
+                guard let self,
+                      !Task.isCancelled,
+                      requestID == currentRequestID
+                else { return }
+                for (session, context) in sessions {
+                    guard !Task.isCancelled,
                           requestID == currentRequestID
                     else { return }
                     let stream = try await searcher(session, query, context)
@@ -172,16 +194,17 @@ public final class SearchPanelModel {
                         else { return }
                         apply(batch, session: session)
                     }
-                    guard requestID == currentRequestID else { return }
-                    isSearching = false
-                    if totalMatches == 0 { placeholder = "No matches." }
-                } catch is CancellationError {
-                    return
-                } catch {
-                    guard let self, requestID == currentRequestID else { return }
-                    isSearching = false
-                    placeholder = "Search failed."
                 }
+                guard requestID == currentRequestID else { return }
+                isSearching = false
+                if totalMatches == 0 { placeholder = "No matches." }
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self, requestID == currentRequestID else { return }
+                clearResults()
+                isSearching = false
+                placeholder = "Search failed."
             }
         }
     }
@@ -237,10 +260,6 @@ public final class SearchPanelModel {
             preserving: selectedMatch,
             fallbackIndex: previousSelectedIndex
         )
-        if batch.isFinal {
-            isSearching = false
-            if totalMatches == 0 { placeholder = "No matches." }
-        }
     }
 
     func reconcileSelection(

@@ -311,6 +311,44 @@ func rustProfileTitleKeepsFeatureSelectionSegment() async throws {
 
 @MainActor
 @Test
+func projectSearchQueriesAllWorkspaceSessions() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryGitProject([
+        "z/a.rs": "fn a() { let needle = 1; }\n",
+        "m/b.py": "needle = 1\n",
+        "c.ts": "const needle = 1;\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+    try #require(await mainWindowWaitUntil(
+        model.snapshotPhase == .fullReady
+    ))
+    try #require(await mainWindowWaitUntil(
+        model.querySessions.count == 3
+    ))
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.showProjectSearch()
+    controller.selfTestSetProjectSearchQuery("needle")
+
+    try #require(await mainWindowWaitUntil(
+        controller.selfTestProjectSearchOutlineState.map {
+            $0.matchRows == 3 && $0.status.contains("3 matches in 3 files")
+        } ?? false
+    ))
+    let state = try #require(controller.selfTestProjectSearchOutlineState)
+    #expect(state.groupRows == 3)
+    #expect(state.matchRows == 3)
+    #expect(!state.searching)
+}
+
+@MainActor
+@Test
 func windowGrowthKeepsSidebarWidthAndGivesSpaceToReader() {
     _ = NSApplication.shared
     let fixture = MainWindowIdentityFixture()
@@ -360,6 +398,21 @@ private func mainWindowTemporaryProject(
             withIntermediateDirectories: true
         )
         try contents.write(to: file, atomically: true, encoding: .utf8)
+    }
+    return root
+}
+
+private func mainWindowTemporaryGitProject(
+    _ files: [String: String]
+) throws -> URL {
+    let root = try mainWindowTemporaryProject(files)
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+    process.arguments = ["-C", root.path, "init", "-q"]
+    try process.run()
+    process.waitUntilExit()
+    guard process.terminationStatus == 0 else {
+        throw CocoaError(.fileWriteUnknown)
     }
     return root
 }

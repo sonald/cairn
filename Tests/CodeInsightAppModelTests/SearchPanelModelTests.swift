@@ -7,7 +7,7 @@ import Testing
 @MainActor
 @Test
 func searchPanelDebouncesRapidQueries() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let counter = CountingSearcher()
     let model = SearchPanelModel(searcher: counter.search)
@@ -27,7 +27,7 @@ func searchPanelDebouncesRapidQueries() async throws {
 @MainActor
 @Test
 func searchPanelDiscardsLateQueryResults() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let gate = GatedSearcher()
     let model = SearchPanelModel(searcher: gate.search)
@@ -58,7 +58,7 @@ func searchPanelDiscardsLateQueryResults() async throws {
 @MainActor
 @Test
 func searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let (batches, continuation) =
         AsyncThrowingStream<SearchBatch, Error>.makeStream()
@@ -97,7 +97,7 @@ func searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() async throws {
 @MainActor
 @Test
 func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let (batches, continuation) =
         AsyncThrowingStream<SearchBatch, Error>.makeStream()
@@ -134,7 +134,7 @@ func searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() async throws 
 @MainActor
 @Test
 func searchPanelCapsDisplayedMatchesAndReportsTrueTotal() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = await searchPanelModel(
         fixture: fixture,
@@ -157,7 +157,7 @@ func searchPanelCapsDisplayedMatchesAndReportsTrueTotal() async throws {
 @MainActor
 @Test
 func searchPanelDoesNotBuildGroupsPastDisplayLimit() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let batches = [
         SearchBatch(
@@ -190,7 +190,7 @@ func searchPanelDoesNotBuildGroupsPastDisplayLimit() async throws {
 @MainActor
 @Test
 func searchPanelDoesNotTruncateBelowDisplayLimit() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = await searchPanelModel(
         fixture: fixture,
@@ -204,7 +204,7 @@ func searchPanelDoesNotTruncateBelowDisplayLimit() async throws {
 @MainActor
 @Test
 func searchPanelDoesNotTruncateAtDisplayLimit() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = await searchPanelModel(
         fixture: fixture,
@@ -218,7 +218,7 @@ func searchPanelDoesNotTruncateAtDisplayLimit() async throws {
 @MainActor
 @Test
 func searchPanelTruncatesAboveDisplayLimit() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = await searchPanelModel(
         fixture: fixture,
@@ -235,7 +235,7 @@ func searchPanelTruncatesAboveDisplayLimit() async throws {
 @MainActor
 @Test
 func searchPanelDistinguishesUpstreamAndDisplayTruncation() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let upstream = await searchPanelModel(
         fixture: fixture,
@@ -256,7 +256,7 @@ func searchPanelDistinguishesUpstreamAndDisplayTruncation() async throws {
 @MainActor
 @Test
 func searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let (batches, continuation) =
         AsyncThrowingStream<SearchBatch, Error>.makeStream()
@@ -310,7 +310,7 @@ func searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() async throws {
 @MainActor
 @Test
 func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = SearchPanelModel { _, query, _ in
         let matches = query.pattern == "old"
@@ -349,7 +349,7 @@ func searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() async throws {
 @MainActor
 @Test
 func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
-    let fixture = try SearchPanelFixture()
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let batches = [SearchBatch(
         matchesByPath: [
@@ -393,8 +393,8 @@ func searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() async throws {
 
 @MainActor
 @Test
-func searchPanelShowsEmptyAndIndexingPlaceholders() throws {
-    let fixture = try SearchPanelFixture()
+func searchPanelShowsEmptyAndIndexingPlaceholders() async throws {
+    let fixture = try await SearchPanelFixture()
     defer { fixture.remove() }
     let model = SearchPanelModel()
 
@@ -403,6 +403,202 @@ func searchPanelShowsEmptyAndIndexingPlaceholders() throws {
     model.updateProjectState(.indexing(root: fixture.root, startedAt: .now))
     #expect(model.placeholder == "Indexing project…")
     #expect(!model.isSearching)
+}
+
+@MainActor
+@Test
+func searchPanelAggregatesAllWorkspaceSessionsAndSortsPathsStably() async throws {
+    let fixture = try await SearchPanelFixture(workspace: true)
+    defer { fixture.remove() }
+    let model = SearchPanelModel { session, _, _ in
+        let path = try #require(activeWorkspacePathID(fixture: fixture, session: session))
+        return stream(batches: [SearchBatch(
+            matchesByPath: [path: [searchMatch(path: path, offset: 2)]],
+            isFinal: true,
+            completeness: .complete
+        )])
+    }
+    model.updateWorkspaceSessions(fixture.workspace)
+    model.setQuery("needle")
+
+    #expect(await testWaitUntil("model.totalMatches == 3") { model.totalMatches == 3 })
+    #expect(model.groups.map(\.path) == ["a.rs", "b.py", "b.ts"])
+    #expect(model.groups.map { $0.matches.map(\.value.byteRange.lowerBound) }
+        == [[2], [2], [2]])
+}
+
+@MainActor
+@Test
+func searchPanelWorkspaceDisplayLimitCountsAllSessionsAndWaitsForAllFinals() async throws {
+    let fixture = try await SearchPanelFixture(workspace: true)
+    defer { fixture.remove() }
+    let page1 = SearchPanelModel.displayLimit / 2
+    let page2 = SearchPanelModel.displayLimit / 2 + 3
+    let displayLimit = SearchPanelModel.displayLimit
+    let model = SearchPanelModel { session, _, _ in
+        let path = try #require(activeWorkspacePathID(fixture: fixture, session: session))
+        if session.analysisProfile.language == .rust {
+            return stream(batches: [
+                SearchBatch(
+                    matchesByPath: [path: (0..<page1).map {
+                        searchMatch(path: path, offset: UInt32($0))
+                    }],
+                    isFinal: false,
+                    completeness: .complete
+                ),
+                SearchBatch(
+                    matchesByPath: [path: (page1..<page2).map {
+                        searchMatch(path: path, offset: UInt32($0))
+                    }],
+                    isFinal: true,
+                    completeness: .complete
+                ),
+            ])
+        }
+        return stream(batches: [
+            SearchBatch(
+                matchesByPath: [path: (0..<displayLimit).map {
+                    searchMatch(path: path, offset: UInt32($0))
+                }],
+                isFinal: false,
+                completeness: .complete
+            ),
+            SearchBatch(
+                matchesByPath: [path: (displayLimit..<(displayLimit + 10)).map {
+                    searchMatch(path: path, offset: UInt32($0))
+                }],
+                isFinal: true,
+                completeness: .complete
+            ),
+        ])
+    }
+    model.updateWorkspaceSessions(fixture.workspace)
+    model.setQuery("needle")
+
+    #expect(await testWaitUntil(
+        "model.totalMatches == page2 + 2 * (displayLimit + 10)"
+    ) {
+        model.totalMatches == page2 + 2 * (displayLimit + 10)
+    })
+    #expect(displayedMatches(in: model) == displayLimit)
+    #expect(model.fileCount == 3)
+    #expect(model.totalMatches == page2 + 2 * (displayLimit + 10))
+}
+
+@MainActor
+@Test
+func searchPanelWorkspaceAnyStreamErrorFailsOverallSearch() async throws {
+    let fixture = try await SearchPanelFixture(workspace: true)
+    defer { fixture.remove() }
+    let model = SearchPanelModel { session, _, _ in
+        if session.analysisProfile.language == .python {
+            return AsyncThrowingStream { continuation in
+                continuation.finish(throwing: SearchPanelFailure.expected)
+            }
+        }
+        return stream(batches: [SearchBatch(
+            matchesByPath: [:],
+            isFinal: true,
+            completeness: .complete
+        )])
+    }
+    model.updateWorkspaceSessions(fixture.workspace)
+    model.setQuery("needle")
+
+    #expect(await testWaitUntil("model.placeholder == \"Search failed.\"") {
+        model.placeholder == "Search failed."
+    })
+    #expect(!model.isSearching)
+}
+
+@MainActor
+@Test
+func searchPanelWorkspaceNewQueryDropsAllOldStreams() async throws {
+    let fixture = try await SearchPanelFixture(workspace: true)
+    defer { fixture.remove() }
+    let gate = GatedSearcher()
+    let model = SearchPanelModel(searcher: gate.search)
+    model.updateWorkspaceSessions(fixture.workspace)
+
+    model.setQuery("old")
+    #expect(await testWaitUntil("gate.pending(\"old\")") { await gate.pending("old") })
+    model.setQuery("new")
+    #expect(await testWaitUntil("gate.pending(\"new\")") { await gate.pending("new") })
+
+    await gate.release("new", batches: [SearchBatch(
+        matchesByPath: [fixture.rust.pathID: [
+            searchMatch(path: fixture.rust.pathID, offset: 1),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    )])
+    #expect(await testWaitUntil("model.totalMatches == 1") { model.totalMatches == 1 })
+    #expect(await testWaitUntil("gate.pending(\"new\")") { await gate.pending("new") })
+
+    await gate.release("new", batches: [SearchBatch(
+        matchesByPath: [fixture.python.pathID: [
+            searchMatch(path: fixture.python.pathID, offset: 1),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    )])
+    #expect(await testWaitUntil("model.totalMatches == 2") { model.totalMatches == 2 })
+    #expect(await testWaitUntil("gate.pending(\"new\")") { await gate.pending("new") })
+
+    await gate.release("new", batches: [SearchBatch(
+        matchesByPath: [fixture.typescript.pathID: [
+            searchMatch(path: fixture.typescript.pathID, offset: 1),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    )])
+    #expect(await testWaitUntil("model.totalMatches == 3") { model.totalMatches == 3 })
+    #expect(await testWaitUntil("gate.returnedCount(\"new\") == 3") {
+        await gate.returnedCount("new") == 3
+    })
+
+    await gate.release("old", batches: [SearchBatch(
+        matchesByPath: [fixture.python.pathID: [
+            searchMatch(path: fixture.python.pathID, offset: 9),
+        ]],
+        isFinal: true,
+        completeness: .complete
+    )])
+    #expect(await testWaitUntil("gate.returnedCount(\"old\") == 1") {
+        await gate.returnedCount("old") == 1
+    })
+
+    #expect(model.totalMatches == 3)
+    #expect(model.groups.map(\.path) == ["a.rs", "b.py", "b.ts"])
+}
+
+@MainActor
+@Test
+func searchWorkspaceNewQueryResetsOldResultsAndPlaceholder() async throws {
+    let fixture = try await SearchPanelFixture(workspace: true)
+    defer { fixture.remove() }
+    let model = SearchPanelModel { session, query, _ in
+        let path = try #require(activeWorkspacePathID(fixture: fixture, session: session))
+        let count = query.pattern == "old" ? 3 : 0
+        return stream(batches: [SearchBatch(
+            matchesByPath: count == 0
+                ? [:]
+                : [path: (0..<count).map {
+                    searchMatch(path: path, offset: UInt32($0))
+                }],
+            isFinal: true,
+            completeness: count == 0 ? .complete : .truncated
+        )])
+    }
+    model.updateWorkspaceSessions(fixture.workspace)
+    model.setQuery("old")
+    #expect(await testWaitUntil("model.totalMatches == 9") { model.totalMatches == 9 })
+    #expect(model.isTruncated)
+
+    model.setQuery("new")
+    #expect(await testWaitUntil("model.totalMatches == 0 && !model.isTruncated") {
+        model.totalMatches == 0 && !model.isTruncated && model.placeholder == "No matches."
+    })
 }
 
 private actor CountingSearcher {
@@ -426,17 +622,30 @@ private actor GatedSearcher {
     private var continuations: [
         String: CheckedContinuation<AsyncThrowingStream<SearchBatch, Error>, Never>
     ] = [:]
+    private var returnedCounts: [String: Int] = [:]
 
     func search(
         session: EngineSession,
         query: ContentSearchQuery,
         context: QueryContext
     ) async throws -> AsyncThrowingStream<SearchBatch, Error> {
-        await withCheckedContinuation { continuations[query.pattern] = $0 }
+        let result = await withCheckedContinuation { continuation in
+            continuations[query.pattern] = continuation
+        }
+        returnedCounts[query.pattern, default: 0] += 1
+        return result
     }
 
     func isPending(_ query: String) -> Bool {
         continuations[query] != nil
+    }
+
+    func pending(_ query: String) -> Bool {
+        isPending(query)
+    }
+
+    func returnedCount(_ query: String) -> Int {
+        returnedCounts[query, default: 0]
     }
 
     func release(_ query: String, batches: [SearchBatch]) {
@@ -446,14 +655,19 @@ private actor GatedSearcher {
     }
 }
 
+@MainActor
 private struct SearchPanelFixture {
     let root: URL
     let session: EngineSession
     let context: QueryContext
     let a: PathID
     let b: PathID
+    let workspace: [(EngineSession, QueryContext)]
+    let rust: (session: EngineSession, context: QueryContext, pathID: PathID)
+    let python: (session: EngineSession, context: QueryContext, pathID: PathID)
+    let typescript: (session: EngineSession, context: QueryContext, pathID: PathID)
 
-    init() throws {
+    init(workspace: Bool = false) async throws {
         root = FileManager.default.temporaryDirectory.appendingPathComponent(
             "SearchPanelModelTests-\(UUID().uuidString)"
         )
@@ -471,6 +685,24 @@ private struct SearchPanelFixture {
             atomically: true,
             encoding: .utf8
         )
+        try "needle".write(
+            to: root.appendingPathComponent("b.py"),
+            atomically: true,
+            encoding: .utf8
+        )
+        try "needle".write(
+            to: root.appendingPathComponent("b.ts"),
+            atomically: true,
+            encoding: .utf8
+        )
+        let gitInit = Process()
+        gitInit.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        gitInit.arguments = ["-C", root.path, "init", "-q"]
+        try gitInit.run()
+        gitInit.waitUntilExit()
+        guard gitInit.terminationStatus == 0 else {
+            throw CocoaError(.fileWriteUnknown)
+        }
         let indexed = try ProjectIndexer().index(root: root)
         let queryContext = QueryContext(
             snapshotID: indexed.snapshotID,
@@ -487,6 +719,55 @@ private struct SearchPanelFixture {
         context = queryContext
         a = aPath
         b = bPath
+        if workspace {
+            let model = AppModel(indexService: ProjectIndexService())
+            try await model.openProject(root: root, languages: [.typescript, .rust, .python])
+            let querySessions = model.querySessions
+            guard querySessions.count == 3 else {
+                throw CocoaError(.featureUnsupported)
+            }
+            let rust = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .rust
+            }.map(\.0))
+            let python = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .python
+            }.map(\.0))
+            let ts = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .typescript
+            }.map(\.0))
+            let rustContext = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .rust
+            }.map(\.1))
+            let pythonContext = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .python
+            }.map(\.1))
+            let tsContext = try #require(querySessions.first {
+                $0.0.analysisProfile.language == .typescript
+            }.map(\.1))
+            let rustPath = try Self.fid(rust, "a.rs")
+            let pythonPath = try Self.fid(python, "b.py")
+            let tsPath = try Self.fid(ts, "b.ts")
+            let tuples: [(EngineSession, QueryContext, PathID)] = [
+                (rust, rustContext, rustPath),
+                (python, pythonContext, pythonPath),
+                (ts, tsContext, tsPath),
+            ]
+            self.workspace = tuples.map { ($0.0, $0.1) }
+            self.rust = (tuples[0].0, tuples[0].1, tuples[0].2)
+            self.python = (tuples[1].0, tuples[1].1, tuples[1].2)
+            self.typescript = (tuples[2].0, tuples[2].1, tuples[2].2)
+        } else {
+            self.workspace = []
+            self.rust = (indexed, queryContext, aPath)
+            self.python = (indexed, queryContext, aPath)
+            self.typescript = (indexed, queryContext, aPath)
+        }
+    }
+
+    private static func fid(_ session: EngineSession, _ path: String) throws -> PathID {
+        try #require(session.manifest.files.first {
+            session.paths.resolve($0.pathID) == path
+        }?.pathID)
     }
 
     func remove() {
@@ -503,6 +784,10 @@ private func searchMatch(path: PathID, offset: UInt32) -> SearchMatch {
         lineText: "needle",
         lineTextRange: ByteRange(lowerBound: offset, upperBound: offset + 6)
     )
+}
+
+private enum SearchPanelFailure: Error {
+    case expected
 }
 
 private func stream(
@@ -537,4 +822,20 @@ private func searchPanelModel(
 @MainActor
 private func displayedMatches(in model: SearchPanelModel) -> Int {
     model.groups.reduce(0) { $0 + $1.matches.count }
+}
+
+private func activeWorkspacePathID(
+    fixture: SearchPanelFixture,
+    session: EngineSession
+) -> PathID? {
+    switch session.analysisProfile.language {
+    case .rust:
+        return fixture.rust.pathID
+    case .python:
+        return fixture.python.pathID
+    case .typescript:
+        return fixture.typescript.pathID
+    case .javascript:
+        return nil
+    }
 }

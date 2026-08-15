@@ -50,7 +50,7 @@ final class SearchPanel: NSWindowController,
         ownerWindow = owner
         input.stringValue = ""
         panelModel.setQuery("")
-        panelModel.updateProjectState(appModel.projectState)
+        applyProjectState()
         render()
 
         guard let panel = window else { return }
@@ -68,7 +68,16 @@ final class SearchPanel: NSWindowController,
 
     func refreshProjectState() {
         guard window?.isVisible == true else { return }
-        panelModel.updateProjectState(appModel.projectState)
+        applyProjectState()
+    }
+
+    private func applyProjectState() {
+        let sessions = appModel.querySessions
+        if sessions.isEmpty {
+            panelModel.updateProjectState(appModel.projectState)
+        } else {
+            panelModel.updateWorkspaceSessions(sessions)
+        }
     }
 
     func selfTestSetQuery(_ query: String) {
