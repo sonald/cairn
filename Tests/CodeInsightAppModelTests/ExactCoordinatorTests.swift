@@ -108,7 +108,7 @@ func exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile()
         "tools/ts/main.ts": "export function target(): void {}\n",
         "tools/ts/other.ts": "export function other(): void {}\n",
         "outside.ts": "export function forbidden(): void {}\n",
-    ])
+    ], configurationPaths: ["tools/ts/package.json", "tools/ts/tsconfig.json"])
     let expectedProfile = try ExactProfileKey(
         snapshot: snapshot,
         language: .typescript,
@@ -144,6 +144,16 @@ func exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile()
     })
     #expect(URL(fileURLWithPath: providerRootBox.value).lastPathComponent == "ts")
     #expect(state.prepareCount == 1)
+    let provided = try #require(state.latestPrepareSnapshot)
+    #expect(Set(provided.listFiles().map { $0.path }) == Set([
+        "package.json",
+        "tsconfig.json",
+        "main.ts",
+        "other.ts",
+    ]))
+    #expect(provided.configurationPaths == ["package.json", "tsconfig.json"])
+    #expect((try? provided.readBytes(path: "main.ts")) != nil)
+    #expect((try? provided.readBytes(path: "outside.ts")) == nil)
 
     let inProfile = await coordinator.definition(
         file: "tools/ts/main.ts",
@@ -2276,6 +2286,7 @@ private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
         trustMode: TrustMode
     ) throws -> any ExactSession {
         state.makeSession(
+            snapshot: snapshot,
             attribution: ExactAttribution(
                 provider: "fake-exact",
                 toolVersion: toolVersion,
@@ -2307,6 +2318,7 @@ private final class ExactProviderState: @unchecked Sendable {
     private var languages: [LanguageID] = []
     private var roots: [URL] = []
     private var requestFiles: [String] = []
+    private var storedPrepareSnapshot: (any Snapshot)?
     private var closed: Set<Int> = []
     private weak var latestSession: ExactStateSession?
 
@@ -2323,6 +2335,9 @@ private final class ExactProviderState: @unchecked Sendable {
     var prepareCount: Int { locked { prepares } }
     var definitionCount: Int { locked { definitions } }
     var filesRequested: [String] { locked { requestFiles } }
+    var latestPrepareSnapshot: (any Snapshot)? {
+        locked { storedPrepareSnapshot }
+    }
     var prepareLanguages: [LanguageID] { locked { languages } }
     var prepareRoots: [URL] { locked { roots } }
     var trustModes: [String] { locked { modes } }
@@ -2332,10 +2347,12 @@ private final class ExactProviderState: @unchecked Sendable {
     var hasReferencesCapability: Bool { referencesValue != nil }
 
     func makeSession(
+        snapshot: any Snapshot,
         attribution: ExactAttribution
     ) -> ExactStateSession {
         let ordinal = locked {
             prepares += 1
+            storedPrepareSnapshot = snapshot
             let mode = switch attribution.environment.trustMode {
             case .safe: "safe"
             case .trusted: "trusted"
@@ -2539,9 +2556,15 @@ private final class ExactTestSnapshot: Snapshot, @unchecked Sendable {
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.untracked
     private let files: [String: [UInt8]]
+    private let storedConfigurationPaths: [String]?
 
-    init(files: [String: String]) {
+    init(files: [String: String], configurationPaths: [String]? = nil) {
         self.files = files.mapValues { Array($0.utf8) }
+        self.storedConfigurationPaths = configurationPaths?.sorted()
+    }
+
+    var configurationPaths: [String] {
+        storedConfigurationPaths ?? []
     }
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {

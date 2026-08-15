@@ -148,12 +148,55 @@ public final class ExactCoordinator {
         let key: ExactOverlay.ReuseKey
         let provider: any ExactProvider
         let session: any ExactSession
-        let snapshot: any Snapshot
+        let providerSnapshot: any Snapshot
         let profile: ExactProfileKey
         let trustMode: TrustMode
         let workspaceRoot: URL
         let profilePrefix: String
         let materializedRoot: URL?
+    }
+
+    private struct ProfileSnapshot: Snapshot {
+        let snapshotID: SnapshotID
+        let objectFormat: GitObjectFormat
+        let sourceKind: SourceKind
+        let projectRootName: String
+        let configurationPaths: [String]
+        private let wrapped: any Snapshot
+        private let prefix: String
+
+        init?(_ wrapped: any Snapshot, prefix: String) {
+            guard !prefix.isEmpty else { return nil }
+            self.wrapped = wrapped
+            self.prefix = prefix
+            snapshotID = wrapped.snapshotID
+            objectFormat = wrapped.objectFormat
+            sourceKind = wrapped.sourceKind
+            projectRootName = wrapped.projectRootName
+            configurationPaths = wrapped.configurationPaths.filter {
+                $0.hasPrefix("\(prefix)/")
+            }.map { String($0.dropFirst(prefix.count + 1)) }
+        }
+
+        func listFiles() -> [(
+            path: String,
+            contentID: ContentID,
+            fileMode: FileMode
+        )] {
+            wrapped.listFiles().filter { file in
+                file.path.hasPrefix("\(prefix)/")
+            }.map { file in
+                (
+                    String(file.path.dropFirst(prefix.count + 1)),
+                    file.contentID,
+                    file.fileMode
+                )
+            }
+        }
+
+        func readBytes(path: String) throws -> [UInt8] {
+            try wrapped.readBytes(path: "\(prefix)/\(path)")
+        }
     }
 
     private struct Prepared: Sendable {
@@ -517,8 +560,12 @@ public final class ExactCoordinator {
                         trustMode: trustMode,
                         toolVersion: provider.toolVersion
                     )
+                    let providerSnapshot = ProfileSnapshot(
+                        snapshot,
+                        prefix: profilePrefix
+                    ) ?? snapshot
                     let session = try provider.prepare(
-                        snapshot: snapshot,
+                        snapshot: providerSnapshot,
                         profile: profile,
                         trustMode: trustMode
                     )
@@ -527,7 +574,7 @@ public final class ExactCoordinator {
                         key: key,
                         provider: provider,
                         session: session,
-                        snapshot: snapshot,
+                        providerSnapshot: providerSnapshot,
                         profile: profile,
                         trustMode: trustMode,
                         workspaceRoot: root,
@@ -742,7 +789,7 @@ public final class ExactCoordinator {
         do {
             let newSession = try await Task.detached(priority: .utility) {
                 try previous.provider.prepare(
-                    snapshot: previous.snapshot,
+                    snapshot: previous.providerSnapshot,
                     profile: previous.profile,
                     trustMode: previous.trustMode
                 )
@@ -756,7 +803,7 @@ public final class ExactCoordinator {
                 key: previous.key,
                 provider: previous.provider,
                 session: newSession,
-                snapshot: previous.snapshot,
+                providerSnapshot: previous.providerSnapshot,
                 profile: previous.profile,
                 trustMode: previous.trustMode,
                 workspaceRoot: previous.workspaceRoot,
@@ -932,7 +979,7 @@ public final class ExactCoordinator {
         do {
             let newSession = try await Task.detached(priority: .utility) {
                 try previous.provider.prepare(
-                    snapshot: previous.snapshot,
+                    snapshot: previous.providerSnapshot,
                     profile: previous.profile,
                     trustMode: previous.trustMode
                 )
@@ -946,7 +993,7 @@ public final class ExactCoordinator {
                 key: previous.key,
                 provider: previous.provider,
                 session: newSession,
-                snapshot: previous.snapshot,
+                providerSnapshot: previous.providerSnapshot,
                 profile: previous.profile,
                 trustMode: previous.trustMode,
                 workspaceRoot: previous.workspaceRoot,
