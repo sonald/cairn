@@ -17,14 +17,10 @@ public struct ModuleMap: Sendable {
         indexes: [ContentIndexKey: ContentIndex],
         bytesByContent: [ContentID: [UInt8]],
         names: Interner<NameID>,
-        paths: Interner<PathID>
+        paths: Interner<PathID>,
+        projectRoot: String
     ) {
-        let files = manifest.files.filter {
-            LanguageMode.classify(
-                path: paths.resolve($0.pathID),
-                language: language
-            ) != nil
-        }
+        let files = manifest.files
         switch language {
         case .rust:
             self.language = .rust
@@ -33,7 +29,8 @@ public struct ModuleMap: Sendable {
                 indexes: indexes,
                 bytesByContent: bytesByContent,
                 names: names,
-                paths: paths
+                paths: paths,
+                projectRoot: projectRoot
             )
             parentModules = rust.parents
             crateRoots = rust.roots
@@ -44,7 +41,8 @@ public struct ModuleMap: Sendable {
         case .python:
             let canonical = Self.pythonModuleFiles(
                 files: files,
-                paths: paths
+                paths: paths,
+                projectRoot: projectRoot
             )
             self.language = .python
             parentModules = [:]
@@ -53,14 +51,15 @@ public struct ModuleMap: Sendable {
             var rootsByFile: [PathID: String] = [:]
             for file in files {
                 let path = paths.resolve(file.pathID)
-                if path.hasPrefix("src/") {
+                let relative = Self.relativePath(path, root: projectRoot)
+                if relative.hasPrefix("src/") {
                     rootsByFile[file.pathID] = "src"
                 } else {
                     rootsByFile[file.pathID] = "root"
                 }
             }
             pathsByID = Dictionary(uniqueKeysWithValues: files.map {
-                ($0.pathID, paths.resolve($0.pathID))
+                ($0.pathID, Self.relativePath(paths.resolve($0.pathID), root: projectRoot))
             })
             pythonRootsByFile = rootsByFile
             moduleChildren = [:]
@@ -70,7 +69,7 @@ public struct ModuleMap: Sendable {
             crateRoots = []
             pythonModuleFiles = [:]
             pathsByID = Dictionary(uniqueKeysWithValues: files.map {
-                ($0.pathID, paths.resolve($0.pathID))
+                ($0.pathID, Self.relativePath(paths.resolve($0.pathID), root: projectRoot))
             })
             pythonRootsByFile = [:]
             moduleChildren = [:]
@@ -84,14 +83,15 @@ public struct ModuleMap: Sendable {
         indexes: [ContentIndexKey: ContentIndex],
         bytesByContent: [ContentID: [UInt8]],
         names: Interner<NameID>,
-        paths: Interner<PathID>
+        paths: Interner<PathID>,
+        projectRoot: String
     ) -> (
         children: [PathID: [NameID: PathID]],
         parents: [PathID: PathID],
         roots: Set<PathID>
     ) {
         let pathIDsByString = Dictionary(uniqueKeysWithValues: files.map {
-            (paths.resolve($0.pathID), $0.pathID)
+            (Self.relativePath(paths.resolve($0.pathID), root: projectRoot), $0.pathID)
         })
         var indexesByContent: [ContentID: ContentIndex] = [:]
         for (key, index) in indexes where indexesByContent[key.contentID] == nil {
@@ -102,7 +102,7 @@ public struct ModuleMap: Sendable {
         var roots: Set<PathID> = []
 
         for file in files {
-            let path = paths.resolve(file.pathID)
+            let path = Self.relativePath(paths.resolve(file.pathID), root: projectRoot)
             let fileName = path.split(separator: "/").last.map(String.init) ?? path
             if fileName == "main.rs" || fileName == "lib.rs" {
                 roots.insert(file.pathID)
@@ -139,11 +139,12 @@ public struct ModuleMap: Sendable {
 
     private static func pythonModuleFiles(
         files: [FileOccurrence],
-        paths: Interner<PathID>
+        paths: Interner<PathID>,
+        projectRoot: String
     ) -> [String: [PathID]] {
         var filesByPath: [String: PathID] = [:]
         for file in files {
-            let path = paths.resolve(file.pathID)
+            let path = Self.relativePath(paths.resolve(file.pathID), root: projectRoot)
             filesByPath[path] = file.pathID
         }
         var canonical: [String: [PathID]] = [:]
@@ -177,6 +178,12 @@ public struct ModuleMap: Sendable {
             .joined(separator: ".")
         guard !canonicalModule.isEmpty else { return }
         canonical[canonicalModule, default: []].append(pathID)
+    }
+
+    private static func relativePath(_ path: String, root: String) -> String {
+        guard root != ".", !root.isEmpty else { return path }
+        guard path.hasPrefix(root + "/") else { return path }
+        return String(path.dropFirst(root.count + 1))
     }
 
     func targetFile(

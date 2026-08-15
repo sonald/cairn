@@ -100,11 +100,25 @@ struct SnapshotView: Sendable {
         self.analysisProfile = analysisProfile
         self.extractor = extractor
         storeState = store.snapshot()
+        let rootPath = store.paths.resolve(analysisProfile.projectRoot)
+        let activeFiles = manifest.files.filter { file in
+            let path = store.paths.resolve(file.pathID)
+            guard LanguageMode.classify(
+                path: path,
+                language: analysisProfile.language
+            ) != nil else { return false }
+            return Self.isWithin(root: rootPath, path: path)
+        }
+        let activeManifest = SnapshotManifest(
+            snapshotID: manifest.snapshotID,
+            files: activeFiles
+        )
         var contentIndexes: [ContentIndexKey: ContentIndex] = [:]
         var contentKeysByPath: [PathID: ContentIndexKey] = [:]
-        for file in manifest.files {
+        for file in activeFiles {
+            let path = store.paths.resolve(file.pathID)
             guard let mode = LanguageMode.classify(
-                path: store.paths.resolve(file.pathID),
+                path: path,
                 language: analysisProfile.language
             ) else { continue }
             let key = ContentIndexKey(
@@ -120,13 +134,20 @@ struct SnapshotView: Sendable {
         self.contentIndexes = contentIndexes
         self.contentKeysByPath = contentKeysByPath
         moduleMap = ModuleMap(
-            manifest: manifest,
+            manifest: activeManifest,
             language: analysisProfile.language,
             indexes: contentIndexes,
             bytesByContent: storeState.sourceBytesByContent,
             names: store.names,
-            paths: store.paths
+            paths: store.paths,
+            projectRoot: rootPath
         )
+    }
+
+    private static func isWithin(root: String, path: String) -> Bool {
+        root == "." || root.isEmpty
+            || path == root
+            || path.hasPrefix(root + "/")
     }
 
     init(

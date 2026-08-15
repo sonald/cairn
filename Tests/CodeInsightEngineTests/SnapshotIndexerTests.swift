@@ -737,6 +737,171 @@ func publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutside
 }
 
 @Test
+func nestedPythonActiveViewTrimsUnitRootBeforeModuleIdentity() throws {
+    let files: [String: [UInt8]] = [
+        "tools/py/src/pkg/__init__.py": Array("\n".utf8),
+        "tools/py/src/pkg/a.py": Array("def f():\n    return 1\n".utf8),
+        "tools/py/src/main.py": Array("from pkg.a import f\nf()\n".utf8),
+        "tools/py/pyproject.toml": Array("[project]\nname = \"tools-py\"\n".utf8),
+    ]
+    let snapshot = CountingSnapshot(files: files, configurationPaths: [
+        "tools/py/pyproject.toml",
+    ])
+    let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .python,
+        discoverUnitRoot: true
+    )
+    let session = try ProjectIndexer().completeSnapshot(prepared)
+
+    #expect(session.paths.resolve(session.analysisProfile.projectRoot)
+        == "tools/py")
+    #expect(session.manifest.files.map { session.paths.resolve($0.pathID) }
+        == [
+            "tools/py/src/main.py",
+            "tools/py/src/pkg/__init__.py",
+            "tools/py/src/pkg/a.py",
+        ])
+    let mainPath = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "tools/py/src/main.py"
+    }?.pathID)
+    let callOffset = try #require(utf8Offset(
+        of: "f()",
+        in: "from pkg.a import f\nf()\n"
+    ))
+    let resolved = try session.resolve(
+        file: mainPath,
+        offset: callOffset,
+        context: snapshotQueryContext(for: session)
+    )
+    let top = try #require(resolved.first)
+    #expect(session.paths.resolve(top.target.pathID) == "tools/py/src/pkg/a.py")
+    #expect(top.certainty == .strong)
+    #expect(top.evidence.contains {
+        if case .uniqueImport = $0 { return true }
+        return false
+    })
+}
+
+@Test
+func nestedRustCrateAndSuperStayInsideUnitRoot() throws {
+    let libSource = "pub mod child;\npub fn root() {}\n"
+    let childSource = "use super::root;\nfn call() { root(); }\n"
+    let snapshot = CountingSnapshot(files: [
+        "crates/x/src/lib.rs": Array(libSource.utf8),
+        "crates/x/src/child.rs": Array(childSource.utf8),
+        "crates/x/Cargo.toml": Array("[package]\nname = \"x\"\n".utf8),
+    ], configurationPaths: [
+        "crates/x/Cargo.toml",
+    ])
+    let prepared = try ProjectIndexer(parallelism: 1).prepareSnapshot(
+        snapshot,
+        into: ProjectIndexStore(),
+        language: .rust,
+        discoverUnitRoot: true
+    )
+    let session = try ProjectIndexer().completeSnapshot(prepared)
+
+    #expect(session.paths.resolve(session.analysisProfile.projectRoot)
+        == "crates/x")
+    let child = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "crates/x/src/child.rs"
+    }?.pathID)
+    let offset = try #require(utf8Offset(of: "root()", in: childSource))
+    let resolved = try session.resolve(
+        file: child,
+        offset: offset,
+        context: snapshotQueryContext(for: session)
+    )
+    let top = try #require(resolved.first)
+    #expect(session.paths.resolve(top.target.pathID) == "crates/x/src/lib.rs")
+    #expect(top.certainty == .strong)
+    #expect(top.evidence.contains {
+        if case .uniqueImport = $0 { return true }
+        return false
+    })
+}
+
+@Test
+func activeViewKeepsUnionManifestButExcludesPathsOutsideManualUnitRoot() throws {
+    let appSource = """
+        import { b } from './b'
+        import { outside } from '../../../outside'
+        b()
+        outside()
+        """
+    let files: [String: [UInt8]] = [
+        "tools/ts/src/app.ts": Array(appSource.utf8),
+        "tools/ts/src/b.ts": Array("export function b() {}\n".utf8),
+        "outside.ts": Array("export const outside = 1\n".utf8),
+        "tools/ts/tsconfig.json": Array("{}".utf8),
+    ]
+    let snapshot = CountingSnapshot(files: files, configurationPaths: [
+        "tools/ts/tsconfig.json",
+    ])
+    let store = ProjectIndexStore()
+    let base = try ProjectIndexer(parallelism: 1).indexSnapshot(
+        snapshot,
+        into: store,
+        language: .typescript
+    )
+    let nestedRoot = store.paths.intern("tools/ts")
+    let nestedProfile = AnalysisProfile(
+        language: .typescript,
+        projectRoot: nestedRoot,
+        projectUnitName: "tsconfig.json",
+        configFingerprint: base.analysisProfile.configFingerprint,
+        environmentFingerprint: base.analysisProfile.environmentFingerprint,
+        featureSelection: .defaultFeatures,
+        featureNames: [],
+        edition: nil,
+        trustMode: .safe
+    )
+    let view = SnapshotView(
+        store: store,
+        manifest: base.manifest,
+        stats: base.stats,
+        analysisProfile: nestedProfile,
+        extractor: base.extractor
+    )
+    let session = EngineSession(store: store, snapshotView: view)
+
+    #expect(session.manifest.files.map { session.paths.resolve($0.pathID) }
+        == ["outside.ts", "tools/ts/src/app.ts", "tools/ts/src/b.ts"])
+    let outside = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "outside.ts"
+    }?.pathID)
+    #expect(session.content(at: outside) == nil)
+    #expect(try session.definitions(
+        of: "outside",
+        context: snapshotQueryContext(for: session)
+    ).isEmpty)
+    let app = try #require(session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "tools/ts/src/app.ts"
+    }?.pathID)
+    #expect(session.content(at: app) != nil)
+    #expect(session.content(at: outside) == nil)
+    let appIndex = try #require(session.content(at: app)?.1)
+    let specs = appIndex.imports.map {
+        session.strings.resolve($0.moduleSpecifier)
+    }
+    #expect(Set(specs) == Set(["./b", "../../../outside"]))
+    for importBinding in appIndex.imports {
+        let specifier = session.strings.resolve(importBinding.moduleSpecifier)
+        let target = session.moduleMap.targetFile(
+            for: importBinding,
+            from: app,
+            names: session.names,
+            strings: session.strings
+        )
+        #expect(target.map { session.paths.resolve($0) }
+            == (specifier == "./b" ? "tools/ts/src/b.ts" : nil))
+    }
+    #expect(session.contentIndexes.count == 2)
+}
+
+@Test
 func snapshotIndexingIsDeterministicForTheSameSequence() throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
@@ -1258,8 +1423,9 @@ private final class CountingSnapshot: Snapshot, @unchecked Sendable {
 
     func listFiles() -> [(path: String, contentID: ContentID, fileMode: FileMode)] {
         lock.withLock { listCount += 1 }
-        return files.map {
-            ($0.key, ContentID.sha256(of: $0.value), .regular)
+        return files.compactMap { path, bytes in
+            guard !configurationPaths.contains(path) else { return nil }
+            return (path, ContentID.sha256(of: bytes), .regular)
         }.sorted { $0.path < $1.path }
     }
 
@@ -1276,6 +1442,11 @@ private func countingCopyOf(_ snapshot: any Snapshot) throws -> CountingSnapshot
         bytes[file.path] = try snapshot.readBytes(path: file.path)
     }
     return CountingSnapshot(files: bytes)
+}
+
+private func utf8Offset(of needle: String, in source: String) -> UInt32? {
+    guard let range = source.range(of: needle) else { return nil }
+    return UInt32(source[..<range.lowerBound].utf8.count)
 }
 
 private struct ContractExtractor: LanguageExtractor {
