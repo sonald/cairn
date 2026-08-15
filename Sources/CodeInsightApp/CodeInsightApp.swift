@@ -3209,10 +3209,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     && exactSelfTestProviderState?.featureSelections.last
                         == .allFeatures
             })
-        let fuzzyVisibleDuringSwitch =
+        let contextVisibleDuringSwitch =
             windowController.selfTestContextCandidateCount >= 1
-            && windowController.selfTestContextProvenance?
-                .contains("Exact") == false
         exactSelfTestProviderState?.releaseBlockedDefinition()
         exactSelfTestProviderState?.releaseBlockedRelation()
         let oldGenerationResultReturned = waitUntil(timeout: 5, condition: {
@@ -3224,11 +3222,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 exactSelfTestProviderState?.blockedRelationReturned == true
             }
         )
-        let oldGenerationResultDiscarded = oldGenerationResultReturned
-            && oldGenerationRelationResultReturned
-            && model.generation == oldGeneration + 1
-            && windowController.selfTestContextProvenance?
-                .contains("Exact") == false
         let featureRelationRestoredAfterSwitch = waitUntil(timeout: 5, condition: {
             model.relationTree.root?.title == "Backend"
                 && model.relationTree.root?.children?.isEmpty == false
@@ -3251,6 +3244,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             windowController.selfTestContextProvenance?
                 .contains("features: all") == true
         })
+        let oldGenerationResultDiscarded = oldGenerationResultReturned
+            && oldGenerationRelationResultReturned
+            && model.generation == oldGeneration + 1
+            && switchedExactVisible
         let contextReadyMS = milliseconds(since: reprofiledAt)
         let reprofileExtracted = if case let .ready(session, _) = model.projectState {
             session.stats.extractedCount
@@ -3276,7 +3273,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "featurePrepared": featurePrepared,
                 "fakePrepareFeatures": exactSelfTestProviderState?
                     .featureSelections.map(\.rawValue) ?? [],
-                "fuzzyVisibleDuringSwitch": fuzzyVisibleDuringSwitch,
+                "contextVisibleDuringSwitch": contextVisibleDuringSwitch,
                 "fuzzyAfterSwitch": fuzzyAfterSwitch,
                 "oldGenerationRequestInFlight": oldGenerationRequestInFlight,
                 "oldGenerationResultReturned": oldGenerationResultReturned,
@@ -4321,7 +4318,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "featureProbeFileVisible": featureProbeFileVisible,
             "featureMenuActionTriggered": menuActionTriggered,
             "featurePrepared": featurePrepared,
-            "featureFuzzyVisibleDuringSwitch": fuzzyVisibleDuringSwitch,
+            "featureContextClearedDuringSwitch": !contextVisibleDuringSwitch,
             "featureFuzzyAfterSwitch": fuzzyAfterSwitch,
             "featureOldGenerationRequestInFlight":
                 oldGenerationRequestInFlight,
