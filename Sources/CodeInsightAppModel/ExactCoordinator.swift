@@ -1155,8 +1155,8 @@ public final class ExactCoordinator {
         source.session.onEnvironmentChange = { [weak self] environment in
             Task { @MainActor [weak self] in
                 guard let self,
-                      expectedGeneration == generation,
-                      let active,
+                      self.expectedGeneration == generation,
+                      let active = self.active,
                       active.generation == generation,
                       ObjectIdentifier(active.session) == sessionID
                 else { return }
