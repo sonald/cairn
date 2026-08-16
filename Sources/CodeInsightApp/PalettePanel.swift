@@ -599,10 +599,10 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                if Mode.parse(input.stringValue).mode == .projectSymbol {
-                    installProjectSymbolRows()
+                if Mode.parse(self.input.stringValue).mode == .projectSymbol {
+                    self.installProjectSymbolRows()
                 }
-                observeSymbolModel()
+                self.observeSymbolModel()
             }
         }
     }

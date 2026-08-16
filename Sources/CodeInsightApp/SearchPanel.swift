@@ -439,8 +439,8 @@ final class SearchPanel: NSWindowController,
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                observe()
-                scheduleReload()
+                self.observe()
+                self.scheduleReload()
             }
         }
     }

@@ -270,8 +270,8 @@ final class CommitPickerPopover: NSViewController,
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                render()
-                observe()
+                self.render()
+                self.observe()
             }
         }
     }

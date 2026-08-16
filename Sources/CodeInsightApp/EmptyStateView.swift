@@ -213,9 +213,7 @@ final class EmptyStateView: NSView {
             button.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
             Task { @MainActor [weak button] in
-                let image = await Task.detached(priority: .utility) {
-                    NSWorkspace.shared.icon(forFile: path)
-                }.value
+                let image = NSWorkspace.shared.icon(forFile: path)
                 image.size = NSSize(width: 28, height: 28)
                 button?.image = image
             }

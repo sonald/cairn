@@ -72,7 +72,7 @@ final class ReadingSetView: NSView {
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
                 guard let self else { return }
-                onScroll?(Double(scrollView.contentView.bounds.minY))
+                self.onScroll?(Double(self.scrollView.contentView.bounds.minY))
             }
         }
         scrollView.contentView.postsBoundsChangedNotifications = true
