@@ -77,7 +77,7 @@ if [[ $# -eq 6 ]]; then
         exit 2
     fi
     if ! git -C "$mixed_repo" rev-list --first-parent HEAD \
-            | grep -qx "$mixed_fixed_history"; then
+            | grep -x "$mixed_fixed_history" >/dev/null; then
         echo "mixed-git-repo historical revision is not an ancestor of HEAD: $mixed_repo" >&2
         exit 2
     fi
