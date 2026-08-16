@@ -125,6 +125,7 @@ jobs:
         with:
           name: product-quality-${{ github.run_id }}
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 14
           path: |
             .build/corpora.log
