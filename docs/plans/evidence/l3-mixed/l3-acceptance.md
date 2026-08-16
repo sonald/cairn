@@ -2,8 +2,7 @@
 
 > Started: 2026-08-15 (Asia/Shanghai)
 > Source plan: `docs/plans/l3-mixed-language-plan.md`
-> Current status: F7/F8 implementation and fresh-cache host evidence recorded; F9 workflow
-> definition updated but remote macOS-15 run UNVERIFIED/BLOCKED.
+> Current status: local V0 PASS; F9 remote macOS-15 UNVERIFIED/BLOCKED.
 
 ## F0 live baseline
 
@@ -326,3 +325,98 @@ and pass the third corpus to `scripts/run-product-gates.sh`.
 
 F9 verdict: **UNVERIFIED/BLOCKED**. A remote macOS-15 workflow run has not executed against
 the updated workflow definition, so the GitHub Actions PASS is not claimed.
+
+## V0 local gates and final bundle
+
+Local V0 product gate completed on 2026-08-16 (Asia/Shanghai). The full Swift Testing run
+reported 793 tests in 3 suites passed after 260.731 seconds. The host product matrix concluded:
+
+```text
+summary: pass=17 fail=0 hang=0
+All gold gates passed.
+```
+
+Gold totals:
+
+```text
+tokio:                total 17, knownFailures 0, unexpected 0
+ripgrep:              total 16, knownFailures 3, unexpected 0
+mcp-python-sdk:       total 6,  knownFailures 0, unexpected 0
+morphic-typescript:   total 10, knownFailures 0, unexpected 0
+```
+
+Release fold performance completed with `foldLatencyMs=379.15895800000001`. The product gate
+artifact is `.build/self-test-run-20260816-130732-54752`.
+
+The external corpora were clean before and after the gates:
+
+```text
+Python:     /Users/siancao/work/ai/mcp/mcp-python-sdk
+revision:   f55831ee798cd4d7bafab4d50d6dba46e6fce387
+status:     clean
+
+TypeScript: /Users/siancao/work/ai/morphic
+revision:   f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
+status:     clean
+
+Mixed:      /private/tmp/codeinsight-l3-p0.tKX4qX/llm-tools
+revision:   457b66e72da1967c2432131a7ff8adc4341eb337
+status:     clean
+```
+
+Final bundle:
+
+```text
+bundle id:  dev.cairn.Cairn.l3v0.20260816-131015-61943
+output:     .build/l3-distribution-20260816-131015-61943/Cairn.app
+zip:        .build/l3-distribution-20260816-131015-61943/Cairn.zip
+preflight:  unique output directory did not exist before the build
+Info.plist: OK
+zip extract: same bundle ID and codeinsight-app executable
+codesign:   app and extracted zip app passed --verify --strict
+signing:    arm64, ad-hoc, not notarized
+zip SHA-256: b9e809eb1b20e55eaf4c9644a0e54a6bc8f04f51ca6b9471eff64fb1f66e3afc
+binary SHA-256: 34cf2d69239df1f9b1edd133f34abe9bcb725b57dd4b7d6207c969174fbfd256
+```
+
+LaunchServices UI verification:
+
+```text
+Single-language smoke: Rust, Python, TypeScript all opened from the existing menus.
+Mixed chooser: Rust/Python/TypeScript all checked.
+Union tree: visible after mixed open.
+#main search results:
+  Rust: crates/qrcode2txt/src/main.rs
+  Python: examples/example_usage.py, main.py
+  TypeScript: tools/model-files-web/src/core/imatrix.ts
+Reader modes: cli.rs, main.py, imatrix.ts, Readers.tsx
+Rust profile menu: default/all/no-default features, edition 2021
+Python profile menu: llm-tools Safe
+TypeScript profile menu: tsconfig.json Safe
+Exact context: Exact·direct for rust-analyzer, Pyright, TLS; old provider not residual after switch.
+Historical switch: fixed 6cc5b52 keeps TS selected with zero TS source and Rust active.
+Compare: qrcode_monkey_fixtures.rs vs 6cc5b52 62/45/17/2.
+TS relation: only tokenizer.ts, bucketIndex -> analyzeVocabulary.
+Normal quit: descendants 0; relaunch restored llm-tools/tokenizer.ts/TS profile.
+Open Recent after relaunch: llm-tools, morphic, mcp-python-sdk, codeinsight.
+Second quit: descendants 0.
+```
+
+Screenshot:
+
+```text
+path: docs/plans/evidence/l3-mixed/l3-v0-final-bundle-compare.jpeg
+sha-256: 389c5fb7811297bc25889de50573cb9036ffbfdd7598593ed61f3f56ab6c015d
+size: 900x652
+```
+
+Final repo/corpora status before evidence commit: repository clean except the new evidence
+file and docs update; Python, TypeScript, and mixed corpora remain at the exact HEADs above.
+
+After removing one unused local binding reported by the release compiler, the final release
+build exited `0`. The same release binary then reran `--self-test-mixed` against the fixed corpus:
+all nine structured checks passed, the three real provider queries completed in 135/305/195 ms,
+the fixed Compare remained 62/45/17/2, and `SELF_TEST_FINISH ... channel=mixed exit=0` was emitted.
+
+Overall V0: local gate PASS. F9 remote macOS-15 workflow remains UNVERIFIED/BLOCKED, so final
+remote CI PASS is not claimed for this evidence file.

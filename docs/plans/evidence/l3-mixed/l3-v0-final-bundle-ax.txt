@@ -1,0 +1,109 @@
+# L3 V0 final bundle AX excerpts
+
+Raw-style accessibility facts captured during the bundle verification. No AX index was
+rewritten; labels below are the stable element names/labels observed.
+
+## File menu
+
+```text
+AXMenuBar
+  AXMenuItem "Open Project…"
+  AXMenuItem "Open Python Project…"
+  AXMenuItem "Open TypeScript Project…"
+  AXMenuItem "Open Mixed-Language Project…"
+```
+
+## Mixed chooser
+
+```text
+AXSheet "Open Mixed-Language Project"
+AXCheckBox "Rust" checked
+AXCheckBox "Python" checked
+AXCheckBox "TypeScript" checked
+AXButton "Open" enabled
+AXButton "Cancel" enabled
+```
+
+## Union tree and Reader
+
+```text
+AXOutline "Files"
+AXRow "crates"
+AXRow "qrcode2txt"
+AXRow "main.rs" / "lib.rs" / "tests"
+AXRow "tools"
+AXRow "model-files-web"
+AXRow "src"
+AXRow "core"
+AXRow "tokenizer.ts"
+AXRow "Readers.tsx"
+AXRow "main.py"
+AXTab "cli.rs"
+AXTab "main.py"
+AXTab "imatrix.ts"
+AXTab "Readers.tsx"
+```
+
+## Global symbol search
+
+```text
+AXTextField "Quick Open" value "#main"
+AXRow "main crates/qrcode2txt/src/main.rs:5:4"
+AXRow "main examples/example_usage.py:310:5"
+AXRow "main main.py:125:5"
+AXRow "remaining tools/model-files-web/src/core/imatrix.ts:78:7"
+```
+
+## Profile menus
+
+```text
+Rust:
+  "Current unit: qrcode2txt · features: default · edition 2021 · Safe"
+  "Default features"
+  "All features"
+  "No default features"
+Python:
+  "Current unit: llm-tools · Safe"
+TypeScript:
+  "Current unit: tsconfig.json · Safe"
+```
+
+## Exact context / relations
+
+```text
+Context "Exact·direct · rust-analyzer · source"
+Context "Exact·direct · pyright · source"
+Context "Exact·direct · typescript-language-server · source"
+Relation target "tools/model-files-web/src/core/tokenizer.ts"
+Relation "bucketIndex" -> "analyzeVocabulary"
+```
+
+## Compare
+
+```text
+File "crates/qrcode2txt/tests/qrcode_monkey_fixtures.rs"
+Commit "6cc5b52f9f1bef28b27133155bbb858b2891c829"
+Diff "62 left / 45 right / 17 changes / 2 hunks"
+```
+
+## PID sequence
+
+```text
+bundle main PID 65673
+Rust provider PID 76048 after exact query
+Python switch: Rust provider absent
+Pyright returned real Exact results; no lingering child found by subsequent scan
+TLS returned real Exact results; no lingering child found by subsequent scan
+first normal quit: app/provider descendants 0
+relaunched restored mixed session: llm-tools/tokenizer.ts/TS profile
+Open Recent: llm-tools, morphic, mcp-python-sdk, codeinsight
+second normal quit: app/provider descendants 0
+```
+
+## Historical TS-zero-source state
+
+```text
+Mixed project at worktree: Rust, Python, TypeScript sessions selected
+Commit 6cc5b52: TypeScript selected but zero TS/TSX source; Rust active
+Worktree switch returns: TypeScript profile restored
+```
