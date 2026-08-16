@@ -2,7 +2,7 @@
 
 > Started: 2026-08-15 (Asia/Shanghai)
 > Source plan: `docs/plans/l3-mixed-language-plan.md`
-> Current status: local V0 PASS; F9 remote macOS-15 UNVERIFIED/BLOCKED.
+> Current status: overall PASS (local V0 + remote F9 macOS-15).
 
 ## F0 live baseline
 
@@ -323,8 +323,56 @@ deltaBytes=6209512
 F9 workflow definition has been updated to check out fixed `sonald/llm-tools`
 and pass the third corpus to `scripts/run-product-gates.sh`.
 
-F9 verdict: **UNVERIFIED/BLOCKED**. A remote macOS-15 workflow run has not executed against
-the updated workflow definition, so the GitHub Actions PASS is not claimed.
+Remote F9 verification passed after two root-cause fixes: `dba68e3` keeps the current-content
+verified batch when the deadline passes after parsing, instead of discarding it before emitting;
+`755e7ca` closes fold latency at layout stable while retaining the two post-stable run-loop turns
+for memory sampling only.
+
+```text
+workflow run: 31938577400
+url:          https://github.com/sonald/cairn/actions/runs/31938577400
+head:         755e7ca15838404e2e96908389c00f3139bf07d7
+job:          95144269062
+runner:       macOS 15.7.7, Xcode 16.4, Swift 6.1.2
+Swift Testing: 795 tests passed after 289.034 seconds
+product gate:  pass=17 fail=0 hang=0
+artifact:      product-quality-31938577400, id 9261512730
+digest:        sha256:98aceada57bc7b6c494a76f56c471413a75548acd6059a0b8501782b5889ba15
+size:          85511 bytes
+expires:       2026-08-30T09:28:08Z
+```
+
+Reading scaled-check: 18,001 raw candidates, 201 verified references, service
+3670.51 ms, all structured checks true.
+
+Mixed corpus and providers:
+
+```text
+coldStats: rust files=11 extracted=11 reused=0, python files=8 extracted=8 reused=0, typescript files=26 extracted=26 reused=0
+hotStats:  rust files=11 extracted=0 reused=11, python files=8 extracted=0 reused=8, typescript files=26 extracted=0 reused=26
+providers: rust-analyzer 1/1, Pyright 1/1, typescript-language-server 1/7
+compare:   leftLineCount=62 rightLineCount=45 changeCount=17 hunkCount=2
+snapshots: cold/commit/worktree unique
+```
+
+Gold totals:
+
+```text
+tokio: 17, ripgrep: 16 knownFailures 3, mcp-python-sdk: 6, morphic-typescript: 10, unexpected 0
+```
+
+Fold performance:
+
+```text
+foldLatencyMs=214.842666
+resolutionMs: 33.643917 (control), 32.546125 (fold)
+deltaBytes=15352000
+counts: 8400 candidates / 4400 logical / 200 rendered
+```
+
+Corpora remain frozen/clean and provider process cleanup passed.
+
+F9 verdict: **PASS**.
 
 ## V0 local gates and final bundle
 
@@ -433,5 +481,5 @@ build exited `0`. The same production revision reran `--self-test-mixed` against
 all nine structured checks passed, the three real provider queries completed in 135/305/195 ms,
 the fixed Compare remained 62/45/17/2, and `SELF_TEST_FINISH ... channel=mixed exit=0` was emitted.
 
-Overall V0: local gate PASS. F9 remote macOS-15 workflow remains UNVERIFIED/BLOCKED, so final
-remote CI PASS is not claimed for this evidence file.
+Overall V0: local gate PASS. F9 remote macOS-15 workflow PASS with run 31938577400;
+remote CI is now claimed for this evidence file.
