@@ -20,7 +20,7 @@ private enum SelfTestBudgets {
     static let hugeFirstVisibleMS = 2_500.0
     static let hugeStyledFragments = 500
     static let projectTreeVisibleMS = 1_000.0
-    static let projectIndexReadyMS = 3_000.0
+    static let projectIndexReadyMS = 2_500.0
     static let snapshotFirstPaintMS = 1_000.0
 }
 

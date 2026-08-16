@@ -209,7 +209,11 @@ run_case() {
 # Keep each channel as an explicit independent process. The historical hang was
 # observed when unlike channels were hidden inside a shell for-loop.
 run_case base --self-test
+swift build -c release ${swift_options[@]+"${swift_options[@]}"} \
+    --product codeinsight-app
+binary="$PWD/.build/release/codeinsight-app"
 run_case project-git --self-test-project "$git_repo"
+binary="$PWD/.build/debug/codeinsight-app"
 run_case project-non-git --self-test-project "$non_git_root"
 run_case tabs --self-test-tabs
 run_case search --self-test-search
