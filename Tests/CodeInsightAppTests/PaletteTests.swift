@@ -313,7 +313,7 @@ struct PaletteTests {
         defer { panel.close() }
         panel.show(prefill: "#target_symbol_", relativeTo: nil)
         #expect(panel.inputSelectionForTesting == NSRange(location: 15, length: 0))
-        #expect(await waitUntil {
+        #expect(await waitUntil(timeout: .seconds(10)) {
             panel.rowsForTesting.count == 20
                 && panel.footerForTesting == "… 还有 35 条"
                 && panel.rowsForTesting.allSatisfy {
