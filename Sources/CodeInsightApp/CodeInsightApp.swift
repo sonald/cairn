@@ -10394,9 +10394,9 @@ private func runFoldPerformance(
         fitViewport()
         reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
         window.displayIfNeeded()
-        pumpRunLoop()
-        pumpRunLoop()
         foldLatencyMS = milliseconds(since: started)
+        pumpRunLoop()
+        pumpRunLoop()
     } else {
         observedCounts = reader.foldPerformanceCounts
         pumpRunLoop()
