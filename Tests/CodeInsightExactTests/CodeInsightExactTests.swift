@@ -373,6 +373,34 @@ func typeScriptProviderRejectsSymlinksResolvingInsideProject() throws {
 }
 
 @Test
+func typeScriptTsserverURLDerivesFromNestedNodeModulesRoot() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let nodeModules = root
+        .appendingPathComponent(
+            "hostedtoolcache/node/26.7.0/arm64/lib/node_modules",
+            isDirectory: true
+        )
+    let typescript = nodeModules
+        .appendingPathComponent("typescript/lib", isDirectory: true)
+    try FileManager.default.createDirectory(
+        at: typescript,
+        withIntermediateDirectories: true
+    )
+    let tsserver = typescript.appendingPathComponent("tsserver.js")
+    try Data("x".utf8).write(to: tsserver)
+
+    let languageServer = nodeModules
+        .appendingPathComponent("typescript-language-server/lib/cli.mjs")
+    let found = try #require(
+        TypeScriptLanguageServerProvider.tsserverURL(
+            fromLanguageServer: languageServer
+        )
+    )
+    #expect(found.path == tsserver.path)
+}
+
+@Test
 func typeScriptSessionUsesTSReactLanguageIDForDidOpen() throws {
     let root = try temporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: root) }

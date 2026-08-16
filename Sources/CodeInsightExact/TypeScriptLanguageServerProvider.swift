@@ -117,6 +117,27 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
         }
     }
 
+    @usableFromInline
+    package static func tsserverURL(
+        fromLanguageServer languageServerURL: URL
+    ) -> URL? {
+        let resolved = languageServerURL.resolvingSymlinksInPath()
+            .standardizedFileURL
+        let nodeModulesRoot = resolved
+            .deletingLastPathComponent()  // lib
+            .deletingLastPathComponent()  // typescript-language-server
+            .deletingLastPathComponent()  // node_modules
+        guard nodeModulesRoot.lastPathComponent == "node_modules" else {
+            return nil
+        }
+        let candidate = nodeModulesRoot
+            .appendingPathComponent("typescript/lib/tsserver.js")
+        guard FileManager.default.isReadableFile(atPath: candidate.path) else {
+            return nil
+        }
+        return candidate
+    }
+
     static func requireOutsideProject(
         _ candidateURL: URL,
         projectURL: URL

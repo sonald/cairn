@@ -259,6 +259,9 @@ public final class ExactCoordinator {
                         named: "tsserver.js",
                         projectURL: projectURL
                     )
+                    ?? TypeScriptLanguageServerProvider.tsserverURL(
+                        fromLanguageServer: languageServer
+                    )
                     ?? [
                         "/opt/homebrew/lib/node_modules/typescript/lib/tsserver.js",
                         "/usr/local/lib/node_modules/typescript/lib/tsserver.js",
