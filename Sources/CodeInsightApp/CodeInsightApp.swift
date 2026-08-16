@@ -7122,7 +7122,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         offset: offset
                     )
                     contextResolved = candidate != nil
-                    if let candidate {
+                    if candidate != nil {
                         controller.selfTestReaderRelation(
                             offset: offset,
                             direction: .references
