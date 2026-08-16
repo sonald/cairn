@@ -367,19 +367,26 @@ status:     clean
 Final bundle:
 
 ```text
-bundle id:  dev.cairn.Cairn.l3v0.20260816-131015-61943
-output:     .build/l3-distribution-20260816-131015-61943/Cairn.app
-zip:        .build/l3-distribution-20260816-131015-61943/Cairn.zip
+bundle id:  dev.cairn.Cairn.l3v0.final.20260816-140706
+output:     .build/l3-distribution-final-20260816-140706/Cairn.app
+zip:        .build/l3-distribution-final-20260816-140706/Cairn.zip
 preflight:  unique output directory did not exist before the build
 Info.plist: OK
 zip extract: same bundle ID and codeinsight-app executable
 codesign:   app and extracted zip app passed --verify --strict
 signing:    arm64, ad-hoc, not notarized
-zip SHA-256: b9e809eb1b20e55eaf4c9644a0e54a6bc8f04f51ca6b9471eff64fb1f66e3afc
-binary SHA-256: 34cf2d69239df1f9b1edd133f34abe9bcb725b57dd4b7d6207c969174fbfd256
+zip SHA-256: 1393f5f556bf162a61fb7a856040f05c21961c1523097c141e809e373f02cd69
+binary SHA-256: 7747df6d754e427172b44acf8b1b45022f5d97b4498f1aab1c8fc258af1f71d4
 ```
 
-LaunchServices UI verification:
+Detailed LaunchServices UI verification was performed on the immediately preceding release
+bundle. The only subsequent production-source change was inside the CLI-only mixed self-test:
+an unused optional binding became the equivalent non-nil check. No normal product path changed.
+The rebuilt final bundle above was then launched through normal LaunchServices against the same
+fixed mixed corpus; its union tree published, Exact reached `ready · Safe (limited)` with a real
+rust-analyzer child, and normal Quit reaped both app and provider.
+
+Detailed UI journey:
 
 ```text
 Single-language smoke: Rust, Python, TypeScript all opened from the existing menus.
@@ -402,7 +409,15 @@ Open Recent after relaunch: llm-tools, morphic, mcp-python-sdk, codeinsight.
 Second quit: descendants 0.
 ```
 
-Screenshot:
+Rebuilt final-artifact screenshot:
+
+```text
+path: docs/plans/evidence/l3-mixed/l3-v0-final-artifact.jpeg
+sha-256: af01ea5b47ad6ad514eaac4d4dfed06ae2762efa1772ac96ebdffe486693f8a3
+size: 900x652
+```
+
+Detailed Compare screenshot from the product-identical preceding release:
 
 ```text
 path: docs/plans/evidence/l3-mixed/l3-v0-final-bundle-compare.jpeg
@@ -413,8 +428,8 @@ size: 900x652
 Final repo/corpora status before evidence commit: repository clean except the new evidence
 file and docs update; Python, TypeScript, and mixed corpora remain at the exact HEADs above.
 
-After removing one unused local binding reported by the release compiler, the final release
-build exited `0`. The same release binary then reran `--self-test-mixed` against the fixed corpus:
+After removing the unused local binding reported by the release compiler, the final release
+build exited `0`. The same production revision reran `--self-test-mixed` against the fixed corpus:
 all nine structured checks passed, the three real provider queries completed in 135/305/195 ms,
 the fixed Compare remained 62/45/17/2, and `SELF_TEST_FINISH ... channel=mixed exit=0` was emitted.
 

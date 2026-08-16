@@ -3,6 +3,10 @@
 Raw-style accessibility facts captured during the bundle verification. No AX index was
 rewritten; labels below are the stable element names/labels observed.
 
+The detailed journey used bundle `dev.cairn.Cairn.l3v0.20260816-131015-61943`. The only later
+source edit was an equivalent check inside the CLI-only mixed self-test. The rebuilt final
+artifact used `dev.cairn.Cairn.l3v0.final.20260816-140706` and received the separate smoke below.
+
 ## File menu
 
 ```text
@@ -98,6 +102,21 @@ first normal quit: app/provider descendants 0
 relaunched restored mixed session: llm-tools/tokenizer.ts/TS profile
 Open Recent: llm-tools, morphic, mcp-python-sdk, codeinsight
 second normal quit: app/provider descendants 0
+```
+
+## Rebuilt final artifact
+
+```text
+AXMenuItem "Open Mixed-Language Project…"
+AXCheckBox "Rust" checked
+AXCheckBox "Python" checked
+AXCheckBox "TypeScript" checked
+AXOutline "Files": crates, examples, src, tools, main.py
+AXText "Project" value "llm-tools"
+AXText "Exact provider status" value "Exact: ready · Safe (limited)"
+bundle main PID 80674
+rust-analyzer PID 80899
+normal Quit: final app/provider descendants 0
 ```
 
 ## Historical TS-zero-source state
