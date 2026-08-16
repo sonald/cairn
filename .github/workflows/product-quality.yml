@@ -20,7 +20,6 @@ jobs:
     timeout-minutes: 45
     env:
       CODEINSIGHT_SELF_TEST_TIMEOUT_SECONDS: 240
-      CAIRN_CORPUS_ROOT: ${{ runner.temp }}/cairn-corpora
       HOMEBREW_NO_AUTO_UPDATE: 1
       RUSTUP_TOOLCHAIN: 1.97.1
 
@@ -103,12 +102,16 @@ jobs:
             | tee .build/mixed-corpus.log
 
       - name: Provision frozen Rust corpora
+        env:
+          CAIRN_CORPUS_ROOT: ${{ runner.temp }}/cairn-corpora
         run: |
           set -o pipefail
           mkdir -p .build
           bash scripts/provision-corpora.sh 2>&1 | tee .build/corpora.log
 
       - name: Run mixed-language product gate
+        env:
+          CAIRN_CORPUS_ROOT: ${{ runner.temp }}/cairn-corpora
         run: |
           set -o pipefail
           bash scripts/run-product-gates.sh \
