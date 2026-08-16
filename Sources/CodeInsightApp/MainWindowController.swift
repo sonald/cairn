@@ -1217,7 +1217,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               profileButton.frame.height > 0,
               let container = profileButton.superview
         else { return false }
-        return container.bounds.contains(profileButton.frame)
+        return !container.visibleRect.intersection(profileButton.frame).isEmpty
     }
     var selfTestProfileButtonFrame: NSRect { profileButton.frame }
     var selfTestProfileContainerBounds: NSRect {
