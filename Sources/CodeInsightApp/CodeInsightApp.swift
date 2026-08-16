@@ -1788,48 +1788,57 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )?
         let referenceProbeStartedAt = ContinuousClock.now
         Task { @MainActor in
-            do {
-                let stream = try referenceSession.searchReferences(
-                    ContentSearchQuery(
-                        pattern: "p0",
-                        caseSensitive: true
-                    ),
-                    excludingPathID: referenceSymbol.pathID,
-                    excludingRange: referenceDeclarationRange,
-                    context: referenceContext
-                )
-                var verifiedCount = 0
-                var firstBatchMS: Double?
-                var isTruncated = false
-                for try await batch in stream {
-                    let count = batch.matchesByPath.values.reduce(0) {
-                        $0 + $1.count
+            let completedProbe = await { () async -> (
+                verifiedCount: Int,
+                firstBatchMS: Double,
+                totalMS: Double,
+                isTruncated: Bool,
+                error: String?
+            ) in
+                do {
+                    let stream = try referenceSession.searchReferences(
+                        ContentSearchQuery(
+                            pattern: "p0",
+                            caseSensitive: true
+                        ),
+                        excludingPathID: referenceSymbol.pathID,
+                        excludingRange: referenceDeclarationRange,
+                        context: referenceContext
+                    )
+                    var verifiedCount = 0
+                    var firstBatchMS: Double?
+                    var isTruncated = false
+                    for try await batch in stream {
+                        let count = batch.matchesByPath.values.reduce(0) {
+                            $0 + $1.count
+                        }
+                        if firstBatchMS == nil, count > 0 {
+                            firstBatchMS = milliseconds(
+                                since: referenceProbeStartedAt
+                            )
+                        }
+                        verifiedCount += count
+                        isTruncated =
+                            isTruncated || batch.completeness == .truncated
                     }
-                    if firstBatchMS == nil, count > 0 {
-                        firstBatchMS = milliseconds(
-                            since: referenceProbeStartedAt
-                        )
-                    }
-                    verifiedCount += count
-                    isTruncated =
-                        isTruncated || batch.completeness == .truncated
+                    return (
+                        verifiedCount,
+                        firstBatchMS ?? -1,
+                        milliseconds(since: referenceProbeStartedAt),
+                        isTruncated,
+                        nil
+                    )
+                } catch {
+                    return (
+                        0,
+                        -1,
+                        milliseconds(since: referenceProbeStartedAt),
+                        false,
+                        error.localizedDescription
+                    )
                 }
-                referenceProbe = (
-                    verifiedCount,
-                    firstBatchMS ?? -1,
-                    milliseconds(since: referenceProbeStartedAt),
-                    isTruncated,
-                    nil
-                )
-            } catch {
-                referenceProbe = (
-                    0,
-                    -1,
-                    milliseconds(since: referenceProbeStartedAt),
-                    false,
-                    error.localizedDescription
-                )
-            }
+            }()
+            referenceProbe = completedProbe
         }
         guard waitUntil(timeout: 10, condition: { referenceProbe != nil }),
               let referenceProbe,
