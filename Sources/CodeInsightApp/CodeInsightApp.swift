@@ -6748,20 +6748,26 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         func git(_ arguments: [String]) throws -> String {
             let process = Process()
-            let output = Pipe()
+            let standardOutput = Pipe()
+            let standardError = Pipe()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
             process.arguments = ["-C", root.path] + arguments
-            process.standardOutput = output
-            process.standardError = output
+            process.standardOutput = standardOutput
+            process.standardError = standardError
             try process.run()
             process.waitUntilExit()
-            let data = output.fileHandleForReading.readDataToEndOfFile()
+            let data = standardOutput.fileHandleForReading.readDataToEndOfFile()
+            let errorData = standardError.fileHandleForReading
+                .readDataToEndOfFile()
             guard process.terminationStatus == 0
             else {
                 throw CocoaError(.fileReadUnknown, userInfo: [
                     NSLocalizedFailureReasonErrorKey:
                         "git \(arguments.joined(separator: " ")) failed ("
                         + "\(process.terminationStatus)): "
+                        + String(decoding: errorData, as: UTF8.self)
+                            .trimmingCharacters(in: .whitespacesAndNewlines)
+                        + " "
                         + String(decoding: data, as: UTF8.self)
                             .trimmingCharacters(in: .whitespacesAndNewlines)
                 ])
