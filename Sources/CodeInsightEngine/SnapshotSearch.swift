@@ -443,13 +443,6 @@ public struct SnapshotSearchService: Sendable {
 
                         for occurrence in occurrences {
                             try Task.checkCancellation()
-                            if Self.expired(startedAt, limit: wallClockLimit) {
-                                completeness = .truncated
-                                truncatedPathIDs.formUnion(
-                                    allPathIDs.subtracting(processedPathIDs)
-                                )
-                                break contentLoop
-                            }
 
                             let references = verifiedRanges.filter {
                                 occurrence.pathID != excludingPathID

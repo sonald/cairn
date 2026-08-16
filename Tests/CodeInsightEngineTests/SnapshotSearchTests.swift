@@ -354,6 +354,47 @@ func snapshotReferenceSearchMarksTimeoutPartial() async throws {
 }
 
 @Test
+func snapshotReferenceSearchPublishesCurrentContentWhenDeadlinePassesDuringParse()
+    async throws
+{
+    let source = FakeSnapshotSource([
+        ("a.rs", Array("fn f() { foo(); }\n".utf8)),
+        ("b.rs", Array("fn f() { foo(); }\nfoo();\n".utf8)),
+    ])
+    let stream = try RustExtractor.$parseObserver.withValue({
+        Thread.sleep(forTimeInterval: 0.05)
+    }) {
+        try SnapshotSearchService(
+            source: source,
+            language: .rust,
+            extractor: RustExtractor(),
+            wallClockLimit: .milliseconds(1)
+        ).searchReferences(
+            ContentSearchQuery(pattern: "foo", caseSensitive: true),
+            excludingPathID: source.manifest.files[0].pathID,
+            excludingRange: ByteRange(lowerBound: 0, upperBound: 0),
+            context: context(for: source)
+        )
+    }
+    var matches: [SearchMatch] = []
+    var finalCompleteness: Completeness?
+    var truncatedPathIDs = Set<PathID>()
+    for try await batch in stream {
+        matches.append(contentsOf: batch.matchesByPath.values.flatMap { $0 })
+        truncatedPathIDs.formUnion(batch.truncatedPathIDs)
+        if batch.isFinal {
+            finalCompleteness = batch.completeness
+        }
+    }
+
+    #expect(matches.count == 1)
+    #expect(finalCompleteness == .truncated)
+    #expect(truncatedPathIDs.count == 1)
+    let first = try #require(matches.first)
+    #expect(first.byteRange != ByteRange(lowerBound: 0, upperBound: 0))
+}
+
+@Test
 func snapshotReferenceSearchCancellationTerminatesConsumer() async throws {
     let source = FakeSnapshotSource(
         (0..<100).map { index in
