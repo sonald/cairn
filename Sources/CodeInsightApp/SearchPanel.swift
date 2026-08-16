@@ -96,6 +96,8 @@ final class SearchPanel: NSWindowController,
         for row in 0..<outlineView.numberOfRows
         where outlineView.item(atRow: row) as? String == message {
             outlineView.scrollRowToVisible(row)
+            outlineView.layoutSubtreeIfNeeded()
+            outlineView.window?.displayIfNeeded()
             return
         }
     }
