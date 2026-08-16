@@ -1193,7 +1193,7 @@ func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
         label: "right",
         files: ["main.rs": "fn previous() {}"]
     )
-    weak let retainedRight = right
+    weak var retainedRight = right
     let compareGeneration = model.compare.beginLoading(revision: "RIGHT")
     #expect(model.compare.install(
         snapshot: right!,
