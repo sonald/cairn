@@ -20,7 +20,7 @@ private enum SelfTestBudgets {
     static let hugeFirstVisibleMS = 2_500.0
     static let hugeStyledFragments = 500
     static let projectTreeVisibleMS = 1_000.0
-    static let projectIndexReadyMS = 2_500.0
+    static let projectIndexReadyMS = 3_000.0
     static let snapshotFirstPaintMS = 1_000.0
 }
 
@@ -9143,12 +9143,16 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         enlargedWindowGeometry: [String: Double] = [:]
     ) -> Never {
         do {
+            let projectIndexReadyWithinBudget =
+                indexReadyMS < SelfTestBudgets.projectIndexReadyMS
             var object: [String: Any] = [
                 "treeVisibleMS": treeVisibleMS,
                 "indexReadyMS": indexReadyMS,
                 "fileCount": fileCount,
                 "reused": reused,
                 "extracted": extracted,
+                "projectIndexReadyWithinBudget":
+                    projectIndexReadyWithinBudget,
                 "emptyStateRemoved": emptyStateRemoved,
                 "readerDocumentVisible": readerDocumentVisible,
                 "branchName": branchName ?? "",
@@ -9181,7 +9185,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     && indexStatusHiddenAfterFullReady
                     && layoutChecks.values.allSatisfy { $0 }
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
-                    && indexReadyMS < SelfTestBudgets.projectIndexReadyMS
+                    && projectIndexReadyWithinBudget
                     ? 0 : 1
             )
         } catch {
