@@ -1379,6 +1379,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         matchRows: Int,
         truncationRows: Int,
         truncationVisible: Bool,
+        truncationDiagnostic: [String: String]?,
         status: String,
         searching: Bool
     )? {

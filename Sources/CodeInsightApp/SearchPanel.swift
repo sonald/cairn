@@ -89,9 +89,14 @@ final class SearchPanel: NSWindowController,
     }
 
     func selfTestRevealTruncationRow() {
+        reloadTask?.cancel()
+        reloadTask = nil
+        render()
         for group in panelModel.groups {
             outlineView.expandItem(group)
         }
+        outlineView.layoutSubtreeIfNeeded()
+        outlineView.window?.displayIfNeeded()
         guard let message = panelModel.displayTruncationMessage else { return }
         for row in 0..<outlineView.numberOfRows
         where outlineView.item(atRow: row) as? String == message {
@@ -108,6 +113,7 @@ final class SearchPanel: NSWindowController,
         matchRows: Int,
         truncationRows: Int,
         truncationVisible: Bool,
+        truncationDiagnostic: [String: String]?,
         status: String,
         searching: Bool
     ) {
@@ -116,6 +122,7 @@ final class SearchPanel: NSWindowController,
         var matchRows = 0
         var truncationRows = 0
         var truncationVisible = false
+        var diagnosticRow: [String: String]?
         for row in 0..<totalRows {
             switch outlineView.item(atRow: row) {
             case is SearchPanelModel.Group:
@@ -126,11 +133,19 @@ final class SearchPanel: NSWindowController,
                 where message == panelModel.displayTruncationMessage:
                 truncationRows += 1
                 let frame = outlineView.rect(ofRow: row)
-                let intersection = frame.intersection(outlineView.visibleRect)
+                let visibleRect = outlineView.visibleRect
+                let intersection = frame.intersection(visibleRect)
                 truncationVisible = window?.isVisible == true
                     && !intersection.isNull
                     && intersection.width > 0
                     && intersection.height > 0
+                diagnosticRow = [
+                    "truncationRow": String(row),
+                    "windowVisible": String(window?.isVisible == true),
+                    "rowRect": NSStringFromRect(frame),
+                    "visibleRect": NSStringFromRect(visibleRect),
+                    "intersection": NSStringFromRect(intersection),
+                ]
             default:
                 break
             }
@@ -141,6 +156,7 @@ final class SearchPanel: NSWindowController,
             matchRows,
             truncationRows,
             truncationVisible,
+            diagnosticRow,
             statusLabel.stringValue,
             panelModel.isSearching
         )

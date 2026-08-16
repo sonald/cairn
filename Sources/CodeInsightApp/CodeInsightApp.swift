@@ -1307,6 +1307,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 matchRows: Int,
                 truncationRows: Int,
                 truncationVisible: Bool,
+                truncationDiagnostic: [String: String]?,
                 status: String,
                 searching: Bool
             )?,
@@ -1329,6 +1330,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 "status": state?.status as Any,
                 "totalRows": state?.totalRows as Any,
                 "truncationRows": state?.truncationRows as Any,
+                "truncationDiagnostic": state?.truncationDiagnostic as Any,
             ])
             Self.exitSelfTest(
                 channel: "search",
