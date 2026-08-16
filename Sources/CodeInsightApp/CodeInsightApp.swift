@@ -8011,6 +8011,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller.window?.contentView?.layoutSubtreeIfNeeded()
         controller.window?.displayIfNeeded()
         let contentFrame = controller.window?.contentView?.bounds ?? .zero
+        controller.selfTestSetDefaultSidebarDivider()
         let splitFrame = controller.selfTestContentSplitFrameInContentView
         let trailFrame = controller.selfTestTrailBarFrameInContentView
         let statusFrame = controller.selfTestStatusBarFrameInContentView

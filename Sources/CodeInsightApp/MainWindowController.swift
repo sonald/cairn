@@ -843,6 +843,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestSidebarDividerSurvivesPlaceholderRefresh: Bool {
         sidebarController.selfTestDividerSurvivesPlaceholderRefresh()
     }
+    func selfTestSetDefaultSidebarDivider() {
+        sidebarController.selfTestSetDefaultSidebarDivider()
+    }
     var selfTestSidebarDividerPersistsAcrossRebuild: Bool {
         sidebarController.selfTestDividerPersistsAcrossRebuild()
     }
@@ -2858,6 +2861,16 @@ final class SidebarViewController: NSViewController,
         )
     }
 
+    func selfTestSetDefaultSidebarDivider() {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        guard splitView.arrangedSubviews.count == 2,
+              splitView.bounds.height > 0
+        else { return }
+        splitView.setPosition(splitView.bounds.height * 0.65, ofDividerAt: 0)
+        view.layoutSubtreeIfNeeded()
+    }
+
     func selfTestDividerSurvivesPlaceholderRefresh() -> Bool {
         loadViewIfNeeded()
         guard splitView.arrangedSubviews.count == 2 else { return false }
@@ -4478,7 +4491,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         (
             tabStripView.convert(tabStripView.bounds, to: nil),
             readerHeader.convert(readerHeader.bounds, to: nil),
-            readingHeightControl.convert(readingHeightControl.bounds, to: nil),
+            readingHeightControl.superview?.convert(
+                readingHeightControl.alignmentRect(
+                    forFrame: readingHeightControl.frame
+                ),
+                to: nil
+            ) ?? .zero,
             scopeHeader.convert(scopeHeader.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
@@ -4702,7 +4720,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 readingHeightControl.label(forSegment: $0)
             },
             readerHeader.convert(readerHeader.bounds, to: nil),
-            readingHeightControl.convert(readingHeightControl.bounds, to: nil),
+            readingHeightControl.superview?.convert(
+                readingHeightControl.alignmentRect(
+                    forFrame: readingHeightControl.frame
+                ),
+                to: nil
+            ) ?? .zero,
             readingHeightShortcutLabel.stringValue,
             readingHeightControl.accessibilityLabel() ?? ""
         )
