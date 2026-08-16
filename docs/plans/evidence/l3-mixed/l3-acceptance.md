@@ -323,10 +323,12 @@ deltaBytes=6209512
 F9 workflow definition has been updated to check out fixed `sonald/llm-tools`
 and pass the third corpus to `scripts/run-product-gates.sh`.
 
-Remote F9 verification passed after two root-cause fixes: `dba68e3` keeps the current-content
+Remote F9 verification first passed after two root-cause fixes: `dba68e3` keeps the current-content
 verified batch when the deadline passes after parsing, instead of discarding it before emitting;
 `755e7ca` closes fold latency at layout stable while retaining the two post-stable run-loop turns
-for memory sampling only.
+for memory sampling only. A further fix `8c545de` runs the `project-git` performance channel with
+the release binary while the other 16 channels stay debug, restoring the 2,500 ms project index
+budget for its release baseline.
 
 ```text
 workflow run: 31938577400
@@ -373,6 +375,29 @@ counts: 8400 candidates / 4400 logical / 200 rendered
 Corpora remain frozen/clean and provider process cleanup passed.
 
 F9 verdict: **PASS**.
+
+Latest code-head confirmation (`8c545de`):
+
+```text
+workflow run: 31940670696
+url:          https://github.com/sonald/cairn/actions/runs/31940670696
+head:         8c545dea9be58a662ecdbd4f776c5083bce0cfbe
+job:          95149239552
+runner:       macOS 15.7.7, Xcode 16.4, Swift 6.1.2
+Swift Testing: 795 tests passed after 275.093 seconds
+product gate:  pass=17 fail=0 hang=0
+artifact:      product-quality-31940670696, id 9262065845
+digest:        sha256:322ad874730661f0469c47e6d4721d57f38f6193bf2f0192935475ecce89168f
+size:          85396 bytes
+expires:       2026-08-30T10:16:02Z
+```
+
+project-git release timing: fileCount=60, extracted=57, reused=0,
+projectIndexReadyMS=634.254833, treeVisibleMS=136.855042, budget=true.
+Reading: 18,001 candidates -> 201 verified, service 3529.37175, result 3804.696917.
+Mixed cold/hot 11/8/26 unique snapshots; provider ready 243.284042/357.061542/240.818667;
+compare 62/45/17/2. Fold latency 215.035709 ms (resolution 31.344750/34.441333, delta 8896448).
+Gold 17/16/6/10 with ripgrep known 3, unexpected 0. Provider cleanup passed.
 
 ## V0 local gates and final bundle
 
@@ -481,5 +506,5 @@ build exited `0`. The same production revision reran `--self-test-mixed` against
 all nine structured checks passed, the three real provider queries completed in 135/305/195 ms,
 the fixed Compare remained 62/45/17/2, and `SELF_TEST_FINISH ... channel=mixed exit=0` was emitted.
 
-Overall V0: local gate PASS. F9 remote macOS-15 workflow PASS with run 31938577400;
+Overall V0: local gate PASS. F9 remote macOS-15 workflow PASS with latest code-head run 31940670696;
 remote CI is now claimed for this evidence file.
