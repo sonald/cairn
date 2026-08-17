@@ -376,28 +376,32 @@ Corpora remain frozen/clean and provider process cleanup passed.
 
 F9 verdict: **PASS**.
 
-Latest code-head confirmation (`8c545de`):
+Latest final confirmation (`6a9a75b`): search stale reload/render/layout fix that also emits
+geometry diagnostics.
 
 ```text
-workflow run: 31940670696
-url:          https://github.com/sonald/cairn/actions/runs/31940670696
-head:         8c545dea9be58a662ecdbd4f776c5083bce0cfbe
-job:          95149239552
+workflow run: 31943676250
+url:          https://github.com/sonald/cairn/actions/runs/31943676250
+head:         6a9a75b1b4bff499741b48ae3f9b6651b0888195
+job:          95156413491
 runner:       macOS 15.7.7, Xcode 16.4, Swift 6.1.2
-Swift Testing: 795 tests passed after 275.093 seconds
+Swift Testing: 795 tests passed after 340.002 seconds
 product gate:  pass=17 fail=0 hang=0
-artifact:      product-quality-31940670696, id 9262065845
-digest:        sha256:322ad874730661f0469c47e6d4721d57f38f6193bf2f0192935475ecce89168f
-size:          85396 bytes
-expires:       2026-08-30T10:16:02Z
+artifact:      product-quality-31943676250, id 9262864710
+digest:        sha256:0f55ca70864c8e0e55a98d844c8bccb828407fc84f2c347a77ca7489420007e3
+size:          85669 bytes
+expires:       2026-08-30T11:26:36Z
 ```
 
+Search exact result: 2001 matches/11 files, matchRows 2000, truncation row 2011, visible=true,
+windowVisible true, rowRect y 48712.64 h24, visibleRect y 48331 h416.
+
 project-git release timing: fileCount=60, extracted=57, reused=0,
-projectIndexReadyMS=634.254833, treeVisibleMS=136.855042, budget=true.
-Reading: 18,001 candidates -> 201 verified, service 3529.37175, result 3804.696917.
-Mixed cold/hot 11/8/26 unique snapshots; provider ready 243.284042/357.061542/240.818667;
-compare 62/45/17/2. Fold latency 215.035709 ms (resolution 31.344750/34.441333, delta 8896448).
-Gold 17/16/6/10 with ripgrep known 3, unexpected 0. Provider cleanup passed.
+indexReadyMS=696.646791, treeVisibleMS=140.270583, budget=true.
+Reading: 18,001 -> 201 verified, service 3555.4765, result 4375.339125.
+Mixed cold/hot 11/8/26 unique snapshots; providers ready 175.897625/350.576/196.144834;
+compare 62/45/17/2. Fold 201.42625ms, resolutions 31.161625/30.579791, delta 1425472.
+Gold 17/16/6/10 with ripgrep known 3, unexpected 0; real providers and process cleanup PASS.
 
 ## V0 local gates and final bundle
 
@@ -506,5 +510,5 @@ build exited `0`. The same production revision reran `--self-test-mixed` against
 all nine structured checks passed, the three real provider queries completed in 135/305/195 ms,
 the fixed Compare remained 62/45/17/2, and `SELF_TEST_FINISH ... channel=mixed exit=0` was emitted.
 
-Overall V0: local gate PASS. F9 remote macOS-15 workflow PASS with latest code-head run 31940670696;
+Overall V0: local gate PASS. F9 remote macOS-15 workflow PASS with latest code-head run 31943676250;
 remote CI is now claimed for this evidence file.
