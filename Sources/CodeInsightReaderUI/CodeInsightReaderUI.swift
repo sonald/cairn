@@ -2956,7 +2956,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
         let measured = (bodyText as NSString).size(withAttributes: [.font: font])
         let bodyWidth = min(180, ceil(measured.width))
-        chipSize = NSSize(width: 5 + bodyWidth + 54 + 5, height: 16)
+        chipSize = NSSize(width: 5 + bodyWidth + 54 + 5, height: 22)
         super.init(data: nil, ofType: "com.codeinsight.fold-attachment")
         allowsTextAttachmentView = true
     }
@@ -3087,7 +3087,7 @@ private final class FoldAttachmentViewProvider:
         }
         return CGRect(
             x: 0,
-            y: -3,
+            y: -6,
             width: attachment.chipSize.width,
             height: attachment.chipSize.height
         )
