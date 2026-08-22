@@ -420,8 +420,9 @@ struct RelationUXTests {
 
         #expect(definitionRequests == 0)
         #expect(fixture.controller.selfTestExpandPossibleMatches())
-        await pumpRunLoop()
+        let validated = await waitUntil { definitionRequests == 2 }
 
+        #expect(validated)
         #expect(definitionRequests == 2)
     }
 
@@ -1793,6 +1794,18 @@ private func byteOffset(of needle: String, in source: String) -> UInt32 {
 @MainActor
 private func pumpRunLoop() async {
     try? await Task.sleep(for: .milliseconds(50))
+}
+
+private func waitUntil(
+    timeout: Duration = .seconds(3),
+    _ condition: @escaping @MainActor () -> Bool
+) async -> Bool {
+    let deadline = ContinuousClock.now.advanced(by: timeout)
+    while ContinuousClock.now < deadline {
+        if await MainActor.run { condition() } { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return await MainActor.run { condition() }
 }
 
 private struct RelationTestIndexService: IndexService {
