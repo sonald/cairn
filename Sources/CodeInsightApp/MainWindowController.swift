@@ -1341,10 +1341,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func showSymbolSearch() {
-        showPalette(prefill: "#")
+        showPalette(prefill: "#", lockMode: true)
     }
 
-    func showPalette(prefill: String = "") {
+    func showPalette(prefill: String = "", lockMode: Bool = false) {
         if palettePanel == nil {
             palettePanel = PalettePanel(
                 appModel: model,
@@ -1353,7 +1353,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 self?.navigate(to: file, byteOffset: offset, cause: .search)
             }
         }
-        palettePanel?.show(prefill: prefill, relativeTo: window)
+        palettePanel?.show(
+            prefill: prefill,
+            lockMode: lockMode,
+            relativeTo: window
+        )
     }
 
     func showProjectSearch() {
@@ -1671,7 +1675,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             symbolsButton.font = .systemFont(ofSize: 12)
             symbolsButton.target = self
             symbolsButton.action = #selector(showSymbolSearchFromToolbar(_:))
-            symbolsButton.frame.size = NSSize(width: 150, height: 28)
+            symbolsButton.frame.size = NSSize(width: 120, height: 28)
             symbolsButton.setAccessibilityLabel("Open Symbol Search")
             let menuItem = NSMenuItem(
                 title: "Symbols",

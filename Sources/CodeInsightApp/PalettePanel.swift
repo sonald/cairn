@@ -49,6 +49,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private static let resultLimit = 20
     private let appModel: AppModel
     private let symbolModel = SymbolSearchPanelModel()
+    private var lockedMode: (mode: Mode, prefix: String)?
     private let onOpen: (URL, UInt32?) -> Void
     private let input = NSTextField()
     private let modeLabel = NSTextField(labelWithString: "⌘P")
@@ -97,9 +98,14 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         fatalError("init(coder:) has not been implemented")
     }
 
-    func show(prefill: String, relativeTo owner: NSWindow?) {
+    func show(
+        prefill: String,
+        lockMode: Bool = false,
+        relativeTo owner: NSWindow?
+    ) {
         prepare(
             prefill: prefill,
+            lockMode: lockMode,
             owner: owner,
             commands: Self.commandRows(in: NSApp.mainMenu)
         )
@@ -162,9 +168,15 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     func prepareForTesting(
         prefill: String,
         owner: NSWindow?,
-        commands: [Row]
+        commands: [Row],
+        lockMode: Bool = false
     ) {
-        prepare(prefill: prefill, owner: owner, commands: commands)
+        prepare(
+            prefill: prefill,
+            lockMode: lockMode,
+            owner: owner,
+            commands: commands
+        )
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
@@ -359,18 +371,32 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     private func prepare(
         prefill: String,
+        lockMode: Bool,
         owner: NSWindow?,
         commands: [Row]
     ) {
         ownerWindow = owner
         originalResponder = owner?.firstResponder
         capturedCommands = commands
+        lockedMode = lockMode
+            ? (Mode.parse(prefill).mode, String(prefill.prefix(1)))
+            : nil
         input.stringValue = prefill
         refreshRows()
     }
 
     private func refreshRows() {
-        let parsed = Mode.parse(input.stringValue)
+        let raw = input.stringValue.trimmingCharacters(in: .whitespaces)
+        let parsed: (mode: Mode, query: String) = if let lockedMode {
+            (
+                lockedMode.mode,
+                raw.hasPrefix(lockedMode.prefix)
+                    ? String(raw.dropFirst())
+                    : raw
+            )
+        } else {
+            Mode.parse(input.stringValue)
+        }
         modeLabel.stringValue = switch parsed.mode {
         case .file: "⌘P"
         case .command: "⇧⌘P"

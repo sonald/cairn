@@ -323,6 +323,26 @@ struct PaletteTests {
     }
 
     @Test
+    func symbolToolbarLocksProjectSymbolMode() async throws {
+        let model = AppModel()
+        let panel = PalettePanel(
+            appModel: model,
+            settings: ReaderSettings(),
+            onOpen: { _, _ in }
+        )
+        defer { panel.close() }
+        panel.show(prefill: "#", lockMode: true, relativeTo: nil)
+        #expect(
+            panel.rowsForTesting.map(\.title) == ["Type a project symbol"]
+        )
+
+        panel.setQueryForTesting("> Item")
+        #expect(
+            panel.rowsForTesting.map(\.title) == ["No project symbols found"]
+        )
+    }
+
+    @Test
     func projectSymbolModeForwardsFullWorkspaceSessions() async throws {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("PaletteTests-\(UUID().uuidString)", isDirectory: true)
