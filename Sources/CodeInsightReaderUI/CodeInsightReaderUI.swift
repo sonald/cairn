@@ -1727,6 +1727,13 @@ public final class ReaderTextView {
         )
         updateCurrentLine(byteOffset: byteOffset)
         view.scrollRangeToVisible(lineRange)
+        if let scrollView = view.enclosingScrollView {
+            let clipView = scrollView.contentView
+            if clipView.bounds.origin.x != 0 {
+                clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
+                scrollView.reflectScrolledClipView(clipView)
+            }
+        }
         view.showFindIndicator(for: lineRange)
     }
 

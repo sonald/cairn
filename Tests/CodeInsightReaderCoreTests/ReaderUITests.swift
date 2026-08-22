@@ -364,6 +364,35 @@ func wrapSettingReversesEveryTextKitAndScrollerProperty() {
 
 @MainActor
 @Test
+func revealResetsHorizontalScrollAfterNavigation() throws {
+    let source = (0..<40)
+        .map { "let value\($0) = \($0);" }
+        .joined(separator: "\n")
+    let highlighted = try RustHighlighter().highlight(bytes: Array(source.utf8))
+    let document = ReaderDocument(
+        bytes: Array(source.utf8),
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let (reader, scrollView, window) = renderOffscreen(document)
+    defer { withExtendedLifetime(window) {} }
+
+    let clipView = scrollView.contentView
+    let targetOffset = document.lineTable.lineStarts[20]
+    reader.reveal(byteOffset: targetOffset)
+    let y = clipView.bounds.origin.y
+    #expect(y > 0)
+
+    clipView.scroll(to: NSPoint(x: 120, y: y))
+    scrollView.reflectScrolledClipView(clipView)
+    #expect(clipView.bounds.origin.x == 120)
+
+    reader.reveal(byteOffset: document.lineTable.lineStarts[30])
+    #expect(clipView.bounds.origin.x == 0)
+}
+
+@MainActor
+@Test
 func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {
     let source = """
         fn probe() {
