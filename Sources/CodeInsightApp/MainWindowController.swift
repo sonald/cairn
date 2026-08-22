@@ -2128,13 +2128,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 color = .systemOrange
             } else if environment?.limitations.isEmpty == false {
                 status = "Exact: ready\(trustSuffix) (limited)"
-                color = .systemOrange
+                color = .systemBlue
             } else if environment != nil {
                 status = "Exact: ready\(trustSuffix)"
                 color = .systemGreen
             } else {
                 status = "Exact: ready\(trustSuffix) (environment unknown)"
-                color = .systemOrange
+                color = .systemBlue
             }
             statusDetail = nil
         case .preparing:
