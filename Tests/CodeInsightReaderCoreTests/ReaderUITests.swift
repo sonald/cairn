@@ -455,7 +455,9 @@ func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {
     #expect(threeLineWidth == nineNineNineLineWidth)
     let lineHeight = try #require(manager.textLayoutFragment(for: .zero))
         .layoutFragmentFrame.height
-    #expect(providerView.bounds.height <= lineHeight)
+    // The chip target is intentionally 22pt tall and vertically centered on
+    // the line, so it may extend slightly past the line fragment.
+    #expect(providerView.bounds.height <= max(lineHeight, 22))
 
     #expect(providerView.hitTest(
         NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)

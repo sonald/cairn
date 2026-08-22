@@ -709,8 +709,9 @@ public final class ReaderTextView {
                 && threeSize == providerView?.bounds.size
             let lineHeight = reader.view.textLayoutManager?
                 .textLayoutFragment(for: .zero)?.layoutFragmentFrame.height ?? 0
+            // The 22pt chip target intentionally overhangs the text line.
             let attachmentFitsLine = (providerView?.bounds.height ?? .infinity)
-                <= lineHeight
+                <= max(lineHeight, 22)
             let axReadable = providerView?.accessibilityLabel()?
                 .contains("Collapsed, hides") == true
             let providerYieldsHitTesting = providerView.map {
