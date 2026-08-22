@@ -309,8 +309,8 @@ public struct ReaderTheme: Equatable, Sendable {
     public func lineNumberRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
         case .dark: 0x858585
-        case .siClassic: 0x8B8272
-        case .auto, .light: 0x8C959F
+        case .siClassic: 0x706755
+        case .auto, .light: 0x66707B
         }
     }
 
@@ -380,9 +380,9 @@ public struct ReaderTheme: Equatable, Sendable {
 
     public func chromeTertiaryRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x6E747B
-        case .siClassic: 0x8B8272
-        case .auto, .light: 0x8C959F
+        case .dark: 0x8A9097
+        case .siClassic: 0x706755
+        case .auto, .light: 0x66707B
         }
     }
 
