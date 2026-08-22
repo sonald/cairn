@@ -596,8 +596,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && fileMenu?.items.compactMap(\.title).firstIndex(
                     of: "Open TypeScript Project…"
                 ) == fileMenu?.items.compactMap(\.title).firstIndex(
-                    of: "Open Mixed-Language Project…"
-                ).map { $0 - 1 },
+                    of: "Open Python Project…"
+                ).map { $0 + 1 },
             "paletteCollectsRustPythonAndTypeScriptOpen":
                 paletteCommands.contains {
                     $0.title == "File ▸ Open Project…"
@@ -7970,10 +7970,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
             onChooseProject: { [weak self] in
-                self?.chooseMixedProject(nil)
+                self?.chooseLanguagesProject(nil)
             },
             onChooseProjectLanguage: { [weak self] in
-                self?.chooseMixedProject($0)
+                self?.chooseLanguagesProject($0)
             },
             onShowSettings: { [weak self] in self?.showSettings(nil) }
         )
@@ -8094,11 +8094,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
     }
 
     @objc private func openProject(_ sender: Any?) {
-        chooseProject(language: .rust)
-    }
-
-    @objc private func openMixedProject(_ sender: Any?) {
-        chooseMixedProject(nil)
+        chooseLanguagesProject(nil)
     }
 
     @objc private func openPythonProject(_ sender: Any?) {
@@ -8128,7 +8124,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ))
     }
 
-    private func chooseMixedProject(_ root: URL?) {
+    private func chooseLanguagesProject(_ root: URL?) {
         let selectedRoot: URL
         if let root {
             selectedRoot = root
@@ -8144,9 +8140,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             selectedRoot = panelRoot
         }
         let alert = NSAlert()
-        alert.messageText = "Open Mixed-Language Project"
+        alert.messageText = "Choose Languages"
         alert.informativeText =
-            "Choose 2 or 3 languages for \(selectedRoot.lastPathComponent)."
+            "Choose 1 to 3 languages for \(selectedRoot.lastPathComponent)."
         alert.addButton(withTitle: "Open")
         alert.addButton(withTitle: "Cancel")
         let stack = NSStackView()
@@ -8187,9 +8183,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         if mixedLanguageCheckboxes[2].state == .on {
             selected.append(.typescript)
         }
-        let languages = selected.count >= 2
-            ? try? LanguageMode.normalize(languages: selected)
-            : nil
+        let languages = selected.isEmpty
+            ? nil
+            : try? LanguageMode.normalize(languages: selected)
         mixedLanguageCheckboxes = []
         mixedLanguageOpenButton = nil
         guard let languages else { return }
@@ -8198,7 +8194,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     @objc private func mixedCheckboxChanged(_ sender: NSButton) {
         let count = mixedLanguageCheckboxes.filter { $0.state == .on }.count
-        mixedLanguageOpenButton?.isEnabled = count >= 2
+        mixedLanguageOpenButton?.isEnabled = count >= 1
     }
 
     @objc private func clearRecentProjects(_ sender: Any?) {
@@ -8572,13 +8568,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         openTypeScriptItem.target = self
         fileMenu.addItem(openTypeScriptItem)
-        let openMixedItem = NSMenuItem(
-            title: "Open Mixed-Language Project…",
-            action: #selector(openMixedProject(_:)),
-            keyEquivalent: ""
-        )
-        openMixedItem.target = self
-        fileMenu.addItem(openMixedItem)
         let quickOpenItem = NSMenuItem(
             title: "Quick Open…",
             action: #selector(quickOpen(_:)),
