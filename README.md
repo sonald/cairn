@@ -1,0 +1,130 @@
+# CodeInsight / Cairn
+
+<p align="center">
+  <a href="https://github.com/sonald/cairn/actions/workflows/product-quality.yml">
+    <img src="https://github.com/sonald/cairn/actions/workflows/product-quality.yml/badge.svg" alt="Mixed-language product gate" />
+  </a>
+  <a href="./LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" />
+  </a>
+</p>
+
+<p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a>
+</p>
+
+CodeInsight is a native, read-only code reader for macOS, released as **Cairn**. It is designed for understanding unfamiliar code: open a project to build a symbol index, move between reading, search, and call relationships, and switch virtually across Git snapshots.
+
+This is not an editor. Cairn does not save files, run builds, or modify your working tree; it makes evidence and uncertainty in the reading workflow explicit.
+
+## Features
+
+- **Native read-only Reader**: file tree, outline, Context Window, relations panel, folding, and navigation history built with AppKit/Swift.
+- **Multilingual indexing**: syntax extraction, symbol indexing, and the reading surface currently support Rust, Python, TypeScript, and TSX.
+- **Symbol and content search**: fuzzy symbol lookup, literal/regex content search, definition candidates, callers, outgoing calls, implementations, and overrides.
+- **Exact analysis**: optional rust-analyzer, Pyright, and typescript-language-server integration, with provider and environment attribution on results.
+- **Safe Reading Mode**: network access is denied by default, project build scripts and proc macros are disabled, and these limitations are surfaced as part of results.
+- **Git time travel**: inspect worktree or commit snapshots and compare versions without checkout or repository mutation.
+- **CLI toolkit**: index projects, query semantics, inspect snapshots, measure cache-switch reuse, and evaluate gold sets.
+
+## Repository Layout
+
+| Path | Purpose |
+| --- | --- |
+| `Sources/CodeInsightApp` | macOS application entry point for Cairn |
+| `Sources/CodeInsightCLI` | `codeinsight` command-line tool |
+| `Sources/CodeInsightEngine` | project indexing, relation resolution, and queries |
+| `Sources/CodeInsightExact` | rust-analyzer / Pyright / TypeScript language server integration |
+| `Sources/CodeInsightReader*` | Reader data models and AppKit rendering layers |
+| `docs/plans` | staged implementation plans and acceptance records |
+
+## Build and Run
+
+Requires macOS 14+, a Swift 6 toolchain, and Homebrew `libgit2`:
+
+```bash
+brew install libgit2
+swift build
+.build/debug/codeinsight-app
+```
+
+To build a distributable Cairn.app, use static network-disabled vendored libgit2:
+
+```bash
+bash scripts/vendor-libgit2.sh
+bash scripts/make-app.sh
+open .build/distribution/Cairn.app
+```
+
+## CLI Examples
+
+Build the command-line entry point:
+
+```bash
+swift build --product codeinsight
+.build/debug/codeinsight --help
+```
+
+Common queries:
+
+```bash
+# Index a Rust project and print statistics.
+.build/debug/codeinsight index /path/to/rust-project --stats
+
+# Search symbols fuzzily.
+.build/debug/codeinsight symsearch spawn \
+  --project /path/to/project \
+  --limit 20
+
+# Resolve a source position. The column is a UTF-8 byte column.
+.build/debug/codeinsight resolve Sources/Foo/Bar.rs:120:9 \
+  --project /path/to/project
+```
+
+The full subcommand set includes `parse`, `index`, `dump`, `defs`, `callers`, `calls`, `impls`, `overrides`, `resolve`, `search`, `symsearch`, `snapshot`, `switch-stats`, `goldset`, and `exact-def`.
+
+## Exact Providers
+
+| Language | Reader/indexing | Exact provider |
+| --- | --- | --- |
+| Rust | Built-in tree-sitter extractor | rust-analyzer |
+| Python | Built-in tree-sitter extractor | Pyright |
+| TypeScript / TSX | Built-in tree-sitter extractor | typescript-language-server |
+
+Providers are installed locally; Cairn does not install project dependencies for you. Missing offline dependencies and Safe Mode limitations are displayed as result states rather than silently treated as exact and complete.
+
+## Testing and Quality Gates
+
+Run Swift tests:
+
+```bash
+swift test
+```
+
+Run local CI, including self-tests and release fold-performance gates:
+
+```bash
+CODEX_SANDBOX=1 bash scripts/ci.sh
+```
+
+The mixed-language product gate requires three clean Git corpora:
+
+```bash
+bash scripts/run-product-gates.sh \
+  /path/to/python-repo \
+  /path/to/typescript-repo \
+  /path/to/mixed-language-repo
+```
+
+GitHub Actions installs pinned tools, clones frozen corpora, and runs the same gates automatically.
+
+## Documentation
+
+- [Requirements and design](docs/design.md)
+- [Benchmarks](docs/benchmarks.md)
+- [Gold set baseline](docs/goldset-baseline.md)
+- [Implementation plans and acceptance records](docs/plans/)
+
+## License
+
+First-party source code is released under the [MIT License](./LICENSE). Vendored tree-sitter runtime and language grammars retain their upstream licenses; see each directory's `LICENSE` and `VENDORED.md`.
