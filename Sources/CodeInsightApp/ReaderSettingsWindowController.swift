@@ -1,6 +1,7 @@
 import AppKit
 import CodeInsightAppModel
 import CodeInsightReaderCore
+import CodeInsightExact
 import SwiftUI
 
 @MainActor
@@ -106,6 +107,7 @@ private struct SettingsView: View {
     let onRevoke: @MainActor (URL) async -> Void
     let onChange: @MainActor (ReaderSettings) -> Void
     @State private var cacheMessage: String? = nil
+    @State private var confirmsCacheClear = false
 
     var body: some View {
         TabView {
@@ -122,14 +124,28 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                     Button("Clear Materialized Cache") {
-                        Task {
-                            do {
-                                try await exactCoordinator.clearMaterializedCache()
-                                cacheMessage = "Materialized cache cleared."
-                            } catch {
-                                cacheMessage = error.localizedDescription
+                        confirmsCacheClear = true
+                    }
+                    .confirmationDialog(
+                        "Clear Materialized Cache?",
+                        isPresented: $confirmsCacheClear,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Clear", role: .destructive) {
+                            Task {
+                                do {
+                                    try await exactCoordinator.clearMaterializedCache()
+                                    cacheMessage = "Materialized cache cleared."
+                                } catch {
+                                    cacheMessage = error.localizedDescription
+                                }
                             }
                         }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(
+                            "Deletes all historical Exact snapshots. They will be rebuilt on demand."
+                        )
                     }
                 }
             }
@@ -242,6 +258,7 @@ private struct ReaderSettingsView: View {
 struct TrustSettingsView: View {
     @Bindable var coordinator: ExactCoordinator
     let onRevoke: @MainActor (URL) async -> Void
+    @State private var confirmRevokeRepository: TrustedRepository? = nil
 
     var body: some View {
         Group {
@@ -270,12 +287,29 @@ struct TrustSettingsView: View {
                         }
                         Spacer()
                         Button("Revoke") {
-                            Task {
-                                await onRevoke(URL(
-                                    fileURLWithPath: repository.path,
-                                    isDirectory: true
-                                ))
+                            confirmRevokeRepository = repository
+                        }
+                        .confirmationDialog(
+                            "Revoke Trust?",
+                            isPresented: Binding(
+                                get: { confirmRevokeRepository == repository },
+                                set: { if !$0 { confirmRevokeRepository = nil } }
+                            ),
+                            titleVisibility: .visible
+                        ) {
+                            Button("Revoke", role: .destructive) {
+                                Task {
+                                    await onRevoke(URL(
+                                        fileURLWithPath: repository.path,
+                                        isDirectory: true
+                                    ))
+                                }
                             }
+                            Button("Cancel", role: .cancel) {}
+                        } message: {
+                            Text(
+                                "Exact analysis will stop trusting \(repository.path)."
+                            )
                         }
                     }
                     .padding(.vertical, 4)
