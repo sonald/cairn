@@ -1355,10 +1355,28 @@ final class RelationWindowController: NSViewController,
         wholeTreeReloadCount += 1
         outlineView.reloadData()
         fitOutlineWidthToVisibleRect()
-        if let root = model.root { outlineView.expandItem(root) }
-        let isEmpty = model.root == nil
-        placeholderLabel.isHidden = !isEmpty
-        scrollView.isHidden = isEmpty
+        if let root = model.root {
+            outlineView.expandItem(root)
+            let directionWord = switch model.direction {
+            case .callers: "callers"
+            case .calls: "calls"
+            case .implementations: "implementations"
+            case .references: "references"
+            }
+            placeholderLabel.stringValue =
+                "No \(directionWord) found. The analysis index has no entries"
+                + " for this symbol, or this relation isn't supported for it."
+            let showsPlaceholder = root.kind == .root
+                && (root.children?.isEmpty == true
+                    || (!root.isExpandable && root.children == nil))
+            placeholderLabel.isHidden = !showsPlaceholder
+            scrollView.isHidden = showsPlaceholder
+        } else {
+            placeholderLabel.stringValue = "Right-click a symbol"
+                + " → Show Callers / Calls / Implements / References"
+            placeholderLabel.isHidden = false
+            scrollView.isHidden = true
+        }
     }
 
     private func reloadNode(_ node: RelationTreeModel.Node) {
