@@ -5,15 +5,13 @@ import CodeInsightReaderCore
 import Foundation
 import Testing
 
-// Regression: NSRulerView strokes its built-in edge hairline across the full
-// dirty rect, and macOS 14+ views no longer clip to bounds by default. Without
-// clipping, the ruler paints a short vertical line at x == ruleThickness into
-// sibling views laid out above the scroll view (the reader tab strip).
-// This renders the real view hierarchy and pixel-scans the header band above
-// the ruler without depending on screen-capture permission.
+// Regression: the ruler must draw its line numbers without letting either its
+// own drawing or NSRulerView's built-in edge hairline reach the header above it.
+// This renders the real hierarchy and checks both pixel outcomes without screen
+// capture permission.
 @MainActor
 @Test
-func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
+func rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() throws {
     let source = (1...120).map { "let value\($0) = \($0);" }.joined(separator: "\n")
     let file = URL(fileURLWithPath: "/bleed.rs")
     let document = try DocumentLoader(source: { _ in Array(source.utf8) })
@@ -29,7 +27,7 @@ func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
     header.layer?.backgroundColor = NSColor.white.cgColor
 
     let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
-    let reader = ReaderTextView()
+    let reader = ReaderTextView(settings: ReaderSettings(theme: .light))
     scrollView.documentView = reader.view
     reader.view.frame = scrollView.contentView.bounds
     reader.configureGutter(in: scrollView, lineNumbers: true)
@@ -61,12 +59,18 @@ func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
         Int(gutterFrame.maxX.rounded(.up)) * scale + 1
     )
 
-    // The header band occupies the top 32pt of the window. Any column with a
-    // near-full-height run of non-white pixels at the gutter edge is a bleed.
+    // NSBitmapImageRep uses a top-left pixel origin for cached NSView output.
+    let headerRows = max(
+        0,
+        Int((container.bounds.maxY - header.frame.maxY + 2) * CGFloat(scale))
+    )..<min(
+        bitmap.pixelsHigh,
+        Int((container.bounds.maxY - header.frame.minY - 2) * CGFloat(scale))
+    )
     var bledColumns: [Int] = []
     for px in scanColumns {
         var dark = 0
-        for py in (202 * scale)..<(230 * scale) {
+        for py in headerRows {
             guard let color = bitmap.colorAt(x: px, y: py)?
                 .usingColorSpace(.sRGB) else { continue }
             if color.brightnessComponent < 0.97 { dark += 1 }
@@ -74,4 +78,33 @@ func rulerEdgeLineDoesNotBleedAboveTheScrollView() throws {
         if dark > 20 * scale / 2 { bledColumns.append(px) }
     }
     #expect(bledColumns.isEmpty, "vertical line bled into header at pixel columns \(bledColumns)")
+
+    let lineNumberRGB = ReaderTheme(settings: ReaderSettings(theme: .light))
+        .lineNumberRGB(isDark: false)
+    let target = (
+        red: CGFloat((lineNumberRGB >> 16) & 0xFF) / 255,
+        green: CGFloat((lineNumberRGB >> 8) & 0xFF) / 255,
+        blue: CGFloat(lineNumberRGB & 0xFF) / 255
+    )
+    let numberColumns = max(0, Int(gutterFrame.minX) * scale)..<min(
+        bitmap.pixelsWide,
+        Int(gutterFrame.minX + 34) * scale
+    )
+    let readerRows = min(bitmap.pixelsHigh, 34 * scale)..<min(
+        bitmap.pixelsHigh,
+        120 * scale
+    )
+    var lineNumberPixels = 0
+    for px in numberColumns {
+        for py in readerRows {
+            guard let color = bitmap.colorAt(x: px, y: py)?
+                .usingColorSpace(.sRGB),
+                  abs(color.redComponent - target.red) < 0.12,
+                  abs(color.greenComponent - target.green) < 0.12,
+                  abs(color.blueComponent - target.blue) < 0.12
+            else { continue }
+            lineNumberPixels += 1
+        }
+    }
+    #expect(lineNumberPixels >= 4, "line-number pixels were not rendered")
 }

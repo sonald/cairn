@@ -7730,6 +7730,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             Self.writeJSON(["channel": channel, "error": "window unavailable"])
             Self.exitSelfTest(channel: channel, status: 1)
         }
+        controller.applyReaderSettings(ReaderSettings(theme: .light))
         window.setContentSize(NSSize(width: 1_200, height: 800))
         window.setFrameOrigin(NSPoint(x: 80, y: 80))
         window.orderFrontRegardless()
@@ -7859,6 +7860,33 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return Double(deviant) / Double(column.count)
         }
         let lineColumns = (columnStart..<columnEnd).filter { coverage($0) >= 0.7 }
+        let lineNumberRGB = ReaderTheme(settings: ReaderSettings(theme: .light))
+            .lineNumberRGB(isDark: false)
+        let target = (
+            red: CGFloat((lineNumberRGB >> 16) & 0xFF) / 255,
+            green: CGFloat((lineNumberRGB >> 8) & 0xFF) / 255,
+            blue: CGFloat(lineNumberRGB & 0xFF) / 255
+        )
+        let numberColumnStart = max(0, pixelX(reading.rulerFrame.minX))
+        let numberColumnEnd = min(
+            bitmap.pixelsWide,
+            pixelX(reading.rulerFrame.minX + min(34, reading.rulerThickness))
+        )
+        let rulerRowStart = max(0, pixelY(reading.rulerFrame.maxY))
+        let rulerRowEnd = min(bitmap.pixelsHigh, pixelY(reading.rulerFrame.minY))
+        var lineNumberPixelCount = 0
+        for px in numberColumnStart..<numberColumnEnd {
+            for py in rulerRowStart..<rulerRowEnd {
+                guard let color = bitmap.colorAt(x: px, y: py)?
+                    .usingColorSpace(.sRGB),
+                      abs(color.redComponent - target.red) < 0.12,
+                      abs(color.greenComponent - target.green) < 0.12,
+                      abs(color.blueComponent - target.blue) < 0.12
+                else { continue }
+                lineNumberPixelCount += 1
+            }
+        }
+        let lineNumbersVisible = lineNumberPixelCount >= 4
         let json: [String: Any] = [
             "png": pngPath,
             "gutterWindowX": Double(gutterX),
@@ -7868,8 +7896,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "scanRowsPx": [rowStart, rowEnd],
             "lineColumnsPx": lineColumns,
             "lineDetected": !lineColumns.isEmpty,
+            "lineNumberPixelCount": lineNumberPixelCount,
+            "lineNumbersVisible": lineNumbersVisible,
         ]
-        return (lineColumns.isEmpty, json)
+        return (lineColumns.isEmpty && lineNumbersVisible, json)
     }
 
     func runOpenSelfTest(file: URL) {

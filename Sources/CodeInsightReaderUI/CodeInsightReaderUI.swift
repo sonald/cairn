@@ -3190,11 +3190,6 @@ private final class ReaderRulerView: NSRulerView {
     init(scrollView: NSScrollView, reader: ReaderTextView) {
         self.reader = reader
         super.init(scrollView: scrollView, orientation: .verticalRuler)
-        // NSRulerView strokes its built-in edge hairline across the full dirty
-        // rect. Since macOS 14 views no longer clip to bounds by default, that
-        // hairline bleeds above the scroll view into sibling header views as a
-        // short vertical line at x == ruleThickness. Clip to keep it inside.
-        clipsToBounds = true
         ruleThickness = 7
         clientView = reader.view
     }
@@ -3203,8 +3198,13 @@ private final class ReaderRulerView: NSRulerView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    override func drawHashMarksAndLabels(in rect: NSRect) {
-        reader?.drawRuler(in: self, dirtyRect: rect)
+    override func draw(_ dirtyRect: NSRect) {
+        // This ruler has no system markers. Bypass NSRulerView's edge hairline
+        // and clip only Cairn's custom pass so line numbers stay visible.
+        NSGraphicsContext.saveGraphicsState()
+        NSBezierPath(rect: bounds).addClip()
+        reader?.drawRuler(in: self, dirtyRect: dirtyRect)
+        NSGraphicsContext.restoreGraphicsState()
     }
 
     override func updateTrackingAreas() {
