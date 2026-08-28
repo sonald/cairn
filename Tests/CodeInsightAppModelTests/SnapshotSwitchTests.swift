@@ -1220,7 +1220,7 @@ func switchingMainSnapshotClearsAndReleasesCompareSnapshot() async throws {
     #expect(retainedRight == nil)
 }
 
-private final class TestSnapshot: Snapshot, @unchecked Sendable {
+final class TestSnapshot: Snapshot, @unchecked Sendable {
     let label: String
     let snapshotID: SnapshotID
     let objectFormat = GitObjectFormat.sha1
@@ -1249,13 +1249,19 @@ private final class TestSnapshot: Snapshot, @unchecked Sendable {
     }
 }
 
-private actor ControlledSnapshotIndexService: IndexService {
+actor ControlledSnapshotIndexService: IndexService {
     private let initialSession: EngineSession
     private var worktreeSnapshot: TestSnapshot?
     private let snapshots: [String: TestSnapshot]
+    private let externalSnapshots: [String: any Snapshot]
     private let store = ProjectIndexStore()
     private var blockedCached: Set<String>
     private var blockedFull: Set<String>
+    private let ignoresCachedCancellation: Set<String>
+    private let failedCapture: Set<String>
+    private let failedPrepare: Set<String>
+    private let failedFull: Set<String>
+    private let cachedLanguageOverrides: [String: LanguageID]
     private var labelsBySnapshotID: [SnapshotID: String] = [:]
     private var fullStarted: Set<String> = []
     private var cachedStarted: Set<String> = []
@@ -1269,15 +1275,27 @@ private actor ControlledSnapshotIndexService: IndexService {
         initialSession: EngineSession,
         worktreeSnapshot: TestSnapshot? = nil,
         snapshots: [String: TestSnapshot],
+        externalSnapshots: [String: any Snapshot] = [:],
         blockedCached: Set<String> = [],
         blockedFull: Set<String> = [],
+        ignoresCachedCancellation: Set<String> = [],
+        failedCapture: Set<String> = [],
+        failedPrepare: Set<String> = [],
+        failedFull: Set<String> = [],
+        cachedLanguageOverrides: [String: LanguageID] = [:],
         completedLanguageOverride: LanguageID? = nil
     ) {
         self.initialSession = initialSession
         self.worktreeSnapshot = worktreeSnapshot
         self.snapshots = snapshots
+        self.externalSnapshots = externalSnapshots
         self.blockedCached = blockedCached
         self.blockedFull = blockedFull
+        self.ignoresCachedCancellation = ignoresCachedCancellation
+        self.failedCapture = failedCapture
+        self.failedPrepare = failedPrepare
+        self.failedFull = failedFull
+        self.cachedLanguageOverrides = cachedLanguageOverrides
         self.completedLanguageOverride = completedLanguageOverride
     }
 
@@ -1316,13 +1334,17 @@ private actor ControlledSnapshotIndexService: IndexService {
         revision: String?,
         languages: [LanguageID]
     ) async throws -> any Snapshot {
-        let snapshot = if let revision {
-            snapshots[revision]
+        let snapshot: (any Snapshot)? = if let revision {
+            externalSnapshots[revision] ?? snapshots[revision]
         } else {
             worktreeSnapshot
         }
         guard let snapshot else { throw SnapshotTestError.missing(revision ?? "worktree") }
-        labelsBySnapshotID[snapshot.snapshotID] = snapshot.label
+        let label = revision
+            ?? (snapshot as? TestSnapshot)?.label
+            ?? "snapshot"
+        if failedCapture.contains(label) { throw SnapshotTestError.missing(label) }
+        labelsBySnapshotID[snapshot.snapshotID] = label
         return snapshot
     }
 
@@ -1332,17 +1354,20 @@ private actor ControlledSnapshotIndexService: IndexService {
     ) async throws -> ProjectIndexer.PreparedSnapshot {
         prepareLanguages.append(language)
         let label = try label(for: snapshot.snapshotID)
+        if failedPrepare.contains(label) { throw SnapshotTestError.missing(label) }
         cachedStarted.insert(label)
         let cacheBlock = blockedCached.contains(label) ? label : nil
         while let cacheBlock {
-            try Task.checkCancellation()
+            if !ignoresCachedCancellation.contains(label) {
+                try Task.checkCancellation()
+            }
             await Task.yield()
             if !blockedCached.contains(cacheBlock) { break }
         }
         return try ProjectIndexer().prepareSnapshot(
             snapshot,
             into: store,
-            language: language
+            language: cachedLanguageOverrides[label] ?? language
         )
     }
 
@@ -1366,6 +1391,7 @@ private actor ControlledSnapshotIndexService: IndexService {
         let language = prepared.cachedSession.analysisProfile.language
         let key = "\(label)-\(language.rawValue)"
         fullStarted.insert(key)
+        if failedFull.contains(label) { throw SnapshotTestError.missing(label) }
         do {
             while blockedFull.contains(label) || blockedFull.contains(key) {
                 try Task.checkCancellation()

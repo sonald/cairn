@@ -489,6 +489,7 @@ public final class ReaderTextView {
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
+    private var bookmarkMarkers: [Int: [String]] = [:]
     private var declarationKindsByLine: [Int: OutlineKind] = [:]
     private weak var scrollView: NSScrollView?
     private weak var ruler: NSRulerView?
@@ -803,6 +804,7 @@ public final class ReaderTextView {
         displayedDocument = document
         refreshVisibleFoldRegions()
         diffMarkers = [:]
+        bookmarkMarkers = [:]
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
         findMatchByteRanges = nil
@@ -867,6 +869,7 @@ public final class ReaderTextView {
         navigationLandingLine = nil
         navigationMarkerGeneration += 1
         diffMarkers = [:]
+        bookmarkMarkers = [:]
         declarationKindsByLine = [:]
         occurrenceSelectionByteOffset = nil
         findMatchByteRanges = nil
@@ -1477,6 +1480,7 @@ public final class ReaderTextView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
         updateRulerThickness()
+        updateBookmarkAccessibilityLabel()
         ruler?.needsDisplay = true
         validateVisibleRenderingAttributes(in: layoutManager)
         view.needsDisplay = true
@@ -1826,6 +1830,7 @@ public final class ReaderTextView {
         scrollView.rulersVisible = true
         ruler = activeRuler
         updateRulerThickness()
+        updateBookmarkAccessibilityLabel()
         scrollView.tile()
         configureWrapping(in: scrollView)
         activeRuler.needsDisplay = true
@@ -1845,8 +1850,36 @@ public final class ReaderTextView {
         ruler?.needsDisplay = true
     }
 
+    public func setBookmarkMarkers(_ labelsBySourceLine: [Int: [String]]) {
+        bookmarkMarkers = labelsBySourceLine.reduce(into: [:]) { result, entry in
+            guard entry.key > 0, !entry.value.isEmpty else { return }
+            result[entry.key] = entry.value.sorted()
+        }
+        if let scrollView = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        }
+        updateRulerThickness()
+        updateBookmarkAccessibilityLabel()
+        ruler?.needsDisplay = true
+    }
+
     public var diffMarkerCounts: [DiffCore.MarkerKind: Int] {
         Dictionary(grouping: diffMarkers.values, by: { $0 }).mapValues(\.count)
+    }
+
+    internal var bookmarkMarkerLabelsForTesting: [Int: [String]] {
+        visibleBookmarkMarkers()
+    }
+
+    internal var bookmarkMarkerAccessibilityLabelForTesting: String {
+        bookmarkAccessibilityLabel
+    }
+
+    package var bookmarkMarkerLines: [Int] { visibleBookmarkMarkers().keys.sorted() }
+
+    package var bookmarkMarkerAccessibilityLabel: String? {
+        guard lineNumbers, !bookmarkMarkers.isEmpty else { return nil }
+        return ruler?.accessibilityLabel()
     }
 
     public var rulerThickness: CGFloat {
@@ -2289,6 +2322,48 @@ public final class ReaderTextView {
         return result
     }
 
+    private func visibleBookmarkMarkers() -> [Int: [String]] {
+        guard let document = displayedDocument else { return [:] }
+        var result: [Int: [String]] = [:]
+        let regions = renderedRegions(in: document)
+        for (line, labels) in bookmarkMarkers {
+            guard line > 0,
+                  document.lineTable.lineStarts.indices.contains(line - 1)
+            else { continue }
+            let offset = document.lineTable.lineStarts[line - 1]
+            let targetLine: Int
+            if let region = regions.filter({ $0.bodyRange.contains(offset) }).max(
+                by: { $0.outlineDepth < $1.outlineDepth }
+            ), let header = document.lineTable.lineColumn(
+                at: region.headerRange.lowerBound
+            )?.line {
+                targetLine = Int(header)
+            } else {
+                targetLine = line
+            }
+            result[targetLine, default: []].append(contentsOf: labels)
+        }
+        return result.mapValues { labels in
+            labels.sorted()
+        }
+    }
+
+    private var bookmarkAccessibilityLabel: String {
+        let markers = visibleBookmarkMarkers()
+        guard !markers.isEmpty else { return "" }
+        return "Bookmarks: " + markers.keys.sorted().map { line in
+            "line \(line): \(markers[line, default: []].joined(separator: ", "))"
+        }.joined(separator: "; ")
+    }
+
+    private func updateBookmarkAccessibilityLabel() {
+        guard lineNumbers, !bookmarkMarkers.isEmpty else {
+            ruler?.setAccessibilityLabel(nil)
+            return
+        }
+        ruler?.setAccessibilityLabel(bookmarkAccessibilityLabel)
+    }
+
     private func renderedRegions(in document: ReaderDocument) -> [FoldRegion] {
         document.foldRegions.filter {
             renderedFoldIDs.contains($0.id)
@@ -2332,6 +2407,7 @@ public final class ReaderTextView {
         ruler.ruleThickness = lineNumberColumnWidth
             + declarationColumnWidth
             + foldColumnWidth
+            + bookmarkColumnWidth
             + diffColumnWidth
         view.textContainerInset.width = 12 + ruler.ruleThickness
         scrollView?.tile()
@@ -2349,6 +2425,10 @@ public final class ReaderTextView {
 
     private var diffColumnWidth: CGFloat {
         diffMarkers.isEmpty ? 0 : 7
+    }
+
+    private var bookmarkColumnWidth: CGFloat {
+        lineNumbers && !bookmarkMarkers.isEmpty ? 7 : 0
     }
 
     private var foldColumnWidth: CGFloat {
@@ -2485,6 +2565,7 @@ public final class ReaderTextView {
         paragraph.alignment = .right
         let foldsByLine: [Int: FoldRegion]
         let foldedDiffByLine: [Int: DiffCore.MarkerKind]
+        let bookmarksByLine = lineNumbers ? visibleBookmarkMarkers() : [:]
         if let document = displayedDocument {
             var mapped: [Int: FoldRegion] = [:]
             for region in visibleFoldRegions(in: document) {
@@ -2569,6 +2650,16 @@ public final class ReaderTextView {
                     yRadius: 2
                 ).fill()
             }
+            if bookmarksByLine[line] != nil {
+                theme.accentColor.setFill()
+                NSBezierPath(ovalIn: NSRect(
+                    x: lineNumberColumnWidth + declarationColumnWidth
+                        + foldColumnWidth + 1,
+                    y: rulerRect.midY - 2.25,
+                    width: 4.5,
+                    height: 4.5
+                )).fill()
+            }
             let directDiff = diffMarkers[line]
             let foldedDiff = foldedDiffByLine[line]
             let mergedDiff: DiffCore.MarkerKind?
@@ -2583,7 +2674,7 @@ public final class ReaderTextView {
                 theme.color(for: kind).setFill()
                 NSRect(
                     x: lineNumberColumnWidth + declarationColumnWidth
-                        + foldColumnWidth + 1,
+                        + foldColumnWidth + bookmarkColumnWidth + 1,
                     y: rulerRect.minY,
                     width: max(2, diffColumnWidth - 2),
                     height: max(2, rulerRect.height)

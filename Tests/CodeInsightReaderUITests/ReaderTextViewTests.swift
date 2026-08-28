@@ -295,6 +295,57 @@ func clearThenApplySettingsKeepsStorageEmpty() throws {
 
 @MainActor
 @Test
+func bookmarkMarkersAggregateLabelsProjectFoldedLinesAndClearWithDocument() throws {
+    let source = """
+        fn outer() {
+            let one = 1;
+            let two = 2;
+        }
+        """
+    let file = URL(fileURLWithPath: "/bookmark-marker.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) })
+        .load(file: file).document
+    let fold = try #require(document.foldRegions.first { $0.kind == .declaration })
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 320, height: 180))
+    scrollView.documentView = reader.view
+    reader.configureGutter(in: scrollView, lineNumbers: true)
+    reader.display(document: document, fileURL: file)
+
+    reader.setBookmarkMarkers([2: ["zeta", "alpha"], 3: ["beta"]])
+
+    #expect(reader.bookmarkMarkerAccessibilityLabelForTesting
+        == "Bookmarks: line 2: alpha, zeta; line 3: beta")
+    #expect(scrollView.verticalRulerView?.accessibilityLabel()
+        == "Bookmarks: line 2: alpha, zeta; line 3: beta")
+    _ = reader.toggleFold(id: fold.id)
+
+    #expect(reader.bookmarkMarkerLabelsForTesting == [1: ["alpha", "beta", "zeta"]])
+    #expect(reader.bookmarkMarkerAccessibilityLabelForTesting
+        == "Bookmarks: line 1: alpha, beta, zeta")
+
+    reader.clear()
+    #expect(reader.bookmarkMarkerLabelsForTesting.isEmpty)
+    #expect(scrollView.verticalRulerView?.accessibilityLabel() == nil)
+}
+
+@MainActor
+@Test
+func bookmarkMarkersDoNotCreateAGutterWhenLineNumbersAreDisabled() throws {
+    let reader = ReaderTextView(settings: ReaderSettings(lineNumbers: false))
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 240, height: 120))
+    scrollView.documentView = reader.view
+    reader.configureGutter(in: scrollView, lineNumbers: false)
+    reader.display(document: try highlightedDocument())
+
+    reader.setBookmarkMarkers([1: ["entry"]])
+
+    #expect(!scrollView.hasVerticalRuler)
+    #expect(reader.bookmarkMarkerLabelsForTesting == [1: ["entry"]])
+}
+
+@MainActor
+@Test
 func everyThemeAppliesTypographyWithinStorageBounds() throws {
     let document = try highlightedDocument()
     let reader = ReaderTextView()

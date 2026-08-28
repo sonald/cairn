@@ -491,7 +491,7 @@ public final class AppModel {
 
     private enum SnapshotDestination {
         case worktree
-        case commit(String)
+        case commit(revision: String, fullOID: String?)
     }
 
     public private(set) var projectState: ProjectState = .empty
@@ -521,6 +521,7 @@ public final class AppModel {
     public let readingTrail = ReadingTrail()
     public let resolutionExplanations = ResolutionExplanationStore()
     public let tabStrip = TabStripModel()
+    package var bookmarkModel = BookmarkModel()
 
     public var canTrustCurrentRepository: Bool {
         guard case .ready = projectState, let projectRoot else { return false }
@@ -575,6 +576,13 @@ public final class AppModel {
     private var lastInstalledProjectRoot: URL?
     private var lastInstalledRevision: String?
     private var lastInstalledGeneration: UInt64?
+    package var lastInstalledWorkspace: (
+        projectRoot: URL?,
+        revision: String?,
+        generation: UInt64?
+    ) {
+        (lastInstalledProjectRoot, lastInstalledRevision, lastInstalledGeneration)
+    }
     @ObservationIgnored private var snapshotDestinations: [
         SnapshotID: SnapshotDestination
     ] = [:]
@@ -583,6 +591,7 @@ public final class AppModel {
         replayedAgainstCurrentWorktree: Bool,
         opensInNewTab: Bool
     )?
+    package var hasPendingReplay: Bool { pendingReplay != nil }
 
     public init(
         indexService: any IndexService = ProjectIndexService(),
@@ -639,6 +648,11 @@ public final class AppModel {
             navigationSink: navigationSink
         )
         self.sessionURL = sessionURL.standardizedFileURL
+        self.bookmarkModel = BookmarkModel(store: BookmarkStore(
+            fileURL: sessionURL.standardizedFileURL
+                .deletingLastPathComponent()
+                .appendingPathComponent("bookmarks.json")
+        ))
     }
 
     package static var defaultSessionURL: URL {
@@ -795,6 +809,7 @@ public final class AppModel {
         compare.clear()
         generation &+= 1
         let openGeneration = generation
+        bookmarkModel.workspaceDidChange(to: openGeneration)
         exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
         projectLanguages = normalized
@@ -1521,6 +1536,467 @@ public final class AppModel {
         return session.capturedSource(atManifestPath: path)
     }
 
+    package func bookmarkEligibility() -> BookmarkEligibility {
+        guard let root = projectRoot, tabStrip.activeTab != nil else {
+            return .unavailable(.empty)
+        }
+        guard let file = tabStrip.activeTab?.fileURL else {
+            return .unavailable(.readingSet)
+        }
+        guard compare.rightRevision == nil else {
+            return .unavailable(.comparison)
+        }
+        guard selectedFile?.standardizedFileURL == file.standardizedFileURL,
+              let document = tabStrip.activeDocument
+        else { return .unavailable(.readerNotReady) }
+        guard let path = Self.relativePath(of: file, under: root) else {
+            return .unavailable(.dependency)
+        }
+        guard let byteOffset = selectedByteOffset ?? tabStrip.activeTab?.selectionByteOffset,
+              document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil
+        else {
+            return .unavailable(.noSelection)
+        }
+        guard currentBookmarkAnchor() != nil,
+              let captured = capturedProjectSource(at: path),
+              captured.contentID == document.contentID
+        else { return .unavailable(.capturedSourceMismatch) }
+        return .eligible
+    }
+
+    package func captureCurrentBookmark() -> BookmarkRecord? {
+        guard bookmarkEligibility() == .eligible,
+              let root = projectRoot,
+              let file = tabStrip.activeTab?.fileURL,
+              let path = Self.relativePath(of: file, under: root),
+              let document = tabStrip.activeDocument,
+              let byteOffset = selectedByteOffset ?? tabStrip.activeTab?.selectionByteOffset,
+              document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil,
+              let line = document.lineTable.lineColumn(at: byteOffset)?.line,
+              let anchor = currentBookmarkAnchor(),
+              let captured = capturedProjectSource(at: path),
+              captured.contentID == document.contentID
+        else { return nil }
+        bookmarkModel.clearAttempt()
+        let facet = document.outlineFacets
+            .filter { $0.range.contains(byteOffset) }
+            .min { $0.range.length < $1.range.length }
+        return BookmarkRecord(
+            id: UUID(),
+            projectPath: root.path,
+            snapshot: anchor,
+            path: path,
+            contentID: document.contentID,
+            byteOffset: byteOffset,
+            line: line,
+            symbolName: facet?.name,
+            symbolKind: facet?.kind.rawValue,
+            note: "",
+            updatedAt: .now
+        )
+    }
+
+    package func bookmarkStatus(for record: BookmarkRecord) -> BookmarkStatus {
+        guard let anchor = currentBookmarkAnchor(), anchor == record.snapshot else {
+            return .notEvaluated
+        }
+        return BookmarkStatus.evaluate(
+            record: record,
+            snapshot: anchor,
+            revisionAvailable: true,
+            capturedSource: capturedProjectSource(at: record.path)
+        )
+    }
+
+    package func bookmarkMarkers(
+        for file: URL,
+        document: ReaderDocument
+    ) -> [Int: [String]] {
+        guard let root = projectRoot,
+              let path = Self.relativePath(of: file, under: root),
+              let anchor = currentBookmarkAnchor(),
+              let captured = capturedProjectSource(at: path),
+              captured.contentID == document.contentID
+        else { return [:] }
+        return bookmarkModel.records.reduce(into: [:]) { result, record in
+            guard record.projectPath == root.path,
+                  record.snapshot == anchor,
+                  record.path == path,
+                  record.contentID == document.contentID,
+                  bookmarkStatus(for: record) == .exactContent
+            else { return }
+            result[Int(record.line), default: []].append(bookmarkModel.title(for: record))
+        }
+    }
+
+    package func explicitBookmarkLineOpen(
+        _ record: BookmarkRecord,
+        line: UInt32
+    ) -> (file: URL, byteOffset: UInt32, line: UInt32)? {
+        guard let captured = capturedBookmarkDocument(for: record) else { return nil }
+        guard let target = bookmarkModel.lineTarget(
+            in: captured.document,
+            requestedLine: line
+        ) else { return nil }
+        return (captured.file, target.byteOffset, target.line)
+    }
+
+    package func reanchorBookmark(
+        id: UUID,
+        line: UInt32,
+        updatedAt: Date = .now
+    ) -> BookmarkReanchorResult {
+        guard let record = bookmarkModel.records.first(where: { $0.id == id }),
+              let captured = capturedBookmarkDocument(for: record)
+        else { return .unsupportedSnapshot }
+        return bookmarkModel.reanchorWorktree(
+            id: id,
+            document: captured.document,
+            line: line,
+            updatedAt: updatedAt
+        )
+    }
+
+    private func capturedBookmarkDocument(
+        for record: BookmarkRecord
+    ) -> (file: URL, document: ReaderDocument)? {
+        guard let root = projectRoot,
+              record.projectPath == root.path,
+              record.snapshot == .worktree,
+              currentBookmarkAnchor() == .worktree,
+              let file = safeProjectFile(record.path, under: root),
+              let languageMode = languageMode(for: file),
+              let captured = capturedProjectSource(at: record.path),
+              let loaded = try? DocumentLoader(source: { _ in captured.bytes })
+                .load(file: file, languageMode: languageMode),
+              loaded.document.contentID == captured.contentID
+        else { return nil }
+        return (file, loaded.document)
+    }
+
+    package func openStrictBookmark(
+        _ record: BookmarkRecord,
+        leaving original: JumpRecord
+    ) {
+        guard let root = projectRoot,
+              root.path == record.projectPath,
+              let anchor = currentBookmarkAnchor()
+        else {
+            bookmarkModel.beginAttempt(
+                for: record,
+                workspaceGeneration: generation,
+                message: "Bookmark belongs to a different project or snapshot."
+            )
+            return
+        }
+        guard anchor == record.snapshot else {
+            openStrictBookmarkAcrossSnapshots(
+                record,
+                root: root,
+                leaving: original
+            )
+            return
+        }
+        let status = bookmarkStatus(for: record)
+        guard status == .exactContent else {
+            if let message = status.attemptMessage {
+                bookmarkModel.beginAttempt(
+                    for: record,
+                    workspaceGeneration: generation,
+                    message: message
+                )
+            }
+            return
+        }
+        guard let source = capturedDocumentSource(for: root),
+              let file = safeProjectFile(record.path, under: root)
+        else {
+            bookmarkModel.beginAttempt(
+                for: record,
+                workspaceGeneration: generation,
+                message: "Bookmark captured source is unavailable."
+            )
+            return
+        }
+        do {
+            let bytes = try source(file)
+            guard ContentID.sha256(of: Data(bytes)) == record.contentID else {
+                bookmarkModel.beginAttempt(
+                    for: record,
+                    workspaceGeneration: generation,
+                    message: "Bookmark captured source does not match its content."
+                )
+                return
+            }
+        } catch {
+            bookmarkModel.beginAttempt(
+                for: record,
+                workspaceGeneration: generation,
+                message: "Bookmark file is absent."
+            )
+            return
+        }
+        documentSource = source
+        publishProjectState(projectState, root: root)
+        navigate(to: file, byteOffset: record.byteOffset, leaving: original)
+        bookmarkModel.clearAttempt()
+    }
+
+    private func openStrictBookmarkAcrossSnapshots(
+        _ record: BookmarkRecord,
+        root: URL,
+        leaving original: JumpRecord
+    ) {
+        let workspaceGeneration = generation
+        let languages = projectLanguages
+        guard !languages.isEmpty else {
+            bookmarkModel.beginAttempt(
+                for: record,
+                workspaceGeneration: workspaceGeneration,
+                message: "Bookmark snapshot capture failed."
+            )
+            return
+        }
+        let revision: String? = switch record.snapshot {
+        case .worktree: nil
+        case let .commit(fullOID): fullOID
+        }
+        let indexService = indexService
+        bookmarkModel.beginStrictJump(
+            for: record,
+            workspaceGeneration: workspaceGeneration
+        ) { [weak self, indexService] attemptGeneration in
+            guard let self,
+                  self.canPublishWorkspaceResult(
+                      generation: workspaceGeneration,
+                      root: root,
+                      languages: languages
+                  ),
+                  self.bookmarkModel.isCurrentJump(
+                      attemptGeneration,
+                      workspaceGeneration: workspaceGeneration
+                  )
+            else { return nil }
+
+            let snapshot: any Snapshot
+            do {
+                snapshot = try await indexService.captureSnapshot(
+                    root: root,
+                    revision: revision,
+                    languages: languages
+                )
+            } catch is CancellationError {
+                return nil
+            } catch {
+                return switch record.snapshot {
+                case .worktree: "Bookmark snapshot capture failed."
+                case .commit: BookmarkStatus.revisionUnavailable.attemptMessage
+                }
+            }
+            guard self.canPublishWorkspaceResult(
+                      generation: workspaceGeneration,
+                      root: root,
+                      languages: languages
+                  ),
+                  self.bookmarkModel.isCurrentJump(
+                      attemptGeneration,
+                      workspaceGeneration: workspaceGeneration
+                  )
+            else { return nil }
+            if case let .commit(fullOID) = record.snapshot {
+                guard let commit = snapshot as? CommitSnapshot,
+                      commit.commitOID.hex == fullOID
+                else { return "Bookmark snapshot capture failed." }
+            }
+            let files = snapshot.listFiles()
+            guard let entry = files.first(where: { $0.path == record.path }) else {
+                return BookmarkStatus.fileAbsent.attemptMessage
+            }
+            guard entry.contentID == record.contentID else {
+                return switch record.snapshot {
+                case .worktree: BookmarkStatus.drifted.attemptMessage
+                case .commit: BookmarkStatus.fileAbsent.attemptMessage
+                }
+            }
+            let bytes: [UInt8]
+            do {
+                bytes = try snapshot.readBytes(path: record.path)
+            } catch {
+                return BookmarkStatus.fileAbsent.attemptMessage
+            }
+            guard ContentID.sha256(of: bytes) == record.contentID else {
+                return switch record.snapshot {
+                case .worktree: BookmarkStatus.drifted.attemptMessage
+                case .commit: BookmarkStatus.fileAbsent.attemptMessage
+                }
+            }
+            guard ByteUTF16Map(validUTF8: bytes).utf16Offset(
+                forByte: Int(record.byteOffset)
+            ) != nil else {
+                return BookmarkStatus.offsetInvalid.attemptMessage
+            }
+
+            let prepared: [ProjectIndexer.PreparedSnapshot]
+            do {
+                prepared = try await indexService.prepareSnapshots(
+                    snapshot,
+                    root: root,
+                    languages: languages
+                )
+            } catch is CancellationError {
+                return nil
+            } catch {
+                return "Bookmark snapshot preparation failed."
+            }
+            guard self.canPublishWorkspaceResult(
+                      generation: workspaceGeneration,
+                      root: root,
+                      languages: languages
+                  ),
+                  self.bookmarkModel.isCurrentJump(
+                      attemptGeneration,
+                      workspaceGeneration: workspaceGeneration
+                  ),
+                  let cached = self.validatedWorkspaceSessions(
+                      prepared.map(\.cachedSession),
+                      languages: languages,
+                      snapshotID: snapshot.snapshotID
+                  )
+            else { return "Bookmark snapshot install failed." }
+            let active = cached.values
+                .first(where: { Self.sessionCoverage(for: $0).filesTotal > 0 })
+                ?? cached.values.first!
+
+            self.generation &+= 1
+            let installedGeneration = self.generation
+            guard self.bookmarkModel.advanceWorkspace(
+                to: installedGeneration,
+                attemptGeneration: attemptGeneration
+            ) else { return nil }
+            self.snapshotTask?.cancel()
+            self.compareSnapshotTask?.cancel()
+            self.replayTask?.cancel()
+            self.snapshotTask = nil
+            self.compareSnapshotTask = nil
+            self.replayTask = nil
+            self.exactCoordinator.invalidate(generation: installedGeneration)
+            self.compare.clear()
+            self.commitPicker.setCurrentRevision(revision)
+            self.fileTree = FileTreeModel(
+                root: root,
+                snapshotPaths: files.map(\.path),
+                languages: languages
+            )
+            self.currentSnapshotID = snapshot.snapshotID
+            self.snapshotDestinations[snapshot.snapshotID] = switch record.snapshot {
+            case .worktree: .worktree
+            case let .commit(fullOID): .commit(revision: fullOID, fullOID: fullOID)
+            }
+            self.documentSource = { file in
+                guard let path = Self.relativePath(of: file, under: root),
+                      files.contains(where: { $0.path == path })
+                else { throw CocoaError(.fileReadNoSuchFile) }
+                return try snapshot.readBytes(path: path)
+            }
+            self.workspaceSessions = cached
+            self.snapshotPhase = .cachedReady
+            self.coverage = self.workspaceCoverage()
+            self.publishProjectState(.ready(
+                active,
+                QueryContext(
+                    snapshotID: snapshot.snapshotID,
+                    analysisProfileID: active.analysisProfile.id,
+                    generation: installedGeneration
+                )
+            ), root: root)
+            self.navigate(
+                to: root.appendingPathComponent(record.path),
+                byteOffset: record.byteOffset,
+                leaving: original
+            )
+            self.snapshotTask = Task { [weak self, indexService] in
+                var completed: [EngineSession] = []
+                do {
+                    for item in prepared {
+                        completed.append(try await indexService.completeSnapshot(item))
+                        guard let self,
+                              self.canPublishWorkspaceResult(
+                                  generation: installedGeneration,
+                                  root: root,
+                                  languages: languages
+                              )
+                        else { return }
+                    }
+                } catch {
+                    return
+                }
+                guard let self,
+                      self.canPublishWorkspaceResult(
+                          generation: installedGeneration,
+                          root: root,
+                          languages: languages
+                      ),
+                      self.installWorkspaceSessions(
+                          completed,
+                          generation: installedGeneration,
+                          root: root,
+                          languages: languages,
+                          expectedSnapshotID: snapshot.snapshotID,
+                          phase: .fullReady
+                      )
+                else { return }
+                self.lastInstalledRevision = revision
+                self.lastInstalledProjectRoot = root
+                self.lastInstalledGeneration = installedGeneration
+                self.prepareExact(generation: installedGeneration)
+            }
+            return nil
+        }
+    }
+
+    package func preflightBookmark(_ record: BookmarkRecord) {
+        let workspaceGeneration = generation
+        guard let root = projectRoot, !projectLanguages.isEmpty else {
+            bookmarkModel.beginAttempt(for: record, workspaceGeneration: workspaceGeneration) {
+                .revisionUnavailable
+            }
+            return
+        }
+        let indexService = indexService
+        let languages = projectLanguages
+        bookmarkModel.beginAttempt(for: record, workspaceGeneration: workspaceGeneration) {
+            guard case let .commit(fullOID) = record.snapshot else {
+                return .notEvaluated
+            }
+            do {
+                let snapshot = try await indexService.captureSnapshot(
+                    root: root,
+                    revision: fullOID,
+                    languages: languages
+                )
+                guard let file = snapshot.listFiles().first(where: {
+                    $0.path == record.path
+                }) else {
+                    return BookmarkStatus.evaluate(
+                        record: record,
+                        snapshot: record.snapshot,
+                        revisionAvailable: true,
+                        capturedSource: nil
+                    )
+                }
+                let bytes = try snapshot.readBytes(path: record.path)
+                return BookmarkStatus.evaluate(
+                    record: record,
+                    snapshot: record.snapshot,
+                    revisionAvailable: true,
+                    capturedSource: (file.contentID, bytes)
+                )
+            } catch {
+                return .revisionUnavailable
+            }
+        }
+    }
+
     package func readingSetSources(
         for excerpts: [ReadingSetExcerpt]
     ) -> [[UInt8]?] {
@@ -1953,6 +2429,7 @@ public final class AppModel {
         compare.clear()
         generation &+= 1
         let switchGeneration = generation
+        bookmarkModel.workspaceDidChange(to: switchGeneration)
         exactCoordinator.invalidate(generation: switchGeneration)
         commitPicker.setCurrentRevision(revision)
         workspaceSessions.removeAll(keepingCapacity: true)
@@ -2103,10 +2580,13 @@ public final class AppModel {
             selectedByteOffset = nil
         }
         currentSnapshotID = snapshot.snapshotID
-        if let revision {
-            snapshotDestinations[snapshot.snapshotID] = .commit(revision)
+        snapshotDestinations[snapshot.snapshotID] = if let revision {
+            .commit(
+                revision: revision,
+                fullOID: (snapshot as? CommitSnapshot)?.commitOID.hex
+            )
         } else {
-            snapshotDestinations[snapshot.snapshotID] = .worktree
+            .worktree
         }
         documentSource = if revision == nil {
             nil
@@ -2192,6 +2672,42 @@ public final class AppModel {
             leftSource: documentSource,
             languageMode: selectedFile.flatMap(languageMode(for:))
         )
+    }
+
+    private func currentBookmarkAnchor() -> BookmarkRecord.SnapshotAnchor? {
+        guard let snapshotID = currentSnapshotID,
+              let destination = snapshotDestinations[snapshotID]
+        else { return nil }
+        switch destination {
+        case .worktree: return .worktree
+        case let .commit(_, fullOID?): return .commit(fullOID: fullOID)
+        case .commit: return nil
+        }
+    }
+
+    private func capturedDocumentSource(
+        for root: URL
+    ) -> DocumentLoader.ContentSource? {
+        let sessions = workspaceSessions.values.filter {
+            $0.snapshotID == currentSnapshotID
+        }
+        guard !sessions.isEmpty else { return nil }
+        return { file in
+            guard let path = Self.relativePath(of: file, under: root),
+                  let bytes = sessions.lazy.compactMap({
+                      $0.capturedSource(atManifestPath: path)?.bytes
+                  }).first
+            else { throw CocoaError(.fileReadNoSuchFile) }
+            return bytes
+        }
+    }
+
+    private func safeProjectFile(_ path: String, under root: URL) -> URL? {
+        let file = root.appendingPathComponent(path).standardizedFileURL
+        guard file.pathComponents.starts(with: root.pathComponents),
+              file.pathComponents.count > root.pathComponents.count
+        else { return nil }
+        return file
     }
 
     private func selectFile(_ file: URL, byteOffset: UInt32?) {
@@ -2286,19 +2802,11 @@ public final class AppModel {
             root: expectedRoot,
             languages: expectedLanguages
         ) else { return false }
-        var byProfile: [AnalysisProfileID: EngineSession] = [:]
-        for session in candidates {
-            byProfile[session.analysisProfile.id] = session
-        }
-        guard byProfile.count == expectedLanguages.count,
-              byProfile.values.allSatisfy({ $0.snapshotID == expectedSnapshotID }),
-              Set(byProfile.keys) == Set(byProfile.values.map { $0.analysisProfile.id }),
-              Set(byProfile.values.map { $0.snapshotID }).count == 1,
-              Set(byProfile.values.map { $0.analysisProfile.language }) == Set(expectedLanguages),
-              Set(byProfile.values.map { ObjectIdentifier($0.paths) }).count == 1
-        else {
-            return false
-        }
+        guard let byProfile = validatedWorkspaceSessions(
+            candidates,
+            languages: expectedLanguages,
+            snapshotID: expectedSnapshotID
+        ) else { return false }
         workspaceSessions = byProfile
         snapshotPhase = phase
         coverage = workspaceCoverage()
@@ -2313,6 +2821,23 @@ public final class AppModel {
             publishProjectState(.ready(active.0, active.1), root: expectedRoot)
         }
         return true
+    }
+
+    private func validatedWorkspaceSessions(
+        _ candidates: [EngineSession],
+        languages: [LanguageID],
+        snapshotID: SnapshotID
+    ) -> [AnalysisProfileID: EngineSession]? {
+        var byProfile: [AnalysisProfileID: EngineSession] = [:]
+        for session in candidates { byProfile[session.analysisProfile.id] = session }
+        guard byProfile.count == languages.count,
+              byProfile.values.allSatisfy({ $0.snapshotID == snapshotID }),
+              Set(byProfile.keys) == Set(byProfile.values.map { $0.analysisProfile.id }),
+              Set(byProfile.values.map { $0.snapshotID }).count == 1,
+              Set(byProfile.values.map { $0.analysisProfile.language }) == Set(languages),
+              Set(byProfile.values.map { ObjectIdentifier($0.paths) }).count == 1
+        else { return nil }
+        return byProfile
     }
 
     private func workspaceCoverage() -> SnapshotCoverage {
@@ -2457,7 +2982,7 @@ public final class AppModel {
         switch destination {
         case .worktree:
             switchSnapshot(revision: nil)
-        case let .commit(revision):
+        case let .commit(revision, _):
             switchSnapshot(revision: revision)
         }
     }

@@ -184,6 +184,27 @@ private struct CodeInsightApplication {
         let exactRoot = arguments.firstIndex(of: "--self-test-exact")
             .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        let bookmarkSelfTestRoot = arguments.firstIndex(of: "--self-test-bookmarks")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        if arguments.contains("--self-test-bookmarks"), bookmarkSelfTestRoot == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-bookmarks <rust-project-root>\n".utf8
+            ))
+            Darwin.exit(2)
+        }
+        let bookmarkRestartSessionURL = arguments.firstIndex(of: "--self-test-bookmarks-restart")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+            .map(URL.init(fileURLWithPath:))
+        if arguments.contains("--self-test-bookmarks-restart"), bookmarkRestartSessionURL == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-bookmarks-restart <session-url>\n".utf8
+            ))
+            Darwin.exit(2)
+        }
+        if let bookmarkRestartSessionURL {
+            runBookmarkSelfTestRestart(sessionURL: bookmarkRestartSessionURL)
+        }
         let delegate: AppDelegate
         if let relationTimingTarget {
             let temporaryRoot = FileManager.default.temporaryDirectory
@@ -342,12 +363,20 @@ private struct CodeInsightApplication {
                     recentProjectsStore: pythonRecentStore
                 )
             } else {
-                delegate = AppDelegate(
-                    startedAt: startedAt,
-                    model: runsSelfTest
+                let bookmarkSessionURL = bookmarkSelfTestRoot.map { _ in
+                    ProcessInfo.processInfo.environment[
+                        "CAIRN_BOOKMARK_SESSION_URL"
+                    ].map(URL.init(fileURLWithPath:)) ?? AppModel.defaultSessionURL
+                }
+                let appModel: AppModel
+                if let bookmarkSessionURL {
+                    appModel = AppModel(sessionURL: bookmarkSessionURL)
+                } else {
+                    appModel = runsSelfTest
                         ? AppModel()
                         : AppModel(sessionURL: AppModel.defaultSessionURL)
-                )
+                }
+                delegate = AppDelegate(startedAt: startedAt, model: appModel)
             }
         }
         if let pythonRoot = pythonSelfTestRoot {
@@ -449,6 +478,8 @@ private struct CodeInsightApplication {
                     fileURLWithPath: arguments[index + 1],
                     isDirectory: true
                 ))
+            } else if let bookmarkSelfTestRoot {
+                delegate.runBookmarkSelfTest(root: bookmarkSelfTestRoot)
             } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
             } else {
@@ -552,6 +583,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             withTitle: "Show Resolution Inspector"
         )
         let trailMenuItem = viewMenu?.item(withTitle: "Show Reading Trail")
+        let toggleBookmarkMenuItem = viewMenu?.item(withTitle: "Toggle Bookmark")
+        let showBookmarksMenuItem = viewMenu?.item(withTitle: "Show Bookmarks")
+        let hideBookmarksMenuItem = viewMenu?.item(withTitle: "Hide Bookmarks")
+        let bookmarkPanelShortcutCount = Self.menuItems(
+            in: NSApplication.shared.mainMenu
+        ).filter {
+            $0.keyEquivalent == "b"
+                && $0.keyEquivalentModifierMask == [.command, .option]
+        }.count
         let fullHeightItem = foldingMenu?.item(withTitle: "Full")
         let structureHeightItem = foldingMenu?.item(withTitle: "Structure")
         let overviewHeightItem = foldingMenu?.item(withTitle: "Overview")
@@ -745,6 +785,23 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     == [.command, .option]
                 && trailMenuItem?.action == #selector(showReadingTrail(_:))
                 && trailMenuItem?.target === self,
+            "bookmarksMenuHasNonConflictingToggleAndPanelCommands":
+                toggleBookmarkMenuItem?.keyEquivalent == "m"
+                && toggleBookmarkMenuItem?.keyEquivalentModifierMask == [.command, .shift]
+                && toggleBookmarkMenuItem?.action == #selector(toggleBookmark(_:))
+                && showBookmarksMenuItem?.keyEquivalent == "b"
+                && showBookmarksMenuItem?.keyEquivalentModifierMask == [.command, .option]
+                && showBookmarksMenuItem?.action == #selector(showBookmarks(_:))
+                && hideBookmarksMenuItem?.action == #selector(closeBookmarks(_:))
+                && bookmarkPanelShortcutCount == 1,
+            "bookmarksToggleIsDisabledWithNamedAccessibilityHelpOutsideReader":
+                toggleBookmarkMenuItem.map {
+                    !validateMenuItem($0)
+                        && $0.toolTip
+                            == "Bookmarks require a current project file in the primary reader."
+                        && $0.accessibilityHelp()
+                            == "Bookmarks require a current project file in the primary reader."
+                } ?? false,
             "readingTrailBarVisibleWithoutProject":
                 windowController.selfTestTrailBarVisible,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
@@ -7789,6 +7846,505 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
     }
 
+    func runBookmarkSelfTest(root: URL) -> Never {
+        let channel = "bookmarks"
+        let languages = bookmarkSelfTestLanguages()
+        let languageFiles = bookmarkSelfTestFiles(in: root, languages: languages)
+        launch(offscreen: false)
+        guard let controller = windowController,
+              let window = controller.window,
+              let file = languageFiles.first?.file
+        else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "fixture unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        window.setContentSize(NSSize(width: 1_200, height: 800))
+        window.setFrameOrigin(NSPoint(x: 80, y: 80))
+        window.orderFrontRegardless()
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        controller.openProject(root: root, languages: languages)
+        guard waitUntil(timeout: 60, condition: {
+            if case .ready = self.model.projectState { return true }
+            return false
+        }) else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "project not ready"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        controller.openFileForSelfTest(file)
+        guard waitUntil(timeout: 15, condition: {
+            controller.displayedReaderFile?.standardizedFileURL == file
+                && self.model.tabStrip.activeDocument != nil
+        }) else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "reader unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        controller.setReadingPositionForSelfTest(scrollByteOffset: 0, selectionByteOffset: 0)
+        pumpRunLoop()
+        let viewMenu = NSApplication.shared.mainMenu?.items.compactMap(\.submenu)
+            .first { $0.title == "View" }
+        guard let toggle = viewMenu?.item(withTitle: "Toggle Bookmark"),
+              let show = viewMenu?.item(withTitle: "Show Bookmarks")
+        else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "menu unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let toggleEnabled = validateMenuItem(toggle)
+        let toggled = toggleEnabled && performMenuShortcut(
+            characters: "m", modifiers: [.command, .shift], window: window
+        )
+        guard waitUntil(timeout: 5, condition: {
+            self.model.bookmarkModel.records.count == 1
+        }), let record = self.model.bookmarkModel.records.first else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "bookmark toggle failed"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let gutterMarker = controller.selfTestBookmarkMarkerLines.contains(Int(record.line))
+            && !(controller.selfTestBookmarkMarkerAccessibilityLabel ?? "").isEmpty
+        let gutterLines = controller.selfTestBookmarkMarkerLines
+        let gutterAccessibilityLabel = controller.selfTestBookmarkMarkerAccessibilityLabel ?? ""
+        let openedPanel = performMenuShortcut(
+            characters: "b", modifiers: [.command, .option], window: window
+        )
+        let panelShortcutIsUnique = show.keyEquivalent == "b"
+            && show.keyEquivalentModifierMask == [.command, .option]
+        guard waitUntil(timeout: 5, condition: {
+            controller.selfTestBookmarkPanel?.selfTestState.visible == true
+        }), let panel = controller.selfTestBookmarkPanel else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "panel unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let shown = panel.selfTestState
+        panel.selfTestSetFilter("no-bookmark-match")
+        let filteredOut = panel.selfTestState.rows == 0
+        panel.selfTestSetFilter(record.path)
+        let filteredIn = panel.selfTestState.rows == 1
+            && panel.selfTestState.rowIDs == [record.id.uuidString]
+        let statusToolTip = panel.selfTestFirstRowToolTip
+        let noteText = "* _ [ ] # > | \\ ` { } ( ) + - . !\nnext"
+        let noteSelected = panel.selfTestSelectFirstRow()
+        let noteUpdatedAt = BookmarkModel(store: BookmarkStore(
+            fileURL: bookmarkSelfTestSessionURL().deletingLastPathComponent()
+                .appendingPathComponent("bookmarks.json")
+        )).records.first(where: { $0.id == record.id })?.updatedAt ?? record.updatedAt
+        panel.selfTestTypeNote(noteText)
+        let reloadedNote = BookmarkModel(store: BookmarkStore(
+            fileURL: bookmarkSelfTestSessionURL().deletingLastPathComponent()
+                .appendingPathComponent("bookmarks.json")
+        )).records.first(where: { $0.id == record.id })
+        let noteWriteThrough = reloadedNote?.note == noteText
+            && reloadedNote?.updatedAt == noteUpdatedAt
+        panel.selfTestFinalizeNote()
+        let finalizedNote = BookmarkModel(store: BookmarkStore(
+            fileURL: bookmarkSelfTestSessionURL().deletingLastPathComponent()
+                .appendingPathComponent("bookmarks.json")
+        )).records.first(where: { $0.id == record.id })
+        let noteFinalized = (finalizedNote?.updatedAt ?? noteUpdatedAt) > noteUpdatedAt
+        let noteRestart = finalizedNote?.note == noteText
+        let bookmarksURL = bookmarkSelfTestSessionURL().deletingLastPathComponent()
+            .appendingPathComponent("bookmarks.json")
+        let rawBookmarksBefore = try? Data(contentsOf: bookmarksURL)
+        panel.selfTestPressCopyMarkdown()
+        let copiedMarkdown = panel.selfTestLastCopiedMarkdown
+        let pasteboardReadback = NSPasteboard.general.string(forType: .string) == copiedMarkdown
+        panel.selfTestPressExportMarkdown()
+        let markdownPath = ProcessInfo.processInfo.environment[
+            "CAIRN_BOOKMARK_MARKDOWN_EXPORT_PATH"
+        ] ?? ""
+        let exportedMarkdown = try? String(contentsOfFile: markdownPath, encoding: .utf8)
+        let rawBookmarksAfter = try? Data(contentsOf: bookmarksURL)
+        let rawBookmarksUnchanged = rawBookmarksBefore == rawBookmarksAfter
+        let normalAX = panel.selfTestAXTree()
+        let panelGeometry = panel.selfTestGeometry
+        let historyBefore = self.model.navigationHistory.records.count
+        let rowOpen = panel.selfTestPressFirstOpen()
+        let openedExact = waitUntil(timeout: 5, condition: {
+            self.model.navigationHistory.records.count == historyBefore + 1
+                && self.model.tabStrip.activeDocument?.contentID == record.contentID
+        })
+        let contentIDExactAtOpen = self.model.tabStrip.activeDocument?.contentID == record.contentID
+        let returned = openedExact
+            && performMenuShortcut(characters: "[", modifiers: [.command], window: window)
+            && waitUntil(timeout: 5, condition: {
+                self.model.navigationHistory.canGoForward
+            })
+        let gitHEAD = bookmarkSelfTestGitHEAD(in: root)
+        var gitChecks: [String: Bool] = [:]
+        let gitSkip = gitHEAD == nil ? "commit checks require a repository with HEAD" : ""
+        if let gitHEAD {
+            self.model.switchToCommit(gitHEAD)
+            let commitReady = waitUntil(timeout: 60, condition: {
+                self.model.snapshotPhase == .fullReady && self.model.currentRevision == gitHEAD
+            })
+            controller.openFileForSelfTest(file)
+            let commitReader = waitUntil(timeout: 15, condition: {
+                controller.displayedReaderFile?.standardizedFileURL == file
+                    && self.model.tabStrip.activeDocument != nil
+            })
+            controller.setReadingPositionForSelfTest(scrollByteOffset: 0, selectionByteOffset: 0)
+            let commitToggle = commitReady && commitReader && performMenuShortcut(
+                characters: "m", modifiers: [.command, .shift], window: window
+            )
+            let commitRecord = self.model.bookmarkModel.records.last { candidate in
+                if case let .commit(fullOID) = candidate.snapshot { return fullOID == gitHEAD }
+                return false
+            }
+            let commitCaptured = commitRecord.map { candidate in
+                if case let .commit(fullOID) = candidate.snapshot {
+                    return fullOID.count == 40 || fullOID.count == 64
+                }
+                return false
+            } ?? false
+            self.model.switchToWorktree()
+            let worktreeReady = waitUntil(timeout: 60, condition: {
+                self.model.snapshotPhase == .fullReady && self.model.currentRevision == nil
+            })
+            panel.refresh()
+            let commitNotEvaluated = commitRecord.map {
+                panel.selfTestRowToolTip(id: $0.id) == "Not evaluated"
+            } ?? false
+            let historyBeforeCommitOpen = self.model.navigationHistory.records.count
+            let commitOpen = commitRecord.map { panel.selfTestPressOpen(id: $0.id) } ?? false
+            let commitExact = commitOpen && waitUntil(timeout: 60, condition: {
+                self.model.currentRevision == gitHEAD
+                    && self.model.tabStrip.activeDocument?.contentID == commitRecord?.contentID
+                    && self.model.navigationHistory.records.count == historyBeforeCommitOpen + 1
+            })
+            let commitBack = commitExact
+                && performMenuShortcut(characters: "[", modifiers: [.command], window: window)
+                && waitUntil(timeout: 60, condition: { self.model.currentRevision == nil })
+            let worktreeFullAfterCommitBack = commitBack && waitUntil(timeout: 60, condition: {
+                self.model.snapshotPhase == .fullReady && self.model.currentRevision == nil
+            })
+            let missing = BookmarkRecord(
+                id: UUID(), projectPath: root.standardizedFileURL.path,
+                snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
+                path: record.path, contentID: record.contentID, byteOffset: record.byteOffset,
+                line: record.line, symbolName: nil, symbolKind: nil, note: "", updatedAt: .now
+            )
+            let missingAdded = self.model.bookmarkModel.toggle(missing) == .added
+            panel.refresh()
+            let missingHistory = self.model.navigationHistory.records.count
+            let missingRevision = self.model.currentRevision
+            let missingOpen = missingAdded && panel.selfTestPressOpen(id: missing.id)
+            let missingAttempt = missingOpen && waitUntil(timeout: 15, condition: {
+                self.model.bookmarkModel.lastAttemptMessage?.id == missing.id
+                    && self.model.bookmarkModel.lastAttemptMessage?.message == "Bookmark revision is unavailable."
+            })
+            gitChecks = [
+                "switchToCommit": commitReady,
+                "commitCaptureFullOID": commitToggle && commitCaptured,
+                "commitNotEvaluated": worktreeReady && commitNotEvaluated,
+                "commitOpenExact": commitExact,
+                "commitGoBack": worktreeFullAfterCommitBack,
+                "missingObjectAttempt": missingAttempt,
+                "missingObjectNoWorkspaceMutation": missingAttempt
+                    && self.model.currentRevision == missingRevision
+                    && self.model.navigationHistory.records.count == missingHistory,
+            ]
+        }
+        let drift = BookmarkRecord(
+            id: UUID(), projectPath: root.standardizedFileURL.path, snapshot: .worktree,
+            path: record.path, contentID: ContentID.sha256(of: Data("bookmark drift\n".utf8)),
+            byteOffset: 0, line: 999, symbolName: nil, symbolKind: nil,
+            note: "drift note", updatedAt: .now
+        )
+        let driftAdded = self.model.currentRevision == nil
+            && self.model.bookmarkModel.toggle(drift) == .added
+        panel.refresh()
+        let driftBefore = self.model.bookmarkModel.records.first { $0.id == drift.id }
+        let expectedDriftTarget = self.model.explicitBookmarkLineOpen(drift, line: drift.line)
+        let driftLineOpen = driftAdded && panel.selfTestPressOpenLine(id: drift.id)
+        let driftLineOpened = driftLineOpen && waitUntil(timeout: 15, condition: {
+            self.model.selectedByteOffset == expectedDriftTarget?.byteOffset
+        })
+        let driftReanchored = driftLineOpened && panel.selfTestPressReanchor(id: drift.id)
+        let driftAfter = self.model.bookmarkModel.records.first { $0.id == drift.id }
+        let driftExact = driftAfter.map { self.model.bookmarkStatus(for: $0) == .exactContent } ?? false
+        let modelReloadURL = bookmarkSelfTestSessionURL().deletingLastPathComponent()
+            .appendingPathComponent("bookmarks.json")
+        self.model.bookmarkModel = BookmarkModel(store: BookmarkStore(fileURL: modelReloadURL))
+        panel.refresh()
+        let modelReload = self.model.bookmarkModel.records.contains(where: { $0.id == record.id })
+            && self.model.bookmarkModel.records.first(where: { $0.id == drift.id })?.note == "drift note"
+        var languageChecks: [String: Bool] = [:]
+        if gitHEAD != nil {
+            panel.selfTestSetFilter("")
+            for item in languageFiles {
+                controller.openFileForSelfTest(item.file)
+                let readerReady = waitUntil(timeout: 15, condition: {
+                    controller.displayedReaderFile?.standardizedFileURL == item.file
+                })
+                let existing = self.model.bookmarkModel.records.last { candidate in
+                    candidate.projectPath == root.standardizedFileURL.path && candidate.snapshot == .worktree
+                        && candidate.path == item.file.path.replacingOccurrences(
+                            of: root.standardizedFileURL.path + "/", with: ""
+                        )
+                }
+                controller.setReadingPositionForSelfTest(scrollByteOffset: 1, selectionByteOffset: 1)
+                let languageToggle = existing != nil || (readerReady && performMenuShortcut(
+                    characters: "m", modifiers: [.command, .shift], window: window
+                ))
+                let languageRecord = existing ?? self.model.bookmarkModel.records.last { candidate in
+                    candidate.projectPath == root.standardizedFileURL.path && candidate.snapshot == .worktree
+                        && candidate.path == item.file.path.replacingOccurrences(
+                            of: root.standardizedFileURL.path + "/", with: ""
+                        )
+                }
+                panel.refresh()
+                let languageOpen = languageRecord.map { panel.selfTestPressOpen(id: $0.id) } ?? false
+                let languageExact = languageOpen && waitUntil(timeout: 15, condition: {
+                    self.model.tabStrip.activeDocument?.contentID == languageRecord?.contentID
+                })
+                languageChecks[bookmarkSelfTestLanguageName(item.language)] = languageToggle && languageExact
+            }
+        }
+        let allLanguagesPresent = languageFiles.count == languages.count
+        _ = self.model.compare.beginLoading(revision: "bookmark-self-test")
+        let compareDisabled = !validateMenuItem(toggle)
+            && toggle.accessibilityHelp() == "Compare views cannot be bookmarked."
+        self.model.compare.clear()
+        let themeCaptures = ReaderSettings.Theme.allCases.filter {
+            [.light, .dark, .siClassic].contains($0)
+        }.map { theme in
+            var settings = self.readerSettings
+            settings.theme = theme
+            controller.applyReaderSettings(settings)
+            panel.window?.orderFrontRegardless()
+            let capture = self.bookmarkSelfTestCapture(
+                window: window,
+                panelWindow: panel.window,
+                label: theme.rawValue
+            )
+            return (
+                capture.pass && !controller.selfTestBookmarkMarkerLines.isEmpty,
+                capture.json
+            )
+        }
+
+        self.model.openReadingSet(title: "Bookmark unsupported", excerpts: [])
+        pumpRunLoop()
+        let readingSetDisabled = !validateMenuItem(toggle)
+            && toggle.accessibilityHelp() == "Reading Sets cannot be bookmarked."
+
+        let corruptBytes = Data([0x7B, 0xFF, 0x00])
+        let corruptURL = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "CodeInsightBookmarkCorrupt-\(UUID().uuidString).json"
+        )
+        try? corruptBytes.write(to: corruptURL)
+        self.model.bookmarkModel = BookmarkModel(store: BookmarkStore(fileURL: corruptURL))
+        panel.refresh()
+        let corrupt = panel.selfTestState
+        let errorAX = panel.selfTestAXTree()
+        let exportPressed = panel.selfTestPressExport()
+        let rawExportURL = ProcessInfo.processInfo.environment[
+            "CAIRN_BOOKMARK_RAW_EXPORT_PATH"
+        ].map(URL.init(fileURLWithPath:))
+        let exported = rawExportURL.flatMap { try? Data(contentsOf: $0) } == corruptBytes
+        let checks: [String: Bool] = [
+            "toggleEnabled": toggleEnabled,
+            "toggleShortcut": toggled,
+            "panelShortcut": openedPanel,
+            "panelShortcutUnique": panelShortcutIsUnique,
+            "panelAX": shown.accessibilityLabel == "Bookmarks",
+            "panelGeometry": panelGeometry.content.width >= 500
+                && panelGeometry.content.height >= 400
+                && panelGeometry.table.height > 200
+                && panelGeometry.row.height > 0
+                && panelGeometry.copyVisible
+                && panelGeometry.markdownExportVisible
+                && !panelGeometry.copy.intersects(panelGeometry.markdownExport)
+                && panelGeometry.content.contains(panelGeometry.copy)
+                && panelGeometry.content.contains(panelGeometry.markdownExport),
+            "normalAX": axContains(normalAX, "Filter bookmarks")
+                && axContains(normalAX, "Bookmarks")
+                && axContains(normalAX, "Open bookmark")
+                && axContains(normalAX, "Delete bookmark"),
+            "noteWriteThrough": noteSelected && noteWriteThrough,
+            "noteRestart": noteRestart && noteFinalized,
+            "copyMarkdown": copiedMarkdown.contains("### Note")
+                && copiedMarkdown.contains(
+                    "\\* \\_ \\[ \\] \\# \\> \\| \\\\ \\` \\{ \\} \\( \\) \\+ \\- \\. \\!\nnext"
+                ),
+            "markdownExport": exportedMarkdown == copiedMarkdown,
+            "exportZeroMutation": rawBookmarksUnchanged,
+            "errorAX": axContains(errorAX, "Bookmark storage error")
+                && axContains(errorAX, "Export Raw Copy…"),
+            "statusToolTip": statusToolTip == "Exact content",
+            "filter": filteredOut && filteredIn,
+            "rowOpen": rowOpen && openedExact,
+            "contentIDExactAtOpen": contentIDExactAtOpen,
+            "goBack": returned,
+            "gitMatrix": gitHEAD == nil || gitChecks.values.allSatisfy { $0 },
+            "driftLineOpen": driftLineOpen && driftLineOpened,
+            "driftReanchor": driftReanchored
+                && driftBefore?.id == driftAfter?.id
+                && driftBefore?.note == driftAfter?.note
+                && driftBefore?.contentID != driftAfter?.contentID
+                && driftBefore?.line != driftAfter?.line
+                && driftExact,
+            "modelReload": modelReload,
+            "mixedLanguageCoverage": gitHEAD == nil || (
+                allLanguagesPresent && languageChecks.count == languages.count
+                    && languageChecks.values.allSatisfy { $0 }
+            ),
+            "gutterMarker": gutterMarker,
+            "readingSetDisabled": readingSetDisabled,
+            "compareDisabled": compareDisabled,
+            "themeCaptures": themeCaptures.allSatisfy { $0.0 },
+            "corruptExport": corrupt.exportVisible && corrupt.exportEnabled
+                && corrupt.exportAccessibilityLabel == "Export Raw Copy…"
+                && exportPressed && exported,
+        ]
+        Self.writeJSON([
+            "channel": channel,
+            "passed": checks.values.allSatisfy { $0 },
+            "checks": checks,
+            "menu": [
+                "toggleEnabled": toggleEnabled,
+                "toggleHelp": toggle.accessibilityHelp() ?? "",
+                "panelShortcut": "⌘⌥B",
+                "readingSetDisabled": readingSetDisabled,
+                "compareDisabled": compareDisabled,
+            ],
+            "panel": [
+                "rows": shown.rows,
+                "rowIDs": shown.rowIDs,
+                "accessibilityLabel": shown.accessibilityLabel,
+                "statusToolTip": statusToolTip ?? "",
+            ],
+            "matrix": [
+                "gitApplicable": gitHEAD != nil,
+                "commitApplicable": gitHEAD != nil,
+                "gitSkip": gitSkip,
+                "modelReload": modelReload,
+                "secondProcessReload": "not run",
+                "processRestart": "run --self-test-bookmarks-restart after this process exits",
+                "languages": languages.map(bookmarkSelfTestLanguageName),
+                "languageFiles": languageFiles.map {
+                    ["language": bookmarkSelfTestLanguageName($0.language), "path": $0.file.path]
+                },
+                "languageChecks": languageChecks,
+                "gitChecks": gitChecks,
+                "nonGit": [
+                    "worktreeOnly": gitHEAD == nil,
+                    "commitApplicable": false,
+                    "missingObjectApplicable": false,
+                ],
+                "drift": [
+                    "lineOpen": driftLineOpen && driftLineOpened,
+                    "reanchor": driftReanchored && driftExact,
+                ],
+            ],
+            "axTreeNormal": normalAX,
+            "axTreeError": errorAX,
+            "panelGeometry": [
+                "content": NSStringFromRect(panelGeometry.content),
+                "table": NSStringFromRect(panelGeometry.table),
+                "row": NSStringFromRect(panelGeometry.row),
+                "copy": NSStringFromRect(panelGeometry.copy),
+                "markdownExport": NSStringFromRect(panelGeometry.markdownExport),
+                "copyVisible": panelGeometry.copyVisible,
+                "markdownExportVisible": panelGeometry.markdownExportVisible,
+            ],
+            "copy": ["length": copiedMarkdown.count, "pasteboardReadback": pasteboardReadback],
+            "markdownPath": markdownPath,
+            "markdownLength": copiedMarkdown.count,
+            "pasteboardReadback": pasteboardReadback,
+            "rawBookmarks": [
+                "beforeLength": rawBookmarksBefore?.count ?? -1,
+                "afterLength": rawBookmarksAfter?.count ?? -1,
+                "unchanged": rawBookmarksUnchanged,
+            ],
+            "captures": themeCaptures.map { $0.1 },
+            "historyCount": self.model.navigationHistory.records.count,
+            "contentIDExactAtOpen": contentIDExactAtOpen,
+            "rawExportByteIdentical": exported,
+            "gutter": [
+                "lines": gutterLines,
+                "accessibilityLabel": gutterAccessibilityLabel,
+            ],
+            "sessionURL": bookmarkSelfTestSessionURL().path,
+            "bookmarksURL": bookmarksURL.path,
+        ])
+        try? FileManager.default.removeItem(at: corruptURL)
+        Self.exitSelfTest(channel: channel, status: checks.values.allSatisfy { $0 } ? 0 : 1)
+    }
+
+    private func performMenuShortcut(
+        characters: String,
+        modifiers: NSEvent.ModifierFlags,
+        window: NSWindow
+    ) -> Bool {
+        guard let event = NSEvent.keyEvent(
+            with: .keyDown,
+            location: .zero,
+            modifierFlags: modifiers,
+            timestamp: 0,
+            windowNumber: window.windowNumber,
+            context: nil,
+            characters: characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat: false,
+            keyCode: 0
+        ) else { return false }
+        return NSApplication.shared.mainMenu?.performKeyEquivalent(with: event) == true
+    }
+
+    private func bookmarkSelfTestCapture(
+        window: NSWindow,
+        panelWindow: NSWindow?,
+        label: String
+    ) -> (pass: Bool, json: [String: Any]) {
+        window.displayIfNeeded()
+        panelWindow?.displayIfNeeded()
+        pumpRunLoop()
+        let directory = ProcessInfo.processInfo.environment[
+            "CAIRN_BOOKMARK_CAPTURE_DIR"
+        ] ?? "/tmp/cairn-bookmark-captures"
+        try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
+        let path = "\(directory)/\(label).png"
+        let panelPNG = "\(directory)/\(label)-panel.png"
+        if let panelWindow,
+           let image = CGWindowListCreateImage(
+               .null, .optionIncludingWindow, CGWindowID(window.windowNumber),
+               [.boundsIgnoreFraming, .bestResolution]
+           ), let panelImage = CGWindowListCreateImage(
+               .null, .optionIncludingWindow, CGWindowID(panelWindow.windowNumber),
+               [.boundsIgnoreFraming, .bestResolution]
+           ) {
+            let bitmap = NSBitmapImageRep(cgImage: image)
+            let panelBitmap = NSBitmapImageRep(cgImage: panelImage)
+            let wrote = (try? bitmap.representation(using: .png, properties: [:])?
+                .write(to: URL(fileURLWithPath: path))) != nil
+            let wrotePanel = (try? panelBitmap.representation(using: .png, properties: [:])?
+                .write(to: URL(fileURLWithPath: panelPNG))) != nil
+            return (
+                wrote && wrotePanel && bitmap.pixelsWide > 0 && bitmap.pixelsHigh > 0
+                    && panelBitmap.pixelsWide > 0 && panelBitmap.pixelsHigh > 0,
+                [
+                    "theme": label, "png": path, "width": bitmap.pixelsWide,
+                    "height": bitmap.pixelsHigh, "capture": "CGWindow",
+                    "panelPNG": panelPNG, "panelWidth": panelBitmap.pixelsWide,
+                    "panelHeight": panelBitmap.pixelsHigh, "panelCapture": "CGWindow",
+                ]
+            )
+        }
+        guard let panelWindow,
+              let main = cachedPNG(of: window.contentView, path: path),
+              let panelPath = cachedPNG(
+                of: panelWindow.contentView,
+                path: panelPNG
+              )
+        else { return (false, ["theme": label, "error": "AppKit capture failed"]) }
+        return (true, [
+            "theme": label, "png": main.path, "width": main.width,
+            "height": main.height, "panelPNG": panelPath.path,
+            "panelWidth": panelPath.width, "panelHeight": panelPath.height,
+            "capture": "AppKit cache fallback",
+            "panelCapture": "AppKit cache fallback",
+        ])
+    }
+
     private func gutterLineScan(
         controller: MainWindowController,
         window: NSWindow,
@@ -8449,6 +9005,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         _ = windowController?.toggleFoldAtSelection()
     }
 
+    @objc private func toggleBookmark(_ sender: Any?) {
+        windowController?.toggleBookmark()
+    }
+
+    @objc private func showBookmarks(_ sender: Any?) {
+        windowController?.showBookmarks()
+    }
+
+    @objc private func closeBookmarks(_ sender: Any?) {
+        windowController?.closeBookmarks()
+    }
+
     @objc private func useFullReadingHeight(_ sender: Any?) {
         _ = windowController?.setReadingHeightLevel(.full)
     }
@@ -8509,6 +9077,15 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             return windowController?.canShowReadingTrail == true
         case #selector(toggleFold(_:)):
             return windowController?.canToggleFoldAtSelection == true
+        case #selector(toggleBookmark(_:)):
+            let help = windowController?.bookmarkCommandAccessibilityHelp
+            menuItem.toolTip = help
+            menuItem.setAccessibilityHelp(help)
+            return windowController?.canToggleBookmark == true
+        case #selector(showBookmarks(_:)):
+            return true
+        case #selector(closeBookmarks(_:)):
+            return windowController?.bookmarksPanelIsVisible == true
         case #selector(useFullReadingHeight(_:)):
             menuItem.state =
                 windowController?.readingHeightLevel == .full
@@ -8884,6 +9461,30 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         foldingItem.submenu = foldingMenu
         viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
+        let toggleBookmarkItem = NSMenuItem(
+            title: "Toggle Bookmark",
+            action: #selector(toggleBookmark(_:)),
+            keyEquivalent: "m"
+        )
+        toggleBookmarkItem.keyEquivalentModifierMask = [.command, .shift]
+        toggleBookmarkItem.target = self
+        viewMenu.addItem(toggleBookmarkItem)
+        let showBookmarksItem = NSMenuItem(
+            title: "Show Bookmarks",
+            action: #selector(showBookmarks(_:)),
+            keyEquivalent: "b"
+        )
+        showBookmarksItem.keyEquivalentModifierMask = [.command, .option]
+        showBookmarksItem.target = self
+        viewMenu.addItem(showBookmarksItem)
+        let closeBookmarksItem = NSMenuItem(
+            title: "Hide Bookmarks",
+            action: #selector(closeBookmarks(_:)),
+            keyEquivalent: ""
+        )
+        closeBookmarksItem.target = self
+        viewMenu.addItem(closeBookmarksItem)
+        viewMenu.addItem(.separator())
         let increaseFontItem = NSMenuItem(
             title: "Increase Font Size",
             action: #selector(increaseReaderFontSize(_:)),
@@ -8958,6 +9559,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         mainMenu.addItem(relationsItem)
 
         return mainMenu
+    }
+
+    private static func menuItems(in menu: NSMenu?) -> [NSMenuItem] {
+        guard let menu else { return [] }
+        return menu.items.flatMap { item in
+            [item] + menuItems(in: item.submenu)
+        }
     }
 
     private static func finishSelfTest(
@@ -10560,6 +11168,137 @@ private func selfTestListRowCount(in view: NSView) -> Int {
 private func rustFiles(in nodes: [FileTreeNode]) -> [URL] {
     nodes.flatMap { node in
         node.isDirectory ? rustFiles(in: node.children) : [node.url]
+    }
+}
+
+private func bookmarkSelfTestLanguages() -> [LanguageID] {
+    let raw = ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_LANGUAGES"] ?? "rust"
+    let languages = raw.split(separator: ",").compactMap { part -> LanguageID? in
+        switch part.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "rust": .rust
+        case "python": .python
+        case "typescript", "ts": .typescript
+        default: nil
+        }
+    }
+    return languages.isEmpty ? [.rust] : Array(Set(languages)).sorted { $0.rawValue < $1.rawValue }
+}
+
+private func bookmarkSelfTestFiles(
+    in root: URL,
+    languages: [LanguageID]
+) -> [(language: LanguageID, file: URL)] {
+    let files = FileManager.default.enumerator(
+        at: root,
+        includingPropertiesForKeys: [.isRegularFileKey],
+        options: [.skipsHiddenFiles]
+    )
+    let regular = files?.compactMap { $0 as? URL }.filter {
+        (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+    } ?? []
+    return languages.compactMap { language in
+        guard let file = regular.first(where: { LanguageMode.classify(
+            path: $0.path, language: language
+        ) != nil }) else { return nil }
+        return (language, file.standardizedFileURL)
+    }
+}
+
+private func bookmarkSelfTestGitHEAD(in root: URL) -> String? {
+    func output(_ arguments: [String]) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root.path] + arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment["GIT_OPTIONAL_LOCKS"] = "0"
+        process.environment = environment
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            process.waitUntilExit()
+        } catch { return nil }
+        guard process.terminationStatus == 0 else { return nil }
+        return String(data: pipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    guard output(["rev-parse", "--show-toplevel"]).map({
+        URL(fileURLWithPath: $0).standardizedFileURL == root.standardizedFileURL
+    }) == true,
+    let value = output(["rev-parse", "--verify", "HEAD"]),
+    (value.count == 40 || value.count == 64),
+    value.allSatisfy(\.isHexDigit)
+    else { return nil }
+    return value
+}
+
+@MainActor
+private func runBookmarkSelfTestRestart(sessionURL: URL) -> Never {
+    let bookmarksURL = sessionURL.standardizedFileURL.deletingLastPathComponent()
+        .appendingPathComponent("bookmarks.json")
+    let model = BookmarkModel(store: BookmarkStore(fileURL: bookmarksURL))
+    let checks: [String: Bool] = [
+        "loaded": model.storageError == nil,
+        "records": !model.records.isEmpty,
+        "note": model.records.contains { !$0.note.isEmpty },
+    ]
+    let output: [String: Any] = [
+        "channel": "bookmarks-restart",
+        "passed": checks.values.allSatisfy { $0 },
+        "processRestart": true,
+        "checks": checks,
+        "records": model.records.map { [
+            "id": $0.id.uuidString,
+            "note": $0.note,
+            "path": $0.path,
+        ] },
+        "bookmarksURL": bookmarksURL.path,
+    ]
+    if let data = try? JSONSerialization.data(withJSONObject: output, options: [.sortedKeys]) {
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data([0x0A]))
+    }
+    Darwin.exit(checks.values.allSatisfy { $0 } ? 0 : 1)
+}
+
+private func bookmarkSelfTestLanguageName(_ language: LanguageID) -> String {
+    switch language {
+    case .rust: "rust"
+    case .python: "python"
+    case .typescript: "typescript"
+    case .javascript: "javascript"
+    }
+}
+
+private func axContains(_ tree: [[String: String]], _ label: String) -> Bool {
+    tree.contains { $0["label"] == label }
+}
+
+@MainActor
+private func bookmarkSelfTestSessionURL() -> URL {
+    ProcessInfo.processInfo.environment["CAIRN_BOOKMARK_SESSION_URL"]
+        .map(URL.init(fileURLWithPath:)) ?? AppModel.defaultSessionURL
+}
+
+@MainActor
+private func cachedPNG(of view: NSView?, path: String) -> (
+    path: String, width: Int, height: Int
+)? {
+    guard let view else { return nil }
+    view.layoutSubtreeIfNeeded()
+    guard
+          let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+    else { return nil }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    guard let data = bitmap.representation(using: .png, properties: [:]) else {
+        return nil
+    }
+    do {
+        try data.write(to: URL(fileURLWithPath: path))
+        return (path, bitmap.pixelsWide, bitmap.pixelsHigh)
+    } catch {
+        return nil
     }
 }
 

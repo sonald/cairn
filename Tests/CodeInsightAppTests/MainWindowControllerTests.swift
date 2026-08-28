@@ -66,6 +66,121 @@ func recentProjectClickForwardsStoredLanguage() {
 
 @MainActor
 @Test
+func bookmarkCommandReportsTheEligibilityReasonOutsideThePrimaryReader() {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+
+    #expect(!fixture.controller.canToggleBookmark)
+    #expect(fixture.controller.bookmarkCommandAccessibilityHelp
+        == "Bookmarks require a current project file in the primary reader.")
+}
+
+@MainActor
+@Test
+func bookmarkPanelExportsTheOriginalCorruptBytes() throws {
+    _ = NSApplication.shared
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+        "CodeInsightBookmarkPanel-\(UUID().uuidString)", isDirectory: true
+    )
+    defer { try? FileManager.default.removeItem(at: directory) }
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let input = directory.appendingPathComponent("bookmarks.json")
+    let output = directory.appendingPathComponent("raw-copy.json")
+    let bytes = Data([0x7B, 0xFF, 0x00])
+    try bytes.write(to: input)
+    let model = AppModel()
+    model.bookmarkModel = BookmarkModel(store: BookmarkStore(fileURL: input))
+    let panel = BookmarkPanel(appModel: model, onOpen: { _ in }, onLineOpen: { _, _ in })
+
+    #expect(panel.exportRawCopy(to: output))
+    #expect(try Data(contentsOf: output) == bytes)
+}
+
+@MainActor
+@Test
+func bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "src/main.rs": "fn main() {}\n",
+        "src/other.rs": "fn other() {}\n",
+    ])
+    let sessionURL = root.appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(sessionURL: sessionURL)
+    try await model.openProject(root: root, languages: [.rust])
+    let record = BookmarkRecord(
+        id: UUID(), projectPath: root.standardizedFileURL.path, snapshot: .worktree,
+        path: "src/main.rs",
+        contentID: ContentID.sha256(of: Data("fn main() {}\n".utf8)),
+        byteOffset: 0, line: 1, symbolName: nil, symbolKind: nil, note: "", updatedAt: .now
+    )
+    let other = BookmarkRecord(
+        id: UUID(), projectPath: root.standardizedFileURL.path, snapshot: .worktree,
+        path: "src/other.rs",
+        contentID: ContentID.sha256(of: Data("fn other() {}\n".utf8)),
+        byteOffset: 0, line: 1, symbolName: nil, symbolKind: nil, note: "",
+        updatedAt: Date(timeIntervalSince1970: 1)
+    )
+    #expect(model.bookmarkModel.toggle(record) == .added)
+    #expect(model.bookmarkModel.toggle(other) == .added)
+    let panel = BookmarkPanel(appModel: model, onOpen: { _ in }, onLineOpen: { _, _ in })
+    panel.show(relativeTo: nil)
+    #expect(panel.selfTestSelectFirstRow())
+
+    panel.selfTestClearSelection()
+    panel.selfTestTypeNote("must not attach to a stale row")
+
+    #expect(model.bookmarkModel.records.first(where: { $0.id == record.id })?.note.isEmpty == true)
+
+    #expect(panel.selfTestSelectFirstRow())
+    panel.selfTestSetFilter("no-bookmark-match")
+    panel.selfTestTypeNote("must not attach after filtering")
+    #expect(model.bookmarkModel.records.first(where: { $0.id == record.id })?.note.isEmpty == true)
+
+    panel.selfTestSetFilter(record.path)
+    #expect(panel.selfTestSelectFirstRow())
+    #expect(model.bookmarkModel.delete(id: record.id))
+    panel.refresh()
+    panel.selfTestTypeNote("must not attach after deletion")
+    #expect(model.bookmarkModel.records.first(where: { $0.id == other.id })?.note.isEmpty == true)
+}
+
+@MainActor
+@Test
+func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() {
+    _ = NSApplication.shared
+    let root = try! mainWindowTemporaryProject(["src/main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel()
+    model.openProject(root: root)
+    let record = BookmarkRecord(
+        id: UUID(), projectPath: root.path, snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
+        path: "src/main.rs", contentID: ContentID.sha256(of: Data("old\n".utf8)),
+        byteOffset: 0, line: 1, symbolName: nil, symbolKind: nil, note: "", updatedAt: .now
+    )
+    #expect(model.bookmarkModel.toggle(record) == .added)
+    var opened: UUID?
+    var openedLine: UUID?
+    let panel = BookmarkPanel(
+        appModel: model,
+        onOpen: { opened = $0.id },
+        onLineOpen: { record, _ in openedLine = record.id }
+    )
+    panel.show(relativeTo: nil)
+
+    #expect(panel.selfTestRowToolTip(id: record.id) == "Not evaluated")
+    let geometry = panel.selfTestGeometry
+    #expect(geometry.copyVisible && geometry.markdownExportVisible)
+    #expect(!geometry.copy.intersects(geometry.markdownExport))
+    #expect(geometry.content.contains(geometry.copy))
+    #expect(geometry.content.contains(geometry.markdownExport))
+    #expect(panel.selfTestPressOpen(id: record.id))
+    #expect(opened == record.id)
+    #expect(openedLine == nil)
+}
+
+@MainActor
+@Test
 func recentProjectStoresTypeScriptRawValueTwoAndForwards() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }

@@ -68,6 +68,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     nonisolated(unsafe) private var escapeMonitor: Any?
     private var palettePanel: PalettePanel?
     private var searchPanel: SearchPanel?
+    private var bookmarkPanel: BookmarkPanel?
     private var commitPickerPopover: CommitPickerPopover?
     private var compareCommitPickerPopover: CommitPickerPopover?
     private var panelPreset = PanelPresetModel.reading
@@ -1110,6 +1111,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.selfTestVisibleChildEdgeTitles(ofEdge: title)
     }
     var selfTestLeftReaderBytes: [UInt8]? { readerController.displayedBytes }
+    var selfTestBookmarkMarkerLines: [Int] { readerController.bookmarkMarkerLines }
+    var selfTestBookmarkMarkerAccessibilityLabel: String? {
+        readerController.bookmarkMarkerAccessibilityLabel
+    }
     func selfTestLeftReaderFontName(at byteOffset: UInt32) -> String? {
         readerController.selfTestFontName(at: byteOffset)
     }
@@ -1497,6 +1502,40 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     var canFindInFile: Bool { readerController.canFindInFile }
 
+    var canToggleBookmark: Bool { model.bookmarkEligibility() == .eligible }
+
+    var bookmarkCommandAccessibilityHelp: String? {
+        model.bookmarkEligibility().accessibilityHelp
+    }
+
+    var bookmarksPanelIsVisible: Bool { bookmarkPanel?.window?.isVisible == true }
+    var selfTestBookmarkPanel: BookmarkPanel? { bookmarkPanel }
+
+    func showBookmarks() {
+        if bookmarkPanel == nil {
+            bookmarkPanel = BookmarkPanel(
+                appModel: model,
+                onOpen: { [weak self] record in self?.openBookmark(record) },
+                onLineOpen: { [weak self] record, line in
+                    self?.openDriftedBookmarkLine(record, line: line)
+                }
+            )
+        }
+        bookmarkPanel?.show(relativeTo: window)
+    }
+
+    func closeBookmarks() { bookmarkPanel?.closePanel() }
+
+    func toggleBookmark() {
+        guard let record = model.captureCurrentBookmark() else { return }
+        switch model.bookmarkModel.toggle(record) {
+        case .added, .deleted, .rejected:
+            render()
+        case let .confirmationRequired(id):
+            confirmBookmarkDeletion(id: id)
+        }
+    }
+
     @discardableResult
     func toggleFocusCurrentScope() -> Bool {
         readerController.toggleFocusCurrentScope()
@@ -1760,6 +1799,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.exactCoordinator.readiness
             _ = model.exactCoordinator.analysisEnvironment
             _ = model.exactCoordinator.trustMode
+            _ = model.bookmarkModel.records
+            _ = model.bookmarkModel.storageError
+            _ = model.bookmarkModel.lastAttemptMessage
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
                 self?.render()
@@ -1829,6 +1871,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readingSetSkippedReasons:
                 model.tabStrip.activeTab?.readingSetSkippedReasons ?? []
         )
+        if let readerFile,
+           let document = model.tabStrip.activeDocument
+        {
+            readerController.setBookmarkMarkers(
+                model.bookmarkMarkers(for: readerFile, document: document)
+            )
+        } else {
+            readerController.setBookmarkMarkers([:])
+        }
         if readerFile == nil, model.tabStrip.activeTab != nil {
             readerController.restoreReadingSetScrollOffset(
                 model.tabStrip.activeTab?.readingSetScrollOffset
@@ -1910,6 +1961,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.validateVisibleItems()
         palettePanel?.refreshProjectState()
         searchPanel?.refreshProjectState()
+        bookmarkPanel?.refresh()
     }
 
     private var profileTitle: String? {
@@ -2349,6 +2401,30 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     @objc func goForward(_ sender: Any?) {
         model.goForward()
+    }
+
+    private func openBookmark(_ record: BookmarkRecord) {
+        guard let leaving = currentJumpRecord() else { return }
+        model.openStrictBookmark(record, leaving: leaving)
+    }
+
+    private func openDriftedBookmarkLine(_ record: BookmarkRecord, line: UInt32) {
+        guard let target = model.explicitBookmarkLineOpen(record, line: line) else { return }
+        navigate(to: target.file, byteOffset: target.byteOffset)
+    }
+
+    private func confirmBookmarkDeletion(id: UUID) {
+        let alert = NSAlert()
+        alert.messageText = "Delete bookmark?"
+        alert.informativeText = "Its note will be removed."
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            _ = self?.model.bookmarkModel.delete(id: id)
+            self?.render()
+        }
     }
 
     @objc func previousDiffHunk(_ sender: Any?) {
@@ -4830,7 +4906,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         textView.setDiffMarkers(markers)
     }
 
+    func setBookmarkMarkers(_ markers: [Int: [String]]) {
+        loadViewIfNeeded()
+        textView.setBookmarkMarkers(markers)
+    }
+
     var displayedBytes: [UInt8]? { textView.displayedBytes }
+    var bookmarkMarkerLines: [Int] { textView.bookmarkMarkerLines }
+    var bookmarkMarkerAccessibilityLabel: String? {
+        textView.bookmarkMarkerAccessibilityLabel
+    }
     var isEditable: Bool { textView.view.isEditable }
     var diffMarkerCounts: [DiffCore.MarkerKind: Int] { textView.diffMarkerCounts }
     var gutterShowsLineNumbersAndDiff: Bool {

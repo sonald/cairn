@@ -34,7 +34,7 @@ public final class CompareModel {
     }
 
     @discardableResult
-    func beginLoading(revision: String) -> UInt64 {
+    package func beginLoading(revision: String) -> UInt64 {
         clear()
         rightRevision = revision
         isLoading = true
