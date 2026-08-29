@@ -567,6 +567,39 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController.applyReaderSettings(themeSettings)
         let autoChromeFollowsSystem = windowController.window?.appearance == nil
 
+        let languageAlert = makeLanguageSelectionAlert(for: URL(
+            fileURLWithPath: "/tmp/codeinsight-language-picker-self-test",
+            isDirectory: true
+        ))
+        languageAlert.window.contentView?.layoutSubtreeIfNeeded()
+        languageAlert.window.displayIfNeeded()
+        let languageStack = languageAlert.accessoryView as? NSStackView
+        let languageCheckboxes = languageStack?.arrangedSubviews
+            .compactMap { $0 as? NSButton } ?? []
+        let languageFrames = languageCheckboxes.map(\.frame)
+        let languageLabelsFit = languageCheckboxes.count == 3
+            && languageCheckboxes.allSatisfy {
+                $0.frame.width >= $0.fittingSize.width - 1
+                    && $0.frame.height >= $0.fittingSize.height - 1
+            }
+        let languageFramesDoNotOverlap = languageFrames.count == 3
+            && languageFrames.allSatisfy { !$0.isEmpty }
+            && zip(languageFrames, languageFrames.dropFirst()).allSatisfy {
+                left, right in !left.intersects(right)
+            }
+        let languageOrderMatches = languageCheckboxes.map(\.title)
+            == ["Rust", "Python", "TypeScript"]
+        let languageOpenButton = languageAlert.buttons.first
+        let languageOpenDisabledAtZero = languageOpenButton?.isEnabled == false
+        languageCheckboxes.first?.performClick(nil)
+        let languageOpenEnabledAtOne = languageOpenButton?.isEnabled == true
+        languageCheckboxes.dropFirst().forEach { $0.performClick(nil) }
+        let languageOpenEnabledAtThree = languageOpenButton?.isEnabled == true
+        languageCheckboxes.forEach { $0.performClick(nil) }
+        let languageOpenDisabledAfterClearing = languageOpenButton?.isEnabled == false
+        mixedLanguageCheckboxes = []
+        mixedLanguageOpenButton = nil
+
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
         let appMenu = NSApplication.shared.mainMenu?.items.first?.submenu
@@ -623,6 +656,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "lightChromeMatchesTheme": lightChromeMatchesTheme,
             "siClassicChromeStaysLight": siClassicChromeStaysLight,
             "autoChromeFollowsSystem": autoChromeFollowsSystem,
+            "languagePickerLabelsFit": languageLabelsFit,
+            "languagePickerFramesDoNotOverlap": languageFramesDoNotOverlap,
+            "languagePickerOrderMatches": languageOrderMatches,
+            "languagePickerOpenGate": languageOpenDisabledAtZero
+                && languageOpenEnabledAtOne
+                && languageOpenEnabledAtThree
+                && languageOpenDisabledAfterClearing,
             "quickOpenUsesCommandP":
                 fileMenu?.item(withTitle: "Quick Open…")?.keyEquivalent == "p"
                 && fileMenu?.item(withTitle: "Quick Open…")?
@@ -8725,35 +8765,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             }
             selectedRoot = panelRoot
         }
-        let alert = NSAlert()
-        alert.messageText = "Choose Languages"
-        alert.informativeText =
-            "Choose 1 to 3 languages for \(selectedRoot.lastPathComponent)."
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
-        let stack = NSStackView()
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 8
-        let options: [String] = [
-            "Rust",
-            "Python",
-            "TypeScript",
-        ]
-        mixedLanguageCheckboxes = options.map { title in
-            let checkbox = NSButton(
-                checkboxWithTitle: title,
-                target: self,
-                action: #selector(mixedCheckboxChanged(_:))
-            )
-            checkbox.setAccessibilityLabel(title)
-            stack.addArrangedSubview(checkbox)
-            return checkbox
-        }
-        alert.accessoryView = stack
-        let openButton = alert.buttons[0]
-        openButton.isEnabled = false
-        mixedLanguageOpenButton = openButton
+        let alert = makeLanguageSelectionAlert(for: selectedRoot)
         guard alert.runModal() == .alertFirstButtonReturn else {
             mixedLanguageCheckboxes = []
             mixedLanguageOpenButton = nil
@@ -8776,6 +8788,41 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         mixedLanguageOpenButton = nil
         guard let languages else { return }
         windowController?.openProject(root: selectedRoot, languages: languages)
+    }
+
+    private func makeLanguageSelectionAlert(for root: URL) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = "Choose Languages"
+        alert.informativeText =
+            "Choose 1 to 3 languages for \(root.lastPathComponent)."
+        alert.addButton(withTitle: "Open")
+        alert.addButton(withTitle: "Cancel")
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        let options: [String] = [
+            "Rust",
+            "Python",
+            "TypeScript",
+        ]
+        mixedLanguageCheckboxes = options.map { title in
+            let checkbox = NSButton(
+                checkboxWithTitle: title,
+                target: self,
+                action: #selector(mixedCheckboxChanged(_:))
+            )
+            checkbox.setAccessibilityLabel(title)
+            stack.addArrangedSubview(checkbox)
+            return checkbox
+        }
+        stack.frame.size = stack.fittingSize
+        stack.layoutSubtreeIfNeeded()
+        alert.accessoryView = stack
+        let openButton = alert.buttons[0]
+        openButton.isEnabled = false
+        mixedLanguageOpenButton = openButton
+        return alert
     }
 
     @objc private func mixedCheckboxChanged(_ sender: NSButton) {
