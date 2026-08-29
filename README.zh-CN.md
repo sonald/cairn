@@ -27,6 +27,15 @@ CodeInsight 是一个 macOS 原生、只读的代码阅读器，正式产品名�
 - **Git 时间旅行**：读取 worktree 或 commit 快照，比较不同版本，不 checkout、不修改仓库。
 - **CLI 工具链**：提供索引、查询、快照、缓存切换统计、gold-set 评估等命令。
 
+## 可解释阅读工作流
+
+1. 打开项目，并选择项目中实际使用的语言。
+2. 在 Relations 中选择已发布结果进行语义导航；使用 `⌘I` 打开 Resolution Inspector，查看来源与验证证据。
+3. 使用 `⌥⌘T` 打开 Trail Details 或 Branches，检查当前路径，并在不丢弃兄弟分支的前提下恢复较早节点。
+4. 在 Relations 中使用 **Freeze Results**，或在 Trail 中使用 **Freeze Path as Reading Set**。生成的 Reading Set 会保留冻结源码和证据，并可在 Cairn 重启后恢复。
+
+Reading Trail 只属于当前应用会话，重启后按设计从空状态开始。Reading Set 是冻结证据集，不是可编辑的整理清单。折叠只作用于文件 Reader：`⌥⌘0/1/2` 分别选择 Full、Structure、Overview，`⌥⌘F` 聚焦当前作用域。当前产品界面文案为英文，Cairn 尚未提供完整本地化。
+
 ## Repository Layout
 
 | 路径 | 用途 |

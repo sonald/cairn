@@ -27,6 +27,15 @@ This is not an editor. Cairn does not save files, run builds, or modify your wor
 - **Git time travel**: inspect worktree or commit snapshots and compare versions without checkout or repository mutation.
 - **CLI toolkit**: index projects, query semantics, inspect snapshots, measure cache-switch reuse, and evaluate gold sets.
 
+## Explainable Reading Workflow
+
+1. Open a project and choose the languages present in it.
+2. In Relations, select a published result to navigate semantically; use `⌘I` to open the Resolution Inspector and review source and verification evidence.
+3. Use `⌥⌘T` to open Trail Details or Branches, inspect the current route, and restore an earlier node without discarding sibling branches.
+4. Use **Freeze Results** in Relations or **Freeze Path as Reading Set** in the Trail. The resulting Reading Set keeps frozen source and evidence and can be restored after restarting Cairn.
+
+The Reading Trail belongs to the current app session and intentionally starts empty after a restart. A Reading Set is a frozen evidence set, not an editable curation list. Folding applies only to a file Reader: `⌥⌘0/1/2` selects Full, Structure, or Overview, and `⌥⌘F` focuses the current scope. Product UI labels are currently English; Cairn does not yet provide full localization.
+
 ## Repository Layout
 
 | Path | Purpose |
