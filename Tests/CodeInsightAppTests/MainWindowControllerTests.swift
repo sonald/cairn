@@ -77,6 +77,49 @@ func bookmarkCommandReportsTheEligibilityReasonOutsideThePrimaryReader() {
 
 @MainActor
 @Test
+func readingHeightIsOnlyEnabledForAReadyFile() throws {
+    _ = NSApplication.shared
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    let root = try mainWindowTemporaryProject([
+        "main.rs": "fn main() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("main.rs")
+
+    controller.showEmptyState(
+        recentPaths: [],
+        failed: false,
+        onChooseProject: {},
+        onOpenRecent: { _ in },
+        onOpenDropped: { _ in },
+        onRetry: {}
+    )
+    #expect(!controller.selfTestReadingHeightHeader.enabled)
+    #expect(!controller.selfTestReadingHeightHeader.hidden)
+
+    controller.removeEmptyState(placeholder: "Indexing project…")
+    #expect(!controller.selfTestReadingHeightHeader.enabled)
+
+    controller.display(file)
+    #expect(controller.selfTestReadingHeightHeader.enabled)
+    #expect(!controller.selfTestReadingHeightHeader.hidden)
+
+    controller.display(.readingSet(title: "set", excerpts: []))
+    #expect(!controller.selfTestReadingHeightHeader.enabled)
+    #expect(controller.selfTestReadingHeightHeader.hidden)
+
+    controller.display(file)
+    #expect(controller.selfTestReadingHeightHeader.enabled)
+    #expect(!controller.selfTestReadingHeightHeader.hidden)
+
+    controller.display(root.appendingPathComponent("missing.rs"))
+    #expect(!controller.selfTestReadingHeightHeader.enabled)
+    #expect(!controller.selfTestReadingHeightHeader.hidden)
+}
+
+@MainActor
+@Test
 func bookmarkPanelExportsTheOriginalCorruptBytes() throws {
     _ = NSApplication.shared
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(

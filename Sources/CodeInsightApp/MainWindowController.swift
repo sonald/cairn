@@ -1562,7 +1562,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             frame: NSRect,
             controlFrame: NSRect,
             shortcut: String,
-            accessibilityLabel: String
+            accessibilityLabel: String,
+            hidden: Bool,
+            enabled: Bool
         )
     {
         readerController.selfTestReadingHeightHeader
@@ -4464,6 +4466,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         onRetry: @escaping () -> Void
     ) {
         loadViewIfNeeded()
+        readingHeightControl.isEnabled = false
         label.isHidden = true
         scrollView?.isHidden = true
         if let emptyStateView {
@@ -4493,6 +4496,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         emptyStateView?.removeFromSuperview()
         emptyStateView = nil
         scrollView?.isHidden = false
+        readingHeightControl.isEnabled = displayedDocument != nil
         if displayedFile == nil {
             label.stringValue = placeholder
             label.isHidden = false
@@ -4789,7 +4793,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             frame: NSRect,
             controlFrame: NSRect,
             shortcut: String,
-            accessibilityLabel: String
+            accessibilityLabel: String,
+            hidden: Bool,
+            enabled: Bool
         )
     {
         loadViewIfNeeded()
@@ -4808,7 +4814,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 to: nil
             ) ?? .zero,
             readingHeightShortcutLabel.stringValue,
-            readingHeightControl.accessibilityLabel() ?? ""
+            readingHeightControl.accessibilityLabel() ?? "",
+            readingHeightControl.isHidden,
+            readingHeightControl.isEnabled
         )
     }
     var selfTestScopeHeader: (
@@ -5113,6 +5121,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         scrollView?.isHidden = true
         readingSetView.isHidden = false
         readingHeightControl.isHidden = true
+        readingHeightControl.isEnabled = false
         readingHeightShortcutLabel.isHidden = true
         fileNameLabel.stringValue = "Reading Set · \(title)"
         readingSetView.display(
@@ -5181,6 +5190,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         readingSetView.isHidden = true
         scrollView?.isHidden = false
         readingHeightControl.isHidden = false
+        readingHeightControl.isEnabled = false
         readingHeightShortcutLabel.isHidden = false
         let rerunFind = !findBar.isHidden
         if rerunFind {
@@ -5233,6 +5243,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
                 languageMode: languageMode
             )
             displayedDocument = loaded.document
+            readingHeightControl.isEnabled = true
             onDocumentChange?(file, loaded.document)
             label.isHidden = true
             layoutTextViewFrame()
