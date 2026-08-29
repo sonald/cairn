@@ -397,7 +397,8 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let titles = breadcrumbTitles
         if titles.isEmpty {
             let empty = NSTextField(
-                labelWithString: "Explicit semantic navigation will appear here"
+                labelWithString:
+                    "Navigate from Relations to build a trail · this session only"
             )
             empty.font = .systemFont(ofSize: 11)
             empty.textColor = theme.chromeTertiaryColor
@@ -426,10 +427,14 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
                 ))
             }
         }
-        branchButton.title = branchCount > 0 ? "⑂ \(branchCount)" : "⑂"
+        branchButton.title = branchCount > 0
+            ? "Branches · \(branchCount)"
+            : "Trail Details"
         branchButton.isEnabled = !(trail?.nodes.isEmpty ?? true)
         setAccessibilityValue(
-            breadcrumbText.isEmpty ? "No semantic navigation yet" : breadcrumbText
+            breadcrumbText.isEmpty
+                ? "Navigate from Relations to build a trail · this session only"
+                : breadcrumbText
         )
     }
 

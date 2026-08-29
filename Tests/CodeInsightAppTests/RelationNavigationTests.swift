@@ -1591,6 +1591,22 @@ func semanticTrailKeepsBranchesVisibleAndRestorable() async throws {
     #expect(fixture.model.readingTrail.edges.count == 2)
     #expect(fixture.controller.selfTestTrailBranchCount == 1)
     #expect(fixture.controller.selfTestTrailBreadcrumbTitles.last?.contains("b.rs") == true)
+    if let directory = ProcessInfo.processInfo.environment[
+        "CODEINSIGHT_M10_M11_CAPTURE_DIR"
+    ], let contentView = fixture.controller.window?.contentView {
+        fixture.controller.applyPanelPreset(.reading)
+        let size = NSSize(width: 900, height: 600)
+        fixture.controller.window?.setContentSize(size)
+        contentView.setFrameSize(size)
+        contentView.layoutSubtreeIfNeeded()
+        relationTestViews(in: contentView).forEach { $0.needsDisplay = true }
+        contentView.display()
+        try capturePNG(
+            contentView,
+            at: URL(fileURLWithPath: directory)
+                .appendingPathComponent("s2-trail-900x600.png")
+        )
+    }
     fixture.controller.selfTestShowTrailPopover()
     #expect(
         fixture.controller.selfTestTrailPopoverContentView?.bounds.width ?? 0
@@ -1675,6 +1691,72 @@ func semanticTrailShowsSnapshotBoundaryAndNavigationCause() throws {
 }
 
 @MainActor
+@Test
+func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
+    _ = NSApplication.shared
+    let trail = ReadingTrail()
+    let store = ResolutionExplanationStore()
+    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
+    func jump(_ path: String) -> JumpRecord {
+        JumpRecord(
+            path: path,
+            contentID: nil,
+            byteOffset: 0,
+            line: 1,
+            column: 1,
+            symbolAnchor: nil,
+            snapshotID: nil
+        )
+    }
+    func button() throws -> NSButton {
+        try #require(relationTestViews(in: view).compactMap {
+            $0 as? NSButton
+        }.first {
+            $0.accessibilityLabel() == "Show Reading Trail branches"
+        })
+    }
+
+    view.display(trail: trail, store: store)
+    let emptyText = relationTestViews(in: view).compactMap {
+        ($0 as? NSTextField)?.stringValue
+    }
+    #expect(emptyText.contains(
+        "Navigate from Relations to build a trail · this session only"
+    ))
+    #expect(view.accessibilityValue() as? String
+        == "Navigate from Relations to build a trail · this session only")
+    #expect(try button().title == "Trail Details")
+    #expect(try !button().isEnabled)
+
+    let root = jump("root.rs")
+    let a = jump("a.rs")
+    let b = jump("b.rs")
+    let c = jump("c.rs")
+    let d = jump("d.rs")
+    let aID = trail.recordNavigation(from: root, to: a, cause: .relation)
+    let rootID = try #require(trail.edges.last?.from)
+    view.display(trail: trail, store: store)
+    #expect(try button().title == "Trail Details")
+    #expect(try button().isEnabled)
+
+    trail.restore(rootID)
+    _ = trail.recordNavigation(from: root, to: b, cause: .relation)
+    view.display(trail: trail, store: store)
+    #expect(view.branchCount == 1)
+    #expect(try button().title == "Branches · 1")
+
+    trail.restore(aID)
+    _ = trail.recordNavigation(from: a, to: c, cause: .relation)
+    trail.restore(aID)
+    _ = trail.recordNavigation(from: a, to: d, cause: .relation)
+    view.display(trail: trail, store: store)
+    #expect(view.branchCount == 2)
+    #expect(try button().title == "Branches · 2")
+    #expect(try button().toolTip
+        == "Show the semantic trail and its branches (⌥⌘T)")
+}
+
+@MainActor
 private func makeRelationNavigationFixture(
     sessionURL: URL? = nil
 ) async throws -> (
@@ -1755,6 +1837,11 @@ private func makeRelationNavigationFixture(
         throw CocoaError(.coderReadCorrupt)
     }
     return (root, mainSource, aSource, bSource, model, controller)
+}
+
+@MainActor
+private func relationTestViews(in view: NSView) -> [NSView] {
+    [view] + view.subviews.flatMap(relationTestViews(in:))
 }
 
 @MainActor
