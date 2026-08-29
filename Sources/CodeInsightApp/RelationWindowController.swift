@@ -760,16 +760,17 @@ final class RelationWindowController: NSViewController,
         inspectButton.isEnabled = false
         inspectButton.translatesAutoresizingMaskIntoConstraints = false
 
-        readingSetButton.title = "Reading Set"
+        readingSetButton.title = "Freeze Results"
         readingSetButton.image = NSImage(
             systemSymbolName: "text.badge.plus",
-            accessibilityDescription: "Open as Reading Set"
+            accessibilityDescription: "Freeze Results as Reading Set"
         )
         readingSetButton.imagePosition = .imageLeading
         readingSetButton.font = .systemFont(ofSize: 11, weight: .semibold)
         readingSetButton.bezelStyle = .accessoryBarAction
-        readingSetButton.toolTip = "Open published locations as a Reading Set"
-        readingSetButton.setAccessibilityLabel("Open as Reading Set")
+        readingSetButton.toolTip =
+            "Freeze up to 50 published locations as a Reading Set"
+        readingSetButton.setAccessibilityLabel("Freeze Results as Reading Set")
         readingSetButton.target = self
         readingSetButton.action = #selector(openAsReadingSet(_:))
         readingSetButton.isEnabled = false

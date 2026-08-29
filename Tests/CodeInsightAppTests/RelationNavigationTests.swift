@@ -35,9 +35,9 @@ struct RelationUXTests {
         fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
         let button = fixture.controller.selfTestReadingSetButtonState
 
-        #expect(button.0 == "Reading Set")
+        #expect(button.0 == "Freeze Results")
         #expect(button.1)
-        #expect(button.2 == "Open as Reading Set")
+        #expect(button.2 == "Freeze Results as Reading Set")
         fixture.controller.selfTestOpenAsReadingSet()
         let result = try #require(captured)
         #expect(result.0 == "subject")
@@ -1520,9 +1520,9 @@ func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
     fixture.controller.selfTestShowTrailPopover()
     #expect(fixture.controller.selfTestSelectTrailNode(path: "a.rs"))
     let button = fixture.controller.selfTestTrailReadingSetButtonState
-    #expect(button.title == "Open as Reading Set")
+    #expect(button.title == "Freeze Path as Reading Set")
     #expect(button.enabled)
-    #expect(button.label == "Open Trail as Reading Set")
+    #expect(button.label == "Freeze Path as Reading Set")
     fixture.controller.selfTestOpenSelectedTrailAsReadingSet()
 
     guard case .readingSet(let title, let excerpts) =

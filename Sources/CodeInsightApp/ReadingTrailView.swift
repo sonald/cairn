@@ -33,7 +33,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         action: nil
     )
     private let readingSetButton = NSButton(
-        title: "Open as Reading Set",
+        title: "Freeze Path as Reading Set",
         target: nil,
         action: nil
     )
@@ -310,7 +310,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         readingSetButton.bezelStyle = .rounded
         readingSetButton.target = self
         readingSetButton.action = #selector(openReadingSet(_:))
-        readingSetButton.setAccessibilityLabel("Open Trail as Reading Set")
+        readingSetButton.setAccessibilityLabel("Freeze Path as Reading Set")
         detailStack.addArrangedSubview(detailText)
         detailStack.addArrangedSubview(readingSetButton)
         detailStack.addArrangedSubview(restoreButton)

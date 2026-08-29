@@ -32,7 +32,7 @@ func readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() {
 
     #expect(state.visible)
     #expect(state.title == "Reading Set · spawn")
-    #expect(state.subtitle == "5 段 · frozen at capture")
+    #expect(state.subtitle == "5 excerpts · frozen at capture")
     #expect(!state.emptyVisible)
     #expect(state.cardCount == 5)
     #expect(state.cardFrames.allSatisfy { $0.width > 650 && $0.height > 60 })
@@ -50,7 +50,15 @@ func readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() {
     #expect(state.code.allSatisfy { $0.1 && !$0.2 })
     #expect(state.codeGeometry[0].0.hasPrefix("142\n143\n144"))
     #expect(state.codeGeometry.allSatisfy { $0.1 && $0.2 })
-    #expect(state.actions[0].map(\.0) == ["打开完整文件", "扩大上下文", "查看证据"])
+    #expect(state.actions[0].map(\.0) == [
+        "Open File", "Expand Context", "View Evidence",
+    ])
+    let actionAX = readingSetTestViews(in: controller.view).compactMap {
+        ($0 as? NSButton)?.accessibilityLabel()
+    }
+    #expect(actionAX.contains("Open File"))
+    #expect(actionAX.contains("Expand Context"))
+    #expect(actionAX.contains("View Evidence"))
     #expect(state.actions[0].allSatisfy { !$0.1 && $0.2 })
     #expect(state.actions[3][0].1)
     #expect(state.actions[3][1...].allSatisfy { !$0.1 && $0.2 })
@@ -58,6 +66,7 @@ func readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() {
     #expect(!controller.canFocusCurrentScope)
     #expect(controller.currentReadingPosition() == nil)
     #expect(opened == nil && expanded == nil && inspected == nil)
+
 }
 
 @MainActor
@@ -91,8 +100,14 @@ func readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() {
         #expect(state.visible)
         #expect(state.emptyVisible)
         #expect(state.cardCount == 0)
-        #expect(state.subtitle == "0 段 · frozen at capture · skipped 3 · "
+        #expect(state.subtitle == "0 excerpts · frozen at capture · skipped 3 · "
             + "recorded source is unreadable ×2; relation evidence is unavailable")
+        let text = readingSetTestViews(in: controller.view).compactMap {
+            ($0 as? NSTextField)?.stringValue
+        }
+        #expect(text.contains(
+            "No excerpts could be frozen. Review the skipped reasons above."
+        ))
     }
     #expect(controller.displayedFile == nil)
     #expect(controller.selfTestPlaceholderText != "Select a file to read")
@@ -225,4 +240,9 @@ private func prototypeReadingSetExcerpts() -> [ReadingSetExcerpt] {
             caveat: spec.caveat
         )
     }
+}
+
+@MainActor
+private func readingSetTestViews(in view: NSView) -> [NSView] {
+    [view] + view.subviews.flatMap(readingSetTestViews(in:))
 }

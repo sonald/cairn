@@ -21,7 +21,8 @@ final class ReadingSetView: NSView {
     private let titleLabel = NSTextField(labelWithString: "")
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(
-        wrappingLabelWithString: "No excerpts could be frozen."
+        wrappingLabelWithString:
+            "No excerpts could be frozen. Review the skipped reasons above."
     )
     private var cards: [ReadingSetExcerptView] = []
     private var theme = ReaderTheme(settings: ReaderSettings())
@@ -100,7 +101,7 @@ final class ReadingSetView: NSView {
         skippedReasons: [String] = []
     ) {
         titleLabel.stringValue = "Reading Set · \(title)"
-        var subtitle = "\(excerpts.count) 段 · frozen at capture"
+        var subtitle = "\(excerpts.count) excerpts · frozen at capture"
         if !skippedReasons.isEmpty {
             var order: [String] = []
             var counts: [String: Int] = [:]
@@ -266,9 +267,9 @@ private final class ReadingSetExcerptView: NSView {
         codeView.setAccessibilityLabel("Frozen source excerpt")
         codeDocument.addSubview(lineNumbers)
         codeDocument.addSubview(codeView)
-        configure(openButton, title: "打开完整文件", action: #selector(open(_:)))
-        configure(expandButton, title: "扩大上下文", action: #selector(expand(_:)))
-        configure(evidenceButton, title: "查看证据", action: #selector(evidence(_:)))
+        configure(openButton, title: "Open File", action: #selector(open(_:)))
+        configure(expandButton, title: "Expand Context", action: #selector(expand(_:)))
+        configure(evidenceButton, title: "View Evidence", action: #selector(evidence(_:)))
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 12
