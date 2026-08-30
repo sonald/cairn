@@ -2759,10 +2759,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         })
         pumpRunLoop()
         windowController.applyPanelPreset(.relations)
-        pumpRunLoop()
-        let relationsPlaceholderHiddenWithRoot =
+        let relationsPlaceholderHiddenWithRoot = waitUntil(timeout: 5, condition: {
             !windowController.selfTestRelationsPlaceholderVisible
-            && windowController.selfTestRelationsTreeVisible
+                && windowController.selfTestRelationsTreeVisible
+        })
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
         let followRelationPreservedContext = pinContextSummary == initialContext
