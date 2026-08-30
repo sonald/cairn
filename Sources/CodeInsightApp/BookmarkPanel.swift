@@ -125,6 +125,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         markdownExportVisible: Bool
     ) {
         window?.contentView?.layoutSubtreeIfNeeded()
+        window?.displayIfNeeded()
         return (
             window?.contentView?.bounds ?? .zero,
             tableView.visibleRect,
