@@ -166,7 +166,6 @@ func currentBranchNameReturnsNilOutsideARepository() throws {
 @Test
 func commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() throws {
     let head = try CommitSnapshot(repositoryURL: repositoryRoot)
-    let previous = try CommitSnapshot(repositoryURL: repositoryRoot, revision: "HEAD~1")
     let headFiles = head.listFiles()
 
     #expect(!headFiles.isEmpty)
@@ -178,7 +177,18 @@ func commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() throws {
     #expect(!packageBytes.isEmpty)
     #expect(String(bytes: packageBytes, encoding: .utf8)?.contains("PackageDescription") == true)
 
-    let headContents = Dictionary(uniqueKeysWithValues: headFiles.map {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let file = fixture.root.appendingPathComponent("sample.rs")
+    try Data("first\n".utf8).write(to: file)
+    try fixture.git("add", "sample.rs")
+    try fixture.commit("first")
+    try Data("second\n".utf8).write(to: file)
+    try fixture.git("add", "sample.rs")
+    try fixture.commit("second")
+    let current = try CommitSnapshot(repositoryURL: fixture.root)
+    let previous = try CommitSnapshot(repositoryURL: fixture.root, revision: "HEAD~1")
+    let headContents = Dictionary(uniqueKeysWithValues: current.listFiles().map {
         ($0.path, $0.contentID)
     })
     let previousContents = Dictionary(uniqueKeysWithValues: previous.listFiles().map {
