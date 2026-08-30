@@ -37,11 +37,11 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         panel.title = "Bookmarks"
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
+        panel.contentMinSize = NSSize(width: 560, height: 460)
+        panel.setContentSize(NSSize(width: 560, height: 460))
         super.init(window: panel)
         panel.delegate = self
         configureView()
-        panel.contentMinSize = NSSize(width: 560, height: 460)
-        panel.setContentSize(NSSize(width: 560, height: 460))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }

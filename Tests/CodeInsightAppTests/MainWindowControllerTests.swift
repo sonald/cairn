@@ -167,6 +167,7 @@ func bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() 
     #expect(model.bookmarkModel.toggle(record) == .added)
     #expect(model.bookmarkModel.toggle(other) == .added)
     let panel = BookmarkPanel(appModel: model, onOpen: { _ in }, onLineOpen: { _, _ in })
+    defer { panel.closePanel() }
     panel.show(relativeTo: nil)
     #expect(panel.selfTestSelectFirstRow())
 
@@ -190,7 +191,7 @@ func bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() 
 
 @MainActor
 @Test
-func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() {
+func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async throws {
     _ = NSApplication.shared
     let root = try! mainWindowTemporaryProject(["src/main.rs": "fn main() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
@@ -209,9 +210,16 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() {
         onOpen: { opened = $0.id },
         onLineOpen: { record, _ in openedLine = record.id }
     )
+    defer { panel.closePanel() }
     panel.show(relativeTo: nil)
 
     #expect(panel.selfTestRowToolTip(id: record.id) == "Not evaluated")
+    try #require(await mainWindowWaitUntil(
+        panel.selfTestGeometry.content.width >= 500
+            && !panel.selfTestGeometry.copy.intersects(
+                panel.selfTestGeometry.markdownExport
+            )
+    ))
     let geometry = panel.selfTestGeometry
     #expect(geometry.copyVisible && geometry.markdownExportVisible)
     #expect(!geometry.copy.intersects(geometry.markdownExport))
@@ -279,11 +287,9 @@ func recentProjectClickForwardsStoredLanguageSet() async throws {
 
     #expect(fixture.controller.pendingRecentProjectLanguage == .rust)
     #expect(fixture.controller.lastOpenedProjectLanguage == .rust)
-    let indexingStarted: () -> Bool = {
-        if case .indexing = fixture.model.projectState { return true }
-        return false
-    }
-    try #require(await mainWindowWaitUntil(indexingStarted()))
+    try #require(await mainWindowWaitUntil(
+        fixture.model.projectLanguages == [.rust, .typescript]
+    ))
     #expect(fixture.model.projectLanguages == [.rust, .typescript])
 }
 
@@ -301,11 +307,9 @@ func retryForwardsCompleteLanguageSet() async throws {
     fixture.controller.retryLastOpenedProject()
 
     #expect(fixture.controller.lastOpenedProjectLanguage == .rust)
-    let indexingStarted: () -> Bool = {
-        if case .indexing = fixture.model.projectState { return true }
-        return false
-    }
-    try #require(await mainWindowWaitUntil(indexingStarted()))
+    try #require(await mainWindowWaitUntil(
+        fixture.model.projectLanguages == [.rust, .python, .typescript]
+    ))
     #expect(fixture.model.projectLanguages == [.rust, .python, .typescript])
 }
 
