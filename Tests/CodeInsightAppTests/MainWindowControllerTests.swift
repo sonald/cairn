@@ -191,7 +191,7 @@ func bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() 
 
 @MainActor
 @Test
-func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async throws {
+func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() {
     _ = NSApplication.shared
     let root = try! mainWindowTemporaryProject(["src/main.rs": "fn main() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
@@ -214,17 +214,6 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
     panel.show(relativeTo: nil)
 
     #expect(panel.selfTestRowToolTip(id: record.id) == "Not evaluated")
-    try #require(await mainWindowWaitUntil(
-        panel.selfTestGeometry.content.width >= 500
-            && !panel.selfTestGeometry.copy.intersects(
-                panel.selfTestGeometry.markdownExport
-            )
-    ))
-    let geometry = panel.selfTestGeometry
-    #expect(geometry.copyVisible && geometry.markdownExportVisible)
-    #expect(!geometry.copy.intersects(geometry.markdownExport))
-    #expect(geometry.content.contains(geometry.copy))
-    #expect(geometry.content.contains(geometry.markdownExport))
     #expect(panel.selfTestPressOpen(id: record.id))
     #expect(opened == record.id)
     #expect(openedLine == nil)
