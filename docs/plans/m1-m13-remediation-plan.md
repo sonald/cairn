@@ -140,6 +140,23 @@ selection 导致 generation 变化时旧 Attempt 清除。
 移除 bookmark 自测对 deprecated `CGWindowListCreateImage` 的依赖。Homebrew/Wasmedge
 宿主 linker 搜索路径不属于仓库修复范围，单列环境噪声。
 
+### S5b — CI 全量测试日志确定性
+
+**触发证据**：总验收中 `scripts/ci.sh` 的 `swift test | tee` 实时输出路径三次在
+不同 AppKit 测试处无断言、无 crash 摘要地提前结束；相同 HEAD、相同测试参数将
+`tee` 的 stdout 静默后 842 tests / 3 suites 全部 PASS。该问题属于测试日志背压触发的
+时序 flake，不以放宽超时处理。
+
+**允许文件**：`scripts/ci.sh`。
+
+**实现**：`swift test` 直接写现有 `.build/ci-swift-test.log`；失败或缺完整成功摘要时
+输出日志并 exit 1，成功时只输出最终摘要。保留日志文件名、`--no-parallel`、测试参数、
+完整成功 grep 与后续门禁；不新增 runner、重试或超时。
+
+**验收**：安静路径 full suite 的测试数与直接运行一致；`CODEX_SANDBOX=1 bash
+scripts/ci.sh` exit 0；`run-product-gates.sh` 能继续越过 CI 进入 17 通道和新增 bookmark
+门。注入失败退出码时必须打印日志并失败，不能吞错。
+
 **总验收**：
 
 ```bash
