@@ -149,9 +149,11 @@ selection 导致 generation 变化时旧 Attempt 清除。
 
 **允许文件**：`scripts/ci.sh`。
 
-**实现**：`swift test` 直接写现有 `.build/ci-swift-test.log`；失败或缺完整成功摘要时
-输出日志并 exit 1，成功时只输出最终摘要。保留日志文件名、`--no-parallel`、测试参数、
-完整成功 grep 与后续门禁；不新增 runner、重试或超时。
+**实现**：`swift test` 通过 `tee` 持续排水到现有 `.build/ci-swift-test.log`，同时把
+`tee` 的 stdout 丢到 `/dev/null`，避免实时输出与 regular-file 直写两种已复现的时序
+中止；`pipefail` 保留命令失败。失败或缺完整成功摘要时输出日志并 exit 1，成功时只
+输出最终摘要。保留日志文件名、`--no-parallel`、测试参数、完整成功 grep 与后续门禁；
+不新增 runner、重试或超时。
 
 **验收**：安静路径 full suite 的测试数与直接运行一致；`CODEX_SANDBOX=1 bash
 scripts/ci.sh` exit 0；`run-product-gates.sh` 能继续越过 CI 进入 17 通道和新增 bookmark
