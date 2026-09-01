@@ -235,6 +235,25 @@ isolated=1、isolated command rc=9）均 exit 1。完全访问宿主的同一
 `.build/self-test-run-20260901-142005-5642`；真实三 provider、Gold、fold、
 bookmark/restart 与三主题证据全部 PASS。本地 S5d 验收完成。
 
+### S5e — weak test reference 的远端 Swift 兼容性
+
+**远端 RED**：push `a732bf9498f3abc986d21ed23a456610420d1160` 触发
+Mixed-language product quality run `33479998094`；job `99767272947` 在编译
+`SnapshotSwitchTests.swift:1196` 时失败：macOS 15 的 Swift 编译器拒绝
+`weak let retainedRight = right`，要求 weak 引用必须是 mutable variable。该行由 S5 warning
+收口从 `weak var` 改来；本机 Swift 6.3.3 接受，远端工具链不接受。
+
+**允许文件**：`Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift`。
+
+**实现**：仍使用 weak mutable variable，但将声明与赋值分开：
+`weak var retainedRight: TestSnapshot?` 后 `retainedRight = right`。这样远端保留 `weak var`
+语义，本机也能看到实际赋值而不报“从未修改”warning。不新增 helper/type、条件编译或
+工具链分支。
+
+**验收**：focused `switchingMainSnapshotClearsAndReleasesCompareSnapshot` PASS；本机 debug /
+release build 不出现该 warning；完整本地产品门 PASS；推送后精确远端 workflow 到
+terminal success。
+
 **总验收**：
 
 ```bash
