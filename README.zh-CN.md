@@ -36,6 +36,13 @@ CodeInsight 是一个 macOS 原生、只读的代码阅读器，正式产品名�
 
 Reading Trail 只属于当前应用会话，重启后按设计从空状态开始。Reading Set 是冻结证据集，不是可编辑的整理清单。折叠只作用于文件 Reader：`⌥⌘0/1/2` 分别选择 Full、Structure、Overview，`⌥⌘F` 聚焦当前作用域。当前产品界面文案为英文，Cairn 尚未提供完整本地化。
 
+## 书签与笔记
+
+- 在主阅读区的项目文件中按 `⌘⇧M` 切换书签；按 `⌘⌥B` 打开书签面板。
+- 书签是精确的快照锚点：捕获内容匹配时为 **Exact content**；工作区内容变化时为 **Drifted**，必须显式 **Re-anchor**；版本/文件缺失或 offset 无效会保持诚实状态，绝不静默跳转。
+- `bookmarks.json` 最多持久化 32 条记录；每条纯文本 note 上限为 2 KiB，并以原子方式写入。
+- dependency 文件、Compare、Reading Set、空态和 mini reader 不支持书签。当前不实现跨 commit 符号映射；commit 书签始终绑定保存时的快照和完整 object ID。
+
 ## Repository Layout
 
 | 路径 | 用途 |
@@ -64,6 +71,8 @@ bash scripts/vendor-libgit2.sh
 bash scripts/make-app.sh
 open .build/distribution/Cairn.app
 ```
+
+`scripts/make-app.sh` 默认使用 ad-hoc 签名，不执行公证或 staple。Developer ID 签名和公证需要显式签名身份或 Apple 凭据；本仓库尚未执行这些步骤。
 
 ## CLI 示例
 
@@ -99,6 +108,7 @@ swift build --product codeinsight
 | Rust | 内置 tree-sitter extractor | rust-analyzer |
 | Python | 内置 tree-sitter extractor | Pyright |
 | TypeScript / TSX | 内置 tree-sitter extractor | typescript-language-server |
+| JavaScript / JSX | deferred / unsupported | — |
 
 Provider 由本机安装；Cairn 不会替项目安装依赖。离线依赖缺失或 Safe Mode 的限制会作为结果状态显示，不会被静默当作“精确且完整”。
 
@@ -126,6 +136,7 @@ bash scripts/run-product-gates.sh \
 ```
 
 GitHub Actions 会自动安装固定版本工具、克隆冻结 corpus 并运行同一套门禁。
+产品门禁还会运行隔离的书签/重启检查，并验证 Light、Dark、SI Classic 三主题截图均为非空可见证据。
 
 ## 文档
 

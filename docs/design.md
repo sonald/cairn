@@ -2,8 +2,13 @@
 
 > 一个**只读**的 macOS 原生代码阅读器：把项目丢进去，秒级建立符号索引，
 > 以 Source Insight 式的 Context Window、Call Tree 和独特排版美学，
-> 帮你读懂陌生的复杂代码。**实施路线（2026-07 裁决）：M0–M4 单点打透 Rust（含 exact
-> 增强与正式发布）；TypeScript / Python 整语言面推至 M5。** 支持在 git 历史中自由穿梭。
+> 帮你读懂陌生的复杂代码。**历史实施路线（2026-07 裁决）：M0–M4 单点打透 Rust；
+> TypeScript / Python 整语言面推至 M5。** 支持在 git 历史中自由穿梭。
+>
+> **当前实现事实（2026-09-01）**：M1–M13 的核心代码已落地；Rust、Python、
+> TypeScript/TSX 及 Git 混合 workspace 已有实现与自动测试。M10/M11 的真实
+> `Trail → Reading Set → 重启` 产品闭环仍为 **BLOCKED**；当前构建默认是
+> ad-hoc bundle，Developer ID 签名、公证和 staple 尚未执行。
 >
 > v3 修订：吸收第二轮同行评审。核心变化——数据模型升级为 3+1 层（新增 AnalysisProfile）、
 > 符号模型引入 Scope/Binding/SymbolSpace、调用解析拆为四个正交维度、
@@ -63,10 +68,10 @@ macOS 原生应用（AppKit/Swift），无 Electron、无 Tauri、无 WebView。
 
 ### 1.3 目标用户与首要语言
 
-**首要支持语言：Rust、Python、TypeScript**（JS 见 F1.5 能力分级；C/C++、Go 后续扩展）。
-**实施现状（2026-07）**：M0–M4 只落地了 Rust（提取器/阅读面/exact 全套）；
-Python、TypeScript 的整语言面（提取器 + 文件树/阅读 + exact）作为 M5 主体——
-设计目标不变，只是实施节奏单点打透。
+**首要支持语言：Rust、Python、TypeScript/TSX**；JavaScript/JSX 当前 deferred/unsupported，
+C/C++、Go 后续另立计划。
+**实施现状（2026-09-01）**：Rust、Python、TypeScript/TSX 的提取器、文件树/阅读面、
+搜索、关系与 Exact provider 链已落地；L3 额外提供同一 Git workspace 的混合语言路由。
 
 - 接手陌生大型代码库（后端服务、基础设施工具、前端工程）的工程师
 - 代码审计、安全审查者（**仓库本身可能不可信**——这是 Safe Mode 存在的理由）
@@ -96,12 +101,13 @@ Python、TypeScript 的整语言面（提取器 + 文件树/阅读 + exact）作
   项目配置变化只失效 ResolvedRelations，不重建 ContentIndex。
 - **F1.5（P0）语言与能力分级**：
   - Rust / Python / TypeScript（含 TSX）：全功能目标。
-  - **JavaScript：parsing/高亮/符号大纲随首发；definition/call 候选标 beta；exact 不承诺。**
+  - **JavaScript/JSX：当前 deferred/unsupported；在 I/O、cache 或 provider 启动前拒绝，
+    不承诺 parsing、高亮、符号大纲、definition/call 或 exact。**
 - **F1.6（P0）候选式解析**：召回 + scope/binding/模块图约束 + 排序，输出永远是
   候选集 + certainty + dispatch + provenance + completeness + evidence（§4.2）。
 - **F1.7（P1）精确增强（Exact Provider）**：见 §8。要点：TS7 原生 LSP 优先、
-  按项目声明选择版本化工具、SCIP 作为离线事实源导入；**P1 仅支持当前 worktree**，
-  历史 commit 的精确模式依赖后续的私有物化（§8.3）。
+  按项目声明选择版本化工具、SCIP 作为离线事实源导入；当前 worktree 与已物化的历史
+  commit 均可进入 Exact，仍受离线可用性与 coverage 限制（§8.3）。
 - **F1.8 依赖的四级参与**：
   - **依赖参与语义解析（P1 必需）**：crate graph、package typings、site-packages/stubs
     进入 Project Model，不必展示或全文索引。
@@ -220,7 +226,8 @@ Python、TypeScript 的整语言面（提取器 + 文件树/阅读 + exact）作
 
 ### 2.8 明确不做
 
-编辑/保存/格式化；构建/运行/调试；Git 写操作；插件市场（早期）。
+编辑/保存/格式化；构建/运行/调试；Git 写操作；JavaScript/JSX 解析与导航（当前
+deferred/unsupported）；插件市场（早期）。
 
 ---
 
@@ -596,7 +603,7 @@ protocol ExactProvider {
 }
 ```
 
-按能力声明接入，不是单一"Exact"开关。外部工具跑在独立 helper 进程（XPC），
+按能力声明接入，不是单一"Exact"开关。外部工具跑在独立、受控 stdio subprocess helper 进程，
 不违背原生原则——原生 UI ≠ 一切分析链接进主进程。
 
 ### 8.2 Provider 策略（2026-07 生态）
@@ -618,8 +625,8 @@ Call Tree 仍需"SCIP 符号身份 × tree-sitter 调用表达式"结合。
 
 ```text
 Fuzzy        worktree + 一切历史 commit 永远可用（虚拟读取）
-Exact P1     仅当前 worktree
-Exact 历史   后续版本：commit 物化到 App 私有缓存目录（绝不动用户工作区），
+Exact P1     当前 worktree 与已物化的历史 commit 均可用；离线缺失或覆盖不足如实展示
+Exact 历史   commit 物化到 App 私有缓存目录（绝不动用户工作区），
              按 (commit tree × profile × dependency fingerprint × tool version × config) 缓存复用
 ```
 
@@ -634,7 +641,7 @@ Safe Reading Mode（默认）
     不自动安装依赖；不联网；fuzzy 索引始终全功能
 
 Trusted Exact Mode（按仓库显式授权）
-    启动外部精确 provider（独立 helper/XPC）；项目目录只读挂载；
+    启动外部精确 provider（独立、受控 stdio subprocess helper）；项目目录只读挂载；
     写入仅限 App 私有缓存；默认无网络；CPU/内存/时间限额
 ```
 
@@ -898,7 +905,16 @@ Cold  等待后台索引或 exact provider         先返回局部/fuzzy，异�
 | **M1 Reader Alpha** | 壳 + 阅读区 + 文件树 + 符号搜索 + Context Window（Follow/Pin、局部作用域、渐进回答）+ 跳转历史 | 用它读 tokio/Django 不想切回 IDE；冷启动/内存达标 |
 | **M2 Relations Alpha** | 双向 Call Tree（四维标注、分组、证据）+ 实现关系 + 全文搜索 | 分组可信；懒展开流畅 |
 | **M3 Product MVP** | Git 时间旅行完整（三级就绪 + 覆盖状态 UI + 跨版本历史）+ 面板预设 + 排版系统 | 任意 commit first paint < 1s；无串线 |
-| **M4 正式版** | Exact Provider（P1 范围：worktree）+ Trusted Mode + diff 阅读 + 缓存生命周期完整 | 三语言按 gold set 达标者标正式，未达标者 beta |
+| **M4 发布基础** | Rust Exact Provider（worktree）+ Trusted Mode + diff 阅读 + 缓存生命周期 | 功能与 ad-hoc bundle 构建已实现；Developer ID/notarization 尚未执行 |
+| **M5 Rust 深化与 UIUX** | AnalysisProfile、feature/依赖边界、多标签、SI 式排版、搜索 cap 与三主题 surface | 核心代码与自动测试已实现；不把历史人工清单外推为当前产品 PASS |
+| **M6 Exact 能力扩展** | rust-analyzer readiness、definition/references、Exact Relations 与取消/回收边界 | 核心实现与 focused tests 已落地；真实 provider 覆盖以各 acceptance 记录为准 |
+| **M7 References 与解释证据** | References 消费、关系证据与 provenance/coverage 展示 | 实现与自动回归已落地；[M7 验收记录](plans/m7-s6-acceptance.md)保留逐项口径 |
+| **M8 Relations 响应与认知负担** | 启发式先出、Exact 原位升级、关系行式与展开预算 | 实现与 [M8 验收记录](plans/m8-acceptance.md)已记录；性能数字不外推到未测规模 |
+| **M9 阅读体验与 UI 打磨** | Outline/Selection/Divider/三主题/Readiness/Relations surface | 实现与 [M9 验收记录](plans/m9-acceptance.md)已记录 |
+| **M10 Explainable Navigation** | Resolution Inspector、解释快照、Reading Trail 与分支恢复 | 代码与自动门禁已实现；真实首次进入后的完整产品闭环仍待 M10/M11 验收 |
+| **M11 Reading Comfort** | 折叠、Find、Reader 设置、Reading Set 冻结与跨重启恢复 | Reader/Reading Set 实现已落地；真实 `Trail → Reading Set → 重启` 仍 **BLOCKED** |
+| **M12 多语言架构地基** | LanguageMode/Profile/Cache identity、单语言入口与后续混合 workspace seam | 实现已落地；Rust/Python/TypeScript 的支持边界由 L1/L2/L3 记录约束 |
+| **M13 书签与阅读笔记** | exact 快照书签、worktree drift/re-anchor、纯文本 note、面板/gutter/导出 | 已批准并实现；本轮 remediation 的 M13 V0 尚未全部通过；跨 commit 符号映射不在本期 |
 
 ---
 
@@ -925,21 +941,22 @@ Cold  等待后台索引或 exact provider         先返回局部/fuzzy，异�
 
 **已决策**：
 
-1. macOS 原生（AppKit），macOS 14+；主进程 + exact helper（XPC）架构。
-2. 首发 Rust/Python/TypeScript；JS 能力分级（parsing/大纲首发，候选 beta，exact 不承诺）；
-   C/C++、Go 后续。
+1. macOS 原生（AppKit），macOS 14+；主进程 + 受控 stdio subprocess exact helper 架构。
+2. 当前支持 Rust/Python/TypeScript/TSX；JavaScript/JSX deferred/unsupported，不承诺
+   parsing、符号大纲、候选或 exact；C/C++、Go 后续另立计划。
 3. 数据模型 3+1 层；关系缓存与查询绑定 snapshot × profile；配置变化不重建 ContentIndex。
 4. Call Tree = 静态源码调用候选图；UI 用 Exact/Strong/Possible；启发式不冒充 Exact。
 5. Safe Reading Mode 默认（不执行项目代码），Trusted Exact Mode 按仓库授权。
-6. Exact P1 仅 worktree；历史 commit 精确模式待私有物化（后续版本）。
+6. Exact P1 支持当前 worktree 与已物化历史 commit；离线缺失或 coverage 不足时保持诚实状态。
 7. 搜索统一 SnapshotSearchService；字节字面量 + NSRegularExpression 基线 + PCRE2 候选；
    不引入 rg/ast-grep 依赖。
-8. 首版直接分发 + 公证；App Store 留作后续选项。
+8. 首版构建以 ad-hoc bundle 为默认；Developer ID 签名、公证与 staple 需要凭据，当前尚未执行；
+   App Store 留作后续选项。
 9. lockfile 进入 Project Model；依赖参与语义解析（P1）与依赖可浏览（P2）分离。
 
 **待定**：
 
-1. 正式产品名（CodeInsight 撞名，仅作代号）。
+1. 商标 clearance 仍待正式法律检索；产品显示名已定为 Cairn，CodeInsight 仅作仓库/模块代号。
 2. 开源与否。
 3. 各语言 beta→正式阈值数值（待 M0-A gold set；预期 Rust/TS 先达标，
    Python 方法解析长期依赖 exact 补强）。

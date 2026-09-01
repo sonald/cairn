@@ -1,6 +1,8 @@
 # L3 实施计划 v1：单 workspace 混合 Rust / Python / TypeScript
 
-> 状态：**计划已批准；P0 GO；production 尚未实施**。
+> 状态：混合 workspace 实现已落地；阶段与产品证据见
+> [L3 mixed-language implementation acceptance](evidence/l3-mixed/l3-acceptance.md)。
+> 本轮 remediation 的总验收仍以 `docs/plans/m1-m13-remediation-plan.md` 为准。
 >
 > `L3_BASE = 5af5d8253d3099214e91f56ae40b1758d5fbabfe`。
 > 计划编写时 `main...origin/main [ahead 21]`，worktree/index 均干净；远端分支不是本轮

@@ -36,6 +36,13 @@ This is not an editor. Cairn does not save files, run builds, or modify your wor
 
 The Reading Trail belongs to the current app session and intentionally starts empty after a restart. A Reading Set is a frozen evidence set, not an editable curation list. Folding applies only to a file Reader: `⌥⌘0/1/2` selects Full, Structure, or Overview, and `⌥⌘F` focuses the current scope. Product UI labels are currently English; Cairn does not yet provide full localization.
 
+## Bookmarks and Notes
+
+- In a primary project file, press `⌘⇧M` to toggle a bookmark; press `⌘⌥B` to open Bookmarks.
+- Bookmarks are exact snapshot anchors: matching captured content is **Exact content**; changed worktree content is **Drifted** and requires an explicit **Re-anchor**; missing revisions/files or invalid offsets remain honest statuses and never silently jump.
+- Up to 32 records are persisted in `bookmarks.json`; each plain-text note is capped at 2 KiB and written atomically.
+- Bookmarks are unavailable in dependency files, Compare, Reading Sets, empty states, and mini readers. Cross-commit symbol mapping is not implemented; commit bookmarks remain tied to their saved snapshot and full object ID.
+
 ## Repository Layout
 
 | Path | Purpose |
@@ -64,6 +71,8 @@ bash scripts/vendor-libgit2.sh
 bash scripts/make-app.sh
 open .build/distribution/Cairn.app
 ```
+
+`scripts/make-app.sh` defaults to ad-hoc signing and does not notarize or staple. Developer ID signing and notarization require an explicit identity or Apple credentials; they have not been executed for this repository.
 
 ## CLI Examples
 
@@ -99,6 +108,7 @@ The full subcommand set includes `parse`, `index`, `dump`, `defs`, `callers`, `c
 | Rust | Built-in tree-sitter extractor | rust-analyzer |
 | Python | Built-in tree-sitter extractor | Pyright |
 | TypeScript / TSX | Built-in tree-sitter extractor | typescript-language-server |
+| JavaScript / JSX | Deferred / unsupported | — |
 
 Providers are installed locally; Cairn does not install project dependencies for you. Missing offline dependencies and Safe Mode limitations are displayed as result states rather than silently treated as exact and complete.
 
@@ -126,6 +136,7 @@ bash scripts/run-product-gates.sh \
 ```
 
 GitHub Actions installs pinned tools, clones frozen corpora, and runs the same gates automatically.
+The product gate also runs an isolated bookmark/restart check and validates non-empty Light, Dark, and SI Classic captures.
 
 ## Documentation
 

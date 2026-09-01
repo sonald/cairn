@@ -1,6 +1,8 @@
 # L2 实施计划 v1：TypeScript 单语言项目 vertical slice
 
-> 状态：**草案；P0 尚未执行，尚未授权修改生产代码。**
+> 状态：TypeScript/TSX 单语言实现已落地；阶段与产品证据见
+> [L2 TypeScript implementation acceptance](evidence/l2-typescript/l2-acceptance.md)。
+> 本轮 remediation 的总验收仍以 `docs/plans/m1-m13-remediation-plan.md` 为准。
 >
 > 草拟时实施基线：`2ace2ebf4ed78b1ae1bc1fa64b6d6917620c6b0d`，工作区干净。
 > L1 产品基线：`44c6c4a`（Python vertical slice）；其后两个 Reader 稳定性提交属于

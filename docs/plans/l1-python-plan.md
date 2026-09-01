@@ -1,6 +1,8 @@
 # L1 实施计划 v1：Python 单语言项目 vertical slice
 
-> 状态：P0 可行性 **GO**；本计划可执行，但尚未授权修改生产代码。
+> 状态：Python 单语言实现已落地；阶段与产品证据见
+> [L1 implementation acceptance](evidence/l1-python/l1-acceptance.md)。本轮 remediation
+> 的总验收仍以 `docs/plans/m1-m13-remediation-plan.md` 为准。
 > 架构基线：`0add42056b8f8dfd618d82371b211072c2f90899`。
 > P0 证据：`docs/plans/evidence/l1-python/p0-feasibility.md`。
 > 本计划延续 M12 的单活动语言模型；混合项目仍属于 L3，不在本里程碑预留容器。
