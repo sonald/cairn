@@ -254,6 +254,28 @@ Mixed-language product quality run `33479998094`；job `99767272947` 在编译
 release build 不出现该 warning；完整本地产品门 PASS；推送后精确远端 workflow 到
 terminal success。
 
+### S5f — BookmarkPanel 几何自测坐标系
+
+**远端 RED**：S5e push `ac8ad62` 触发 run `33480622895`；编译、840+2 tests、17 通道与
+真实 provider 全部通过，最终 bookmark product self-test 因
+`checks.panelGeometry=false` exit 1。远端 macOS 15 报告 copy frame
+`{{5, 3}, {150, 32}}`、markdown frame `{{149, 3}, {151, 32}}`；本地 macOS 26 同控件为
+`{{12, 10}, {139.5, 24}}`、`{{159.5, 10}, {140.5, 24}}`。
+
+**根因**：BookmarkPanel 的约束通过 `leadingAnchor` / `trailingAnchor` 布局 NSButton 的
+alignment rect；自测却用原始 `frame.intersects`。macOS 15 的原生按钮 frame 包含 bezel
+alignment inset，因此 raw frame 会越过约束边界形成假交叠，AX、可见像素和其余几何均
+通过。不得放宽间距或改变产品按钮布局。
+
+**允许文件**：`Sources/CodeInsightApp/BookmarkPanel.swift`。
+
+**实现**：`selfTestGeometry` 的 copy/markdownExport 两项改为
+`alignmentRect(forFrame:)` 的结果，其余 content/table/row/visible 合同不变。不新增
+类型、helper、OS 分支或 tolerance。
+
+**验收**：focused BookmarkPanel tests PASS；bookmark/restart product self-test 与三主题
+截图 PASS；完整本地产品门 exit 0；推送后的精确远端 workflow terminal success。
+
 **总验收**：
 
 ```bash
