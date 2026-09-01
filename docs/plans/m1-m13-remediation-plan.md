@@ -276,6 +276,28 @@ alignment inset，因此 raw frame 会越过约束边界形成假交叠，AX、�
 **验收**：focused BookmarkPanel tests PASS；bookmark/restart product self-test 与三主题
 截图 PASS；完整本地产品门 exit 0；推送后的精确远端 workflow terminal success。
 
+### S5g — relation follow rows 的最终状态等待
+
+**远端 RED**：S5f push `356588d` 触发 run `33483310346`。编译、840+2 tests 与 S5d
+总数合同均 PASS；Exact self-test 的 `relation-follow-context` 报
+`selectedFirst=false`、`selectedSecond=false`、`updatedTwice=false`，通道 exit 1。相同
+Exact self-test 在 run #31 已 PASS，S5f 只改 BookmarkPanel 几何，确认是时序而非功能
+回归。
+
+**根因**：`exactCallersRestored` 仅等待 relation root/direction 与
+`selfTestExactGroupRowCount > 0`；exact provider 可以先满足该条件，而随后要选择的异步
+follow rows `relation_root` / `main` 尚未发布到 outline，两个即时选择因此返回 false。
+
+**允许文件**：`Sources/CodeInsightApp/CodeInsightApp.swift`。
+
+**实现**：保留现有 5 秒 bounded `waitUntil`，在同一 condition 中增加最终可观察状态：
+`selfTestVisibleRelationEdgeTitles(inGroup: "")` 同时包含 `relation_root` 与 `main`。不新增
+sleep、retry、helper/type 或时间预算。
+
+**验收**：Exact self-test 的 `relation-follow-context` 两次选择、两次 summary 更新和恢复
+全部 true；focused exact 通道重复运行稳定；完整本地产品门 exit 0；推送后精确远端
+workflow terminal success。
+
 **总验收**：
 
 ```bash
