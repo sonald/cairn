@@ -285,13 +285,15 @@ Exact self-test 在 run #31 已 PASS，S5f 只改 BookmarkPanel 几何，确认�
 回归。
 
 **根因**：`exactCallersRestored` 仅等待 relation root/direction 与
-`selfTestExactGroupRowCount > 0`；exact provider 可以先满足该条件，而随后要选择的异步
-follow rows `relation_root` / `main` 尚未发布到 outline，两个即时选择因此返回 false。
+`selfTestExactGroupRowCount > 0`；exact provider 可以先满足该条件，而 direct row
+`relation_root` 尚未发布。`main` 属于默认折叠的 Possible group，只能在既有
+`selfTestExpandPossibleRelations()` 后等待其变为可见，不能与展开前状态一起判断。
 
 **允许文件**：`Sources/CodeInsightApp/CodeInsightApp.swift`。
 
-**实现**：保留现有 5 秒 bounded `waitUntil`，在同一 condition 中增加最终可观察状态：
-`selfTestVisibleRelationEdgeTitles(inGroup: "")` 同时包含 `relation_root` 与 `main`。不新增
+**实现**：保留现有 5 秒 bounded `waitUntil`：`exactCallersRestored` condition 增加
+visible titles 包含 `relation_root`；调用既有 `selfTestExpandPossibleRelations()` 后，再用
+相同 bounded wait 等 visible titles 包含 `main`，只有 ready 后才选择第二行。不新增
 sleep、retry、helper/type 或时间预算。
 
 **验收**：Exact self-test 的 `relation-follow-context` 两次选择、两次 summary 更新和恢复
