@@ -21,7 +21,7 @@ fi
 swift build ${swift_options[@]+"${swift_options[@]}"}
 swift_test_log=.build/ci-swift-test.log
 if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} \
-    >"$swift_test_log" 2>&1; then
+    2>&1 | tee "$swift_test_log" >/dev/null; then
     cat "$swift_test_log" >&2
     echo "FAIL: swift test command failed" >&2
     exit 1
