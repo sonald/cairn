@@ -1,12 +1,38 @@
 # M10/M11 产品化收口总验收
 
-日期：2026-08-30
+原验收日期：2026-08-30
+
+修复计划复验：2026-09-01
 
 `PLAN_BASE`：`7ec7c6c3b185b3085aef621cf62d6a3ffcaa38b1`
 
-当前实现 HEAD：`a590c909f1279c3a2c8a8d78d15a9c1d69a8865d`
+历史实现 HEAD：`a590c909f1279c3a2c8a8d78d15a9c1d69a8865d`
 
-结论：**BLOCKED**。S1–S5 的代码、测试、文档和自动门禁均已完成；最终唯一 bundle 的首次空态、语言选择器、AX 和截图通过，但当前 Computer Use 通道无法对原生 alert checkbox 执行点击，主机未启用可把 Tab 焦点移到 checkbox 的 Full Keyboard Access。计划禁止用预写 session、UserDefaults 或 self-test 注入绕过首次进入，因此其余真实产品任务未冒充 PASS。
+本轮 `REMEDIATION_BASE`：`3166644822715527a3e5ed3430ebb15962661c75`
+
+当前结论：**BLOCKED**。原来的语言 checkbox 阻塞已在 2026-09-01 复验中解除；真实
+`NSOpenPanel`、Rust checkbox、Open、Exact ready、A → B → Back → C 分支与 Restore
+均已通过。新的唯一执行阻塞是 Computer Use 能读取并高亮 Reader 右键菜单里的
+`Show Callers`，但无法对这个自定义 AppKit menu item 完成 AXPress；因此
+Resolution Inspector、Freeze Path、Freeze Results、Reading Set 创建和同 bundle 重启恢复
+仍未到达。计划禁止用预写 session、UserDefaults 或 self-test 注入绕过，未完成项继续
+如实记 BLOCKED。
+
+## 2026-09-01 真实 bundle 复验增量
+
+- Bundle id：`dev.cairn.Cairn.remediation.s3.20260901`
+- Bundle：`.build/m1-m13-remediation/s3/Cairn.app`
+- Fixture：一次性 Git Rust `exact_fixture`，HEAD
+  `8a3899f2b30f8437e54286c53e4242c1685af3a8`
+- 首次空态：PASS；Trail 明示 `this session only`，Reading Height disabled。
+- 真实打开：PASS；`NSOpenPanel` → `Choose Languages` → Rust value `1` → Open。
+- Provider：PASS；真实 rust-analyzer，`Exact: ready · Safe (limited)`。
+- Branch：PASS；完成 A → B → Back → C，Trail 显示 `Branches · 1`。
+- Restore：PASS；选择 `lib.rs:3` 的旧分支并执行 `Restore this node`，兄弟分支保留。
+- Explain / Freeze / Reading Set / restart：BLOCKED；右键菜单的四个自定义关系动作可见，
+  但当前 Computer Use AXPress 不生效。CLI 对同一 fixture 的 `callers answer` 已返回
+  `relation_root` 和 `main`，所以这不是用“语料无结果”解释掉的产品空态。
+- 正常 Quit：PASS。
 
 ## 分阶段交付
 
