@@ -3901,9 +3901,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             direction: .callers
         )
         let exactCallersRestored = waitUntil(timeout: 5, condition: {
-            model.relationTree.root?.title == "answer"
+            let visibleTitles = windowController.selfTestVisibleRelationEdgeTitles(
+                inGroup: ""
+            )
+            return model.relationTree.root?.title == "answer"
                 && model.relationTree.direction == .callers
                 && windowController.selfTestExactGroupRowCount > 0
+                && visibleTitles.contains("relation_root")
         })
 
         let selectedFirstFollowCaller =
@@ -3915,8 +3919,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             ? windowController.selfTestContextSummary
             : nil
         _ = windowController.selfTestExpandPossibleRelations()
+        let secondFollowCallerReady = waitUntil(timeout: 5, condition: {
+            windowController.selfTestVisibleRelationEdgeTitles(inGroup: "")
+                .contains("main")
+        })
         let selectedSecondFollowCaller =
-            windowController.selfTestSelectRelationEdge(titled: "main")
+            secondFollowCallerReady
+            && windowController.selfTestSelectRelationEdge(titled: "main")
         let relationRowsUpdateFollowContext = firstFollowSummary != nil
             && selectedSecondFollowCaller
             && waitUntil(timeout: 5, condition: {
