@@ -1229,6 +1229,7 @@ public final class AppModel {
         compare.clear()
         generation &+= 1
         let openGeneration = generation
+        bookmarkModel.workspaceDidChange(to: openGeneration)
         exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
         projectLanguages = [language]
@@ -1337,6 +1338,7 @@ public final class AppModel {
         }
         generation &+= 1
         let profileGeneration = generation
+        bookmarkModel.workspaceDidChange(to: profileGeneration)
         let reprofiled = session.reprofiled(featureSelection: featureSelection)
         let oldProfileID = session.analysisProfile.id
         workspaceSessions[oldProfileID] = nil

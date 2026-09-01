@@ -457,6 +457,111 @@ func bookmarkAttemptDeletedBeforeCompletionCannotPublish() async throws {
 
 @MainActor
 @Test
+func appModelSingleLanguageOpenSynchronizesBookmarkWorkspaceGeneration() async throws {
+    let root = try bookmarkModelTemporaryGitProject(source: "fn main() {}\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+
+    let generationBeforeOpen = model.generation
+    try model.openProject(root: root, language: .rust)
+
+    #expect(model.generation == generationBeforeOpen + 1)
+    #expect(model.bookmarkModel.workspaceGeneration == model.generation)
+    #expect(await testWaitUntil("single-language project ready") {
+        model.snapshotPhase == .fullReady
+    })
+}
+
+@MainActor
+@Test
+func persistedCrossSnapshotBookmarkAttemptSurvivesSingleLanguageOpen() async throws {
+    let root = try bookmarkModelTemporaryGitProject(source: "fn main() {}\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sessionURL = root
+        .deletingLastPathComponent()
+        .appendingPathComponent("BookmarkModelTests-\(UUID().uuidString)")
+        .appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: sessionURL.deletingLastPathComponent()) }
+    let record = BookmarkRecord(
+        id: UUID(),
+        projectPath: root.path,
+        snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
+        path: "src/main.rs",
+        contentID: ContentID.sha256(of: Data("fn saved() {}\n".utf8)),
+        byteOffset: 3,
+        line: 1,
+        symbolName: nil,
+        symbolKind: nil,
+        note: "",
+        updatedAt: .now
+    )
+    try BookmarkStore(
+        fileURL: sessionURL.deletingLastPathComponent().appendingPathComponent("bookmarks.json")
+    ).replace([record])
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: ProjectIndexService()
+    )
+    #expect(model.bookmarkModel.records.map(\.id) == [record.id])
+
+    try model.openProject(root: root, language: .rust)
+    #expect(await testWaitUntil("single-language project ready before bookmark open") {
+        model.snapshotPhase == .fullReady
+    })
+
+    model.openStrictBookmark(
+        record,
+        leaving: JumpRecord(
+            path: "src/main.rs",
+            contentID: nil,
+            byteOffset: 0,
+            line: 1,
+            column: 1,
+            symbolAnchor: nil,
+            snapshotID: model.currentSnapshotID
+        )
+    )
+
+    #expect(await testWaitUntil("persisted cross-snapshot bookmark attempt") {
+        model.bookmarkModel.lastAttemptMessage?.id == record.id
+    })
+    #expect(model.bookmarkModel.lastAttemptMessage?.message
+        == BookmarkStatus.revisionUnavailable.attemptMessage)
+}
+
+@MainActor
+@Test
+func featureSelectionChangeClearsOlderBookmarkAttempt() async throws {
+    let root = try bookmarkModelTemporaryGitProject(source: "fn main() {}\n")
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    try model.openProject(root: root, language: .rust)
+    #expect(await testWaitUntil("feature switch project ready") {
+        model.snapshotPhase == .fullReady
+    })
+
+    model.bookmarkModel.workspaceDidChange(to: model.generation)
+    let record = bookmarkModelRecord(snapshot: .worktree)
+    let generationBeforeSwitch = model.generation
+    model.bookmarkModel.beginAttempt(
+        for: record,
+        workspaceGeneration: generationBeforeSwitch
+    ) {
+        try? await Task.sleep(for: .milliseconds(50))
+        return .drifted
+    }
+
+    model.switchFeatureSelection(.allFeatures)
+
+    #expect(model.generation == generationBeforeSwitch + 1)
+    #expect(model.bookmarkModel.workspaceGeneration == model.generation)
+    #expect(model.bookmarkModel.lastAttemptMessage == nil)
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(model.bookmarkModel.lastAttemptMessage == nil)
+}
+
+@MainActor
+@Test
 func appModelPreflightPublishesOnlyTransientMissingCommitAttempts() async throws {
     let root = try bookmarkModelTemporaryGitProject(source: "fn committed() {}\n")
     defer { try? FileManager.default.removeItem(at: root) }
