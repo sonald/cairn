@@ -192,7 +192,7 @@ default sandbox 二元集合 PASS；842/3 full suite PASS；独立 `scripts/ci.s
 明确报告 `sandbox-exec: sandbox_apply: Operation not permitted`。当前 Codex 执行器没有
 一个环境能单次承载完整门禁：default sandbox 阻止真实 provider，require_escalated
 宿主使 Swift Testing helper 提前成功退出。不得为适配执行器增加产品/测试 workaround；
-完整单命令改由用户 Terminal 或获授权后的远端 workflow 验收。
+该执行环境诊断已被 S5d 的测试进程隔离取代；不再要求用户手工拼接分段证据。
 
 ### S5d — BookmarkPanel 窗口测试的进程隔离
 
@@ -226,6 +226,14 @@ CI guard exit 1；最小 bookmark → async 二元集合复现同一现象。
 **验收**：主进程当前 840 tests、隔离进程 2 tests、总计 842；任一进程非零或缺摘要
 都会打印完整日志并 exit 1；`CODEX_SANDBOX=1 bash scripts/ci.sh` PASS；完整
 `run-product-gates.sh` 在完全访问宿主单次 exit 0；远端 workflow terminal success。
+
+**实施结果（2026-09-01）**：Luna(max) 仅修改 `scripts/ci.sh`，提交
+`02f827b6a06ae3b07c5a6a1ac3aab468db4ef16a`。主进程 840 tests / 3 suites，
+244.109 s；隔离进程 2 tests，0.363 s；总计 842。三条失败注入（main=839、
+isolated=1、isolated command rc=9）均 exit 1。完全访问宿主的同一
+`run-product-gates.sh` 单次 exit 0，17 通道 `pass=17 fail=0 hang=0`，artifact
+`.build/self-test-run-20260901-142005-5642`；真实三 provider、Gold、fold、
+bookmark/restart 与三主题证据全部 PASS。本地 S5d 验收完成。
 
 **总验收**：
 

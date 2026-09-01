@@ -4,13 +4,11 @@
 
 `REMEDIATION_BASE`：`3166644822715527a3e5ed3430ebb15962661c75`
 
-实现 HEAD：`6e3122d4823d465ee7f9b148f37682fe281adcd6`
+实现 HEAD：`02f827b6a06ae3b07c5a6a1ac3aab468db4ef16a`
 
-当前结论：**BLOCKED（执行环境）**。S1–S5 的实现与真实产品闭环通过；同一完整
-`run-product-gates.sh` 在 default sandbox 能完整通过 842-test CI，但真实 provider 被
-外层 sandbox 禁止；在 require_escalated 宿主中 provider/17 通道可通过，但 Swift
-Testing helper 会在 AppKit 段以 0 提前退出。没有把两个环境的分段 PASS 拼接成整条
-命令 PASS。
+当前结论：**LOCAL PASS / REMOTE NOT RUN**。S1–S5d、真实产品闭环和同一完整
+`run-product-gates.sh` 均已在完全访问宿主单次 exit 0；本地验收没有遗留失败。当前只
+缺未经用户授权的 push 与远端 workflow terminal success。
 
 ## 切片结论
 
@@ -23,6 +21,7 @@ Testing helper 会在 AppKit 段以 0 提前退出。没有把两个环境的分
 | S5 warning 收口 | `fe1343c8ce47b03f14a5c7e4a365fa68e14e862d` | PASS | 仓库源代码 warning 清零；只余 Wasmedge/Homebrew 宿主路径噪声 |
 | S5b CI 日志确定性 | `45b5cbd8fa58b167baa7e344e6806046f5592638`–`6e3122d4823d465ee7f9b148f37682fe281adcd6` | PASS | 安静排水、失败打印和成功摘要合同均生效；它不是宿主 helper 提前退出的根因 |
 | S5c cooperative wait 候选 | 无实现提交 | REJECTED | 宿主 RED 稳定；`Task.yield()` 候选仍失败并已还原，test/script 零 diff，不叠 workaround |
+| S5d BookmarkPanel 测试进程隔离 | `02f827b6a06ae3b07c5a6a1ac3aab468db4ef16a` | PASS | 主 840 + 隔离 2 = 842；不改测试/产品逻辑；完整产品门单次 exit 0 |
 
 代码和脚本修改均由 Luna、reasoning effort `max` 完成；主代理负责 RED/GREEN 复核、
 独立测试、真实 bundle 操作、范围审计和提交控制。
@@ -36,21 +35,21 @@ Testing helper 会在 AppKit 段以 0 提前退出。没有把两个环境的分
 | `CodeInsightAppTests` | PASS | 84 tests；含纯色/变化像素判据、bookmark/restart |
 | AppModel + App + ReaderUI 联合门 | PASS | 412 tests |
 | 直接安静 full suite | PASS | 842 tests / 3 suites，220.411 s |
-| `CODEX_SANDBOX=1 bash scripts/ci.sh` | PASS | exit 0；842 tests / 3 suites，219.616 s；后续 self-test/fold 全部通过 |
-| 完整 `run-product-gates.sh` | BLOCKED（执行环境） | default：842/3 与 14 基础通道 PASS，Python/TS hang、Mixed sandbox-exec denied；escalated：CI helper 提前结束，跳过 CI 后的完整剩余步骤 PASS |
-| 产品门 CI 之后的原样剩余步骤 | PASS（诊断，不替代完整门禁） | 17 通道 `pass=17 fail=0 hang=0`；mixed、真实三 provider、Gold、fold、bookmark/restart 全部通过；artifact `.build/self-test-run-20260901-121651-62651` |
+| `CODEX_SANDBOX=1 bash scripts/ci.sh` | PASS | exit 0；主 840 / 3 suites，244.109 s；隔离 2，0.363 s；total 842；后续 self-test/fold 全部通过 |
+| 完整 `run-product-gates.sh` | PASS | 同一命令单次 exit 0；17 通道、三 provider、Gold、fold、bookmark/restart 全部通过；artifact `.build/self-test-run-20260901-142005-5642` |
+| S5d 失败注入 | PASS | main=839、isolated=1、isolated command rc=9 三种情况均打印对应错误并 exit 1 |
 | 远端 workflow | NOT RUN | 分支未 push；本轮没有获得 push 授权，不能声称远端成功 |
 
-产品门剩余步骤的关键结果：
+产品门关键结果：
 
 - Tokio Gold：17 total，known 0，unexpected 0；
 - ripgrep Gold：16 total，known 3，unexpected 0；
 - Python Gold：6 total，known 0；TypeScript Gold：10 total，known 0；
-- fold：resolution 约 24.03 ms，latency 232.186 ms，delta 20,856,856 B；
+- final product fold：resolution 24.926 ms，latency 251.440 ms，delta 16,990,232 B；
 - bookmark 三主题与 restart 均 PASS；正式 App Support 门禁前后指纹均为
   `8c691d6d9c5d0b428a2bfcc9434b16cce5801022171610c063da4c3cb68e6117`。
 
-### 完整产品门执行环境矩阵
+### 完整产品门执行结果与历史诊断
 
 相同命令、相同 HEAD、相同三 corpus：
 
@@ -66,13 +65,16 @@ CODEX_SANDBOX=1 \
 
 | 环境 | CI | 17 通道 / provider | 终点 |
 |---|---|---|---|
-| Codex default sandbox | PASS：842/3，232.508 s；CI self-tests/fold PASS | base 14 PASS；Python、TypeScript 90 s hang；Mixed exit 1，明确 `sandbox-exec: sandbox_apply: Operation not permitted` | exit 1；artifact `.build/self-test-run-20260901-133131-80177` |
-| Codex require_escalated | Swift Testing helper 在 AppKit 测试开始后 rc 0、缺 summary；真 PTY、O_RDWR FIFO、`script` 均不能修复 | 跳过已独立通过的 CI 后，17/17、三 provider、Gold、fold、bookmark/restart PASS | CI guard exit 1；remainder artifact `.build/self-test-run-20260901-121651-62651` |
+| S5d / 完全访问宿主 | PASS：840 + 2 = 842；CI self-tests/fold PASS | `pass=17 fail=0 hang=0`；三 provider、Gold、bookmark/restart PASS | **exit 0**；artifact `.build/self-test-run-20260901-142005-5642` |
+| S5d 前 default sandbox（历史） | PASS：842/3，232.508 s | base 14 PASS；Python、TypeScript hang；Mixed sandbox-exec denied | exit 1；artifact `.build/self-test-run-20260901-133131-80177` |
+| S5d 前完全访问宿主（历史） | helper 在 AppKit 测试后 rc 0、缺 summary | 跳过 CI 后的 17/17 与其余门 PASS | CI guard exit 1；remainder artifact `.build/self-test-run-20260901-121651-62651` |
 
 最小宿主复现是
 `bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus|recentProjectClickForwardsStoredLanguageSet`：
-两个用例单独 PASS；default 二元完整 PASS；escalated 二元第一项 PASS、第二项 started 后
-helper rc 0 且无摘要。临时 AppKit 插桩和 S5c 候选均已还原。
+两个用例单独 PASS；同进程第一项 PASS、第二项 started 后 helper rc 0 且无摘要。LLDB
+证明 runner main 经 `swift_task_asyncMainDrainQueue` 自然退出。S5d 保持两项同一隔离进程
+运行并从主进程精确 skip；当前分别 840 与 2，覆盖总数仍为 842。临时 AppKit 插桩与
+S5c 候选均已还原。
 
 ## 10 万行 dedicated open
 
@@ -137,10 +139,5 @@ helper rc 0 且无摘要。临时 AppKit 插桩和 S5c 候选均已还原。
 
 ## 解阻与最终完成条件
 
-总计划保持 BLOCKED，直到同时满足：
-
-1. 用户在普通 Terminal 用户会话中执行上述完整 `run-product-gates.sh` 并最终 exit 0，
-   或远端同一 workflow 提供等价终态证据；
-2. 获得 push 授权后，远端 product workflow 到 terminal success。
-
-第一项未完成前不把本地修复判为总验收 PASS；第二项未经授权保持 NOT RUN。
+本地计划已经 PASS。最终完成只剩：获得用户 push 授权后，推送当前分支并监控对应远端
+product workflow 到 terminal success；未经授权保持 NOT RUN。
