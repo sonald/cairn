@@ -194,6 +194,39 @@ default sandbox 二元集合 PASS；842/3 full suite PASS；独立 `scripts/ci.s
 宿主使 Swift Testing helper 提前成功退出。不得为适配执行器增加产品/测试 workaround；
 完整单命令改由用户 Terminal 或获授权后的远端 workflow 验收。
 
+### S5d — BookmarkPanel 窗口测试的进程隔离
+
+**重新触发（2026-09-01）**：用户在普通 Terminal、完全访问权限下执行完整产品门仍
+exit 1；`.build/ci-swift-test.log` 再次在 BookmarkPanel 测试通过、下一 async AppKit
+测试 started 后无摘要结束。LLDB 在 `exit` 抓到的栈为
+`libsystem_c.exit → libswift_Concurrency._swift_exit → swift_task_asyncMainDrainQueue →
+CodeInsightPackageTests main`，证明不是 AppKit 主动 terminate，而是 Swift Testing 1902 /
+Swift 6.3.3 的 runner main 在遗留 async 测试未完成时自然返回。
+
+**最小边界**：
+
+- `CodeInsightAppTests` 跳过
+  `bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote` 与
+  `bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus`：82 tests / 3 suites
+  PASS；
+- 上述两项在独立测试进程中一起运行：2 tests PASS；
+- 合计仍为 84，两个命令均有完整 summary，不减少覆盖、不改测试逻辑。
+
+**允许文件**：`scripts/ci.sh`。
+
+**RED**：当前单进程 `swift test --no-parallel` 在真实宿主稳定 rc 0 但缺完整 summary，
+CI guard exit 1；最小 bookmark → async 二元集合复现同一现象。
+
+**实现**：沿用同一 SwiftPM 参数和 `.build/ci-swift-test.log`，只把 Swift 测试分成两个
+顺序进程：主进程以两个精确 `--skip` 运行其余测试；隔离进程以一个精确 `--filter`
+运行这两个 BookmarkPanel 测试并把输出 append 到同一日志。两个进程分别保留退出码和
+完整 summary guard；隔离 summary 必须恰为 2 tests。输出主 summary、隔离 summary 与
+二者计数之和。不增加 runner、重试、timeout、测试类型或产品代码。
+
+**验收**：主进程当前 840 tests、隔离进程 2 tests、总计 842；任一进程非零或缺摘要
+都会打印完整日志并 exit 1；`CODEX_SANDBOX=1 bash scripts/ci.sh` PASS；完整
+`run-product-gates.sh` 在完全访问宿主单次 exit 0；远端 workflow terminal success。
+
 **总验收**：
 
 ```bash
