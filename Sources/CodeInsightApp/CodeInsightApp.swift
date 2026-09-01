@@ -8344,36 +8344,6 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         try? FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true)
         let path = "\(directory)/\(label).png"
         let panelPNG = "\(directory)/\(label)-panel.png"
-        if let panelWindow,
-           let image = CGWindowListCreateImage(
-               .null, .optionIncludingWindow, CGWindowID(window.windowNumber),
-               [.boundsIgnoreFraming, .bestResolution]
-           ), let panelImage = CGWindowListCreateImage(
-               .null, .optionIncludingWindow, CGWindowID(panelWindow.windowNumber),
-               [.boundsIgnoreFraming, .bestResolution]
-           ) {
-            let bitmap = NSBitmapImageRep(cgImage: image)
-            let panelBitmap = NSBitmapImageRep(cgImage: panelImage)
-            let wrote = (try? bitmap.representation(using: .png, properties: [:])?
-                .write(to: URL(fileURLWithPath: path))) != nil
-            let wrotePanel = (try? panelBitmap.representation(using: .png, properties: [:])?
-                .write(to: URL(fileURLWithPath: panelPNG))) != nil
-            let visible = bookmarkBitmapHasVisiblePixels(bitmap)
-            let panelVisible = bookmarkBitmapHasVisiblePixels(panelBitmap)
-            if wrote && wrotePanel && visible && panelVisible {
-                return (
-                    true,
-                    [
-                        "theme": label, "png": path, "width": bitmap.pixelsWide,
-                        "height": bitmap.pixelsHigh, "capture": "CGWindow",
-                        "visiblePixels": visible, "panelPNG": panelPNG,
-                        "panelWidth": panelBitmap.pixelsWide,
-                        "panelHeight": panelBitmap.pixelsHigh,
-                        "panelCapture": "CGWindow", "panelVisiblePixels": panelVisible,
-                    ]
-                )
-            }
-        }
         guard let panelWindow,
               let main = cachedPNG(of: window.contentView, path: path),
               let panelPath = cachedPNG(
@@ -8387,8 +8357,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "panelPNG": panelPath.path,
             "panelWidth": panelPath.width, "panelHeight": panelPath.height,
             "panelVisiblePixels": panelPath.visiblePixels,
-            "capture": "AppKit cache fallback",
-            "panelCapture": "AppKit cache fallback",
+            "capture": "AppKit cache",
+            "panelCapture": "AppKit cache",
         ])
     }
 
@@ -8403,16 +8373,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         }
         let reading = controller.selfTestReadingGeometry
         let tabs = controller.selfTestTabGeometry
-        guard let image = CGWindowListCreateImage(
-            .null,
-            .optionIncludingWindow,
-            CGWindowID(window.windowNumber),
-            [.boundsIgnoreFraming, .bestResolution]
-        ) else {
-            return (false, ["error": "window capture failed"])
-        }
-        let bitmap = NSBitmapImageRep(cgImage: image)
-        let frame = window.frame
+        guard let contentView = window.contentView,
+              let bitmap = cachedBitmap(of: contentView)
+        else { return (false, ["error": "window cache failed"]) }
+        let frame = contentView.bounds
         let scale = Double(bitmap.pixelsWide) / Double(frame.width)
         let captureDirectory = ProcessInfo.processInfo.environment[
             "CAIRN_GUTTER_CAPTURE_DIR"
@@ -8431,8 +8395,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             Int(((Double(frame.height) - Double(y)) * scale).rounded())
         }
 
-        let gutterX = reading.rulerFrame.maxX
-        let header = tabs.headerFrame
+        let gutter = contentView.convert(reading.rulerFrame, from: nil)
+        let header = contentView.convert(tabs.headerFrame, from: nil)
+        let gutterX = gutter.maxX
         let rowStart = max(0, pixelY(header.maxY - 3))
         let rowEnd = min(bitmap.pixelsHigh, pixelY(header.minY + 3))
         let columnStart = max(0, pixelX(gutterX - 8))
@@ -8470,13 +8435,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             green: CGFloat((lineNumberRGB >> 8) & 0xFF) / 255,
             blue: CGFloat(lineNumberRGB & 0xFF) / 255
         )
-        let numberColumnStart = max(0, pixelX(reading.rulerFrame.minX))
+        let numberColumnStart = max(0, pixelX(gutter.minX))
         let numberColumnEnd = min(
             bitmap.pixelsWide,
-            pixelX(reading.rulerFrame.minX + min(34, reading.rulerThickness))
+            pixelX(gutter.minX + min(34, reading.rulerThickness))
         )
-        let rulerRowStart = max(0, pixelY(reading.rulerFrame.maxY))
-        let rulerRowEnd = min(bitmap.pixelsHigh, pixelY(reading.rulerFrame.minY))
+        let rulerRowStart = max(0, pixelY(gutter.maxY))
+        let rulerRowEnd = min(bitmap.pixelsHigh, pixelY(gutter.minY))
         var lineNumberPixelCount = 0
         for px in numberColumnStart..<numberColumnEnd {
             for py in rulerRowStart..<rulerRowEnd {
@@ -11336,15 +11301,20 @@ private func bookmarkSelfTestSessionURL() -> URL {
 }
 
 @MainActor
+private func cachedBitmap(of view: NSView?) -> NSBitmapImageRep? {
+    guard let view else { return nil }
+    view.layoutSubtreeIfNeeded()
+    guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
+    else { return nil }
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    return bitmap
+}
+
+@MainActor
 private func cachedPNG(of view: NSView?, path: String) -> (
     path: String, width: Int, height: Int, visiblePixels: Bool
 )? {
-    guard let view else { return nil }
-    view.layoutSubtreeIfNeeded()
-    guard
-          let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
-    else { return nil }
-    view.cacheDisplay(in: view.bounds, to: bitmap)
+    guard let bitmap = cachedBitmap(of: view) else { return nil }
     guard let data = bitmap.representation(using: .png, properties: [:]) else {
         return nil
     }

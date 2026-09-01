@@ -517,7 +517,7 @@ func trailReadingSetSkipsExtensionlessDependencyAfterLeavingOriginRoute() async 
 func readingTrailCommitRouteFrozenAcrossWorktreeAndCommit() async throws {
     let root = try readingSetTemporaryProject(source: "fn target() {}\n")
     defer { try? FileManager.default.removeItem(at: root) }
-    try? readingSetGit(root, "init", "-q")
+    try readingSetGit(root, "init", "-q")
     try readingSetGit(root, "add", "src/lib.rs")
     try readingSetGit(
         root,

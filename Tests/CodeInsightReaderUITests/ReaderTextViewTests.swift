@@ -9,7 +9,7 @@ import Testing
 @Test
 func readerThemeColorResolvesFromDetachedExecutor() async throws {
     let color = ReaderTheme(settings: ReaderSettings()).backgroundColor
-    let values = try await Task.detached(priority: .userInitiated) {
+    let values = await Task.detached(priority: .userInitiated) {
         (0..<1000).map { _ in color.alphaComponent }
     }.value
     #expect(values.allSatisfy { $0 >= 0 && $0 <= 1 })

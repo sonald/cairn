@@ -441,7 +441,7 @@ func typescriptProfileAndFeatureSwitchMatchNonRustRules() async throws {
     let model = AppModel(
         indexService: MainWindowFailingIndexService(session: rustSession)
     )
-    try model.openProject(root: root)
+    model.openProject(root: root)
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady
     ))
@@ -507,7 +507,7 @@ func rustProfileTitleKeepsFeatureSelectionSegment() async throws {
     let model = AppModel(
         indexService: MainWindowFailingIndexService(session: session)
     )
-    try model.openProject(root: root)
+    model.openProject(root: root)
     try #require(await mainWindowWaitUntil(
         model.snapshotPhase == .fullReady
     ))

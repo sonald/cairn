@@ -1889,7 +1889,7 @@ private func waitUntil(
 ) async -> Bool {
     let deadline = ContinuousClock.now.advanced(by: timeout)
     while ContinuousClock.now < deadline {
-        if await MainActor.run { condition() } { return true }
+        if await MainActor.run(body: { condition() }) { return true }
         try? await Task.sleep(for: .milliseconds(10))
     }
     return await MainActor.run { condition() }
