@@ -14,7 +14,7 @@ mixed_repo="$(cd "$3" && pwd -P)"
 cd "$(dirname "$0")/.."
 
 required_tools=(
-    git jq rg swift rust-analyzer pyright pyright-langserver
+    git jq rg python3 swift rust-analyzer pyright pyright-langserver
     node npm typescript-language-server tsserver
 )
 for tool in "${required_tools[@]}"; do
@@ -167,6 +167,139 @@ if ! jq -e '
 fi
 
 echo "PASS mixed product self-test"
+
+official="$HOME/Library/Application Support/Cairn/dev.cairn.Cairn"
+fingerprint_official() {
+    if [[ ! -e "$official" ]]; then
+        echo ABSENT
+        return
+    fi
+    python3 - "$official" <<'PY'
+import hashlib
+import os
+import sys
+
+root = sys.argv[1]
+h = hashlib.sha256()
+for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    dirnames.sort()
+    filenames.sort()
+    rel_dir = os.path.relpath(dirpath, root)
+    h.update(b"D\0" + os.fsencode(rel_dir) + b"\0")
+    for name in dirnames + filenames:
+        path = os.path.join(dirpath, name)
+        rel = os.path.relpath(path, root)
+        if os.path.islink(path):
+            h.update(b"L\0" + os.fsencode(rel) + b"\0"
+                     + os.fsencode(os.readlink(path)) + b"\0")
+        elif os.path.isdir(path):
+            continue
+        elif os.path.isfile(path):
+            h.update(b"F\0" + os.fsencode(rel) + b"\0")
+            with open(path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                    h.update(chunk)
+print(h.hexdigest())
+PY
+}
+official_before="$(fingerprint_official)"
+echo "bookmark official App Support fingerprint before=$official_before"
+
+bookmark_root="$fixture_root/bookmark-repo"
+bookmark_session_dir="$fixture_root/bookmark-session"
+bookmark_export_dir="$fixture_root/bookmark-export"
+bookmark_artifact_dir="$PWD/.build/bookmark-gate-$(date '+%Y%m%d-%H%M%S')-$$"
+bookmark_capture_dir="$bookmark_artifact_dir/captures"
+mkdir -p "$bookmark_root/src" "$bookmark_session_dir" "$bookmark_export_dir" \
+    "$bookmark_capture_dir"
+cp "$open_file" "$bookmark_root/src/main.rs"
+git -C "$bookmark_root" init -q
+git -C "$bookmark_root" add src/main.rs
+git -C "$bookmark_root" \
+    -c user.name="Cairn Product Gate" \
+    -c user.email="cairn-product-gate@example.invalid" \
+    commit -qm initial
+
+bookmark_session="$bookmark_session_dir/session.json"
+bookmark_stdout="$bookmark_artifact_dir/bookmarks.stdout"
+bookmark_stderr="$bookmark_artifact_dir/bookmarks.stderr"
+bookmark_export="$bookmark_export_dir/bookmarks.md"
+bookmark_raw_export="$bookmark_export_dir/raw.json"
+bookmark_binary="$PWD/.build/debug/codeinsight-app"
+bookmark_exit=0
+CAIRN_BOOKMARK_SESSION_URL="$bookmark_session" \
+        CAIRN_BOOKMARK_CAPTURE_DIR="$bookmark_capture_dir" \
+        CAIRN_BOOKMARK_MARKDOWN_EXPORT_PATH="$bookmark_export" \
+        CAIRN_BOOKMARK_RAW_EXPORT_PATH="$bookmark_raw_export" \
+        "$bookmark_binary" --self-test-bookmarks "$bookmark_root" \
+        >"$bookmark_stdout" 2>"$bookmark_stderr" || bookmark_exit=$?
+official_after_bookmark="$(fingerprint_official)"
+if [[ "$official_after_bookmark" != "$official_before" ]]; then
+    echo "FAIL formal Cairn App Support changed during bookmark gate" >&2
+    echo "before=$official_before after=$official_after_bookmark" >&2
+    exit 1
+fi
+if [[ $bookmark_exit -ne 0 ]]; then
+    cat "$bookmark_stdout" "$bookmark_stderr" >&2
+    echo "FAIL bookmark product self-test" >&2
+    exit 1
+fi
+if ! grep -q '^SELF_TEST_FINISH .* channel=bookmarks exit=0$' "$bookmark_stderr"; then
+    cat "$bookmark_stdout" "$bookmark_stderr" >&2
+    echo "FAIL bookmark self-test did not finish with exit=0" >&2
+    exit 1
+fi
+if ! jq -e '
+        .channel == "bookmarks"
+            and .passed == true
+            and (.checks | to_entries | length > 0 and all(.value == true))
+            and (.captures | length) == 3
+            and ([.captures[].theme] | sort) == ["Dark", "Light", "SI Classic"]
+            and ([.captures[].visiblePixels] | all(. == true))
+            and ([.captures[].panelVisiblePixels] | all(. == true))
+            and ([.captures[] | .width, .height, .panelWidth, .panelHeight]
+                | all(type == "number" and . > 0))
+    ' "$bookmark_stdout" >/dev/null; then
+    cat "$bookmark_stdout" >&2
+    echo "FAIL bookmark summary or visual evidence mismatch" >&2
+    exit 1
+fi
+while IFS= read -r capture_path; do
+    if [[ ! -s "$capture_path" ]]; then
+        echo "FAIL empty bookmark capture: $capture_path" >&2
+        exit 1
+    fi
+done < <(jq -r '.captures[] | .png, .panelPNG' "$bookmark_stdout")
+echo "PASS bookmark product self-test and three-theme visual evidence"
+
+restart_stdout="$bookmark_artifact_dir/bookmarks-restart.stdout"
+restart_stderr="$bookmark_artifact_dir/bookmarks-restart.stderr"
+restart_exit=0
+"$bookmark_binary" --self-test-bookmarks-restart "$bookmark_session" \
+        >"$restart_stdout" 2>"$restart_stderr" || restart_exit=$?
+official_after_restart="$(fingerprint_official)"
+if [[ "$official_after_restart" != "$official_after_bookmark" ]]; then
+    echo "FAIL formal Cairn App Support changed during bookmark restart gate" >&2
+    echo "before=$official_after_bookmark after=$official_after_restart" >&2
+    exit 1
+fi
+if [[ $restart_exit -ne 0 ]]; then
+    cat "$restart_stdout" "$restart_stderr" >&2
+    echo "FAIL bookmark restart product self-test" >&2
+    exit 1
+fi
+if ! jq -e '
+        .channel == "bookmarks-restart"
+            and .passed == true
+            and .processRestart == true
+            and (.checks | to_entries | length > 0 and all(.value == true))
+            and (.records | length > 0)
+    ' "$restart_stdout" >/dev/null; then
+    cat "$restart_stdout" >&2
+    echo "FAIL bookmark restart summary mismatch" >&2
+    exit 1
+fi
+echo "PASS bookmark restart product self-test"
 
 if [[ -z "$self_test_artifacts" || ! -f "$exact_output" ]] || \
    ! jq -e '

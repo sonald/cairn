@@ -8358,16 +8358,21 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 .write(to: URL(fileURLWithPath: path))) != nil
             let wrotePanel = (try? panelBitmap.representation(using: .png, properties: [:])?
                 .write(to: URL(fileURLWithPath: panelPNG))) != nil
-            return (
-                wrote && wrotePanel && bitmap.pixelsWide > 0 && bitmap.pixelsHigh > 0
-                    && panelBitmap.pixelsWide > 0 && panelBitmap.pixelsHigh > 0,
-                [
-                    "theme": label, "png": path, "width": bitmap.pixelsWide,
-                    "height": bitmap.pixelsHigh, "capture": "CGWindow",
-                    "panelPNG": panelPNG, "panelWidth": panelBitmap.pixelsWide,
-                    "panelHeight": panelBitmap.pixelsHigh, "panelCapture": "CGWindow",
-                ]
-            )
+            let visible = bookmarkBitmapHasVisiblePixels(bitmap)
+            let panelVisible = bookmarkBitmapHasVisiblePixels(panelBitmap)
+            if wrote && wrotePanel && visible && panelVisible {
+                return (
+                    true,
+                    [
+                        "theme": label, "png": path, "width": bitmap.pixelsWide,
+                        "height": bitmap.pixelsHigh, "capture": "CGWindow",
+                        "visiblePixels": visible, "panelPNG": panelPNG,
+                        "panelWidth": panelBitmap.pixelsWide,
+                        "panelHeight": panelBitmap.pixelsHigh,
+                        "panelCapture": "CGWindow", "panelVisiblePixels": panelVisible,
+                    ]
+                )
+            }
         }
         guard let panelWindow,
               let main = cachedPNG(of: window.contentView, path: path),
@@ -8376,10 +8381,12 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 path: panelPNG
               )
         else { return (false, ["theme": label, "error": "AppKit capture failed"]) }
-        return (true, [
+        return (main.visiblePixels && panelPath.visiblePixels, [
             "theme": label, "png": main.path, "width": main.width,
-            "height": main.height, "panelPNG": panelPath.path,
+            "height": main.height, "visiblePixels": main.visiblePixels,
+            "panelPNG": panelPath.path,
             "panelWidth": panelPath.width, "panelHeight": panelPath.height,
+            "panelVisiblePixels": panelPath.visiblePixels,
             "capture": "AppKit cache fallback",
             "panelCapture": "AppKit cache fallback",
         ])
@@ -11330,7 +11337,7 @@ private func bookmarkSelfTestSessionURL() -> URL {
 
 @MainActor
 private func cachedPNG(of view: NSView?, path: String) -> (
-    path: String, width: Int, height: Int
+    path: String, width: Int, height: Int, visiblePixels: Bool
 )? {
     guard let view else { return nil }
     view.layoutSubtreeIfNeeded()
@@ -11343,10 +11350,53 @@ private func cachedPNG(of view: NSView?, path: String) -> (
     }
     do {
         try data.write(to: URL(fileURLWithPath: path))
-        return (path, bitmap.pixelsWide, bitmap.pixelsHigh)
+        return (
+            path,
+            bitmap.pixelsWide,
+            bitmap.pixelsHigh,
+            bookmarkBitmapHasVisiblePixels(bitmap)
+        )
     } catch {
         return nil
     }
+}
+
+func bookmarkBitmapHasVisiblePixels(_ bitmap: NSBitmapImageRep) -> Bool {
+    guard bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0 else { return false }
+    let sampleWidth = min(bitmap.pixelsWide, 64)
+    let sampleHeight = min(bitmap.pixelsHigh, 64)
+    var reference: (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)?
+    for row in 0..<sampleHeight {
+        let y = sampleHeight == 1
+            ? 0
+            : row * (bitmap.pixelsHigh - 1) / (sampleHeight - 1)
+        for column in 0..<sampleWidth {
+            let x = sampleWidth == 1
+                ? 0
+                : column * (bitmap.pixelsWide - 1) / (sampleWidth - 1)
+            guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+            else { continue }
+            let sample = (
+                red: color.redComponent,
+                green: color.greenComponent,
+                blue: color.blueComponent,
+                alpha: color.alphaComponent
+            )
+            if let reference {
+                let delta = max(
+                    abs(sample.red - reference.red),
+                    max(
+                        abs(sample.green - reference.green),
+                        max(abs(sample.blue - reference.blue), abs(sample.alpha - reference.alpha))
+                    )
+                )
+                if delta >= 0.05 { return true }
+            } else {
+                reference = sample
+            }
+        }
+    }
+    return false
 }
 
 private func pythonFiles(in nodes: [FileTreeNode]) -> [URL] {

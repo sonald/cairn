@@ -594,6 +594,36 @@ func windowGrowthKeepsSidebarWidthAndGivesSpaceToReader() {
 }
 
 @MainActor
+@Test
+func bookmarkVisualGateRejectsUniformBitmapsAndAcceptsVisibleChange() {
+    let context = CGContext(
+        data: nil,
+        width: 16,
+        height: 16,
+        bitsPerComponent: 8,
+        bytesPerRow: 0,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    )!
+    context.setFillColor(NSColor.black.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+    let bitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
+
+    #expect(!bookmarkBitmapHasVisiblePixels(bitmap))
+
+    context.setFillColor(NSColor.white.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 16, height: 16))
+    let whiteBitmap = NSBitmapImageRep(cgImage: context.makeImage()!)
+    #expect(!bookmarkBitmapHasVisiblePixels(whiteBitmap))
+
+    context.setFillColor(NSColor.black.cgColor)
+    context.fill(CGRect(x: 0, y: 0, width: 8, height: 16))
+    #expect(bookmarkBitmapHasVisiblePixels(
+        NSBitmapImageRep(cgImage: context.makeImage()!)
+    ))
+}
+
+@MainActor
 private func mainWindowCapturePNG(_ view: NSView, at url: URL) throws {
     guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
     else { throw CocoaError(.fileWriteUnknown) }
