@@ -129,8 +129,8 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             window?.contentView?.bounds ?? .zero,
             tableView.visibleRect,
             tableView.numberOfRows > 0 ? tableView.rect(ofRow: 0) : .zero,
-            copyButton.frame,
-            markdownExportButton.frame,
+            copyButton.alignmentRect(forFrame: copyButton.frame),
+            markdownExportButton.alignmentRect(forFrame: markdownExportButton.frame),
             !copyButton.isHidden && copyButton.alphaValue > 0,
             !markdownExportButton.isHidden && markdownExportButton.alphaValue > 0
         )
