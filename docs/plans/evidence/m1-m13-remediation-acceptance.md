@@ -4,11 +4,11 @@
 
 `REMEDIATION_BASE`：`3166644822715527a3e5ed3430ebb15962661c75`
 
-实现 HEAD：`02f827b6a06ae3b07c5a6a1ac3aab468db4ef16a`
+实现 HEAD：`e803cf3fa9b9364fbad4d62297981050fe2196a1`
 
-当前结论：**LOCAL PASS / REMOTE NOT RUN**。S1–S5d、真实产品闭环和同一完整
-`run-product-gates.sh` 均已在完全访问宿主单次 exit 0；本地验收没有遗留失败。当前只
-缺未经用户授权的 push 与远端 workflow terminal success。
+当前结论：**PASS**。S1–S5g、真实产品闭环、同一完整本地 `run-product-gates.sh` 和
+远端 Mixed-language product quality run #34 均 terminal success；没有遗留失败或未完成
+计划项。
 
 ## 切片结论
 
@@ -22,6 +22,9 @@
 | S5b CI 日志确定性 | `45b5cbd8fa58b167baa7e344e6806046f5592638`–`6e3122d4823d465ee7f9b148f37682fe281adcd6` | PASS | 安静排水、失败打印和成功摘要合同均生效；它不是宿主 helper 提前退出的根因 |
 | S5c cooperative wait 候选 | 无实现提交 | REJECTED | 宿主 RED 稳定；`Task.yield()` 候选仍失败并已还原，test/script 零 diff，不叠 workaround |
 | S5d BookmarkPanel 测试进程隔离 | `02f827b6a06ae3b07c5a6a1ac3aab468db4ef16a` | PASS | 主 840 + 隔离 2 = 842；不改测试/产品逻辑；完整产品门单次 exit 0 |
+| S5e weak test reference 兼容 | `ac8ad62` | PASS | weak mutable 分离声明/赋值；远端旧 Swift 编译通过，本机 warning=0 |
+| S5f BookmarkPanel alignment geometry | `356588d` | PASS | 自测比较 alignment rect，不改产品约束；macOS 15/26 均通过 |
+| S5g relation follow readiness | `e803cf3` | PASS | bounded final-state waits；Exact 连续 3 次与远端 run #34 PASS |
 
 代码和脚本修改均由 Luna、reasoning effort `max` 完成；主代理负责 RED/GREEN 复核、
 独立测试、真实 bundle 操作、范围审计和提交控制。
@@ -35,17 +38,17 @@
 | `CodeInsightAppTests` | PASS | 84 tests；含纯色/变化像素判据、bookmark/restart |
 | AppModel + App + ReaderUI 联合门 | PASS | 412 tests |
 | 直接安静 full suite | PASS | 842 tests / 3 suites，220.411 s |
-| `CODEX_SANDBOX=1 bash scripts/ci.sh` | PASS | exit 0；主 840 / 3 suites，244.109 s；隔离 2，0.363 s；total 842；后续 self-test/fold 全部通过 |
-| 完整 `run-product-gates.sh` | PASS | 同一命令单次 exit 0；17 通道、三 provider、Gold、fold、bookmark/restart 全部通过；artifact `.build/self-test-run-20260901-142005-5642` |
+| `CODEX_SANDBOX=1 bash scripts/ci.sh` | PASS | exit 0；主 840 / 3 suites，247.684 s；隔离 2，0.355 s；total 842；后续 self-test/fold 全部通过 |
+| 完整 `run-product-gates.sh` | PASS | S5g HEAD 单次 exit 0；17 通道、三 provider、Gold、fold、bookmark/restart 全部通过；artifact `.build/self-test-run-20260901-161631-67126` |
 | S5d 失败注入 | PASS | main=839、isolated=1、isolated command rc=9 三种情况均打印对应错误并 exit 1 |
-| 远端 workflow | NOT RUN | 分支未 push；本轮没有获得 push 授权，不能声称远端成功 |
+| 远端 workflow | PASS | run `33486436504` / job `99787494893`，HEAD `e803cf3`，16m12s，artifact upload 与 post steps 全部成功 |
 
 产品门关键结果：
 
 - Tokio Gold：17 total，known 0，unexpected 0；
 - ripgrep Gold：16 total，known 3，unexpected 0；
 - Python Gold：6 total，known 0；TypeScript Gold：10 total，known 0；
-- final product fold：resolution 24.926 ms，latency 251.440 ms，delta 16,990,232 B；
+- final product fold：resolution 25.343 ms，latency 256.923 ms，delta 21,069,824 B；
 - bookmark 三主题与 restart 均 PASS；正式 App Support 门禁前后指纹均为
   `8c691d6d9c5d0b428a2bfcc9434b16cce5801022171610c063da4c3cb68e6117`。
 
@@ -65,7 +68,7 @@ CODEX_SANDBOX=1 \
 
 | 环境 | CI | 17 通道 / provider | 终点 |
 |---|---|---|---|
-| S5d / 完全访问宿主 | PASS：840 + 2 = 842；CI self-tests/fold PASS | `pass=17 fail=0 hang=0`；三 provider、Gold、bookmark/restart PASS | **exit 0**；artifact `.build/self-test-run-20260901-142005-5642` |
+| S5g / 完全访问宿主 | PASS：840 + 2 = 842；CI self-tests/fold PASS | `pass=17 fail=0 hang=0`；三 provider、Gold、bookmark/restart PASS | **exit 0**；artifact `.build/self-test-run-20260901-161631-67126` |
 | S5d 前 default sandbox（历史） | PASS：842/3，232.508 s | base 14 PASS；Python、TypeScript hang；Mixed sandbox-exec denied | exit 1；artifact `.build/self-test-run-20260901-133131-80177` |
 | S5d 前完全访问宿主（历史） | helper 在 AppKit 测试后 rc 0、缺 summary | 跳过 CI 后的 17/17 与其余门 PASS | CI guard exit 1；remainder artifact `.build/self-test-run-20260901-121651-62651` |
 
@@ -75,6 +78,20 @@ CODEX_SANDBOX=1 \
 证明 runner main 经 `swift_task_asyncMainDrainQueue` 自然退出。S5d 保持两项同一隔离进程
 运行并从主进程精确 skip；当前分别 840 与 2，覆盖总数仍为 842。临时 AppKit 插桩与
 S5c 候选均已还原。
+
+### 远端 RED → GREEN
+
+| Run | HEAD | 结论 | 证据 |
+|---|---|---|---|
+| `33479998094` #30 | `a732bf9` | RED | macOS 15 Swift 拒绝 `weak let`；S5e 输入 |
+| `33480622895` #31 | `ac8ad62` | RED | 编译与 17 通道通过；BookmarkPanel raw frame 假交叠；S5f 输入 |
+| `33483310346` #32 | `356588d` | RED | 840+2 通过；Exact follow rows 未就绪；S5g 输入 |
+| `33486436263` #33 | `e803cf3` | CANCELLED | 同 push 的早发 run，被 workflow concurrency 自动取消 |
+| `33486436504` #34 | `e803cf3` | **PASS** | workflow Success，16m12s；job Success，16m7s；artifact/post/complete 全 PASS |
+
+最终 artifact：`product-quality-33486436504`，502 KB，SHA-256
+`a2675e701b80767553d40367a700f38ab976f799b802ea9d32d771cb1fde3ca1`。远端仅余
+Node 20 action deprecation 与 Homebrew tap trust 两条外部 warning，不影响门禁。
 
 ## 10 万行 dedicated open
 
@@ -139,5 +156,4 @@ S5c 候选均已还原。
 
 ## 解阻与最终完成条件
 
-本地计划已经 PASS。最终完成只剩：获得用户 push 授权后，推送当前分支并监控对应远端
-product workflow 到 terminal success；未经授权保持 NOT RUN。
+本地与远端计划均已 PASS；完成条件全部满足。

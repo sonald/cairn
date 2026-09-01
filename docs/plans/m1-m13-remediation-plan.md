@@ -254,6 +254,10 @@ Mixed-language product quality run `33479998094`；job `99767272947` 在编译
 release build 不出现该 warning；完整本地产品门 PASS；推送后精确远端 workflow 到
 terminal success。
 
+**实施结果（2026-09-01）**：Luna(max) 仅改目标测试两行，提交 `ac8ad62`。focused
+1/1、SnapshotSwitch 相关 11/11、本机 warning audit PASS；远端 run #31 越过编译并进入
+后段产品门，S5e PASS。
+
 ### S5f — BookmarkPanel 几何自测坐标系
 
 **远端 RED**：S5e push `ac8ad62` 触发 run `33480622895`；编译、840+2 tests、17 通道与
@@ -275,6 +279,10 @@ alignment inset，因此 raw frame 会越过约束边界形成假交叠，AX、�
 
 **验收**：focused BookmarkPanel tests PASS；bookmark/restart product self-test 与三主题
 截图 PASS；完整本地产品门 exit 0；推送后的精确远端 workflow terminal success。
+
+**实施结果（2026-09-01）**：Luna(max) 仅将两项 self-test frame 改为 alignment rect，
+提交 `356588d`。Bookmark focused 2/2、AppTests 84/84、bookmark/restart 三主题与完整
+本地产品门 PASS；最终远端 run #34 的 bookmark gate PASS，S5f 完成。
 
 ### S5g — relation follow rows 的最终状态等待
 
@@ -299,6 +307,11 @@ sleep、retry、helper/type 或时间预算。
 **验收**：Exact self-test 的 `relation-follow-context` 两次选择、两次 summary 更新和恢复
 全部 true；focused exact 通道重复运行稳定；完整本地产品门 exit 0；推送后精确远端
 workflow terminal success。
+
+**实施结果（2026-09-01）**：Luna(max) 仅扩展既有 bounded wait，提交 `e803cf3`；
+Exact self-test 连续 3 次 PASS，S5g HEAD 完整本地产品门 exit 0。远端 run
+`33486436504` / job `99787494893` 对同一 HEAD terminal Success（16m12s / 16m7s），
+artifact upload、setup-node/checkout post 与 Complete job 全部成功，S5g 完成。
 
 **总验收**：
 
@@ -329,7 +342,7 @@ bash Scripts/run-product-gates.sh <python> <typescript> <mixed>
 
 ## 4. 完成定义
 
-S1–S5 均有 RED/GREEN 或真实产品证据；自动门禁、bundle、M10/M11 live journey、
+S1–S5g 均有 RED/GREEN 或真实产品证据；自动门禁、bundle、M10/M11 live journey、
 文档事实和范围审计全部通过；无未解释失败、假绿截图或待处理计划项。最终新增
 `docs/plans/evidence/m1-m13-remediation-acceptance.md`，逐项记录命令、退出码、
 测试数、bundle id、截图、远端 run 和未适用项。
