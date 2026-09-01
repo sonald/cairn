@@ -144,8 +144,8 @@ selection 导致 generation 变化时旧 Attempt 清除。
 
 **触发证据**：总验收中 `scripts/ci.sh` 的 `swift test | tee` 实时输出路径三次在
 不同 AppKit 测试处无断言、无 crash 摘要地提前结束；相同 HEAD、相同测试参数将
-`tee` 的 stdout 静默后 842 tests / 3 suites 全部 PASS。该问题属于测试日志背压触发的
-时序 flake，不以放宽超时处理。
+`tee` 的 stdout 静默后曾取得 842 tests / 3 suites PASS。后续 S5c 证明静默排水只修正
+日志合同，不是测试 host 提前结束的根因。
 
 **允许文件**：`scripts/ci.sh`。
 
@@ -158,6 +158,41 @@ selection 导致 generation 变化时旧 Attempt 清除。
 **验收**：安静路径 full suite 的测试数与直接运行一致；`CODEX_SANDBOX=1 bash
 scripts/ci.sh` exit 0；`run-product-gates.sh` 能继续越过 CI 进入 17 通道和新增 bookmark
 门。注入失败退出码时必须打印日志并失败，不能吞错。
+
+### S5c — AppKit 测试 host 的 cooperative wait
+
+**触发证据**：在 `require_escalated` 宿主环境中，最小有序集合
+`bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus|recentProjectClickForwardsStoredLanguageSet`
+稳定表现为第一项 PASS、第二项进入 `mainWindowWaitUntil` 第一次 `Task.sleep` 后，
+`swiftpm-testing-helper` 以 0 结束且缺测试摘要。两项单独运行均 PASS；相同二元命令在
+default sandbox PASS。临时诊断确认两环境 `NSApplication.delegate=nil`、
+`isRunning=false`、window/visibility 状态相同；O_RDWR FIFO、feeder、`script` PTY 和安静
+stdout 均不能修复。根因边界是宿主 AppKit test process 挂起 MainActor 后不再调度，
+不是 stdin EOF、日志背压、产品窗口关闭合同或 `run-product-gates.sh`。
+
+**允许文件**：`Tests/CodeInsightAppTests/MainWindowControllerTests.swift`。
+
+**RED**：上述二元 regex 在宿主环境必须复现无摘要退出；两个用例分别运行必须 PASS，
+避免把单测本身错误误判为顺序污染。
+
+**实现候选**：只修改既有 `mainWindowWaitUntil`，在 30 秒 wall-clock bound 内以
+`Task.yield()` cooperative wait 让 MainActor 任务保持可调度；不新增 helper/type、窗口
+anchor、runner、重试、sleep、环境分支或放宽断言。若二元 GREEN 但全量不 GREEN，候选
+无效并停止，不继续叠 workaround。
+
+**验收**：宿主二元集合完整报告 2 tests PASS；`CodeInsightAppTests` 全目标 PASS；
+default sandbox 二元集合 PASS；842/3 full suite PASS；独立 `scripts/ci.sh` PASS；完整
+`run-product-gates.sh` 单次调用最终 exit 0。
+
+**实施结果（2026-09-01）**：候选 REJECTED。Luna(max) 只改一行
+`Task.sleep` → `Task.yield()` 后，宿主二元集合仍在第二项开始后以 0 提前结束，已按停止
+条件立即还原；test/script 零 diff。进一步用真正 `tty:true` 的 escalated 命令仍复现，
+所以 PTY 也不是修复。default sandbox 中同一完整产品门的 CI 取得 842/3 PASS，随后
+14 个基础通道 PASS，但 Python/TypeScript 因 provider 进程被外层 sandbox 卡住，Mixed
+明确报告 `sandbox-exec: sandbox_apply: Operation not permitted`。当前 Codex 执行器没有
+一个环境能单次承载完整门禁：default sandbox 阻止真实 provider，require_escalated
+宿主使 Swift Testing helper 提前成功退出。不得为适配执行器增加产品/测试 workaround；
+完整单命令改由用户 Terminal 或获授权后的远端 workflow 验收。
 
 **总验收**：
 

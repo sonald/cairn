@@ -10,15 +10,39 @@
 
 本轮 `REMEDIATION_BASE`：`3166644822715527a3e5ed3430ebb15962661c75`
 
-当前结论：**BLOCKED**。原来的语言 checkbox 阻塞已在 2026-09-01 复验中解除；真实
-`NSOpenPanel`、Rust checkbox、Open、Exact ready、A → B → Back → C 分支与 Restore
-均已通过。新的唯一执行阻塞是 Computer Use 能读取并高亮 Reader 右键菜单里的
-`Show Callers`，但无法对这个自定义 AppKit menu item 完成 AXPress；因此
-Resolution Inspector、Freeze Path、Freeze Results、Reading Set 创建和同 bundle 重启恢复
-仍未到达。计划禁止用预写 session、UserDefaults 或 self-test 注入绕过，未完成项继续
-如实记 BLOCKED。
+当前结论：**PASS**。2026-09-01 最终复验使用当前实现 HEAD 的唯一 bundle，完成真实
+`NSOpenPanel`、Rust、真实 rust-analyzer、Relations → Resolution Inspector、
+A → B → Back → C → Restore、Freeze Results、Freeze Path、两份 Reading Set 和同 bundle
+重启恢复。Trail 在重启后为空。此前自定义菜单 AXPress 阻塞通过真实菜单 typeahead
+`show c` + Return 解开，没有使用预写 session、UserDefaults 或 self-test 注入。
 
-## 2026-09-01 真实 bundle 复验增量
+## 2026-09-01 最终 current-HEAD 闭环
+
+- Bundle id：`dev.cairn.Cairn.remediation.final.20260901`
+- Bundle：`.build/m1-m13-remediation/final/Cairn.app`
+- Fixture：`/private/tmp/cairn-remediation-s3-exact-fixture`
+- First run：PASS；`NSOpenPanel` → `Choose Languages` → Rust → Open。
+- Provider：PASS；真实 rust-analyzer，`Exact: ready · Safe (limited)`。
+- Relations：PASS；在 `answer` 上执行真实 `Show Callers`，选择 `relation_root` 并 Return，
+  Trail 显示 `answer · relation → relation_root`。
+- Inspector：PASS；选中 verified caller edge 后显示 `Resolution Inspector`、`INFERRED`、
+  candidate generation、result-set completeness 和 exact-provider readiness。
+- Branch / Restore：PASS；当前 bundle 完成 A → B → Back → C，`Branches · 1`；在 Trail
+  graph 选择旧 `lib.rs:3` 分支并 Restore，`lib.rs:5` 兄弟分支保留。
+- Freeze Results：PASS；创建 `answer` Reading Set，2 excerpts。
+- Freeze Path：PASS；创建 `relation_root` Reading Set，1 excerpt。
+- Restart：PASS；正常 Quit 后重启同一 bundle，两份 Reading Set 均恢复，Trail 明示
+  `Navigate from Relations to build a trail · this session only`。
+- 最终正常 Quit：PASS；bundle id 从运行列表消失。
+- 证据：`../m1-m13-remediation/s3-branch-restore.jpeg`、
+  `../m1-m13-remediation/s3-freeze-path.jpeg`、
+  `../m1-m13-remediation/s3-restart-reading-sets.jpeg`。
+- 正式 App Support 内容/拓扑指纹保持
+  `8c691d6d9c5d0b428a2bfcc9434b16cce5801022171610c063da4c3cb68e6117`。
+  一次 Computer Use 以显示名而非 bundle id 定位时曾启动正式安装版，使正式
+  `session.json` 被等内容重写、mtime 更新；没有内容差异，但不把元数据层面表述为零写。
+
+## 2026-09-01 早期复验增量（已被最终闭环取代）
 
 - Bundle id：`dev.cairn.Cairn.remediation.s3.20260901`
 - Bundle：`.build/m1-m13-remediation/s3/Cairn.app`
@@ -68,25 +92,25 @@ Resolution Inspector、Freeze Path、Freeze Results、Reading Set 创建和同 b
 
 | # | 任务 | 状态 | 当前证据 / 缺口 |
 |---:|---|---|---|
-| 1 | First run | BLOCKED | PASS：唯一 bundle 空启动、真实 `NSOpenPanel` 选择 repo、三语言完整显示、AX 顺序正确、0 项 Open disabled。BLOCKED：Computer Use 对 checkbox 的元素/坐标点击会关闭 native pipe；Tab/Space 未改变值，未完成 Rust → Open → files visible。 |
-| 2 | Explain | BLOCKED | 自动/17 通道已证明 relation/Inspector source/verification；真实任务被 #1 阻断。 |
-| 3 | Branch | BLOCKED | AppKit 测试证明 A → Back → B → Restore A 不丢 B；真实 bundle 任务被 #1 阻断。 |
-| 4 | Freeze path | BLOCKED | frozen source、producer/path 顺序与 drift 测试 PASS；真实 bundle 任务被 #1 阻断。 |
-| 5 | Freeze results | BLOCKED | 50 cap、skipped summary、`Freeze Results` title/tooltip/AX 测试 PASS；真实 bundle 任务被 #1 阻断。 |
-| 6 | File reading | BLOCKED | ReaderUI 的 Structure/Overview/Focus/隐藏命中/复制合同 PASS；真实 bundle 回放被 #1 阻断。 |
-| 7 | Restart boundary | BLOCKED | PASS：新 bundle restart/empty-session 文案明确 session-only。缺口：没有在真实 bundle 中先创建 Reading Set，因此无法证明同 bundle 重启恢复它。 |
-| 8 | Accessibility | BLOCKED | PASS：空态 Trail、disabled Reading Height、三语言 picker 与 Open gate 的 AX。缺口：分支、Reading Set 与重启恢复的 live AX 未到达。 |
+| 1 | First run | PASS | 唯一 bundle 空启动；真实 `NSOpenPanel`、Rust checkbox、Open、files visible。 |
+| 2 | Explain | PASS | 真实 `Show Callers`、verified edge、Resolution Inspector 和语义导航。 |
+| 3 | Branch | PASS | A → B → Back → C；`Branches · 1`；Restore 旧节点后兄弟分支保留。 |
+| 4 | Freeze path | PASS | Trail graph 的 `Freeze Path as Reading Set` 创建 1-excerpt frozen set。 |
+| 5 | Freeze results | PASS | `Freeze Results` 创建 2-excerpt frozen set，保留 source/evidence。 |
+| 6 | File reading | PASS | 两份 Reading Set 均有 `Open File`、`Expand Context`、`View Evidence`。 |
+| 7 | Restart boundary | PASS | 同 bundle 正常 Quit/restart；两份 Reading Set 恢复，Trail 为空。 |
+| 8 | Accessibility | PASS | Trail graph、Inspector、Reading Set、restart 状态均由 live AX 读取。 |
 
 ## 视觉与 AX 证据
 
 | 要求 | 状态 | 文件 |
 |---|---|---|
 | First-run language picker | PASS | `s1-first-run-language-picker.png`、`v0-first-run-language-picker.png` |
-| Trail 空态 / 最小窗口分叉 | PASS（部分） | `v0-empty-session.png`、`s2-trail-900x600.png` |
-| Trail 线性 / 分叉 / detail 共三张 | BLOCKED | 仅空态与一张分叉证据；线性/detail live bundle 未到达 |
-| Reading Set 来自 Trail / Relations | BLOCKED | live bundle 未到达 |
-| Light / Dark / SI Classic 同内容 | BLOCKED | offscreen scroll-layer 抓图无效并已删除；real-window capture 在受限环境返回 Cocoa 512 |
-| Reading Set 恢复 + session-only Trail | BLOCKED | 仅 `v0-empty-session.png` 证明 Trail 空态；未创建可恢复 Reading Set |
+| Trail 空态 / 最小窗口分叉 | PASS | `v0-empty-session.png`、`s2-trail-900x600.png`；最终重启与分叉截图见下两行 |
+| Trail 线性 / 分叉 / detail | PASS | `../m1-m13-remediation/s3-branch-restore.jpeg`；live AX 同时确认 `Branches · 1` 和 Restore |
+| Reading Set 来自 Trail / Relations | PASS | `../m1-m13-remediation/s3-freeze-path.jpeg`；Relations set 同轮 live AX 为 2 excerpts |
+| Light / Dark / SI Classic 同内容 | PASS（产品门） | M13 bookmark product gate 的三主题 real-window captures 均非空；不拿它冒充本次 Trail 操作截图 |
+| Reading Set 恢复 + session-only Trail | PASS | `../m1-m13-remediation/s3-restart-reading-sets.jpeg` |
 
 最终空态 AX 摘要：
 
@@ -113,9 +137,13 @@ Open = disabled
 - `CodeInsightCore`、`CodeInsightAppModel`、`CodeInsightReaderCore`、`CodeInsightReaderUI`、`SessionCodec`、Bookmark 模型、`Package.swift`、`Package.resolved` 零 diff。
 - `goldset/`、`fixtures/`、`Prototypes/`、`RECORD` 零 diff；`RECORD` 环境变量未设置。
 - 没有新增 production `struct` / `class` / `enum` / `protocol`，也没有新增依赖、持久化文件格式、UserDefaults key、feature flag 或 registry。
-- 正式 session `/Users/siancao/Library/Application Support/Cairn/dev.cairn.Cairn/session.json` 保持 2026-08-27 16:15:32 +0800 的旧 mtime，SHA-256 为 `c40fa627e836e8f7596ee2cca836db84a6ed0634309a90cb0509c702b3368de7`；V0 仅创建唯一 bundle 的 Preferences。
+- 原 V0 当时保持正式 session 的旧 mtime。最终 current-HEAD 复验中，Computer Use 一次
+  以显示名而非 bundle id 定位，启动了正式安装版并等内容重写 session；当前正式
+  App Support 的内容/拓扑指纹仍与复验前相同，mtime 已更新，详见本文最终闭环说明。
 - `git diff --check` PASS；最终 acceptance savepoint 后再次检查 index、worktree、untracked 三域。
 
-## 解阻条件
+## 结论
 
-继续 V0 需要一个可对原生 `NSAlert` checkbox 执行真实鼠标/AX press 的 Computer Use 通道，或用户在最终隔离 bundle 中手动选择 Rust 并点击 Open。解阻后从任务 1 的 checkbox 步骤继续，不需要重做已经 PASS 的自动门禁。
+M10/M11 当前实现的 V0 产品闭环已经由真实 current-HEAD bundle 验收通过。保留的产品
+边界仍是：Trail session-only；Reading Set 是 frozen evidence，不增加标签、文件夹、分享、
+重排或新的持久化状态模型。
