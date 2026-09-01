@@ -20,19 +20,59 @@ fi
 
 swift build ${swift_options[@]+"${swift_options[@]}"}
 swift_test_log=.build/ci-swift-test.log
+swift_test_summary_regex='^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites)? passed after '
+bookmark_test_one='CodeInsightAppTests.bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote'
+bookmark_test_two='CodeInsightAppTests.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
 if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} \
+    --skip "$bookmark_test_one" \
+    --skip "$bookmark_test_two" \
     2>&1 | tee "$swift_test_log" >/dev/null; then
     cat "$swift_test_log" >&2
-    echo "FAIL: swift test command failed" >&2
+    echo "FAIL: main swift test command failed" >&2
     exit 1
 fi
-if ! swift_test_summary="$(grep -E '^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites)? passed after ' "$swift_test_log" | tail -n 1)" \
-    || [[ -z "$swift_test_summary" ]]; then
+if ! main_swift_test_summary="$(grep -E "$swift_test_summary_regex" "$swift_test_log" | tail -n 1)" \
+    || [[ -z "$main_swift_test_summary" ]]; then
     cat "$swift_test_log" >&2
-    echo "FAIL: swift test 未报告完整成功的测试运行" >&2
+    echo "FAIL: main swift test 未报告完整成功的测试运行" >&2
     exit 1
 fi
-echo "$swift_test_summary"
+main_swift_test_count="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$main_swift_test_summary")"
+if [[ "$main_swift_test_count" != "840" ]]; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: main swift test expected 840 tests got $main_swift_test_count" >&2
+    exit 1
+fi
+main_swift_test_log_lines="$(wc -l < "$swift_test_log" | tr -d ' ')"
+if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} \
+    --filter "$bookmark_test_one|$bookmark_test_two" \
+    2>&1 | tee -a "$swift_test_log" >/dev/null; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: isolated bookmark swift test command failed" >&2
+    exit 1
+fi
+if ! isolated_swift_test_summary="$(tail -n +$((main_swift_test_log_lines + 1)) "$swift_test_log" \
+    | grep -E "$swift_test_summary_regex" | tail -n 1)" \
+    || [[ -z "$isolated_swift_test_summary" ]]; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: isolated bookmark swift test 未报告完整成功的测试运行" >&2
+    exit 1
+fi
+isolated_swift_test_count="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$isolated_swift_test_summary")"
+if [[ "$isolated_swift_test_count" != "2" ]]; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: isolated bookmark swift test expected 2 tests got $isolated_swift_test_count" >&2
+    exit 1
+fi
+total_swift_test_count=$((main_swift_test_count + isolated_swift_test_count))
+if [[ "$total_swift_test_count" != "842" ]]; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: swift test total expected 842 tests got $total_swift_test_count" >&2
+    exit 1
+fi
+echo "$main_swift_test_summary"
+echo "$isolated_swift_test_summary"
+echo "PASS: swift test total=$total_swift_test_count (main=$main_swift_test_count isolated=$isolated_swift_test_count)"
 
 if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
     Sources/CodeInsightReaderUI/ \
