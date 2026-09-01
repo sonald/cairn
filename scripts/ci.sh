@@ -20,11 +20,19 @@ fi
 
 swift build ${swift_options[@]+"${swift_options[@]}"}
 swift_test_log=.build/ci-swift-test.log
-swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} 2>&1 | tee "$swift_test_log"
-if ! grep -Eq '^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites)? passed after ' "$swift_test_log"; then
+if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} \
+    >"$swift_test_log" 2>&1; then
+    cat "$swift_test_log" >&2
+    echo "FAIL: swift test command failed" >&2
+    exit 1
+fi
+if ! swift_test_summary="$(grep -E '^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites)? passed after ' "$swift_test_log" | tail -n 1)" \
+    || [[ -z "$swift_test_summary" ]]; then
+    cat "$swift_test_log" >&2
     echo "FAIL: swift test 未报告完整成功的测试运行" >&2
     exit 1
 fi
+echo "$swift_test_summary"
 
 if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
     Sources/CodeInsightReaderUI/ \
