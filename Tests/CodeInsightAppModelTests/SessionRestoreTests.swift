@@ -54,8 +54,8 @@ func savedPythonSessionRestoresWithPythonLanguageAndTree() async throws {
 
     #expect(model.snapshotPhase == .fullReady)
     #expect(model.projectLanguage == .python)
-    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
-    #expect(model.fileTree?.fileCount == 1)
+    #expect(model.fileTree?.children.map(\.name) == ["ignored.rs", "main.py"])
+    #expect(model.fileTree?.fileCount == 2)
     guard case let .ready(session, _) = model.projectState else {
         Issue.record("expected ready Python session after restore")
         return
@@ -89,7 +89,7 @@ func savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() async th
 
     #expect(model.snapshotPhase == .fullReady)
     #expect(model.projectLanguage == .typescript)
-    #expect(model.fileTree?.fileCount == 2)
+    #expect(model.fileTree?.fileCount == 3)
     guard case let .ready(session, _) = model.projectState else {
         Issue.record("expected ready TypeScript session after restore")
         return

@@ -34,7 +34,8 @@ func snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() async throws {
 
     #expect(await testWaitUntil("model.snapshotPhase == .firstPaint") { model.snapshotPhase == .firstPaint })
     #expect(model.fileTree?.children.first?.name == "src")
-    #expect(model.fileTree?.children.first?.children.map(\.name) == ["c.rs"])
+    #expect(model.fileTree?.children.first?.children.map(\.name)
+        == ["c.rs", "ignored.py"])
     #expect(model.coverage.filesIndexed == 0)
     #expect(model.coverage.filesTotal == 1)
 
@@ -322,7 +323,7 @@ func mixedOpenDoesNotExposeSessionsBeforeCachedArrayIsReady() async throws {
 
 @MainActor
 @Test
-func pythonSnapshotFirstPaintFiltersForeignPathsFromSelectionAndSource() async throws {
+func pythonSnapshotFirstPaintKeepsForeignFilesVisibleAndSnapshotReadable() async throws {
     let root = try snapshotTemporaryProject(["main.py": "def current():\n    pass\n"])
     defer { try? FileManager.default.removeItem(at: root) }
     let initial = try ProjectIndexer().index(root: root, language: .python)
@@ -356,13 +357,12 @@ func pythonSnapshotFirstPaintFiltersForeignPathsFromSelectionAndSource() async t
     model.switchToCommit("C")
     #expect(await testWaitUntil("model.snapshotPhase == .firstPaint") { model.snapshotPhase == .firstPaint })
 
-    #expect(model.selectedFile == nil)
+    #expect(model.selectedFile == foreign.standardizedFileURL)
     #expect(model.selectedByteOffset == nil)
-    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
+    #expect(model.fileTree?.children.map(\.name) == ["foreign.rs", "main.py"])
     let source = try #require(model.documentSource)
-    #expect(throws: CocoaError.self) {
-        _ = try DocumentLoader(source: source).load(file: foreign)
-    }
+    #expect(try source(foreign) == Array("fn foreign() {}\n".utf8))
+    #expect(model.languageMode(for: foreign) == nil)
 }
 
 @MainActor
