@@ -823,7 +823,7 @@ func relationReferenceSingleClicksNavigateEachLocationOnce() async throws {
 
 @MainActor
 @Test
-func mixedProjectUnsupportedSelectionClearsReaderWithoutActiveLanguageFallback()
+func mixedProjectUnsupportedLanguageFileUsesPlainPreviewWithoutActiveLanguageFallback()
     async throws
 {
     let fixture = try await makeRelationNavigationFixture()
@@ -840,7 +840,9 @@ func mixedProjectUnsupportedSelectionClearsReaderWithoutActiveLanguageFallback()
                 == Array(fixture.mainSource.utf8)
     })
 
+    let plainText = "const notes = \"plain\";\n"
     let unsupported = fixture.root.appendingPathComponent("notes.js")
+    try plainText.write(to: unsupported, atomically: true, encoding: .utf8)
     fixture.controller.openFileForSelfTest(unsupported)
     #expect(fixture.model.selectedFile?.standardizedFileURL
         == unsupported.standardizedFileURL)
@@ -848,8 +850,9 @@ func mixedProjectUnsupportedSelectionClearsReaderWithoutActiveLanguageFallback()
     #expect(fixture.controller.displayedReaderFile?.standardizedFileURL
         == unsupported.standardizedFileURL)
     #expect(fixture.controller.selfTestLeftReaderBytes == nil)
-    #expect(fixture.controller.selfTestReaderPlaceholderText
-        == "Unsupported file language")
+    #expect(fixture.controller.selfTestReaderPlaceholderText == nil)
+    #expect(fixture.controller.selfTestReaderPreviewKind == "Plain text")
+    #expect(fixture.controller.selfTestReaderPreviewText == plainText)
 }
 
 @MainActor

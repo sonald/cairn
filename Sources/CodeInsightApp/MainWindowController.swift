@@ -4,6 +4,8 @@ import CodeInsightCore
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Observation
+import PDFKit
+import WebKit
 
 enum ProvenanceBadgeStyle: Equatable {
     case exact
@@ -690,6 +692,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestReaderPlaceholderText: String? {
         readerController.selfTestPlaceholderText
+    }
+    var selfTestReaderPreviewKind: String? {
+        readerController.selfTestPreviewState.kind
+    }
+    var selfTestReaderPreviewText: String? {
+        readerController.selfTestPreviewState.renderedText
     }
     var selfTestReaderPlaceholderVisible: Bool {
         readerController.selfTestPlaceholderVisible
@@ -3754,7 +3762,9 @@ private final class ReadingHeightControl: NSSegmentedControl {
 }
 
 @MainActor
-final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
+final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
+    NSTextViewDelegate, WKNavigationDelegate
+{
     var onTokenClick: ((UInt32, Bool) -> Void)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
@@ -3777,6 +3787,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private let label = NSTextField(labelWithString: "")
     private let textView = ReaderTextView()
     private let readingSetView = ReadingSetView()
+    private let previewArea = NSView()
     private let loader = DocumentLoader()
     private let showsCompareControls: Bool
     private let compareVersionButton = NSButton()
@@ -3810,6 +3821,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
     private var displayedLanguageMode: LanguageMode?
     private var displayedDocument: ReaderDocument?
     private var displayedReadingSetKey: String?
+    private var previewView: NSView?
+    private var previewKind: String?
+    private var previewRenderedText: String?
+    private var previewLinkCount = 0
+    private var previewAccessibilityLabel: String?
+    private var previewHTMLJavaScriptEnabled: Bool?
+    private var previewHTMLDataStorePersistent: Bool?
+    private var previewHTMLContentSecurityPolicy: String?
+    private var previewPDFPageCount: Int?
+    private var previewImageSize: NSSize?
+    private var previewHTMLSource: String?
+    private var previewHTMLBaseURL: URL?
+    private var htmlInitialNavigationAllowed = false
     private var loadGeneration: UInt64 = 0
     private var syntaxLoadPending = false
     private var pendingFocusNavigationOffset: UInt32?
@@ -3869,7 +3893,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         label.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(scrollView)
         readerArea.addSubview(readingSetView)
+        readerArea.addSubview(previewArea)
         readerArea.addSubview(label)
+        previewArea.translatesAutoresizingMaskIntoConstraints = false
+        previewArea.wantsLayer = true
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
@@ -3879,10 +3906,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             readingSetView.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
             readingSetView.topAnchor.constraint(equalTo: readerArea.topAnchor),
             readingSetView.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
+            previewArea.leadingAnchor.constraint(equalTo: readerArea.leadingAnchor),
+            previewArea.trailingAnchor.constraint(equalTo: readerArea.trailingAnchor),
+            previewArea.topAnchor.constraint(equalTo: readerArea.topAnchor),
+            previewArea.bottomAnchor.constraint(equalTo: readerArea.bottomAnchor),
             label.centerXAnchor.constraint(equalTo: readerArea.centerXAnchor),
             label.centerYAnchor.constraint(equalTo: readerArea.centerYAnchor),
         ])
         readingSetView.isHidden = true
+        previewArea.isHidden = true
         readingSetView.onOpen = { [weak self] in
             self?.onOpenReadingSetExcerpt?($0)
         }
@@ -4307,6 +4339,45 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         }
     }
 
+    func textView(
+        _ textView: NSTextView,
+        clickedOnLink link: Any,
+        at charIndex: Int
+    ) -> Bool {
+        true
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
+    ) {
+        decisionHandler(htmlNavigationPolicy(
+            for: navigationAction.navigationType,
+            isMainFrame: navigationAction.targetFrame?.isMainFrame != false
+        ))
+    }
+
+    private func htmlNavigationPolicy(
+        for navigationType: WKNavigationType,
+        isMainFrame: Bool
+    ) -> WKNavigationActionPolicy {
+        guard navigationType == .other,
+              isMainFrame,
+              htmlInitialNavigationAllowed
+        else { return .cancel }
+        htmlInitialNavigationAllowed = false
+        return .allow
+    }
+
+    func selfTestHTMLNavigationPolicy(
+        for navigationType: WKNavigationType,
+        initialLoad: Bool = false
+    ) -> WKNavigationActionPolicy {
+        if initialLoad { htmlInitialNavigationAllowed = true }
+        return htmlNavigationPolicy(for: navigationType, isMainFrame: true)
+    }
+
     private func applyReaderHeaderTheme(_ settings: ReaderSettings) {
         readerTheme = ReaderTheme(settings: settings)
         readerHeader.layer?.backgroundColor = readerTheme.chromeHeaderColor.cgColor
@@ -4424,8 +4495,25 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
 
     func apply(settings: ReaderSettings) {
         loadViewIfNeeded()
+        readerTheme = ReaderTheme(settings: settings)
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)
+        previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
+        if let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
+            previewTextView.backgroundColor = readerTheme.backgroundColor
+            previewTextView.textColor = readerTheme.foregroundColor
+        }
+        if let pdfView = previewView as? PDFView {
+            pdfView.backgroundColor = readerTheme.backgroundColor
+        }
+        if let webView = previewView as? WKWebView,
+           let html = previewHTMLSource,
+           let baseURL = previewHTMLBaseURL
+        {
+            webView.underPageBackgroundColor = readerTheme.backgroundColor
+            htmlInitialNavigationAllowed = true
+            webView.loadHTMLString(htmlPreviewMarkup(html), baseURL: baseURL)
+        }
         if !showsCompareControls {
             tabStripView.apply(settings: settings)
             applyReaderHeaderTheme(settings)
@@ -4552,6 +4640,40 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             && textView.view.bounds.height > 0
             && textView.view.visibleRect.width > 0
             && textView.view.visibleRect.height > 0
+    }
+    var selfTestPreviewState: (
+        kind: String?,
+        renderedText: String?,
+        linkCount: Int,
+        editable: Bool,
+        selectable: Bool,
+        visible: Bool,
+        sourceVisible: Bool,
+        previewVisible: Bool,
+        accessibilityLabel: String?,
+        htmlJavaScriptEnabled: Bool?,
+        htmlDataStorePersistent: Bool?,
+        htmlContentSecurityPolicy: String?,
+        pdfPageCount: Int?,
+        imageSize: NSSize?
+    ) {
+        let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView
+        return (
+            previewKind,
+            previewRenderedText,
+            previewLinkCount,
+            previewTextView?.isEditable ?? false,
+            previewTextView?.isSelectable ?? false,
+            previewView != nil && !previewArea.isHidden,
+            scrollView?.isHidden == false,
+            !previewArea.isHidden,
+            previewAccessibilityLabel,
+            previewHTMLJavaScriptEnabled,
+            previewHTMLDataStorePersistent,
+            previewHTMLContentSecurityPolicy,
+            previewPDFPageCount,
+            previewImageSize
+        )
     }
     var selfTestPlaceholderText: String? {
         label.isHidden ? nil : label.stringValue
@@ -5117,6 +5239,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         hideScopeHeader()
         findBar.isHidden = true
         label.isHidden = true
+        clearPreview()
         textView.clear()
         scrollView?.isHidden = true
         readingSetView.isHidden = false
@@ -5134,6 +5257,268 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             expandAvailability: actionAvailability?.map(\.expand),
             skippedReasons: skippedReasons
         )
+    }
+
+    private static let previewContentSecurityPolicy =
+        "default-src 'none'; style-src 'unsafe-inline'; img-src data:; "
+            + "object-src 'none'; frame-src 'none'; connect-src 'none'; "
+            + "media-src 'none'; base-uri 'none'; form-action 'none'"
+
+    private func clearPreview() {
+        if let webView = previewView as? WKWebView {
+            webView.stopLoading()
+            webView.navigationDelegate = nil
+        }
+        previewView?.removeFromSuperview()
+        previewView = nil
+        previewKind = nil
+        previewRenderedText = nil
+        previewLinkCount = 0
+        previewAccessibilityLabel = nil
+        previewHTMLJavaScriptEnabled = nil
+        previewHTMLDataStorePersistent = nil
+        previewHTMLContentSecurityPolicy = nil
+        previewPDFPageCount = nil
+        previewImageSize = nil
+        previewHTMLSource = nil
+        previewHTMLBaseURL = nil
+        htmlInitialNavigationAllowed = false
+        previewArea.isHidden = true
+    }
+
+    private func installPreview(_ view: NSView) {
+        view.translatesAutoresizingMaskIntoConstraints = false
+        previewArea.addSubview(view)
+        NSLayoutConstraint.activate([
+            view.leadingAnchor.constraint(equalTo: previewArea.leadingAnchor),
+            view.trailingAnchor.constraint(equalTo: previewArea.trailingAnchor),
+            view.topAnchor.constraint(equalTo: previewArea.topAnchor),
+            view.bottomAnchor.constraint(equalTo: previewArea.bottomAnchor),
+        ])
+        previewView = view
+        previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
+        previewArea.isHidden = false
+        scrollView?.isHidden = true
+        label.isHidden = true
+        readingSetView.isHidden = true
+    }
+
+    private func displayPreview(
+        _ file: URL,
+        source: DocumentLoader.ContentSource?
+    ) {
+        findBar.isHidden = true
+        invalidateFind()
+        savedSymbolOccurrenceByteOffset = nil
+        textView.clear()
+        readingHeightControl.isHidden = true
+        readingHeightControl.isEnabled = false
+        readingHeightShortcutLabel.isHidden = true
+        syntaxLoadPending = false
+        pendingFocusNavigationOffset = nil
+        displayedDocument = nil
+        onDocumentChange?(file, nil)
+        clearPreview()
+
+        let bytes: [UInt8]
+        do {
+            if let source {
+                bytes = try source(file)
+            } else {
+                bytes = Array(try Data(contentsOf: file, options: .mappedIfSafe))
+            }
+        } catch {
+            displayPreviewError("Could not open \(file.lastPathComponent)")
+            return
+        }
+
+        let extensionName = file.pathExtension.lowercased()
+        if extensionName == "pdf" {
+            guard let document = PDFDocument(data: Data(bytes)) else {
+                displayPreviewError("Could not open PDF")
+                return
+            }
+            let pdfView = PDFView()
+            pdfView.document = document
+            pdfView.autoScales = true
+            pdfView.displayMode = .singlePageContinuous
+            pdfView.displaysPageBreaks = true
+            pdfView.backgroundColor = readerTheme.backgroundColor
+            pdfView.setAccessibilityLabel("PDF preview")
+            previewKind = "PDF"
+            previewAccessibilityLabel = "PDF preview"
+            previewPDFPageCount = document.pageCount
+            installPreview(pdfView)
+            return
+        }
+
+        if let image = NSImage(data: Data(bytes)) {
+            let imageView = NSImageView()
+            imageView.image = image
+            imageView.imageScaling = .scaleProportionallyUpOrDown
+            imageView.imageAlignment = .alignCenter
+            imageView.setAccessibilityLabel("Image preview")
+            previewKind = "Image"
+            previewAccessibilityLabel = "Image preview"
+            previewImageSize = image.size
+            installPreview(imageView)
+            return
+        }
+
+        guard let string = String(bytes: bytes, encoding: .utf8) else {
+            displayPreviewError("Unsupported binary")
+            return
+        }
+        if extensionName == "md" || extensionName == "markdown" {
+            guard let markdown = try? AttributedString(
+                markdown: string,
+                options: .init(),
+                baseURL: file.deletingLastPathComponent()
+            ) else {
+                displayPreviewError("Unsupported binary")
+                return
+            }
+            let attributed = NSAttributedString(markdown)
+            displayPreviewText(
+                attributed,
+                kind: "Markdown",
+                accessibilityLabel: "Markdown preview"
+            )
+            return
+        }
+        if extensionName == "html" || extensionName == "htm" {
+            displayPreviewHTML(string, file: file)
+            return
+        }
+        displayPreviewText(
+            NSAttributedString(string: string),
+            kind: "Plain text",
+            accessibilityLabel: "Plain text preview"
+        )
+    }
+
+    private func displayPreviewText(
+        _ attributed: NSAttributedString,
+        kind: String,
+        accessibilityLabel: String
+    ) {
+        let styled = NSMutableAttributedString(attributedString: attributed)
+        if styled.length > 0 {
+            let fullRange = NSRange(location: 0, length: styled.length)
+            styled.enumerateAttribute(.font, in: fullRange) { value, range, _ in
+                guard value == nil else { return }
+                styled.addAttribute(
+                    .font,
+                    value: NSFont.systemFont(ofSize: 14),
+                    range: range
+                )
+            }
+            styled.enumerateAttribute(.foregroundColor, in: fullRange) {
+                value, range, _ in
+                guard value == nil else { return }
+                styled.addAttribute(
+                    .foregroundColor,
+                    value: readerTheme.foregroundColor,
+                    range: range
+                )
+            }
+        }
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.isRichText = true
+        textView.drawsBackground = true
+        textView.backgroundColor = readerTheme.backgroundColor
+        textView.textContainerInset = NSSize(width: 24, height: 24)
+        textView.textStorage?.setAttributedString(styled)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.delegate = self
+        textView.setAccessibilityLabel(accessibilityLabel)
+        let scrollView = NSScrollView()
+        scrollView.documentView = textView
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        var linkCount = 0
+        if styled.length > 0 {
+            styled.enumerateAttribute(
+                .link,
+                in: NSRange(location: 0, length: styled.length)
+            ) { value, _, _ in
+                if value != nil { linkCount += 1 }
+            }
+        }
+        previewKind = kind
+        previewRenderedText = textView.string
+        previewLinkCount = linkCount
+        previewAccessibilityLabel = accessibilityLabel
+        installPreview(scrollView)
+    }
+
+    private func displayPreviewHTML(_ html: String, file: URL) {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .nonPersistent()
+        configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = false
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = self
+        webView.underPageBackgroundColor = readerTheme.backgroundColor
+        webView.setAccessibilityLabel("HTML preview")
+        previewKind = "HTML"
+        previewAccessibilityLabel = "HTML preview"
+        previewHTMLJavaScriptEnabled = configuration
+            .defaultWebpagePreferences.allowsContentJavaScript
+        previewHTMLDataStorePersistent = false
+        previewHTMLContentSecurityPolicy = Self.previewContentSecurityPolicy
+        previewHTMLSource = html
+        previewHTMLBaseURL = file.deletingLastPathComponent()
+        installPreview(webView)
+        htmlInitialNavigationAllowed = true
+        webView.loadHTMLString(
+            htmlPreviewMarkup(html),
+            baseURL: file.deletingLastPathComponent()
+        )
+    }
+
+    private func htmlPreviewMarkup(_ html: String) -> String {
+        let style = "<style>body { color: \(cssColor(readerTheme.foregroundColor)); "
+            + "background-color: \(cssColor(readerTheme.backgroundColor)); "
+            + "font-family: -apple-system, BlinkMacSystemFont, sans-serif; }</style>"
+        let meta = "<meta http-equiv=\"Content-Security-Policy\" content=\""
+            + Self.previewContentSecurityPolicy + "\">"
+        guard let headStart = html.range(
+            of: "<head",
+            options: [.caseInsensitive]
+        ), let headEnd = html[headStart.upperBound...].firstIndex(of: ">") else {
+            return "<head>\(meta)\(style)</head>\(html)"
+        }
+        let insertion = html.index(after: headEnd)
+        return String(html[..<insertion]) + meta + style + String(html[insertion...])
+    }
+
+    private func cssColor(_ color: NSColor) -> String {
+        let resolved = color.usingColorSpace(.deviceRGB) ?? .black
+        return String(
+            format: "#%02x%02x%02x",
+            Int(resolved.redComponent * 255),
+            Int(resolved.greenComponent * 255),
+            Int(resolved.blueComponent * 255)
+        )
+    }
+
+    private func displayPreviewError(_ message: String) {
+        let errorLabel = NSTextField(labelWithString: message)
+        errorLabel.alignment = .center
+        errorLabel.textColor = readerTheme.chromeSecondaryColor
+        errorLabel.setAccessibilityLabel("\(message) preview")
+        previewKind = "Error"
+        previewRenderedText = message
+        previewAccessibilityLabel = "\(message) preview"
+        installPreview(errorLabel)
     }
 
     var currentReadingSetScrollOffset: Double? {
@@ -5219,6 +5604,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
             findBar.isHidden = true
             findStatusLabel.stringValue = ""
             displayedDocument = nil
+            clearPreview()
             label.stringValue = "Select a file to read"
             label.isHidden = false
             textView.clear()
@@ -5227,15 +5613,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate {
         }
 
         guard let languageMode else {
-            displayedDocument = nil
-            onDocumentChange?(file, nil)
-            label.stringValue = "Unsupported file language"
-            label.isHidden = false
-            textView.clear()
-            hideScopeHeader()
+            displayPreview(file, source: source)
             return
         }
 
+        clearPreview()
         do {
             let activeLoader = source.map { DocumentLoader(source: $0) } ?? loader
             let loaded = try activeLoader.load(
