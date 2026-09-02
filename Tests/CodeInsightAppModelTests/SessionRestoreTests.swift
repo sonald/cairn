@@ -68,6 +68,37 @@ func savedPythonSessionRestoresWithPythonLanguageAndTree() async throws {
 
 @MainActor
 @Test
+func savedReadmeSessionRestoresAsActiveNonSourceTabWithoutDocument() async throws {
+    let root = try sessionRestoreProject([
+        "main.rs": "fn main() {}\n",
+        "README.md": "# Read me\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "README.md",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+    #expect(model.tabStrip.activeTab?.fileURL?.lastPathComponent == "README.md")
+    #expect(model.tabStrip.activeDocument == nil)
+    #expect(model.languageMode(for: root.appendingPathComponent("README.md")) == nil)
+}
+
+@MainActor
+@Test
 func savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() async throws {
     let root = try sessionRestoreProject([
         "src/a.ts": "export const a = 1\n",

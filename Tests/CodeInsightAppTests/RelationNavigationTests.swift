@@ -1761,7 +1761,9 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
 
 @MainActor
 private func makeRelationNavigationFixture(
-    sessionURL: URL? = nil
+    sessionURL: URL? = nil,
+    extraFiles: [(String, String)] = [],
+    measuresIdleFootprint: Bool = false
 ) async throws -> (
     root: URL,
     mainSource: String,
@@ -1798,8 +1800,13 @@ private func makeRelationNavigationFixture(
         ("main.rs", mainSource),
         ("a.rs", aSource),
         ("b.rs", bSource),
-    ] {
-        try Data(source.utf8).write(to: root.appendingPathComponent(path))
+    ] + extraFiles {
+        let file = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: file.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(source.utf8).write(to: file)
     }
     let indexService = RelationTestIndexService()
     let exactCoordinator = ExactCoordinator(
@@ -1821,7 +1828,8 @@ private func makeRelationNavigationFixture(
     let controller = MainWindowController(
         model: model,
         settings: ReaderSettings(),
-        offscreen: true
+        offscreen: true,
+        measuresIdleFootprint: measuresIdleFootprint
     )
     controller.openProject(root: root)
     guard await relationTestWaitUntil(
@@ -1840,6 +1848,75 @@ private func makeRelationNavigationFixture(
         throw CocoaError(.coderReadCorrupt)
     }
     return (root, mainSource, aSource, bSource, model, controller)
+}
+
+@MainActor
+@Test
+func markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge()
+    async throws
+{
+    let fixture = try await makeRelationNavigationFixture(
+        extraFiles: [
+        ("README.md", "[guide](docs/guide.md#install)\n"),
+        ("docs/guide.md", "# Guide\n"),
+        ("docs/空 白.md", "# Unicode\n"),
+        ],
+        measuresIdleFootprint: true
+    )
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let readme = fixture.root.appendingPathComponent("README.md")
+    let guide = fixture.root.appendingPathComponent("docs/guide.md")
+    fixture.controller.openFileForSelfTest(readme)
+    #expect(fixture.model.readingTrail.edges.isEmpty)
+    #expect(fixture.controller.selfTestActivatePreviewLink(at: 0))
+    try #require(await relationTestWaitUntil("guide is selected") {
+        fixture.model.selectedFile?.standardizedFileURL == guide.standardizedFileURL
+            && fixture.controller.selfTestActiveTabFile?.standardizedFileURL
+                == guide.standardizedFileURL
+    })
+    #expect(fixture.model.readingTrail.edges.isEmpty)
+
+    fixture.controller.goBack(nil)
+    try #require(await relationTestWaitUntil("back restores README") {
+        fixture.model.selectedFile?.standardizedFileURL == readme.standardizedFileURL
+    })
+    fixture.controller.goForward(nil)
+    try #require(await relationTestWaitUntil("forward restores guide") {
+        fixture.model.selectedFile?.standardizedFileURL == guide.standardizedFileURL
+    })
+
+    #expect(fixture.controller.selfTestOpenPreviewLink(guide))
+    let unicode = fixture.root.appendingPathComponent("docs/空 白.md")
+    let encodedUnicode = try #require(URL(string: unicode.absoluteString))
+    #expect(fixture.controller.selfTestOpenPreviewLink(encodedUnicode))
+    #expect(fixture.model.selectedFile?.standardizedFileURL == unicode.standardizedFileURL)
+    #expect(fixture.controller.selfTestOpenPreviewLink(
+        fixture.root.appendingPathComponent("docs/../main.rs")
+    ))
+
+    let unchanged = try #require(fixture.model.selectedFile)
+    let outside = fixture.root.deletingLastPathComponent()
+        .appendingPathComponent("outside.md")
+    let missing = fixture.root.appendingPathComponent("missing.md")
+    let symlink = fixture.root.appendingPathComponent("later-link.md")
+    try FileManager.default.createSymbolicLink(
+        at: symlink,
+        withDestinationURL: guide
+    )
+    for candidate in [
+        outside,
+        missing,
+        fixture.root.appendingPathComponent("docs"),
+        symlink,
+        URL(string: "https://example.com")!,
+    ] {
+        #expect(!fixture.controller.selfTestOpenPreviewLink(candidate))
+        #expect(fixture.model.selectedFile?.standardizedFileURL
+            == unchanged.standardizedFileURL)
+    }
 }
 
 @MainActor

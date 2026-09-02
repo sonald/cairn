@@ -1052,6 +1052,22 @@ public final class AppModel {
                     file.pathComponents.starts(with: root.pathComponents)
                         && file.pathComponents.count > root.pathComponents.count
                 ) else { continue }
+                if !dependency,
+                   let selectionPath = fileTree?.selectionPath(for: file),
+                   let node = selectionPath.last,
+                   !node.isDirectory,
+                   languageMode(for: file) == nil
+                {
+                    tabStrip.open(
+                        file,
+                        inNewTab: true,
+                        selectionByteOffset: nil
+                    )
+                    guard let newIndex = tabStrip.activeIndex else { continue }
+                    oldToNew[oldOrdinal] = (newIndex, nil, nil)
+                    successfulOrdinals.append(oldOrdinal)
+                    continue
+                }
                 guard let languageMode = languageMode(for: file) else {
                     continue
                 }
@@ -3014,6 +3030,27 @@ public final class AppModel {
             : root.appendingPathComponent(jump.path).standardizedFileURL
         guard dependency || file.pathComponents.starts(with: root.pathComponents)
         else { return }
+        if !dependency,
+           let selectionPath = fileTree?.selectionPath(for: file),
+           let node = selectionPath.last,
+           !node.isDirectory,
+           languageMode(for: file) == nil
+        {
+            readingTrail.restore(record.trailNodeID)
+            replayNotice = nil
+            if opensInNewTab {
+                openInNewTab(file, selectionByteOffset: nil)
+            } else {
+                navigate(
+                    NavigationRequest(
+                        destination: SourceDestination(file: file),
+                        cause: .historyReplay,
+                        policy: .replay
+                    )
+                )
+            }
+            return
+        }
         guard let languageMode = languageMode(for: file) else { return }
         let source = dependency ? nil : documentSource
         let replayGeneration = generation

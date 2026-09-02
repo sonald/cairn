@@ -610,10 +610,13 @@ func commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() async throws {
     let fixture = try SnapshotGitFixture()
     defer { fixture.remove() }
     let file = fixture.root.appendingPathComponent("main.rs")
+    let readme = fixture.root.appendingPathComponent("README.md")
     try snapshotWrite("fn value() { /* X */ }", to: file)
-    try fixture.git("add", "main.rs")
+    try snapshotWrite("README X\n", to: readme)
+    try fixture.git("add", "main.rs", "README.md")
     try fixture.commit("X")
     try snapshotWrite("fn value() { /* Y */ }", to: file)
+    try snapshotWrite("README Y\n", to: readme)
     let model = AppModel()
 
     model.openProject(root: fixture.root)
@@ -633,6 +636,10 @@ func commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() async throws {
     let committed = try DocumentLoader(source: source).load(file: file).document
     #expect(String(bytes: committed.bytes, encoding: .utf8)?.contains("X") == true)
     #expect(String(bytes: committed.bytes, encoding: .utf8)?.contains("Y") == false)
+    #expect(String(
+        bytes: try source(readme),
+        encoding: .utf8
+    ) == "README X\n")
 
     let commitSnapshotID = model.currentSnapshotID
     model.switchToWorktree()
@@ -642,6 +649,58 @@ func commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() async throws {
     #expect(model.documentSource == nil)
     let live = try DocumentLoader().load(file: file).document
     #expect(String(bytes: live.bytes, encoding: .utf8)?.contains("Y") == true)
+    #expect(String(
+        data: try Data(contentsOf: readme),
+        encoding: .utf8
+    ) == "README Y\n")
+}
+
+@MainActor
+@Test
+func passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() async throws {
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn main() {}\n",
+        "README.md": "# Read me\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let initial = try ProjectIndexer().index(root: root)
+    let model = AppModel(indexService: ControlledSnapshotIndexService(
+        initialSession: initial,
+        snapshots: [:]
+    ))
+
+    try model.openProject(root: root, language: .rust)
+    #expect(await testWaitUntil("model.snapshotPhase == .fullReady") {
+        model.snapshotPhase == .fullReady
+    })
+    let readme = root.appendingPathComponent("README.md")
+    let main = root.appendingPathComponent("main.rs")
+    model.navigate(to: readme)
+    let readmeRecord = JumpRecord(
+        path: "README.md",
+        contentID: nil,
+        byteOffset: 0,
+        line: 0,
+        column: 0,
+        symbolAnchor: nil,
+        snapshotID: model.currentSnapshotID
+    )
+    model.navigate(to: main, leaving: readmeRecord)
+    let mainRecord = JumpRecord(
+        path: "main.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: nil,
+        snapshotID: model.currentSnapshotID
+    )
+
+    model.goBack(from: mainRecord)
+
+    #expect(model.selectedFile?.standardizedFileURL == readme.standardizedFileURL)
+    #expect(model.selectedByteOffset == nil)
+    #expect(model.tabStrip.activeDocument == nil)
 }
 
 @MainActor

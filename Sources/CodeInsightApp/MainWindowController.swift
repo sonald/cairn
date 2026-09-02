@@ -392,6 +392,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             captureActiveTabState()
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
         }
+        readerController.onOpenPreviewLink = { [weak self] url in
+            self?.openPreviewLink(url)
+        }
         readerController.onReadingSetScrollChange = { [weak self] offset in
             guard let self else { return }
             model.tabStrip.updateActiveReadingSetScroll(offset)
@@ -758,6 +761,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     func selfTestNavigate(to file: URL, byteOffset: UInt32) {
         navigate(to: file, byteOffset: byteOffset)
+    }
+    @discardableResult
+    func selfTestOpenPreviewLink(_ url: URL) -> Bool {
+        openPreviewLink(url)
+    }
+    @discardableResult
+    func selfTestActivatePreviewLink(at index: Int) -> Bool {
+        readerController.selfTestActivatePreviewLink(at: index)
     }
     func selfTestEmitOutlineFollow(at byteOffset: UInt32) {
         readerController.selfTestEmitOutlineFollow(at: byteOffset)
@@ -2789,6 +2800,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return Self.projectRelativePath(for: file, under: root)
     }
 
+    @discardableResult
+    private func openPreviewLink(_ url: URL) -> Bool {
+        let file = url.standardizedFileURL
+        guard let path = model.fileTree?.selectionPath(for: file),
+              let node = path.last,
+              !node.isDirectory
+        else { return false }
+        navigate(to: file)
+        return true
+    }
+
     private func readerSource(
         for file: URL?
     ) -> DocumentLoader.ContentSource? {
@@ -3774,6 +3796,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onFocusNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
+    var onOpenPreviewLink: ((URL) -> Void)?
     var onReadingSetScrollChange: ((Double) -> Void)?
     var onCopyPathLine: ((URL, UInt32) -> Void)?
     var onRevealInFinder: ((URL) -> Void)?
@@ -4344,7 +4367,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         clickedOnLink link: Any,
         at charIndex: Int
     ) -> Bool {
-        true
+        guard let file = displayedFile,
+              let resolved = resolvedPreviewLink(link, relativeTo: file)
+        else { return true }
+        onOpenPreviewLink?(resolved)
+        return true
     }
 
     func webView(
@@ -4352,22 +4379,58 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         decidePolicyFor navigationAction: WKNavigationAction,
         decisionHandler: @escaping @MainActor @Sendable (WKNavigationActionPolicy) -> Void
     ) {
-        decisionHandler(htmlNavigationPolicy(
-            for: navigationAction.navigationType,
+        let result = htmlNavigationDecision(
+            for: navigationAction.request.url,
+            navigationAction.navigationType,
             isMainFrame: navigationAction.targetFrame?.isMainFrame != false
-        ))
+        )
+        decisionHandler(result.policy)
+        if let callback = result.callback {
+            onOpenPreviewLink?(callback)
+        }
+    }
+
+    private func htmlNavigationDecision(
+        for url: URL?,
+        _ navigationType: WKNavigationType,
+        isMainFrame: Bool
+    ) -> (policy: WKNavigationActionPolicy, callback: URL?) {
+        guard isMainFrame else { return (.cancel, nil) }
+        if navigationType == .other,
+           htmlInitialNavigationAllowed
+        {
+            htmlInitialNavigationAllowed = false
+            return (.allow, nil)
+        }
+        guard navigationType == .linkActivated,
+              let file = displayedFile,
+              let url,
+              let resolved = resolvedPreviewLink(url, relativeTo: file)
+        else { return (.cancel, nil) }
+        let components = URLComponents(
+            url: url,
+            resolvingAgainstBaseURL: true
+        )
+        let hasFragment = components?.fragment != nil
+        let hasQuery = components?.query != nil
+        if hasFragment,
+           !hasQuery,
+           resolved.standardizedFileURL == file.standardizedFileURL
+        {
+            return (.allow, nil)
+        }
+        return (.cancel, resolved)
     }
 
     private func htmlNavigationPolicy(
         for navigationType: WKNavigationType,
         isMainFrame: Bool
     ) -> WKNavigationActionPolicy {
-        guard navigationType == .other,
-              isMainFrame,
-              htmlInitialNavigationAllowed
-        else { return .cancel }
-        htmlInitialNavigationAllowed = false
-        return .allow
+        htmlNavigationDecision(
+            for: nil,
+            navigationType,
+            isMainFrame: isMainFrame
+        ).policy
     }
 
     func selfTestHTMLNavigationPolicy(
@@ -4376,6 +4439,74 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     ) -> WKNavigationActionPolicy {
         if initialLoad { htmlInitialNavigationAllowed = true }
         return htmlNavigationPolicy(for: navigationType, isMainFrame: true)
+    }
+
+    func selfTestHTMLNavigationPolicy(
+        for url: URL,
+        navigationType: WKNavigationType,
+        initialLoad: Bool = false
+    ) -> WKNavigationActionPolicy {
+        if initialLoad { htmlInitialNavigationAllowed = true }
+        let result = htmlNavigationDecision(
+            for: url,
+            navigationType,
+            isMainFrame: true
+        )
+        if let callback = result.callback {
+            onOpenPreviewLink?(callback)
+        }
+        return result.policy
+    }
+
+    func selfTestActivatePreviewLink(at index: Int) -> Bool {
+        guard index >= 0,
+              let previewTextView = (previewView as? NSScrollView)?
+                  .documentView as? NSTextView,
+              let storage = previewTextView.textStorage
+        else { return false }
+        var ordinal = 0
+        var value: Any?
+        storage.enumerateAttribute(
+            .link,
+            in: NSRange(location: 0, length: storage.length)
+        ) { attribute, _, stop in
+            guard attribute != nil else { return }
+            if ordinal == index {
+                value = attribute
+                stop.pointee = true
+            }
+            ordinal += 1
+        }
+        guard let value else { return false }
+        return textView(
+            previewTextView,
+            clickedOnLink: value,
+            at: 0
+        )
+    }
+
+    private func resolvedPreviewLink(_ value: Any, relativeTo file: URL) -> URL? {
+        let resolved: URL?
+        if let url = value as? URL {
+            resolved = URL(string: url.absoluteString, relativeTo: file)?.absoluteURL
+        } else if let string = value as? String {
+            resolved = URL(string: string, relativeTo: file)?.absoluteURL
+        } else {
+            resolved = nil
+        }
+        guard let resolved else { return nil }
+        guard resolved.isFileURL,
+              resolved.host == nil
+                || resolved.host?.isEmpty == true
+                || resolved.host?.caseInsensitiveCompare("localhost") == .orderedSame
+        else { return nil }
+        var components = URLComponents(
+            url: resolved,
+            resolvingAgainstBaseURL: true
+        )
+        components?.query = nil
+        components?.fragment = nil
+        return components?.url?.standardizedFileURL
     }
 
     private func applyReaderHeaderTheme(_ settings: ReaderSettings) {
@@ -5373,7 +5504,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             guard let markdown = try? AttributedString(
                 markdown: string,
                 options: .init(),
-                baseURL: file.deletingLastPathComponent()
+                baseURL: file
             ) else {
                 displayPreviewError("Unsupported binary")
                 return
@@ -5475,12 +5606,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewHTMLDataStorePersistent = false
         previewHTMLContentSecurityPolicy = Self.previewContentSecurityPolicy
         previewHTMLSource = html
-        previewHTMLBaseURL = file.deletingLastPathComponent()
+        previewHTMLBaseURL = file
         installPreview(webView)
         htmlInitialNavigationAllowed = true
         webView.loadHTMLString(
             htmlPreviewMarkup(html),
-            baseURL: file.deletingLastPathComponent()
+            baseURL: file
         )
     }
 

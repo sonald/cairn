@@ -4,6 +4,7 @@ import CodeInsightReaderCore
 import Foundation
 import PDFKit
 import Testing
+import WebKit
 @testable import CodeInsightApp
 
 @MainActor
@@ -122,6 +123,91 @@ func nonSourcePreviewHTMLUsesLockedDownNavigationAndCSP() throws {
     #expect(controller.selfTestHTMLNavigationPolicy(for: .linkActivated) == .cancel)
     #expect(controller.selfTestHTMLNavigationPolicy(for: .formSubmitted) == .cancel)
     #expect(controller.selfTestHTMLNavigationPolicy(for: .reload) == .cancel)
+}
+
+@MainActor
+@Test
+func markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let markdown = try nonSourcePreviewFile(
+        root: root,
+        name: "README.md",
+        bytes: Array("[guide](docs/guide.md#install)\n".utf8)
+    )
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    var opened: [URL] = []
+    controller.onOpenPreviewLink = { opened.append($0) }
+
+    controller.display(markdown, languageMode: nil)
+
+    #expect(controller.selfTestActivatePreviewLink(at: 0))
+    #expect(opened == [
+        root.appendingPathComponent("docs/guide.md").standardizedFileURL
+    ])
+}
+
+@MainActor
+@Test
+func htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let page = try nonSourcePreviewFile(
+        root: root,
+        name: "page.html",
+        bytes: Array("<html><body>page</body></html>".utf8)
+    )
+    let guide = try nonSourcePreviewFile(
+        root: root,
+        name: "docs/guide.md",
+        bytes: Array("guide".utf8)
+    )
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    var opened: [URL] = []
+    controller.onOpenPreviewLink = { opened.append($0) }
+    controller.display(page, languageMode: nil)
+
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: page,
+        navigationType: .other,
+        initialLoad: true
+    ) == .allow)
+    let sameFileFragment = URL(string: "#section", relativeTo: page)!.absoluteURL
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: sameFileFragment,
+        navigationType: .linkActivated
+    ) == .allow)
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: guide,
+        navigationType: .linkActivated
+    ) == .cancel)
+    #expect(opened == [guide.standardizedFileURL])
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: URL(string: "https://example.com")!,
+        navigationType: .linkActivated
+    ) == .cancel)
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: URL(string: "mailto:team@example.com")!,
+        navigationType: .linkActivated
+    ) == .cancel)
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: URL(string: "javascript:alert(1)")!,
+        navigationType: .linkActivated
+    ) == .cancel)
+    #expect(opened == [guide.standardizedFileURL])
+    let queriedFragment = URL(string: "page.html?reload=1#section")!
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: queriedFragment,
+        navigationType: .linkActivated
+    ) == .cancel)
+    #expect(controller.selfTestHTMLNavigationPolicy(
+        for: page,
+        navigationType: .formSubmitted
+    ) == .cancel)
 }
 
 @MainActor
