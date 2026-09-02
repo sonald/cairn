@@ -132,6 +132,7 @@ jobs:
             .build/product-gates.log
             .build/mixed-corpus.log
             .build/ci-swift-test.log
+            .build/ci-swift-test-isolated.log
             .build/self-test-run-*
             .build/self-test-run-*/mixed.stdout
             .build/self-test-run-*/mixed.stderr

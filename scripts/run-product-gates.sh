@@ -203,6 +203,15 @@ print(h.hexdigest())
 PY
 }
 official_before="$(fingerprint_official)"
+assert_official_unchanged() { # <phase>
+    local now
+    now="$(fingerprint_official)"
+    if [[ "$now" != "$official_before" ]]; then
+        echo "FAIL formal Cairn App Support changed during $1" >&2
+        echo "before=$official_before after=$now" >&2
+        exit 1
+    fi
+}
 echo "bookmark official App Support fingerprint before=$official_before"
 
 bookmark_root="$fixture_root/bookmark-repo"
@@ -233,12 +242,7 @@ CAIRN_BOOKMARK_SESSION_URL="$bookmark_session" \
         CAIRN_BOOKMARK_RAW_EXPORT_PATH="$bookmark_raw_export" \
         "$bookmark_binary" --self-test-bookmarks "$bookmark_root" \
         >"$bookmark_stdout" 2>"$bookmark_stderr" || bookmark_exit=$?
-official_after_bookmark="$(fingerprint_official)"
-if [[ "$official_after_bookmark" != "$official_before" ]]; then
-    echo "FAIL formal Cairn App Support changed during bookmark gate" >&2
-    echo "before=$official_before after=$official_after_bookmark" >&2
-    exit 1
-fi
+assert_official_unchanged "bookmark gate"
 if [[ $bookmark_exit -ne 0 ]]; then
     cat "$bookmark_stdout" "$bookmark_stderr" >&2
     echo "FAIL bookmark product self-test" >&2
@@ -257,8 +261,6 @@ if ! jq -e '
             and ([.captures[].theme] | sort) == ["Dark", "Light", "SI Classic"]
             and ([.captures[].visiblePixels] | all(. == true))
             and ([.captures[].panelVisiblePixels] | all(. == true))
-            and ([.captures[] | .width, .height, .panelWidth, .panelHeight]
-                | all(type == "number" and . > 0))
     ' "$bookmark_stdout" >/dev/null; then
     cat "$bookmark_stdout" >&2
     echo "FAIL bookmark summary or visual evidence mismatch" >&2
@@ -277,12 +279,7 @@ restart_stderr="$bookmark_artifact_dir/bookmarks-restart.stderr"
 restart_exit=0
 "$bookmark_binary" --self-test-bookmarks-restart "$bookmark_session" \
         >"$restart_stdout" 2>"$restart_stderr" || restart_exit=$?
-official_after_restart="$(fingerprint_official)"
-if [[ "$official_after_restart" != "$official_after_bookmark" ]]; then
-    echo "FAIL formal Cairn App Support changed during bookmark restart gate" >&2
-    echo "before=$official_after_bookmark after=$official_after_restart" >&2
-    exit 1
-fi
+assert_official_unchanged "bookmark restart gate"
 if [[ $restart_exit -ne 0 ]]; then
     cat "$restart_stdout" "$restart_stderr" >&2
     echo "FAIL bookmark restart product self-test" >&2

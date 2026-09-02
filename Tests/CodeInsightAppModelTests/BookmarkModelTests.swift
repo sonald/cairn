@@ -482,17 +482,10 @@ func persistedCrossSnapshotBookmarkAttemptSurvivesSingleLanguageOpen() async thr
         .appendingPathComponent("BookmarkModelTests-\(UUID().uuidString)")
         .appendingPathComponent("session.json")
     defer { try? FileManager.default.removeItem(at: sessionURL.deletingLastPathComponent()) }
-    let record = BookmarkRecord(
+    let record = bookmarkModelRecord(
         id: UUID(),
         projectPath: root.path,
-        snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
-        path: "src/main.rs",
-        contentID: ContentID.sha256(of: Data("fn saved() {}\n".utf8)),
         byteOffset: 3,
-        line: 1,
-        symbolName: nil,
-        symbolKind: nil,
-        note: "",
         updatedAt: .now
     )
     try BookmarkStore(
@@ -1042,20 +1035,24 @@ func appModelStrictSameSnapshotNonExactAndProjectMismatchOnlyPublishAttempts() a
 }
 
 private func bookmarkModelRecord(
-    snapshot: BookmarkRecord.SnapshotAnchor = .commit(fullOID: String(repeating: "a", count: 40))
+    id: UUID = UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
+    projectPath: String = "/tmp/project",
+    snapshot: BookmarkRecord.SnapshotAnchor = .commit(fullOID: String(repeating: "a", count: 40)),
+    byteOffset: UInt32 = 0,
+    updatedAt: Date = Date(timeIntervalSince1970: 1_786_270_000)
 ) -> BookmarkRecord {
     BookmarkRecord(
-        id: UUID(uuidString: "00000000-0000-4000-8000-000000000001")!,
-        projectPath: "/tmp/project",
+        id: id,
+        projectPath: projectPath,
         snapshot: snapshot,
         path: "src/main.rs",
         contentID: ContentID.sha256(of: Data("fn saved() {}\n".utf8)),
-        byteOffset: 0,
+        byteOffset: byteOffset,
         line: 1,
         symbolName: nil,
         symbolKind: nil,
         note: "",
-        updatedAt: Date(timeIntervalSince1970: 1_786_270_000)
+        updatedAt: updatedAt
     )
 }
 

@@ -3901,13 +3901,11 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             direction: .callers
         )
         let exactCallersRestored = waitUntil(timeout: 5, condition: {
-            let visibleTitles = windowController.selfTestVisibleRelationEdgeTitles(
-                inGroup: ""
-            )
-            return model.relationTree.root?.title == "answer"
+            model.relationTree.root?.title == "answer"
                 && model.relationTree.direction == .callers
                 && windowController.selfTestExactGroupRowCount > 0
-                && visibleTitles.contains("relation_root")
+                && windowController.selfTestVisibleRelationEdgeTitles(inGroup: "")
+                    .contains("relation_root")
         })
 
         let selectedFirstFollowCaller =
@@ -11342,17 +11340,11 @@ private func cachedPNG(of view: NSView?, path: String) -> (
 
 func bookmarkBitmapHasVisiblePixels(_ bitmap: NSBitmapImageRep) -> Bool {
     guard bitmap.pixelsWide > 0, bitmap.pixelsHigh > 0 else { return false }
-    let sampleWidth = min(bitmap.pixelsWide, 64)
-    let sampleHeight = min(bitmap.pixelsHigh, 64)
+    let stepX = max(1, bitmap.pixelsWide / 64)
+    let stepY = max(1, bitmap.pixelsHigh / 64)
     var reference: (red: CGFloat, green: CGFloat, blue: CGFloat, alpha: CGFloat)?
-    for row in 0..<sampleHeight {
-        let y = sampleHeight == 1
-            ? 0
-            : row * (bitmap.pixelsHigh - 1) / (sampleHeight - 1)
-        for column in 0..<sampleWidth {
-            let x = sampleWidth == 1
-                ? 0
-                : column * (bitmap.pixelsWide - 1) / (sampleWidth - 1)
+    for y in stride(from: 0, to: bitmap.pixelsHigh, by: stepY) {
+        for x in stride(from: 0, to: bitmap.pixelsWide, by: stepX) {
             guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
             else { continue }
             let sample = (
@@ -11364,10 +11356,9 @@ func bookmarkBitmapHasVisiblePixels(_ bitmap: NSBitmapImageRep) -> Bool {
             if let reference {
                 let delta = max(
                     abs(sample.red - reference.red),
-                    max(
-                        abs(sample.green - reference.green),
-                        max(abs(sample.blue - reference.blue), abs(sample.alpha - reference.alpha))
-                    )
+                    abs(sample.green - reference.green),
+                    abs(sample.blue - reference.blue),
+                    abs(sample.alpha - reference.alpha)
                 )
                 if delta >= 0.05 { return true }
             } else {
