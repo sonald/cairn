@@ -350,7 +350,8 @@ public struct FileTreeModel: Sendable {
 
     public init(root: URL, language: LanguageID) throws {
         self.root = root.standardizedFileURL
-        children = try Self.children(in: self.root, language: language)
+        _ = language
+        children = try Self.children(in: self.root)
         fileCount = Self.fileCount(in: children)
     }
 
@@ -364,9 +365,8 @@ public struct FileTreeModel: Sendable {
         language: LanguageID
     ) {
         self.root = root.standardizedFileURL
-        let paths = snapshotPaths
-            .filter { LanguageMode.classify(path: $0, language: language) != nil }
-            .map { $0.split(separator: "/").map(String.init) }
+        _ = language
+        let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
     }
@@ -377,11 +377,8 @@ public struct FileTreeModel: Sendable {
         languages: [LanguageID]
     ) {
         self.root = root.standardizedFileURL
-        let paths = snapshotPaths
-            .filter { path in
-                LanguageMode.classify(path: path, languages: languages) != nil
-            }
-            .map { $0.split(separator: "/").map(String.init) }
+        _ = languages
+        let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
     }
@@ -394,10 +391,7 @@ public struct FileTreeModel: Sendable {
         )
     }
 
-    private static func children(
-        in directory: URL,
-        language: LanguageID
-    ) throws -> [FileTreeNode] {
+    private static func children(in directory: URL) throws -> [FileTreeNode] {
         let keys: Set<URLResourceKey> = [
             .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
         ]
@@ -411,7 +405,7 @@ public struct FileTreeModel: Sendable {
                 guard values.isSymbolicLink != true,
                       !ProjectIndexer.skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                let children = try children(in: url, language: language)
+                let children = try children(in: url)
                 if !children.isEmpty {
                     nodes.append(FileTreeNode(
                         url: url,
@@ -420,7 +414,7 @@ public struct FileTreeModel: Sendable {
                     ))
                 }
             } else if values.isRegularFile == true,
-                      LanguageMode.classify(path: url.path, language: language) != nil
+                      url.lastPathComponent != ".DS_Store"
             {
                 nodes.append(FileTreeNode(url: url, isDirectory: false))
             }
@@ -1268,7 +1262,11 @@ public final class AppModel {
                 self.fileTree = fileTree
                 coverage = SnapshotCoverage(
                     filesIndexed: 0,
-                    filesTotal: fileTree.fileCount
+                    filesTotal: sourceFileCount(
+                        in: fileTree.children,
+                        under: fileTree.root,
+                        languages: [language]
+                    )
                 )
                 let session = try await indexService.index(
                     root: root,
@@ -1810,7 +1808,14 @@ public final class AppModel {
                       commit.commitOID.hex == fullOID
                 else { return "Bookmark snapshot capture failed." }
             }
-            let files = snapshot.listFiles()
+            let files = snapshot.listFiles().filter {
+                switch $0.fileMode {
+                case .symlink, .gitlink:
+                    false
+                case .regular, .lfsPointer:
+                    true
+                }
+            }
             guard let entry = files.first(where: { $0.path == record.path }) else {
                 return BookmarkStatus.fileAbsent.attemptMessage
             }
@@ -2563,10 +2568,15 @@ public final class AppModel {
             root: root,
             languages: languages
         ) else { return }
-        let files = snapshot.listFiles()
-        let paths = files.map(\.path).filter {
-            LanguageMode.classify(path: $0, languages: languages) != nil
+        let files = snapshot.listFiles().filter {
+            switch $0.fileMode {
+            case .symlink, .gitlink:
+                false
+            case .regular, .lfsPointer:
+                true
+            }
         }
+        let paths = files.map(\.path)
         let selectedPath = selectedFile.flatMap {
             Self.relativePath(of: $0, under: root)
         }
@@ -2606,7 +2616,9 @@ public final class AppModel {
         snapshotPhase = .firstPaint
         coverage = SnapshotCoverage(
             filesIndexed: 0,
-            filesTotal: paths.count
+            filesTotal: paths.filter {
+                LanguageMode.classify(path: $0, languages: languages) != nil
+            }.count
         )
         navigationGeneration &+= 1
         if let pending = pendingReplay {
@@ -3147,6 +3159,30 @@ public final class AppModel {
             parts.append("restored at file head")
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+private func sourceFileCount(
+    in nodes: [FileTreeNode],
+    under root: URL,
+    languages: [LanguageID]
+) -> Int {
+    nodes.reduce(0) { count, node in
+        if node.isDirectory {
+            return count + sourceFileCount(
+                in: node.children,
+                under: root,
+                languages: languages
+            )
+        }
+        let rootComponents = root.standardizedFileURL.pathComponents
+        let fileComponents = node.url.standardizedFileURL.pathComponents
+        guard fileComponents.starts(with: rootComponents),
+              fileComponents.count > rootComponents.count
+        else { return count }
+        let path = fileComponents.dropFirst(rootComponents.count)
+            .joined(separator: "/")
+        return count + (LanguageMode.classify(path: path, languages: languages) != nil ? 1 : 0)
     }
 }
 

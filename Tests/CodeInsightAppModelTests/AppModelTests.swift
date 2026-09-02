@@ -621,17 +621,27 @@ func navigationPushesWhileProjectIsIndexing() {
 }
 
 @Test
-func fileTreeUsesTheSharedRustClassifierAcrossBothSources() throws {
+func fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() throws {
     let root = try temporaryProject([
         "z.rs": "",
         "a.rs": "",
-        "README.md": "ignored",
+        "README.md": "markdown",
+        "guide.html": "html",
+        "image.png": "png",
+        "paper.pdf": "pdf",
+        "notes.txt": "text",
+        "payload.bin": "binary",
         "src/z.rs": "",
         "src/a.rs": "",
-        "empty/note.txt": "ignored",
-        "upper.RS": "ignored",
+        "empty/note.txt": "text",
+        "upper.RS": "case",
+        ".DS_Store": "metadata",
     ])
     defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createSymbolicLink(
+        atPath: root.appendingPathComponent("linked.md").path,
+        withDestinationPath: "README.md"
+    )
     for skipped in ProjectIndexer.skippedDirectories {
         try write("", to: root.appendingPathComponent(skipped).appendingPathComponent("skip.rs"))
     }
@@ -639,39 +649,64 @@ func fileTreeUsesTheSharedRustClassifierAcrossBothSources() throws {
     let compatibility = try FileTreeModel(root: root)
     let tree = try FileTreeModel(root: root, language: .rust)
 
-    #expect(tree.children.map(\.name) == ["src", "a.rs", "z.rs"])
-    #expect(tree.children[0].children.map(\.name) == ["a.rs", "z.rs"])
-    #expect(tree.fileCount == 4)
+    func relativeFiles(in nodes: [FileTreeNode]) -> Set<String> {
+        Set(nodes.flatMap { node in
+            if node.isDirectory {
+                return relativeFiles(in: node.children).map {
+                    "\(node.name)/\($0)"
+                }
+            }
+            return [node.name]
+        })
+    }
+
+    let expected = Set([
+        "README.md", "guide.html", "image.png", "paper.pdf", "notes.txt",
+        "payload.bin", "upper.RS", "z.rs", "a.rs", "empty/note.txt",
+        "src/a.rs", "src/z.rs",
+    ])
+    #expect(relativeFiles(in: tree.children) == expected)
+    #expect(tree.fileCount == expected.count)
+    #expect(tree.children.first { $0.name == "src" }?.children.map(\.name)
+        == ["a.rs", "z.rs"])
     #expect(
         tree.selectionPath(for: root.appendingPathComponent("src/a.rs"))?
             .map(\.name) == ["src", "a.rs"]
     )
     #expect(tree.selectionPath(for: root.appendingPathComponent("missing.rs")) == nil)
+    #expect(tree.selectionPath(for: root.appendingPathComponent("linked.md")) == nil)
+    #expect(tree.selectionPath(for: root.appendingPathComponent(".DS_Store")) == nil)
     #expect(tree.selectionPath(for: nil) == nil)
     #expect(tree.children.map(\.name) == compatibility.children.map(\.name))
     #expect(tree.fileCount == compatibility.fileCount)
 
     let snapshot = FileTreeModel(
         root: root,
-        snapshotPaths: ["src/a.rs", "src/ignored.py", "README.md"],
+        snapshotPaths: ["src/a.rs", "README.md"],
         language: .rust
     )
-    #expect(snapshot.children.map(\.name) == ["src"])
-    #expect(snapshot.children[0].children.map(\.name) == ["a.rs"])
-    #expect(snapshot.fileCount == 1)
+    #expect(snapshot.children.map(\.name) == ["src", "README.md"])
+    #expect(snapshot.children.first { $0.name == "src" }?.children.map(\.name)
+        == ["a.rs"])
+    #expect(snapshot.fileCount == 2)
 }
 
 @MainActor
 @Test
 func projectOpenPublishesFileTreeAsynchronously() async throws {
-    let root = try temporaryProject(["main.rs": "fn main() {}"])
+    let root = try temporaryProject([
+        "main.rs": "fn main() {}",
+        "README.md": "read me",
+        "payload.bin": "binary",
+    ])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(indexService: FailingIndexService())
 
     model.openProject(root: root)
 
     #expect(model.fileTree == nil)
-    #expect(await testWaitUntil("model.fileTree?.fileCount == 1") { model.fileTree?.fileCount == 1 })
+    #expect(await testWaitUntil("model.fileTree?.fileCount == 3") { model.fileTree?.fileCount == 3 })
+    #expect(model.coverage.filesTotal == 1)
 }
 
 @MainActor
@@ -723,7 +758,7 @@ func realIndexServiceOpensTypeScriptProjectAndPublishesTypeScriptSession() async
         model.snapshotPhase == .fullReady
     })
     #expect(model.projectLanguage == .typescript)
-    #expect(model.fileTree?.fileCount == 2)
+    #expect(model.fileTree?.fileCount == 4)
     #expect(model.fileTree?.selectionPath(
         for: root.appendingPathComponent("src/a.ts")
     )?.map(\.name) == ["src", "a.ts"])
@@ -755,8 +790,8 @@ func realIndexServiceOpensPythonProjectAndPublishesPythonSession() async throws 
         model.snapshotPhase == .fullReady
     })
     #expect(model.projectLanguage == .python)
-    #expect(model.fileTree?.children.map(\.name) == ["main.py"])
-    #expect(model.fileTree?.fileCount == 1)
+    #expect(model.fileTree?.children.map(\.name) == ["ignored.rs", "main.py"])
+    #expect(model.fileTree?.fileCount == 2)
     guard case let .ready(session, _) = model.projectState else {
         Issue.record("expected ready Python session")
         return
@@ -985,7 +1020,7 @@ func mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() async thr
     #expect(model.querySessions.map { $0.0.analysisProfile.language }
         == [.rust, .python, .typescript])
     #expect(Set(model.querySessions.map { $0.0.snapshotID }).count == 1)
-    #expect(model.fileTree?.fileCount == 4)
+    #expect(model.fileTree?.fileCount == 7)
     if case .failed = model.projectState {
         Issue.record("mixed open failed unexpectedly")
     }
@@ -1329,10 +1364,13 @@ func projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() asy
     )
     let paths = snapshot.listFiles().map(\.path)
     #expect(Set(paths) == Set([
+        "crates/r/Cargo.toml",
         "crates/r/src/lib.rs",
         "pkg.py",
+        "pyproject.toml",
         "tools/ts/src/a.ts",
         "tools/ts/src/b.tsx",
+        "tools/ts/tsconfig.json",
     ]))
 
     let prepared = try await service.prepareSnapshots(

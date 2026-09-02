@@ -274,7 +274,6 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     ]
 
     private let files: [String: CapturedFile]
-    private let configurationFiles: [String: CapturedFile]
 
     public let snapshotID: SnapshotID
     public let objectFormat: GitObjectFormat
@@ -310,10 +309,7 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
         let root = repositoryInfo.0
 
         var captured: [String: CapturedFile] = [:]
-        for file in try Self.sourceFiles(
-            under: root,
-            languages: selectedLanguages
-        ) {
+        for file in try Self.regularFiles(under: root) {
             let bytes = [UInt8](try Data(contentsOf: file, options: .mappedIfSafe))
             let relative = Self.relativePath(of: file, under: root)
             captured[relative] = CapturedFile(
@@ -323,25 +319,15 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
             )
         }
 
-        var configurationFiles: [String: CapturedFile] = [:]
-        for file in (try? Self.configurationFiles(under: root,
-            selected: selectedLanguages)) ?? [] {
-            guard let data = try? Data(contentsOf: file, options: .mappedIfSafe)
-            else { continue }
-            let bytes = [UInt8](data)
-            configurationFiles[Self.relativePath(of: file, under: root)] = CapturedFile(
-                bytes: bytes,
-                contentID: ContentID.sha256(of: bytes),
-                fileMode: .regular
-            )
-        }
-
         snapshotID = SnapshotID(rawValue: UUID())
         objectFormat = repositoryInfo.1
         projectRootName = root.lastPathComponent
         files = captured
-        self.configurationFiles = configurationFiles
-        configurationPaths = configurationFiles.keys.sorted()
+        configurationPaths = captured.keys.filter { entry in
+            configurationLanguage(
+                for: URL(fileURLWithPath: entry).lastPathComponent
+            ).map(selectedLanguages.contains) == true
+        }.sorted()
     }
 
     public func listFiles() -> [(
@@ -359,16 +345,13 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
     }
 
     public func readBytes(path: String) throws -> [UInt8] {
-        guard let file = files[path] ?? configurationFiles[path] else {
+        guard let file = files[path] else {
             throw GitError.missingPath(path)
         }
         return file.bytes
     }
 
-    private static func sourceFiles(
-        under root: URL,
-        languages: [LanguageID]
-    ) throws -> [URL] {
+    private static func regularFiles(under root: URL) throws -> [URL] {
         var result: [URL] = []
         for url in try FileManager.default.contentsOfDirectory(
             at: root,
@@ -384,40 +367,10 @@ public final class WorktreeSnapshot: Snapshot, Sendable {
                 guard values.isSymbolicLink != true,
                       !skippedDirectories.contains(url.lastPathComponent)
                 else { continue }
-                result += try sourceFiles(under: url, languages: languages)
+                result += try regularFiles(under: url)
             } else if values.isSymbolicLink != true,
                       values.isRegularFile == true,
-                      LanguageMode.classify(path: url.path, languages: languages) != nil
-            {
-                result.append(url)
-            }
-        }
-        return result.sorted { $0.path < $1.path }
-    }
-
-    private static func configurationFiles(
-        under root: URL,
-        selected: [LanguageID]
-    ) throws -> [URL] {
-        var result: [URL] = []
-        for url in try FileManager.default.contentsOfDirectory(
-            at: root,
-            includingPropertiesForKeys: [
-                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ]
-        ) {
-            let values = try url.resourceValues(forKeys: [
-                .isDirectoryKey, .isRegularFileKey, .isSymbolicLinkKey,
-            ])
-            if values.isDirectory == true {
-                guard values.isSymbolicLink != true,
-                      !skippedDirectories.contains(url.lastPathComponent)
-                else { continue }
-                result += try configurationFiles(under: url, selected: selected)
-            } else if values.isSymbolicLink != true,
-                      values.isRegularFile == true,
-                      configurationLanguage(for: url.lastPathComponent)
-                        .map(selected.contains) == true
+                      url.lastPathComponent != ".DS_Store"
             {
                 result.append(url)
             }

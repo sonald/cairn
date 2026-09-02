@@ -214,8 +214,55 @@ func worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() throws {
     try Data("[package]\nname = \"changed\"\n".utf8).write(to: cargo)
     #expect(try snapshot.readBytes(path: "sample.rs") == captured)
     #expect(try snapshot.readBytes(path: "Cargo.toml") == capturedCargo)
-    #expect(!snapshot.listFiles().contains { $0.path == "Cargo.toml" })
+    #expect(snapshot.listFiles().contains { $0.path == "Cargo.toml" })
     #expect(snapshot.projectRootName == fixture.root.lastPathComponent)
+}
+
+@Test
+func worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() throws {
+    let fixture = try GitFixture()
+    defer { fixture.remove() }
+    let files: [String: [UInt8]] = [
+        "README.md": Array("# read me\n".utf8),
+        "docs/guide.html": Array("<h1>guide</h1>".utf8),
+        "image.png": [0x89, 0x50, 0x4e, 0x47],
+        "paper.pdf": [0x25, 0x50, 0x44, 0x46],
+        "notes.txt": Array("plain text\n".utf8),
+        "payload.bin": [0x00, 0xff, 0x01],
+        "pointer.bin": Array("version https://git-lfs.github.com/spec/v1\n".utf8),
+        "src/main.rs": Array("fn main() {}\n".utf8),
+        "Cargo.toml": Array("[package]\nname = \"fixture\"\n".utf8),
+        ".DS_Store": Array("metadata".utf8),
+        "node_modules/skip.md": Array("skip".utf8),
+    ]
+    for (path, bytes) in files {
+        let url = fixture.root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(bytes).write(to: url)
+    }
+    try FileManager.default.createSymbolicLink(
+        atPath: fixture.root.appendingPathComponent("linked.md").path,
+        withDestinationPath: "README.md"
+    )
+
+    let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root)
+    let paths = Set(snapshot.listFiles().map(\.path))
+    let expected = Set([
+        "README.md", "docs/guide.html", "image.png", "paper.pdf", "notes.txt",
+        "payload.bin", "pointer.bin", "src/main.rs", "Cargo.toml",
+    ])
+    #expect(paths == expected)
+    #expect(snapshot.configurationPaths == ["Cargo.toml"])
+    #expect(try snapshot.readBytes(path: "payload.bin") == [0x00, 0xff, 0x01])
+    #expect(snapshot.listFiles().first { $0.path == "pointer.bin" }?.fileMode == .lfsPointer)
+
+    try Data("changed\n".utf8).write(
+        to: fixture.root.appendingPathComponent("README.md")
+    )
+    #expect(try snapshot.readBytes(path: "README.md") == Array("# read me\n".utf8))
 }
 
 @Test
@@ -246,7 +293,9 @@ func explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() throws {
     let compatibilityFiles = compatibility.listFiles()
     let explicitFiles = explicit.listFiles()
 
-    #expect(compatibilityFiles.map(\.path) == ["src/lib.rs"])
+    #expect(compatibilityFiles.map(\.path) == [
+        "Cargo.lock", "Cargo.toml", "src/ignored.py", "src/ignored.ts", "src/lib.rs",
+    ])
     #expect(explicitFiles.map(\.path) == compatibilityFiles.map(\.path))
     for (left, right) in zip(compatibilityFiles, explicitFiles) {
         #expect(left.contentID == right.contentID)
@@ -320,13 +369,14 @@ func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws
         languages: [.rust, .python, .typescript]
     )
 
-    #expect(snapshot.listFiles().map(\.path) == [
-        "src/a.ts",
-        "src/b.tsx",
-        "src/lib.py",
-        "src/lib.rs",
-        "src/main.rs",
-    ])
+    #expect(Set(snapshot.listFiles().map(\.path)) == Set([
+        "Cargo.lock", "Cargo.toml", "nested/Cargo.lock", "nested/Cargo.toml",
+        "nested/bun.lockb", "nested/package.json", "nested/pyproject.toml",
+        "nested/tsconfig.json", "nested/uv.lock", "package.json", "pyproject.toml",
+        "src/a.ts", "src/b.tsx", "src/ignored.cts", "src/ignored.d.ts", "src/ignored.js",
+        "src/ignored.mts", "src/ignored.pyi", "src/ignored.rs.old", "src/lib.py",
+        "src/lib.rs", "src/main.rs", "tsconfig.json", "uv.lock",
+    ]))
     #expect(Set(snapshot.configurationPaths) == Set([
         "Cargo.toml",
         "Cargo.lock",
@@ -343,13 +393,8 @@ func unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() throws
         "nested/bun.lockb",
     ]))
     #expect(snapshot.configurationPaths.contains("src/config-link/tsconfig.json") == false)
-    #expect(snapshot.listFiles().contains {
-        $0.path.contains("Cargo")
-            || $0.path.contains("pyproject")
-            || $0.path.contains("tsconfig")
-            || $0.path.hasSuffix(".lock")
-            || $0.path.hasSuffix("package.json")
-    } == false)
+    #expect(snapshot.listFiles().contains { $0.path == "Cargo.toml" })
+    #expect(snapshot.listFiles().contains { $0.path == "package.json" })
     #expect(try Data(contentsOf: fixture.root.appendingPathComponent("Cargo.toml"))
         == projectBytes)
     #expect(try Data(contentsOf: fixture.root.appendingPathComponent("node_modules/pkg.ts"))
@@ -505,7 +550,7 @@ func unsupportedWorktreeLanguagesFailBeforeOpeningARepository() {
 }
 
 @Test
-func pythonWorktreeSnapshotCapturesOnlyPythonFilesAndRootConfigs() throws {
+func pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
     let files: [String: String] = [
@@ -537,7 +582,11 @@ func pythonWorktreeSnapshotCapturesOnlyPythonFilesAndRootConfigs() throws {
         language: .python
     )
 
-    #expect(snapshot.listFiles().map(\.path) == ["main.py", "src/service.py"])
+    #expect(Set(snapshot.listFiles().map(\.path)) == Set([
+        "main.py", "pyrightconfig.json", "pyproject.toml", "src/ignored.js",
+        "src/ignored.rs", "src/ignored.ts", "src/service.py", "uv.lock",
+        "nested/pyproject.toml",
+    ]))
     #expect(try snapshot.readBytes(path: "pyrightconfig.json")
         == Array(files["pyrightconfig.json"]!.utf8))
     #expect(try snapshot.readBytes(path: "pyproject.toml")
@@ -630,7 +679,7 @@ func trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() throws {
 }
 
 @Test
-func typescriptWorktreeSnapshotCapturesOnlyClassifierApprovedTsAndRootConfigs() throws {
+func typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() throws {
     let fixture = try GitFixture()
     defer { fixture.remove() }
     let files: [String: String] = [
@@ -662,7 +711,11 @@ func typescriptWorktreeSnapshotCapturesOnlyClassifierApprovedTsAndRootConfigs() 
 
     let snapshot = try WorktreeSnapshot(repositoryURL: fixture.root, language: .typescript)
 
-    #expect(snapshot.listFiles().map(\.path) == ["src/a.ts", "src/b.tsx"])
+    #expect(Set(snapshot.listFiles().map(\.path)) == Set([
+        ".gitignore", "nested/tsconfig.json", "package.json", "src/a.ts",
+        "src/b.tsx", "src/ignored.d.ts", "src/ignored.js",
+        "src/ignored.rs", "tsconfig.json", "bun.lockb",
+    ]))
     #expect(try snapshot.readBytes(path: "tsconfig.json") == Array(files["tsconfig.json"]!.utf8))
     #expect(try snapshot.readBytes(path: "package.json") == Array(files["package.json"]!.utf8))
     #expect(try snapshot.readBytes(path: "bun.lockb") == Array(files["bun.lockb"]!.utf8))
