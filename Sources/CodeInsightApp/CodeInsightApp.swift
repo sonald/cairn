@@ -8,7 +8,9 @@ import CodeInsightReaderCore
 import CodeInsightReaderUI
 import Darwin
 import os
+import PDFKit
 import SwiftUI
+import WebKit
 
 private enum SelfTestBudgets {
     static let coldStartMS = 500.0
@@ -170,6 +172,22 @@ private struct CodeInsightApplication {
                 "usage: codeinsight-app --self-test-mixed <mixed-git-repo>\n".utf8
             ))
             Darwin.exit(2)
+        }
+        let nonSourceSelfTestRoot = arguments.firstIndex(of: "--self-test-non-source")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+            .map { URL(fileURLWithPath: $0, isDirectory: true).standardizedFileURL }
+        if arguments.contains("--self-test-non-source") {
+            guard let nonSourceSelfTestRoot,
+                  let values = try? nonSourceSelfTestRoot.resourceValues(
+                      forKeys: [.isDirectoryKey]
+                  ),
+                  values.isDirectory == true
+            else {
+                FileHandle.standardError.write(Data(
+                    "usage: codeinsight-app --self-test-non-source <fixture-root>\n".utf8
+                ))
+                Darwin.exit(2)
+            }
         }
         let app = NSApplication.shared
         if let foldPerformance {
@@ -482,6 +500,8 @@ private struct CodeInsightApplication {
                 delegate.runBookmarkSelfTest(root: bookmarkSelfTestRoot)
             } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
+            } else if let nonSourceSelfTestRoot {
+                delegate.runNonSourceSelfTest(root: nonSourceSelfTestRoot)
             } else {
                 app.run()
             }
@@ -1068,6 +1088,556 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             indexStatusHiddenAfterFullReady: indexStatusHiddenAfterFullReady,
             layoutChecks: projectChecks,
             enlargedWindowGeometry: layout?.geometry ?? [:]
+        )
+    }
+
+    func runNonSourceSelfTest(root: URL) -> Never {
+        launch(offscreen: true)
+
+        func finish(
+            passed: Bool,
+            checks: [String: Bool],
+            projectReadyMS: Double,
+            treePaths: [String],
+            files: [[String: Any]],
+            captures: [[String: Any]],
+            contentSizes: [String: Any],
+            history: [String: Any],
+            error: String? = nil
+        ) -> Never {
+            var object: [String: Any] = [
+                "channel": "non-source",
+                "passed": passed,
+                "checks": checks,
+                "projectReadyMS": projectReadyMS,
+                "physicalFootprintBytes": Int(physicalFootprintBytes() ?? 0),
+                "treeCount": treePaths.count,
+                "treePaths": treePaths,
+                "files": files,
+                "captures": captures,
+                "contentSizes": contentSizes,
+                "history": history,
+            ]
+            if let error { object["error"] = error }
+            Self.writeJSON(object)
+            Self.exitSelfTest(channel: "non-source", status: passed ? 0 : 1)
+        }
+
+        guard let controller = windowController,
+              let window = controller.window
+        else {
+            finish(
+                passed: false,
+                checks: ["windowCreated": false],
+                projectReadyMS: 0,
+                treePaths: [],
+                files: [],
+                captures: [],
+                contentSizes: [:],
+                history: [:],
+                error: "window was not created"
+            )
+        }
+        controller.prepareTitledWindowForSelfTest()
+        window.setFrameOrigin(NSPoint(x: 80, y: 80))
+        controller.showWindow(nil)
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        window.contentView?.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let openedContentSize = window.contentView?.bounds.size ?? .zero
+        var contentSizes: [String: Any] = [
+            "beforePreview": [
+                "width": openedContentSize.width,
+                "height": openedContentSize.height,
+            ],
+        ]
+
+        func allViews(in view: NSView) -> [NSView] {
+            [view] + view.subviews.flatMap { allViews(in: $0) }
+        }
+        func visible(_ view: NSView?) -> Bool {
+            guard let view else { return false }
+            view.layoutSubtreeIfNeeded()
+            guard let contentView = window.contentView else { return false }
+            let frame = view.convert(view.bounds, to: contentView)
+            return view.window === window
+                && !view.isHiddenOrHasHiddenAncestor
+                && frame.width > 0
+                && frame.height > 0
+                && !frame.intersection(contentView.bounds).isEmpty
+        }
+        func labeled(_ label: String) -> NSView? {
+            guard let contentView = window.contentView else { return nil }
+            return allViews(in: contentView).first {
+                $0.accessibilityLabel() == label
+            }
+        }
+        func relativePath(_ file: URL) -> String? {
+            let file = file.standardizedFileURL
+            let root = root.standardizedFileURL
+            guard file.pathComponents.starts(with: root.pathComponents),
+                  file.pathComponents.count > root.pathComponents.count
+            else { return nil }
+            return file.pathComponents.dropFirst(root.pathComponents.count)
+                .joined(separator: "/")
+        }
+        func select(_ file: URL) -> Bool {
+            guard controller.selectFileInSidebar(file) else { return false }
+            return waitUntil(timeout: 5) {
+                controller.displayedReaderFile?.standardizedFileURL
+                    == file.standardizedFileURL
+            }
+        }
+        func sourceControlsAreLocked() -> Bool {
+            let height = controller.selfTestReadingHeightHeader
+            return !controller.canFindInFile
+                && !controller.canFocusCurrentScope
+                && !controller.canToggleFoldAtSelection
+                && !controller.readerHasReadingPosition
+                && height.hidden
+                && !height.enabled
+        }
+        func capture(_ name: String) -> [String: Any] {
+            let directory = ProcessInfo.processInfo.environment[
+                "CAIRN_NON_SOURCE_CAPTURE_DIR"
+            ] ?? "/tmp/cairn-non-source-captures"
+            try? FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true
+            )
+            let path = URL(fileURLWithPath: directory)
+                .appendingPathComponent("\(name).png").path
+            guard let result = cachedPNG(of: window.contentView, path: path)
+            else {
+                return [
+                    "name": name,
+                    "path": path,
+                    "width": 0,
+                    "height": 0,
+                    "visiblePixels": false,
+                ]
+            }
+            return [
+                "name": name,
+                "path": result.path,
+                "width": result.width,
+                "height": result.height,
+                "visiblePixels": result.visiblePixels,
+            ]
+        }
+        func writeSnapshotImage(
+            _ image: NSImage,
+            name: String,
+            captureMethod: String
+        ) -> [String: Any] {
+            let directory = ProcessInfo.processInfo.environment[
+                "CAIRN_NON_SOURCE_CAPTURE_DIR"
+            ] ?? "/tmp/cairn-non-source-captures"
+            try? FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true
+            )
+            let path = URL(fileURLWithPath: directory)
+                .appendingPathComponent("\(name).png").path
+            try? FileManager.default.removeItem(atPath: path)
+            guard let tiff = image.tiffRepresentation,
+                  let bitmap = NSBitmapImageRep(data: tiff),
+                  let data = bitmap.representation(using: .png, properties: [:]),
+                  (try? data.write(to: URL(fileURLWithPath: path))) != nil
+            else {
+                return [
+                    "name": name,
+                    "path": path,
+                    "width": 0,
+                    "height": 0,
+                    "visiblePixels": false,
+                    "captureMethod": captureMethod,
+                ]
+            }
+            return [
+                "name": name,
+                "path": path,
+                "width": bitmap.pixelsWide,
+                "height": bitmap.pixelsHigh,
+                "visiblePixels": bookmarkBitmapHasVisiblePixels(bitmap),
+                "captureMethod": captureMethod,
+            ]
+        }
+        func captureWebView(_ webView: WKWebView) -> [String: Any] {
+            let directory = ProcessInfo.processInfo.environment[
+                "CAIRN_NON_SOURCE_CAPTURE_DIR"
+            ] ?? "/tmp/cairn-non-source-captures"
+            try? FileManager.default.createDirectory(
+                atPath: directory,
+                withIntermediateDirectories: true
+            )
+            let path = URL(fileURLWithPath: directory)
+                .appendingPathComponent("dark-html.png").path
+            try? FileManager.default.removeItem(atPath: path)
+            var snapshot: NSImage?
+            var snapshotError: String?
+            var snapshotErrorDomain: String?
+            var snapshotErrorCode: Int?
+            var completed = false
+            webView.layoutSubtreeIfNeeded()
+            webView.displayIfNeeded()
+            for _ in 0..<4 { pumpRunLoop() }
+            let configuration = WKSnapshotConfiguration()
+            configuration.rect = webView.bounds
+            configuration.afterScreenUpdates = true
+            webView.takeSnapshot(with: configuration) { image, error in
+                snapshot = image
+                snapshotError = error?.localizedDescription
+                if let error {
+                    let error = error as NSError
+                    snapshotErrorDomain = error.domain
+                    snapshotErrorCode = error.code
+                }
+                completed = true
+            }
+            let deadline = Date(timeIntervalSinceNow: 5)
+            while !completed, Date() < deadline {
+                pumpRunLoop()
+            }
+            guard let snapshot else {
+                return [
+                    "name": "dark-html",
+                    "path": path,
+                    "width": 0,
+                    "height": 0,
+                    "visiblePixels": false,
+                    "error": snapshotError ?? "snapshot timed out",
+                    "errorDomain": snapshotErrorDomain ?? "",
+                    "errorCode": snapshotErrorCode ?? 0,
+                    "captureMethod": "none",
+                    "webViewInWindow": webView.window != nil,
+                    "webViewHidden": webView.isHiddenOrHasHiddenAncestor,
+                    "webViewFrameWidth": webView.frame.width,
+                    "webViewFrameHeight": webView.frame.height,
+                    "webViewURL": webView.url?.absoluteString ?? "",
+                    "webViewLoading": webView.isLoading,
+                    "webViewProgress": webView.estimatedProgress,
+                ]
+            }
+            return writeSnapshotImage(
+                snapshot,
+                name: "dark-html",
+                captureMethod: "WKWebView.takeSnapshot"
+            )
+        }
+        func previewContentSizeIsStable() -> Bool {
+            guard let contentView = window.contentView else { return false }
+            let size = contentView.bounds.size
+            return abs(size.width - openedContentSize.width) <= 1
+                && abs(size.height - openedContentSize.height) <= 1
+        }
+        func recordContentSize(_ name: String) {
+            let size = window.contentView?.bounds.size ?? .zero
+            contentSizes[name] = [
+                "width": size.width,
+                "height": size.height,
+                "stable": previewContentSizeIsStable(),
+            ]
+        }
+
+        let projectStartedAt = ContinuousClock.now
+        controller.openProject(root: root, language: .rust)
+        let projectIsReady: () -> Bool = {
+            if case .ready = self.model.projectState { return true }
+            return false
+        }
+        let ready = waitUntil(timeout: 30) {
+            model.snapshotPhase == .fullReady
+                && model.fileTree != nil
+                && projectIsReady()
+        }
+        let projectReadyMS = milliseconds(since: projectStartedAt)
+        guard ready, let tree = model.fileTree else {
+            finish(
+                passed: false,
+                checks: ["projectReady": false],
+                projectReadyMS: projectReadyMS,
+                treePaths: [],
+                files: [],
+                captures: [],
+                contentSizes: [:],
+                history: [:],
+                error: "project did not reach fullReady"
+            )
+        }
+        var treePaths: [String] = []
+        func collect(_ nodes: [FileTreeNode]) {
+            for node in nodes {
+                if node.isDirectory {
+                    collect(node.children)
+                } else if let path = relativePath(node.url) {
+                    treePaths.append(path)
+                }
+            }
+        }
+        collect(tree.children)
+        treePaths.sort()
+        let requiredPaths = [
+            "main.rs", "README.md", "page.html", "image.png",
+            "paper.pdf", "notes.txt",
+        ]
+        var checks: [String: Bool] = [
+            "projectReady": true,
+            "treeContainsRequiredFiles": requiredPaths.allSatisfy {
+                treePaths.contains($0)
+            },
+        ]
+        var files: [[String: Any]] = []
+        var captures: [[String: Any]] = []
+        var history: [String: Any] = [:]
+
+        let readme = root.appendingPathComponent("README.md")
+        let guide = root.appendingPathComponent("docs/guide.md")
+
+        let markdownSelected = select(readme)
+        let markdownState = controller.selfTestReaderPreviewKind == "Markdown"
+        let markdownView = labeled("Markdown preview")
+        recordContentSize("markdown")
+        checks["markdownPreview"] = markdownSelected
+            && markdownState
+            && visible(markdownView)
+            && controller.selfTestReaderPreviewText?.contains("guide") == true
+            && sourceControlsAreLocked()
+            && previewContentSizeIsStable()
+        files.append([
+            "path": "README.md",
+            "kind": controller.selfTestReaderPreviewKind ?? "",
+            "accessibilityLabel": markdownView?.accessibilityLabel() ?? "",
+            "frameWidth": markdownView?.frame.width ?? 0,
+            "frameHeight": markdownView?.frame.height ?? 0,
+            "visible": visible(markdownView),
+        ])
+        var light = ReaderSettings()
+        light.theme = .light
+        controller.applyReaderSettings(light)
+        pumpRunLoop()
+        let lightCapture = capture("light-markdown")
+        captures.append(lightCapture)
+        checks["captureLightMarkdown"] = lightCapture["visiblePixels"] as? Bool == true
+
+        let historyBeforeLink = model.navigationHistory.records.count
+        let linkActivated = controller.selfTestActivatePreviewLink(at: 0)
+        let guideSelected = waitUntil(timeout: 5) {
+            controller.displayedReaderFile?.standardizedFileURL
+                == guide.standardizedFileURL
+        }
+        history["beforeMarkdownLink"] = historyBeforeLink
+        history["afterMarkdownLink"] = model.navigationHistory.records.count
+        history["markdownLinkActivated"] = linkActivated
+        let historyAfterLink = model.navigationHistory.records.count
+        controller.goBack(nil)
+        let back = waitUntil(timeout: 5) {
+            controller.displayedReaderFile?.standardizedFileURL
+                == readme.standardizedFileURL
+        }
+        controller.goForward(nil)
+        let forward = waitUntil(timeout: 5) {
+            controller.displayedReaderFile?.standardizedFileURL
+                == guide.standardizedFileURL
+        }
+        history["afterBack"] = model.navigationHistory.records.count
+        history["afterForward"] = model.navigationHistory.records.count
+        history["trailEdges"] = model.readingTrail.edges.count
+        checks["markdownLinkHistory"] = linkActivated
+            && guideSelected
+            && back
+            && forward
+            && historyAfterLink == historyBeforeLink + 1
+            && model.readingTrail.edges.isEmpty
+
+        let page = root.appendingPathComponent("page.html")
+        let htmlSelected = select(page)
+        pumpRunLoop()
+        let htmlWebView = labeled("HTML preview") as? WKWebView
+            ?? window.contentView.flatMap { content in
+                allViews(in: content).compactMap { $0 as? WKWebView }.first
+            }
+        let htmlLoaded = waitUntil(timeout: 5) {
+            controller.selfTestReaderHTMLFinished
+                && htmlWebView != nil
+                && htmlWebView?.isLoading == false
+        }
+        let htmlKind = controller.selfTestReaderPreviewKind
+        recordContentSize("html")
+        let htmlWebViewHasNonPersistentDataStore =
+            htmlWebView?.configuration.websiteDataStore.isPersistent == false
+        let htmlWebViewHasJavaScriptDisabled =
+            htmlWebView?.configuration.defaultWebpagePreferences
+                .allowsContentJavaScript == false
+        checks["htmlPreview"] = htmlSelected
+            && htmlKind == "HTML"
+            && htmlLoaded
+            && visible(htmlWebView)
+            && htmlWebViewHasNonPersistentDataStore
+            && htmlWebViewHasJavaScriptDisabled
+            && htmlWebView?.accessibilityLabel() == "HTML preview"
+            && sourceControlsAreLocked()
+            && previewContentSizeIsStable()
+        let htmlWidth = htmlWebView?.frame.width ?? 0
+        let htmlHeight = htmlWebView?.frame.height ?? 0
+        files.append([
+            "path": "page.html",
+            "kind": htmlKind ?? "",
+            "accessibilityLabel": htmlWebView?.accessibilityLabel() ?? "",
+            "frameWidth": htmlWidth,
+            "frameHeight": htmlHeight,
+            "visible": visible(htmlWebView),
+            "loaded": htmlLoaded,
+            "didFinish": controller.selfTestReaderHTMLFinished,
+            "loadError": controller.selfTestReaderHTMLLoadError ?? "",
+            "javaScriptEnabled": !htmlWebViewHasJavaScriptDisabled,
+            "dataStorePersistent": !htmlWebViewHasNonPersistentDataStore,
+        ])
+        var dark = ReaderSettings()
+        dark.theme = .dark
+        controller.applyReaderSettings(dark)
+        let htmlReloaded = waitUntil(timeout: 5) {
+            controller.selfTestReaderHTMLFinished
+                && htmlWebView != nil
+                && htmlWebView?.isLoading == false
+        }
+        pumpRunLoop()
+        let darkCapture: [String: Any] = if htmlReloaded,
+                                            let htmlWebView
+        {
+            captureWebView(htmlWebView)
+        } else {
+            [
+                "name": "dark-html",
+                "path": "",
+                "width": 0,
+                "height": 0,
+                "visiblePixels": false,
+                "error": controller.selfTestReaderHTMLLoadError
+                    ?? "HTML did not finish loading",
+            ]
+        }
+        captures.append(darkCapture)
+        checks["captureDarkHTML"] = htmlReloaded
+            && darkCapture["visiblePixels"] as? Bool == true
+
+        let image = root.appendingPathComponent("image.png")
+        let imageSelected = select(image)
+        let imageView = labeled("Image preview") as? NSImageView
+        let imageKind = controller.selfTestReaderPreviewKind
+        recordContentSize("image")
+        checks["imagePreview"] = imageSelected
+            && imageKind == "Image"
+            && imageView?.image != nil
+            && visible(imageView)
+            && sourceControlsAreLocked()
+            && previewContentSizeIsStable()
+        files.append([
+            "path": "image.png",
+            "kind": imageKind ?? "",
+            "accessibilityLabel": imageView?.accessibilityLabel() ?? "",
+            "frameWidth": imageView?.frame.width ?? 0,
+            "frameHeight": imageView?.frame.height ?? 0,
+            "visible": visible(imageView),
+            "hasImage": imageView?.image != nil,
+        ])
+        var siClassic = ReaderSettings()
+        siClassic.theme = .siClassic
+        controller.applyReaderSettings(siClassic)
+        pumpRunLoop()
+        let imageCapture = capture("si-image")
+        captures.append(imageCapture)
+        checks["captureSIImage"] = imageCapture["visiblePixels"] as? Bool == true
+
+        let pdf = root.appendingPathComponent("paper.pdf")
+        let pdfSelected = select(pdf)
+        let pdfView = labeled("PDF preview") as? PDFView
+        let pdfKind = controller.selfTestReaderPreviewKind
+        recordContentSize("pdf")
+        checks["pdfPreview"] = pdfSelected
+            && pdfKind == "PDF"
+            && (pdfView?.document?.pageCount ?? 0) > 0
+            && visible(pdfView)
+            && sourceControlsAreLocked()
+            && previewContentSizeIsStable()
+        files.append([
+            "path": "paper.pdf",
+            "kind": pdfKind ?? "",
+            "accessibilityLabel": pdfView?.accessibilityLabel() ?? "",
+            "frameWidth": pdfView?.frame.width ?? 0,
+            "frameHeight": pdfView?.frame.height ?? 0,
+            "visible": visible(pdfView),
+            "pageCount": pdfView?.document?.pageCount ?? 0,
+        ])
+        let pdfCapture: [String: Any]
+        if let pdfView,
+           let page = pdfView.currentPage ?? pdfView.document?.page(at: 0)
+        {
+            let targetSize = NSSize(
+                width: max(1, pdfView.bounds.width),
+                height: max(1, pdfView.bounds.height)
+            )
+            pdfCapture = writeSnapshotImage(
+                page.thumbnail(of: targetSize, for: .mediaBox),
+                name: "si-pdf",
+                captureMethod: "PDFPage.thumbnail"
+            )
+        } else {
+            pdfCapture = [
+                "name": "si-pdf",
+                "path": "",
+                "width": 0,
+                "height": 0,
+                "visiblePixels": false,
+                "captureMethod": "PDFPage.thumbnail",
+            ]
+        }
+        captures.append(pdfCapture)
+        checks["captureSIPDF"] = pdfCapture["visiblePixels"] as? Bool == true
+
+        let notes = root.appendingPathComponent("notes.txt")
+        let notesSelected = select(notes)
+        let notesKind = controller.selfTestReaderPreviewKind
+        let notesPreviewText = controller.selfTestReaderPreviewText
+        recordContentSize("plainText")
+        let notesText = (try? Data(contentsOf: notes))
+            .flatMap { String(data: $0, encoding: .utf8) }
+        checks["plainTextPreview"] = notesSelected
+            && notesKind == "Plain text"
+            && notesPreviewText == notesText
+            && sourceControlsAreLocked()
+            && previewContentSizeIsStable()
+        files.append([
+            "path": "notes.txt",
+            "kind": notesKind ?? "",
+            "accessibilityLabel": "Plain text preview",
+            "frameWidth": 0,
+            "frameHeight": 0,
+            "visible": visible(labeled("Plain text preview")),
+        ])
+
+        let main = root.appendingPathComponent("main.rs")
+        let sourceSelected = select(main)
+        let sourceHeight = controller.selfTestReadingHeightHeader
+        checks["sourceSurfaceRestored"] = sourceSelected
+            && controller.selfTestReaderPreviewKind == nil
+            && controller.selfTestLeftReaderBytes != nil
+            && controller.canFindInFile
+            && sourceHeight.enabled
+            && !sourceHeight.hidden
+        history["sourceRestored"] = checks["sourceSurfaceRestored"] == true
+        history["treeCount"] = treePaths.count
+        let passed = checks.values.allSatisfy { $0 }
+        finish(
+            passed: passed,
+            checks: checks,
+            projectReadyMS: projectReadyMS,
+            treePaths: treePaths,
+            files: files,
+            captures: captures,
+            contentSizes: contentSizes,
+            history: history
         )
     }
 
