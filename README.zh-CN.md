@@ -27,6 +27,18 @@ CodeInsight 是一个 macOS 原生、只读的代码阅读器，正式产品名�
 - **Git 时间旅行**：读取 worktree 或 commit 快照，比较不同版本，不 checkout、不修改仓库。
 - **CLI 工具链**：提供索引、查询、快照、缓存切换统计、gold-set 评估等命令。
 
+## 非源码预览
+
+Cairn 的文件树会显示跳过目录之外的常规非符号链接文件。源码索引和 Exact 分析仍只识别现有的 Rust、Python、TypeScript 和 TSX 语言模式。
+
+- Markdown（`.md`、`.markdown`）以只读富文本渲染。
+- HTML（`.html`、`.htm`）在只读 WebKit 视图中渲染，并封闭 JavaScript、网络和本地子资源。
+- 可解码图片和 PDF 以只读方式显示；其他严格 UTF-8 文件使用可选择的纯文本预览。
+- Markdown 和 HTML 的项目内链接可以打开项目文件；这些预览支持 Back/Forward，commit tab 读取所选快照字节。
+- 未知或损坏的二进制内容会明确显示为不支持预览，不会渲染成乱码。
+
+非源码预览不提供 outline、fold、relations、bookmark、compare/diff、Reading Height 或 search 控件；不会打开外链，也不承诺内联本地资源。
+
 ## 可解释阅读工作流
 
 1. 打开项目，并选择项目中实际使用的语言。

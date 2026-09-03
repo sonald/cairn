@@ -27,6 +27,18 @@ This is not an editor. Cairn does not save files, run builds, or modify your wor
 - **Git time travel**: inspect worktree or commit snapshots and compare versions without checkout or repository mutation.
 - **CLI toolkit**: index projects, query semantics, inspect snapshots, measure cache-switch reuse, and evaluate gold sets.
 
+## Non-source previews
+
+Cairn's file tree shows regular non-symlink files outside skipped directories. Source indexing and Exact analysis still recognize only the existing Rust, Python, TypeScript, and TSX language modes.
+
+- Markdown (`.md`, `.markdown`) is rendered as read-only attributed text.
+- HTML (`.html`, `.htm`) is rendered in a read-only WebKit view with JavaScript, network access, and local subresources closed.
+- Decodable images and PDFs are shown read-only; other strict UTF-8 files use a selectable plain-text preview.
+- Markdown and HTML project-local links can open files in the project; Back and Forward work across those previews, and commit tabs read the selected snapshot bytes.
+- Unknown or invalid binary content is reported as unsupported instead of being rendered as garbled text.
+
+Non-source previews do not provide outline, folding, relations, bookmarks, compare/diff, Reading Height, or search controls. External links and inline local resources are not opened.
+
 ## Explainable Reading Workflow
 
 1. Open a project and choose the languages present in it.
