@@ -17,7 +17,7 @@ func nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() throws {
     let markdown = try nonSourcePreviewFile(
         root: root,
         name: "README.md",
-        bytes: Array("# Title\n\ndisk bytes **Read** [guide](docs/guide.md)\n".utf8)
+        bytes: Array("# Title\n\ndisk bytes **Read** [guide](docs/guide.md)\n\n- first\n- second\n".utf8)
     )
     let text = try nonSourcePreviewFile(
         root: root,
@@ -51,8 +51,15 @@ func nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() throws {
     state = controller.selfTestPreviewState
     #expect(state.kind == "Markdown")
     #expect(state.renderedText?.contains("Title") == true)
+    #expect(state.renderedText?.contains("Title\n\ndisk bytes") == true)
+    #expect(state.renderedText?.contains("first\nsecond") == true)
     #expect(state.renderedText?.contains("**") == false)
     #expect(state.linkCount == 1)
+    let headingFont = try #require(controller.selfTestPreviewFont(at: "Title"))
+    let bodyFont = try #require(controller.selfTestPreviewFont(at: "disk bytes"))
+    let strongFont = try #require(controller.selfTestPreviewFont(at: "Read"))
+    #expect(headingFont.pointSize > bodyFont.pointSize)
+    #expect(strongFont.fontDescriptor.symbolicTraits.contains(.bold))
     #expect(state.editable == false)
     #expect(state.selectable == true)
     #expect(state.visible)

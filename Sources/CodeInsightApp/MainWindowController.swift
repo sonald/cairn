@@ -702,6 +702,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestReaderPreviewText: String? {
         readerController.selfTestPreviewState.renderedText
     }
+    var selfTestReaderHTMLFinished: Bool {
+        readerController.selfTestReaderHTMLFinished
+    }
+    var selfTestReaderHTMLLoadError: String? {
+        readerController.selfTestReaderHTMLLoadError
+    }
     var selfTestReaderPlaceholderVisible: Bool {
         readerController.selfTestPlaceholderVisible
     }
@@ -3856,6 +3862,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var previewImageSize: NSSize?
     private var previewHTMLSource: String?
     private var previewHTMLBaseURL: URL?
+    private var previewHTMLFinished = false
+    private var previewHTMLLoadError: String?
     private var htmlInitialNavigationAllowed = false
     private var loadGeneration: UInt64 = 0
     private var syntaxLoadPending = false
@@ -4390,6 +4398,32 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
     }
 
+    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard (previewView as? WKWebView) === webView else { return }
+        previewHTMLFinished = true
+        previewHTMLLoadError = nil
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFail navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard (previewView as? WKWebView) === webView else { return }
+        previewHTMLFinished = false
+        previewHTMLLoadError = error.localizedDescription
+    }
+
+    func webView(
+        _ webView: WKWebView,
+        didFailProvisionalNavigation navigation: WKNavigation!,
+        withError error: Error
+    ) {
+        guard (previewView as? WKWebView) === webView else { return }
+        previewHTMLFinished = false
+        previewHTMLLoadError = error.localizedDescription
+    }
+
     private func htmlNavigationDecision(
         for url: URL?,
         _ navigationType: WKNavigationType,
@@ -4457,6 +4491,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
         return result.policy
     }
+
+    var selfTestReaderHTMLFinished: Bool { previewHTMLFinished }
+    var selfTestReaderHTMLLoadError: String? { previewHTMLLoadError }
 
     func selfTestActivatePreviewLink(at index: Int) -> Bool {
         guard index >= 0,
@@ -4642,6 +4679,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
            let baseURL = previewHTMLBaseURL
         {
             webView.underPageBackgroundColor = readerTheme.backgroundColor
+            previewHTMLFinished = false
+            previewHTMLLoadError = nil
             htmlInitialNavigationAllowed = true
             webView.loadHTMLString(htmlPreviewMarkup(html), baseURL: baseURL)
         }
@@ -4805,6 +4844,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             previewPDFPageCount,
             previewImageSize
         )
+    }
+    func selfTestPreviewFont(at substring: String) -> NSFont? {
+        guard !substring.isEmpty,
+              let previewTextView = (previewView as? NSScrollView)?
+                  .documentView as? NSTextView,
+              let storage = previewTextView.textStorage
+        else { return nil }
+        let range = (storage.string as NSString).range(of: substring)
+        guard range.location != NSNotFound else { return nil }
+        return storage.attribute(.font, at: range.location, effectiveRange: nil)
+            as? NSFont
     }
     var selfTestPlaceholderText: String? {
         label.isHidden ? nil : label.stringValue
@@ -5413,6 +5463,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewImageSize = nil
         previewHTMLSource = nil
         previewHTMLBaseURL = nil
+        previewHTMLFinished = false
+        previewHTMLLoadError = nil
         htmlInitialNavigationAllowed = false
         previewArea.isHidden = true
     }
@@ -5488,6 +5540,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             imageView.image = image
             imageView.imageScaling = .scaleProportionallyUpOrDown
             imageView.imageAlignment = .alignCenter
+            imageView.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            imageView.setContentHuggingPriority(.defaultLow, for: .vertical)
+            imageView.setContentCompressionResistancePriority(
+                .defaultLow,
+                for: .horizontal
+            )
+            imageView.setContentCompressionResistancePriority(
+                .defaultLow,
+                for: .vertical
+            )
             imageView.setAccessibilityLabel("Image preview")
             previewKind = "Image"
             previewAccessibilityLabel = "Image preview"
@@ -5509,7 +5571,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 displayPreviewError("Unsupported binary")
                 return
             }
-            let attributed = NSAttributedString(markdown)
+            let attributed = markdownPreviewAttributedString(markdown)
             displayPreviewText(
                 attributed,
                 kind: "Markdown",
@@ -5526,6 +5588,101 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             kind: "Plain text",
             accessibilityLabel: "Plain text preview"
         )
+    }
+
+    private func markdownPreviewAttributedString(
+        _ markdown: AttributedString
+    ) -> NSAttributedString {
+        let rendered = NSMutableAttributedString()
+        var previousComponents: [PresentationIntent.IntentType]?
+        for run in markdown.runs {
+            let components = run.presentationIntent?.components ?? []
+            let leaf = components.first
+            if let previousComponents,
+               let previousLeaf = previousComponents.first,
+               let leaf,
+               previousLeaf.identity != leaf.identity,
+               rendered.length > 0,
+               !rendered.string.hasSuffix("\n")
+            {
+                let previousIsListItem = previousComponents.contains {
+                    if case .listItem = $0.kind { return true }
+                    return false
+                }
+                let isListItem = previousIsListItem && components.contains {
+                    if case .listItem = $0.kind { return true }
+                    return false
+                }
+                rendered.append(NSAttributedString(
+                    string: isListItem ? "\n" : "\n\n"
+                ))
+            }
+            let attributed = NSMutableAttributedString(
+                attributedString: NSAttributedString(
+                    AttributedString(markdown[run.range])
+                )
+            )
+            if attributed.length > 0 {
+                let range = NSRange(location: 0, length: attributed.length)
+                let baseFont: NSFont = switch leaf?.kind {
+                case .header(let level):
+                    NSFont.systemFont(
+                        ofSize: max(16, 24 - CGFloat(min(level, 6)) * 1.5),
+                        weight: .semibold
+                    )
+                case .codeBlock:
+                    NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+                default:
+                    NSFont.systemFont(ofSize: 14)
+                }
+                var font = baseFont
+                if run.inlinePresentationIntent?.contains(.code) == true {
+                    font = NSFont.monospacedSystemFont(
+                        ofSize: baseFont.pointSize,
+                        weight: .regular
+                    )
+                }
+                if run.inlinePresentationIntent?.contains(
+                    .stronglyEmphasized
+                ) == true {
+                    font = NSFontManager.shared.convert(
+                        font,
+                        toHaveTrait: .boldFontMask
+                    )
+                }
+                if run.inlinePresentationIntent?.contains(.emphasized) == true {
+                    font = NSFontManager.shared.convert(
+                        font,
+                        toHaveTrait: .italicFontMask
+                    )
+                }
+                attributed.addAttribute(
+                    NSAttributedString.Key.font,
+                    value: font,
+                    range: range
+                )
+                if run.inlinePresentationIntent?.contains(
+                    .strikethrough
+                ) == true {
+                    attributed.addAttribute(
+                        NSAttributedString.Key.strikethroughStyle,
+                        value: NSUnderlineStyle.single.rawValue,
+                        range: range
+                    )
+                }
+                if run.link != nil {
+                    attributed.addAttributes([
+                        NSAttributedString.Key.foregroundColor:
+                            readerTheme.accentColor,
+                        NSAttributedString.Key.underlineStyle:
+                            NSUnderlineStyle.single.rawValue,
+                    ], range: range)
+                }
+            }
+            rendered.append(attributed)
+            previousComponents = components
+        }
+        return rendered
     }
 
     private func displayPreviewText(
@@ -5607,6 +5764,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewHTMLContentSecurityPolicy = Self.previewContentSecurityPolicy
         previewHTMLSource = html
         previewHTMLBaseURL = file
+        previewHTMLFinished = false
+        previewHTMLLoadError = nil
         installPreview(webView)
         htmlInitialNavigationAllowed = true
         webView.loadHTMLString(
