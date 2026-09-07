@@ -432,11 +432,15 @@ public final class LSPClient: @unchecked Sendable {
         }
     }
 
-    init(readHandle: FileHandle, writeHandle: FileHandle) {
+    init(
+        readHandle: FileHandle,
+        writeHandle: FileHandle,
+        errorReadHandle: FileHandle? = nil
+    ) {
         process = nil
         inputHandle = writeHandle
         outputHandle = readHandle
-        errorHandle = nil
+        errorHandle = errorReadHandle
         precondition(
             Darwin.fcntl(inputHandle.fileDescriptor, F_SETNOSIGPIPE, 1) != -1,
             "failed to disable SIGPIPE for LSP transport"
@@ -544,6 +548,7 @@ public final class LSPClient: @unchecked Sendable {
         while responses[id] == nil,
               !cancelledRequestIDs.contains(id),
               readError == nil,
+              !reachedEOF,
               transportIsOpen,
               condition.wait(until: deadline)
         {}
@@ -579,6 +584,7 @@ public final class LSPClient: @unchecked Sendable {
         while !serverIsQuiescent,
               shouldContinue(),
               readError == nil,
+              !reachedEOF,
               transportIsOpen,
               Date() < deadline
         {
@@ -661,19 +667,31 @@ public final class LSPClient: @unchecked Sendable {
     private func installHandlers() {
         outputHandle.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard let self else { return }
-            if data.isEmpty {
+            guard let self else {
+                handle.readabilityHandler = nil
+                return
+            }
+            guard !data.isEmpty else {
+                // EOF on stdout: stop monitoring this stream before waking
+                // waiters so no further callbacks are scheduled. Already
+                // received messages and diagnostics stay intact.
+                handle.readabilityHandler = nil
                 condition.lock()
                 reachedEOF = true
                 condition.broadcast()
                 condition.unlock()
-            } else {
-                receive(data)
+                return
             }
+            receive(data)
         }
         errorHandle?.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
-            guard !data.isEmpty, let self else { return }
+            guard let self, !data.isEmpty else {
+                // EOF on stderr ends only this stream's monitor; it does not
+                // close the whole transport while stdout is still open.
+                handle.readabilityHandler = nil
+                return
+            }
             condition.lock()
             stderr.append(data)
             let observer = diagnosticObserver

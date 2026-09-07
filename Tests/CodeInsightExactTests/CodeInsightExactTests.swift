@@ -1583,6 +1583,154 @@ func lspClientReportsClosedWritePipeWithoutTerminatingProcess() throws {
 }
 
 @Test
+func lspClientStopsStdoutMonitoringAtEOFWhileClientStaysAlive() throws {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    defer { client.close(grace: 0.01) }
+    // The provider closes its stdout while the client keeps running. The
+    // pending request must end promptly and the monitor must be gone so EOF
+    // does not spin the readability handler.
+    try serverToClient.fileHandleForWriting.close()
+
+    let started = Date()
+    do {
+        _ = try client.request("test/never-answered", params: [:], timeout: 30)
+        Issue.record("expected connectionClosed after stdout EOF")
+    } catch LSPError.connectionClosed {
+        // expected
+    } catch {
+        Issue.record("expected connectionClosed, got \(error)")
+    }
+    #expect(
+        Date().timeIntervalSince(started) < 10,
+        "pending request must be ended by stdout EOF, not by burning the timeout"
+    )
+    #expect(
+        serverToClient.fileHandleForReading.readabilityHandler == nil,
+        "stdout readability monitor must be uninstalled at EOF"
+    )
+}
+
+@Test
+func lspClientStopsStderrMonitoringAtEOFWithoutClosingTransport() throws {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let serverErrors = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        requestResponder: { _, _ in .result(NSNull()) },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting,
+        errorReadHandle: serverErrors.fileHandleForReading
+    )
+    defer {
+        client.close(grace: 0.01)
+        try? serverToClient.fileHandleForWriting.close()
+        try? clientToServer.fileHandleForWriting.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    // The provider closes only its stderr. That stream's monitor must stop,
+    // but the stdout transport must keep serving requests.
+    try serverErrors.fileHandleForWriting.close()
+
+    let stderrMonitorDeadline = Date().addingTimeInterval(2)
+    while serverErrors.fileHandleForReading.readabilityHandler != nil,
+          Date() < stderrMonitorDeadline
+    {
+        Thread.sleep(forTimeInterval: 0.02)
+    }
+    #expect(
+        serverErrors.fileHandleForReading.readabilityHandler == nil,
+        "stderr readability monitor must be uninstalled at EOF"
+    )
+
+    let result = try client.request("test/after-stderr-eof", timeout: 5)
+    #expect(result is NSNull)
+    #expect(
+        serverToClient.fileHandleForReading.readabilityHandler != nil,
+        "stdout monitor must stay installed after a stderr-only EOF"
+    )
+}
+
+@Test
+func lspClientEndsPendingRequestWhenProcessClosesStdoutButStaysAlive() throws {
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "exec 1>&-; sleep 10"]
+    )
+    defer { client.close(grace: 0.05) }
+
+    let started = Date()
+    do {
+        _ = try client.request("test/never-answered", params: [:], timeout: 15)
+        Issue.record("expected connectionClosed after stdout EOF")
+    } catch LSPError.connectionClosed {
+        // expected
+    } catch {
+        Issue.record("expected connectionClosed, got \(error)")
+    }
+    #expect(
+        Date().timeIntervalSince(started) < 8,
+        "stdout EOF must end the pending request, not the 15s timeout"
+    )
+    #expect(client.isRunning, "the child process itself is still alive")
+}
+
+@Test
+func lspClientProcessExitUninstallsMonitorsAndCloseStaysIdempotent() throws {
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "exit 0"]
+    )
+    let termination = DispatchSemaphore(value: 0)
+    client.observeTermination { _ in termination.signal() }
+    #expect(
+        termination.wait(timeout: .now() + 5) == .success,
+        "process exit must publish termination"
+    )
+    client.close(grace: 0.05)
+    client.close(grace: 0.05)
+    #expect(!client.isRunning)
+    #expect(!client.didForceKill)
+}
+
+@Test
+func lspClientDeinitUninstallsStreamMonitors() throws {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    var client: LSPClient? = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    client = nil
+    #expect(
+        serverToClient.fileHandleForReading.readabilityHandler == nil,
+        "a released client must not leave stream monitors installed"
+    )
+}
+
+@Test
+func lspClientCloseRacesBothStreamEOFWithoutHanging() throws {
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "exec 1>&-; exec 2>&-; sleep 10"]
+    )
+    client.close(grace: 0.05)
+    client.close(grace: 0.05)
+    #expect(!client.isRunning)
+}
+
+@Test
 func byteAndLSPUTF16PositionsRoundTrip() throws {
     let bytes = Array("a你😀z\n汉🙂b".utf8)
     let map = try #require(LSPPositionMap(utf8: bytes))
