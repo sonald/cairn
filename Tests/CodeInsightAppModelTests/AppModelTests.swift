@@ -3133,3 +3133,40 @@ private func jumpRecord(
         snapshotID: snapshotID
     )
 }
+
+@MainActor
+@Test
+func openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() async throws {
+    let first = try temporaryProject(["a.rs": "fn a() {}\n"])
+    let second = try temporaryProject(["b.rs": "fn b() {}\n"])
+    defer {
+        try? FileManager.default.removeItem(at: first)
+        try? FileManager.default.removeItem(at: second)
+    }
+    let service = ControlledIndexService()
+    let model = AppModel(indexService: service)
+
+    model.openProject(root: first)
+    #expect(await service.waitUntilRequested(root: first))
+
+    // The first open is still awaiting its session when the user opens the
+    // second project; only the second one may publish.
+    await service.complete(root: second, result: .success(
+        try ProjectIndexer().index(root: second)
+    ))
+    model.openProject(root: second)
+    #expect(await testWaitUntil("second project published") {
+        model.snapshotPhase == .fullReady
+            && model.projectRoot?.standardizedFileURL
+                == second.standardizedFileURL
+    })
+    #expect(model.fileTree?.children.map(\.name) == ["b.rs"])
+
+    await service.complete(root: first, result: .success(
+        try ProjectIndexer().index(root: first)
+    ))
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(model.projectRoot?.standardizedFileURL
+        == second.standardizedFileURL)
+    #expect(model.fileTree?.children.map(\.name) == ["b.rs"])
+}

@@ -806,9 +806,14 @@ public final class AppModel {
         )
     }
 
-    public func openProject(root: URL, languages: [LanguageID]) async throws {
-        let normalized = try LanguageMode.normalize(languages: languages)
-        let root = root.standardizedFileURL
+    /// Shared open lifecycle for both entry points: cancels in-flight
+    /// workspace work, advances the workspace generation, and resets
+    /// per-project state. Snapshot switches and index refreshes keep their
+    /// own narrower scopes (tabs, trail, and history survive those).
+    private func beginWorkspaceOpen(
+        root: URL,
+        languages: [LanguageID]
+    ) -> UInt64 {
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
@@ -819,17 +824,17 @@ public final class AppModel {
         bookmarkModel.workspaceDidChange(to: openGeneration)
         exactCoordinator.invalidate(generation: openGeneration)
         projectRoot = root
-        projectLanguages = normalized
+        projectLanguages = languages
         workspaceSessions.removeAll(keepingCapacity: true)
         commitPicker.setCurrentRevision(nil)
         commitPicker.load(repositoryURL: root)
+        currentSnapshotID = nil
         snapshotDestinations.removeAll(keepingCapacity: true)
         pendingReplay = nil
         documentSource = nil
         transition(to: .indexing(root: root, startedAt: .now))
         snapshotPhase = nil
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
-        currentSnapshotID = nil
         fileTree = nil
         selectedFile = nil
         selectedByteOffset = nil
@@ -841,94 +846,32 @@ public final class AppModel {
         staleIndexNotice = nil
         endIndexRefresh()
         tabStrip.reset()
+        return openGeneration
+    }
 
-        do {
-            let snapshot = try await indexService.captureSnapshot(
+    public func openProject(root: URL, languages: [LanguageID]) async throws {
+        let normalized = try LanguageMode.normalize(languages: languages)
+        let root = root.standardizedFileURL
+        let openGeneration = beginWorkspaceOpen(
+            root: root,
+            languages: normalized
+        )
+        // The staged capture/prepare/complete chain is shared with snapshot
+        // switches and index refreshes; storing it in snapshotTask lets a
+        // newer open cancel an in-flight one instead of abandoning it.
+        snapshotTask = snapshotLoadTask(
+            revision: nil,
+            generation: openGeneration,
+            root: root,
+            languages: normalized
+        ) { [weak self] generation, root, languages in
+            self?.failWorkspace(
+                generation: generation,
                 root: root,
-                revision: nil,
-                languages: normalized
-            )
-            try Task.checkCancellation()
-            guard canPublishWorkspaceResult(
-                generation: openGeneration,
-                root: root,
-                languages: normalized
-            ) else { return }
-            publishFirstPaint(
-                snapshot,
-                root: root,
-                revision: nil,
-                generation: openGeneration,
-                languages: normalized
-            )
-            try Task.checkCancellation()
-            guard canPublishWorkspaceResult(
-                generation: openGeneration,
-                root: root,
-                languages: normalized
-            ) else { return }
-
-            let prepared = try await indexService.prepareSnapshots(
-                snapshot,
-                root: root,
-                languages: normalized
-            )
-            try Task.checkCancellation()
-            guard canPublishWorkspaceResult(
-                generation: openGeneration,
-                root: root,
-                languages: normalized
-            ) else { return }
-            guard installWorkspaceSessions(
-                prepared.map(\.cachedSession),
-                generation: openGeneration,
-                root: root,
-                languages: normalized,
-                expectedSnapshotID: snapshot.snapshotID,
-                phase: .cachedReady
-            ) else {
-                failWorkspace(
-                    generation: openGeneration,
-                    root: root,
-                    languages: normalized
-                )
-                return
-            }
-
-            var completed: [AnalysisProfileID: EngineSession] = [:]
-            for item in prepared {
-                let session = try await indexService.completeSnapshot(item)
-                completed[session.analysisProfile.id] = session
-            }
-            guard installWorkspaceSessions(
-                completed.values.map(\.self),
-                generation: openGeneration,
-                root: root,
-                languages: normalized,
-                expectedSnapshotID: snapshot.snapshotID,
-                phase: .fullReady
-            ) else {
-                workspaceSessions.removeAll(keepingCapacity: true)
-                failWorkspace(
-                    generation: openGeneration,
-                    root: root,
-                    languages: normalized
-                )
-                return
-            }
-            lastInstalledRevision = currentRevision
-            lastInstalledProjectRoot = projectRoot
-            lastInstalledGeneration = generation
-            prepareExact(generation: openGeneration)
-        } catch is CancellationError {
-            return
-        } catch {
-            failWorkspace(
-                generation: openGeneration,
-                root: root,
-                languages: normalized
+                languages: languages
             )
         }
+        await snapshotTask?.value
     }
 
     private func failWorkspace(
@@ -1244,41 +1187,11 @@ public final class AppModel {
     public func openProject(root: URL, language: LanguageID) throws {
         try validateProductSupport(language)
         let root = root.standardizedFileURL
-        guard transition(to: .indexing(root: root, startedAt: .now)) else {
-            assertionFailure("Illegal project state transition to indexing")
-            return
-        }
-        snapshotTask?.cancel()
-        compareSnapshotTask?.cancel()
-        replayTask?.cancel()
-        semanticValidationTask?.cancel()
-        compare.clear()
-        generation &+= 1
-        let openGeneration = generation
-        bookmarkModel.workspaceDidChange(to: openGeneration)
-        exactCoordinator.invalidate(generation: openGeneration)
-        projectRoot = root
-        projectLanguages = [language]
-        workspaceSessions.removeAll(keepingCapacity: true)
-        commitPicker.setCurrentRevision(nil)
-        commitPicker.load(repositoryURL: root)
-        currentSnapshotID = nil
-        snapshotDestinations.removeAll(keepingCapacity: true)
-        pendingReplay = nil
-        documentSource = nil
-        snapshotPhase = nil
-        coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
-        fileTree = nil
-        selectedFile = nil
-        selectedByteOffset = nil
-        navigationGeneration &+= 1
-        navigationHistory.reset()
-        readingTrail.reset()
-        resolutionExplanations.removeAll()
-        replayNotice = nil
-        staleIndexNotice = nil
-        endIndexRefresh()
-        tabStrip.reset()
+        // Shares the open lifecycle with the multi-language entry; plain
+        // non-Git directories keep the index() fallback below, whose errors
+        // propagate into .failed unchanged (never reclassified as "not a
+        // Git repository").
+        let openGeneration = beginWorkspaceOpen(root: root, languages: [language])
 
         snapshotTask = Task { [weak self, indexService] in
             do {

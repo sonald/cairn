@@ -1989,3 +1989,120 @@ func refreshYieldsToAProjectSwitchMidFlight() async throws {
     #expect(model.fileTree?.children.map(\.name) == ["solo.rs"])
     #expect(!model.isRefreshingIndex)
 }
+
+// MARK: - S3a open-flow convergence
+
+@MainActor
+@Test
+func openingASecondProjectCancelsTheInFlightMultiLanguageOpen() async throws {
+    let first = try SnapshotGitFixture()
+    let second = try SnapshotGitFixture()
+    defer {
+        first.remove()
+        second.remove()
+    }
+    let firstFiles = [
+        "main.rs": "fn main() {}\n",
+        "lib.py": "def f():\n    pass\n",
+        "a.ts": "export function a() {}\n",
+    ]
+    let secondFiles = [
+        "main.rs": "fn second_main() {}\n",
+        "lib.py": "def g():\n    pass\n",
+        "a.ts": "export function b() {}\n",
+    ]
+    for (path, contents) in firstFiles {
+        try snapshotWrite(contents, to: first.root.appendingPathComponent(path))
+    }
+    try first.git("add", "main.rs", "lib.py", "a.ts")
+    try first.commit("initial")
+    for (path, contents) in secondFiles {
+        try snapshotWrite(contents, to: second.root.appendingPathComponent(path))
+    }
+    try second.git("add", "main.rs", "lib.py", "a.ts")
+    try second.commit("initial")
+    let service = ControlledSnapshotIndexService(
+        initialSession: try ProjectIndexer().index(root: first.root),
+        worktreeSnapshot: TestSnapshot(label: "first", files: firstFiles),
+        snapshots: [:],
+        blockedFull: ["first"]
+    )
+    let model = AppModel(indexService: service)
+    let firstOpen = Task { @MainActor in
+        try? await model.openProject(
+            root: first.root,
+            languages: [.typescript, .rust, .python]
+        )
+    }
+    #expect(await testWaitUntil("first open blocked at full") {
+        await service.hasStartedFull("first")
+    })
+
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "second",
+        files: secondFiles
+    ))
+    let secondOpen = Task { @MainActor in
+        try? await model.openProject(
+            root: second.root,
+            languages: [.typescript, .rust, .python]
+        )
+    }
+    _ = await secondOpen.value
+    #expect(await testWaitUntil("second project published") {
+        model.snapshotPhase == .fullReady
+            && model.projectRoot?.standardizedFileURL
+                == second.root.standardizedFileURL
+    })
+    #expect(
+        await testWaitUntil("first open cancelled") {
+            await service.wasCancelled("first")
+        },
+        "opening a new project must cancel the in-flight open, not just abandon it"
+    )
+    #expect(model.fileTree?.children.map(\.name).contains("main.rs") == true)
+}
+
+@MainActor
+@Test
+func singleLanguageOpenSharesTheWorkspaceResetBoundaries() async throws {
+    let root = try snapshotTemporaryProject([
+        "main.rs": "fn main() {}\n",
+        "other.rs": "fn other() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel()
+    model.navigate(to: root.appendingPathComponent("main.rs"))
+    model.navigationHistory.push(NavigationRecord(
+        jump: snapshotJumpRecord(
+            "main.rs",
+            offset: 0,
+            snapshotID: SnapshotID(rawValue: UUID())
+        )
+    ))
+    _ = model.readingTrail.recordNavigation(
+        from: nil,
+        to: snapshotJumpRecord(
+            "main.rs",
+            offset: 0,
+            snapshotID: SnapshotID(rawValue: UUID())
+        )
+    )
+    #expect(!model.tabStrip.tabs.isEmpty || model.selectedFile != nil)
+
+    model.openProject(root: root)
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+
+    #expect(model.selectedFile == nil)
+    #expect(model.selectedByteOffset == nil)
+    #expect(model.tabStrip.tabs.isEmpty)
+    #expect(model.navigationHistory.records.isEmpty)
+    #expect(model.readingTrail.edges.isEmpty)
+    #expect(model.replayNotice == nil)
+    #expect(model.staleIndexNotice == nil)
+    #expect(model.isRefreshingIndex == false)
+    #expect(model.compare.rightRevision == nil)
+    #expect(!model.hasPendingReplay)
+}
