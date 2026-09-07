@@ -2371,3 +2371,106 @@ private func relationLocation(
         coordinate.line
     )
 }
+
+// MARK: - S5 surface-driven relation commands
+
+@MainActor
+@Test
+func keyboardRelationCommandsFollowTheReaderSelection() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    // No Context candidate exists (nothing was ever clicked), matching the
+    // review repro: a caret or selection in the Reader must be enough.
+    #expect(fixture.model.contextWindow.selectedCandidate == nil)
+    #expect(
+        fixture.controller.canShowRelationsFromReaderSurface,
+        "a caret in a project source file must enable the commands"
+    )
+
+    fixture.controller.selfTestActivateReading(
+        at: byteOffset(of: "target() {}", in: fixture.mainSource)
+    )
+    fixture.controller.showRelations(direction: .references)
+    try #require(await relationTestWaitUntil("references load from the caret") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+    })
+    #expect(referenceEdge(path: "b.rs", in: fixture.model) != nil)
+}
+
+@MainActor
+@Test
+func pinnedContextDoesNotStealRelationCommandTargets() async throws {
+    let fixture = try await makeRelationNavigationFixture(extraFiles: [
+        ("first_caller.rs", "fn calls_first() { first(); }\n"),
+        ("second_caller.rs", "fn calls_second() { second(); }\n"),
+    ])
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    // Pin a Context preview on `first` by clicking its definition token.
+    let firstDefinition = byteOffset(of: "fn first() {}", in: fixture.mainSource)
+        + UInt32("fn ".utf8.count)
+    fixture.model.contextWindow.tokenClicked(file: "main.rs", offset: firstDefinition)
+    try #require(await relationTestWaitUntil("first candidate shown") {
+        fixture.model.contextWindow.selectedCandidate != nil
+    })
+    fixture.model.contextWindow.setMode(.pinned)
+    let pinnedPath = fixture.model.contextWindow.selectedCandidate?.path
+
+    // The Reader caret moves to a call of `second`; the global command must
+    // query second, leaving the pinned preview untouched.
+    fixture.controller.selfTestActivateReading(
+        at: byteOffset(of: "second();", in: fixture.mainSource)
+    )
+    fixture.controller.showRelations(direction: .references)
+    try #require(await relationTestWaitUntil("second references load") {
+        referenceEdge(path: "second_caller.rs", in: fixture.model) != nil
+    })
+    #expect(
+        referenceEdge(path: "first_caller.rs", in: fixture.model) == nil,
+        "the pinned preview's target must not steal the command"
+    )
+    #expect(fixture.model.contextWindow.mode == .pinned)
+    #expect(fixture.model.contextWindow.selectedCandidate?.path == pinnedPath)
+}
+
+@MainActor
+@Test
+func relationCommandsDisabledOutsideReadableSourceSurfaces() async throws {
+    let fixture = try await makeRelationNavigationFixture(extraFiles: [
+        ("README.md", "# Notes\n\nSee main.rs.\n"),
+    ])
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let readme = fixture.root.appendingPathComponent("README.md")
+    fixture.controller.openFileForSelfTest(readme)
+    try #require(await relationTestWaitUntil("readme is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == readme.standardizedFileURL
+    })
+    #expect(
+        !fixture.controller.canShowRelationsFromReaderSurface,
+        "non-source previews have no relation target"
+    )
+    fixture.controller.showRelations(direction: .references)
+    try await pumpRunLoop()
+    #expect(fixture.model.relationTree.root == nil)
+}

@@ -59,7 +59,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let statusBar = NSView()
     private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
     private var focusNotice: String?
-    private let toolbar = NSToolbar(identifier: "MainToolbar")
+    // A unique identifier per controller keeps AppKit's toolbar-family
+    // synchronization from mutating sibling toolbars (closed windows from
+    // earlier tests/self-tests) during profile-item add/remove, which
+    // crashed with an out-of-range _currentItems assertion.
+    private let toolbar = NSToolbar(
+        identifier: NSToolbar.Identifier("MainToolbar-\(UUID().uuidString)")
+    )
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
     private let onChooseProject: () -> Void
@@ -1671,9 +1677,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         applyPanelPreset(.compare)
     }
 
+    /// Cheap validity check for the global relation commands: the primary
+    /// Reader shows a project source file with a selection or caret. No
+    /// I/O, no Exact, safe during menu tracking.
+    var canShowRelationsFromReaderSurface: Bool {
+        guard let file = model.selectedFile,
+              projectPath(for: file) != nil,
+              readerController.currentSelectionByteOffset != nil
+        else { return false }
+        return true
+    }
+
     func showRelations(direction: RelationTreeModel.Direction) {
-        guard let symbol = model.contextWindow.selectedCandidate?.symbol else { return }
-        showRelations(target: .engine(symbol), direction: direction)
+        // D3: the Reader's current selection or caret drives the global
+        // relation commands through the same file + offset → resolve →
+        // relation root path as the context menu. The pinned Context
+        // preview is not a silent fallback target.
+        guard let offset = readerController.currentSelectionByteOffset else {
+            return
+        }
+        handleReaderRelation(offset: offset, direction: direction)
     }
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -5134,6 +5157,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
     var isFocusMode: Bool { textView.isFocusMode }
     var canFocusCurrentScope: Bool { displayedDocument != nil }
+    /// Byte offset of the Reader's current selection or caret, when a
+    /// source document is displayed. Drives surface-scoped relation
+    /// commands alongside the context menu.
+    var currentSelectionByteOffset: UInt32? {
+        guard displayedDocument != nil, displayedFile != nil else { return nil }
+        let range = textView.view.selectedRange()
+        guard range.location != NSNotFound,
+              let byteOffset = textView.byteOffset(
+                  forCharacterIndex: range.location
+              ),
+              let offset = UInt32(exactly: byteOffset)
+        else { return nil }
+        return offset
+    }
     @discardableResult
     func setReadingHeightLevel(_ level: ReadingHeightLevel) -> Bool {
         loadViewIfNeeded()

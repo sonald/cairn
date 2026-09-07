@@ -6645,6 +6645,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         guard contextSymbolReady else {
             finish("implementations context symbol unavailable")
         }
+        // S5/D3: the global relation commands resolve from the Reader's
+        // selection, so place it on the hierarchy symbol first.
+        controller.selfTestNavigate(to: hierarchyFile, byteOffset: hierarchyOffset)
         controller.showRelations(direction: .implementations)
         let implementationsUnsupported = await pythonWait(timeout: 5) {
             if controller.selfTestVisibleRelationText.contains(where: {
@@ -9672,7 +9675,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         case #selector(showCallers(_:)),
             #selector(showCalls(_:)),
             #selector(showImplementations(_:)):
-            return model.contextWindow.selectedCandidate != nil
+            return windowController?.canShowRelationsFromReaderSurface == true
         case #selector(showResolutionInspector(_:)):
             return windowController?.canShowResolutionInspector == true
         case #selector(showReadingTrail(_:)):
