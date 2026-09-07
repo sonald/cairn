@@ -1825,6 +1825,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.selectedFile
             _ = model.navigationGeneration
             _ = model.replayNotice
+            _ = model.staleIndexNotice
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.currentBranchName
             _ = model.commitPicker.isLoading

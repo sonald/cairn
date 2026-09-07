@@ -68,6 +68,10 @@ public final class ContextWindowModel {
     public private(set) var mode: Mode = .follow
     public private(set) var stage: Stage = .idle
     public private(set) var requestID: UInt64 = 0
+    /// Reports a project path whose content no longer matches the indexed
+    /// bytes an Exact reply was computed against, so the owner can surface a
+    /// stale-index notice instead of silently mixing contents.
+    package var onStaleIndexContent: (@MainActor (String) -> Void)?
 
     private let resolver: Resolver
     private let loader: Loader
@@ -513,6 +517,7 @@ public final class ContextWindowModel {
         for exact in entries {
             await applyExact(
                 exact,
+                token: token,
                 session: session,
                 context: context,
                 request: request
@@ -543,6 +548,7 @@ public final class ContextWindowModel {
 
     private func applyExact(
         _ exact: ExactOverlay.Entry,
+        token: Token,
         session: EngineSession,
         context: QueryContext,
         request: UInt64
@@ -557,6 +563,31 @@ public final class ContextWindowModel {
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
         else { return }
         let targetPath = projectPath(exact.location.file)
+        // The provider answered against the captured bytes; matching profile
+        // and snapshot alone does not prove the query source and target still
+        // hold those bytes. Drift suspends the upgrade instead of presenting
+        // changed content as Exact.
+        let sourceIsCurrent = await indexContentIsCurrent(
+            token.file,
+            session: session
+        )
+        let targetIsCurrent = await indexContentIsCurrent(
+            targetPath,
+            session: session
+        )
+        guard requestID == request,
+              case let .ready(latestSession, latestContext) = projectState,
+              latestContext.generation == context.generation,
+              latestSession.snapshotID == session.snapshotID,
+              latestSession.analysisProfile.id == session.analysisProfile.id,
+              case .candidates = stage
+        else { return }
+        guard sourceIsCurrent && targetIsCurrent else {
+            onStaleIndexContent?(
+                sourceIsCurrent ? targetPath : token.file
+            )
+            return
+        }
         if let index = current.firstIndex(where: {
             $0.path == targetPath && $0.targetByteOffset == targetOffset
         }) {
@@ -818,7 +849,40 @@ public final class ContextWindowModel {
             loaded = await loader(file, languageMode)
         }
         guard let loaded else { return nil }
+        // A worktree file may have drifted since indexing; never hand back
+        // different bytes under the requested identity.
+        guard loaded.contentID == contentID else { return nil }
         return remember(loaded, path: path)
+    }
+
+    /// Freshly verifies that an indexed project file still holds the bytes
+    /// the session captured. Deliberately bypasses the excerpt cache so a
+    /// drifted worktree file is detected even when older consistent bytes are
+    /// still cached. Snapshot-backed and dependency paths are consistent by
+    /// construction.
+    private func indexContentIsCurrent(
+        _ path: String,
+        session: EngineSession
+    ) async -> Bool {
+        guard exactLocationIsInDependency(path) == false,
+              let pathID = pathID(path, in: session),
+              let (key, _) = session.content(at: pathID),
+              let expected = contentID(at: pathID, in: session),
+              let root
+        else { return true }
+        let file = root.appendingPathComponent(path)
+        let loaded: ReaderDocument?
+        if let contentSource {
+            loaded = await Task.detached(priority: .userInitiated) {
+                try? DocumentLoader(source: contentSource).load(
+                    file: file,
+                    languageMode: key.languageMode
+                ).document
+            }.value
+        } else {
+            loaded = await loader(file, key.languageMode)
+        }
+        return loaded?.contentID == expected
     }
 
     private func dependencyDocument(

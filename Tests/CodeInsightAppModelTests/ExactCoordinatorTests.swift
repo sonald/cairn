@@ -2017,6 +2017,176 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
 
 @MainActor
 @Test
+func contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() async throws {
+    let source = """
+        struct A; impl A { fn close(&self) {} }
+        struct B; impl B { fn close(&self) {} }
+        fn f<T>(value: T) { value.close(); }
+        """
+    let root = try exactTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    var staleReports: [String] = []
+    model.onStaleIndexContent = { staleReports.append($0) }
+    model.updateProjectState(.ready(session, context), root: root)
+    let callOffset = exactByteOffset(of: "close();", in: source)
+    let secondDefinition = exactByteOffset(
+        of: "close(&self)",
+        in: String(source[source.range(of: "struct B")!.lowerBound...])
+    ) + exactByteOffset(of: "struct B", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: callOffset)
+    #expect(await testWaitUntil("fuzzy candidates pending exact") {
+        model.candidateCount == 2 && gate.count == 1
+    })
+
+    // The provider roundtrip is still in flight while disk drifts; the
+    // reply is only truthful against the captured bytes.
+    try "struct A;\nstruct B;\nfn f<T>(value: T) { value.close(); }\n"
+        .write(to: root.appendingPathComponent("main.rs"), atomically: true, encoding: .utf8)
+    gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: secondDefinition))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(
+        model.selectedCandidate?.certainty != .exact,
+        "a drifted target must not be upgraded to Exact"
+    )
+    #expect(
+        model.selectedCandidate?.provenanceBadge.contains("Exact") != true
+    )
+    #expect(model.candidateCount == 2, "index-consistent fuzzy candidates stay")
+    #expect(staleReports.contains("main.rs"))
+}
+
+@MainActor
+@Test
+func contextExactInsertRequiresMatchingTargetBytes() async throws {
+    let source = """
+        fn target() {}
+        fn main() { target(); }
+        fn never_fuzzy() {}
+        """
+    let root = try exactTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    var staleReports: [String] = []
+    model.onStaleIndexContent = { staleReports.append($0) }
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "target()", in: source))
+    #expect(await testWaitUntil("fuzzy candidate pending exact") {
+        model.candidateCount >= 1 && gate.count == 1
+    })
+    let candidateCountBeforeExact = model.candidateCount
+
+    // The Exact reply points at a definition the fuzzy list never produced,
+    // and the target file drifted: no mixed-content candidate may appear.
+    try "// drifted behind the index\nfn target() {}\nfn main() { target(); }\nfn never_fuzzy() {}\n"
+        .write(to: root.appendingPathComponent("main.rs"), atomically: true, encoding: .utf8)
+    gate.complete(0, with: exactEntry(
+        file: "main.rs",
+        byteOffset: exactByteOffset(of: "never_fuzzy", in: source)
+    ))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(model.candidateCount == candidateCountBeforeExact)
+    #expect(model.selectedCandidate?.certainty != .exact)
+    #expect(staleReports.contains("main.rs"))
+}
+
+@MainActor
+@Test
+func contextExactUpgradeSuspendsWhenSourceFileDrifts() async throws {
+    let mainSource = "fn target() {}\n"
+    let callerSource = "fn call_target() { target(); }\n"
+    let root = try exactTemporaryProject([
+        "main.rs": mainSource,
+        "caller.rs": callerSource,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let gate = ContextExactGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    var staleReports: [String] = []
+    model.onStaleIndexContent = { staleReports.append($0) }
+    model.updateProjectState(.ready(session, context), root: root)
+
+    model.tokenClicked(
+        file: "caller.rs",
+        offset: exactByteOffset(of: "target()", in: callerSource)
+    )
+    #expect(await testWaitUntil("caller fuzzy candidates pending exact") {
+        model.candidateCount >= 1 && gate.count == 1
+    })
+
+    // Only the query source drifts; the target definition file is untouched.
+    try "fn call_target() {}\n"
+        .write(to: root.appendingPathComponent("caller.rs"), atomically: true, encoding: .utf8)
+    gate.complete(0, with: exactEntry(
+        file: "main.rs",
+        byteOffset: exactByteOffset(of: "target", in: mainSource)
+    ))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(
+        model.selectedCandidate?.certainty != .exact,
+        "a drifted query source must suspend the Exact upgrade"
+    )
+    #expect(staleReports.contains("caller.rs"))
+}
+
+@MainActor
+@Test
+func contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() async throws {
+    let source = "fn target() {}\nfn main() { target(); }\n"
+    let root = try exactTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = exactQueryContext(for: session, generation: 1)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        }
+    )
+    model.updateProjectState(.ready(session, context), root: root)
+
+    // The target drifts on disk before its first Context lookup. The lookup
+    // must keep the index-located line/column but must not excerpt the
+    // drifted bytes under the indexed offsets.
+    try "fn renamed() {}\nfn main() { renamed(); }\n"
+        .write(to: root.appendingPathComponent("main.rs"), atomically: true, encoding: .utf8)
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "target", in: source))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(model.selectedCandidate?.excerpt.isEmpty == true,
+            "excerpt must not mix drifted disk bytes with indexed offsets")
+    #expect(model.selectedCandidate?.line == 1)
+}
+
+@MainActor
+@Test
 func pythonContextExactBadgeOmitsCargoFeatureDetail() async throws {
     let source = "def target():\n    pass\n\ntarget()\n"
     let root = try exactTemporaryPythonProject(["main.py": source])

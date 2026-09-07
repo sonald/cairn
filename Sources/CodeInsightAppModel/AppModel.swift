@@ -607,6 +607,9 @@ public final class AppModel {
         self.compare = compare
         self.navigationSink = navigationSink
         contextWindow.attachExactCoordinator(exactCoordinator)
+        contextWindow.onStaleIndexContent = { [weak self] _ in
+            self?.markStaleIndexContent()
+        }
         relationTree.attachExactCoordinator(exactCoordinator)
         relationTree.onContextsReset = { [weak self] in
             self?.contextWindow.cancelExactUpgrade()
@@ -1590,6 +1593,10 @@ public final class AppModel {
     }
 
     private func markStaleIndexNavigation(to file: URL) {
+        markStaleIndexContent()
+    }
+
+    package func markStaleIndexContent() {
         staleIndexNotice = "File changed since indexing"
     }
 
