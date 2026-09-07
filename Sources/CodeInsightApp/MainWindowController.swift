@@ -53,6 +53,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let settingsButton = NSButton()
     private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
+    private let refreshIndexButton = NSButton()
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
@@ -215,6 +216,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         indexLabel.textColor = .secondaryLabelColor
         indexLabel.setAccessibilityLabel("Index status")
         indexLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        refreshIndexButton.bezelStyle = .rounded
+        refreshIndexButton.font = .systemFont(ofSize: 11)
+        refreshIndexButton.controlSize = .small
+        refreshIndexButton.title = "Refresh Index"
+        refreshIndexButton.toolTip = "Recapture the working tree as a new index generation"
+        refreshIndexButton.isHidden = true
+        refreshIndexButton.setAccessibilityLabel("Refresh Index")
         truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         truncatedLabel.textColor = .systemOrange
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -239,7 +247,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         exactLabel.setAccessibilityLabel("Exact provider status")
 
         let statusStack = NSStackView()
-        statusStack.setViews([indexLabel], in: .leading)
+        statusStack.setViews([indexLabel, refreshIndexButton], in: .leading)
         statusStack.setViews([truncatedLabel], in: .center)
         statusStack.setViews([exactLabel], in: .trailing)
         statusStack.translatesAutoresizingMaskIntoConstraints = false
@@ -308,6 +316,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentViewController
         super.init(window: window)
+        refreshIndexButton.target = self
+        refreshIndexButton.action = #selector(refreshProjectIndex(_:))
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
             [weak self, weak window] event in
             guard event.keyCode == 53,
@@ -1826,6 +1836,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.navigationGeneration
             _ = model.replayNotice
             _ = model.staleIndexNotice
+            _ = model.isRefreshingIndex
+            _ = model.indexRefreshNotice
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.currentBranchName
             _ = model.commitPicker.isLoading
@@ -2295,6 +2307,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let indexStatus = [
             focusNotice,
             initialIndexStatus,
+            model.isRefreshingIndex ? "Refreshing index…" : nil,
+            model.indexRefreshNotice,
             coverageStatus,
             model.replayNotice,
             model.staleIndexNotice,
@@ -2304,7 +2318,28 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         focusNotice = nil
         indexLabel.stringValue = indexStatus
         indexLabel.isHidden = indexStatus.isEmpty
+        refreshIndexButton.isHidden = model.isRefreshingIndex
+            || (model.staleIndexNotice == nil && model.indexRefreshNotice == nil)
+        refreshIndexButton.isEnabled = !model.isRefreshingIndex
         truncatedLabel.isHidden = !model.relationTree.hasTruncatedResults
+    }
+
+    var canRefreshIndex: Bool {
+        guard case .ready = model.projectState, model.projectRoot != nil else {
+            return false
+        }
+        return !model.isRefreshingIndex
+    }
+
+    @objc func refreshProjectIndex(_ sender: Any?) {
+        guard canRefreshIndex else { return }
+        refreshIndex()
+    }
+
+    func refreshIndex() {
+        captureActiveTabState()
+        model.refreshIndex(leaving: currentJumpRecord())
+        render()
     }
 
     private func renderTrail() {

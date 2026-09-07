@@ -509,6 +509,10 @@ public final class AppModel {
     /// content no longer matches the indexed bytes. Cleared when a semantic
     /// navigation verifies again or the workspace republishes a snapshot.
     public private(set) var staleIndexNotice: String?
+    /// True while a Refresh Index capture is in flight.
+    public private(set) var isRefreshingIndex = false
+    /// Set when Refresh Index failed and the previous index was restored.
+    public private(set) var indexRefreshNotice: String?
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
@@ -669,7 +673,7 @@ public final class AppModel {
     }
 
     package func scheduleSessionCheckpoint(panelPreset: PanelPresetModel) {
-        guard sessionURL != nil else { return }
+        guard sessionURL != nil, !isRefreshingIndex else { return }
         sessionCheckpointTask?.cancel()
         let checkpointGeneration = lastInstalledGeneration
         let checkpointLanguages = projectLanguages
@@ -835,6 +839,7 @@ public final class AppModel {
         resolutionExplanations.removeAll()
         replayNotice = nil
         staleIndexNotice = nil
+        endIndexRefresh()
         tabStrip.reset()
 
         do {
@@ -1272,6 +1277,7 @@ public final class AppModel {
         resolutionExplanations.removeAll()
         replayNotice = nil
         staleIndexNotice = nil
+        endIndexRefresh()
         tabStrip.reset()
 
         snapshotTask = Task { [weak self, indexService] in
@@ -1416,6 +1422,231 @@ public final class AppModel {
             pendingReplay = (record, false, false)
         }
         switchSnapshot(revision: nil)
+    }
+
+    /// State captured before a refresh so a failed refresh can restore the
+    /// previous index instead of failing the workspace.
+    @ObservationIgnored private var refreshRestoreState: (
+        sessions: [AnalysisProfileID: EngineSession],
+        phase: SnapshotPhase?,
+        coverage: SnapshotCoverage,
+        fileTree: FileTreeModel?,
+        snapshotID: SnapshotID?,
+        documentSource: DocumentLoader.ContentSource?,
+        readySession: EngineSession?,
+        staleNotice: String?
+    )?
+
+    /// Recaptures the current worktree (or selected commit) as a new index
+    /// generation. Tabs, Reading Sets, bookmarks, the trail, history, and the
+    /// selected file are preserved; file positions restore through the
+    /// existing replay fallbacks. A failed refresh restores the previous
+    /// index instead of failing the workspace. Repeated triggers cancel the
+    /// in-flight capture; this never routes through openProject, which would
+    /// reset tabs and trail.
+    public func refreshIndex(leaving current: JumpRecord?) {
+        guard let root = projectRoot,
+              !projectLanguages.isEmpty,
+              case .ready = projectState
+        else { return }
+        snapshotTask?.cancel()
+        compareSnapshotTask?.cancel()
+        replayTask?.cancel()
+        semanticValidationTask?.cancel()
+        compare.clear()
+        generation &+= 1
+        let refreshGeneration = generation
+        isRefreshingIndex = true
+        indexRefreshNotice = nil
+        if refreshRestoreState == nil {
+            let readySession: EngineSession?
+            if case let .ready(session, _) = projectState {
+                readySession = session
+            } else {
+                readySession = nil
+            }
+            refreshRestoreState = (
+                workspaceSessions,
+                snapshotPhase,
+                coverage,
+                fileTree,
+                currentSnapshotID,
+                documentSource,
+                readySession,
+                staleIndexNotice
+            )
+        }
+        bookmarkModel.workspaceDidChange(to: refreshGeneration)
+        exactCoordinator.invalidate(generation: refreshGeneration)
+        workspaceSessions.removeAll(keepingCapacity: true)
+        snapshotPhase = nil
+        coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
+        publishProjectState(.indexing(root: root, startedAt: .now), root: root)
+        pendingReplay = nil
+        if selectedFile != nil, let current {
+            // Position restore rides the existing replay fallback chain; a
+            // refresh, unlike a destination switch, adds no history entry.
+            pendingReplay = (
+                NavigationRecord(
+                    jump: current,
+                    trailNodeID: readingTrail.activeNodeID
+                ),
+                false,
+                false
+            )
+        }
+        let languages = projectLanguages
+        if languages.count == 1 {
+            let language = languages[0]
+            snapshotTask = Task { [weak self, indexService] in
+                do {
+                    let session = try await indexService.index(
+                        root: root,
+                        language: language
+                    )
+                    try Task.checkCancellation()
+                    let tree = try await detachedValue {
+                        try FileTreeModel(root: root, language: language)
+                    }
+                    try Task.checkCancellation()
+                    guard let self,
+                          self.canPublishWorkspaceResult(
+                              generation: refreshGeneration,
+                              root: root,
+                              languages: languages
+                          )
+                    else { return }
+                    self.fileTree = tree
+                    if let selected = self.selectedFile,
+                       self.fileTree?.selectionPath(for: selected)?
+                           .last?.isDirectory != false
+                    {
+                        self.selectedFile = nil
+                        self.selectedByteOffset = nil
+                    }
+                    self.finishIndexing(
+                        session,
+                        generation: refreshGeneration,
+                        root: root,
+                        language: language
+                    )
+                    guard case .ready = self.projectState else {
+                        self.refreshIndexDidFail(
+                            generation: refreshGeneration,
+                            root: root,
+                            languages: languages
+                        )
+                        return
+                    }
+                    self.refreshIndexDidSucceed(
+                        generation: refreshGeneration,
+                        root: root,
+                        languages: languages
+                    )
+                    if let pending = self.pendingReplay {
+                        self.pendingReplay = nil
+                        self.replayWithinCurrentSnapshot(
+                            pending.record,
+                            replayedAgainstCurrentWorktree: false,
+                            opensInNewTab: false
+                        )
+                    }
+                } catch is CancellationError {
+                    return
+                } catch {
+                    guard let self,
+                          self.canPublishWorkspaceResult(
+                              generation: refreshGeneration,
+                              root: root,
+                              languages: languages
+                          )
+                    else { return }
+                    self.refreshIndexDidFail(
+                        generation: refreshGeneration,
+                        root: root,
+                        languages: languages
+                    )
+                }
+            }
+        } else {
+            snapshotTask = snapshotLoadTask(
+                revision: currentRevision,
+                generation: refreshGeneration,
+                root: root,
+                languages: languages
+            ) { [weak self] generation, root, languages in
+                self?.refreshIndexDidFail(
+                    generation: generation,
+                    root: root,
+                    languages: languages
+                )
+            } onSuccess: { [weak self] in
+                self?.refreshIndexDidSucceed(
+                    generation: refreshGeneration,
+                    root: root,
+                    languages: languages
+                )
+            }
+        }
+    }
+
+    /// Hands the workspace over to a new open or switch flow: any in-flight
+    /// index refresh stops owning the state.
+    private func endIndexRefresh() {
+        isRefreshingIndex = false
+        indexRefreshNotice = nil
+        refreshRestoreState = nil
+    }
+
+    private func refreshIndexDidSucceed(
+        generation: UInt64,
+        root: URL,
+        languages: [LanguageID]
+    ) {
+        guard canPublishWorkspaceResult(
+            generation: generation,
+            root: root,
+            languages: languages
+        ) else { return }
+        isRefreshingIndex = false
+        indexRefreshNotice = nil
+        refreshRestoreState = nil
+        staleIndexNotice = nil
+    }
+
+    private func refreshIndexDidFail(
+        generation: UInt64,
+        root: URL,
+        languages: [LanguageID]
+    ) {
+        guard canPublishWorkspaceResult(
+            generation: generation,
+            root: root,
+            languages: languages
+        ) else { return }
+        isRefreshingIndex = false
+        indexRefreshNotice = "Index refresh failed — previous index restored"
+        pendingReplay = nil
+        guard let restore = refreshRestoreState else { return }
+        refreshRestoreState = nil
+        workspaceSessions = restore.sessions
+        snapshotPhase = restore.phase
+        coverage = restore.coverage
+        fileTree = restore.fileTree
+        currentSnapshotID = restore.snapshotID
+        documentSource = restore.documentSource
+        staleIndexNotice = restore.staleNotice
+        if let session = restore.readySession {
+            publishProjectState(.ready(
+                session,
+                QueryContext(
+                    snapshotID: session.snapshotID,
+                    analysisProfileID: session.analysisProfile.id,
+                    generation: generation
+                )
+            ), root: root)
+            prepareExact(generation: generation)
+        }
     }
 
     public func selectCompareCommit(_ revision: String) {
@@ -2583,6 +2814,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
+        endIndexRefresh()
         compare.clear()
         generation &+= 1
         let switchGeneration = generation
@@ -2594,67 +2826,86 @@ public final class AppModel {
         coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
         publishProjectState(.indexing(root: root, startedAt: .now), root: root)
 
-        let expectedLanguages = projectLanguages
-        snapshotTask = Task { [weak self, indexService] in
+        snapshotTask = snapshotLoadTask(
+            revision: revision,
+            generation: switchGeneration,
+            root: root,
+            languages: projectLanguages
+        ) { [weak self] generation, root, languages in
+            self?.failWorkspace(
+                generation: generation,
+                root: root,
+                languages: languages
+            )
+        }
+    }
+
+    /// The staged capture/prepare/complete publication chain shared by
+    /// destination switches and index refreshes.
+    private func snapshotLoadTask(
+        revision: String?,
+        generation: UInt64,
+        root: URL,
+        languages: [LanguageID],
+        onFailure: @escaping @MainActor (UInt64, URL, [LanguageID]) -> Void,
+        onSuccess: (@MainActor () -> Void)? = nil
+    ) -> Task<Void, Never> {
+        Task { [weak self, indexService] in
             do {
                 let snapshot = try await indexService.captureSnapshot(
                     root: root,
                     revision: revision,
-                    languages: expectedLanguages
+                    languages: languages
                 )
                 try Task.checkCancellation()
                 guard let self,
-                      canPublishWorkspaceResult(
-                          generation: switchGeneration,
+                      self.canPublishWorkspaceResult(
+                          generation: generation,
                           root: root,
-                          languages: expectedLanguages
+                          languages: languages
                       )
                 else { return }
-                publishFirstPaint(
+                self.publishFirstPaint(
                     snapshot,
                     root: root,
                     revision: revision,
-                    generation: switchGeneration,
-                    languages: expectedLanguages
+                    generation: generation,
+                    languages: languages
                 )
                 await Task.yield()
-                guard canPublishWorkspaceResult(
-                    generation: switchGeneration,
+                guard self.canPublishWorkspaceResult(
+                    generation: generation,
                     root: root,
-                    languages: expectedLanguages
+                    languages: languages
                 ) else { return }
 
                 let prepared = try await indexService.prepareSnapshots(
                     snapshot,
                     root: root,
-                    languages: expectedLanguages
+                    languages: languages
                 )
                 try Task.checkCancellation()
-                guard canPublishWorkspaceResult(
-                    generation: switchGeneration,
+                guard self.canPublishWorkspaceResult(
+                    generation: generation,
                     root: root,
-                    languages: expectedLanguages
+                    languages: languages
                 ) else { return }
-                guard installWorkspaceSessions(
+                guard self.installWorkspaceSessions(
                     prepared.map(\.cachedSession),
-                    generation: switchGeneration,
+                    generation: generation,
                     root: root,
-                    languages: expectedLanguages,
+                    languages: languages,
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .cachedReady
                 ) else {
-                    failWorkspace(
-                        generation: switchGeneration,
-                        root: root,
-                        languages: expectedLanguages
-                    )
+                    onFailure(generation, root, languages)
                     return
                 }
                 await Task.yield()
-                guard canPublishWorkspaceResult(
-                    generation: switchGeneration,
+                guard self.canPublishWorkspaceResult(
+                    generation: generation,
                     root: root,
-                    languages: expectedLanguages
+                    languages: languages
                 ) else { return }
 
                 var completed: [EngineSession] = []
@@ -2662,46 +2913,39 @@ public final class AppModel {
                     let session = try await indexService.completeSnapshot(item)
                     completed.append(session)
                     try Task.checkCancellation()
-                    guard canPublishWorkspaceResult(
-                        generation: switchGeneration,
+                    guard self.canPublishWorkspaceResult(
+                        generation: generation,
                         root: root,
-                        languages: expectedLanguages
+                        languages: languages
                     ) else { return }
                 }
-                guard installWorkspaceSessions(
+                guard self.installWorkspaceSessions(
                     completed,
-                    generation: switchGeneration,
+                    generation: generation,
                     root: root,
-                    languages: expectedLanguages,
+                    languages: languages,
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .fullReady
                 ) else {
-                    failWorkspace(
-                        generation: switchGeneration,
-                        root: root,
-                        languages: expectedLanguages
-                    )
+                    onFailure(generation, root, languages)
                     return
                 }
-                lastInstalledRevision = currentRevision
-                lastInstalledProjectRoot = projectRoot
-                lastInstalledGeneration = generation
-                prepareExact(generation: generation)
+                self.lastInstalledRevision = self.currentRevision
+                self.lastInstalledProjectRoot = self.projectRoot
+                self.lastInstalledGeneration = self.generation
+                self.prepareExact(generation: self.generation)
+                onSuccess?()
             } catch is CancellationError {
                 return
             } catch {
                 guard let self,
-                      canPublishWorkspaceResult(
-                          generation: switchGeneration,
+                      self.canPublishWorkspaceResult(
+                          generation: generation,
                           root: root,
-                          languages: expectedLanguages
+                          languages: languages
                       )
                 else { return }
-                failWorkspace(
-                    generation: switchGeneration,
-                    root: root,
-                    languages: expectedLanguages
-                )
+                onFailure(generation, root, languages)
             }
         }
     }

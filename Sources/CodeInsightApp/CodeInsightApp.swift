@@ -9534,6 +9534,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.closeActiveTab()
     }
 
+    @objc private func refreshProjectIndex(_ sender: Any?) {
+        windowController?.refreshProjectIndex(sender)
+    }
+
     @objc private func selectPreviousTab(_ sender: Any?) {
         windowController?.selectPreviousTab()
     }
@@ -9654,6 +9658,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(refreshProjectIndex(_:)):
+            return windowController?.canRefreshIndex == true
         case #selector(findInFile(_:)), #selector(findNext(_:)),
             #selector(findPrevious(_:)):
             return windowController?.canFindInFile == true
@@ -9803,6 +9809,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         )
         closeTabItem.target = self
         fileMenu.addItem(closeTabItem)
+        fileMenu.addItem(.separator())
+        let refreshIndexItem = NSMenuItem(
+            title: "Refresh Index",
+            action: #selector(refreshProjectIndex(_:)),
+            keyEquivalent: "r"
+        )
+        refreshIndexItem.target = self
+        fileMenu.addItem(refreshIndexItem)
         fileMenu.addItem(.separator())
         let trustItem = NSMenuItem(
             title: "Trust This Repository…",

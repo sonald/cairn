@@ -1618,3 +1618,374 @@ private enum SnapshotTestError: Error {
     case missing(String)
     case git(String)
 }
+
+// MARK: - S2c Refresh Index
+
+@MainActor
+@Test
+func refreshIndexRepublishesDriftedWorktreeAndClearsStaleState() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let file = fixture.root.appendingPathComponent("main.rs")
+    let original = "pub fn target() -> i32 { 42 }\n"
+    try snapshotWrite(original, to: file)
+    try fixture.git("add", "main.rs")
+    try fixture.commit("initial")
+    let model = AppModel(indexService: ProjectIndexService())
+    model.openProject(root: fixture.root)
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+    model.navigate(to: file)
+    let tabsAfterOpen = model.tabStrip.tabs.count
+
+    // External drift (review repro): prefix comment lines plus a rename.
+    let drifted = String(repeating: "// drift\n", count: 8)
+        + "pub fn renamed() -> i32 { 42 }\n"
+    try snapshotWrite(drifted, to: file)
+    let oldIdentity = ContentID.sha256(of: Array(original.utf8))
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: file,
+            byteOffset: 4,
+            expectedContentID: oldIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    #expect(await testWaitUntil("stale notice set") {
+        model.staleIndexNotice != nil
+    })
+
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh installed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+    })
+    #expect(model.indexRefreshNotice == nil)
+    guard case let .ready(session, context) = model.projectState else {
+        Issue.record("expected refreshed session")
+        return
+    }
+    let renamedHits = try await session.searchSymbols(
+        query: "renamed",
+        limit: 10,
+        boost: SearchBoost(),
+        context: context
+    )
+    #expect(!renamedHits.isEmpty, "#renamed must be indexed after refresh")
+    let targetHits = try await session.searchSymbols(
+        query: "target",
+        limit: 10,
+        boost: SearchBoost(),
+        context: context
+    )
+    #expect(targetHits.isEmpty, "#target must no longer be indexed")
+    let refreshedIdentity = session.manifest.files.first {
+        session.paths.resolve($0.pathID) == "main.rs"
+    }?.contentID
+    #expect(refreshedIdentity == ContentID.sha256(of: Array(drifted.utf8)))
+
+    #expect(model.staleIndexNotice == nil)
+    #expect(model.tabStrip.tabs.count == tabsAfterOpen)
+
+    // Navigation carrying the refreshed identity is accepted again.
+    let renamedOffset = UInt32(
+        drifted[..<drifted.range(of: "renamed")!.lowerBound].utf8.count
+    )
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: file,
+            byteOffset: renamedOffset,
+            expectedContentID: ContentID.sha256(of: Array(drifted.utf8))
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    #expect(await testWaitUntil("refreshed offset applied") {
+        model.selectedByteOffset == renamedOffset
+    })
+}
+
+@MainActor
+@Test
+func refreshIndexPreservesTabsTrailHistoryAndBookmarks() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let file = fixture.root.appendingPathComponent("main.rs")
+    let other = fixture.root.appendingPathComponent("other.rs")
+    let source = "pub fn target() -> i32 { 42 }\n"
+    try snapshotWrite(source, to: file)
+    try snapshotWrite("pub fn other() {}\n", to: other)
+    try fixture.git("add", "main.rs", "other.rs")
+    try fixture.commit("initial")
+    let model = AppModel(indexService: ProjectIndexService())
+    model.openProject(root: fixture.root)
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+    model.navigate(to: file)
+    let identity = ContentID.sha256(of: Array(source.utf8))
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: file,
+                byteOffset: 4,
+                expectedContentID: identity
+            ),
+            cause: .search,
+            policy: .explicitSemantic
+        ),
+        leaving: snapshotJumpRecord(
+            "main.rs",
+            offset: 4,
+            snapshotID: try #require(model.currentSnapshotID)
+        )
+    )
+    #expect(await testWaitUntil("trail recorded") {
+        model.readingTrail.edges.count == 1
+    })
+    model.openInNewTab(other)
+    let bookmark = BookmarkRecord(
+        id: UUID(),
+        projectPath: fixture.root.standardizedFileURL.path,
+        snapshot: .worktree,
+        path: "main.rs",
+        contentID: identity,
+        byteOffset: 4,
+        line: 1,
+        symbolName: nil,
+        symbolKind: nil,
+        note: "",
+        updatedAt: .now
+    )
+    #expect(model.bookmarkModel.toggle(bookmark) == .added)
+    let tabsBefore = model.tabStrip.tabs.count
+    let historyBefore = model.navigationHistory.records.count
+
+    try snapshotWrite("// drift\npub fn renamed() -> i32 { 42 }\n", to: file)
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh installed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+    })
+
+    #expect(model.tabStrip.tabs.count == tabsBefore)
+    #expect(model.readingTrail.edges.count == 1)
+    #expect(model.navigationHistory.records.count == historyBefore)
+    #expect(model.bookmarkModel.records.count == 1)
+    #expect(
+        model.tabStrip.tabs.contains {
+            $0.fileURL?.standardizedFileURL == other.standardizedFileURL
+        }
+    )
+}
+
+@MainActor
+@Test
+func refreshIndexFailureRestoresThePreviousIndexAndAllowsRetry() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let mixedFiles = [
+        "main.rs": "fn main() {}\n",
+        "lib.py": "def f():\n    pass\n",
+        "a.ts": "export function a() {}\n",
+    ]
+    for (path, contents) in mixedFiles {
+        try snapshotWrite(contents, to: fixture.root.appendingPathComponent(path))
+    }
+    try fixture.git("add", "main.rs", "lib.py", "a.ts")
+    try fixture.commit("initial")
+    let service = ControlledSnapshotIndexService(
+        initialSession: try ProjectIndexer().index(root: fixture.root),
+        worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
+        snapshots: [:],
+        failedCapture: ["refresh"]
+    )
+    let model = AppModel(indexService: service)
+    try await model.openProject(
+        root: fixture.root,
+        languages: [.typescript, .rust, .python]
+    )
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+    #expect(model.querySessions.count == 3)
+
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "refresh",
+        files: mixedFiles
+    ))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh failed and restored") {
+        model.indexRefreshNotice != nil && !model.isRefreshingIndex
+    })
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.querySessions.count == 3)
+    guard case .ready = model.projectState else {
+        Issue.record("expected the previous index restored as ready")
+        return
+    }
+
+    // Retry with a capturable snapshot succeeds and clears the notice.
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "retry",
+        files: mixedFiles
+    ))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("retry refresh installed") {
+        model.snapshotPhase == .fullReady
+            && !model.isRefreshingIndex
+            && model.indexRefreshNotice == nil
+    })
+}
+
+@MainActor
+@Test
+func refreshInProgressSuppressesSessionCheckpoints() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let mixedFiles = [
+        "main.rs": "fn main() {}\n",
+        "lib.py": "def f():\n    pass\n",
+        "a.ts": "export function a() {}\n",
+    ]
+    for (path, contents) in mixedFiles {
+        try snapshotWrite(contents, to: fixture.root.appendingPathComponent(path))
+    }
+    try fixture.git("add", "main.rs", "lib.py", "a.ts")
+    try fixture.commit("initial")
+    let sessionURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("CodeInsightRefreshCheckpoint-\(UUID().uuidString).json")
+    defer { try? FileManager.default.removeItem(at: sessionURL) }
+    let service = ControlledSnapshotIndexService(
+        initialSession: try ProjectIndexer().index(root: fixture.root),
+        worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
+        snapshots: [:],
+        blockedFull: ["refresh"]
+    )
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: service
+    )
+    try await model.openProject(
+        root: fixture.root,
+        languages: [.typescript, .rust, .python]
+    )
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "refresh",
+        files: mixedFiles
+    ))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh mid-flight at cached phase") {
+        model.snapshotPhase == .cachedReady || model.snapshotPhase == .firstPaint
+    })
+    model.scheduleSessionCheckpoint(panelPreset: .reading)
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(
+        !FileManager.default.fileExists(atPath: sessionURL.path),
+        "a half-installed refresh must not be checkpointed"
+    )
+    await service.releaseFull("refresh")
+    #expect(await testWaitUntil("refresh completed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+    })
+    model.scheduleSessionCheckpoint(panelPreset: .reading)
+    #expect(await testWaitUntil("checkpoint after completion") {
+        FileManager.default.fileExists(atPath: sessionURL.path)
+    })
+}
+
+@MainActor
+@Test
+func refreshIndexWorksForPlainNonGitDirectories() async throws {
+    let root = try snapshotTemporaryProject(["main.rs": "fn target() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    model.openProject(root: root)
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+    let file = root.appendingPathComponent("main.rs")
+    try snapshotWrite("fn renamed() {}\n", to: file)
+
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("non-git refresh installed") {
+        model.snapshotPhase == .fullReady && !model.isRefreshingIndex
+    })
+    guard case let .ready(session, context) = model.projectState else {
+        Issue.record("expected refreshed session")
+        return
+    }
+    let hits = try await session.searchSymbols(
+        query: "renamed",
+        limit: 10,
+        boost: SearchBoost(),
+        context: context
+    )
+    #expect(!hits.isEmpty)
+}
+
+@MainActor
+@Test
+func refreshYieldsToAProjectSwitchMidFlight() async throws {
+    let first = try SnapshotGitFixture()
+    let second = try SnapshotGitFixture()
+    defer {
+        first.remove()
+        second.remove()
+    }
+    let mixedFiles = [
+        "main.rs": "fn main() {}\n",
+        "lib.py": "def f():\n    pass\n",
+        "a.ts": "export function a() {}\n",
+    ]
+    for (path, contents) in mixedFiles {
+        try snapshotWrite(contents, to: first.root.appendingPathComponent(path))
+    }
+    try first.git("add", "main.rs", "lib.py", "a.ts")
+    try first.commit("initial")
+    try snapshotWrite("fn solo() {}\n", to: second.root.appendingPathComponent("solo.rs"))
+    try second.git("add", "solo.rs")
+    try second.commit("initial")
+    let service = ControlledSnapshotIndexService(
+        initialSession: try ProjectIndexer().index(root: first.root),
+        worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
+        snapshots: [:],
+        blockedFull: ["refresh"]
+    )
+    let model = AppModel(indexService: service)
+    try await model.openProject(
+        root: first.root,
+        languages: [.typescript, .rust, .python]
+    )
+    #expect(await testWaitUntil("fullReady after open") {
+        model.snapshotPhase == .fullReady
+    })
+    await service.setWorktreeSnapshot(TestSnapshot(
+        label: "refresh",
+        files: mixedFiles
+    ))
+    model.refreshIndex(leaving: nil)
+    #expect(await testWaitUntil("refresh mid-flight") {
+        model.snapshotPhase == .firstPaint
+            || model.snapshotPhase == .cachedReady
+    })
+
+    // Opening another project mid-refresh must take over; the in-flight
+    // refresh may not publish anything into the new workspace afterwards.
+    let secondModelTask = Task { @MainActor in
+        _ = try? await model.openProject(root: second.root, language: .rust)
+    }
+    await service.releaseFull("refresh")
+    _ = await secondModelTask.value
+    #expect(await testWaitUntil("second project ready") {
+        model.snapshotPhase == .fullReady
+            && model.projectRoot?.standardizedFileURL
+                == second.root.standardizedFileURL
+    })
+    #expect(model.fileTree?.children.map(\.name) == ["solo.rs"])
+    #expect(!model.isRefreshingIndex)
+}
