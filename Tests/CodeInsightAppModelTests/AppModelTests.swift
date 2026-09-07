@@ -3234,3 +3234,105 @@ func openAndSwitchFailuresSurfaceTheirUnderlyingReasons() async throws {
     #expect(summary.count <= 281)
     #expect(summary.hasSuffix("…"))
 }
+
+@MainActor
+@Test
+func projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() async throws {
+    let first = try temporaryGitProject([
+        "src/lib.rs": "pub fn first_only() {}\n",
+    ])
+    let second = try temporaryGitProject([
+        "src/lib.rs": "pub fn second_only() {}\n",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: first)
+        try? FileManager.default.removeItem(at: second)
+    }
+    let service = ProjectIndexService()
+    let firstSession = try await service.index(root: first)
+    let firstIdentity = ContentID.sha256(
+        of: Array("pub fn first_only() {}\n".utf8)
+    )
+    #expect(
+        service.retainedContentIDsForDiagnostics.contains(firstIdentity),
+        "the open project's content must be retained"
+    )
+
+    // Crossing the project boundary replaces the service store; the old
+    // project's bytes must not stay retained by the service.
+    let secondSession = try await service.index(root: second)
+    #expect(
+        !service.retainedContentIDsForDiagnostics.contains(firstIdentity),
+        "a closed project's content must leave the service store"
+    )
+    let secondIdentity = ContentID.sha256(
+        of: Array("pub fn second_only() {}\n".utf8)
+    )
+    #expect(service.retainedContentIDsForDiagnostics.contains(secondIdentity))
+
+    // Already-published sessions keep working through their own references.
+    let firstContext = QueryContext(
+        snapshotID: firstSession.snapshotID,
+        analysisProfileID: firstSession.analysisProfile.id,
+        generation: 1
+    )
+    let firstHits = try await firstSession.searchSymbols(
+        query: "first_only",
+        limit: 10,
+        boost: SearchBoost(),
+        context: firstContext
+    )
+    #expect(!firstHits.isEmpty)
+    let secondContext = QueryContext(
+        snapshotID: secondSession.snapshotID,
+        analysisProfileID: secondSession.analysisProfile.id,
+        generation: 2
+    )
+    let secondHits = try await secondSession.searchSymbols(
+        query: "second_only",
+        limit: 10,
+        boost: SearchBoost(),
+        context: secondContext
+    )
+    #expect(!secondHits.isEmpty)
+
+    // Reopening the first project rebuilds through cache/capture as before.
+    _ = try await service.index(root: first)
+    #expect(service.retainedContentIDsForDiagnostics.contains(firstIdentity))
+}
+
+@MainActor
+@Test
+func multiLanguageProjectBoundaryAlsoReplacesTheServiceStore() async throws {
+    let first = try temporaryGitProject([
+        "main.rs": "fn m1() {}\n",
+        "lib.py": "def p1():\n    pass\n",
+    ])
+    let second = try temporaryGitProject([
+        "main.rs": "fn m2() {}\n",
+        "lib.py": "def p2():\n    pass\n",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: first)
+        try? FileManager.default.removeItem(at: second)
+    }
+    let service = ProjectIndexService()
+    let model = AppModel(indexService: service)
+    try await model.openProject(root: first, languages: [.rust, .python])
+    #expect(await testWaitUntil("first multi ready") {
+        model.snapshotPhase == .fullReady
+    })
+    let firstIdentity = ContentID.sha256(of: Array("fn m1() {}\n".utf8))
+    #expect(service.retainedContentIDsForDiagnostics.contains(firstIdentity))
+
+    try await model.openProject(root: second, languages: [.rust, .python])
+    #expect(await testWaitUntil("second multi ready") {
+        model.snapshotPhase == .fullReady
+            && model.projectRoot?.standardizedFileURL
+                == second.standardizedFileURL
+    })
+    #expect(
+        !service.retainedContentIDsForDiagnostics.contains(firstIdentity),
+        "multi-language boundary must also drop the old project"
+    )
+}

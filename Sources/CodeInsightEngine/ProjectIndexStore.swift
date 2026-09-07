@@ -21,6 +21,20 @@ public final class ProjectIndexStore: @unchecked Sendable {
 
     public init() {}
 
+    /// Content identities currently retained as source bytes. Diagnostic and
+    /// regression surface for store lifetime boundaries.
+    public func retainedContentIDs() -> Set<ContentID> {
+        lock.withLock { Set(storedSourceBytes.keys) }
+    }
+
+    /// Total retained source-byte count. Diagnostic and regression surface
+    /// for store lifetime boundaries.
+    public func retainedContentByteCount() -> Int {
+        lock.withLock {
+            storedSourceBytes.values.reduce(0) { $0 + $1.count }
+        }
+    }
+
     func snapshot() -> State {
         lock.withLock {
             State(

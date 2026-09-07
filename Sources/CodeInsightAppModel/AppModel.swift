@@ -142,11 +142,30 @@ public extension IndexService {
 }
 
 public final class ProjectIndexService: IndexService, @unchecked Sendable {
-    private let store = ProjectIndexStore()
+    private var store = ProjectIndexStore()
     private let lock = NSLock()
     private var indexer = ProjectIndexer()
+    private var scopedRoot: URL?
 
     public init() {}
+
+    /// Content identities the service store currently retains. Regression
+    /// surface for the project-boundary lifetime contract.
+    package var retainedContentIDsForDiagnostics: Set<ContentID> {
+        lock.withLock { store.retainedContentIDs() }
+    }
+
+    /// Replaces the store when work starts for a different project so a
+    /// closed project's bytes do not stay retained. Sessions already
+    /// published keep their own store references.
+    private func beginProjectScope(root: URL) {
+        let key = root.standardizedFileURL
+        lock.withLock {
+            guard scopedRoot != key else { return }
+            scopedRoot = key
+            store = ProjectIndexStore()
+        }
+    }
 
     public static func loadCommitHistory(root: URL) async throws -> [CommitInfo] {
         try await detachedValue {
@@ -159,7 +178,8 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         language: LanguageID
     ) async throws -> EngineSession {
         try validateProductSupport(language)
-        let store = store
+        beginProjectScope(root: root)
+        let store = lock.withLock { self.store }
         let indexer = ProjectIndexer(persistingProjectAt: root)
         lock.withLock { self.indexer = indexer }
         return try await detachedValue {
@@ -186,6 +206,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         language: LanguageID
     ) async throws -> any Snapshot {
         try validateProductSupport(language)
+        beginProjectScope(root: root)
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
@@ -202,7 +223,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         _ snapshot: any Snapshot,
         language: LanguageID
     ) async throws -> ProjectIndexer.PreparedSnapshot {
-        let store = store
+        let store = lock.withLock { self.store }
         let indexer: ProjectIndexer = lock.withLock { self.indexer }
         return try await detachedValue {
             try indexer.prepareSnapshot(
@@ -219,6 +240,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         languages: [LanguageID]
     ) async throws -> any Snapshot {
         let normalized = try LanguageMode.normalize(languages: languages)
+        beginProjectScope(root: root)
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
