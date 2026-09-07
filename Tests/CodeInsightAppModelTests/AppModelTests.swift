@@ -3170,3 +3170,67 @@ func openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() async throws
         == second.standardizedFileURL)
     #expect(model.fileTree?.children.map(\.name) == ["b.rs"])
 }
+
+@MainActor
+@Test
+func openAndSwitchFailuresSurfaceTheirUnderlyingReasons() async throws {
+    // Missing path: the real service fails and the reason is preserved.
+    let missing = URL(
+        fileURLWithPath: "/nonexistent-\(UUID().uuidString)",
+        isDirectory: true
+    )
+    let missingModel = AppModel(indexService: ProjectIndexService())
+    missingModel.openProject(root: missing)
+    #expect(await testWaitUntil("missing path failed") {
+        if case .failed = missingModel.projectState { return true }
+        return false
+    })
+    #expect(missingModel.projectFailureReason?.isEmpty == false)
+
+    // Denied read: the underlying CocoaError reaches the failure state.
+    let deniedRoot = try temporaryProject(["a.rs": "fn a() {}\n"])
+    defer { try? FileManager.default.removeItem(at: deniedRoot) }
+    let deniedService = ControlledIndexService()
+    let deniedModel = AppModel(indexService: deniedService)
+    deniedModel.openProject(root: deniedRoot)
+    #expect(await deniedService.waitUntilRequested(root: deniedRoot))
+    await deniedService.complete(root: deniedRoot, result: .failure(
+        CocoaError(.fileReadNoPermission)
+    ))
+    #expect(await testWaitUntil("permission failure surfaced") {
+        if case .failed = deniedModel.projectState { return true }
+        return false
+    })
+    #expect(deniedModel.projectFailureReason?.isEmpty == false)
+
+    // Invalid Git revision on a ready repository fails with its reason.
+    let gitRoot = try temporaryGitProject(["src/lib.rs": "pub fn a() {}\n"])
+    defer { try? FileManager.default.removeItem(at: gitRoot) }
+    let gitModel = AppModel(indexService: ProjectIndexService())
+    gitModel.openProject(root: gitRoot)
+    #expect(await testWaitUntil("git project ready") {
+        gitModel.snapshotPhase == .fullReady
+    })
+    gitModel.switchToCommit(String(repeating: "0", count: 40))
+    #expect(await testWaitUntil("invalid revision failed") {
+        if case .failed = gitModel.projectState { return true }
+        return false
+    })
+    #expect(gitModel.projectFailureReason?.isEmpty == false)
+
+    // A successful reopen clears the previous reason.
+    gitModel.openProject(root: gitRoot)
+    #expect(await testWaitUntil("git project reopened") {
+        gitModel.snapshotPhase == .fullReady
+    })
+    #expect(gitModel.projectFailureReason == nil)
+
+    // Unbounded provider stderr stays bounded in the surfaced reason.
+    let huge = LSPError.processExited(
+        1,
+        String(repeating: "stderr noise; ", count: 200)
+    )
+    let summary = AppModel.failureSummary(huge)
+    #expect(summary.count <= 281)
+    #expect(summary.hasSuffix("…"))
+}

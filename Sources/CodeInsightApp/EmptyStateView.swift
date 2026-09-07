@@ -7,8 +7,12 @@ final class EmptyStateView: NSView {
     private let taglineLabel = NSTextField(
         labelWithString: "Read code without touching it."
     )
+    private let reasonLabel = NSTextField(
+        wrappingLabelWithString: ""
+    )
     private let markView = NSImageView()
     private let openButton = NSButton()
+    private let chooseFolderButton = NSButton()
     private let recentStack = NSStackView()
     private var recentPaths: [String] = []
     private var isFailure = false
@@ -46,11 +50,30 @@ final class EmptyStateView: NSView {
         taglineLabel.font = .systemFont(ofSize: 13)
         taglineLabel.textColor = .secondaryLabelColor
         taglineLabel.alignment = .center
+        // Short, bounded failure reason; selectable so it stays copyable.
+        reasonLabel.font = .systemFont(ofSize: 13)
+        reasonLabel.textColor = .secondaryLabelColor
+        reasonLabel.alignment = .center
+        reasonLabel.isSelectable = true
+        reasonLabel.setContentHuggingPriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        reasonLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 460)
+            .isActive = true
+        reasonLabel.setAccessibilityLabel("Open failure reason")
 
         openButton.bezelStyle = .rounded
         openButton.target = self
         openButton.action = #selector(openOrRetry(_:))
         openButton.setAccessibilityLabel("Open Project")
+
+        chooseFolderButton.bezelStyle = .rounded
+        chooseFolderButton.title = "Open Another Folder…"
+        chooseFolderButton.target = self
+        chooseFolderButton.action = #selector(chooseFolder(_:))
+        chooseFolderButton.setAccessibilityLabel("Open Another Folder")
+        chooseFolderButton.isHidden = true
 
         let dropHint = NSTextField(labelWithString: "or drop a folder here")
         dropHint.font = .systemFont(ofSize: 11)
@@ -65,7 +88,9 @@ final class EmptyStateView: NSView {
             markView,
             titleLabel,
             taglineLabel,
+            reasonLabel,
             openButton,
+            chooseFolderButton,
             dropHint,
             recentStack,
         ])
@@ -74,8 +99,10 @@ final class EmptyStateView: NSView {
         stack.spacing = 0
         stack.setCustomSpacing(12, after: markView)
         stack.setCustomSpacing(4, after: titleLabel)
-        stack.setCustomSpacing(24, after: taglineLabel)
+        stack.setCustomSpacing(8, after: taglineLabel)
+        stack.setCustomSpacing(16, after: reasonLabel)
         stack.setCustomSpacing(8, after: openButton)
+        stack.setCustomSpacing(24, after: chooseFolderButton)
         stack.setCustomSpacing(32, after: dropHint)
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -93,19 +120,27 @@ final class EmptyStateView: NSView {
             stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -24),
         ])
 
-        update(recentPaths: recentPaths, failed: failed)
+        update(recentPaths: recentPaths, failed: failed, reason: nil)
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func update(recentPaths: [String], failed: Bool) {
+    func update(
+        recentPaths: [String],
+        failed: Bool,
+        reason: String?
+    ) {
         isFailure = failed
         titleLabel.stringValue = failed ? "Couldn't open this folder." : "Cairn"
         openButton.title = failed ? "Try Again" : "Open Project…  ⌘O"
         openButton.keyEquivalent = "\r"
         openButton.keyEquivalentModifierMask = []
+        let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
+        reasonLabel.stringValue = failed ? (trimmedReason ?? "") : ""
+        reasonLabel.isHidden = !failed || trimmedReason == nil
+        chooseFolderButton.isHidden = !failed
 
         let visiblePaths = Array(recentPaths.prefix(5))
         guard visiblePaths != self.recentPaths else { return }
@@ -114,11 +149,26 @@ final class EmptyStateView: NSView {
     }
 
     var selfTestTextValues: [String] {
-        [titleLabel.stringValue, taglineLabel.stringValue]
+        [titleLabel.stringValue, taglineLabel.stringValue, reasonLabel.stringValue]
     }
 
     var selfTestButtonTitles: [String] {
-        [openButton.title]
+        var titles = [openButton.title]
+        if !chooseFolderButton.isHidden { titles.append(chooseFolderButton.title) }
+        return titles
+    }
+
+    var selfTestFailureReason: String? {
+        reasonLabel.isHidden ? nil : reasonLabel.stringValue
+    }
+
+    var selfTestReasonIsSelectable: Bool {
+        !reasonLabel.isHidden && reasonLabel.isSelectable
+    }
+
+    var selfTestChooseFolderActionAvailable: Bool {
+        !chooseFolderButton.isHidden && chooseFolderButton.action
+            == #selector(chooseFolder(_:))
     }
 
     var selfTestAttachedToWindow: Bool { window != nil }
@@ -171,6 +221,10 @@ final class EmptyStateView: NSView {
         } else {
             onChooseProject()
         }
+    }
+
+    @objc private func chooseFolder(_ sender: Any?) {
+        onChooseProject()
     }
 
     @objc private func openRecent(_ sender: NSButton) {

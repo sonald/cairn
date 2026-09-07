@@ -1182,6 +1182,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestEmptyStateButtonTitles: [String] {
         readerController.selfTestEmptyStateButtonTitles
     }
+    var selfTestEmptyStateFailureReason: String? {
+        readerController.selfTestEmptyStateFailureReason
+    }
+    var selfTestEmptyStateReasonIsSelectable: Bool {
+        readerController.selfTestEmptyStateReasonIsSelectable
+    }
+    var selfTestEmptyStateChooseFolderActionAvailable: Bool {
+        readerController.selfTestEmptyStateChooseFolderActionAvailable
+    }
     var selfTestEmptyStateAttachedToWindow: Bool {
         readerController.selfTestEmptyStateAttachedToWindow
     }
@@ -1838,6 +1847,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.staleIndexNotice
             _ = model.isRefreshingIndex
             _ = model.indexRefreshNotice
+            _ = model.projectFailureReason
             _ = model.commitPicker.currentCommit
             _ = model.commitPicker.currentBranchName
             _ = model.commitPicker.isLoading
@@ -2188,6 +2198,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
                 failed: true,
+                failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
                 onOpenRecent: { [weak self] in self?.openRecentProject($0) },
                 onOpenDropped: onChooseProjectLanguage,
@@ -4772,6 +4783,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     func showEmptyState(
         recentPaths: [String],
         failed: Bool,
+        failureReason: String? = nil,
         onChooseProject: @escaping () -> Void,
         onOpenRecent: @escaping (URL) -> Void,
         onOpenDropped: @escaping (URL) -> Void,
@@ -4782,7 +4794,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         label.isHidden = true
         scrollView?.isHidden = true
         if let emptyStateView {
-            emptyStateView.update(recentPaths: recentPaths, failed: failed)
+            emptyStateView.update(
+                recentPaths: recentPaths,
+                failed: failed,
+                reason: failureReason
+            )
             return
         }
         let emptyStateView = EmptyStateView(
@@ -4792,6 +4808,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onOpenRecent: onOpenRecent,
             onOpenDropped: onOpenDropped,
             onRetry: onRetry
+        )
+        emptyStateView.update(
+            recentPaths: recentPaths,
+            failed: failed,
+            reason: failureReason
         )
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(emptyStateView)
@@ -4821,6 +4842,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
     var selfTestEmptyStateButtonTitles: [String] {
         emptyStateView?.selfTestButtonTitles ?? []
+    }
+    var selfTestEmptyStateFailureReason: String? {
+        emptyStateView?.selfTestFailureReason
+    }
+    var selfTestEmptyStateReasonIsSelectable: Bool {
+        emptyStateView?.selfTestReasonIsSelectable == true
+    }
+    var selfTestEmptyStateChooseFolderActionAvailable: Bool {
+        emptyStateView?.selfTestChooseFolderActionAvailable == true
     }
     var selfTestEmptyStateAttachedToWindow: Bool {
         emptyStateView?.selfTestAttachedToWindow == true

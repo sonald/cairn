@@ -513,6 +513,10 @@ public final class AppModel {
     public private(set) var isRefreshingIndex = false
     /// Set when Refresh Index failed and the previous index was restored.
     public private(set) var indexRefreshNotice: String?
+    /// Short underlying reason for a failed open or switch, shown by the
+    /// empty state with its recovery actions. Bounded so unbounded stderr
+    /// never drives layout; the full error stays available to diagnostics.
+    public private(set) var projectFailureReason: String?
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
@@ -844,6 +848,7 @@ public final class AppModel {
         resolutionExplanations.removeAll()
         replayNotice = nil
         staleIndexNotice = nil
+        projectFailureReason = nil
         endIndexRefresh()
         tabStrip.reset()
         return openGeneration
@@ -864,11 +869,12 @@ public final class AppModel {
             generation: openGeneration,
             root: root,
             languages: normalized
-        ) { [weak self] generation, root, languages in
+        ) { [weak self] generation, root, languages, error in
             self?.failWorkspace(
                 generation: generation,
                 root: root,
-                languages: languages
+                languages: languages,
+                error: error
             )
         }
         await snapshotTask?.value
@@ -877,7 +883,8 @@ public final class AppModel {
     private func failWorkspace(
         generation expectedGeneration: UInt64,
         root expectedRoot: URL,
-        languages expectedLanguages: [LanguageID]
+        languages expectedLanguages: [LanguageID],
+        error: Error? = nil
     ) {
         guard canPublishWorkspaceResult(
             generation: expectedGeneration,
@@ -886,7 +893,18 @@ public final class AppModel {
         ) else { return }
         pendingReplay = nil
         workspaceSessions.removeAll(keepingCapacity: true)
+        projectFailureReason = error.map(Self.failureSummary)
         publishProjectState(.failed, root: expectedRoot)
+    }
+
+    /// Bounded, human-readable summary of an underlying open/switch error.
+    /// Errors like a provider's exit report can embed unbounded stderr; the
+    /// UI reason stays short while the original error is not replaced.
+    nonisolated package static func failureSummary(_ error: Error) -> String {
+        let text = (error as? LocalizedError)?.errorDescription
+            ?? String(describing: error)
+        guard text.count > 280 else { return text }
+        return String(text.prefix(280)) + "…"
     }
 
     package func restoreSession(_ snapshot: SessionCodec.Snapshot) async -> Bool {
@@ -1240,7 +1258,8 @@ public final class AppModel {
                 failIndexing(
                     generation: openGeneration,
                     root: root,
-                    language: language
+                    language: language,
+                    error: error
                 )
             }
         }
@@ -1487,11 +1506,12 @@ public final class AppModel {
                 generation: refreshGeneration,
                 root: root,
                 languages: languages
-            ) { [weak self] generation, root, languages in
+            ) { [weak self] generation, root, languages, error in
                 self?.refreshIndexDidFail(
                     generation: generation,
                     root: root,
-                    languages: languages
+                    languages: languages,
+                    error: error
                 )
             } onSuccess: { [weak self] in
                 self?.refreshIndexDidSucceed(
@@ -1525,12 +1545,14 @@ public final class AppModel {
         indexRefreshNotice = nil
         refreshRestoreState = nil
         staleIndexNotice = nil
+        projectFailureReason = nil
     }
 
     private func refreshIndexDidFail(
         generation: UInt64,
         root: URL,
-        languages: [LanguageID]
+        languages: [LanguageID],
+        error: Error? = nil
     ) {
         guard canPublishWorkspaceResult(
             generation: generation,
@@ -1538,7 +1560,10 @@ public final class AppModel {
             languages: languages
         ) else { return }
         isRefreshingIndex = false
-        indexRefreshNotice = "Index refresh failed — previous index restored"
+        let reason = error.map(Self.failureSummary)
+        indexRefreshNotice = reason.map {
+            "Index refresh failed — previous index restored (\($0))"
+        } ?? "Index refresh failed — previous index restored"
         pendingReplay = nil
         guard let restore = refreshRestoreState else { return }
         refreshRestoreState = nil
@@ -2684,6 +2709,7 @@ public final class AppModel {
         currentSnapshotID = session.snapshotID
         snapshotDestinations[session.snapshotID] = .worktree
         snapshotPhase = .fullReady
+        projectFailureReason = nil
         coverage = Self.sessionCoverage(for: session)
         guard transition(to: .ready(
             session,
@@ -2705,7 +2731,8 @@ public final class AppModel {
     private func failIndexing(
         generation: UInt64,
         root: URL,
-        language: LanguageID
+        language: LanguageID,
+        error: Error? = nil
     ) {
         guard canPublishProjectResult(
             generation: generation,
@@ -2714,6 +2741,7 @@ public final class AppModel {
         ) else { return }
         workspaceSessions.removeAll(keepingCapacity: true)
         pendingReplay = nil
+        projectFailureReason = error.map(Self.failureSummary)
         guard transition(to: .failed) else {
             assertionFailure("Illegal project state transition to failed")
             return
@@ -2744,11 +2772,12 @@ public final class AppModel {
             generation: switchGeneration,
             root: root,
             languages: projectLanguages
-        ) { [weak self] generation, root, languages in
+        ) { [weak self] generation, root, languages, error in
             self?.failWorkspace(
                 generation: generation,
                 root: root,
-                languages: languages
+                languages: languages,
+                error: error
             )
         }
     }
@@ -2760,7 +2789,7 @@ public final class AppModel {
         generation: UInt64,
         root: URL,
         languages: [LanguageID],
-        onFailure: @escaping @MainActor (UInt64, URL, [LanguageID]) -> Void,
+        onFailure: @escaping @MainActor (UInt64, URL, [LanguageID], Error?) -> Void,
         onSuccess: (@MainActor () -> Void)? = nil
     ) -> Task<Void, Never> {
         Task { [weak self, indexService] in
@@ -2811,7 +2840,7 @@ public final class AppModel {
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .cachedReady
                 ) else {
-                    onFailure(generation, root, languages)
+                    onFailure(generation, root, languages, nil)
                     return
                 }
                 await Task.yield()
@@ -2840,7 +2869,7 @@ public final class AppModel {
                     expectedSnapshotID: snapshot.snapshotID,
                     phase: .fullReady
                 ) else {
-                    onFailure(generation, root, languages)
+                    onFailure(generation, root, languages, nil)
                     return
                 }
                 self.lastInstalledRevision = self.currentRevision
@@ -2858,7 +2887,7 @@ public final class AppModel {
                           languages: languages
                       )
                 else { return }
-                onFailure(generation, root, languages)
+                onFailure(generation, root, languages, error)
             }
         }
     }
@@ -2929,6 +2958,7 @@ public final class AppModel {
         )
         navigationGeneration &+= 1
         staleIndexNotice = nil
+        projectFailureReason = nil
         if let pending = pendingReplay {
             pendingReplay = nil
             replayWithinCurrentSnapshot(

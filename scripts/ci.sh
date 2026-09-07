@@ -27,10 +27,10 @@ bookmark_test_two='CodeInsightAppTests.bookmarkPanelSelfTestActionsTargetRowsByU
 # Quarantine contract: the main run covers everything except the two isolated
 # bookmark panel tests (AppKit window-state isolation). Bump these counts when
 # the suite grows or the isolation list changes.
-# 873 = 849 baseline + 6 S1 LSP EOF + 5 S2a semantic navigation
+# 875 = 849 baseline + 6 S1 LSP EOF + 5 S2a semantic navigation
 # + 4 S2b Context/Exact consistency + 6 S2c Refresh Index
-# + 3 S3a open-flow convergence regressions.
-expected_main_test_count=873
+# + 3 S3a open-flow convergence + 2 S3b failure-reason regressions.
+expected_main_test_count=875
 expected_isolated_test_count=2
 if ! swift test --no-parallel ${swift_options[@]+"${swift_options[@]}"} \
     --skip "$bookmark_test_one" \

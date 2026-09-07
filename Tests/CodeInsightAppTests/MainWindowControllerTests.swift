@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightEngine
+import CodeInsightExact
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -681,4 +682,64 @@ private func mainWindowWaitUntil(
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+@MainActor
+@Test
+func emptyStateFailureShowsReasonAndRecoveryActions() {
+    _ = NSApplication.shared
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    let longReason = String(
+        repeating: "provider stderr line; ", count: 40
+    )
+
+    controller.showEmptyState(
+        recentPaths: [],
+        failed: true,
+        failureReason: AppModel.failureSummary(
+            CocoaError(.fileReadNoSuchFile)
+        ),
+        onChooseProject: {},
+        onOpenRecent: { _ in },
+        onOpenDropped: { _ in },
+        onRetry: {}
+    )
+    #expect(controller.selfTestEmptyStateTexts.contains("Couldn't open this folder."))
+    #expect(controller.selfTestEmptyStateButtonTitles.contains("Try Again"))
+    #expect(
+        controller.selfTestEmptyStateButtonTitles.contains("Open Another Folder…"),
+        "failure state must offer choosing a different folder"
+    )
+    #expect(controller.selfTestEmptyStateFailureReason?.isEmpty == false)
+    #expect(controller.selfTestEmptyStateReasonIsSelectable)
+    #expect(controller.selfTestEmptyStateChooseFolderActionAvailable)
+
+    // A provider-sized reason stays bounded and does not grow without limit.
+    let bounded = AppModel.failureSummary(
+        LSPError.processExited(1, longReason)
+    )
+    #expect(bounded.count <= 281)
+    controller.showEmptyState(
+        recentPaths: [],
+        failed: true,
+        failureReason: bounded,
+        onChooseProject: {},
+        onOpenRecent: { _ in },
+        onOpenDropped: { _ in },
+        onRetry: {}
+    )
+    #expect(controller.selfTestEmptyStateFailureReason == bounded)
+
+    // The default empty state carries no reason and no second button.
+    controller.showEmptyState(
+        recentPaths: [],
+        failed: false,
+        onChooseProject: {},
+        onOpenRecent: { _ in },
+        onOpenDropped: { _ in },
+        onRetry: {}
+    )
+    #expect(controller.selfTestEmptyStateFailureReason == nil)
+    #expect(!controller.selfTestEmptyStateButtonTitles.contains("Open Another Folder…"))
 }
