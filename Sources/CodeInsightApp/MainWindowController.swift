@@ -1379,8 +1379,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             palettePanel = PalettePanel(
                 appModel: model,
                 settings: currentReaderSettings
-            ) { [weak self] file, offset in
-                self?.navigate(to: file, byteOffset: offset, cause: .search)
+            ) { [weak self] file, offset, expectedContentID in
+                self?.navigate(
+                    to: file,
+                    byteOffset: offset,
+                    cause: .search,
+                    expectedContentID: expectedContentID
+                )
             }
         }
         palettePanel?.show(
@@ -1392,8 +1397,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func showProjectSearch() {
         if searchPanel == nil {
-            searchPanel = SearchPanel(appModel: model) { [weak self] file, offset in
-                self?.navigate(to: file, byteOffset: offset, cause: .search)
+            searchPanel = SearchPanel(
+                appModel: model
+            ) { [weak self] file, offset, expectedContentID in
+                self?.navigate(
+                    to: file,
+                    byteOffset: offset,
+                    cause: .search,
+                    expectedContentID: expectedContentID
+                )
             }
         }
         searchPanel?.show(relativeTo: window)
@@ -2284,6 +2296,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             initialIndexStatus,
             coverageStatus,
             model.replayNotice,
+            model.staleIndexNotice,
         ]
             .compactMap { $0 }
             .joined(separator: " · ")
@@ -2593,7 +2606,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             byteOffset: byteOffset,
             cause: .relation,
             explanation: explanation,
-            symbolAnchor: symbolAnchor
+            symbolAnchor: symbolAnchor,
+            expectedContentID: exactLocationIsInDependency(path)
+                ? nil
+                : model.indexedContentID(forPath: path)
         )
     }
 
@@ -2615,7 +2631,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         byteOffset: UInt32? = nil,
         cause: NavigationCause = .fileSelection,
         explanation: NavigationExplanation? = nil,
-        symbolAnchor: String? = nil
+        symbolAnchor: String? = nil,
+        expectedContentID: ContentID? = nil
     ) {
         let current = currentJumpRecord()
         captureActiveTabState()
@@ -2629,7 +2646,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             destination: SourceDestination(
                 file: file,
                 byteOffset: byteOffset,
-                symbolAnchor: symbolAnchor
+                symbolAnchor: symbolAnchor,
+                expectedContentID: expectedContentID
             ),
             cause: cause,
             policy: byteOffset == nil ? .passive : .explicitSemantic,

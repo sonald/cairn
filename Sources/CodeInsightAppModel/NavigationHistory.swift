@@ -501,15 +501,23 @@ public struct SourceDestination: Sendable {
     public let file: URL
     public let byteOffset: UInt32?
     public let symbolAnchor: String?
+    /// Content identity of the bytes that produced `byteOffset`. Producers of
+    /// index-derived positions must supply it so the shared navigation entry
+    /// can verify the target content before committing viewport, history, or
+    /// Trail changes. Positions produced from the currently displayed
+    /// document (outline, in-file find) pass nil.
+    public let expectedContentID: ContentID?
 
     public init(
         file: URL,
         byteOffset: UInt32? = nil,
-        symbolAnchor: String? = nil
+        symbolAnchor: String? = nil,
+        expectedContentID: ContentID? = nil
     ) {
         self.file = file
         self.byteOffset = byteOffset
         self.symbolAnchor = symbolAnchor
+        self.expectedContentID = expectedContentID
     }
 }
 

@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightCore
 import CodeInsightReaderCore
 import Observation
 
@@ -19,11 +20,14 @@ final class SearchPanel: NSWindowController,
     private let statusLabel = NSTextField(labelWithString: "0 matches in 0 files")
     private let truncatedLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
-    private let onOpen: (URL, UInt32) -> Void
+    private let onOpen: (URL, UInt32, ContentID?) -> Void
     private var reloadTask: Task<Void, Never>?
     private weak var ownerWindow: NSWindow?
 
-    init(appModel: AppModel, onOpen: @escaping (URL, UInt32) -> Void) {
+    init(
+        appModel: AppModel,
+        onOpen: @escaping (URL, UInt32, ContentID?) -> Void
+    ) {
         self.appModel = appModel
         self.onOpen = onOpen
         let panel = KeyablePanel(
@@ -575,7 +579,7 @@ final class SearchPanel: NSWindowController,
         else { return }
         let file = root.appendingPathComponent(request.path)
         dismiss()
-        onOpen(file, request.byteOffset)
+        onOpen(file, request.byteOffset, request.contentID)
     }
 
     private func dismiss(restoreFocus: Bool = true) {

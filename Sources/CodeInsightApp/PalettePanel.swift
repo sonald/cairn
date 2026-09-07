@@ -32,7 +32,9 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     enum Payload {
         case file(URL)
-        case location(URL, UInt32)
+        /// `expectedContentID` carries the indexed identity for project-symbol
+        /// locations; rows produced from the displayed document pass nil.
+        case location(URL, UInt32, expectedContentID: ContentID?)
         case command(NSMenuItem)
     }
 
@@ -50,7 +52,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private let appModel: AppModel
     private let symbolModel = SymbolSearchPanelModel()
     private var lockedMode: (mode: Mode, prefix: String)?
-    private let onOpen: (URL, UInt32?) -> Void
+    private let onOpen: (URL, UInt32?, ContentID?) -> Void
     private let input = NSTextField()
     private let modeLabel = NSTextField(labelWithString: "⌘P")
     private let tableView = NSTableView()
@@ -71,7 +73,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     init(
         appModel: AppModel,
         settings: ReaderSettings,
-        onOpen: @escaping (URL, UInt32?) -> Void
+        onOpen: @escaping (URL, UInt32?, ContentID?) -> Void
     ) {
         self.appModel = appModel
         self.onOpen = onOpen
@@ -488,7 +490,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 identity: "project:\(hit.path):\(hit.facet.nameRange.lowerBound)",
                 payload: .location(
                     root.appendingPathComponent(hit.path),
-                    hit.facet.nameRange.lowerBound
+                    hit.facet.nameRange.lowerBound,
+                    expectedContentID: appModel.indexedContentID(forPath: hit.path)
                 )
             )
         }
@@ -568,10 +571,10 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         switch payload {
         case .file(let file):
             dismiss()
-            onOpen(file, nil)
-        case let .location(file, offset):
+            onOpen(file, nil, nil)
+        case let .location(file, offset, expectedContentID):
             dismiss()
-            onOpen(file, offset)
+            onOpen(file, offset, expectedContentID)
         case .command(let item):
             execute(item)
         }
@@ -710,7 +713,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 detail: "\(facet.kind.rawValue) · line \(line ?? 1)",
                 shortcut: "",
                 identity: "current:\(facet.kind.rawValue):\(facet.nameRange.lowerBound)",
-                payload: .location(file, facet.nameRange.lowerBound)
+                payload: .location(file, facet.nameRange.lowerBound, expectedContentID: nil)
             )
         }
     }
@@ -734,7 +737,11 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             detail: detail,
             shortcut: "↩",
             identity: "line:\(line)",
-            payload: .location(file, document.lineTable.lineStarts[line - 1])
+            payload: .location(
+                file,
+                document.lineTable.lineStarts[line - 1],
+                expectedContentID: nil
+            )
         )], "")
     }
 

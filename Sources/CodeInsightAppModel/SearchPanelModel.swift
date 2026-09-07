@@ -19,11 +19,18 @@ public final class SearchPanelModel {
     public final class Group {
         public let pathID: PathID
         public let path: String
+        public let contentID: ContentID?
         public fileprivate(set) var matches: [Match]
 
-        fileprivate init(pathID: PathID, path: String, matches: [Match]) {
+        fileprivate init(
+            pathID: PathID,
+            path: String,
+            contentID: ContentID?,
+            matches: [Match]
+        ) {
             self.pathID = pathID
             self.path = path
+            self.contentID = contentID
             self.matches = matches
         }
     }
@@ -115,13 +122,16 @@ public final class SearchPanelModel {
         selectedIndex = flatIndex
     }
 
-    public func openSelection() -> (path: String, byteOffset: UInt32)? {
+    public func openSelection() -> (
+        path: String, byteOffset: UInt32, contentID: ContentID?
+    )? {
         guard let selectedIndex,
               let selection = selection(at: selectedIndex)
         else { return nil }
         return (
             selection.group.path,
-            selection.match.value.byteRange.lowerBound
+            selection.match.value.byteRange.lowerBound,
+            selection.group.contentID
         )
     }
 
@@ -236,6 +246,9 @@ public final class SearchPanelModel {
             let group = groupsByPath[pathID] ?? Group(
                 pathID: pathID,
                 path: session.paths.resolve(pathID),
+                contentID: session.manifest.files.first {
+                    $0.pathID == pathID
+                }?.contentID,
                 matches: []
             )
             groupsByPath[pathID] = group

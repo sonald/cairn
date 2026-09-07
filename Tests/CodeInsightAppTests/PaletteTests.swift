@@ -153,7 +153,7 @@ struct PaletteTests {
         )
         #expect(clamped.rows.first?.title == "Go to line 4")
         #expect(clamped.rows.first?.detail == "Line 99 is past the end · using 4")
-        guard case let .location(_, offset) = clamped.rows.first?.payload else {
+        guard case let .location(_, offset, _) = clamped.rows.first?.payload else {
             Issue.record("expected clamped line location")
             return
         }
@@ -242,7 +242,7 @@ struct PaletteTests {
         let panel = PalettePanel(
             appModel: AppModel(),
             settings: ReaderSettings(),
-            onOpen: { _, _ in }
+            onOpen: { _, _, _ in }
         )
         var sentActionCount = 0
         var sentTargetMatches = false
@@ -308,7 +308,7 @@ struct PaletteTests {
         let panel = PalettePanel(
             appModel: model,
             settings: ReaderSettings(),
-            onOpen: { _, _ in }
+            onOpen: { _, _, _ in }
         )
         defer { panel.close() }
         panel.show(prefill: "#target_symbol_", relativeTo: nil)
@@ -328,7 +328,7 @@ struct PaletteTests {
         let panel = PalettePanel(
             appModel: model,
             settings: ReaderSettings(),
-            onOpen: { _, _ in }
+            onOpen: { _, _, _ in }
         )
         defer { panel.close() }
         panel.show(prefill: "#", lockMode: true, relativeTo: nil)
@@ -382,7 +382,7 @@ struct PaletteTests {
         let panel = PalettePanel(
             appModel: model,
             settings: ReaderSettings(),
-            onOpen: { _, _ in }
+            onOpen: { _, _, _ in }
         )
         defer { panel.close() }
         panel.show(prefill: "#shared", relativeTo: nil)
@@ -400,7 +400,7 @@ struct PaletteTests {
         let panel = PalettePanel(
             appModel: model,
             settings: ReaderSettings(),
-            onOpen: { _, _ in }
+            onOpen: { _, _, _ in }
         )
         defer { panel.close() }
 

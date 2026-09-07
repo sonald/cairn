@@ -1450,6 +1450,9 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(!fixture.controller.selfTestResolutionInspectorVisible)
     fixture.controller.showResolutionInspector()
     #expect(fixture.controller.selfTestResolutionInspectorVisible)
+    // The relation jump commits after its content-identity validation task,
+    // so the window chrome renders one main-actor hop later than the model.
+    await pumpRunLoop()
     fixture.controller.showWindow(nil)
     fixture.controller.window?.displayIfNeeded()
     #expect(fixture.controller.selfTestTrailBarVisible)
@@ -1520,6 +1523,9 @@ func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
 
     try "fn drifted() {}\n".write(to: a, atomically: true, encoding: .utf8)
     fixture.model.resolutionExplanations.removeAll()
+    // Let the observation-driven render publish the trail before the UI
+    // assertions below inspect the popover.
+    await pumpRunLoop()
     fixture.controller.selfTestShowTrailPopover()
     #expect(fixture.controller.selfTestSelectTrailNode(path: "a.rs"))
     let button = fixture.controller.selfTestTrailReadingSetButtonState
@@ -1589,6 +1595,9 @@ func semanticTrailKeepsBranchesVisibleAndRestorable() async throws {
     try #require(await relationTestWaitUntil("b is selected") {
         fixture.model.selectedFile?.standardizedFileURL == b.standardizedFileURL
     })
+    // The last relation jump commits after its content-identity validation
+    // task; let the observation-driven render publish the trail first.
+    await pumpRunLoop()
 
     #expect(fixture.model.readingTrail.nodes.count == 3)
     #expect(fixture.model.readingTrail.edges.count == 2)

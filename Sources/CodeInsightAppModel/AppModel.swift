@@ -505,6 +505,10 @@ public final class AppModel {
     public private(set) var navigationGeneration: UInt64 = 0
     public private(set) var activeNavigationRequest: NavigationRequest?
     public private(set) var replayNotice: String?
+    /// Set when an index-derived navigation was rejected because the target
+    /// content no longer matches the indexed bytes. Cleared when a semantic
+    /// navigation verifies again or the workspace republishes a snapshot.
+    public private(set) var staleIndexNotice: String?
     @ObservationIgnored public private(set) var documentSource: DocumentLoader.ContentSource?
     public let contextWindow: ContextWindowModel
     public let exactCoordinator: ExactCoordinator
@@ -564,6 +568,7 @@ public final class AppModel {
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var compareSnapshotTask: Task<Void, Never>?
     @ObservationIgnored private var replayTask: Task<Void, Never>?
+    @ObservationIgnored private var semanticValidationTask: Task<Void, Never>?
     @ObservationIgnored private var sessionCheckpointTask: Task<Void, Never>?
     @ObservationIgnored private var sessionURL: URL?
     package private(set) var projectRoot: URL?
@@ -800,6 +805,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
+        semanticValidationTask?.cancel()
         compare.clear()
         generation &+= 1
         let openGeneration = generation
@@ -825,6 +831,7 @@ public final class AppModel {
         readingTrail.reset()
         resolutionExplanations.removeAll()
         replayNotice = nil
+        staleIndexNotice = nil
         tabStrip.reset()
 
         do {
@@ -1236,6 +1243,7 @@ public final class AppModel {
         snapshotTask?.cancel()
         compareSnapshotTask?.cancel()
         replayTask?.cancel()
+        semanticValidationTask?.cancel()
         compare.clear()
         generation &+= 1
         let openGeneration = generation
@@ -1260,6 +1268,7 @@ public final class AppModel {
         readingTrail.reset()
         resolutionExplanations.removeAll()
         replayNotice = nil
+        staleIndexNotice = nil
         tabStrip.reset()
 
         snapshotTask = Task { [weak self, indexService] in
@@ -1476,8 +1485,79 @@ public final class AppModel {
         _ request: NavigationRequest,
         leaving current: JumpRecord? = nil
     ) {
+        // Index-derived positions carry the content identity of the bytes
+        // that produced them. The shared entry verifies the destination
+        // before committing viewport, history, or Trail changes; positions
+        // from the currently displayed document (outline, in-file find) and
+        // pre-validated replays/bookmarks pass nil and commit directly.
+        guard let byteOffset = request.destination.byteOffset,
+              let expectedContentID = request.destination.expectedContentID
+        else {
+            commitNavigation(request, leaving: current)
+            return
+        }
+        let file = request.destination.file.standardizedFileURL
+        // Fast path: the destination is what the active Reader already shows,
+        // so compare against the displayed document without re-reading.
+        if let activeFile = tabStrip.activeTab?.fileURL?.standardizedFileURL,
+           activeFile == file,
+           let displayed = tabStrip.activeDocument
+        {
+            if displayed.contentID == expectedContentID,
+               displayed.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil
+            {
+                commitNavigation(request, leaving: current)
+            } else {
+                markStaleIndexNavigation(to: file)
+            }
+            return
+        }
+        // Slow path: verify the bytes the Reader will load, off the main
+        // actor, and only publish while the request is still current.
+        guard let root = projectRoot else { return }
+        let expectedLanguages = projectLanguages
+        let workspaceGeneration = generation
+        let navigationGenerationAtRequest = navigationGeneration
+        let source = documentSource
+        semanticValidationTask?.cancel()
+        semanticValidationTask = Task { [weak self] in
+            let verified: Bool
+            do {
+                verified = try await detachedValue {
+                    try Self.semanticDestinationMatches(
+                        expectedContentID: expectedContentID,
+                        byteOffset: byteOffset,
+                        file: file,
+                        source: source
+                    )
+                }
+            } catch {
+                verified = false
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  self.canPublishWorkspaceResult(
+                      generation: workspaceGeneration,
+                      root: root,
+                      languages: expectedLanguages
+                  ),
+                  self.navigationGeneration == navigationGenerationAtRequest
+            else { return }
+            if verified {
+                self.commitNavigation(request, leaving: current)
+            } else {
+                self.markStaleIndexNavigation(to: file)
+            }
+        }
+    }
+
+    private func commitNavigation(
+        _ request: NavigationRequest,
+        leaving current: JumpRecord?
+    ) {
         replayTask?.cancel()
         if request.cause != .historyReplay { replayNotice = nil }
+        if request.destination.expectedContentID != nil { staleIndexNotice = nil }
         var currentTrailNodeID = readingTrail.activeNodeID
         if request.policy.recordInTrail,
            let destination = trailJump(for: request.destination)
@@ -1507,6 +1587,53 @@ public final class AppModel {
             request.destination.file,
             byteOffset: request.destination.byteOffset
         )
+    }
+
+    private func markStaleIndexNavigation(to file: URL) {
+        staleIndexNotice = "File changed since indexing"
+    }
+
+    /// Verifies that the bytes the Reader would load for `file` still match
+    /// the indexed identity and that `byteOffset` resolves inside them.
+    /// Snapshot-backed destinations read through `source`; worktree files
+    /// read the current disk content.
+    nonisolated package static func semanticDestinationMatches(
+        expectedContentID: ContentID,
+        byteOffset: UInt32,
+        file: URL,
+        source: DocumentLoader.ContentSource?
+    ) throws -> Bool {
+        let bytes: [UInt8]
+        if let source {
+            bytes = try source(file)
+        } else {
+            bytes = Array(try Data(contentsOf: file, options: .mappedIfSafe))
+        }
+        guard String(bytes: bytes, encoding: .utf8) != nil else { return false }
+        guard ContentID.sha256(of: bytes) == expectedContentID else { return false }
+        return ByteUTF16Map(validUTF8: bytes)
+            .utf16Offset(forByte: Int(byteOffset)) != nil
+    }
+
+    /// Content identity the current index holds for a project-relative path,
+    /// for producers of index-derived navigation positions. Dependency
+    /// targets return nil; their identity comes from their own source.
+    public func indexedContentID(forPath path: String) -> ContentID? {
+        guard let root = projectRoot,
+              !exactLocationIsInDependency(path)
+        else { return nil }
+        let file = root.appendingPathComponent(path).standardizedFileURL
+        guard let relative = Self.relativePath(of: file, under: root) else {
+            return nil
+        }
+        for (session, _) in querySessions {
+            if let entry = session.manifest.files.first(where: {
+                session.paths.resolve($0.pathID) == relative
+            }) {
+                return entry.contentID
+            }
+        }
+        return nil
     }
 
     public func openInNewTab(
@@ -2637,6 +2764,7 @@ public final class AppModel {
             }.count
         )
         navigationGeneration &+= 1
+        staleIndexNotice = nil
         if let pending = pendingReplay {
             pendingReplay = nil
             replayWithinCurrentSnapshot(

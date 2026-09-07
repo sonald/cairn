@@ -119,6 +119,328 @@ func navigationReplayFallsBackToLineAndColumnAfterFileShrinks() async throws {
     #expect(model.replayNotice == "restored by line and column")
 }
 
+@MainActor
+@Test
+func semanticNavigationVerifiesContentIdentityBeforeCommitting() async throws {
+    let source = "pub fn target() -> i32 { 42 }\n"
+    let root = try temporaryProject([
+        "src/lib.rs": source,
+        "src/other.rs": "pub fn other() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let lib = root.appendingPathComponent("src/lib.rs")
+    let indexIdentity = ContentID.sha256(of: Array(source.utf8))
+    let targetOffset = byteOffset(of: "target", in: source)
+
+    func indexJump(to file: URL) -> NavigationRequest {
+        NavigationRequest(
+            destination: SourceDestination(
+                file: file,
+                byteOffset: targetOffset,
+                expectedContentID: indexIdentity
+            ),
+            cause: .search,
+            policy: .explicitSemantic
+        )
+    }
+
+    // Unchanged content: the index jump commits and lands on the offset.
+    let openedBeforeFirst = opened.count
+    model.navigate(indexJump(to: lib))
+    #expect(await testWaitUntil("lib.rs opened at target offset") {
+        opened.count == openedBeforeFirst + 1
+            && opened.last?.0 == "lib.rs" && opened.last?.1 == targetOffset
+    })
+    #expect(model.staleIndexNotice == nil)
+    let committedHistory = model.navigationHistory.navigationRecords.count
+    let committedTrailEdges = model.readingTrail.edges.count
+
+    // Disk drifts behind the index's back (review repro: prefix comment
+    // lines plus a rename). The stale offset must not move the viewport.
+    let drifted = String(repeating: "// review drift\n", count: 8)
+        + "pub fn renamed() -> i32 { 42 }\n"
+    try write(drifted, to: lib)
+    let openedBeforeStale = opened.count
+    model.navigate(
+        indexJump(to: lib),
+        leaving: jumpRecord("src/other.rs", offset: 1)
+    )
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(model.staleIndexNotice == "File changed since indexing")
+    #expect(opened.count == openedBeforeStale)
+    #expect(
+        model.navigationHistory.navigationRecords.count == committedHistory,
+        "rejected navigation must not add history"
+    )
+    #expect(
+        model.readingTrail.edges.count == committedTrailEdges,
+        "rejected navigation must not extend the trail"
+    )
+
+    // Content matches the index again: the same jump resumes working.
+    try write(source, to: lib)
+    let openedBeforeRestore = opened.count
+    model.navigate(indexJump(to: lib))
+    #expect(await testWaitUntil("lib.rs reopened at target offset") {
+        opened.count == openedBeforeRestore + 1
+            && opened.last?.0 == "lib.rs" && opened.last?.1 == targetOffset
+    })
+    #expect(model.staleIndexNotice == nil)
+}
+
+@MainActor
+@Test
+func semanticNavigationChecksDisplayedDocumentWithoutRereading() async throws {
+    let source = "pub fn target() -> i32 { 42 }\n"
+    let root = try temporaryProject([
+        "src/lib.rs": source,
+        "src/other.rs": "pub fn other() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let lib = root.appendingPathComponent("src/lib.rs")
+    let indexIdentity = ContentID.sha256(of: Array(source.utf8))
+    let targetOffset = byteOffset(of: "target", in: source)
+    let rust = LanguageMode(language: .rust)
+
+    // Simulate the Reader already showing the drifted file.
+    model.navigate(to: lib)
+    let drifted = String(repeating: "// review drift\n", count: 8)
+        + "pub fn renamed() -> i32 { 42 }\n"
+    model.tabStrip.setActiveDocument(
+        ReaderDocument(bytes: Array(drifted.utf8), languageMode: rust),
+        for: lib
+    )
+    let openedBeforeStale = opened.count
+    let historyBeforeStale = model.navigationHistory.navigationRecords.count
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: lib,
+                byteOffset: targetOffset,
+                expectedContentID: indexIdentity
+            ),
+            cause: .search,
+            policy: .explicitSemantic
+        ),
+        leaving: jumpRecord("src/other.rs", offset: 1)
+    )
+    #expect(opened.count == openedBeforeStale)
+    #expect(model.staleIndexNotice == "File changed since indexing")
+    #expect(model.navigationHistory.navigationRecords.count == historyBeforeStale)
+
+    // The displayed document matches the index again: jumps resume.
+    model.tabStrip.setActiveDocument(
+        ReaderDocument(bytes: Array(source.utf8), languageMode: rust),
+        for: lib
+    )
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: lib,
+            byteOffset: targetOffset,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    #expect(opened.last?.0 == "lib.rs" && opened.last?.1 == targetOffset)
+    #expect(model.staleIndexNotice == nil)
+}
+
+@MainActor
+@Test
+func semanticNavigationRejectsDeletedInvalidUTF8AndOutOfRangeTargets() async throws {
+    let source = "pub fn target() -> i32 { 42 }\n"
+    let root = try temporaryProject([
+        "src/lib.rs": source,
+        "src/gone.rs": source,
+        "src/binary.rs": source,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let lib = root.appendingPathComponent("src/lib.rs")
+    let gone = root.appendingPathComponent("src/gone.rs")
+    let binary = root.appendingPathComponent("src/binary.rs")
+    let indexIdentity = ContentID.sha256(of: Array(source.utf8))
+    let targetOffset = byteOffset(of: "target", in: source)
+    let openedBefore = opened.count
+
+    // Offset beyond the indexed content: no navigation even though the
+    // identity itself matches.
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: lib,
+            byteOffset: 10_000,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(opened.count == openedBefore)
+    #expect(model.staleIndexNotice != nil)
+
+    // Invalid UTF-8 content cannot produce a readable jump target.
+    try Data([0xFF, 0xFE, 0x00, 0xD8, 0x41]).write(to: binary)
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: binary,
+            byteOffset: 1,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(opened.count == openedBefore)
+    #expect(model.staleIndexNotice != nil)
+
+    // Deleted target: the jump is rejected instead of failing mid-display.
+    try FileManager.default.removeItem(at: gone)
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: gone,
+            byteOffset: targetOffset,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(opened.count == openedBefore)
+    #expect(model.staleIndexNotice != nil)
+}
+
+@MainActor
+@Test
+func semanticValidationCannotPublishAfterNewerNavigationOrProjectSwitch() async throws {
+    let source = "pub fn target() -> i32 { 42 }\n"
+    let first = try temporaryProject([
+        "src/lib.rs": source,
+        "src/other.rs": "pub fn other() {}\n",
+    ])
+    let second = try temporaryProject(["src/second.rs": source])
+    defer {
+        try? FileManager.default.removeItem(at: first)
+        try? FileManager.default.removeItem(at: second)
+    }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: first)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let lib = first.appendingPathComponent("src/lib.rs")
+    let other = first.appendingPathComponent("src/other.rs")
+    let indexIdentity = ContentID.sha256(of: Array(source.utf8))
+    let targetOffset = byteOffset(of: "target", in: source)
+
+    // The target drifted, so its validation can only end in rejection; the
+    // user navigates elsewhere before the background check completes.
+    try write(String(repeating: "// drift\n", count: 4), to: lib)
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: lib,
+            byteOffset: targetOffset,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    model.navigate(to: other)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(opened.last?.0 == "other.rs")
+    #expect(
+        !opened.contains { $0.0 == "lib.rs" && $0.1 == targetOffset },
+        "a validation started before a newer navigation must not publish"
+    )
+
+    // A validation from a previous project must not survive a project switch.
+    opened.removeAll()
+    model.openProject(root: second)
+    #expect(await testWaitUntil("second project fileTree") {
+        model.fileTree?.root.standardizedFileURL
+            == second.standardizedFileURL
+    })
+    let secondLib = second.appendingPathComponent("src/second.rs")
+    try write(String(repeating: "// drift\n", count: 4), to: secondLib)
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: secondLib,
+            byteOffset: targetOffset,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    model.openProject(root: first)
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(
+        !opened.contains { $0.0 == "second.rs" && $0.1 == targetOffset },
+        "a validation from the previous project must not publish"
+    )
+}
+
+@MainActor
+@Test
+func semanticNavigationCommitsUnicodeOffsetsAgainstMatchingContent() async throws {
+    let source = "// 注释😀\npub fn 目标函数() -> i32 { 42 }\n"
+    let root = try temporaryProject(["src/lib.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    var opened: [(String, UInt32?)] = []
+    let model = AppModel(indexService: FailingIndexService()) { file, offset in
+        opened.append((file.lastPathComponent, offset))
+    }
+    model.openProject(root: root)
+    #expect(await testWaitUntil("model.fileTree != nil") { model.fileTree != nil })
+    let lib = root.appendingPathComponent("src/lib.rs")
+    let indexIdentity = ContentID.sha256(of: Array(source.utf8))
+    let targetOffset = byteOffset(of: "目标函数", in: source)
+
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: lib,
+            byteOffset: targetOffset,
+            expectedContentID: indexIdentity
+        ),
+        cause: .search,
+        policy: .explicitSemantic
+    ))
+    #expect(await testWaitUntil("unicode offset lands") {
+        opened.last?.0 == "lib.rs" && opened.last?.1 == targetOffset
+    })
+
+    // Positions produced from the current document (outline-style, no index
+    // identity) keep working even after the index bytes went stale.
+    try write("// 注释😀\npub fn 改名函数() -> i32 { 42 }\n", to: lib)
+    model.navigate(NavigationRequest(
+        destination: SourceDestination(
+            file: lib,
+            byteOffset: byteOffset(of: "改名函数", in: "// 注释😀\npub fn 改名函数() -> i32 { 42 }\n")
+        ),
+        cause: .outline,
+        policy: .explicitSemantic
+    ))
+    #expect(opened.last?.0 == "lib.rs")
+    #expect(opened.last?.1 != nil)
+}
+
 @Test
 func replayOffsetUsesFiveHonestFallbacksAndRejectsInvalidScalars() throws {
     let source = "fn target() {}\nlet value = \"世\";\n"
