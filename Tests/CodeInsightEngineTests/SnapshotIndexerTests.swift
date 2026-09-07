@@ -1626,3 +1626,125 @@ private struct VersionedTypeScriptExtractor: LanguageExtractor {
 private enum SnapshotFixtureError: Error {
     case git(String)
 }
+
+// MARK: - S4a retention measurement matrix
+
+private struct RetentionMeasurementSnapshot: Snapshot {
+    let files: [String: [UInt8]]
+    let snapshotID = SnapshotID(rawValue: UUID())
+    let objectFormat = GitObjectFormat.sha1
+    let sourceKind = SourceKind.untracked
+    let projectRootName = "measure"
+    var configurationPaths: [String] { [] }
+
+    func listFiles() -> [(
+        path: String, contentID: ContentID, fileMode: FileMode
+    )] {
+        files.sorted { $0.key < $1.key }.map {
+            ($0.key, ContentID.sha256(of: $0.value), .regular)
+        }
+    }
+
+    func readBytes(path: String) throws -> [UInt8] {
+        guard let bytes = files[path] else {
+            throw CocoaError(.fileReadNoSuchFile)
+        }
+        return bytes
+    }
+}
+
+/// Measurement entry for the S4a retention matrix. Prints the numbers and
+/// asserts only that the run completes; the frozen S4b thresholds live in
+/// the S4b regressions, not here.
+@Test
+func s4aRetentionMeasurementMatrix() throws {
+    var lines: [String] = []
+    let sourceFiles: [String: [UInt8]] = Dictionary(
+        uniqueKeysWithValues: (0..<20).map { index in
+            (
+                "src/file\(index).rs",
+                Array("pub fn f\(index)() -> i32 { \(index) }\n".utf8)
+            )
+        }
+    )
+    func nonSourcePayload(totalMiB: Int) -> [String: [UInt8]] {
+        guard totalMiB > 0 else { return [:] }
+        return Dictionary(
+            uniqueKeysWithValues: (0..<(totalMiB / 4)).map { index in
+                var chunk = [UInt8](repeating: 0x25, count: 4 << 20)
+                chunk[0] = UInt8(index & 0xFF)
+                chunk[1] = UInt8((index >> 8) & 0xFF)
+                return ("assets/payload\(index).pdf", chunk)
+            }
+        )
+    }
+    func retainedBytes(_ store: ProjectIndexStore) -> Int {
+        store.sourceBytesByContent.values.reduce(0) { $0 + $1.count }
+    }
+
+    // Scenario A: same sources plus a non-source payload, fresh store per
+    // run. Retention should track the sources, not the payload.
+    for payloadMiB in [0, 64, 256] {
+        let snapshot = RetentionMeasurementSnapshot(
+            files: sourceFiles.merging(
+                nonSourcePayload(totalMiB: payloadMiB)
+            ) { current, _ in current }
+        )
+        let store = ProjectIndexStore()
+        let started = Date()
+        _ = try ProjectIndexer().prepareSnapshot(
+            snapshot,
+            into: store,
+            language: .rust
+        )
+        let elapsed = Date().timeIntervalSince(started)
+        lines.append(
+            "A payloadMiB=\(payloadMiB) prepareMs=\(Int(elapsed * 1000))"
+                + " retainedKiB=\(retainedBytes(store) / 1024)"
+                + " entries=\(store.sourceBytesByContent.count)"
+        )
+    }
+
+    // Scenario B: a fixed A/B set alternated 20 times over one store. The
+    // tail rounds must not grow (project-boundary retention target).
+    let sharedStore = ProjectIndexStore()
+    let projectA = RetentionMeasurementSnapshot(files: sourceFiles)
+    let projectB = RetentionMeasurementSnapshot(
+        files: sourceFiles.mapKeys { "b/\($0)" }
+    )
+    var seriesB: [String] = []
+    for round in 0..<20 {
+        _ = try ProjectIndexer().prepareSnapshot(
+            round.isMultiple(of: 2) ? projectA : projectB,
+            into: sharedStore,
+            language: .rust
+        )
+        seriesB.append(String(retainedBytes(sharedStore) / 1024))
+    }
+    lines.append("B fixedAB20rounds retainedKiB=" + seriesB.joined(separator: ","))
+
+    // Scenario C: one file evolving across 10 captures over one store —
+    // documents same-store growth for distinct contents.
+    let evolvingStore = ProjectIndexStore()
+    var seriesC: [String] = []
+    for revision in 0..<10 {
+        var files = sourceFiles
+        files["src/lib.rs"] = Array("// revision \(revision)\n".utf8)
+        _ = try ProjectIndexer().prepareSnapshot(
+            RetentionMeasurementSnapshot(files: files),
+            into: evolvingStore,
+            language: .rust
+        )
+        seriesC.append(String(retainedBytes(evolvingStore)))
+    }
+    lines.append("C evolving10 retainedBytes=" + seriesC.joined(separator: ","))
+
+    print("S4A-MEASURE " + lines.joined(separator: " | "))
+    #expect(lines.count == 5)
+}
+
+private extension Dictionary {
+    func mapKeys(_ transform: (Key) -> Key) -> [Key: Value] {
+        Dictionary(uniqueKeysWithValues: map { (transform($0.key), $0.value) })
+    }
+}
