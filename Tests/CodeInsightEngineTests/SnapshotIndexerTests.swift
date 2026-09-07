@@ -100,7 +100,10 @@ func snapshotIndexerReusesContentAndResolvesEachCommit() throws {
     #expect(!older.contentIndexes.keys.contains {
         $0.contentID == package.contentID
     })
-    #expect(older.sourceBytesByContent[package.contentID] != nil)
+    // S4b-2 contract: non-source payloads stay out of the semantic store;
+    // their raw bytes remain available through the snapshot itself.
+    #expect(older.sourceBytesByContent[package.contentID] == nil)
+    #expect(try !olderSnapshot.readBytes(path: "Package.swift").isEmpty)
 
     let repeated = try indexer.indexSnapshot(olderSnapshot, into: store)
     #expect(repeated.stats.reusedCount == 2)
@@ -1631,11 +1634,12 @@ private enum SnapshotFixtureError: Error {
 
 private struct RetentionMeasurementSnapshot: Snapshot {
     let files: [String: [UInt8]]
+    var configurations: [String] = []
     let snapshotID = SnapshotID(rawValue: UUID())
     let objectFormat = GitObjectFormat.sha1
     let sourceKind = SourceKind.untracked
     let projectRootName = "measure"
-    var configurationPaths: [String] { [] }
+    var configurationPaths: [String] { configurations }
 
     func listFiles() -> [(
         path: String, contentID: ContentID, fileMode: FileMode
@@ -1747,4 +1751,65 @@ private extension Dictionary {
     func mapKeys(_ transform: (Key) -> Key) -> [Key: Value] {
         Dictionary(uniqueKeysWithValues: map { (transform($0.key), $0.value) })
     }
+}
+
+@Test
+func s4b2NonSourceBytesDoNotEnterTheSemanticStore() throws {
+    let sourceFiles: [String: [UInt8]] = Dictionary(
+        uniqueKeysWithValues: (0..<20).map { index in
+            (
+                "src/file\(index).rs",
+                Array("pub fn f\(index)() -> i32 { \(index) }\n".utf8)
+            )
+        }
+    )
+    var payload: [String: [UInt8]] = [:]
+    for index in 0..<64 {
+        var chunk = [UInt8](repeating: 0x25, count: 4 << 20)
+        chunk[0] = UInt8(index & 0xFF)
+        chunk[1] = UInt8((index >> 8) & 0xFF)
+        payload["assets/payload\(index).pdf"] = chunk
+    }
+    let manifestOnlyBytes = Array("[package]\nname='measure'\n".utf8)
+
+    // Configuration files stay available to profiling and materialization;
+    // non-source payloads never reach the semantic store.
+    let snapshot = RetentionMeasurementSnapshot(
+        files: sourceFiles
+            .merging(payload) { current, _ in current }
+            .merging(["Cargo.toml": manifestOnlyBytes]) { _, new in new },
+        configurations: ["Cargo.toml"]
+    )
+
+    let store = ProjectIndexStore()
+    let prepared = try ProjectIndexer().prepareSnapshot(
+        snapshot,
+        into: store,
+        language: .rust
+    )
+
+    let retained = store.retainedContentIDs()
+    #expect(retained.count == 21, "only sources plus configuration")
+    for file in sourceFiles {
+        #expect(retained.contains(ContentID.sha256(of: file.value)))
+    }
+    #expect(retained.contains(ContentID.sha256(of: manifestOnlyBytes)))
+    for (path, bytes) in payload {
+        #expect(
+            !retained.contains(ContentID.sha256(of: bytes)),
+            "\(path) must not be retained in the semantic store"
+        )
+    }
+    #expect(
+        store.retainedContentByteCount()
+            == sourceFiles.values.reduce(0) { $0 + $1.count } + manifestOnlyBytes.count
+    )
+
+    // File-tree membership and sizes survive: the manifest still lists the
+    // non-source payload with its captured size.
+    #expect(prepared.cachedSession.manifest.files.count == 20 + 64 + 1)
+    let payloadEntry = prepared.cachedSession.manifest.files.first {
+        prepared.cachedSession.paths.resolve($0.pathID) == "assets/payload0.pdf"
+    }
+    #expect(payloadEntry?.size == UInt64(4 << 20))
 }

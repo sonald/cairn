@@ -241,8 +241,15 @@ public struct ProjectIndexer: Sendable {
         for (offset, file) in files.enumerated() {
             try Task.checkCancellation()
             let bytes = try snapshot.readBytes(path: file.path)
-            capturedBytes[file.contentID] = bytes
             let mode = LanguageMode.classify(path: file.path, language: language)
+            // Only semantic sources and real configuration reach the
+            // long-lived store; non-source payloads stay in the snapshot,
+            // where previews and the manifest read them by path.
+            if mode != nil
+                || snapshot.configurationPaths.contains(file.path)
+            {
+                capturedBytes[file.contentID] = bytes
+            }
             guard let occurrenceID = UInt32(exactly: offset) else {
                 preconditionFailure("File count exceeds UInt32")
             }
