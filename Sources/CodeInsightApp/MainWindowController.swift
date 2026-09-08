@@ -530,8 +530,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
         }
         profileButton.translatesAutoresizingMaskIntoConstraints = false
+        // Bounded instead of fixed so a long analysis-profile title cannot
+        // demand pane width; the title truncates and the full text lives in
+        // the menu representation.
+        profileButton.cell?.truncatesLastVisibleLine = true
+        profileButton.cell?.wraps = false
         NSLayoutConstraint.activate([
-            profileButton.widthAnchor.constraint(equalToConstant: 240),
+            profileButton.widthAnchor.constraint(
+                lessThanOrEqualToConstant: 180
+            ),
             profileButton.heightAnchor.constraint(equalToConstant: 28),
         ])
         applyReaderSettings(settings)
@@ -1755,6 +1762,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.projectItemIdentifier:
             item.label = "Project"
             item.view = projectLabel
+            item.visibilityPriority = .low
             projectLabel.font = .systemFont(ofSize: 13, weight: .semibold)
             projectLabel.cell?.lineBreakMode = .byTruncatingTail
             projectLabel.frame.size = NSSize(width: 120, height: 22)
@@ -1766,7 +1774,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.commitItemIdentifier:
             item.label = "Version"
             item.view = commitButton
-            item.visibilityPriority = .high
+            item.visibilityPriority = .low
             commitButton.target = self
             commitButton.action = #selector(showCommitPicker(_:))
             commitButton.bezelStyle = .rounded
@@ -1784,7 +1792,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.symbolsItemIdentifier:
             item.label = "Symbols"
             item.view = symbolsButton
-            item.visibilityPriority = .standard
+            // §3.2: Symbols stays visible at 900pt with long project names;
+            // project/version/profile chrome overflows first.
+            item.visibilityPriority = .high
             symbolsButton.title = "Symbols  ⌘T"
             symbolsButton.image = NSImage(
                 systemSymbolName: "magnifyingglass",
@@ -1830,10 +1840,14 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case Self.profileItemIdentifier:
             item.label = "Profile"
             item.view = profileButton
-            item.visibilityPriority = .high
+            item.visibilityPriority = .standard
             profileButton.bezelStyle = .rounded
             profileButton.font = .systemFont(ofSize: 11, weight: .semibold)
             profileButton.cell?.lineBreakMode = .byTruncatingTail
+            // Bounded so a long analysis-profile title cannot demand pane
+            // width; the full title lives in the menu representation.
+            profileButton.cell?.truncatesLastVisibleLine = true
+            profileButton.cell?.wraps = false
             profileButton.target = self
             profileButton.action = #selector(showProfileMenu(_:))
             profileButton.setAccessibilityLabel("Analysis profile")
@@ -6333,6 +6347,11 @@ final class ContextWindowViewController: NSViewController {
             ? nil : candidateLabel.stringValue
     }
 
+    var selfTestProvenanceTooltip: String? {
+        loadViewIfNeeded()
+        return candidateLabel.toolTip
+    }
+
     var selfTestCandidateCount: Int {
         loadViewIfNeeded()
         return Int(countLabel.stringValue.split(separator: "/").last ?? "") ?? 0
@@ -6389,6 +6408,17 @@ final class ContextWindowViewController: NSViewController {
         candidateBadge.layer?.cornerRadius = 4
         candidateLabel.font = .systemFont(ofSize: 11, weight: .medium)
         candidateLabel.lineBreakMode = .byTruncatingTail
+        candidateLabel.cell?.truncatesLastVisibleLine = true
+        candidateLabel.cell?.wraps = false
+        // Long provenance must truncate, not demand pane width.
+        candidateLabel.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        candidateLabel.setContentHuggingPriority(
+            .defaultLow,
+            for: .horizontal
+        )
         candidateLabel.translatesAutoresizingMaskIntoConstraints = false
         candidateBadge.addSubview(candidateLabel)
         NSLayoutConstraint.activate([
@@ -6528,12 +6558,20 @@ final class ContextWindowViewController: NSViewController {
         let highlightsSyntax: Bool
         if let candidate = model.selectedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
-            candidateLabel.stringValue = [
+            let fullProvenance = [
                 candidate.provenanceBadge,
                 candidate.bindingKind,
             ]
                 .compactMap { $0 }
                 .joined(separator: " · ")
+            // §3.2: the header keeps a short status; the full provider, tool
+            // version, trust, limitations, commit, and features move to the
+            // tooltip and accessibility value instead of widening the pane.
+            candidateLabel.stringValue = Self.shortProvenanceLabel(
+                fullProvenance
+            )
+            candidateLabel.toolTip = fullProvenance
+            candidateLabel.setAccessibilityLabel(fullProvenance)
             countLabel.stringValue = "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"
             text = candidate.excerpt
             highlightsSyntax = true
@@ -6544,6 +6582,8 @@ final class ContextWindowViewController: NSViewController {
         } else {
             pathLabel.stringValue = ""
             candidateLabel.stringValue = ""
+            candidateLabel.toolTip = nil
+            candidateLabel.setAccessibilityLabel(nil)
             countLabel.stringValue = ""
             text = ""
             highlightsSyntax = false
@@ -6564,10 +6604,28 @@ final class ContextWindowViewController: NSViewController {
         miniReader.display(document: document)
     }
 
+    /// Short header label for a full provenance badge: keeps the certainty
+    /// status (Exact/Strong/Possible/…) and the binding kind; provider, tool
+    /// version, trust, limitations, commit, and features move to the
+    /// tooltip. Unresolved and other states keep their distinguishing word.
+    static func shortProvenanceLabel(_ full: String) -> String {
+        let parts = full.components(separatedBy: " · ")
+        guard let status = parts.first, !status.isEmpty else {
+            return String(full.prefix(40))
+        }
+        let bindingKinds: Set<String> = [
+            "param", "letBinding", "importBinding", "assignment",
+            "patternBinding", "globalDecl", "nonlocalDecl",
+        ]
+        if let bindingKind = parts.last, bindingKinds.contains(bindingKind) {
+            return "\(status) · \(bindingKind)"
+        }
+        return status
+    }
+
     private func applyBadgeStyle() {
         let colors: (background: NSColor, foreground: NSColor) =
-            switch provenanceBadgeStyle(for: candidateLabel.stringValue) {
-            case .exact:
+            switch provenanceBadgeStyle(for: candidateLabel.stringValue) {            case .exact:
                 (.systemGreen.withAlphaComponent(0.12), .systemGreen)
             case .strong:
                 (.systemBlue.withAlphaComponent(0.12), .systemBlue)

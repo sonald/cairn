@@ -1,5 +1,4 @@
 import AppKit
-import CodeInsightAppModel
 import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
@@ -7,6 +6,7 @@ import CodeInsightReaderCore
 import Foundation
 import Testing
 @testable import CodeInsightApp
+@testable import CodeInsightAppModel
 
 @MainActor
 private final class MainWindowIdentityFixture {
@@ -742,4 +742,167 @@ func emptyStateFailureShowsReasonAndRecoveryActions() {
     )
     #expect(controller.selfTestEmptyStateFailureReason == nil)
     #expect(!controller.selfTestEmptyStateButtonTitles.contains("Open Another Folder…"))
+}
+
+@MainActor
+private final class ContextExactBadgeGate {
+    private var continuation:
+        CheckedContinuation<ExactCoordinator.DefinitionResult?, Never>?
+
+    func resolve(
+        file: String,
+        offset: UInt32,
+        generation: UInt64,
+        batch: ExactRequestBatch
+    ) async -> ExactCoordinator.DefinitionResult? {
+        await withCheckedContinuation { continuation = $0 }
+    }
+
+    func complete(with entry: ExactOverlay.Entry?) {
+        continuation?.resume(
+            returning: .completed(entry.map { [$0] } ?? [])
+        )
+        continuation = nil
+    }
+}
+
+@MainActor
+@Test
+func contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() async throws {
+    _ = NSApplication.shared
+    let source = "pub fn target() -> i32 { 42 }\npub fn main() { target(); }\n"
+    let root = try mainWindowTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let gate = ContextExactBadgeGate()
+    let contextModel = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve
+    )
+    contextModel.updateProjectState(.ready(session, context), root: root)
+    let controller = ContextWindowViewController(model: contextModel)
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
+        styleMask: [.titled, .resizable],
+        backing: .buffered,
+        defer: false
+    )
+    window.minSize = NSSize(width: 900, height: 300)
+    let content = NSView()
+    controller.view.translatesAutoresizingMaskIntoConstraints = false
+    content.addSubview(controller.view)
+    NSLayoutConstraint.activate([
+        controller.view.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+        controller.view.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+        controller.view.topAnchor.constraint(equalTo: content.topAnchor),
+        controller.view.bottomAnchor.constraint(equalTo: content.bottomAnchor),
+    ])
+    window.contentView = content
+    window.setContentSize(NSSize(width: 900, height: 300))
+    let frameBefore = window.frame
+
+    contextModel.tokenClicked(
+        file: "main.rs",
+        offset: UInt32(source[..<source.range(of: "target();")!.lowerBound].utf8.count)
+    )
+    #expect(await mainWindowWaitUntil(contextModel.candidateCount >= 1))
+    try await Task.sleep(for: .milliseconds(150))
+    content.layoutSubtreeIfNeeded()
+    #expect(controller.selfTestProvenance?.contains("·") == true)
+    let fuzzyFrame = window.frame
+
+
+    let longEnvironment = ExactAnalysisEnvironment(
+        trustMode: .safe,
+        limitations: [
+            .buildScriptsDisabled, .procMacrosDisabled, .dependenciesUnavailableOffline,
+        ]
+    )
+    let longAttribution = ExactAttribution(
+        provider: "extremely-long-provider-name-for-window-widening-probe",
+        toolVersion: "999.999.99999999+longbuildmetadata.abcdefghijk",
+        configFingerprint: "config",
+        environmentFingerprint: "environment",
+        featureSelection: .defaultFeatures,
+        environment: longEnvironment,
+        generatedAt: Date(timeIntervalSince1970: 0)
+    )
+    let definitionOffset = UInt32(
+        source[..<source.range(of: "target")!.lowerBound].utf8.count
+    )
+    gate.complete(with: ExactOverlay.Entry(
+        location: ExactLocation(
+            file: root.appendingPathComponent("main.rs").path,
+            byteOffset: Int(definitionOffset),
+            line: 1,
+            column: Int(definitionOffset) + 1
+        ),
+        attribution: longAttribution,
+        origin: .worktree
+    ))
+    #expect(
+        await mainWindowWaitUntil(
+            contextModel.selectedCandidate?.certainty == .exact
+        )
+    )
+    try await Task.sleep(for: .milliseconds(150))
+    content.layoutSubtreeIfNeeded()
+    // The badge line stays short and the window keeps its frame; the full
+    // provenance remains reachable through the tooltip and AX value.
+    let badge = controller.selfTestProvenance ?? ""
+    #expect(badge.count <= 40, "header badge must stay short, got: \(badge)")
+    #expect(
+        controller.selfTestProvenanceTooltip?.contains(
+            "extremely-long-provider-name"
+        ) == true,
+        "full provenance must remain available via tooltip/AX"
+    )
+    #expect(
+        abs(window.frame.width - frameBefore.width) < 0.5
+            && abs(window.frame.height - frameBefore.height) < 0.5,
+        "publishing long provenance must not move the window frame"
+    )
+    #expect(
+        content.fittingSize.width <= 900.5,
+        "content must fit within the fixed width, got \(content.fittingSize.width)"
+    )
+    _ = fuzzyFrame
+}
+
+@MainActor
+@Test
+func toolbarKeepsSymbolsVisibleAheadOfSecondaryChrome() {
+    let controller = MainWindowController(
+        model: AppModel(),
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.showWindow(nil)
+    guard let toolbar = controller.window?.toolbar else {
+        Issue.record("window has no toolbar")
+        return
+    }
+    let symbols = toolbar.items.first {
+        $0.itemIdentifier.rawValue.contains("Symbols")
+    }
+    #expect(symbols?.visibilityPriority == .high, "Symbols must outrank secondary chrome")
+    let project = toolbar.items.first { $0.itemIdentifier.rawValue.contains("Project") }
+    let commit = toolbar.items.first { $0.itemIdentifier.rawValue.contains("Commit") }
+    #expect(project?.visibilityPriority == .low, "project name compresses first")
+    #expect(commit?.visibilityPriority == .low, "version compresses first")
+    // The profile item appears only with an active analysis profile; when
+    // present it must sit below Symbols.
+    if let profile = toolbar.items.first(where: {
+        $0.itemIdentifier.rawValue.contains("Profile")
+    }) {
+        #expect(profile.visibilityPriority == .standard)
+    }
 }
