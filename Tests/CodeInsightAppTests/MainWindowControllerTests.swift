@@ -906,3 +906,93 @@ func toolbarKeepsSymbolsVisibleAheadOfSecondaryChrome() {
         #expect(profile.visibilityPriority == .standard)
     }
 }
+
+@MainActor
+@Test
+func emptyWindowRetiresPanelsWithoutAnObjectOfOperation() {
+    let fixture = MainWindowIdentityFixture()
+    defer { fixture.close() }
+    fixture.controller.showWindow(nil)
+    fixture.controller.renderForSelfTest()
+
+    #expect(fixture.controller.selfTestSidebarPaneCollapsed)
+    #expect(fixture.controller.selfTestContextPaneCollapsed)
+    #expect(fixture.controller.selfTestRelationsPaneCollapsed)
+    #expect(!fixture.controller.selfTestTrailBarVisible,
+            "an empty trail bar has no object of operation")
+    #expect(fixture.controller.selfTestEmptyStateExists)
+    #expect(fixture.controller.selfTestEmptyStateOpenButtonIsVisibleDefaultAction)
+}
+
+@MainActor
+@Test
+func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "src/main.rs": "pub fn target() {}\npub fn main() { target(); }\n",
+        "README.md": "# Notes\n\n- one\n- two\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    controller.renderForSelfTest()
+
+    let main = root.appendingPathComponent("src/main.rs")
+    let readme = root.appendingPathComponent("README.md")
+    controller.applyPanelPreset(.relations)
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    ))
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestRelationsPaneCollapsed)
+    #expect(!controller.selfTestContextPaneCollapsed)
+    #expect(!controller.selfTestOutlineHidden)
+    // Pin the Context preview on the definition before leaving the source.
+    let targetOffset = UInt32(
+        "pub fn ".utf8.count
+    )
+    model.contextWindow.tokenClicked(
+        file: "src/main.rs",
+        offset: targetOffset
+    )
+    #expect(await mainWindowWaitUntil(
+        model.contextWindow.selectedCandidate != nil
+    ))
+    model.contextWindow.setMode(.pinned)
+
+    // Non-source surface: file tree stays, source panels retire.
+    controller.openFileForSelfTest(readme)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL
+            == readme.standardizedFileURL
+    ))
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestSidebarPaneCollapsed, "file tree stays")
+    #expect(controller.selfTestOutlineHidden)
+    #expect(controller.selfTestContextPaneCollapsed)
+    #expect(controller.selfTestRelationsPaneCollapsed)
+    #expect(model.contextWindow.mode == .pinned, "pin survives the detour")
+
+    // Back on source: the user's relations layout and outline return.
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    ))
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestRelationsPaneCollapsed)
+    #expect(!controller.selfTestContextPaneCollapsed)
+    #expect(!controller.selfTestOutlineHidden)
+    #expect(model.contextWindow.mode == .pinned)
+    #expect(controller.selfTestTrailBarVisible)
+}

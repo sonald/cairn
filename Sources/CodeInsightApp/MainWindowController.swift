@@ -652,6 +652,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.selectFile(file)
     }
 
+    func renderForSelfTest() {
+        render()
+    }
+
     func openFileForSelfTest(_ file: URL) {
         navigate(to: file)
     }
@@ -929,6 +933,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationController.selfTestCloseInspector()
     }
     var selfTestExactStatusText: String { exactLabel.stringValue }
+    var selfTestSidebarPaneCollapsed: Bool { sidebarItem.isCollapsed }
+    var selfTestContextPaneCollapsed: Bool { contextItem.isCollapsed }
+    var selfTestRelationsPaneCollapsed: Bool { relationItem.isCollapsed }
+    var selfTestOutlineHidden: Bool {
+        sidebarController.selfTestOutlineHidden
+    }
     var selfTestTrailBarVisible: Bool {
         selfTestViewIsVisibleInWindow(trailView)
     }
@@ -1505,10 +1515,139 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func applyPanelPreset(_ preset: PanelPresetModel) {
         panelPreset = preset
+        // An explicit preset choice replaces any layout captured for a
+        // round-trip through a non-source surface.
+        savedSourceSurfaceLayout = nil
         applyPanelLayout(
             readingSetLayoutActive ? PanelPresetModel.focus.layout : preset.layout
         )
+        contentSurfaceMode = nil
+        updateContentSurfaceIfNeeded()
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
+    }
+
+    /// Which surface the window currently presents. Derived from project
+    /// state and the selected file's kind; drives temporary panel exit per
+    /// §3.1 without writing back into the user's preset.
+    private enum ContentSurfaceMode: Equatable {
+        case noProject
+        case nonSource
+        case source
+    }
+
+    private var contentSurfaceMode: ContentSurfaceMode?
+    @ObservationIgnored private var savedSourceSurfaceLayout: PanelLayoutDescription?
+
+    private func currentContentSurfaceMode() -> ContentSurfaceMode {
+        switch model.projectState {
+        case .empty, .failed:
+            return .noProject
+        case .indexing, .ready:
+            if model.tabStrip.activeTab?.fileURL == nil {
+                return .source
+            }
+            guard let file = model.selectedFile else { return .source }
+            return model.languageMode(for: file) == nil ? .nonSource : .source
+        }
+    }
+
+    /// Applies the §3.1 panel exit rules when the content surface actually
+    /// changes; splitter positions are only touched on transitions.
+    private func updateContentSurfaceIfNeeded() {
+        let mode = currentContentSurfaceMode()
+        guard mode != contentSurfaceMode else { return }
+        let previous = contentSurfaceMode
+        contentSurfaceMode = mode
+        if previous == .source, mode != .source {
+            savedSourceSurfaceLayout = currentPanelLayout()
+        }
+        switch mode {
+        case .noProject:
+            // Brand, Open Project, and recents carry the window; panels
+            // without an object of operation leave. Menus stay.
+            sidebarItem.isCollapsed = true
+            contextItem.isCollapsed = true
+            relationItem.isCollapsed = true
+            trailView.isHidden = true
+        case .nonSource:
+            // File tree + content preview; the symbol outline, Context,
+            // Relations, and Inspector leave without touching the pinned
+            // preview or the user's source layout.
+            sidebarItem.isCollapsed = false
+            sidebarController.setOutlineHidden(true)
+            contextItem.isCollapsed = true
+            relationItem.isCollapsed = true
+        case .source:
+            sidebarController.setOutlineHidden(false)
+            trailView.isHidden = false
+            if let saved = savedSourceSurfaceLayout {
+                savedSourceSurfaceLayout = nil
+                applyPanelLayout(saved)
+            } else {
+                applyPanelLayout(
+                    readingSetLayoutActive
+                        ? PanelPresetModel.focus.layout
+                        : panelPreset.layout
+                )
+            }
+        }
+    }
+
+    /// Reads the current splitter state so a round-trip through a
+    /// non-source surface restores the user's arrangement, not just the
+    /// preset defaults.
+    private func currentPanelLayout() -> PanelLayoutDescription {
+        let base = panelPreset.layout
+        let upperSplit = upperSplitController.splitView
+        let contentSplit = contentSplitController.splitView
+        let readerSplit = readerSplitController.splitView
+        let sidebarFraction: Double
+        if !sidebarItem.isCollapsed,
+           upperSplit.bounds.width > 0,
+           let sidebar = upperSplit.arrangedSubviews.first
+        {
+            sidebarFraction = sidebar.frame.width / upperSplit.bounds.width
+        } else {
+            sidebarFraction = base.sidebarFraction
+        }
+        let relationsFraction: Double
+        if !relationItem.isCollapsed,
+           upperSplit.bounds.width > 0,
+           let relations = upperSplit.arrangedSubviews.last
+        {
+            relationsFraction = relations.frame.width / upperSplit.bounds.width
+        } else {
+            relationsFraction = base.relationsFraction
+        }
+        let contextFraction: Double
+        if !contextItem.isCollapsed,
+           contentSplit.bounds.height > 0,
+           let context = contentSplit.arrangedSubviews.last
+        {
+            contextFraction = context.frame.height / contentSplit.bounds.height
+        } else {
+            contextFraction = base.contextFraction
+        }
+        let secondaryFraction: Double
+        if !secondaryReaderItem.isCollapsed,
+           readerSplit.bounds.width > 0,
+           let secondary = readerSplit.arrangedSubviews.last
+        {
+            secondaryFraction = secondary.frame.width / readerSplit.bounds.width
+        } else {
+            secondaryFraction = base.secondaryReaderFraction
+        }
+        return PanelLayoutDescription(
+            sidebarCollapsed: sidebarItem.isCollapsed,
+            readerCollapsed: readerGroupItem.isCollapsed,
+            contextCollapsed: contextItem.isCollapsed,
+            relationsCollapsed: relationItem.isCollapsed,
+            readerSplit: !secondaryReaderItem.isCollapsed,
+            sidebarFraction: sidebarFraction,
+            contextFraction: contextFraction,
+            relationsFraction: relationsFraction,
+            secondaryReaderFraction: secondaryFraction
+        )
     }
 
     private func applyPanelLayout(_ layout: PanelLayoutDescription) {
@@ -1910,6 +2049,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func render() {
+        updateContentSurfaceIfNeeded()
         if displayedGeneration != model.generation
             || displayedSnapshotID != model.currentSnapshotID
         {
@@ -2974,6 +3114,16 @@ final class SidebarViewController: NSViewController,
         if isViewLoaded { splitView.autosaveName = name }
     }
 
+    /// Hides the symbol outline half of the sidebar for non-source
+    /// surfaces; the file tree stays (§3.1).
+    func setOutlineHidden(_ hidden: Bool) {
+        loadViewIfNeeded()
+        guard symbolScrollView.isHidden != hidden else { return }
+        symbolScrollView.isHidden = hidden
+        outlinePlaceholder.isHidden = hidden
+        splitView.needsLayout = true
+    }
+
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
         guard isViewLoaded else { return }
@@ -3010,6 +3160,10 @@ final class SidebarViewController: NSViewController,
         view.needsDisplay = true
     }
 
+    var selfTestOutlineHidden: Bool {
+        loadViewIfNeeded()
+        return symbolScrollView.isHidden
+    }
     var selfTestFilesPlaceholderText: String? {
         loadViewIfNeeded()
         return filePlaceholderLabel.stringValue
@@ -6034,6 +6188,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             label.isHidden = false
             textView.clear()
             hideScopeHeader()
+            // No file displayed: the source-only reading height controls
+            // leave with it (§3.1 no-project surface).
+            readingHeightControl.isHidden = true
+            readingHeightShortcutLabel.isHidden = true
             return
         }
 

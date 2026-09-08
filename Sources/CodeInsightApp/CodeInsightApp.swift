@@ -862,8 +862,8 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                         && $0.accessibilityHelp()
                             == "Bookmarks require a current project file in the primary reader."
                 } ?? false,
-            "readingTrailBarVisibleWithoutProject":
-                windowController.selfTestTrailBarVisible,
+            "readingTrailBarHiddenWithoutProject":
+                !windowController.selfTestTrailBarVisible,
             "windowTitleIsCairn": windowController.window?.title == "Cairn",
         ]
         windowController.applyPanelPreset(.relations)
@@ -9194,6 +9194,10 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         controller.selfTestSetDefaultSidebarDivider()
         let splitFrame = controller.selfTestContentSplitFrameInContentView
         let trailFrame = controller.selfTestTrailBarFrameInContentView
+        // The trail bar retires on the no-project surface (§3.1); only a
+        // visible bar occupies content height.
+        let trailOccupancyHeight =
+            controller.selfTestTrailBarVisible ? trailFrame.height : 0
         let statusFrame = controller.selfTestStatusBarFrameInContentView
         let sidebar = controller.selfTestSidebarGeometry
         let sidebarAvailableHeight =
@@ -9209,7 +9213,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                     splitFrame.height
                         - (
                             contentFrame.height - statusBarOccupancyHeight
-                                - trailFrame.height
+                                - trailOccupancyHeight
                         )
                 ) <= tolerance,
             "sidebarFilesPaneIs65Percent":
