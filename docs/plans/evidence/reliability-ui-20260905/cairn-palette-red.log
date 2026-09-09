@@ -1,0 +1,32 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[3/9] Write swift-version--58304C5D6DBC2206.txt
+[5/9] Compiling CodeInsightApp PalettePanel.swift
+[6/9] Emitting module CodeInsightApp
+[6/11] Write Objects.LinkFileList
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[7/11] Linking codeinsight-app
+[8/11] Applying codeinsight-app
+[10/12] Emitting module CodeInsightAppTests
+[10/12] Write Objects.LinkFileList
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[11/12] Linking CodeInsightPackageTests
+Build complete! (6.00s)
+Test Suite 'Selected tests' started at 2026-09-09 19:17:56.910.
+Test Suite 'CodeInsightPackageTests.xctest' started at 2026-09-09 19:17:56.911.
+Test Suite 'CodeInsightPackageTests.xctest' passed at 2026-09-09 19:17:56.911.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-09 19:17:56.911.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite PaletteTests started.
+◇ Test dismissRestoresOwnerResponderBeforeOpening() started.
+✘ Test dismissRestoresOwnerResponderBeforeOpening() recorded an issue at PaletteTests.swift:30:13: Expectation failed: (owner → <NSWindow: 0x1014c0500>).isVisible → false
+✘ Test dismissRestoresOwnerResponderBeforeOpening() failed after 0.191 seconds with 1 issue.
+✘ Suite PaletteTests failed after 0.191 seconds with 1 issue.
+✘ Test run with 1 test in 1 suite failed after 0.191 seconds with 1 issue.

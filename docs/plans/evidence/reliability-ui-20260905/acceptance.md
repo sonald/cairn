@@ -1,77 +1,60 @@
 # 最终验收记录 — 2026-09-05 可靠性与阅读 UI 修复计划
 
-日期：2026-09-09。验收构建：`.build/reliability-ui-validation/Cairn.app`（bundle id `dev.cairn.Cairn.ReliabilityUIValidation`，ad-hoc 签名，未公证——如实记录，不冒充公证发布）。
-实施基线 `ac18460` → 验收 HEAD `6b99101`，共 18 个切片提交（S0–S11 + V0 记录）。全程单机 macOS 26.6.2 / arm64 / Swift 6.3.3。
-`/Applications/Cairn.app` 原实例未被触碰；本轮 fixture 位于 `/tmp/cairn-v0-fixture`，验收后已终止唯一测试实例（PID 51717）。
+更新：2026-09-09。实施基线 `ac18460` → 上轮记录 `1cc9da1`；本轮源码验收HEAD `306368c`。切片提交：`cf592cc`（焦点）、`fe7d22d`（store寿命）、`fdc966a`（书签错误）、`f3151a9`（版本溢出入口）、`306368c`（空载测量）。最终隔离构建：`.build/reliability-ui-final/Cairn.app`，bundle id `dev.cairn.Cairn.ReliabilityUIValidationNext`，ad-hoc签名，尚未公证。
 
-## 总结论：部分完成（不可声明"所有问题已解决"）
+## 总结论：部分完成
 
-计划 §7 判据：V0 任一关键真实步骤 BLOCKED/FAIL → 只能报告部分完成。本轮 **V0 的全部交互式步骤被自动化工具权限阻断**（详见下表），故按判据如实记为部分完成。单元/门禁级（G0/G1/G2 的自动化部分）全部通过。
+不能声明全部遗留问题已关闭。旧屏幕录制/AX权限拒绝已经解除；本轮已完成多项真实流程、修复3个确认问题，另有版本溢出菜单修复待原生复验。Mac随后两次自动锁屏，最终完整原生矩阵尚未完成；公证缺少Developer ID Application证书。各项当前状态如下，旧运行的BLOCKED原因不再作为当前状态。
 
-## 逐切片结果
+详细过程：[本轮修复与原生证据](residual-fixes-20260909.md)、[资源测量](resource-rerun-20260909.md)、[前一次EOF原生重跑](v0-rerun-20260909.md)。S0–S11原实施证据保留在同目录`s*.md`，不撤销既有功能约束。
 
-| 切片 | 结果 | 证据 |
+## 本轮修复
+
+| 项目 | 当前结果 | 证据 |
 |---|---|---|
-| S0 基线 | PASS | baseline.md（探针复现 EOF 空转 1.6M 回调/2s） |
-| S1 LSP EOF | PASS（单测级） | s1-eof.md；98/98 Exact 套件；EOF 后请求 10s→0.08s |
-| S2a 内容身份 | PASS（单测级） | s2a-content-identity.md；5 新回归 + 860 全量 |
-| S2b Context/Exact 一致性 | PASS（单测级） | s2b-source-consistency.md；4 新回归 |
-| S2c Refresh Index | PASS（单测级） | s2c-refresh-index.md；6 新回归（真实 Git fixture） |
-| S3a 打开流程收敛 | PASS | s3a-open-convergence.md；RED（多语言打开不取消）→GREEN |
-| S3b 失败反馈 | PASS | s3b-error-feedback.md；三类失败原因 + Retry/另选目录 |
-| S4a 测量 | PASS | s4a-measurement.md；冻结阈值先于修复 |
-| S4b-1 项目边界寿命 | PASS | s4b1-store-lifetime.md |
-| S4b-2 非源码不入 store | PASS（G1 达标） | s4b2-non-source-store.md；256MiB 负载保留 0 |
-| S4c 捕获策略 | 未触发（判定记录） | s4b2 内判定：预算未超标，不做接口改造 |
-| S5 关系命令操作面 | PASS | s5-relation-surface.md；Pin 独立性 + 顺带修复 toolbar family 崩溃 |
-| S6 来源说明/几何 | PASS | s6-provenance-geometry.md；窗口 900→1401 撑大缺陷修复 |
-| S7a 面板退场 | PASS | s7a-panel-exit.md |
-| S7b Reader 优先/Inspector | PASS | s7b-reader-first-layout.md；打开 Relations 撑窗（既有缺陷）修复 |
-| S8 视觉层级 | PASS（chrome 步） | s8-visual-hierarchy.md；Reader token 无对应问题未改 |
-| S9 语言预选 | PASS | s9-language-preselection.md |
-| S10a Markdown 列表 | PASS | s10a-markdown-lists.md |
-| S10b 概念文案 | PASS | s10b-concept-copy.md |
-| S11 文档与门禁 | PASS | s11-docs-gates.md；失败注入 ×2 使门禁 FAIL 验证 |
+| Quick Open关闭后鼠标/键盘无响应 | 已修复，原生与回归通过 | 最小复现不依赖provider；恢复应用激活与主窗口；旧实现故障注入FAIL，PaletteTests 12 PASS |
+| 同项目演化内容线性保留 | 已修复，服务级回归通过 | 20次真实Git修订，旧实现累积21份/40断言失败，新实现每轮1份；旧会话仍可查询。保留原校验后建立磁盘缓存的时机 |
+| Re-anchor成功仍显示旧漂移错误 | 已修复，最终原生复验待完成 | 真实UI确认；成功提交后清除该书签旧尝试，旧实现回归FAIL；既有严格锚点语义不变 |
+| 窄窗口版本溢出菜单不打开面板 | 修复待原生复验 | 延后至菜单结束跟踪后展示transient popover；宽窗口直达入口可用 |
+| Reading自测误用空载预算 | 测量口径已修正，最终门禁PASS | HEAD基线和修复版加载后均约144.8MB；设计§15的100MB适用于空载。现在在打开项目前检查空载，加载后内存继续原值报告，阈值不变 |
 
-## 门禁（2026-09-09）
+## V0 当前逐步骤状态
 
-- `CODEX_SANDBOX=1 bash scripts/ci.sh`：**PASS** —— swift test 893（main 891 + 隔离 2），ByteUTF16Map 通道 PASS，自测 exact/diff/reading/projector/fold 全部 passed，release 构建 + fold perf 完成。
-- 失败注入：还原 S1 EOF 缺口 → 3 断言 FAIL；拆除 S2a 身份验证 → 5 断言 FAIL。门禁有效。
-
-## V0 逐步骤状态
-
-| 步骤 | 状态 | 证据/限制 |
+| 步骤 | 状态 | 已验证 / 尚缺 |
 |---|---|---|
-| 1 首次打开（鼠标+键盘） | **BLOCKED** | 自动化助手被拒屏幕录制（`Screen Recording is denied for ZCode`）与辅助功能（AX 树不可读，osascript -1719）；无法驱动原生 picker。未以单元测试冒充 |
-| 2 CPU 生命周期 | **部分** | 空载实测：0.0% CPU ×3、10s `sample` 主线程阻塞于 `mach_msg` 事件等待、零 readability-handler 帧（v0-idle.sample.txt.gz）。EOF-断开后采样需先打开项目（依赖步骤 1）→ 该半步 BLOCKED |
-| 3 内容一致性 | **BLOCKED** | 需 UI（改名→重开→stale→拒绝→刷新）。单测级全绿（s2a/s2c），不冒充原生 PASS |
-| 4 关系与 Pin | **BLOCKED** | 需 UI |
-| 5 版本与 Compare | **BLOCKED** | 需 UI；零写基线已记录（fixture git status/HEAD/index 验收前后不变——应用未获交互机会，不声称零写行为已实测） |
-| 6 预览往返 | **BLOCKED** | 需 UI |
-| 7 阅读证据（Freeze/重启） | **BLOCKED** | 需 UI + 持久化动作 |
-| 8 书签与笔记 | **BLOCKED** | 需 UI |
-| 9 视觉/AX 四宽度×三主题 | **BLOCKED** | 截图权限被拒 |
-| 10 资源复测 | **部分** | 验收 bundle 空载 RSS ≈ 93–97MB（ps 三次）；S4a 确定性矩阵随 CI 复跑通过。进程外 RSS 分档 campaign 未完成（依赖打开各档项目） |
+| 1 首次打开（鼠标+键盘） | 部分，主要流程PASS | 新隔离Next构建纯键盘picker→mixed预选→Quick Open→Rust可读，随后鼠标切Python成功；最终构建复验尚缺 |
+| 2 CPU生命周期 | PASS（已记录构建） | 仅终止测试provider后CPU 0.0%，5秒sample主线程4133/4134停在事件等待，零handler帧；Quick Open仍可阅读。后续未修改EOF实现 |
+| 3 内容一致性 | 部分 | mixed项目Rust前插中文/改名→关闭重开→旧搜索拒绝→Refresh→新符号第3行定位PASS；未打开/删除文件及Python、TypeScript各自完整矩阵尚缺 |
+| 4 关系与Pin | 部分 | beta Callers为alpha/gamma，Verified；Pin alpha后关系导航与快捷键查询光标beta，Pin保持。Inspector及四尺寸往返尚缺 |
+| 5 版本与Compare | 主要流程PASS，窄入口待复验 | 第一版42↔第二版43，beta body diff可见；返回Worktree显示外部修改。操作前后HEAD/index/全部文件含.git指纹完全一致。窄窗口溢出菜单修复待复验 |
+| 6 预览往返 | 部分 | Markdown列表/内链→HTML（脚本未执行）/有效PNG/PDF/Unicode文本→源码，Reading Height/Context恢复；Back回README。外链/本地资源策略及完整Back/Forward矩阵尚缺 |
+| 7 阅读证据 | 部分 | 真实Freeze Results与Freeze Path创建两份Reading Set；正常Quit/重启均恢复，Trail为空。完整兄弟分支、Restore与版本边界矩阵尚缺 |
+| 8 书签与笔记 | 部分 | 创建中文笔记→Drifted→严格Open拒绝→显式Re-anchor→严格Open成功；旧错误残留已修复。最终构建重启/即时文案复验尚缺 |
+| 9 视觉/AX | 部分 | 900宽Light和原生Zoom大窗口已检查；Markdown、预览、Reader可见。四个精确内容尺寸×Light/Dark/SI Classic完整矩阵尚缺；Trail超出主窗口截图边界需区分截图裁切与屏幕裁切，尚非确认缺陷 |
+| 10 资源 | 自测矩阵PASS，原生回收部分 | 0/64/256MiB各5次冷索引+20次暖索引共75次，均PASS；暖first-paint p95为6.4/162.2/661.3ms。峰值RSS最高357.1MiB。GUI常驻/关闭Compare、tabs后的回收及固定A/B原生20轮尚缺 |
 
-## 已确认延期项（明示，不隐藏）
+## 原延期项逐项处置
 
-1. V0 步骤 1、3–9 的原生交互验证：被工具权限阻断，需人工或授权环境重跑。**在此之前，S2a–S2c/S5/S7 的修复只能声明单测级 PASS。**
-2. V0 步骤 2 的 EOF-断开后半、步骤 10 的 RSS 分档：同上。
-3. S1 的 bundle 级 CPU 采样：以空载实测 + 单元级回调计数差异替代，断开场景未测。
-4. Reader token 步的 S8 调整：无对应本轮问题，按计划"纯样式值不逐项镜像"未改。
-5. 同项目演化内容线性保留（S4a 场景 C）：按计划收缩到项目边界，作为已报告开放风险。
-6. ad-hoc 签名/未公证：维持事实状态。
+1. V0交互：从旧权限BLOCKED更新为以上实际子项；剩余矩阵不能用单元测试或模型通道替代。
+2. EOF与RSS：EOF半步已关闭；75次进程外资源测量已保存，GUI回收矩阵仍待完成。
+3. S1 bundle CPU：断开场景已实测，见`v0-eof-rerun.sample.txt.gz`，不再仅引用空载采样。
+4. S8 Reader token：未发现对应问题，按原计划不作无需求的样式更改；此项为不适用，不是隐藏的未实施修复。
+5. 同项目演化保留：应用服务生命周期已修复并有20轮回归；不新增淘汰器/引用计数，不影响已发布旧session。
+6. 签名公证：BLOCKED。本机只存在Apple Development证书；缺Developer ID Application证书/私钥及notary配置。已请求用户在本机配置，未索取或写入密码。
 
-## 复现指引
+## 门禁与保护边界
+
+- 本轮完整swift test已通过893主测试+2隔离bookmark测试，共895；隔离契约未改变，新增2个测试已同步计数。
+- 首轮缓存时机回归已发现并修正，定向14项复核PASS。
+- Reading加载后内存检查在HEAD基线也失败，原始对照日志保留；实际空载检查修正后的最终完整门禁**PASS**（退出码0）：893主测试+2隔离测试，Exact/Diff/Reading/Projector/Fold自测，release构建与fold perf全部完成。Reading实测空载23.876MB。原始日志见`final-gates-20260909.log.gz`。这不替代V0交互矩阵。
+- 正式`/Applications/Cairn.app`未启动或修改；正式App Support指纹校验不变。未改`.claude-trace/`或`docs/reviews/`。
+- 原始fixture `/tmp/cairn-v0-fixture`保留；新增完整fixture `/tmp/cairn-v0-complete-20260909`。外部主动制造的drift已与版本零写测量分段取基线。
+
+## 复现
 
 ```bash
-# 门禁
 CODEX_SANDBOX=1 bash scripts/ci.sh
-# 验收 bundle（唯一输出/bundle id）
-CODEX_SANDBOX=1 bash scripts/make-app.sh \
-  --output .build/reliability-ui-validation \
-  --bundle-id dev.cairn.Cairn.ReliabilityUIValidation
-open .build/reliability-ui-validation/Cairn.app   # fixture: /tmp/cairn-v0-fixture
+CODEX_SANDBOX=1 bash scripts/make-app.sh --output .build/reliability-ui-final --bundle-id dev.cairn.Cairn.ReliabilityUIValidationNext
 ```
 
-V0 交互清单逐项见计划 §6「V0：真实 AppKit 流程」；重跑时按步骤记录 PASS/FAIL/SKIP/BLOCKED 并更新本文件。
+原生步骤按计划§6逐项执行。最终构建需要手动解锁的Mac；公证另外需要用户提供本机签名身份与notary profile。不得把上述未完成子项改为PASS。
