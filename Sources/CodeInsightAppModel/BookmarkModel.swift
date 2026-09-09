@@ -296,7 +296,9 @@ package final class BookmarkModel {
         }
         var candidate = records
         candidate[index] = replacement
-        return commit(candidate) ? .updated : .rejected
+        guard commit(candidate) else { return .rejected }
+        clearAttempt(for: id)
+        return .updated
     }
 
     @discardableResult

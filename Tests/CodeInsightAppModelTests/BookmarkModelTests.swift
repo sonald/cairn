@@ -266,7 +266,7 @@ func bookmarkModelRequiresConfirmationForNotesAndCleansAttemptAfterDelete() asyn
 
 @MainActor
 @Test
-func bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation() throws {
+func bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation() async throws {
     let fileURL = bookmarkModelTestFileURL()
     defer { try? FileManager.default.removeItem(at: fileURL.deletingLastPathComponent()) }
     let model = BookmarkModel(store: BookmarkStore(fileURL: fileURL))
@@ -307,6 +307,9 @@ func bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation()
     #expect(model.reanchorWorktree(id: source.id, document: document, line: 2)
         == .conflict(conflict.id))
     #expect(model.records.first(where: { $0.id == source.id }) == source)
+    model.workspaceDidChange(to: 1)
+    model.beginAttempt(for: source, workspaceGeneration: 1, message: "Bookmark content has drifted.")
+    #expect(await testWaitUntil("reanchor failed attempt") { model.attemptMessage(for: source.id) != nil })
     #expect(model.reanchorWorktree(
         id: source.id,
         document: document,
@@ -314,6 +317,7 @@ func bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation()
         updatedAt: Date(timeIntervalSince1970: 20)
     ) == .updated)
     let reanchored = try #require(model.records.first(where: { $0.id == source.id }))
+    #expect(model.attemptMessage(for: source.id) == nil)
     #expect(reanchored.contentID == currentID)
     #expect(reanchored.byteOffset == 0)
     #expect(reanchored.line == 1)
