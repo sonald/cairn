@@ -3336,3 +3336,24 @@ func multiLanguageProjectBoundaryAlsoReplacesTheServiceStore() async throws {
         "multi-language boundary must also drop the old project"
     )
 }
+
+@MainActor
+@Test
+func sameProjectRevisionsDoNotAccumulateInServiceStore() async throws {
+    let root = try temporaryGitProject(["src/lib.rs": "pub fn revision_0() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let service = ProjectIndexService()
+    let original = try await service.index(root: root)
+    let originalID = ContentID.sha256(of: Array("pub fn revision_0() {}\n".utf8))
+    for revision in 1...20 {
+        let source = "pub fn revision_\(revision)() {}\n"
+        try source.write(to: root.appendingPathComponent("src/lib.rs"), atomically: true, encoding: .utf8)
+        let snapshot = try await service.captureSnapshot(root: root, revision: nil)
+        let prepared = try await service.prepareSnapshot(snapshot)
+        _ = try await service.completeSnapshot(prepared)
+        #expect(!service.retainedContentIDsForDiagnostics.contains(originalID))
+        #expect(service.retainedContentIDsForDiagnostics.count == 1)
+    }
+    let hits = try await original.searchSymbols(query: "revision_0", limit: 10, boost: SearchBoost(), context: QueryContext(snapshotID: original.snapshotID, analysisProfileID: original.analysisProfile.id, generation: 1))
+    #expect(hits.count == 1)
+}

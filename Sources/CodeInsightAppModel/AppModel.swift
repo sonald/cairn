@@ -145,7 +145,6 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
     private var store = ProjectIndexStore()
     private let lock = NSLock()
     private var indexer = ProjectIndexer()
-    private var scopedRoot: URL?
 
     public init() {}
 
@@ -155,14 +154,11 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         lock.withLock { store.retainedContentIDs() }
     }
 
-    /// Replaces the store when work starts for a different project so a
-    /// closed project's bytes do not stay retained. Sessions already
-    /// published keep their own store references.
-    private func beginProjectScope(root: URL) {
-        let key = root.standardizedFileURL
+    /// Each capture owns its store; published sessions retain their own
+    /// bytes while discarded revisions can be released. Persistent drafts
+    /// provide reuse without retaining every revision in memory.
+    private func beginSnapshotScope() {
         lock.withLock {
-            guard scopedRoot != key else { return }
-            scopedRoot = key
             store = ProjectIndexStore()
         }
     }
@@ -178,7 +174,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         language: LanguageID
     ) async throws -> EngineSession {
         try validateProductSupport(language)
-        beginProjectScope(root: root)
+        beginSnapshotScope()
         let store = lock.withLock { self.store }
         let indexer = ProjectIndexer(persistingProjectAt: root)
         lock.withLock { self.indexer = indexer }
@@ -206,7 +202,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         language: LanguageID
     ) async throws -> any Snapshot {
         try validateProductSupport(language)
-        beginProjectScope(root: root)
+        beginSnapshotScope()
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
@@ -240,7 +236,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
         languages: [LanguageID]
     ) async throws -> any Snapshot {
         let normalized = try LanguageMode.normalize(languages: languages)
-        beginProjectScope(root: root)
+        beginSnapshotScope()
         return try await detachedValue {
             try Task.checkCancellation()
             let snapshot: any Snapshot = if let revision {
