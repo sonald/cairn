@@ -4444,6 +4444,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         )
 
         if relationFileVisible, let signatureTraitOffset = target.signatureTraitOffset {
+            // S2a's async offset commits can leave the reader on the last
+            // edge target; this step resolves from the relation file.
+            _ = windowController.selectFileInSidebar(target.relationFile)
+            _ = waitUntil(timeout: 5, condition: {
+                windowController.displayedReaderFile?.standardizedFileURL
+                    == target.relationFile.standardizedFileURL
+            })
             windowController.selfTestReaderRelation(
                 offset: signatureTraitOffset,
                 direction: .implementations
@@ -4495,6 +4502,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let secondFollowSummary = relationRowsUpdateFollowContext
             ? windowController.selfTestContextSummary
             : nil
+        // S2a made offset navigations commit after their content-identity
+        // validation task, so the reader can legitimately sit on the last
+        // opened edge target here. This step's intent is clicking the call
+        // in the relation file — re-establish it first.
+        _ = windowController.selectFileInSidebar(target.relationFile)
+        _ = waitUntil(timeout: 5, condition: {
+            windowController.displayedReaderFile?.standardizedFileURL
+                == target.relationFile.standardizedFileURL
+        })
         windowController.selfTestReaderClick(
             offset: target.relationCallOffset,
             commandClick: false

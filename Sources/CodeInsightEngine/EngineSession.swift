@@ -547,7 +547,8 @@ public final class EngineSession: Sendable {
     }
 
     package func sourceBytes(at pathID: PathID) -> [UInt8]? {
-        filesByPath[pathID].flatMap { sourceBytesByContent[$0.contentID] }
+        filesByPath[pathID]
+            .flatMap { sourceBytesByContent[$0.contentID] }
     }
 
     package func capturedSource(

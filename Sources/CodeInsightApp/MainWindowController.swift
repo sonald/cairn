@@ -853,7 +853,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestContextSummary: String? { contextController.selfTestSummary }
     var selfTestContextProvenance: String? {
-        contextController.selfTestProvenance
+        // S6 moved full provider/environment detail to the tooltip; checks
+        // about provenance content read the complete source.
+        contextController.selfTestProvenanceTooltip
+            ?? contextController.selfTestProvenance
     }
     var selfTestContextCandidateCount: Int {
         contextController.selfTestCandidateCount
