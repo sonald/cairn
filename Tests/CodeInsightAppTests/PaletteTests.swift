@@ -10,6 +10,32 @@ import Testing
 @Suite(.serialized)
 struct PaletteTests {
     @Test
+    func dismissRestoresOwnerResponderBeforeOpening() {
+        _ = NSApplication.shared
+        let owner = NSWindow(contentRect: .zero, styleMask: [.titled], backing: .buffered, defer: false)
+        owner.isReleasedWhenClosed = false
+        let field = NSTextField()
+        owner.contentView = field
+        owner.makeFirstResponder(field)
+        let responder = owner.firstResponder
+        let panel = PalettePanel(appModel: AppModel(), settings: ReaderSettings(), onOpen: { _, _, _ in })
+        defer { panel.close(); owner.close() }
+        let item = NSMenuItem(title: "Check", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "")
+        panel.prepareForTesting(prefill: ">", owner: owner, commands: [
+            PalettePanel.Row(title: "Check", detail: "", shortcut: "", identity: "check", payload: .command(item))
+        ])
+        var invoked = false
+        panel.sendActionForTesting = { [weak panel] _, _, _ in
+            invoked = true
+            #expect(owner.isVisible)
+            #expect(owner.firstResponder === responder)
+            #expect(panel?.window?.isVisible == false)
+        }
+        panel.openSelectionForTesting()
+        #expect(invoked)
+    }
+
+    @Test
     func parsesAllFiveModesAndTheirQueries() {
         #expect(PalettePanel.Mode.parse("main").mode == .file)
         #expect(PalettePanel.Mode.parse("main").query == "main")

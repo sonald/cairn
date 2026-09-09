@@ -606,7 +606,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             return
         }
         guard restoreFocus, let ownerWindow else { return }
-        ownerWindow.makeKey()
+        NSApp.activate(ignoringOtherApps: true)
+        ownerWindow.makeKeyAndOrderFront(nil)
         ownerWindow.makeFirstResponder(originalResponder)
     }
 
