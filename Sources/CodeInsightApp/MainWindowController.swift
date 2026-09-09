@@ -6039,9 +6039,24 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     ) -> NSAttributedString {
         let rendered = NSMutableAttributedString()
         var previousComponents: [PresentationIntent.IntentType]?
+        var previousListItemIdentity: Int?
+        // Ordinal for the item currently open in each ordered list.
+        var orderedCounters: [Int: Int] = [:]
         for run in markdown.runs {
             let components = run.presentationIntent?.components ?? []
             let leaf = components.first
+            let listItem = components.first {
+                if case .listItem = $0.kind { return true }
+                return false
+            }
+            let orderedList = components.first {
+                if case .orderedList = $0.kind { return true }
+                return false
+            }
+            let listContainer = orderedList ?? components.first {
+                if case .unorderedList = $0.kind { return true }
+                return false
+            }
             if let previousComponents,
                let previousLeaf = previousComponents.first,
                let leaf,
@@ -6061,6 +6076,38 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                     string: isListItem ? "\n" : "\n\n"
                 ))
             }
+            // A new list item begins: emit its marker with nesting indent.
+            // Unordered items get a bullet; ordered items number within
+            // their list, restarting when the list changes (§S10a).
+            if let listItem,
+               listItem.identity != previousListItemIdentity
+            {
+                let nesting = components.reduce(0) { count, component in
+                    switch component.kind {
+                    case .orderedList, .unorderedList:
+                        count + 1
+                    default:
+                        count
+                    }
+                }
+                let indent = String(
+                    repeating: "  ",
+                    count: max(0, nesting - 1)
+                )
+                if let orderedList {
+                    let counter = (orderedCounters[orderedList.identity] ?? 0) + 1
+                    orderedCounters[orderedList.identity] = counter
+                    rendered.append(NSAttributedString(
+                        string: "\(indent)\(counter). "
+                    ))
+                } else {
+                    rendered.append(NSAttributedString(
+                        string: "\(indent)• "
+                    ))
+                }
+                previousListItemIdentity = listItem.identity
+            }
+            _ = listContainer
             let attributed = NSMutableAttributedString(
                 attributedString: NSAttributedString(
                     AttributedString(markdown[run.range])

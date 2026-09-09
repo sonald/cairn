@@ -52,7 +52,7 @@ func nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() throws {
     #expect(state.kind == "Markdown")
     #expect(state.renderedText?.contains("Title") == true)
     #expect(state.renderedText?.contains("Title\n\ndisk bytes") == true)
-    #expect(state.renderedText?.contains("first\nsecond") == true)
+    #expect(state.renderedText?.contains("• first\n• second") == true)
     #expect(state.renderedText?.contains("**") == false)
     #expect(state.linkCount == 1)
     let headingFont = try #require(controller.selfTestPreviewFont(at: "Title"))
@@ -326,4 +326,57 @@ private func nonSourcePreviewPNG() throws -> [UInt8] {
           let png = representation.representation(using: .png, properties: [:])
     else { throw CocoaError(.fileWriteUnknown) }
     return Array(png)
+}
+
+@MainActor
+@Test
+func markdownPreviewPreservesListMarkersNestingAndInlineStyles() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let markdown = try nonSourcePreviewFile(
+        root: root,
+        name: "LISTS.md",
+        bytes: Array("""
+        # Guide
+
+        - first **bold** item
+        - second item with `code`
+          - nested bullet
+
+        1. install
+        2. run
+
+        ```rust
+        fn code_block() {}
+        ```
+
+        Tail paragraph.
+        """.utf8)
+    )
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.display(markdown, languageMode: nil)
+
+    let state = controller.selfTestPreviewState
+    #expect(state.kind == "Markdown")
+    let text = try #require(state.renderedText)
+    // Unordered markers and nesting survive.
+    #expect(text.contains("• first **bold** item".replacingOccurrences(of: "**", with: "")) || text.contains("• first"))
+    #expect(text.contains("• first bold item") || text.contains("• first **bold** item"))
+    #expect(text.contains("• second item with code") || text.contains("• second item with `code`"))
+    #expect(text.contains("  • nested bullet"))
+    // Ordered numbering restarts per list.
+    #expect(text.contains("1. install"))
+    #expect(text.contains("2. run"))
+    // Paragraph spacing separates blocks; code block stays monospaced.
+    #expect(text.contains("fn code_block() {}"))
+    let codeFont = try #require(controller.selfTestPreviewFont(at: "fn code_block"))
+    #expect(codeFont.fontDescriptor.symbolicTraits.contains(.monoSpace))
+    // Inline styles inside list items keep working.
+    let boldFont = try #require(controller.selfTestPreviewFont(at: "bold"))
+    #expect(boldFont.fontDescriptor.symbolicTraits.contains(.bold))
+    // Selection/copy surface unchanged.
+    #expect(state.selectable == true)
+    #expect(state.editable == false)
 }
