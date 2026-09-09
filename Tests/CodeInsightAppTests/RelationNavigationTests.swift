@@ -2474,3 +2474,114 @@ func relationCommandsDisabledOutsideReadableSourceSurfaces() async throws {
     try await pumpRunLoop()
     #expect(fixture.model.relationTree.root == nil)
 }
+
+// MARK: - S7b reader-first layout
+
+@MainActor
+@Test
+func openingRelationsKeepsTheWindowAndReaderReadableAtTheFloor() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    // Reading preset: sidebar open, relations closed.
+    fixture.controller.applyPanelPreset(.reading)
+    fixture.controller.renderForSelfTest()
+    #expect(!fixture.controller.selfTestSidebarPaneCollapsed)
+
+    // Open Relations from the reader caret at the 900pt minimum window.
+    fixture.controller.window?.setContentSize(NSSize(width: 900, height: 600))
+    fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    fixture.controller.selfTestActivateReading(
+        at: byteOffset(of: "target() {}", in: fixture.mainSource)
+    )
+    fixture.controller.showRelations(direction: .references)
+    try #require(await relationTestWaitUntil("references loaded") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+    })
+    try await Task.sleep(for: .milliseconds(200))
+    fixture.controller.renderForSelfTest()
+    fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+
+    // The window never grows to satisfy pane layout (§3.1)…
+    #expect(
+        (fixture.controller.window?.frame.width ?? 0) <= 900.5,
+        "opening Relations must not grow the window"
+    )
+    // …the sidebar folds while Relations is open…
+    #expect(fixture.controller.selfTestSidebarPaneCollapsed)
+    // …the Reader keeps its readable floor and the right area its 300pt.
+    #expect(fixture.controller.selfTestReaderGroupWidth >= 480)
+    #expect(fixture.controller.selfTestRelationsPaneWidth >= 300)
+
+    // Closing Relations returns the user's sidebar choice.
+    fixture.controller.applyPanelPreset(.reading)
+    fixture.controller.renderForSelfTest()
+    #expect(!fixture.controller.selfTestSidebarPaneCollapsed)
+}
+
+@MainActor
+@Test
+func inspectorReplacesTheListInNarrowRightAreaAndRestoresIt() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("main is displayed") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL
+            == main.standardizedFileURL
+    })
+    fixture.controller.selfTestActivateReading(
+        at: byteOffset(of: "target() {}", in: fixture.mainSource)
+    )
+    fixture.controller.showRelations(direction: .references)
+    try #require(await relationTestWaitUntil("references are loaded") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+    })
+    #expect(fixture.controller.selfTestExpandPossibleRelations())
+    try #require(await relationTestWaitUntil("a.rs reference is visible") {
+        fixture.controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).contains { $0.hasPrefix("a.rs:") }
+    })
+    let selectedTitle = try #require(
+        fixture.controller.selfTestVisibleRelationEdgeTitles(
+            inGroup: "References"
+        ).first { $0.hasPrefix("a.rs:") }
+    )
+    #expect(fixture.controller.selfTestSelectRelationEdge(titled: selectedTitle))
+    let rootBefore = fixture.model.relationTree.root
+    let generationBefore = fixture.model.relationTree.generation
+
+    // The pane is below the side-by-side floor, so the inspector replaces
+    // the list instead of squeezing both into word-narrow columns.
+    #expect(fixture.controller.canShowResolutionInspector)
+    fixture.controller.showResolutionInspector()
+    #expect(fixture.controller.selfTestResolutionInspectorVisible)
+    fixture.controller.renderForSelfTest()
+    #expect(
+        fixture.controller.selfTestListPaneHidden,
+        "the inspector replaces the list in the narrow right area"
+    )
+
+    // Closing brings the same results back with the root and selection
+    // intact; no query is rebuilt.
+    fixture.controller.selfTestCloseResolutionInspector()
+    fixture.controller.renderForSelfTest()
+    #expect(!fixture.controller.selfTestListPaneHidden)
+    #expect(fixture.controller.selfTestVisibleRelationEdgeTitles(
+        inGroup: "References"
+    ).contains { $0 == selectedTitle })
+    #expect(fixture.model.relationTree.root === rootBefore)
+    #expect(fixture.model.relationTree.generation == generationBefore)
+}

@@ -772,19 +772,13 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 && abs(heightHeader.controlFrame.width - 216) <= 1
                 && abs(heightHeader.controlFrame.height - 24) <= 1
                 && heightHeader.frame.contains(heightHeader.controlFrame),
-            "filesPlaceholderVisibleWithoutProject":
-                windowController.selfTestFilesPlaceholderVisible,
-            "filesPlaceholderTextWithoutProject":
-                windowController.selfTestFilesPlaceholderText == "No project open",
-            "filesOpenProjectButtonVisibleWithoutProject":
-                windowController.selfTestFilesOpenProjectButtonVisible,
-            "filesOpenProjectButtonTitle":
-                windowController.selfTestFilesOpenProjectButtonTitle
-                == "Open Project…",
-            "outlinePlaceholderVisibleWithoutFile":
-                windowController.selfTestOutlinePlaceholderVisible,
-            "outlinePlaceholderTextWithoutFile":
-                windowController.selfTestOutlinePlaceholderText == "No file open",
+            // §3.1: without a project the sidebar retires around the brand
+            // empty state instead of showing its placeholders.
+            "sidebarRetiredWithoutProject":
+                windowController.selfTestSidebarPaneCollapsed,
+            "emptyStateCarriesOpenProjectWithoutProject":
+                windowController.selfTestEmptyStateExists
+                && windowController.selfTestEmptyStateOpenButtonIsVisibleDefaultAction,
             "contextPlaceholderVisibleWithoutCandidate":
                 windowController.selfTestContextPlaceholderVisible,
             "contextPlaceholderTextWithoutCandidate":
@@ -868,11 +862,9 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         ]
         windowController.applyPanelPreset(.relations)
         pumpRunLoop()
-        checks["relationsPlaceholderVisibleWithoutRoot"] =
-            windowController.selfTestRelationsPlaceholderVisible
-        checks["relationsPlaceholderTextWithoutRoot"] =
-            windowController.selfTestRelationsPlaceholderText
-            == "Right-click a symbol → Show Callers / Calls / Implements / References"
+        // §3.1: the relations pane retires without a project.
+        checks["relationsRetiredWithoutRoot"] =
+            windowController.selfTestRelationsPaneCollapsed
         checks.merge(layout.checks) { _, new in new }
         Self.finishSelfTest(
             coldStartMS: coldStartMS,

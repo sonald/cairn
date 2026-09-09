@@ -177,9 +177,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         upperSplitController.splitView.dividerStyle = .thin
         readerSplitController.splitView.dividerStyle = .thin
 
-        primaryReaderItem.minimumThickness = 300
+        // §3.1: compare columns keep at least 320pt each.
+        primaryReaderItem.minimumThickness = 320
         primaryReaderItem.canCollapse = false
-        secondaryReaderItem.minimumThickness = 300
+        secondaryReaderItem.minimumThickness = 320
         secondaryReaderItem.canCollapse = true
         secondaryReaderItem.isCollapsed = true
         readerSplitController.addSplitViewItem(primaryReaderItem)
@@ -187,9 +188,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
         sidebarItem.minimumThickness = 180
         sidebarItem.canCollapse = true
+        // §3.1: the independent right area keeps at least 300pt. The
+        // Reader's 480pt floor is enforced by the sidebar adaptation, not a
+        // hard constraint — a required minimum alongside the other panes
+        // would grow the window instead of folding the sidebar.
         readerGroupItem.minimumThickness = 300
         readerGroupItem.canCollapse = false
-        relationItem.minimumThickness = 220
+        relationItem.minimumThickness = 300
         relationItem.maximumThickness = 560
         relationItem.canCollapse = true
         upperSplitController.addSplitViewItem(sidebarItem)
@@ -926,6 +931,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestRelationsTreeVisible: Bool {
         relationController.selfTestTreeVisible
     }
+    var selfTestListPaneHidden: Bool {
+        relationController.selfTestListPaneHidden
+    }
     var selfTestResolutionInspectorVisible: Bool {
         relationController.selfTestInspectorVisible
     }
@@ -934,6 +942,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestExactStatusText: String { exactLabel.stringValue }
     var selfTestSidebarPaneCollapsed: Bool { sidebarItem.isCollapsed }
+    var selfTestReaderGroupWidth: CGFloat {
+        readerGroupItem.viewController.view.frame.width
+    }
+    var selfTestRelationsPaneWidth: CGFloat {
+        relationItem.viewController.view.frame.width
+    }
     var selfTestContextPaneCollapsed: Bool { contextItem.isCollapsed }
     var selfTestRelationsPaneCollapsed: Bool { relationItem.isCollapsed }
     var selfTestOutlineHidden: Bool {
@@ -1493,7 +1507,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func toggleRelations() {
-        relationItem.isCollapsed.toggle()
+        if relationItem.isCollapsed {
+            openRelationsPane()
+        } else {
+            relationItem.isCollapsed = true
+            updateRelationsWidthAdaptation()
+        }
     }
 
     var canShowResolutionInspector: Bool {
@@ -1518,6 +1537,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // An explicit preset choice replaces any layout captured for a
         // round-trip through a non-source surface.
         savedSourceSurfaceLayout = nil
+        sidebarTemporarilyCollapsedForRelations = false
         applyPanelLayout(
             readingSetLayoutActive ? PanelPresetModel.focus.layout : preset.layout
         )
@@ -1549,6 +1569,134 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let file = model.selectedFile else { return .source }
             return model.languageMode(for: file) == nil ? .nonSource : .source
         }
+    }
+
+    @ObservationIgnored
+    private var sidebarTemporarilyCollapsedForRelations = false
+
+    /// Opens the Relations pane without ever growing the window: the
+    /// sidebar folds first when the reader would fall below its readable
+    /// floor, and the freshly opened pane is capped at the width that fits
+    /// beside the reader (§3.1).
+    /// Opens the Relations pane without ever growing the window: the
+    /// sidebar folds first when the reader would fall below its readable
+    /// floor, and the pane's restored thickness is clamped to the width
+    /// that fits beside the reader (§3.1).
+    private func openRelationsPane() {
+        let upperSplit = upperSplitController.splitView
+        upperSplit.layoutSubtreeIfNeeded()
+        let available = upperSplit.bounds.width
+        let sidebarWidth = sidebarItem.isCollapsed
+            ? 0
+            : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+        if !sidebarItem.isCollapsed,
+           available - sidebarWidth - relationItem.minimumThickness < 480
+        {
+            sidebarItem.isCollapsed = true
+            sidebarTemporarilyCollapsedForRelations = true
+        }
+        let fittedSidebar = sidebarItem.isCollapsed
+            ? 0
+            : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+        let target = max(
+            relationItem.minimumThickness,
+            min(
+                Self.relationsPaneMaximumThickness,
+                available - fittedSidebar - 480 - upperSplit.dividerThickness
+            )
+        )
+        let frameBefore = window?.frame
+        // Restoring a collapsed pane re-applies its previous thickness in
+        // the same layout pass. Cap the pane at the width that fits beside
+        // the reader before it opens, and keep the cap while the window is
+        // narrow; the frame guard enforces the §3.1 rule that the window
+        // never grows to satisfy pane layout.
+        capRelationsPane(width: target)
+        relationItem.isCollapsed = false
+        upperSplit.layoutSubtreeIfNeeded()
+        if let frameBefore,
+           window?.frame.width ?? 0 > frameBefore.width + 0.5
+        {
+            window?.setFrame(frameBefore, display: false)
+            upperSplit.layoutSubtreeIfNeeded()
+        }
+    }
+
+    @ObservationIgnored
+    private static let relationsPaneMaximumThickness: CGFloat = 560
+
+    /// Caps the Relations pane's maximum thickness while the window cannot
+    /// fit its natural width beside a readable Reader; a nil width releases
+    /// the cap. maximumThickness is enforced by the split view itself, so
+    /// the cap survives arbitrary layout passes.
+    private func capRelationsPane(width: CGFloat?) {
+        guard let width, width > 0 else {
+            relationItem.maximumThickness =
+                Self.relationsPaneMaximumThickness
+            return
+        }
+        relationItem.maximumThickness = max(
+            relationItem.minimumThickness,
+            min(Self.relationsPaneMaximumThickness, width)
+        )
+    }
+
+    /// §3.1 relations exploration: when the Relations pane is open and the
+    /// window cannot keep the Reader at its readable floor with the sidebar
+    /// up, the sidebar folds temporarily and returns when Relations closes.
+    /// Bound to the pane's open state, not a width band, so crossings
+    /// cannot oscillate; the user's preset is never overwritten.
+    private func updateRelationsWidthAdaptation() {
+        guard contentSurfaceMode == .source else { return }
+        let relationsOpen = !relationItem.isCollapsed
+        let upperSplit = upperSplitController.splitView
+        if relationsOpen {
+            upperSplit.layoutSubtreeIfNeeded()
+            let available = upperSplit.bounds.width
+            let sidebarWidth = sidebarItem.isCollapsed
+                ? 0
+                : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+            let relationsWidth = max(
+                upperSplit.arrangedSubviews.last?.frame.width ?? 0,
+                relationItem.minimumThickness
+            )
+            if !sidebarItem.isCollapsed,
+               available - sidebarWidth - relationsWidth < 480
+            {
+                sidebarItem.isCollapsed = true
+                sidebarTemporarilyCollapsedForRelations = true
+            }
+            // Cap the pane while its natural width cannot fit beside the
+            // readable Reader; release only when it can. The distinct
+            // thresholds keep window-width crossings from oscillating.
+            let sidebarWidthNow = sidebarItem.isCollapsed
+                ? 0
+                : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+            let naturalFits = available - sidebarWidthNow
+                - Self.relationsPaneMaximumThickness
+                - upperSplit.dividerThickness >= 480
+            if !naturalFits {
+                capRelationsPane(
+                    width: available - sidebarWidthNow
+                        - 480 - upperSplit.dividerThickness
+                )
+                upperSplit.layoutSubtreeIfNeeded()
+            } else if relationItem.maximumThickness
+                != Self.relationsPaneMaximumThickness
+            {
+                capRelationsPane(width: nil)
+            }
+        } else {
+            capRelationsPane(width: nil)
+            if sidebarTemporarilyCollapsedForRelations {
+                sidebarTemporarilyCollapsedForRelations = false
+                sidebarItem.isCollapsed = false
+            }
+        }
+    }
+
+    func windowDidResize(_ notification: Notification) {
+        updateRelationsWidthAdaptation()
     }
 
     /// Applies the §3.1 panel exit rules when the content surface actually
@@ -1657,11 +1805,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.isCollapsed = layout.relationsCollapsed
         secondaryReaderItem.isCollapsed = !layout.readerSplit
 
+        // The Reader keeps its thickness when the window narrows; the
+        // sidebar and the relations pane yield before it does.
         sidebarItem.holdingPriority = .init(rawValue: 253)
         readerGroupItem.holdingPriority = .init(rawValue: 250)
         relationItem.holdingPriority = .init(rawValue: 252)
         contextItem.holdingPriority = .init(rawValue: 250)
-        secondaryReaderItem.holdingPriority = .init(rawValue: 251)
+        secondaryReaderItem.holdingPriority = .init(rawValue: 250)
         applyPanelSizes(layout)
         DispatchQueue.main.async { [weak self] in self?.applyPanelSizes(layout) }
     }
@@ -1790,13 +1940,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func applyPanelSizes(_ layout: PanelLayoutDescription) {
         window?.contentView?.layoutSubtreeIfNeeded()
         let upperSplit = upperSplitController.splitView
-        if !layout.sidebarCollapsed, upperSplit.bounds.width > 0 {
+        // The deferred application must not re-open panes the surface
+        // adaptation folded after the preset was applied.
+        if !layout.sidebarCollapsed, !sidebarItem.isCollapsed,
+           upperSplit.bounds.width > 0 {
             upperSplit.setPosition(
                 upperSplit.bounds.width * layout.sidebarFraction,
                 ofDividerAt: 0
             )
         }
-        if !layout.relationsCollapsed, upperSplit.bounds.width > 0 {
+        if !layout.relationsCollapsed, !relationItem.isCollapsed, upperSplit.bounds.width > 0 {
             upperSplit.setPosition(
                 upperSplit.bounds.width * (1 - layout.relationsFraction),
                 ofDividerAt: 1
@@ -2050,6 +2203,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func render() {
         updateContentSurfaceIfNeeded()
+        updateRelationsWidthAdaptation()
         if displayedGeneration != model.generation
             || displayedSnapshotID != model.currentSnapshotID
         {
@@ -2762,7 +2916,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard let file = model.selectedFile,
               let path = projectPath(for: file)
         else { return }
-        relationItem.isCollapsed = false
+        openRelationsPane()
         if direction == .references,
            case let .ready(session, _) = model.projectState,
            let document = model.tabStrip.activeDocument,
@@ -2842,12 +2996,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         direction: RelationTreeModel.Direction,
         document: ReaderDocument? = nil
     ) {
-        relationItem.isCollapsed = false
+        openRelationsPane()
         relationController.setRoot(
             target: target,
             direction: direction,
             document: document
         )
+        render()
     }
 
     private func navigate(

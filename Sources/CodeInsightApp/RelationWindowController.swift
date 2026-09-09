@@ -421,6 +421,7 @@ final class RelationWindowController: NSViewController,
         selfTestOpenSelectionCount
     }
 
+    var selfTestListPaneHidden: Bool { listPane.isHidden }
     var selfTestInspectorVisible: Bool {
         let frame = selfTestInspectorFrame
         return frame.width > 0 && frame.height > 0
@@ -870,6 +871,37 @@ final class RelationWindowController: NSViewController,
         super.viewDidLayout()
         layoutPassCount += 1
         fitOutlineWidthToVisibleRect()
+        updateInspectorLayoutMode()
+    }
+
+    @ObservationIgnored private var inspectorReplacesList = false
+
+    /// §3.1: the list and the inspector sit side by side only when the
+    /// right area fits list ≥280pt, inspector ≥300pt, and the divider;
+    /// otherwise the inspector replaces the list and Close brings the list
+    /// back with its selection and scroll position. Hysteresis keeps width
+    /// crossings from oscillating.
+    private func updateInspectorLayoutMode() {
+        if inspectorView.isHidden {
+            if inspectorReplacesList {
+                inspectorReplacesList = false
+                listPane.isHidden = false
+            }
+            return
+        }
+        let sideBySideMinimum: CGFloat = 280 + 300 + 24
+        let restoreMinimum: CGFloat = sideBySideMinimum + 24
+        print("S7BINSP available=\(contentSplit.bounds.width) hidden=\(inspectorView.isHidden) replaces=\(inspectorReplacesList)")
+        let available = contentSplit.bounds.width
+        if inspectorReplacesList {
+            if available >= restoreMinimum {
+                inspectorReplacesList = false
+                listPane.isHidden = false
+            }
+        } else if available < sideBySideMinimum {
+            inspectorReplacesList = true
+            listPane.isHidden = true
+        }
     }
 
     func setRoot(
@@ -1144,7 +1176,9 @@ final class RelationWindowController: NSViewController,
         inspectorMode = .live(node)
         inspectorView.isHidden = false
         view.layoutSubtreeIfNeeded()
+        updateInspectorLayoutMode()
         inspectorView.displayLive(display, theme: theme)
+        updateInspectorLayoutMode()
     }
 
     private func inspectBadge(for node: RelationTreeModel.Node) {
@@ -1184,6 +1218,7 @@ final class RelationWindowController: NSViewController,
         )
         inspectorView.isHidden = false
         view.layoutSubtreeIfNeeded()
+        updateInspectorLayoutMode()
         inspectorView.displayFrozen(
             display,
             canOpenFormerCandidate: onOpenFormerCandidate != nil,
@@ -1214,6 +1249,7 @@ final class RelationWindowController: NSViewController,
         inspectorMode = nil
         guard !inspectorView.isHidden else { return }
         inspectorView.isHidden = true
+        updateInspectorLayoutMode()
         view.layoutSubtreeIfNeeded()
     }
 
