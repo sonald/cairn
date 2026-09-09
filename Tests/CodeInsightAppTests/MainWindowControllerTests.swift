@@ -996,3 +996,105 @@ func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
     #expect(model.contextWindow.mode == .pinned)
     #expect(controller.selfTestTrailBarVisible)
 }
+
+@MainActor
+@Test
+func languagePreselectionMatchesContentAndStoredPreference() throws {
+    var roots: [URL] = []
+    defer {
+        for root in roots { try? FileManager.default.removeItem(at: root) }
+    }
+    func makeProject(_ files: [String: String]) throws -> URL {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CodeInsightPreselect-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(
+            at: root,
+            withIntermediateDirectories: true
+        )
+        for (path, contents) in files {
+            let file = root.appendingPathComponent(path)
+            try FileManager.default.createDirectory(
+                at: file.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try contents.write(to: file, atomically: true, encoding: .utf8)
+        }
+        return root
+    }
+
+    let rust = try makeProject(["src/lib.rs": "fn a() {}\n"])
+    roots.append(rust)
+    #expect(
+        AppDelegate.preselectedLanguages(for: rust, storedLanguage: nil)
+            .languages == [.rust]
+    )
+    let python = try makeProject(["app/main.py": "def f():\n    pass\n"])
+    roots.append(python)
+    #expect(
+        AppDelegate.preselectedLanguages(for: python, storedLanguage: nil)
+            .languages == [.python]
+    )
+    let tsx = try makeProject(["ui/row.tsx": "export const A = 1\n"])
+    roots.append(tsx)
+    #expect(
+        AppDelegate.preselectedLanguages(for: tsx, storedLanguage: nil)
+            .languages == [.typescript]
+    )
+    let mixed = try makeProject([
+        "src/lib.rs": "fn a() {}\n",
+        "app/main.py": "pass\n",
+        "ui/row.tsx": "export const A = 1\n",
+    ])
+    roots.append(mixed)
+    #expect(
+        AppDelegate.preselectedLanguages(for: mixed, storedLanguage: nil)
+            .languages == [.rust, .python, .typescript]
+    )
+    // Plain JS/JSX does not select TypeScript.
+    let jsOnly = try makeProject(["app.js": "console.log(1)\n"])
+    roots.append(jsOnly)
+    #expect(
+        AppDelegate.preselectedLanguages(for: jsOnly, storedLanguage: nil)
+            .languages == []
+    )
+    // Skipped directories are not probed.
+    let vendored = try makeProject([
+        "node_modules/pkg/index.js": "x\n",
+        "dist/bundle.js": "x\n",
+    ])
+    roots.append(vendored)
+    #expect(
+        AppDelegate.preselectedLanguages(for: vendored, storedLanguage: nil)
+            .languages == []
+    )
+    // A stored preference wins over content, and the fallback never
+    // masquerades as one.
+    #expect(
+        AppDelegate.preselectedLanguages(
+            for: rust,
+            storedLanguage: .python
+        ).languages == [.python]
+    )
+    // Huge trees terminate deterministically.
+    var many: [String: String] = [:]
+    for index in 0..<6000 {
+        many["deep/dir\(index)/file\(index).txt"] = "x"
+    }
+    let huge = try makeProject(many)
+    roots.append(huge)
+    let result = AppDelegate.preselectedLanguages(
+        for: huge,
+        storedLanguage: nil
+    )
+    #expect(result.probeCapped)
+    #expect(result.languages.isEmpty)
+}
+
+@MainActor
+@Test
+func recentsRecordOnlyLookupNeverFallsBackToRust() {
+    let store = RecentProjectsStore()
+    let path = "/tmp/codeinsight-unrecorded-\(UUID().uuidString)"
+    #expect(store.storedLanguagesIfRecorded(for: path) == nil)
+    #expect(store.languages(for: path) == [.rust])
+}

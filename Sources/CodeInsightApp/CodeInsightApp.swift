@@ -510,7 +510,7 @@ private struct CodeInsightApplication {
 }
 
 @MainActor
-private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     NSMenuDelegate
 {
     private let startedAt: ContinuousClock.Instant
@@ -9338,6 +9338,69 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         windowController?.openProject(root: selectedRoot, languages: languages)
     }
 
+    /// Directories the file-name probe skips; mirrors the indexer's fixed
+    /// skip rules so the preselection matches what will be indexed.
+    static let languageProbeSkippedDirectories: Set<String> = [
+        ".git", "target", "node_modules", ".build", "venv", ".venv",
+        "__pycache__", "dist", "build",
+    ]
+
+    /// Entry cap for the read-only filename probe: it terminates on huge
+    /// trees without reading file contents or launching providers.
+    static let languageProbeEntryLimit = 5_000
+
+    /// Languages to preselect when opening `root` for the first time. A
+    /// stored Recents preference wins when present (never the Rust
+    /// fallback); otherwise a bounded, cancellable-by-limit filename probe
+    /// classifies only the extensions that actually appear. Plain .js/.jsx
+    /// files do not select TypeScript.
+    static func preselectedLanguages(
+        for root: URL,
+        storedLanguage: LanguageID?
+    ) -> (languages: [LanguageID], probeCapped: Bool) {
+        if let storedLanguage {
+            return ([storedLanguage], false)
+        }
+        let allLanguages: [LanguageID] = [.rust, .python, .typescript]
+        var found: Set<LanguageID> = []
+        var scanned = 0
+        var capped = false
+        let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        )
+        while let item = enumerator?.nextObject() as? URL {
+            scanned += 1
+            if scanned > languageProbeEntryLimit {
+                capped = true
+                break
+            }
+            if item.pathExtension.isEmpty == false,
+               item.lastPathComponent.hasPrefix(".")
+            {
+                continue
+            }
+            if item.pathComponents.contains(
+                where: { languageProbeSkippedDirectories.contains($0) }
+            ) {
+                continue
+            }
+            let name = item.lastPathComponent
+            if allLanguages.contains(where: { language in
+                LanguageMode.classify(path: name, language: language) != nil
+            }) {
+                for language in allLanguages
+                where LanguageMode.classify(path: name, language: language) != nil
+                {
+                    found.insert(language)
+                }
+            }
+        }
+        let ordered = allLanguages.filter { found.contains($0) }
+        return (ordered, capped)
+    }
+
     private func makeLanguageSelectionAlert(for root: URL) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Choose Languages"
@@ -9354,6 +9417,18 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
             "Python",
             "TypeScript",
         ]
+        // §S9: preselect a stored Recents preference when valid, otherwise
+        // the languages the bounded filename probe actually found; manual
+        // choices stay possible and win once made.
+        // A valid stored record wins; the Rust fallback never counts as a
+        // user choice (§S9).
+        let stored = recentProjectsStore
+            .storedLanguagesIfRecorded(for: root.standardizedFileURL.path)?
+            .first
+        let preselected = Self.preselectedLanguages(
+            for: root,
+            storedLanguage: stored
+        )
         mixedLanguageCheckboxes = options.map { title in
             let checkbox = NSButton(
                 checkboxWithTitle: title,
@@ -9361,6 +9436,14 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
                 action: #selector(mixedCheckboxChanged(_:))
             )
             checkbox.setAccessibilityLabel(title)
+            let language: LanguageID = switch title {
+            case "Rust": .rust
+            case "Python": .python
+            default: .typescript
+            }
+            checkbox.state = preselected.languages.contains(language)
+                ? .on
+                : .off
             stack.addArrangedSubview(checkbox)
             return checkbox
         }
@@ -9368,7 +9451,7 @@ private final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemVali
         stack.layoutSubtreeIfNeeded()
         alert.accessoryView = stack
         let openButton = alert.buttons[0]
-        openButton.isEnabled = false
+        openButton.isEnabled = !preselected.languages.isEmpty
         mixedLanguageOpenButton = openButton
         return alert
     }

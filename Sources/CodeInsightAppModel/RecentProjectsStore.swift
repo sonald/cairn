@@ -40,6 +40,22 @@ public final class RecentProjectsStore {
         languages(for: path).first ?? .rust
     }
 
+    /// The recorded languages for a path, or nil when nothing valid was
+    /// ever recorded. Unlike `languages(for:)` this never substitutes the
+    /// Rust fallback, so callers can distinguish a stored preference from
+    /// a first open.
+    public func storedLanguagesIfRecorded(for path: String) -> [LanguageID]? {
+        guard let raw = readLanguages()[path], !raw.isEmpty else {
+            return nil
+        }
+        let languages = raw.compactMap(LanguageID.init(rawValue:))
+        guard languages.count == raw.count,
+              let normalized = try? LanguageMode.normalize(languages: languages),
+              normalized == languages
+        else { return nil }
+        return normalized
+    }
+
     public func languages(for path: String) -> [LanguageID] {
         guard let raw = readLanguages()[path],
               !raw.isEmpty
