@@ -2759,7 +2759,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     @objc private func showCommitPickerFromMenu(_ sender: Any?) {
-        showCommitPicker(nil)
+        // Let the overflow menu finish tracking before showing a transient popover.
+        DispatchQueue.main.async { [weak self] in self?.showCommitPicker(nil) }
     }
 
     @objc private func showSymbolSearchFromToolbar(_ sender: Any?) {
