@@ -4130,6 +4130,20 @@ private final class ReadingHeightControl: NSSegmentedControl {
         }
         setAccessibilityLabel("Reading height")
         toolTip = "Reading height (⌥⌘0/1/2)"
+        setToolTip(
+            "Full shows the whole file; Structure folds function bodies; "
+                + "Overview keeps only signatures and top-level items",
+            forSegment: ReadingHeightLevel.full.rawValue
+        )
+        setToolTip(
+            "Structure folds function bodies and keeps signatures visible",
+            forSegment: ReadingHeightLevel.structure.rawValue
+        )
+        setToolTip(
+            "Overview keeps only signatures and top-level items; "
+                + "folded bodies stay hidden",
+            forSegment: ReadingHeightLevel.overview.rawValue
+        )
     }
 
     required init?(coder: NSCoder) {

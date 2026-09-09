@@ -32,7 +32,7 @@ func readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() {
 
     #expect(state.visible)
     #expect(state.title == "Reading Set · spawn")
-    #expect(state.subtitle == "5 excerpts · frozen at capture")
+    #expect(state.subtitle == "5 excerpts · frozen at capture · tab lifetime")
     #expect(!state.emptyVisible)
     #expect(state.cardCount == 5)
     #expect(state.cardFrames.allSatisfy { $0.width > 650 && $0.height > 60 })
@@ -100,7 +100,8 @@ func readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() {
         #expect(state.visible)
         #expect(state.emptyVisible)
         #expect(state.cardCount == 0)
-        #expect(state.subtitle == "0 excerpts · frozen at capture · skipped 3 · "
+        #expect(state.subtitle == "0 excerpts · frozen at capture · tab lifetime"
+            + " · skipped 3 · "
             + "recorded source is unreadable ×2; relation evidence is unavailable")
         let text = readingSetTestViews(in: controller.view).compactMap {
             ($0 as? NSTextField)?.stringValue

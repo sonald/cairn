@@ -398,7 +398,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         if titles.isEmpty {
             let empty = NSTextField(
                 labelWithString:
-                    "Navigate from Relations to build a trail · this session only"
+                    "Follow symbols to build a trail · this session only"
             )
             empty.font = .systemFont(ofSize: 11)
             empty.textColor = theme.chromeTertiaryColor
@@ -433,7 +433,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         branchButton.isEnabled = !(trail?.nodes.isEmpty ?? true)
         setAccessibilityValue(
             breadcrumbText.isEmpty
-                ? "Navigate from Relations to build a trail · this session only"
+                ? "Follow symbols to build a trail · this session only"
                 : breadcrumbText
         )
     }
@@ -472,10 +472,10 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             incoming.map { causeText($0.cause) } ?? "session root",
             "",
             "EXPLANATION",
-            "AT NAVIGATION · frozen snapshot",
+            "Evidence at navigation · frozen snapshot",
             observed.map(explanationText) ?? "No relation explanation was attached.",
             "",
-            "CURRENT · explanation store",
+            "Current evidence",
             current.map(explanationText) ?? "No newer explanation is available.",
         ]
         if let observed, let current,

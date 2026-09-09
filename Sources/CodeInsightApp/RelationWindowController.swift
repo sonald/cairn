@@ -772,6 +772,8 @@ final class RelationWindowController: NSViewController,
         readingSetButton.toolTip =
             "Freeze up to 50 published locations as a Reading Set"
         readingSetButton.setAccessibilityLabel("Freeze Results as Reading Set")
+        readingSetButton.toolTip =
+            "Freeze the currently published source and evidence snapshots as a Reading Set tab"
         readingSetButton.target = self
         readingSetButton.action = #selector(openAsReadingSet(_:))
         readingSetButton.isEnabled = false
@@ -891,7 +893,6 @@ final class RelationWindowController: NSViewController,
         }
         let sideBySideMinimum: CGFloat = 280 + 300 + 24
         let restoreMinimum: CGFloat = sideBySideMinimum + 24
-        print("S7BINSP available=\(contentSplit.bounds.width) hidden=\(inspectorView.isHidden) replaces=\(inspectorReplacesList)")
         let available = contentSplit.bounds.width
         if inspectorReplacesList {
             if available >= restoreMinimum {

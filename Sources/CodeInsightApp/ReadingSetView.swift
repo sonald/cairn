@@ -101,7 +101,7 @@ final class ReadingSetView: NSView {
         skippedReasons: [String] = []
     ) {
         titleLabel.stringValue = "Reading Set · \(title)"
-        var subtitle = "\(excerpts.count) excerpts · frozen at capture"
+        var subtitle = "\(excerpts.count) excerpts · frozen at capture · tab lifetime"
         if !skippedReasons.isEmpty {
             var order: [String] = []
             var counts: [String: Int] = [:]

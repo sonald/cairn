@@ -1471,8 +1471,9 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
     #expect(Set(fixture.controller.selfTestTrailPopoverPaths) == [
         "main.rs", "a.rs",
     ])
-    #expect(fixture.controller.selfTestTrailDetailText.contains("AT NAVIGATION"))
-    #expect(fixture.controller.selfTestTrailDetailText.contains("CURRENT"))
+    #expect(fixture.controller.selfTestTrailDetailText.contains("Evidence at navigation"))
+    #expect(fixture.controller.selfTestTrailDetailText.contains("Current evidence"))
+    #expect(!fixture.controller.selfTestTrailDetailText.contains("explanation store"))
     fixture.controller.selfTestCloseTrailPopover()
 
     fixture.controller.selfTestOpenRelationSelection()
@@ -1733,10 +1734,10 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
         ($0 as? NSTextField)?.stringValue
     }
     #expect(emptyText.contains(
-        "Navigate from Relations to build a trail · this session only"
+        "Follow symbols to build a trail · this session only"
     ))
     #expect(view.accessibilityValue() as? String
-        == "Navigate from Relations to build a trail · this session only")
+        == "Follow symbols to build a trail · this session only")
     #expect(try button().title == "Trail Details")
     #expect(try !button().isEnabled)
 
