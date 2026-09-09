@@ -223,18 +223,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         separator.wantsLayer = true
         separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
 
-        indexLabel.font = .systemFont(ofSize: 11)
+        indexLabel.font = .systemFont(ofSize: 12)
         indexLabel.textColor = .secondaryLabelColor
         indexLabel.setAccessibilityLabel("Index status")
         indexLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         refreshIndexButton.bezelStyle = .rounded
-        refreshIndexButton.font = .systemFont(ofSize: 11)
+        refreshIndexButton.font = .systemFont(ofSize: 12)
         refreshIndexButton.controlSize = .small
         refreshIndexButton.title = "Refresh Index"
         refreshIndexButton.toolTip = "Recapture the working tree as a new index generation"
         refreshIndexButton.isHidden = true
         refreshIndexButton.setAccessibilityLabel("Refresh Index")
-        truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        truncatedLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         truncatedLabel.textColor = .systemOrange
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
         truncatedLabel.drawsBackground = true
@@ -249,7 +249,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             ),
             truncatedLabel.heightAnchor.constraint(equalToConstant: 18),
         ])
-        exactLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        exactLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         exactLabel.lineBreakMode = .byTruncatingMiddle
         exactLabel.setContentCompressionResistancePriority(
             .defaultLow,
@@ -2134,7 +2134,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             item.view = profileButton
             item.visibilityPriority = .standard
             profileButton.bezelStyle = .rounded
-            profileButton.font = .systemFont(ofSize: 11, weight: .semibold)
+            profileButton.font = .systemFont(ofSize: 12, weight: .semibold)
             profileButton.cell?.lineBreakMode = .byTruncatingTail
             // Bounded so a long analysis-profile title cannot demand pane
             // width; the full title lives in the menu representation.
@@ -6719,7 +6719,7 @@ final class ContextWindowViewController: NSViewController {
 
         candidateBadge.wantsLayer = true
         candidateBadge.layer?.cornerRadius = 4
-        candidateLabel.font = .systemFont(ofSize: 11, weight: .medium)
+        candidateLabel.font = .systemFont(ofSize: 12, weight: .medium)
         candidateLabel.lineBreakMode = .byTruncatingTail
         candidateLabel.cell?.truncatesLastVisibleLine = true
         candidateLabel.cell?.wraps = false

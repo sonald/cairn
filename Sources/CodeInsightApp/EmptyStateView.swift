@@ -311,7 +311,7 @@ final class EmptyStateView: NSView {
         title.append(NSAttributedString(
             string: (path as NSString).abbreviatingWithTildeInPath,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 11),
+                .font: NSFont.systemFont(ofSize: 12),
                 .foregroundColor: NSColor.tertiaryLabelColor,
                 .paragraphStyle: paragraph,
             ]

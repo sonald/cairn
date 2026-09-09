@@ -738,7 +738,7 @@ final class RelationWindowController: NSViewController,
             object: scrollView.contentView
         )
 
-        placeholderLabel.font = .systemFont(ofSize: 11)
+        placeholderLabel.font = .systemFont(ofSize: 12)
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.alignment = .center
         placeholderLabel.lineBreakMode = .byWordWrapping
@@ -751,7 +751,7 @@ final class RelationWindowController: NSViewController,
         )
         inspectButton.title = "Inspector"
         inspectButton.imagePosition = .imageLeading
-        inspectButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        inspectButton.font = .systemFont(ofSize: 12, weight: .semibold)
         inspectButton.bezelStyle = .accessoryBarAction
         inspectButton.isBordered = true
         inspectButton.toolTip = "Show Resolution Inspector (⌘I)"
@@ -767,7 +767,7 @@ final class RelationWindowController: NSViewController,
             accessibilityDescription: "Freeze Results as Reading Set"
         )
         readingSetButton.imagePosition = .imageLeading
-        readingSetButton.font = .systemFont(ofSize: 11, weight: .semibold)
+        readingSetButton.font = .systemFont(ofSize: 12, weight: .semibold)
         readingSetButton.bezelStyle = .accessoryBarAction
         readingSetButton.toolTip =
             "Freeze up to 50 published locations as a Reading Set"
@@ -1722,12 +1722,12 @@ private final class ResolutionInspectorView: NSView {
             body: environmentBody
         )
         auditButton.bezelStyle = .inline
-        auditButton.font = .systemFont(ofSize: 11, weight: .medium)
+        auditButton.font = .systemFont(ofSize: 12, weight: .medium)
         auditButton.target = self
         auditButton.action = #selector(toggleAudit(_:))
         auditButton.setAccessibilityLabel("Show full resolution audit")
         formerCandidateButton.bezelStyle = .inline
-        formerCandidateButton.font = .systemFont(ofSize: 11, weight: .medium)
+        formerCandidateButton.font = .systemFont(ofSize: 12, weight: .medium)
         formerCandidateButton.target = self
         formerCandidateButton.action = #selector(openFormerCandidate(_:))
         formerCandidateButton.setAccessibilityLabel("Open former candidate")
@@ -1981,8 +1981,8 @@ private final class ResolutionInspectorView: NSView {
         section.orientation = .vertical
         section.alignment = .leading
         section.spacing = 4
-        title.font = .systemFont(ofSize: 10, weight: .semibold)
-        body.font = .systemFont(ofSize: 11)
+        title.font = .systemFont(ofSize: 11, weight: .semibold)
+        body.font = .systemFont(ofSize: 12)
         section.addArrangedSubview(title)
         section.addArrangedSubview(body)
         body.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
@@ -2008,11 +2008,11 @@ private final class ResolutionInspectorView: NSView {
         }
         for (key, value) in rows {
             let keyLabel = NSTextField(labelWithString: key)
-            keyLabel.font = .systemFont(ofSize: 10)
+            keyLabel.font = .systemFont(ofSize: 11)
             keyLabel.textColor = theme.chromeTertiaryColor
             keyLabel.setContentHuggingPriority(.required, for: .horizontal)
             let valueLabel = NSTextField(wrappingLabelWithString: value)
-            valueLabel.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
+            valueLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             valueLabel.textColor = theme.chromeSecondaryColor
             let row = NSStackView(views: [keyLabel, valueLabel])
             row.orientation = .horizontal
@@ -2241,25 +2241,25 @@ private final class RelationCellView: NSTableCellView {
             modifiersLabel.stringValue = node.modifiers.filter {
                 $0 != scope && $0 != caveat && $0 != corrected
             }.joined(separator: " · ")
-            modifiersLabel.font = .systemFont(ofSize: 10)
+            modifiersLabel.font = .systemFont(ofSize: 11)
             modifiersLabel.isHidden = modifiersLabel.stringValue.isEmpty
         case .evidenceLine:
             titleLabel.stringValue = "  \(node.title)"
-            titleLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+            titleLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
             titleLabel.textColor = theme.chromeTertiaryColor
         case .loading:
             titleLabel.stringValue = node.title
-            titleLabel.font = .systemFont(ofSize: 11)
+            titleLabel.font = .systemFont(ofSize: 12)
             titleLabel.textColor = theme.chromeSecondaryColor
             spinner.isHidden = false
             spinner.startAnimation(nil)
         case .truncated:
             titleLabel.stringValue = node.title
-            titleLabel.font = .systemFont(ofSize: 11)
+            titleLabel.font = .systemFont(ofSize: 12)
             titleLabel.textColor = .systemOrange
         case .error:
             titleLabel.stringValue = node.title
-            titleLabel.font = .systemFont(ofSize: 11)
+            titleLabel.font = .systemFont(ofSize: 12)
             titleLabel.textColor = .systemRed
         }
         setAccessibilityLabel(node.title)
