@@ -5,10 +5,15 @@
 > 帮你读懂陌生的复杂代码。**历史实施路线（2026-07 裁决）：M0–M4 单点打透 Rust；
 > TypeScript / Python 整语言面推至 M5。** 支持在 git 历史中自由穿梭。
 >
-> **当前实现事实（2026-09-01）**：M1–M13 的核心代码已落地；Rust、Python、
+> **当前实现事实（2026-09-08）**：M1–M14 的核心代码已落地；Rust、Python、
 > TypeScript/TSX 及 Git 混合 workspace 已有实现与自动测试。M10/M11 的真实
-> `Trail → Reading Set → 重启` 产品闭环仍为 **BLOCKED**；当前构建默认是
-> ad-hoc bundle，Developer ID 签名、公证和 staple 尚未执行。
+> `Trail → Reading Set → 重启` 产品闭环已于 2026-09-01 复验 **PASS**
+> （[验收记录](plans/evidence/m10-m11-productization/m10-m11-productization-acceptance.md)）。
+> 2026-09 稳定性修复轮补充：语义导航内容身份验证、无损 Refresh Index、
+> LSP EOF 生命周期、项目边界存储寿命、Reader 优先布局与非源码面板退场
+> （[计划](plans/2026-09-05-reliability-and-reading-ui-plan.md)与
+> [验收证据](plans/evidence/reliability-ui-20260905/)）。
+> 当前构建默认是 ad-hoc bundle，Developer ID 签名、公证和 staple 尚未执行。
 >
 > v3 修订：吸收第二轮同行评审。核心变化——数据模型升级为 3+1 层（新增 AnalysisProfile）、
 > 符号模型引入 Scope/Binding/SymbolSpace、调用解析拆为四个正交维度、
@@ -53,7 +58,9 @@ rust-analyzer 也足够快。持久的差异化是这五件事的组合：
 ### 1.1 一句话定位
 
 **Code Reader，不是 Code Editor。** 为"理解代码"做极致优化，砍掉一切编辑功能。
-macOS 原生应用（AppKit/Swift），无 Electron、无 Tauri、无 WebView。
+macOS 原生应用（AppKit/Swift），无 Electron、无 Tauri。M14 起非源码预览
+（HTML）局部采用受控 WKWebView（严格 CSP、内链白名单、只读），其余全部原生
+控件；这是明确批准的产品裁决，不表示整体转向 Web 技术。
 
 ### 1.2 与 IDE / VS Code + 插件的差异
 
@@ -175,7 +182,10 @@ C/C++、Go 后续另立计划。
 - **F4.3（P0）快照隔离**：QueryContext = snapshot + profile + generation，过期结果丢弃。
 - **F4.4（P0）不可变快照**：WorktreeSnapshot 捕获时固化 dirty/untracked 内容（§6.2）。
 - **F4.5（P0）忽略与排除**：CommitSnapshot 展示全部 tracked 文件（`.gitignore` 不适用于
-  已跟踪文件）+ CodeInsight 排除规则；Worktree 的 untracked 按 `.gitignore` 过滤。
+  已跟踪文件）+ CodeInsight 排除规则。Worktree 捕获的现行裁决（M14，较本节更具体）：
+  固定跳过目录（`.git`/`target`/`node_modules`/`.build`/`venv`/`.venv`/
+  `__pycache__`/`dist`/`build`）之外的常规非 symlink 文件全部捕获，**不按
+  `.gitignore` 过滤**；文件树与 CLI 快照遵循同一规则。
   依赖/产物目录（node_modules、target、venv、__pycache__、dist…）默认不索引。
   **lockfile 不作为普通源码索引，但必须进入 Project Model 用于确定依赖版本。**
 - **F4.6（P0）边界情况**：symlink、submodule/gitlink、LFS pointer（识别提示，不假装是源文件）、
@@ -200,6 +210,14 @@ C/C++、Go 后续另立计划。
 - **F5.5（P0）可重放跳转历史**：每项记录 snapshot descriptor + path + **contentID +
   byte offset + line/column 兜底 + 最近符号锚点**——临时快照被回收、文件改名后
   仍能定位到相同内容或相近符号。
+- **F5.5b（P0，2026-09 裁决）内容身份验证的语义导航**：所有索引来源的位置
+  （项目/全文搜索、Relations、Context 候选）在应用前与目标内容身份配对验证；
+  Worktree 阅读保持 live 磁盘（M14 合同），检测到漂移时不移动视口、不写
+  history/Trail，提示 `File changed since indexing` 并提供 **Refresh Index**
+  （同一 Worktree 的新捕获代际：保留 tabs/Reading Set/书签/Trail 分支/布局，
+  位置按既有 content/anchor/line fallback 恢复；失败恢复旧索引并可重试；
+  绝不经过会 reset 会话的 openProject）。大纲与文件内查找来自当前文档，
+  不受索引旧而禁用。
 - **F5.6（P0）当前文件符号大纲**。
 - **F5.7（P1）书签与阅读笔记**：存 App 数据目录（书签所在快照因此长期保留，§10.3）。
 
@@ -911,8 +929,8 @@ Cold  等待后台索引或 exact provider         先返回局部/fuzzy，异�
 | **M7 References 与解释证据** | References 消费、关系证据与 provenance/coverage 展示 | 实现与自动回归已落地；[M7 验收记录](plans/m7-s6-acceptance.md)保留逐项口径 |
 | **M8 Relations 响应与认知负担** | 启发式先出、Exact 原位升级、关系行式与展开预算 | 实现与 [M8 验收记录](plans/m8-acceptance.md)已记录；性能数字不外推到未测规模 |
 | **M9 阅读体验与 UI 打磨** | Outline/Selection/Divider/三主题/Readiness/Relations surface | 实现与 [M9 验收记录](plans/m9-acceptance.md)已记录 |
-| **M10 Explainable Navigation** | Resolution Inspector、解释快照、Reading Trail 与分支恢复 | 代码与自动门禁已实现；真实首次进入后的完整产品闭环仍待 M10/M11 验收 |
-| **M11 Reading Comfort** | 折叠、Find、Reader 设置、Reading Set 冻结与跨重启恢复 | Reader/Reading Set 实现已落地；真实 `Trail → Reading Set → 重启` 仍 **BLOCKED** |
+| **M10 Explainable Navigation** | Resolution Inspector、解释快照、Reading Trail 与分支恢复 | 代码与自动门禁已实现；2026-09-01 真实产品闭环复验 PASS（见 M10/M11 验收记录） |
+| **M11 Reading Comfort** | 折叠、Find、Reader 设置、Reading Set 冻结与跨重启恢复 | Reader/Reading Set 已落地；真实 `Trail → Reading Set → 重启` 闭环 2026-09-01 复验 PASS（Reading Set 寿命仍受 tab 生命周期管理，非永久收藏） |
 | **M12 多语言架构地基** | LanguageMode/Profile/Cache identity、单语言入口与后续混合 workspace seam | 实现已落地；Rust/Python/TypeScript 的支持边界由 L1/L2/L3 记录约束 |
 | **M13 书签与阅读笔记** | exact 快照书签、worktree drift/re-anchor、纯文本 note、面板/gutter/导出 | 已批准并实现；本轮 remediation 的 M13 V0 尚未全部通过；跨 commit 符号映射不在本期 |
 

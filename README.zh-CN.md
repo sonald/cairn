@@ -25,6 +25,8 @@ CodeInsight 是一个 macOS 原生、只读的代码阅读器，正式产品名�
 - **Exact 分析**：可选接入 rust-analyzer、Pyright 和 typescript-language-server；结果带 provider 与环境标注。
 - **Safe Reading Mode**：默认拒绝网络、禁用项目构建脚本和 proc macros，并把限制显示为分析结果的一部分。
 - **Git 时间旅行**：读取 worktree 或 commit 快照，比较不同版本，不 checkout、不修改仓库。
+- **索引一致性**：索引来源的跳转先验证目标内容身份；文件在索引后变化时提示 `File changed since indexing` 并提供 Refresh Index——无损重捕获工作区，tabs、Reading Set、书签、Trail 与布局全部保留。
+- **导入预选**：Choose Languages 对话框按 Recents 中保存的偏好或有界文件名探测结果预选（纯 `.js`/`.jsx` 不会选中 TypeScript）；手动选择始终优先。
 - **CLI 工具链**：提供索引、查询、快照、缓存切换统计、gold-set 评估等命令。
 
 ## 非源码预览

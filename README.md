@@ -25,6 +25,8 @@ This is not an editor. Cairn does not save files, run builds, or modify your wor
 - **Exact analysis**: optional rust-analyzer, Pyright, and typescript-language-server integration, with provider and environment attribution on results.
 - **Safe Reading Mode**: network access is denied by default, project build scripts and proc macros are disabled, and these limitations are surfaced as part of results.
 - **Git time travel**: inspect worktree or commit snapshots and compare versions without checkout or repository mutation.
+- **Index consistency**: index-derived jumps verify the target's content identity before navigating; when a file changed since indexing, Cairn shows `File changed since indexing` and offers Refresh Index, which recaptures the working tree without losing tabs, Reading Sets, bookmarks, the trail, or your layout.
+- **Import preselection**: the Choose Languages dialog preselects a stored Recents preference or the languages a bounded filename probe actually finds (plain `.js`/`.jsx` never selects TypeScript); manual choice always wins.
 - **CLI toolkit**: index projects, query semantics, inspect snapshots, measure cache-switch reuse, and evaluate gold sets.
 
 ## Non-source previews
