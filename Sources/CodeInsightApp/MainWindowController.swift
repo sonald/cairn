@@ -2737,7 +2737,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     @objc private func showCommitPicker(_ sender: Any?) {
-        guard let anchor = (sender as? NSView) ?? window?.contentView else { return }
+        // Symbols remains visible when Version moves into the overflow menu.
+        let anchor = (sender as? NSView) ?? symbolsButton
+        guard anchor.window != nil else { return }
         if commitPickerPopover == nil {
             commitPickerPopover = CommitPickerPopover(
                 appModel: model,
