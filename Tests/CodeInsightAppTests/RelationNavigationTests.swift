@@ -2604,3 +2604,38 @@ func inspectorReplacesTheListInNarrowRightAreaAndRestoresIt() async throws {
     #expect(fixture.model.relationTree.root === rootBefore)
     #expect(fixture.model.relationTree.generation == generationBefore)
 }
+
+@MainActor
+@Test
+func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
+    let fixture = try await makeRelationNavigationFixture()
+    defer {
+        fixture.controller.close()
+        try? FileManager.default.removeItem(at: fixture.root)
+    }
+    let main = fixture.root.appendingPathComponent("main.rs")
+    fixture.controller.openFileForSelfTest(main)
+    try #require(await relationTestWaitUntil("resize source loaded") {
+        fixture.controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    })
+    let window = try #require(fixture.controller.window)
+    window.setContentSize(NSSize(width: 1600, height: 820))
+    fixture.controller.applyPanelPreset(.reading)
+    _ = fixture.controller.selfTestActivateReading(at: byteOffset(of: "target() {}", in: fixture.mainSource))
+    fixture.controller.showRelations(direction: .references)
+    try #require(await relationTestWaitUntil("resize relations loaded") {
+        referenceEdge(path: "a.rs", in: fixture.model) != nil
+    })
+    fixture.controller.renderForSelfTest()
+    #expect(!fixture.controller.selfTestSidebarPaneCollapsed)
+    window.setContentSize(NSSize(width: 900, height: 600))
+    window.contentView?.layoutSubtreeIfNeeded()
+    #expect(fixture.controller.selfTestSidebarPaneCollapsed)
+    try #require(await waitUntil {
+        fixture.controller.selfTestReaderGroupWidth >= 480
+    })
+    #expect(window.frame.width <= 900.5)
+    fixture.model.openReadingSet(title: "Layout proof", excerpts: [])
+    fixture.controller.renderForSelfTest()
+    #expect(fixture.controller.selfTestSidebarPaneCollapsed)
+}

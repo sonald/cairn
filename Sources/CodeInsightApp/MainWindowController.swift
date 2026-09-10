@@ -23,7 +23,7 @@ func provenanceBadgeStyle(for text: String) -> ProvenanceBadgeStyle {
 
 @MainActor
 final class MainWindowController: NSWindowController, NSToolbarDelegate,
-    NSToolbarItemValidation
+    NSToolbarItemValidation, NSWindowDelegate
 {
     private static let backItemIdentifier = NSToolbarItem.Identifier("Back")
     private static let forwardItemIdentifier = NSToolbarItem.Identifier("Forward")
@@ -327,6 +327,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentViewController
         super.init(window: window)
+        window.delegate = self
         refreshIndexButton.target = self
         refreshIndexButton.action = #selector(refreshProjectIndex(_:))
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
@@ -1523,7 +1524,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func showResolutionInspector() {
-        relationItem.isCollapsed = false
+        openRelationsPane()
         _ = relationController.showSelectedInspector()
     }
 
@@ -1588,7 +1589,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func openRelationsPane() {
         let upperSplit = upperSplitController.splitView
         upperSplit.layoutSubtreeIfNeeded()
-        let available = upperSplit.bounds.width
+        let available = min(
+            upperSplit.bounds.width,
+            window?.contentLayoutRect.width ?? upperSplit.bounds.width
+        )
         let sidebarWidth = sidebarItem.isCollapsed
             ? 0
             : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
@@ -1651,20 +1655,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// cannot oscillate; the user's preset is never overwritten.
     private func updateRelationsWidthAdaptation() {
         guard contentSurfaceMode == .source else { return }
+        if case .some(.readingSet) = model.tabStrip.activeTab?.content { return }
         let relationsOpen = !relationItem.isCollapsed
         let upperSplit = upperSplitController.splitView
         if relationsOpen {
             upperSplit.layoutSubtreeIfNeeded()
-            let available = upperSplit.bounds.width
+            let available = min(
+                upperSplit.bounds.width,
+                window?.contentLayoutRect.width ?? upperSplit.bounds.width
+            )
             let sidebarWidth = sidebarItem.isCollapsed
                 ? 0
                 : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
-            let relationsWidth = max(
-                upperSplit.arrangedSubviews.last?.frame.width ?? 0,
-                relationItem.minimumThickness
-            )
+            // Use the natural right-pane width before Auto Layout compresses
+            // it; using the compressed width can trap live resizing above
+            // the narrow-window floor without ever retiring the sidebar.
             if !sidebarItem.isCollapsed,
-               available - sidebarWidth - relationsWidth < 480
+               available - sidebarWidth - Self.relationsPaneMaximumThickness
+                    - upperSplit.dividerThickness < 480
             {
                 sidebarItem.isCollapsed = true
                 sidebarTemporarilyCollapsedForRelations = true
@@ -1699,6 +1707,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func windowDidResize(_ notification: Notification) {
+        window?.contentView?.layoutSubtreeIfNeeded()
         updateRelationsWidthAdaptation()
     }
 
