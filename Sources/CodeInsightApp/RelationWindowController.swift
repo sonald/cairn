@@ -700,6 +700,7 @@ final class RelationWindowController: NSViewController,
         directionControl.target = self
         directionControl.action = #selector(directionChanged(_:))
         directionControl.selectedSegmentBezelColor = theme.accentColor
+        directionControl.font = .systemFont(ofSize: 12)
         directionControl.translatesAutoresizingMaskIntoConstraints = false
 
         let column = NSTableColumn(identifier: .init("Relation"))
@@ -820,28 +821,28 @@ final class RelationWindowController: NSViewController,
                 constant: 8
             ),
             directionControl.trailingAnchor.constraint(
-                equalTo: readingSetButton.leadingAnchor,
-                constant: -6
+                equalTo: headerSurface.trailingAnchor,
+                constant: -8
             ),
             readingSetButton.trailingAnchor.constraint(
                 equalTo: inspectButton.leadingAnchor,
                 constant: -6
             ),
-            readingSetButton.centerYAnchor.constraint(
-                equalTo: directionControl.centerYAnchor
+            readingSetButton.topAnchor.constraint(
+                equalTo: directionControl.bottomAnchor, constant: 6
             ),
-            readingSetButton.widthAnchor.constraint(equalToConstant: 104),
+            readingSetButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 104),
             readingSetButton.heightAnchor.constraint(equalToConstant: 22),
             inspectButton.trailingAnchor.constraint(
                 equalTo: headerSurface.trailingAnchor,
                 constant: -8
             ),
-            inspectButton.centerYAnchor.constraint(
-                equalTo: directionControl.centerYAnchor
+            inspectButton.topAnchor.constraint(
+                equalTo: directionControl.bottomAnchor, constant: 6
             ),
-            inspectButton.widthAnchor.constraint(equalToConstant: 82),
+            inspectButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 82),
             inspectButton.heightAnchor.constraint(equalToConstant: 22),
-            headerSurface.bottomAnchor.constraint(equalTo: directionControl.bottomAnchor, constant: 8),
+            headerSurface.bottomAnchor.constraint(equalTo: inspectButton.bottomAnchor, constant: 8),
             contentSplit.topAnchor.constraint(
                 equalTo: headerSurface.bottomAnchor,
                 constant: 6

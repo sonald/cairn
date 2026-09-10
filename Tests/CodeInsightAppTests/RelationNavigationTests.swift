@@ -12,6 +12,24 @@ import Testing
 struct RelationUXTests {
     @MainActor
     @Test
+    func relationHeaderLabelsFitAtMinimumPanelWidth() throws {
+        _ = NSApplication.shared
+        let controller = RelationWindowController(model: RelationTreeModel(), languageMode: { _ in nil })
+        controller.loadViewIfNeeded()
+        controller.view.frame = NSRect(x: 0, y: 0, width: 300, height: 600)
+        controller.view.layoutSubtreeIfNeeded()
+        #expect(controller.view.frame.width == 300)
+        let controls = controller.view.subviews.flatMap(\.subviews).compactMap { $0 as? NSControl }
+        let directions = try #require(controls.first { $0 is NSSegmentedControl })
+        #expect(directions.intrinsicContentSize.width > 0)
+        for control in controls {
+            #expect(control.frame.width + 1 >= control.intrinsicContentSize.width,
+                    "Header labels must fit their actual control bounds")
+        }
+    }
+
+    @MainActor
+    @Test
     func mainWindowChromeStaysCompactWhenContentNarrows() {
         let controller = MainWindowController(
             model: AppModel(),
