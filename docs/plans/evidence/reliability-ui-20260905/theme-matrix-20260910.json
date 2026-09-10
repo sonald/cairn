@@ -1,0 +1,51 @@
+{
+  "themes": [
+    "Dark",
+    "Light",
+    "SI Classic"
+  ],
+  "contentSizes": [
+    [
+      900,
+      600
+    ],
+    [
+      1000,
+      700
+    ],
+    [
+      1280,
+      820
+    ],
+    [
+      1440,
+      900
+    ]
+  ],
+  "smallWindowFrames": [
+    [
+      900,
+      652
+    ],
+    [
+      1000,
+      752
+    ]
+  ],
+  "largeImageSizes": [
+    [
+      1128,
+      768
+    ],
+    [
+      1163,
+      768
+    ]
+  ],
+  "result": "12 Reader layouts visually inspected; no overlapping Reader controls or missing source",
+  "notes": [
+    "较大截图被工具等比缩小，不将JPEG像素当成窗口点数。",
+    "Light缩小时的一点误差已回到未缩放基准校正后重验。",
+    "该矩阵为Reader布局证据；新增Relations标题栏另在唯一ID构建的900宽窗口复验。"
+  ]
+}

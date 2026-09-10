@@ -1,60 +1,62 @@
-# 最终验收记录 — 2026-09-05 可靠性与阅读 UI 修复计划
+# 最终验收记录 — 可靠性与阅读 UI 修复
 
-更新：2026-09-09。实施基线 `ac18460` → 上轮记录 `1cc9da1`；本轮源码验收HEAD `306368c`。切片提交：`cf592cc`（焦点）、`fe7d22d`（store寿命）、`fdc966a`（书签错误）、`f3151a9`（版本溢出入口）、`306368c`（空载测量）。最终隔离构建：`.build/reliability-ui-final/Cairn.app`，bundle id `dev.cairn.Cairn.ReliabilityUIValidationNext`，ad-hoc签名，尚未公证。
+更新：2026-09-10。源码验收 HEAD：`8d0cc82`。最终隔离构建：`.build/reliability-ui-verified-20260910/Cairn.app`，bundle id `dev.cairn.Cairn.ReliabilityUIVerified20260910`，ad-hoc签名。**公证按用户2026-09-10指示移出本次范围，不再作为阻塞。**
 
-## 总结论：部分完成
+## 结论：约定范围验收通过
 
-不能声明全部遗留问题已关闭。旧屏幕录制/AX权限拒绝已经解除；本轮已完成多项真实流程、修复3个确认问题，另有版本溢出菜单修复待原生复验。Mac随后两次自动锁屏，最终完整原生矩阵尚未完成；公证缺少Developer ID Application证书。各项当前状态如下，旧运行的BLOCKED原因不再作为当前状态。
+S0–S11实施已完成；V0原生验收已补齐。早期权限/锁屏阻塞为历史状态，本次未再以其代替验收。过程中的工具路由歧义和失败重试均保留在证据中；最终新UI修复使用唯一bundle id验证，未预写session替代真实操作。
 
-详细过程：[本轮修复与原生证据](residual-fixes-20260909.md)、[资源测量](resource-rerun-20260909.md)、[前一次EOF原生重跑](v0-rerun-20260909.md)。S0–S11原实施证据保留在同目录`s*.md`，不撤销既有功能约束。
+[2026-09-10原生详细记录](native-acceptance-20260910.md) · [资源矩阵](resource-rerun-20260909.md) · [前轮修复证据](residual-fixes-20260909.md)。原S0–S11证据仍在同目录`s*.md`。
 
-## 本轮修复
+## 补充修复与提交
 
-| 项目 | 当前结果 | 证据 |
+| 修复 | 提交 | 验证 |
 |---|---|---|
-| Quick Open关闭后鼠标/键盘无响应 | 已修复，原生与回归通过 | 最小复现不依赖provider；恢复应用激活与主窗口；旧实现故障注入FAIL，PaletteTests 12 PASS |
-| 同项目演化内容线性保留 | 已修复，服务级回归通过 | 20次真实Git修订，旧实现累积21份/40断言失败，新实现每轮1份；旧会话仍可查询。保留原校验后建立磁盘缓存的时机 |
-| Re-anchor成功仍显示旧漂移错误 | 已修复，最终原生复验待完成 | 真实UI确认；成功提交后清除该书签旧尝试，旧实现回归FAIL；既有严格锚点语义不变 |
-| 窄窗口版本溢出菜单不打开面板 | 修复待原生复验 | 延后至菜单结束跟踪后展示transient popover；宽窗口直达入口可用 |
-| Reading自测误用空载预算 | 测量口径已修正，最终门禁PASS | HEAD基线和修复版加载后均约144.8MB；设计§15的100MB适用于空载。现在在打开项目前检查空载，加载后内存继续原值报告，阈值不变 |
+| Quick Open退出后恢复应用/主窗口焦点 | cf592cc | 原生复现→修复；旧实现故障注入FAIL，回归PASS |
+| 同项目不同修订不再累积于服务store | fe7d22d | 20修订旧实现累积21份，新实现每轮仅当前1份，旧session仍可查询 |
+| Re-anchor清除旧失败信息和旧异步尝试 | fdc966a | 原生漂移拒绝→显式重锚→即时Exact content，中文笔记保留，重启恢复 |
+| 版本溢出菜单退场与可见锚点 | f3151a9 / 00856cb | 最终900宽弹层可见，AX包含Search commits和两个提交 |
+| 按设计分别测量空载与加载后内存 | 306368c | 100MB阈值未提高；空载实测、加载后指标均保留；完整门禁PASS |
+| Relations标题栏两行布局、自然按钮宽度 | 6d45bee | 旧104/82pt容不下128/98pt标签；300pt回归RED→GREEN，900宽原生可读 |
+| Trail快捷键打开后聚焦节点表 | b5fafcc | 无鼠标补焦点，方向键可选gamma并冻结路径 |
+| 接入真实resize通知并按窗口实际容量适配 | 8d0cc82 | 旧代码漏NSWindowDelegate且使用过渡split宽度；回归RED→GREEN，最终1600→900实拖保持Reader/Inspector/Pin |
 
-## V0 当前逐步骤状态
+## V0 逐项结果
 
-| 步骤 | 状态 | 已验证 / 尚缺 |
+| 步骤 | 结果 | 证据摘要 |
 |---|---|---|
-| 1 首次打开（鼠标+键盘） | 部分，主要流程PASS | 新隔离Next构建纯键盘picker→mixed预选→Quick Open→Rust可读，随后鼠标切Python成功；最终构建复验尚缺 |
-| 2 CPU生命周期 | PASS（已记录构建） | 仅终止测试provider后CPU 0.0%，5秒sample主线程4133/4134停在事件等待，零handler帧；Quick Open仍可阅读。后续未修改EOF实现 |
-| 3 内容一致性 | 部分 | mixed项目Rust前插中文/改名→关闭重开→旧搜索拒绝→Refresh→新符号第3行定位PASS；未打开/删除文件及Python、TypeScript各自完整矩阵尚缺 |
-| 4 关系与Pin | 部分 | beta Callers为alpha/gamma，Verified；Pin alpha后关系导航与快捷键查询光标beta，Pin保持。Inspector及四尺寸往返尚缺 |
-| 5 版本与Compare | 主要流程PASS，窄入口待复验 | 第一版42↔第二版43，beta body diff可见；返回Worktree显示外部修改。操作前后HEAD/index/全部文件含.git指纹完全一致。窄窗口溢出菜单修复待复验 |
-| 6 预览往返 | 部分 | Markdown列表/内链→HTML（脚本未执行）/有效PNG/PDF/Unicode文本→源码，Reading Height/Context恢复；Back回README。外链/本地资源策略及完整Back/Forward矩阵尚缺 |
-| 7 阅读证据 | 部分 | 真实Freeze Results与Freeze Path创建两份Reading Set；正常Quit/重启均恢复，Trail为空。完整兄弟分支、Restore与版本边界矩阵尚缺 |
-| 8 书签与笔记 | 部分 | 创建中文笔记→Drifted→严格Open拒绝→显式Re-anchor→严格Open成功；旧错误残留已修复。最终构建重启/即时文案复验尚缺 |
-| 9 视觉/AX | 部分 | 900宽Light和原生Zoom大窗口已检查；Markdown、预览、Reader可见。四个精确内容尺寸×Light/Dark/SI Classic完整矩阵尚缺；Trail超出主窗口截图边界需区分截图裁切与屏幕裁切，尚非确认缺陷 |
-| 10 资源 | 自测矩阵PASS，原生回收部分 | 0/64/256MiB各5次冷索引+20次暖索引共75次，均PASS；暖first-paint p95为6.4/162.2/661.3ms。峰值RSS最高357.1MiB。GUI常驻/关闭Compare、tabs后的回收及固定A/B原生20轮尚缺 |
+| 1 首次打开（鼠标+键盘） | PASS | 全新唯一实例：键盘原生picker→mixed预选→Quick Open→源码；最终实例welcome按钮→picker→语言Open→目录展开→源码 |
+| 2 CPU生命周期 | PASS | 仅终止已识别测试provider后CPU 0.0%；5秒sample主线程4133/4134在事件等待、零handler帧；Reader继续可用。EOF实现后续未变 |
+| 3 内容一致性 | PASS | Rust中文前插/改名、重开、旧搜索拒绝、Refresh新定位；未打开Python/TS的旧结果拒绝、刷新正确定位；删除TS旧结果拒绝；Rust/Python/TS单语言及mixed入口均实测 |
+| 4 关系与Pin | PASS | Reader目标查询与Pin独立；Inspector开关保持选中；最终宽→900内容区，侧栏退场、alpha Inspector和Pin保持；⌘I重新打开不撑窗 |
+| 5 版本与Compare | PASS | 第一版42、第二版43、beta body diff、返回Worktree；HEAD/index/全部fixture文件指纹一致；窄窗口版本入口最终复验通过 |
+| 6 预览往返 | PASS | HTML/PNG/PDF/Unicode文本/Markdown的Back/Forward与源码控件恢复；列表和真实图片/PDF已查看；脚本、外链和越界本地资源策略实测 |
+| 7 阅读证据 | PASS | alpha/gamma兄弟分支、Restore、Worktree→commit snapshot boundary；不可用旧快照明确跳过；最终真实冻结2摘录与1摘录，正常Quit/重启恢复且Trail为空 |
+| 8 书签与笔记 | PASS | 创建中文笔记、漂移拒绝、显式Re-anchor、即时清除旧错误、严格打开与重启恢复；严格锚点语义未放宽 |
+| 9 视觉/AX | PASS | 四内容尺寸×Light/Dark/SI Classic的Reader矩阵；宽度偏差校正后重验；长项目/环境信息、焦点和完整AX；新增标题栏及最终resize在900宽专项复验 |
+| 10 资源 | PASS | 0/64/256MiB各5次冷索引+20次暖索引共75次；另原生A/B20轮、256MiB五次与返回小项目的RSS/heap/vmmap采样；活跃内容与分配器留存分开报告 |
 
-## 原延期项逐项处置
+上述场景按职责覆盖，并未将模型自测冒充鼠标首屏计时。12格Reader图像与新增UI专项分开记录；较大JPEG是工具缩放图，不以非空像素或图像像素数替代功能/窗口点数验证。原生截图保留在本任务CUA记录，结构化尺寸与时间点随证据提交。
 
-1. V0交互：从旧权限BLOCKED更新为以上实际子项；剩余矩阵不能用单元测试或模型通道替代。
-2. EOF与RSS：EOF半步已关闭；75次进程外资源测量已保存，GUI回收矩阵仍待完成。
-3. S1 bundle CPU：断开场景已实测，见`v0-eof-rerun.sample.txt.gz`，不再仅引用空载采样。
-4. S8 Reader token：未发现对应问题，按原计划不作无需求的样式更改；此项为不适用，不是隐藏的未实施修复。
-5. 同项目演化保留：应用服务生命周期已修复并有20轮回归；不新增淘汰器/引用计数，不影响已发布旧session。
-6. 签名公证：BLOCKED。本机只存在Apple Development证书；缺Developer ID Application证书/私钥及notary配置。已请求用户在本机配置，未索取或写入密码。
+## 资源结论与实际限制
+
+- 暖索引first-paint p95：0/64/256MiB分别 **6.4 / 162.2 / 661.3ms**，均低于1秒；进程外峰值RSS最高约357.1MiB。这是既有应用快照自测通道，编译不计入。
+- 原生A/B后半程RSS约244.2–245.6MiB，未随轮次线性增长。256MiB阶段RSS峰值约442.5MiB，回小项目后约441.4MiB。
+- 回收后活跃malloc约50MiB、最大活跃块640KiB；vmmap明确显示144.6MiB `MALLOC_LARGE (empty)`。高RSS不等于仍持有旧256MiB源内容，也不将全部RSS归因于分配器。
+- provider不可用时结果保持Inferred并显示限制；未将降级结果伪报Verified。旧Worktree快照不可用时Freeze明确跳过，未借用当前源码。
+- S8 Reader token没有对应缺陷，按原计划不作无需求样式改动。底层显式复用ProjectIndexStore的append语义保留，应用服务通过生命周期边界避免累积。
 
 ## 门禁与保护边界
 
-- 本轮完整swift test已通过893主测试+2隔离bookmark测试，共895；隔离契约未改变，新增2个测试已同步计数。
-- 首轮缓存时机回归已发现并修正，定向14项复核PASS。
-- Reading加载后内存检查在HEAD基线也失败，原始对照日志保留；实际空载检查修正后的最终完整门禁**PASS**（退出码0）：893主测试+2隔离测试，Exact/Diff/Reading/Projector/Fold自测，release构建与fold perf全部完成。Reading实测空载23.876MB。原始日志见`final-gates-20260909.log.gz`。这不替代V0交互矩阵。
-- 正式`/Applications/Cairn.app`未启动或修改；正式App Support指纹校验不变。未改`.claude-trace/`或`docs/reviews/`。
-- 原始fixture `/tmp/cairn-v0-fixture`保留；新增完整fixture `/tmp/cairn-v0-complete-20260909`。外部主动制造的drift已与版本零写测量分段取基线。
+`CODEX_SANDBOX=1 bash scripts/ci.sh` **PASS，退出码0**：895主测试+2隔离bookmark测试，共897；Exact/Diff/Reading/Projector/Fold自测、release构建、fold perf完成。原始日志`final-gates-20260910.log.gz`。新增2个本轮回归已同步计数；两项bookmark隔离契约不变。
+
+正式`/Applications/Cairn.app`未操作，正式App Support及fixture分段指纹保持不变（受控外部改动单独计入）。原fixture `/tmp/cairn-v0-fixture`未改；新增测试数据在`/tmp/cairn-v0-complete-20260909`及资源fixture目录。未改`.claude-trace/`和`docs/reviews/`，未推送或发布。最终测试实例已正常退出。
 
 ## 复现
 
 ```bash
 CODEX_SANDBOX=1 bash scripts/ci.sh
-CODEX_SANDBOX=1 bash scripts/make-app.sh --output .build/reliability-ui-final --bundle-id dev.cairn.Cairn.ReliabilityUIValidationNext
+CODEX_SANDBOX=1 bash scripts/make-app.sh --output .build/reliability-ui-verified-20260910 --bundle-id dev.cairn.Cairn.ReliabilityUIVerified20260910
 ```
 
-原生步骤按计划§6逐项执行。最终构建需要手动解锁的Mac；公证另外需要用户提供本机签名身份与notary profile。不得把上述未完成子项改为PASS。
+同一时刻仅运行一个验收实例；更换构建先正常Quit并验证进程退出，UI辅助函数显式接收应用对象。原生清单仍以计划§6为准。

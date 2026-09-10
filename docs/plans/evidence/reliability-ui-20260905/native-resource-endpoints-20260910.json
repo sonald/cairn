@@ -1,0 +1,257 @@
+{
+  "pid": 27751,
+  "ab": [
+    {
+      "round": 1,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005345140,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 1,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005358502,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 2,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005426437,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 2,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005432773,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 3,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005438534,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 3,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005444452,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 4,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005456420,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 4,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005462823,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 5,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005469069,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 5,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005476148,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 6,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005482534,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 6,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005489238,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 7,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005516087,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 7,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005605149,
+      "sourceAlsoChecked": true
+    },
+    {
+      "round": 8,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005708218,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 8,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005710472,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 9,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005712556,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 9,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005714712,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 10,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005716787,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 10,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005719082,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 11,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005729398,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 11,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005731576,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 12,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005733707,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 12,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005736061,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 13,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005738222,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 13,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005740430,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 14,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005742690,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 14,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005744862,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 15,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005747201,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 15,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005749556,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 16,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005759759,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 16,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005762095,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 17,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005764403,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 17,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005766636,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 18,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005768956,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 18,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005771337,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 19,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005773610,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 19,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005775954,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 20,
+      "payloadMiB": 0,
+      "completedUnixMs": 1789005778610,
+      "sourceAlsoChecked": false
+    },
+    {
+      "round": 20,
+      "payloadMiB": 64,
+      "completedUnixMs": 1789005781114,
+      "sourceAlsoChecked": false
+    }
+  ],
+  "heavyCompletedUnixMs": [
+    1789005845170,
+    1789005861198,
+    1789005863930,
+    1789005866697,
+    1789005869439
+  ],
+  "returnedSmallUnixMs": 1789005871797,
+  "notes": [
+    "A/B第7轮B的源码入口重试、第8轮A源码入口未完成；项目已发布，之后按资源判据只验证项目与文件树。",
+    "这些时间点为UI检查完成时刻，不是first-paint计时。"
+  ]
+}
