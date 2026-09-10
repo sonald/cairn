@@ -171,6 +171,10 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             preferredEdge: .maxY
         )
         selectCurrentRow()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            tableView.window?.makeFirstResponder(tableView)
+        }
     }
 
     func closePopover() { popover.close() }
