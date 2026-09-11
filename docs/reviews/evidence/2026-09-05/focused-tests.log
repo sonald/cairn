@@ -1,0 +1,214 @@
+warning: /Users/siancao/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/siancao/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+warning: /Users/siancao/Library/Caches/org.swift.swiftpm is not accessible or not writable, disabling user-level cache features.
+warning: 'codeinsight': failed storing manifest for 'codeinsight' in cache: attempt to write a readonly database
+warning: 'swift-argument-parser': failed storing manifest for 'swift-argument-parser' in cache: attempt to write a readonly database
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write swift-version--58304C5D6DBC2206.txt
+[4/11] Compiling CodeInsightGit GitSnapshot.swift
+[5/11] Compiling CodeInsightGit CommitLog.swift
+[6/11] Emitting module CodeInsightGit
+[7/35] Compiling CodeInsightEngine NamePosting.swift
+[8/36] Emitting module CodeInsightGitTests
+[9/36] Emitting module CodeInsightEngine
+[10/36] Compiling CodeInsightEngine ProjectIndexStore.swift
+[11/36] Compiling CodeInsightEngine SymbolSearch.swift
+[12/36] Compiling CodeInsightExact TypeScriptLanguageServerProvider.swift
+[13/36] Compiling CodeInsightExact Materializer.swift
+[14/36] Compiling CodeInsightExact TrustRegistry.swift
+[15/36] Compiling CodeInsightExact PyrightProvider.swift
+[16/36] Compiling CodeInsightEngine ModuleMap.swift
+[17/36] Compiling CodeInsightExact RustAnalyzerProvider.swift
+[18/36] Compiling CodeInsightExact Sandbox.swift
+[19/36] Emitting module CodeInsightExact
+[20/36] Compiling CodeInsightExact ExactProvider.swift
+[21/36] Compiling CodeInsightExact LSP.swift
+[22/36] Compiling CodeInsightEngine ProfileDetector.swift
+[23/36] Compiling CodeInsightEngine IndexCache.swift
+[24/36] Compiling CodeInsightEngine SnapshotSearch.swift
+[25/38] Compiling CodeInsightEngine ProjectIndexer.swift
+[26/38] Compiling CodeInsightEngine Resolver.swift
+[27/38] Compiling CodeInsightEngine CanonicalDump.swift
+[28/38] Compiling CodeInsightEngine ContentIndexDraftCodec.swift
+[29/38] Compiling CodeInsightEngine EngineSession.swift
+[30/38] Compiling CodeInsightEngine GoldSet.swift
+[31/66] Compiling CodeInsightAppModel SymbolSearchPanelModel.swift
+[32/67] Compiling CodeInsightGitTests GitSnapshotTests.swift
+[33/67] Compiling CodeInsightAppModel SearchPanelModel.swift
+[34/67] Compiling CodeInsightAppModel SessionCodec.swift
+[35/67] Compiling CodeInsightAppModel TabStripModel.swift
+[36/67] Emitting module CodeInsightEngineTests
+[37/67] Compiling CodeInsightAppModel CompareModel.swift
+[38/67] Compiling CodeInsightAppModel ContextWindowModel.swift
+[39/67] Compiling CodeInsightAppModel ExactCoordinator.swift
+[40/67] Compiling CodeInsightAppModel NavigationHistory.swift
+[41/67] Emitting module CodeInsightCLI
+[42/67] Compiling CodeInsightCLI CodeInsightCLI.swift
+[43/65] Compiling CodeInsightAppModel OutlinePanelModel.swift
+[44/65] Compiling CodeInsightAppModel PanelPresetModel.swift
+[45/65] Compiling CodeInsightAppModel BookmarkStore.swift
+[46/65] Compiling CodeInsightAppModel CommitPickerModel.swift
+[47/65] Compiling CodeInsightAppModel ReadingSet.swift
+[48/65] Compiling CodeInsightAppModel RecentProjectsStore.swift
+[49/65] Compiling CodeInsightAppModel RelationTreeModel.swift
+[50/65] Compiling CodeInsightEngineTests ProfileDetectorTests.swift
+[51/65] Compiling CodeInsightEngineTests SnapshotSearchTests.swift
+[52/65] Compiling CodeInsightAppModel AppModel.swift
+[53/65] Compiling CodeInsightAppModel BookmarkModel.swift
+[54/65] Emitting module CodeInsightAppModel
+[55/94] Compiling RustExtractorTests M6LocalReferenceTests.swift
+[56/94] Compiling RustExtractorTests RustExtractorTests.swift
+[57/94] Compiling RustExtractorTests FixtureHarness.swift
+[58/94] Emitting module RustExtractorTests
+[59/94] Compiling CodeInsightAppModelTests BookmarkStoreTests.swift
+[60/94] Compiling CodeInsightAppModelTests CommitPickerModelTests.swift
+[61/95] Compiling CodeInsightAppModelTests TestWait.swift
+[62/95] Compiling CodeInsightEngineTests SnapshotIndexerTests.swift
+[63/95] Compiling CodeInsightApp RelationWindowController.swift
+[64/95] Compiling CodeInsightApp ReadingTrailView.swift
+[65/95] Compiling CodeInsightApp ReadingSetView.swift
+[66/95] Compiling CodeInsightApp ReaderSettingsWindowController.swift
+[67/95] Compiling CodeInsightApp PalettePanel.swift
+[68/96] Compiling CodeInsightEngineTests CodeInsightEngineTests.swift
+[69/96] Compiling CodeInsightApp SearchPanel.swift
+[70/96] Compiling CodeInsightExactTests CodeInsightExactTests.swift
+[71/96] Emitting module CodeInsightExactTests
+[72/96] Compiling CodeInsightApp EmptyStateView.swift
+[73/96] Compiling CodeInsightApp MainWindowController.swift
+[74/96] Compiling CodeInsightAppModelTests SessionCodecTests.swift
+[75/96] Compiling CodeInsightAppModelTests TabStripModelTests.swift
+[76/96] Compiling CodeInsightAppModelTests SessionRestoreTests.swift
+[77/96] Compiling CodeInsightApp CodeInsightApp.swift
+[78/96] Compiling CodeInsightApp CommitPickerPopover.swift
+[79/96] Compiling CodeInsightApp KeyablePanel.swift
+[80/96] Emitting module CodeInsightApp
+[81/96] Compiling CodeInsightApp BookmarkPanel.swift
+[82/96] Compiling CodeInsightApp CairnMark.swift
+[84/98] Write Objects.LinkFileList
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[85/98] Linking codeinsight-app
+[86/98] Applying codeinsight-app
+[88/109] Compiling CodeInsightAppModelTests PanelPresetModelTests.swift
+[89/109] Compiling CodeInsightAppModelTests ReadingSetTests.swift
+[90/109] Compiling CodeInsightAppModelTests SearchPanelModelTests.swift
+[91/109] Compiling CodeInsightAppModelTests ExactCoordinatorTests.swift
+[92/109] Compiling CodeInsightAppModelTests OutlinePanelModelTests.swift
+[93/109] Compiling CodeInsightAppModelTests SnapshotSwitchTests.swift
+[96/109] Emitting module CodeInsightAppModelTests
+[97/109] Emitting module CodeInsightAppTests
+[98/109] Compiling CodeInsightAppTests MainWindowControllerTests.swift
+[99/109] Compiling CodeInsightAppTests ProvenanceBadgeStyleTests.swift
+[100/109] Compiling CodeInsightAppTests ReaderFindTests.swift
+[101/109] Compiling CodeInsightAppTests ScopeHeaderTests.swift
+[102/109] Compiling CodeInsightAppTests ReaderContextMenuTests.swift
+[103/109] Compiling CodeInsightAppTests ReadingSetViewTests.swift
+[104/109] Compiling CodeInsightAppTests NonSourcePreviewTests.swift
+[105/109] Compiling CodeInsightAppTests ReaderSettingsWindowTests.swift
+[106/109] Compiling CodeInsightAppTests PaletteTests.swift
+[107/109] Compiling CodeInsightAppTests RelationNavigationTests.swift
+[108/111] Emitting module CodeInsightPackageTests
+[109/111] Compiling CodeInsightPackageTests runner.swift
+[109/111] Write Objects.LinkFileList
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[110/111] Linking CodeInsightPackageTests
+Build complete! (28.31s)
+Test Suite 'Selected tests' started at 2026-09-05 20:12:29.377.
+Test Suite 'CodeInsightPackageTests.xctest' started at 2026-09-05 20:12:29.378.
+Test Suite 'CodeInsightPackageTests.xctest' passed at 2026-09-05 20:12:29.378.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-05 20:12:29.378.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test unsupportedSavedJavaScriptDoesNotMutateProjectState() started.
+✔ Test unsupportedSavedJavaScriptDoesNotMutateProjectState() passed after 0.010 seconds.
+◇ Test savedPythonSessionRestoresWithPythonLanguageAndTree() started.
+✔ Test savedPythonSessionRestoresWithPythonLanguageAndTree() passed after 0.006 seconds.
+◇ Test savedReadmeSessionRestoresAsActiveNonSourceTabWithoutDocument() started.
+✔ Test savedReadmeSessionRestoresAsActiveNonSourceTabWithoutDocument() passed after 0.006 seconds.
+◇ Test savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() started.
+✔ Test savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() passed after 0.005 seconds.
+◇ Test sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() started.
+✔ Test sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() passed after 0.005 seconds.
+◇ Test sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() started.
+✔ Test sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() passed after 0.004 seconds.
+◇ Test invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() started.
+✔ Test invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() passed after 0.002 seconds.
+◇ Test missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() started.
+✔ Test missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() passed after 0.003 seconds.
+◇ Test openingAnotherProjectCancelsTheOlderAutomaticRestore() started.
+✔ Test openingAnotherProjectCancelsTheOlderAutomaticRestore() passed after 0.029 seconds.
+◇ Test mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() started.
+✔ Test mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() passed after 0.222 seconds.
+◇ Test mixedRestoreOpensFullSetAndRestoresEachTabByMode() started.
+✔ Test mixedRestoreOpensFullSetAndRestoresEachTabByMode() passed after 0.030 seconds.
+◇ Test mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() started.
+✔ Test mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() passed after 0.026 seconds.
+◇ Test nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() started.
+✔ Test nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() passed after 0.095 seconds.
+◇ Test nonSourcePreviewHTMLUsesLockedDownNavigationAndCSP() started.
+2026-09-05 20:12:29.977 swiftpm-testing-helper[29688:27682281] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-05 20:12:29.977 swiftpm-testing-helper[29688:27682278] Error received in message reply handler: Connection invalid
+2026-09-05 20:12:29.994 swiftpm-testing-helper[29688:27682278] IOPMScheduleUserActivityLevelNotification returned 0
+2026-09-05 20:12:29.994 swiftpm-testing-helper[29688:27682278] IOPMScheduleUserActivityLevelNotification returned 0
+Could not create a 'com.apple.coreservices.launchservicesd' sandbox extension
+Could not create a 'com.apple.coreservices.launchservicesd' sandbox extension
+2026-09-05 20:12:30.007 swiftpm-testing-helper[29688:27682278] NOT IMPLEMENTED - CopyPropertiesForAllFonts
+✔ Test nonSourcePreviewHTMLUsesLockedDownNavigationAndCSP() passed after 0.123 seconds.
+◇ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() started.
+✔ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() passed after 0.011 seconds.
+◇ Test htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() started.
+2026-09-05 20:12:30.026 swiftpm-testing-helper[29688:27682278] IOPMScheduleUserActivityLevelNotification returned 0
+2026-09-05 20:12:30.026 swiftpm-testing-helper[29688:27682278] IOPMScheduleUserActivityLevelNotification returned 0
+Could not create a 'com.apple.coreservices.launchservicesd' sandbox extension
+Could not create a 'com.apple.coreservices.launchservicesd' sandbox extension
+2026-09-05 20:12:30.028 swiftpm-testing-helper[29688:27682278] NOT IMPLEMENTED - CopyPropertiesForAllFonts
+✔ Test htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() passed after 0.009 seconds.
+◇ Test nonSourcePreviewPDFImageAndBinaryStatesAreDistinct() started.
+CoreGraphics PDF has logged an error. Set environment variable "CG_PDF_VERBOSE" to learn more.
+✔ Test nonSourcePreviewPDFImageAndBinaryStatesAreDistinct() passed after 0.012 seconds.
+◇ Test libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() started.
+sysctlbyname for kern.hv_vmm_present failed with status -1kIOSurfaceMethodSetCoreVideoBridgedKeys failed: 10000003
+2026-09-05 20:12:30.052 swiftpm-testing-helper[29688:27682330] [VNImageRequestHandler performRequests:] failed. Error: Error Domain=NSOSStatusErrorDomain Code=-6662 "Failed to create CVPixelBuffer Width = 400, Height = 400, Format = '420f'" UserInfo={NSLocalizedDescription=Failed to create CVPixelBuffer Width = 400, Height = 400, Format = '420f'}
+✔ Test libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() passed after 5.289 seconds.
+◇ Test commitLogReadsHeadFirstWithBranchLabels() started.
+✔ Test commitLogReadsHeadFirstWithBranchLabels() passed after 0.069 seconds.
+◇ Test currentBranchNameReadsTheCheckedOutBranch() started.
+✔ Test currentBranchNameReadsTheCheckedOutBranch() passed after 0.070 seconds.
+◇ Test currentBranchNameReportsDetachedHead() started.
+✔ Test currentBranchNameReportsDetachedHead() passed after 0.068 seconds.
+◇ Test currentBranchNameReturnsNilOutsideARepository() started.
+✔ Test currentBranchNameReturnsNilOutsideARepository() passed after 0.001 seconds.
+◇ Test commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() started.
+✔ Test commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() passed after 0.295 seconds.
+◇ Test worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() started.
+✔ Test worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() passed after 0.019 seconds.
+◇ Test worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() started.
+✔ Test worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() passed after 0.021 seconds.
+◇ Test explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() started.
+✔ Test explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() passed after 0.021 seconds.
+◇ Test unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() started.
+✔ Test unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() passed after 0.026 seconds.
+◇ Test worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() started.
+✔ Test worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() passed after 0.001 seconds.
+◇ Test worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() started.
+✔ Test worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() passed after 0.019 seconds.
+◇ Test commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMarkers() started.
+✔ Test commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMarkers() passed after 0.123 seconds.
+◇ Test unsupportedWorktreeLanguagesFailBeforeOpeningARepository() started.
+✔ Test unsupportedWorktreeLanguagesFailBeforeOpeningARepository() passed after 0.001 seconds.
+◇ Test pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() started.
+✔ Test pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() passed after 0.029 seconds.
+◇ Test commitSnapshotPreservesTreeFileModes() started.
+✔ Test commitSnapshotPreservesTreeFileModes() passed after 0.101 seconds.
+◇ Test commitSnapshotMarksLFSPointersAndReturnsRawBytes() started.
+✔ Test commitSnapshotMarksLFSPointersAndReturnsRawBytes() passed after 0.050 seconds.
+◇ Test trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() started.
+✔ Test trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() passed after 0.060 seconds.
+◇ Test typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() started.
+✔ Test typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() passed after 0.022 seconds.
+✔ Test run with 36 tests in 0 suites passed after 6.901 seconds.
