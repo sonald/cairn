@@ -1,0 +1,23 @@
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.13s)
+Test Suite 'Selected tests' started at 2026-09-11 13:57:44.541.
+Test Suite 'CodeInsightPackageTests.xctest' started at 2026-09-11 13:57:44.542.
+Test Suite 'CodeInsightPackageTests.xctest' passed at 2026-09-11 13:57:44.542.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-11 13:57:44.542.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.001) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test rustAnalyzerUsesEachMaterializedCommitWhenInstalled() started.
+historical-exact HEAD=3:8 HEAD~1=1:8
+✔ Test rustAnalyzerUsesEachMaterializedCommitWhenInstalled() passed after 5.224 seconds.
+◇ Test rustAnalyzerFindsCrossFileDefinitionWhenInstalled() started.
+✔ Test rustAnalyzerFindsCrossFileDefinitionWhenInstalled() passed after 2.479 seconds.
+◇ Test trustedSandboxAllowsTargetButStillDeniesNetwork() started.
+sandbox-semantics trustedTarget=allowed network=denied offline=1
+✔ Test trustedSandboxAllowsTargetButStillDeniesNetwork() passed after 0.082 seconds.
+✔ Test run with 3 tests in 0 suites passed after 7.787 seconds.

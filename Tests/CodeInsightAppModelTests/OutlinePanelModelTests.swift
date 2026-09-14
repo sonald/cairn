@@ -15,6 +15,9 @@ func outlinePanelSortsLocatesInnermostAndOpensRows() {
     ])
 
     #expect(model.facets.map(\.name) == ["outer", "first", "nested", "second"])
+    #expect(model.rootIndices == [0])
+    #expect(model.parentIndices == [nil, 0, 1, 0])
+    #expect(model.childIndices == [[1, 3], [2], [], []])
     #expect(model.highlight(at: 0) == 0)
     #expect(model.highlight(at: 99) == 0)
     #expect(model.highlight(at: 25) == 2)

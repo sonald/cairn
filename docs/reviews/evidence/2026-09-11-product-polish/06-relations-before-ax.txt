@@ -1,0 +1,2270 @@
+Window: "Cairn", App: Cairn.
+1 standard window Cairn, Secondary Actions: Raise
+	2 container Description: Reading Trail, Value: Follow symbols to build a trail · this session only
+		3 text Reading Trail Follow symbols to build a trail · this session only
+		4 button (disabled) Trail Details, Description: Show Reading Trail branches, Help: Show the semantic trail and its branches (⌥⌘T)
+	5 split group
+		6 split group
+			7 text FILES
+			8 scroll area Secondary Actions: Scroll Up, Scroll Down
+				9 outline
+					10 row (selectable, collapsed) Description: Folder, Value: .claude, Secondary Actions: Expand
+						11 disclosure triangle 0
+					12 row (selectable, collapsed) Description: Folder, Value: .codex-trace, Secondary Actions: Expand
+						13 disclosure triangle 0
+					14 row (selectable, collapsed) Description: Folder, Value: .zcache, Secondary Actions: Expand
+						15 disclosure triangle 0
+					16 row (selectable, expanded) Description: Folder, Value: crates, Secondary Actions: Collapse
+						17 disclosure triangle 1
+					18 row (selectable, collapsed) Description: Folder, Value: ai, Secondary Actions: Expand
+						19 disclosure triangle 0
+					20 row (selectable, expanded) Description: Folder, Value: knuth-agent, Secondary Actions: Collapse
+						21 disclosure triangle 1
+					22 row (selectable, collapsed) Description: Folder, Value: examples, Secondary Actions: Expand
+						23 disclosure triangle 0
+					24 row (selectable, expanded) Description: Folder, Value: src, Secondary Actions: Collapse
+						25 disclosure triangle 1
+					26 row (selectable, collapsed) Description: Folder, Value: hooks, Secondary Actions: Expand
+						27 disclosure triangle 0
+					28 row (selectable, collapsed) Description: Folder, Value: tools, Secondary Actions: Expand
+						29 disclosure triangle 0
+					30 row (selectable) Description: File, Value: actor.rs
+					31 row (selectable) Description: File, Value: agent_step.rs
+					32 row (selectable) Description: File, Value: event_log.rs
+					33 row (selected) Description: File, Value: harness.rs
+					34 row (selectable) Description: File, Value: lib.rs
+					35 row (selectable) Description: File, Value: Cargo.toml
+					36 row (selectable, collapsed) Description: Folder, Value: knuth-cli, Secondary Actions: Expand
+						37 disclosure triangle 0
+					38 row (selectable, collapsed) Description: Folder, Value: knuth-core, Secondary Actions: Expand
+						39 disclosure triangle 0
+					40 row (selectable, collapsed) Description: Folder, Value: docs, Secondary Actions: Expand
+						41 disclosure triangle 0
+					42 row (selectable) Description: File, Value: .env
+					43 row (selectable) Description: File, Value: .gitignore
+					44 row (selectable) Description: File, Value: Cargo.lock
+					45 row (selectable) Description: File, Value: Cargo.toml
+				46 scroll bar (settable, float) 0.188034188034188
+					47 value indicator (settable, float) 0.188034188034188
+					48 increment arrow button
+					49 decrement arrow button
+					50 increment page button
+					51 decrement page button
+			52 splitter (disabled, settable, float) 277
+			53 text OUTLINE
+			54 scroll area Secondary Actions: Scroll Up, Scroll Down
+				55 outline (showing 0-41 of 100 items)
+					56 row (selectable) Description: const, Value: SUBSCRIPTION_BUFFER
+					57 row (selectable) Description: struct, Value: AgentConfig
+					58 row (selectable) Description: enum, Value: AgentSessionError
+					59 row (selectable) Description: struct, Value: PendingInput
+					60 row (selectable) Description: struct, Value: ToolInvocationKey
+					61 row (selectable) Description: enum, Value: InvocationState
+					62 row (selectable) Description: struct, Value: PendingInvocation
+					63 row (selectable) Description: enum, Value: AgentActorMessage
+					64 row (selectable) Description: enum, Value: AgentCommand
+					65 row (selectable) Description: impl, Value: AgentCommand
+					66 row (selectable) Description: method, Value: fmt
+					67 row (selectable) Description: enum, Value: TurnState
+					68 row (selectable) Description: struct, Value: AgentActor
+					69 row (selectable) Description: impl, Value: AgentActor
+					70 row (selectable) Description: typeAlias, Value: Message
+					71 row (selectable) Description: method, Value: on_start
+					72 row (selectable) Description: method, Value: handle
+					73 row (selectable) Description: method, Value: on_stop
+					74 row (selected) Description: impl, Value: AgentActor
+					75 row (selectable) Description: method, Value: new
+					76 row (selectable) Description: method, Value: handle_session_error
+					77 row (selectable) Description: method, Value: handle_command
+					78 row (selectable) Description: method, Value: submit_input
+					79 row (selectable) Description: method, Value: try_dispatch_next_input
+					80 row (selectable) Description: method, Value: continue_step
+					81 row (selectable) Description: method, Value: end_turn
+					82 row (selectable) Description: method, Value: handle_step_ended
+					83 row (selectable) Description: method, Value: prepare_tool_calls
+					84 row (selectable) Description: method, Value: dispatch_tool_calls
+					85 row (selectable) Description: method, Value: commit_invocation_result
+					86 row (selectable) Description: method, Value: update_invocation_state
+					87 row (selectable) Description: method, Value: running_invocation
+					88 row (selectable) Description: method, Value: handle_tool_input_prepared
+					89 row (selectable) Description: method, Value: handle_tool_result_finalized
+					90 row (selectable) Description: method, Value: handle_tool_finished
+					91 row (selectable) Description: method, Value: assemble_context
+					92 row (selectable) Description: method, Value: next_step_id
+					93 row (selectable) Description: method, Value: spawn_model_step
+					94 row (selectable) Description: method, Value: subscribe
+					95 row (selectable) Description: struct, Value: AgentSession
+					96 row (selectable) Description: impl, Value: AgentSession
+				97 scroll bar (settable, float) 0
+					98 value indicator (settable, float) 0
+					99 increment arrow button
+					100 decrement arrow button
+					101 increment page button
+					102 decrement page button
+		103 splitter (disabled, settable, float) 363
+		104 split group
+			105 tab group Description: Open files, Value: harness.rs
+			106 text ⌥⌘0/1/2
+			107 Description: Reading height, Help: Reading height (⌥⌘0/1/2)
+				108 radio button Description: Full, Value: 1, Help: Full shows the whole file; Structure folds function bodies; Overview keeps only signatures and top-level items
+				109 radio button Description: Structure, Help: Structure folds function bodies and keeps signatures visible, Value: 0
+				110 radio button Description: Overview, Help: Overview keeps only signatures and top-level items; folded bodies stay hidden, Value: 0
+			111 scroll area Secondary Actions: Scroll Left, Scroll Right, Scroll Up, Scroll Down
+				112 text entry area use async_trait::async_trait;
+use knuth_core::{ToolOutcome, ids::*};
+use std::collections::{HashMap, VecDeque};
+use std::ops::ControlFlow;
+use std::sync::Arc;
+
+use crate::ToolResult;
+use crate::hooks::{
+    AfterToolUseData, BeforeToolUseData, HookContext, HookError, HookRegistry, ToolCallDecision,
+};
+use crate::{
+    Actor, ActorContext, ActorRuntime, AgentStepRunner, AskError, EventLog, spawn_actor,
+    tools::policy::{PolicyContext, PolicyEngineTrait},
+};
+use ai::{
+    AssistantMessage, ContentBlock, ImageContent, Model, StreamOptions, ToolCall, UserContent,
+    UserContentBlock,
+};
+use knuth_core::{
+    AgentEvent, AgentSubscription, EventStoreError, InMemoryEventStore, LiveEvent,
+    ModelStepEndReason, SessionEndReason, UserMessageIntent,
+};
+use tokio::sync::mpsc::error::SendError;
+use tokio::sync::oneshot;
+use tokio_util::sync::CancellationToken;
+use tracing::debug;
+
+const **SUBSCRIPTION_BUFFER**: usize = 100;
+
+pub struct **AgentConfig** {
+    pub model: Model,
+    pub options: StreamOptions,
+    pub policy_engine: Arc<dyn PolicyEngineTrait>,
+    pub policy_context: PolicyContext,
+    pub hooks: Arc<HookRegistry>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum **AgentSessionError** {
+    #[error("Invalid config: {0}")]
+    InvalidConfig(String),
+
+    #[error("Agent is already running")]
+    AgentIsRunning,
+
+    #[error("Invalid state: {0}")]
+    InvalidState(String),
+
+    #[error("Store error: {0}")]
+    StoreError(#[from] EventStoreError),
+
+    #[error("Failed to send event to store: {0}")]
+    ChannelSendError(#[from] SendError<AgentEvent>),
+
+    #[error("Actor task failed: {0}")]
+    ActorTaskFailed(#[from] tokio::task::JoinError),
+
+    #[error("Failed to load image '{path}': {source}")]
+    ImageLoadFailed {
+        path: String,
+        source: std::io::Error,
+    },
+
+    #[error("command failed: {0}")]
+    AskError(#[from] AskError),
+
+    #[error("Hook error: {0}")]
+    HookError(#[from] HookError),
+}
+
+#[derive(Debug)]
+struct **PendingInput** {
+    content: UserContent,
+    intent: UserMessageIntent,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct **ToolInvocationKey** {
+    pub turn_id: TurnId,
+    pub step_id: StepId,
+    pub invocation_id: ToolInvocationId,
+    pub generation: Generation,
+}
+
+#[derive(Debug, Clone)]
+enum **InvocationState** {
+    Proposing { proposed: ToolCall },
+    Executing { effective: ToolCall },
+    Finalized { effective: ToolCall },
+}
+
+#[derive(Debug, Clone)]
+struct **PendingInvocation** {
+    key: ToolInvocationKey,
+    state: InvocationState,
+}
+
+pub enum **AgentActorMessage** {
+    Command(AgentCommand),
+    /// A domain event reported by the model step identified by the `Uuid`.
+    /// Committed to the log verbatim; never drives the state machine.
+    Step(StepId, AgentEvent),
+    /// Streaming progress from a model step. Fanned out to subscribers and
+    /// then dropped; never persisted and never drives the state machine.
+    Live(LiveEvent),
+    /// Control signal from a step runner: the step is over. The actor derives
+    /// and commits the `ModelStepEnded` domain event itself, then advances the
+    /// turn state machine.
+    StepFinished {
+        step_id: StepId,
+        generation: Generation,
+        reason: ModelStepEndReason,
+        assistant_message: Option<AssistantMessage>,
+    },
+    ToolInputPrepared {
+        key: ToolInvocationKey,
+        data: Result<BeforeToolUseData, HookError>,
+    },
+    ToolFinished {
+        key: ToolInvocationKey,
+        result: ToolResult,
+    },
+    ToolResultFinalized {
+        key: ToolInvocationKey,
+        data: Result<AfterToolUseData, HookError>,
+    },
+}
+
+pub enum **AgentCommand** {
+    SetSystemPrompt(String),
+    SubmitInput {
+        intent: UserMessageIntent,
+        input: String,
+        images: Vec<ImageContent>, // save for later use
+        reply: oneshot::Sender<Result<(), AgentSessionError>>,
+    },
+    Subscribe {
+        from_seq: Option<u64>,
+        reply: oneshot::Sender<AgentSubscription>,
+    },
+    Cancel {},
+}
+
+impl std::fmt::Display for AgentCommand {
+    fn **fmt**(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AgentCommand::SetSystemPrompt(prompt) => write!(f, "SetSystemPrompt({})", prompt),
+            AgentCommand::SubmitInput { .. } => write!(f, "SubmitInput"),
+            AgentCommand::Subscribe { .. } => write!(f, "Subscribe"),
+            AgentCommand::Cancel {} => write!(f, "Cancel"),
+        }
+    }
+}
+
+/// Lifecycle of the turn currently being processed. `turn_id` is minted when
+/// an input is dispatched and carried through every phase, so
+/// `AgentTurnStarted`/`AgentTurnEnded` always refer to the same turn.
+#[derive(Debug)]
+enum **TurnState** {
+    Idle,
+    /// A model step is streaming.
+    Streaming {
+        turn_id: TurnId,
+        step_id: StepId,
+        generation: Generation,
+        step: AgentStepRunner,
+    },
+    /// Tool calls from the last step are executing in background tasks;
+    /// `pending` holds the tool_call_ids we are still waiting on.
+    RunningTools {
+        turn_id: TurnId,
+        pending: HashMap<ToolInvocationId, PendingInvocation>,
+        cancel: CancellationToken,
+    },
+}
+
+/// Internal actor for the agent session.
+///
+/// Owns turn orchestration only: queueing inputs, driving the
+/// idle → streaming → running-tools state machine, and reacting to step/tool
+/// completion. Persistence + projection + fan-out live in [`EventLog`]; tool
+/// lookup lives in [`AgentToolRegistry`]; model streaming lives in
+/// [`AgentStepRunner`].
+pub(crate) struct **AgentActor** {
+    id: SessionId,
+    config: AgentConfig,
+
+    log: EventLog,
+
+    generation: Generation,
+    next_step_id: Option<StepId>,
+
+    turn: TurnState,
+    pending_input_queue: VecDeque<PendingInput>,
+}
+
+#[async_trait]
+impl Actor for AgentActor {
+    type **Message** = AgentActorMessage;
+
+    async fn **on_start**(&mut self, ctx: &mut ActorContext<Self::Message>) {
+        match self
+            .log
+            .commit(AgentEvent::SessionStarted {
+                session_id: self.id,
+            })
+            .await
+        {
+            Ok(_) => {
+                debug!("Session started");
+            }
+            Err(e) => {
+                debug!("Failed to start session: {:?}", e);
+                ctx.shutdown.cancel();
+            }
+        }
+    }
+
+    async fn **handle**(
+        &mut self,
+        message: Self::Message,
+        ctx: &mut ActorContext<Self::Message>,
+    ) -> ControlFlow<()> {
+        match message {
+            AgentActorMessage::Command(command) => {
+                debug!("Handling command: {}", command);
+                if let Err(e) = self.handle_command(command, ctx).await {
+                    let _ = self.handle_session_error(e).await;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            AgentActorMessage::Step(_, event) => {
+                if let Err(e) = self.log.commit(event).await {
+                    let _ = self.handle_session_error(e.into()).await;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            AgentActorMessage::Live(event) => self.log.publish_live(event),
+
+            AgentActorMessage::StepFinished {
+                step_id,
+                generation,
+                reason,
+                assistant_message,
+            } => {
+                if let Err(e) = self
+                    .handle_step_ended(step_id, generation, reason, assistant_message, ctx)
+                    .await
+                {
+                    let _ = self.handle_session_error(e).await;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            AgentActorMessage::ToolInputPrepared { key, data } => {
+                if let Err(e) = self.handle_tool_input_prepared(key, data, ctx).await {
+                    let _ = self.handle_session_error(e).await;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            AgentActorMessage::ToolFinished { key, result } => {
+                if let Err(e) = self.handle_tool_finished(key, result, ctx).await {
+                    let _ = self.handle_session_error(e).await;
+                    return ControlFlow::Break(());
+                }
+            }
+
+            AgentActorMessage::ToolResultFinalized { key, data } => {
+                if let Err(e) = self.handle_tool_result_finalized(key, data, ctx).await {
+                    let _ = self.handle_session_error(e).await;
+                    return ControlFlow::Break(());
+                }
+            }
+        }
+        ControlFlow::Continue(())
+    }
+
+    async fn **on_stop**(&mut self, _ctx: &mut ActorContext<Self::Message>) {
+        //TODO: reason comes from handle() break result
+        match self
+            .log
+            .commit(AgentEvent::SessionEnded {
+                reason: SessionEndReason::Success,
+            })
+            .await
+        {
+            Ok(_) => {
+                debug!("Session ended");
+            }
+            Err(e) => {
+                debug!("Failed to end session: {:?}", e);
+            }
+        }
+    }
+}
+
+impl AgentActor {
+    pub fn **new**(session_id: SessionId, config: AgentConfig) -> Self {
+        Self {
+            id: session_id,
+            config,
+            log: EventLog::new(Box::new(InMemoryEventStore::new())),
+            generation: Generation::new(),
+            next_step_id: None,
+            turn: TurnState::Idle,
+            pending_input_queue: VecDeque::new(),
+        }
+    }
+
+    async fn **handle_session_error**(&mut self, error: AgentSessionError) -> ControlFlow<()> {
+        match error {
+            AgentSessionError::StoreError(_) => return ControlFlow::Break(()),
+            e => {
+                let _ = self
+                    .log
+                    .commit(AgentEvent::ErrorOccurred {
+                        message: e.to_string(),
+                        details: None,
+                    })
+                    .await;
+                ControlFlow::Continue(())
+            }
+        }
+    }
+
+    async fn **handle_command**(
+        &mut self,
+        command: AgentCommand,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        match command {
+            AgentCommand::SubmitInput {
+                intent,
+                input,
+                images,
+                reply,
+            } => {
+                let result = self.submit_input(input, images, intent, ctx).await;
+                let _ = reply.send(result);
+            }
+            AgentCommand::Subscribe { reply, from_seq } => self.subscribe(reply, from_seq).await?,
+            AgentCommand::SetSystemPrompt(prompt) => {
+                self.log
+                    .commit(AgentEvent::SystemPromptSet { prompt })
+                    .await?;
+            }
+            AgentCommand::Cancel {} => match &self.turn {
+                TurnState::Idle => {}
+                TurnState::Streaming { step, .. } => step.cancel().await,
+                TurnState::RunningTools { cancel, .. } => cancel.cancel(),
+            },
+        }
+
+        Ok(())
+    }
+
+    async fn **submit_input**(
+        &mut self,
+        input: String,
+        images: Vec<ImageContent>,
+        intent: UserMessageIntent,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let content = {
+            let mut v = vec![];
+            v.push(UserContentBlock::text(input));
+            for image in images {
+                v.push(UserContentBlock::Image(image));
+            }
+            UserContent::Blocks(v)
+        };
+        self.pending_input_queue
+            .push_back(PendingInput { content, intent });
+        self.try_dispatch_next_input(ctx).await?;
+        Ok(())
+    }
+
+    async fn **try_dispatch_next_input**(
+        &mut self,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        if !matches!(self.turn, TurnState::Idle) {
+            return Ok(());
+        }
+
+        let Some(input) = self.pending_input_queue.pop_front() else {
+            return Ok(());
+        };
+
+        let turn_id = TurnId::new();
+
+        self.log
+            .commit(AgentEvent::AgentTurnStarted { turn_id })
+            .await?;
+        self.log
+            .commit(AgentEvent::UserMessageCommitted {
+                message_id: MessageId::new(),
+                content: input.content,
+                intent: input.intent,
+            })
+            .await?;
+
+        self.continue_step(turn_id, ctx).await
+    }
+
+    /// Runs the next model step of `turn_id` against the current conversation.
+    async fn **continue_step**(
+        &mut self,
+        turn_id: TurnId,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let step = self.spawn_model_step(ctx).await?;
+        self.turn = TurnState::Streaming {
+            turn_id: turn_id.clone(),
+            step_id: step.step_id(),
+            generation: step.generation(),
+            step,
+        };
+        Ok(())
+    }
+
+    async fn **end_turn**(
+        &mut self,
+        turn_id: TurnId,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        self.log
+            .commit(AgentEvent::AgentTurnEnded { turn_id })
+            .await?;
+
+        self.turn = TurnState::Idle;
+        self.try_dispatch_next_input(ctx).await
+    }
+
+    async fn **handle_step_ended**(
+        &mut self,
+        step_id: StepId,
+        generation: Generation,
+        reason: ModelStepEndReason,
+        assistant_message: Option<AssistantMessage>,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        debug!("Model step ended, reason: {:?}", reason);
+        let is_current = matches! {
+            self.turn,
+           TurnState::Streaming { step_id: current_step_id, generation: current_generation, ..}
+                if current_step_id == step_id && current_generation == generation
+        };
+
+        if !is_current {
+            debug!("StepFinished for stale step {step_id}");
+            return Ok(());
+        }
+
+        let turn_id = match std::mem::replace(&mut self.turn, TurnState::Idle) {
+            TurnState::Streaming { turn_id, .. } => turn_id,
+            other => {
+                // A step we no longer track (e.g. raced with shutdown): record
+                // the event but leave the state machine alone.
+                self.turn = other;
+                debug!("step {step_id} ended outside Streaming state");
+                self.log
+                    .commit(AgentEvent::ModelStepEnded {
+                        step_id,
+                        reason,
+                        assistant_message,
+                    })
+                    .await?;
+                return Ok(());
+            }
+        };
+
+        self.log
+            .commit(AgentEvent::ModelStepEnded {
+                step_id,
+                reason: reason.clone(),
+                assistant_message: assistant_message.clone(),
+            })
+            .await?;
+
+        let tool_calls: Vec<ToolCall> = assistant_message
+            .as_ref()
+            .map(|msg| {
+                msg.content
+                    .iter()
+                    .filter_map(|content| match content {
+                        ContentBlock::ToolCall(tool_call) => Some(tool_call.clone()),
+                        _ => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        match reason {
+            ModelStepEndReason::Error(error) => {
+                self.log
+                    .commit(AgentEvent::ErrorOccurred {
+                        message: error,
+                        details: None,
+                    })
+                    .await?;
+                self.end_turn(turn_id, ctx).await
+            }
+            ModelStepEndReason::Cancelled => self.end_turn(turn_id, ctx).await,
+            _ if !tool_calls.is_empty() => {
+                self.dispatch_tool_calls(turn_id, step_id, generation, tool_calls, ctx)
+                    .await
+            }
+            _ => self.end_turn(turn_id, ctx).await,
+        }
+    }
+
+    async fn **prepare_tool_calls**(
+        &mut self,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let Some(mailbox) = ctx.upgrade() else {
+            return Err(AgentSessionError::InvalidState(
+                "actor mailbox is gone".to_string(),
+            ));
+        };
+
+        let TurnState::RunningTools {
+            pending, cancel, ..
+        } = &mut self.turn
+        else {
+            unreachable!("not in RunningTools state");
+        };
+
+        for (invocation_id, pending) in pending.iter() {
+            let key = pending.key;
+            let InvocationState::Proposing { proposed } = &pending.state else {
+                unreachable!("not in Proposing state");
+            };
+
+            let hook_ctx = HookContext {
+                session_id: self.id.clone(),
+                invocation_id: Some(*invocation_id),
+                cancel: cancel.clone(),
+            };
+
+            let hooks = Arc::clone(&self.config.hooks);
+            let proposed = proposed.clone();
+            let mailbox = mailbox.clone();
+
+            tokio::spawn(async move {
+                let result = hooks.before_tool_use(&hook_ctx, proposed).await;
+                let _ = mailbox
+                    .send(AgentActorMessage::ToolInputPrepared { key, data: result })
+                    .await;
+            });
+        }
+
+        Ok(())
+    }
+
+    /// Spawns one background task per tool call; each reports back with a
+    /// `ToolFinished` message so the actor stays responsive (e.g. to `Cancel`)
+    /// while tools run.
+    async fn **dispatch_tool_calls**(
+        &mut self,
+        turn_id: TurnId,
+        step_id: StepId,
+        generation: Generation,
+        tool_calls: Vec<ToolCall>,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let batch_cancel = ctx.shutdown.child_token();
+        let mut pending = HashMap::new();
+
+        for call in tool_calls {
+            let invocation_id = ToolInvocationId::new();
+
+            let key = ToolInvocationKey {
+                turn_id,
+                step_id,
+                invocation_id,
+                generation,
+            };
+
+            self.log
+                .commit(AgentEvent::ToolCallProposed {
+                    invocation_id,
+                    step_id: key.step_id,
+                    tool_call_id: call.id.clone(),
+                    tool_name: call.name.clone(),
+                    arguments: call.arguments.clone(),
+                })
+                .await?;
+
+            pending.insert(
+                invocation_id,
+                PendingInvocation {
+                    key,
+                    state: InvocationState::Proposing { proposed: call },
+                },
+            );
+        }
+
+        self.turn = TurnState::RunningTools {
+            turn_id,
+            pending,
+            cancel: batch_cancel,
+        };
+
+        self.prepare_tool_calls(ctx).await?;
+
+        Ok(())
+    }
+
+    async fn **commit_invocation_result**(
+        &mut self,
+        key: ToolInvocationKey,
+        call: ToolCall,
+        result: ToolResult,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        self.log
+            .commit(AgentEvent::ToolResultReceived {
+                invocation_id: key.invocation_id,
+                tool_call_id: call.id.clone(),
+                tool_name: call.name.clone(),
+                outcome: result.outcome.clone(),
+                content: result.content.clone(),
+            })
+            .await?;
+
+        self.log.publish_live(LiveEvent::ToolExecutionEnded {
+            step_id: key.step_id,
+            tool_call_id: call.id.clone(),
+            tool_name: call.name.clone(),
+            result: result.content.clone(),
+        });
+
+        let (is_last, cancelled) = match &mut self.turn {
+            TurnState::RunningTools {
+                turn_id: current_turn,
+                pending,
+                cancel,
+            } => {
+                if *current_turn == key.turn_id && pending.remove(&key.invocation_id).is_some() {
+                    (pending.is_empty(), cancel.is_cancelled())
+                } else {
+                    return Ok(());
+                }
+            }
+            _ => {
+                return Err(AgentSessionError::InvalidState(
+                    "tool batch disappeared during result commit".to_string(),
+                ));
+            }
+        };
+
+        if !is_last {
+            return Ok(());
+        }
+
+        if cancelled {
+            self.end_turn(key.turn_id, ctx).await
+        } else {
+            self.continue_step(key.turn_id, ctx).await
+        }
+    }
+
+    async fn **update_invocation_state**(
+        &mut self,
+        key: ToolInvocationKey,
+        state: InvocationState,
+    ) -> Result<(), AgentSessionError> {
+        let TurnState::RunningTools { pending, .. } = &mut self.turn else {
+            return Err(AgentSessionError::InvalidState(
+                "not in RunningTools state".to_string(),
+            ));
+        };
+
+        pending
+            .entry(key.invocation_id)
+            .and_modify(|p| p.state = state);
+        Ok(())
+    }
+
+    fn **running_invocation**(
+        &self,
+        key: &ToolInvocationKey,
+    ) -> Option<(InvocationState, CancellationToken)> {
+        match &self.turn {
+            TurnState::RunningTools {
+                turn_id,
+                pending,
+                cancel,
+            } if *turn_id == key.turn_id => pending.get(&key.invocation_id).and_then(|inv| {
+                if inv.key.generation == key.generation && inv.key.step_id == key.step_id {
+                    Some((inv.state.clone(), cancel.clone()))
+                } else {
+                    None
+                }
+            }),
+            _ => None,
+        }
+    }
+
+    async fn **handle_tool_input_prepared**(
+        &mut self,
+        key: ToolInvocationKey,
+        data: Result<BeforeToolUseData, HookError>,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let Some((state, cancel)) = self.running_invocation(&key) else {
+            debug!("ignoring stale ToolInputPrepared for {}", key.invocation_id);
+            return Ok(());
+        };
+        let InvocationState::Proposing { proposed } = state else {
+            debug!(
+                "ignoring ToolInputPrepared for non-proposing invocation {}",
+                key.invocation_id
+            );
+            return Ok(());
+        };
+
+        let data = match data {
+            Ok(data) => data,
+            Err(e) => {
+                return self
+                    .commit_invocation_result(
+                        key,
+                        proposed.clone(),
+                        ToolResult {
+                            outcome: match e {
+                                HookError::Cancelled => ToolOutcome::Cancelled,
+                                _ => ToolOutcome::Error,
+                            },
+                            content: e.to_string(),
+                        },
+                        ctx,
+                    )
+                    .await;
+            }
+        };
+
+        if cancel.is_cancelled() {
+            return self
+                .commit_invocation_result(
+                    key,
+                    data.tool_call,
+                    ToolResult {
+                        outcome: ToolOutcome::Cancelled,
+                        content: "Tool pre processing cancelled".to_string(),
+                    },
+                    ctx,
+                )
+                .await;
+        }
+
+        if let ToolCallDecision::Deny { reason } = data.permission {
+            return self
+                .commit_invocation_result(
+                    key,
+                    proposed.clone(),
+                    ToolResult {
+                        outcome: ToolOutcome::PolicyDenied,
+                        content: reason,
+                    },
+                    ctx,
+                )
+                .await;
+        }
+
+        if data.additional_hints.len() > 0 {
+            //TODO: schedule system hints insertion
+        }
+
+        let Some(mailbox) = ctx.upgrade() else {
+            return Err(AgentSessionError::InvalidState(
+                "actor mailbox is gone".to_string(),
+            ));
+        };
+
+        let prepared_call = data.tool_call;
+        let cancel = cancel.clone();
+
+        self.log
+            .commit(AgentEvent::ToolExecutionRequested {
+                invocation_id: key.invocation_id,
+                step_id: key.step_id,
+                tool_call_id: prepared_call.id.clone(),
+                tool_name: prepared_call.name.clone(),
+                arguments: prepared_call.arguments.clone(),
+            })
+            .await?;
+
+        self.log.publish_live(LiveEvent::ToolExecutionStarted {
+            step_id: key.step_id,
+            tool_call_id: prepared_call.id.clone(),
+            tool_name: prepared_call.name.clone(),
+            arguments: prepared_call.arguments.clone(),
+        });
+
+        self.update_invocation_state(
+            key.clone(),
+            InvocationState::Executing {
+                effective: prepared_call.clone(),
+            },
+        )
+        .await?;
+
+        let policy_engine = Arc::clone(&self.config.policy_engine);
+        let policy_context = self.config.policy_context.clone();
+
+        tokio::spawn(async move {
+            let result = policy_engine
+                .execute(&prepared_call, cancel, &policy_context)
+                .await;
+            let _ = mailbox
+                .send(AgentActorMessage::ToolFinished { key, result })
+                .await;
+        });
+
+        Ok(())
+    }
+
+    async fn **handle_tool_result_finalized**(
+        &mut self,
+        key: ToolInvocationKey,
+        data: Result<AfterToolUseData, HookError>,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let Some((state, cancel)) = self.running_invocation(&key) else {
+            debug!(
+                "ignoring stale ToolResultFinalized for {}",
+                key.invocation_id
+            );
+            return Ok(());
+        };
+        let InvocationState::Finalized { effective } = state else {
+            debug!(
+                "ignoring ToolResultFinalized for non-finalized invocation {}",
+                key.invocation_id
+            );
+            return Ok(());
+        };
+
+        let (result, additional_content) = if cancel.is_cancelled() {
+            (
+                ToolResult {
+                    outcome: ToolOutcome::Cancelled,
+                    content: "Tool post processing cancelled".to_string(),
+                },
+                vec![],
+            )
+        } else {
+            match data {
+                Ok(data) => (data.modified, data.additional_hints),
+                Err(e) => (
+                    ToolResult {
+                        outcome: ToolOutcome::Error,
+                        content: e.to_string(),
+                    },
+                    vec![],
+                ),
+            }
+        };
+
+        if additional_content.len() > 0 {
+            //TODO: schedule system hints insertion
+        }
+
+        if !result.outcome.is_success() {
+            self.log
+                .commit(AgentEvent::ErrorOccurred {
+                    message: result.content.clone(),
+                    details: Some(serde_json::json!({
+                        "invocation_id": key.invocation_id,
+                        "phase": "after_tool_use",
+                        "tool_call_id": effective.id,
+                        "tool_name": effective.name,
+                    })),
+                })
+                .await?;
+        }
+
+        self.commit_invocation_result(key, effective.clone(), result, ctx)
+            .await
+    }
+
+    async fn **handle_tool_finished**(
+        &mut self,
+        key: ToolInvocationKey,
+        result: ToolResult,
+        ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<(), AgentSessionError> {
+        let Some((state, cancel)) = self.running_invocation(&key) else {
+            debug!("ignoring stale ToolFinished for {}", key.invocation_id);
+            return Ok(());
+        };
+        let InvocationState::Executing { effective } = state else {
+            debug!(
+                "ignoring ToolFinished for non-executing invocation {}",
+                key.invocation_id
+            );
+            return Ok(());
+        };
+
+        self.log
+            .commit(AgentEvent::ToolExecutionObserved {
+                invocation_id: key.invocation_id,
+                tool_call_id: effective.id.clone(),
+                additional_content: vec![],
+            })
+            .await?;
+
+        self.update_invocation_state(
+            key,
+            InvocationState::Finalized {
+                effective: effective.clone(),
+            },
+        )
+        .await?;
+
+        if cancel.is_cancelled() {
+            let data = Err(HookError::Cancelled);
+            return self.handle_tool_result_finalized(key, data, ctx).await;
+        }
+
+        let Some(mailbox) = ctx.upgrade() else {
+            return Err(AgentSessionError::InvalidState(
+                "actor mailbox is gone".to_string(),
+            ));
+        };
+        let hooks = Arc::clone(&self.config.hooks);
+        let hook_ctx = HookContext {
+            session_id: self.id.clone(),
+            invocation_id: Some(key.invocation_id),
+            cancel,
+        };
+
+        tokio::spawn(async move {
+            let data = hooks.after_tool_use(&hook_ctx, result).await;
+            let _ = mailbox
+                .send(AgentActorMessage::ToolResultFinalized { key, data })
+                .await;
+        });
+        Ok(())
+    }
+
+    fn **assemble_context**(&self) -> ai::Context {
+        ai::Context {
+            system_prompt: Some(self.log.system_prompt().to_string()),
+            messages: self.log.messages().to_vec(),
+            tools: Some(self.config.policy_engine.schemas()),
+        }
+    }
+
+    fn **next_step_id**(&mut self) -> (StepId, Generation) {
+        self.generation = self.generation.next();
+        self.next_step_id = Some(StepId::new());
+        (self.next_step_id.unwrap(), self.generation)
+    }
+
+    async fn **spawn_model_step**(
+        &mut self,
+        actor_ctx: &mut ActorContext<AgentActorMessage>,
+    ) -> Result<AgentStepRunner, AgentSessionError> {
+        let Some(store_tx) = actor_ctx.upgrade() else {
+            return Err(AgentSessionError::InvalidState(
+                "actor mailbox is gone".to_string(),
+            ));
+        };
+
+        debug!("current conversation state: \n{}", self.log.conversation());
+
+        let (step_id, generation) = self.next_step_id();
+
+        Ok(AgentStepRunner::new(
+            step_id,
+            generation,
+            self.config.model.clone(),
+            self.config.options.clone(),
+            store_tx,
+            self.assemble_context(),
+        )
+        .await)
+    }
+
+    //TODO: impl from_seq
+    async fn **subscribe**(
+        &mut self,
+        reply: oneshot::Sender<AgentSubscription>,
+        _from_seq: Option<u64>,
+    ) -> Result<(), AgentSessionError> {
+        let _ = reply.send(self.log.subscribe(SUBSCRIPTION_BUFFER));
+        Ok(())
+    }
+}
+
+pub struct **AgentSession** {
+    pub id: SessionId,
+    pub name: String,
+    pub description: String,
+    runtime: ActorRuntime<AgentActorMessage>,
+}
+
+impl AgentSession {
+    pub async fn **build**(name: String, description: String, config: AgentConfig) -> Self {
+        let id = SessionId::new();
+
+        let actor = AgentActor::new(id, config);
+        let runtime = spawn_actor(actor, 100).await;
+
+        Self {
+            id,
+            name,
+            description,
+            runtime,
+        }
+    }
+
+    async fn **load_images**(
+        &self,
+        images: Vec<String>,
+    ) -> Result<Vec<ImageContent>, AgentSessionError> {
+        use base64::Engine;
+
+        let mut image_contents = vec![];
+        for path in images {
+            let bytes = tokio::fs::read(&path).await.map_err(|source| {
+                AgentSessionError::ImageLoadFailed {
+                    path: path.clone(),
+                    source,
+                }
+            })?;
+            let data = base64::engine::general_purpose::STANDARD.encode(&bytes);
+            let mime_type = mime_type_from_path(&path);
+            image_contents.push(ImageContent { data, mime_type });
+        }
+        Ok(image_contents)
+    }
+
+    pub async fn **submit_input**(
+        &mut self,
+        input: String,
+        images: Vec<String>,
+    ) -> Result<(), AgentSessionError> {
+        let images = self.load_images(images).await?;
+        self.runtime
+            .handle()
+            .ask(|reply| {
+                AgentActorMessage::Command(AgentCommand::SubmitInput {
+                    intent: UserMessageIntent::Normal,
+                    reply: reply,
+                    input: input,
+                    images: images,
+                })
+            })
+            .await?
+    }
+
+    pub async fn **subscribe**(
+        &mut self,
+        from_seq: Option<u64>,
+    ) -> Result<AgentSubscription, AgentSessionError> {
+        Ok(self
+            .runtime
+            .handle()
+            .ask(move |reply| {
+                AgentActorMessage::Command(AgentCommand::Subscribe { reply, from_seq })
+            })
+            .await?)
+    }
+
+    pub async fn **set_system_prompt**(&mut self, prompt: String) -> Result<(), AgentSessionError> {
+        Ok(self
+            .runtime
+            .handle()
+            .send(AgentActorMessage::Command(AgentCommand::SetSystemPrompt(
+                prompt,
+            )))
+            .await?)
+    }
+
+    pub async fn **close**(self) -> Result<(), AgentSessionError> {
+        self.runtime.shutdown().await;
+        Ok(())
+    }
+
+    pub async fn **cancel_current_turn**(&mut self) -> Result<(), AgentSessionError> {
+        self.runtime
+            .handle()
+            .send(AgentActorMessage::Command(AgentCommand::Cancel {}))
+            .await?;
+        Ok(())
+    }
+}
+
+fn **mime_type_from_path**(path: &str) -> String {
+    let extension = std::path::Path::new(path)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+
+    match extension.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "bmp" => "image/bmp",
+        "svg" => "image/svg+xml",
+        _ => "application/octet-stream",
+    }
+    .to_string()
+}
+
+#[cfg(test)]
+mod **tests** {
+    use super::*;
+    use crate::hooks::{
+        AfterToolUseData, AfterToolUseHook, AfterToolUseResult, BeforeToolUseData,
+        BeforeToolUseHook, BeforeToolUseResult, HookContext, HookError, ToolCallDecision,
+        ToolResultView,
+    };
+    use crate::test_support::faux_lock;
+    use crate::tools::policy::{PolicyContext, PolicyEngineTrait};
+    use crate::{AgentToolRegistry, ToolError, ToolResult};
+    use ai::providers::faux::{
+        clear_faux_responses, faux_assistant_message, faux_text, faux_tool_call, set_faux_responses,
+    };
+    use ai::{Api, ModelCost, Provider, ToolCall};
+    use async_trait::async_trait;
+    use futures::StreamExt;
+    use knuth_core::{SessionEvent, ToolOutcome, ids::HookId};
+    use serde_json::Map;
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    use std::time::Duration;
+    use tokio::time::timeout;
+    use tokio_util::sync::CancellationToken;
+
+    struct **RegistryPolicyEngine** {
+        registry: AgentToolRegistry,
+    }
+
+    #[async_trait]
+    impl PolicyEngineTrait for RegistryPolicyEngine {
+        fn **schemas**(&self) -> Vec<ai::Tool> {
+            self.registry.schemas()
+        }
+
+        async fn **execute**(
+            &self,
+            tool_call: &ToolCall,
+            cancel: CancellationToken,
+            _ctx: &PolicyContext,
+        ) -> ToolResult {
+            let Some(tool) = self.registry.get(tool_call.name.as_str()) else {
+                return ToolResult {
+                    outcome: ToolOutcome::Error,
+                    content: ToolError::InvalidTool(tool_call.name.clone()).to_string(),
+                };
+            };
+            match tool.execute(tool_call.arguments.clone(), cancel).await {
+                Ok(result) => result,
+                Err(error) => ToolResult {
+                    outcome: ToolOutcome::Error,
+                    content: error.to_string(),
+                },
+            }
+        }
+    }
+
+    struct **DenyAllEngine**;
+
+    #[async_trait]
+    impl PolicyEngineTrait for DenyAllEngine {
+        fn **schemas**(&self) -> Vec<ai::Tool> {
+            Vec::new()
+        }
+
+        async fn **execute**(
+            &self,
+            _tool_call: &ToolCall,
+            _cancel: CancellationToken,
+            _ctx: &PolicyContext,
+        ) -> ToolResult {
+            ToolResult {
+                outcome: ToolOutcome::PolicyDenied,
+                content: "denied".to_string(),
+            }
+        }
+    }
+
+    struct **EchoArgsEngine** {
+        executed: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl EchoArgsEngine {
+        fn **new**() -> Self {
+            Self {
+                executed: Arc::new(Mutex::new(Vec::new())),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl PolicyEngineTrait for EchoArgsEngine {
+        fn **schemas**(&self) -> Vec<ai::Tool> {
+            Vec::new()
+        }
+
+        async fn **execute**(
+            &self,
+            tool_call: &ToolCall,
+            _cancel: CancellationToken,
+            _ctx: &PolicyContext,
+        ) -> ToolResult {
+            self.executed.lock().unwrap().push(tool_call.name.clone());
+            ToolResult {
+                outcome: ToolOutcome::ExecSuccess,
+                content: serde_json::to_string(&tool_call.arguments).unwrap(),
+            }
+        }
+    }
+
+    struct **DenyNamedHook** {
+        id: HookId,
+        name: String,
+        reason: String,
+    }
+
+    #[async_trait]
+    impl BeforeToolUseHook for DenyNamedHook {
+        fn **id**(&self) -> HookId {
+            self.id
+        }
+
+        async fn **transform**(
+            &self,
+            _ctx: &HookContext,
+            tool_call: &ToolCall,
+        ) -> Result<BeforeToolUseResult, HookError> {
+            if tool_call.name == self.name {
+                Ok(BeforeToolUseResult {
+                    modified_arguments: None,
+                    permission: ToolCallDecision::Deny {
+                        reason: self.reason.clone(),
+                    },
+                    additional_content: None,
+                })
+            } else {
+                Ok(BeforeToolUseResult {
+                    modified_arguments: None,
+                    permission: ToolCallDecision::Allow,
+                    additional_content: None,
+                })
+            }
+        }
+    }
+
+    struct **RewriteCommandHook** {
+        id: HookId,
+        to: String,
+    }
+
+    #[async_trait]
+    impl BeforeToolUseHook for RewriteCommandHook {
+        fn **id**(&self) -> HookId {
+            self.id
+        }
+
+        async fn **transform**(
+            &self,
+            _ctx: &HookContext,
+            _tool_call: &ToolCall,
+        ) -> Result<BeforeToolUseResult, HookError> {
+            let mut arguments = Map::new();
+            arguments.insert("command".into(), serde_json::Value::String(self.to.clone()));
+            Ok(BeforeToolUseResult {
+                modified_arguments: Some(arguments),
+                permission: ToolCallDecision::Allow,
+                additional_content: None,
+            })
+        }
+    }
+
+    struct **PrefixResultHook** {
+        id: HookId,
+        prefix: String,
+    }
+
+    #[async_trait]
+    impl AfterToolUseHook for PrefixResultHook {
+        fn **id**(&self) -> HookId {
+            self.id
+        }
+
+        async fn **transform**(
+            &self,
+            _ctx: &HookContext,
+            current: &ToolResultView,
+        ) -> Result<AfterToolUseResult, HookError> {
+            Ok(AfterToolUseResult {
+                modified: Some(ToolResult {
+                    outcome: current.result.outcome.clone(),
+                    content: format!("{}{}", self.prefix, current.result.content),
+                }),
+                additional_content: None,
+            })
+        }
+    }
+
+    struct **TimeoutAfterHook** {
+        id: HookId,
+    }
+
+    #[async_trait]
+    impl AfterToolUseHook for TimeoutAfterHook {
+        fn **id**(&self) -> HookId {
+            self.id
+        }
+
+        async fn **transform**(
+            &self,
+            _ctx: &HookContext,
+            _current: &ToolResultView,
+        ) -> Result<AfterToolUseResult, HookError> {
+            Err(HookError::Timeout)
+        }
+    }
+
+    fn **default_tool_registry**() -> AgentToolRegistry {
+        let mut registry = AgentToolRegistry::new();
+        registry.load_default();
+        registry
+    }
+
+    fn **passthrough_engine**() -> Arc<dyn PolicyEngineTrait> {
+        Arc::new(RegistryPolicyEngine {
+            registry: default_tool_registry(),
+        })
+    }
+
+    fn **faux_model**() -> Model {
+        Model {
+            id: "faux".into(),
+            name: "Faux".into(),
+            api: Api::from("faux"),
+            provider: Provider::from("faux"),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: ModelCost::default(),
+            context_window: 128_000,
+            max_tokens: 4096,
+            headers: None,
+            compat: None,
+        }
+    }
+
+    fn **test_config**(policy_engine: Arc<dyn PolicyEngineTrait>) -> AgentConfig {
+        test_config_with_hooks(policy_engine, HookRegistry::new())
+    }
+
+    fn **test_config_with_hooks**(
+        policy_engine: Arc<dyn PolicyEngineTrait>,
+        hooks: HookRegistry,
+    ) -> AgentConfig {
+        AgentConfig {
+            model: faux_model(),
+            options: StreamOptions::default(),
+            policy_engine,
+            policy_context: PolicyContext {},
+            hooks: Arc::new(hooks),
+        }
+    }
+
+    fn **dummy_tool_call**() -> ToolCall {
+        ToolCall {
+            id: "stale-call".into(),
+            name: "bash".into(),
+            arguments: Map::new(),
+            thought_signature: None,
+        }
+    }
+
+    async fn **mk_session**() -> AgentSession {
+        AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config(passthrough_engine()),
+        )
+        .await
+    }
+
+    async fn **next_session_event**(sub: &mut AgentSubscription) -> SessionEvent {
+        timeout(Duration::from_secs(5), sub.next())
+            .await
+            .expect("timed out waiting for event")
+            .expect("subscription closed unexpectedly")
+    }
+
+    /// Skips live progress so assertions see only the replayable history.
+    async fn **next_durable_event**(sub: &mut AgentSubscription) -> AgentEvent {
+        loop {
+            if let SessionEvent::Durable(stored) = next_session_event(sub).await {
+                return stored.event;
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn **stale_step_completion_is_not_published**() {
+        let actor = AgentActor::new(SessionId::new(), test_config(passthrough_engine()));
+        let runtime = spawn_actor(actor, 8).await;
+        let mut sub = runtime
+            .handle()
+            .ask(|reply| {
+                AgentActorMessage::Command(AgentCommand::Subscribe {
+                    from_seq: None,
+                    reply,
+                })
+            })
+            .await
+            .unwrap();
+
+        runtime
+            .handle()
+            .send(AgentActorMessage::StepFinished {
+                step_id: StepId::new(),
+                generation: Generation::new(),
+                reason: ModelStepEndReason::Success,
+                assistant_message: None,
+            })
+            .await
+            .unwrap();
+        runtime
+            .handle()
+            .send(AgentActorMessage::Command(AgentCommand::SetSystemPrompt(
+                "after stale completion".to_string(),
+            )))
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            next_durable_event(&mut sub).await,
+            AgentEvent::SystemPromptSet { prompt } if prompt == "after stale completion"
+        ));
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn **stale_tool_pipeline_messages_are_not_persisted**() {
+        let actor = AgentActor::new(SessionId::new(), test_config(passthrough_engine()));
+        let runtime = spawn_actor(actor, 8).await;
+        let mut sub = runtime
+            .handle()
+            .ask(|reply| {
+                AgentActorMessage::Command(AgentCommand::Subscribe {
+                    from_seq: None,
+                    reply,
+                })
+            })
+            .await
+            .unwrap();
+
+        let key = ToolInvocationKey {
+            turn_id: TurnId::new(),
+            step_id: StepId::new(),
+            invocation_id: ToolInvocationId::new(),
+            generation: Generation::new(),
+        };
+        runtime
+            .handle()
+            .send(AgentActorMessage::ToolInputPrepared {
+                key,
+                data: Ok(BeforeToolUseData {
+                    tool_call: dummy_tool_call(),
+                    permission: ToolCallDecision::Allow,
+                    additional_hints: vec![],
+                }),
+            })
+            .await
+            .unwrap();
+        runtime
+            .handle()
+            .send(AgentActorMessage::ToolFinished {
+                key,
+                result: ToolResult {
+                    outcome: ToolOutcome::Error,
+                    content: "stale result".to_string(),
+                },
+            })
+            .await
+            .unwrap();
+        runtime
+            .handle()
+            .send(AgentActorMessage::ToolResultFinalized {
+                key,
+                data: Ok(AfterToolUseData {
+                    modified: ToolResult {
+                        outcome: ToolOutcome::Error,
+                        content: "stale finalized".to_string(),
+                    },
+                    additional_hints: vec![],
+                }),
+            })
+            .await
+            .unwrap();
+        runtime
+            .handle()
+            .send(AgentActorMessage::Command(AgentCommand::SetSystemPrompt(
+                "after stale tool completion".to_string(),
+            )))
+            .await
+            .unwrap();
+
+        let event = next_durable_event(&mut sub).await;
+        assert!(
+            matches!(
+                &event,
+                AgentEvent::SystemPromptSet { prompt } if prompt == "after stale tool completion"
+            ),
+            "stale pipeline messages must not persist or kill the session, got {event:?}"
+        );
+        runtime.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn **turn_with_tool_call_keeps_turn_id_and_resumes_after_tools**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("printf tool-ran"));
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("bash", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut session = mk_session().await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut turn_started = None;
+        let mut requested = None;
+        let mut received = None;
+        let mut live_started_step = None;
+        let mut live_ended = None;
+        let mut step_ends = vec![];
+        let mut tool_lifecycle = vec![];
+        let turn_ended = loop {
+            match next_session_event(&mut sub).await {
+                SessionEvent::Durable(stored) => match stored.event {
+                    AgentEvent::AgentTurnStarted { turn_id } => turn_started = Some(turn_id),
+                    AgentEvent::ToolCallProposed { invocation_id, .. } => {
+                        tool_lifecycle.push(("proposed", invocation_id))
+                    }
+                    AgentEvent::ToolExecutionRequested {
+                        invocation_id,
+                        step_id,
+                        ..
+                    } => {
+                        requested = Some((invocation_id, step_id));
+                        tool_lifecycle.push(("requested", invocation_id));
+                    }
+                    AgentEvent::ToolExecutionObserved { invocation_id, .. } => {
+                        tool_lifecycle.push(("observed", invocation_id))
+                    }
+                    AgentEvent::ToolResultReceived {
+                        invocation_id,
+                        outcome,
+                        content,
+                        ..
+                    } => {
+                        received = Some((invocation_id, outcome, content));
+                        tool_lifecycle.push(("received", invocation_id));
+                    }
+                    AgentEvent::ModelStepEnded {
+                        step_id, reason, ..
+                    } => step_ends.push((step_id, reason)),
+                    AgentEvent::AgentTurnEnded { turn_id } => break turn_id,
+                    _ => {}
+                },
+                SessionEvent::Live(event) => match event {
+                    LiveEvent::ToolExecutionStarted { step_id, .. } => {
+                        live_started_step = Some(step_id)
+                    }
+                    LiveEvent::ToolExecutionEnded {
+                        step_id, result, ..
+                    } => live_ended = Some((step_id, result)),
+                    _ => {}
+                },
+            }
+        };
+        clear_faux_responses();
+
+        assert_eq!(
+            turn_started.expect("turn should start"),
+            turn_ended,
+            "AgentTurnStarted and AgentTurnEnded must carry the same turn_id"
+        );
+
+        assert_eq!(
+            tool_lifecycle
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            ["proposed", "requested", "observed", "received"]
+        );
+        assert!(
+            tool_lifecycle.windows(2).all(|pair| pair[0].1 == pair[1].1),
+            "the hook pipeline must keep one invocation_id, got {tool_lifecycle:?}"
+        );
+
+        let (requested_invocation, requested_step) = requested.expect("tool should be requested");
+        let (received_invocation, outcome, content) =
+            received.expect("tool should report a result");
+        assert_eq!(
+            requested_invocation, received_invocation,
+            "the durable pair must share one invocation_id"
+        );
+        assert_eq!(outcome, ToolOutcome::ExecSuccess);
+        assert!(
+            content.contains("tool-ran"),
+            "tool result should include command stdout, got {content:?}"
+        );
+
+        let (live_ended_step, live_result) =
+            live_ended.expect("tool should report live completion");
+        assert!(
+            live_result.contains("tool-ran"),
+            "live result should mirror the durable content, got {live_result:?}"
+        );
+        assert_eq!(requested_step, step_ends[0].0);
+        assert_eq!(live_started_step, Some(step_ends[0].0));
+        assert_eq!(live_ended_step, step_ends[0].0);
+        assert_eq!(
+            step_ends
+                .into_iter()
+                .map(|(_, reason)| reason)
+                .collect::<Vec<_>>(),
+            vec![ModelStepEndReason::ToolUse, ModelStepEndReason::Success]
+        );
+
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **policy_denial_is_recorded_and_turn_resumes**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert(
+            "path".into(),
+            serde_json::Value::String("/tmp/unused.txt".into()),
+        );
+        args.insert(
+            "content".into(),
+            serde_json::Value::String("must not be written".into()),
+        );
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("write_file", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut session = AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config(Arc::new(DenyAllEngine)),
+        )
+        .await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("try writing".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut outcome = None;
+        let mut requested = false;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolExecutionRequested { .. } => requested = true,
+                AgentEvent::ToolResultReceived {
+                    outcome: tool_outcome,
+                    ..
+                } => outcome = Some(tool_outcome),
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert!(
+            requested,
+            "policy-engine denial happens after ToolExecutionRequested"
+        );
+        assert_eq!(outcome, Some(ToolOutcome::PolicyDenied));
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **duplicate_tool_call_ids_wait_for_both_invocations**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut slow_args = Map::new();
+        slow_args.insert(
+            "command".into(),
+            serde_json::Value::String("sleep 0.25; printf slow".into()),
+        );
+        let mut fast_args = Map::new();
+        fast_args.insert(
+            "command".into(),
+            serde_json::Value::String("printf fast".into()),
+        );
+        let duplicate_id = "duplicate-call-id".to_string();
+        set_faux_responses(vec![
+            faux_assistant_message(vec![
+                ContentBlock::ToolCall(ToolCall {
+                    id: duplicate_id.clone(),
+                    name: "bash".into(),
+                    arguments: slow_args,
+                    thought_signature: None,
+                }),
+                ContentBlock::ToolCall(ToolCall {
+                    id: duplicate_id,
+                    name: "bash".into(),
+                    arguments: fast_args,
+                    thought_signature: None,
+                }),
+            ]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut session = mk_session().await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run both".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut requested = HashSet::new();
+        let mut received = HashSet::new();
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolExecutionRequested { invocation_id, .. } => {
+                    requested.insert(invocation_id);
+                }
+                AgentEvent::ToolResultReceived { invocation_id, .. } => {
+                    received.insert(invocation_id);
+                }
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert_eq!(requested.len(), 2, "each call needs its own invocation");
+        assert_eq!(
+            received, requested,
+            "turn ended before every invocation finished"
+        );
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **queued_inputs_run_as_separate_turns**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_text("first")]),
+            faux_assistant_message(vec![faux_text("second")]),
+        ]);
+
+        let mut session = mk_session().await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("one".to_string(), vec![])
+            .await
+            .unwrap();
+        session
+            .submit_input("two".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut turns = vec![];
+        while turns.len() < 2 {
+            if let AgentEvent::AgentTurnEnded { turn_id } = next_durable_event(&mut sub).await {
+                turns.push(turn_id);
+            }
+        }
+        clear_faux_responses();
+
+        assert_ne!(turns[0], turns[1], "each input should get its own turn");
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **before_hook_deny_skips_execution**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("printf should-not-run"));
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("bash", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let engine = EchoArgsEngine::new();
+        let executed = Arc::clone(&engine.executed);
+        let mut hooks = HookRegistry::new();
+        hooks.on_before_tool_use(Arc::new(DenyNamedHook {
+            id: HookId::new(),
+            name: "bash".into(),
+            reason: "blocked by hook".into(),
+        }));
+
+        let mut session = AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config_with_hooks(Arc::new(engine), hooks),
+        )
+        .await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut requested = false;
+        let mut proposed = false;
+        let mut outcome = None;
+        let mut content = None;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolCallProposed { .. } => proposed = true,
+                AgentEvent::ToolExecutionRequested { .. } => requested = true,
+                AgentEvent::ToolResultReceived {
+                    outcome: tool_outcome,
+                    content: tool_content,
+                    ..
+                } => {
+                    outcome = Some(tool_outcome);
+                    content = Some(tool_content);
+                }
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert!(proposed, "deny still records the proposed call");
+        assert!(
+            !requested,
+            "before-hook deny must not emit ToolExecutionRequested"
+        );
+        assert_eq!(outcome, Some(ToolOutcome::PolicyDenied));
+        assert_eq!(content.as_deref(), Some("blocked by hook"));
+        assert!(
+            executed.lock().unwrap().is_empty(),
+            "policy engine must not run a hook-denied call"
+        );
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **before_hook_rewrites_arguments_used_for_execution**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("printf original"));
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("bash", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut hooks = HookRegistry::new();
+        hooks.on_before_tool_use(Arc::new(RewriteCommandHook {
+            id: HookId::new(),
+            to: "printf rewritten".into(),
+        }));
+
+        let mut session = AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config_with_hooks(Arc::new(EchoArgsEngine::new()), hooks),
+        )
+        .await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut proposed_args = None;
+        let mut requested_args = None;
+        let mut content = None;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolCallProposed { arguments, .. } => proposed_args = Some(arguments),
+                AgentEvent::ToolExecutionRequested { arguments, .. } => {
+                    requested_args = Some(arguments)
+                }
+                AgentEvent::ToolResultReceived {
+                    content: tool_content,
+                    ..
+                } => content = Some(tool_content),
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert_eq!(
+            proposed_args.expect("call should be proposed")["command"],
+            "printf original"
+        );
+        assert_eq!(
+            requested_args.expect("rewritten call should be requested")["command"],
+            "printf rewritten"
+        );
+        let content = content.expect("tool should report a result");
+        assert!(
+            content.contains("printf rewritten"),
+            "execution should see rewritten arguments, got {content:?}"
+        );
+        assert!(
+            !content.contains("printf original"),
+            "original arguments must not be executed, got {content:?}"
+        );
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **after_hook_rewrites_persisted_tool_result**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("printf raw"));
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("bash", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut hooks = HookRegistry::new();
+        hooks.on_after_tool_use(Arc::new(PrefixResultHook {
+            id: HookId::new(),
+            prefix: "hooked:".into(),
+        }));
+
+        let mut session = AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config_with_hooks(Arc::new(EchoArgsEngine::new()), hooks),
+        )
+        .await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut content = None;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolResultReceived {
+                    content: tool_content,
+                    ..
+                } => content = Some(tool_content),
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        let content = content.expect("tool should report a result");
+        assert!(
+            content.starts_with("hooked:"),
+            "after-tool-use hook should rewrite the persisted result, got {content:?}"
+        );
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **after_hook_timeout_is_recorded_as_tool_error**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("printf raw"));
+        set_faux_responses(vec![
+            faux_assistant_message(vec![faux_tool_call("bash", args)]),
+            faux_assistant_message(vec![faux_text("done")]),
+        ]);
+
+        let mut hooks = HookRegistry::new();
+        hooks.on_after_tool_use(Arc::new(TimeoutAfterHook { id: HookId::new() }));
+
+        let mut session = AgentSession::build(
+            "test".to_string(),
+            "".to_string(),
+            test_config_with_hooks(Arc::new(EchoArgsEngine::new()), hooks),
+        )
+        .await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        let mut outcome = None;
+        let mut content = None;
+        let mut error_phase = None;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolResultReceived {
+                    outcome: tool_outcome,
+                    content: tool_content,
+                    ..
+                } => {
+                    outcome = Some(tool_outcome);
+                    content = Some(tool_content);
+                }
+                AgentEvent::ErrorOccurred { details, .. } => {
+                    error_phase = details
+                        .as_ref()
+                        .and_then(|value| value.get("phase"))
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string);
+                }
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert_eq!(outcome, Some(ToolOutcome::Error));
+        assert!(
+            content
+                .as_deref()
+                .is_some_and(|text| text.contains("timed out")),
+            "got {content:?}"
+        );
+        assert_eq!(error_phase.as_deref(), Some("after_tool_use"));
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn **cancel_during_tool_execution_records_cancelled**() {
+        let _guard = faux_lock();
+        clear_faux_responses();
+
+        let mut args = Map::new();
+        args.insert("command".into(), serde_json::json!("sleep 5"));
+        set_faux_responses(vec![faux_assistant_message(vec![faux_tool_call(
+            "bash", args,
+        )])]);
+
+        let mut session = mk_session().await;
+        let mut sub = session.subscribe(None).await.unwrap();
+        session
+            .submit_input("run it".to_string(), vec![])
+            .await
+            .unwrap();
+
+        loop {
+            if matches!(
+                next_durable_event(&mut sub).await,
+                AgentEvent::ToolExecutionRequested { .. }
+            ) {
+                break;
+            }
+        }
+        session.cancel_current_turn().await.unwrap();
+
+        let mut outcome = None;
+        let mut resumed = false;
+        loop {
+            match next_durable_event(&mut sub).await {
+                AgentEvent::ToolResultReceived {
+                    outcome: tool_outcome,
+                    ..
+                } => outcome = Some(tool_outcome),
+                AgentEvent::ModelStepStarted { .. } => resumed = true,
+                AgentEvent::AgentTurnEnded { .. } => break,
+                _ => {}
+            }
+        }
+        clear_faux_responses();
+
+        assert_eq!(outcome, Some(ToolOutcome::Cancelled));
+        assert!(
+            !resumed,
+            "a cancelled tool batch must end the turn without another model step"
+        );
+        session.close().await.unwrap();
+    }
+}
+
+				113 scroll bar (disabled, settable, float) 0
+				114 scroll bar (settable, float) 0.4745818301082322
+					115 value indicator (settable, float) 0.4745818301082322
+					116 increment arrow button
+					117 decrement arrow button
+					118 increment page button
+					119 decrement page button
+				120 ruler
+			121 unknown Current scope: struct AgentSession, harness.rs line 1002
+				122 text struct AgentSession harness.rs:1002
+			123 splitter (disabled, settable, float) 952
+		124 splitter (disabled, settable, float) 952
+		125 radio button Description: Callers, Value: 1
+		126 radio button Description: Calls, Value: 0
+		127 radio button Description: Implements, Value: 0
+		128 radio button Description: References, Value: 0
+		129 button (disabled) Freeze Results, Description: Freeze Results as Reading Set, Help: Freeze the currently published source and evidence snapshots as a Reading Set tab
+		130 button (disabled) Inspector, Description: Show Resolution Inspector, Help: Show Resolution Inspector (⌘I)
+		131 text Right-click a symbol → Show Callers / Calls / Implements / References
+		132 splitter (disabled, settable, float) 1153
+		133 radio button Description: Follow, Value: 1
+		134 radio button Description: Pin, Value: 0
+		135 button (disabled) ‹
+		136 button (disabled) ›
+		137 text Click a symbol to see its definition here. ⌘-click jumps to it.
+	138 text Description: Exact provider status, Value: Exact: deps unavailable (offline) · Safe, Help: Provider: rust-analyzer
+Tool version: rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06)
+Trust: Safe
+Limitations: build scripts disabled; dependencies unavailable offline; proc macros disabled
+Features: default
+	139 toolbar
+		140 button (disabled) Description: Back, Secondary Actions: Move next, Remove from toolbar
+		141 button (disabled) Description: Forward, Secondary Actions: Move previous, Move next, Remove from toolbar
+		142 text Description: Project, Value: knuth-rs
+		143 button Description: Version, Secondary Actions: Move previous, Move next, Remove from toolbar
+		144 button Description: Symbols, Secondary Actions: Move previous, Move next, Remove from toolbar
+		145 button Description: Profile, Secondary Actions: Move previous, Move next, Remove from toolbar
+		146 button Description: Settings, Secondary Actions: Move previous, Remove from toolbar
+	147 close button
+	148 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	149 minimize button
+150 menu bar
+	151 Cairn
+	152 File
+	153 Edit
+	154 Find
+	155 Go
+	156 View
+	157 Relations
+
+The focused UI element is 1 standard window Cairn, Secondary Actions: Raise

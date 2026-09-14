@@ -7,7 +7,7 @@ import Observation
 
 @MainActor
 final class RelationWindowController: NSViewController,
-    NSOutlineViewDataSource, NSOutlineViewDelegate
+    NSOutlineViewDataSource, NSOutlineViewDelegate, NSSplitViewDelegate
 {
     private enum InspectorMode {
         case live(RelationTreeModel.Node)
@@ -31,7 +31,7 @@ final class RelationWindowController: NSViewController,
     private let scrollView = NSScrollView()
     private let container = NSView()
     private let headerSurface = NSView()
-    private let contentSplit = NSStackView()
+    private let contentSplit = NSSplitView()
     private let listPane = NSView()
     private let inspectorView = ResolutionInspectorView()
     private let inspectButton = NSButton()
@@ -48,6 +48,8 @@ final class RelationWindowController: NSViewController,
     private var nodeReloadCount = 0
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var inspectorMode: InspectorMode?
+    private var inspectorSplitFraction: CGFloat = 0.5
+    private var adjustingInspectorSplit = false
     private let verificationReadiness: () -> ExactCoordinator.Readiness
     private let capturedSource: (
         String
@@ -720,6 +722,9 @@ final class RelationWindowController: NSViewController,
             self?.selectSelection(nil)
         }
         outlineView.rowSizeStyle = .default
+        outlineView.style = .plain
+        outlineView.intercellSpacing = .zero
+        outlineView.indentationPerLevel = 12
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
         outlineView.usesAlternatingRowBackgroundColors = false
@@ -743,7 +748,7 @@ final class RelationWindowController: NSViewController,
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.alignment = .center
         placeholderLabel.lineBreakMode = .byWordWrapping
-        placeholderLabel.maximumNumberOfLines = 2
+        placeholderLabel.maximumNumberOfLines = 0
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
         inspectButton.image = NSImage(
@@ -780,20 +785,20 @@ final class RelationWindowController: NSViewController,
         readingSetButton.isEnabled = false
         readingSetButton.translatesAutoresizingMaskIntoConstraints = false
 
-        contentSplit.orientation = .horizontal
-        contentSplit.distribution = .fillEqually
-        contentSplit.spacing = 1
+        contentSplit.isVertical = true
+        contentSplit.dividerStyle = .thin
+        contentSplit.delegate = self
+        contentSplit.arrangesAllSubviews = false
+        contentSplit.setAccessibilityLabel("Relation list and Resolution Inspector")
+        contentSplit.toolTip = "Drag the divider to resize the relation list and inspector"
         contentSplit.wantsLayer = true
         contentSplit.layer?.backgroundColor = theme.chromeDividerColor.cgColor
         contentSplit.translatesAutoresizingMaskIntoConstraints = false
         contentSplit.addArrangedSubview(listPane)
-        contentSplit.addArrangedSubview(inspectorView)
+        contentSplit.addSubview(inspectorView)
         inspectorView.isHidden = true
         listPane.wantsLayer = true
         listPane.layer?.backgroundColor = theme.chromeColor.cgColor
-        inspectorView.widthAnchor.constraint(
-            greaterThanOrEqualToConstant: 220
-        ).isActive = true
         listPane.addSubview(scrollView)
         listPane.addSubview(placeholderLabel)
         inspectorView.onClose = { [weak self] in self?.hideInspector() }
@@ -886,24 +891,66 @@ final class RelationWindowController: NSViewController,
     /// crossings from oscillating.
     private func updateInspectorLayoutMode() {
         if inspectorView.isHidden {
-            if inspectorReplacesList {
-                inspectorReplacesList = false
-                listPane.isHidden = false
-            }
-            return
+            inspectorReplacesList = false
+        } else {
+            let minimum: CGFloat = inspectorReplacesList ? 628 : 604
+            inspectorReplacesList = contentSplit.bounds.width < minimum
         }
-        let sideBySideMinimum: CGFloat = 280 + 300 + 24
-        let restoreMinimum: CGFloat = sideBySideMinimum + 24
-        let available = contentSplit.bounds.width
-        if inspectorReplacesList {
-            if available >= restoreMinimum {
-                inspectorReplacesList = false
-                listPane.isHidden = false
-            }
-        } else if available < sideBySideMinimum {
-            inspectorReplacesList = true
-            listPane.isHidden = true
+        listPane.isHidden = inspectorReplacesList
+        let visiblePanes: [NSView] = [listPane, inspectorView].filter { !$0.isHidden }
+        guard contentSplit.arrangedSubviews != visiblePanes else { return }
+        adjustingInspectorSplit = true
+        for pane in contentSplit.arrangedSubviews {
+            contentSplit.removeArrangedSubview(pane)
         }
+        visiblePanes.forEach(contentSplit.addArrangedSubview)
+        layoutInspectorPanes()
+        adjustingInspectorSplit = false
+    }
+
+    private func layoutInspectorPanes() {
+        let wasAdjusting = adjustingInspectorSplit
+        adjustingInspectorSplit = true
+        contentSplit.adjustSubviews()
+        if contentSplit.arrangedSubviews.count == 2 {
+            let available = contentSplit.bounds.width - contentSplit.dividerThickness
+            contentSplit.setPosition(
+                min(max(available * inspectorSplitFraction, 280), available - 300),
+                ofDividerAt: 0
+            )
+        }
+        adjustingInspectorSplit = wasAdjusting
+        fitOutlineWidthToVisibleRect()
+    }
+
+    func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
+        guard !adjustingInspectorSplit else { return }
+        updateInspectorLayoutMode()
+        layoutInspectorPanes()
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        fitOutlineWidthToVisibleRect()
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat,
+                   ofSubviewAt dividerIndex: Int) -> CGFloat {
+        let available = splitView.bounds.width - splitView.dividerThickness
+        let position = min(max(proposedPosition, 280), available - 300)
+        if !adjustingInspectorSplit, available > 0 {
+            inspectorSplitFraction = position / available
+        }
+        return position
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMinCoordinate proposedMinimum: CGFloat,
+                   ofSubviewAt dividerIndex: Int) -> CGFloat {
+        max(proposedMinimum, 280)
+    }
+
+    func splitView(_ splitView: NSSplitView, constrainMaxCoordinate proposedMaximum: CGFloat,
+                   ofSubviewAt dividerIndex: Int) -> CGFloat {
+        min(proposedMaximum, splitView.bounds.width - splitView.dividerThickness - 300)
     }
 
     func setRoot(
@@ -1001,11 +1048,10 @@ final class RelationWindowController: NSViewController,
         _ outlineView: NSOutlineView,
         heightOfRowByItem item: Any
     ) -> CGFloat {
-        guard let node = item as? RelationTreeModel.Node else { return 24 }
+        guard let node = item as? RelationTreeModel.Node else { return 22 }
         return switch node.kind {
         case .edge, .root: 44
-        case .group, .truncated, .loading, .error: 26
-        case .evidenceLine: 24
+        case .group, .truncated, .loading, .error, .evidenceLine: 22
         }
     }
 
@@ -1681,6 +1727,7 @@ private final class ResolutionInspectorView: NSView {
         scrollView.documentView = documentView
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -1693,6 +1740,7 @@ private final class ResolutionInspectorView: NSView {
 
         nodeTitle.font = .systemFont(ofSize: 13, weight: .semibold)
         nodeTitle.lineBreakMode = .byTruncatingMiddle
+        nodeTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         badge.setContentHuggingPriority(.required, for: .horizontal)
         nodeTitle.setContentHuggingPriority(.required, for: .horizontal)
         let identitySpacer = NSView()
@@ -1909,6 +1957,7 @@ private final class ResolutionInspectorView: NSView {
             captureChip.isHidden = true
         }
         nodeTitle.stringValue = display.nodeTitle
+        nodeTitle.toolTip = display.nodeTitle
         switch display.badge {
         case .verified:
             badge.display(
@@ -2016,15 +2065,13 @@ private final class ResolutionInspectorView: NSView {
             let valueLabel = NSTextField(wrappingLabelWithString: value)
             valueLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             valueLabel.textColor = theme.chromeSecondaryColor
+            valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let row = NSStackView(views: [keyLabel, valueLabel])
             row.orientation = .horizontal
             row.alignment = .firstBaseline
             row.spacing = 8
             auditStack.addArrangedSubview(row)
-            valueLabel.widthAnchor.constraint(
-                lessThanOrEqualTo: auditStack.widthAnchor,
-                constant: -78
-            ).isActive = true
+            row.widthAnchor.constraint(equalTo: auditStack.widthAnchor).isActive = true
         }
     }
 
@@ -2136,6 +2183,7 @@ private final class RelationCellView: NSTableCellView {
     }
 
     func display(_ node: RelationTreeModel.Node, theme: ReaderTheme) {
+        titleLabel.toolTip = node.title
         spinner.stopAnimation(nil)
         spinner.isHidden = true
         locationLabel.isHidden = true

@@ -1,6 +1,7 @@
 import AppKit
 import CodeInsightAppModel
 import CodeInsightReaderCore
+import CodeInsightReaderUI
 import CodeInsightExact
 import SwiftUI
 
@@ -73,10 +74,9 @@ final class ReaderSettingsWindowController: NSWindowController {
         let controls = collect(contentView).compactMap { $0 as? NSControl }
             .filter(isVisible)
         let sliders = controls.compactMap { $0 as? NSSlider }
-        guard sliders.count == 5 else {
-            return ([], [], contentView.bounds)
+        let visualSliders = sliders.filter {
+            $0.accessibilityLabel() != "Line height"
         }
-        let visualSliders = Array(sliders.dropFirst())
         let visualIdentities = Set(visualSliders.map(ObjectIdentifier.init))
         func frame(_ view: NSView) -> NSRect {
             view.convert(view.bounds, to: contentView)
@@ -86,7 +86,8 @@ final class ReaderSettingsWindowController: NSWindowController {
             controls.filter {
                 !visualIdentities.contains(ObjectIdentifier($0))
             }.map(frame),
-            contentView.bounds
+            visualSliders.first?.enclosingScrollView.map { frame($0.contentView) }
+                ?? contentView.bounds
         )
     }
 
@@ -98,6 +99,30 @@ final class ReaderSettingsWindowController: NSWindowController {
         return collect(contentView).count { view in
             String(describing: type(of: view)) == "PlatformSwitch"
         }
+    }
+
+    static func selfTestEnableAccessibility() {
+        NSApplication.shared.accessibilitySetValue(
+            true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+        )
+    }
+
+    var selfTestReaderAccessibilityElements: [AnyObject] {
+        // SwiftUI's virtual nodes implement the AX selectors without
+        // declaring NSAccessibilityProtocol conformance.
+        func collect(_ element: AnyObject) -> [AnyObject] {
+            [element] + (element.accessibilityChildren?() ?? [])
+                .flatMap { collect($0 as AnyObject) }
+        }
+        guard let contentView = window?.contentView else { return [] }
+        return collect(contentView)
+    }
+
+    @discardableResult
+    func selfTestPressReaderControl(_ label: String) -> Bool {
+        selfTestReaderAccessibilityElements.filter {
+            $0.accessibilityLabel?() == label || $0.accessibilityTitle?() == label
+        }.contains { $0.accessibilityPerformPress?() ?? false }
     }
 }
 
@@ -152,87 +177,112 @@ private struct SettingsView: View {
             .tabItem { Label("Exact", systemImage: "checkmark.shield") }
         }
         .padding()
-        .frame(width: 560, height: 520)
+        .frame(width: 600, height: 620)
     }
 }
 
 private struct ReaderSettingsView: View {
+    let suppliedSettings: ReaderSettings
     @State private var settings: ReaderSettings
+    @State private var showsAdvancedTypography = false
     let onChange: @MainActor (ReaderSettings) -> Void
 
     init(
         settings: ReaderSettings,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
+        suppliedSettings = settings
         _settings = State(initialValue: settings)
         self.onChange = onChange
     }
 
     var body: some View {
-        Form {
-            Picker("Theme", selection: $settings.theme) {
-                ForEach(ReaderSettings.Theme.allCases, id: \.self) { theme in
-                    Text(theme.rawValue).tag(theme)
-                }
-            }
-
-            LabeledContent("Line height") {
-                HStack {
-                    Slider(
+        VStack(spacing: 12) {
+            ScrollViewReader { proxy in
+                Form {
+                    Picker("Theme", selection: $settings.theme) {
+                        ForEach(ReaderSettings.Theme.allCases, id: \.self) { theme in
+                            Text(theme.rawValue).tag(theme)
+                        }
+                    }
+                    Stepper(
+                        "Font size: \(settings.fontSize, specifier: "%.0f") pt",
+                        value: $settings.fontSize,
+                        in: ReaderSettings.fontSizeRange,
+                        step: 1
+                    )
+                    valueControl(
+                        "Line height",
                         value: $settings.lineHeightMultiple,
-                        in: ReaderSettings.lineHeightRange,
+                        range: ReaderSettings.lineHeightRange,
                         step: 0.05
                     )
-                    Text(settings.lineHeightMultiple, format: .number.precision(.fractionLength(2)))
-                        .monospacedDigit()
-                        .frame(width: 36, alignment: .trailing)
+                    Toggle("Wrap lines", isOn: $settings.wrapLines)
+                    Toggle("Show line numbers", isOn: $settings.lineNumbers)
+
+                    DisclosureGroup("Advanced typography", isExpanded: $showsAdvancedTypography) {
+                        Stepper(
+                            "Function and type size: +\(settings.functionNameDelta, specifier: "%.0f") pt",
+                            value: $settings.functionNameDelta,
+                            in: ReaderSettings.functionNameDeltaRange,
+                            step: 1
+                        )
+                        valueControl(
+                            "Parameter use opacity",
+                            value: $settings.parameterReferenceAlpha,
+                            range: ReaderSettings.parameterReferenceAlphaRange,
+                            step: 0.01
+                        )
+                        valueControl(
+                            "Gutter marker opacity",
+                            value: $settings.declarationMarkerAlpha,
+                            range: ReaderSettings.declarationMarkerAlphaRange,
+                            step: 0.01
+                        )
+                        valueControl(
+                            "Function and type weight",
+                            value: $settings.functionDeclarationFontWeight,
+                            range: ReaderSettings.functionDeclarationFontWeightRange,
+                            step: 0.05
+                        )
+                        valueControl(
+                            "Constant and module weight",
+                            value: $settings.declarationEmphasisFontWeight,
+                            range: ReaderSettings.declarationEmphasisFontWeightRange,
+                            step: 0.05
+                        )
+                        Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
+                        Toggle("Proportional comment font", isOn: $settings.humanistComments)
+                    }
+                    .accessibilityLabel("Advanced typography")
+                    .accessibilityAction { showsAdvancedTypography.toggle() }
+                    .id("advancedTypography")
+                }
+                .formStyle(.grouped)
+                .onChange(of: showsAdvancedTypography) { _, expanded in
+                    if expanded { proxy.scrollTo("advancedTypography", anchor: .top) }
                 }
             }
-
-            Stepper(
-                "Font size: \(settings.fontSize, specifier: "%.0f") pt",
-                value: $settings.fontSize,
-                in: ReaderSettings.fontSizeRange,
-                step: 1
-            )
-            Stepper(
-                "Function name: +\(settings.functionNameDelta, specifier: "%.0f") pt",
-                value: $settings.functionNameDelta,
-                in: ReaderSettings.functionNameDeltaRange,
-                step: 1
-            )
-            valueControl(
-                "Parameter reference opacity",
-                value: $settings.parameterReferenceAlpha,
-                range: ReaderSettings.parameterReferenceAlphaRange,
-                step: 0.01
-            )
-            valueControl(
-                "Declaration marker opacity",
-                value: $settings.declarationMarkerAlpha,
-                range: ReaderSettings.declarationMarkerAlphaRange,
-                step: 0.01
-            )
-            valueControl(
-                "Function / declaration title weight",
-                value: $settings.functionDeclarationFontWeight,
-                range: ReaderSettings.functionDeclarationFontWeightRange,
-                step: 0.05
-            )
-            valueControl(
-                "Declaration emphasis weight",
-                value: $settings.declarationEmphasisFontWeight,
-                range: ReaderSettings.declarationEmphasisFontWeightRange,
-                step: 0.05
-            )
-            Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
-            Toggle("Use humanist font for comments", isOn: $settings.humanistComments)
-            Toggle("Show line numbers", isOn: $settings.lineNumbers)
-            Toggle("Wrap lines", isOn: $settings.wrapLines)
-                .accessibilityLabel("Wrap lines")
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Preview").font(.headline)
+                    Spacer()
+                    Text("Rust · updates as you change settings")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                ReaderSettingsPreview(settings: settings)
+                    .frame(height: 180)
+                    .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
+            }
+            HStack {
+                Spacer()
+                Button("Restore Reader Defaults") { settings = ReaderSettings() }
+                    .disabled(settings == ReaderSettings())
+            }
         }
-        .formStyle(.grouped)
-        .padding()
+        .padding(12)
+        .onChange(of: suppliedSettings) { _, value in settings = value }
         .onChange(of: settings) { _, value in
             onChange(value)
         }
@@ -244,14 +294,106 @@ private struct ReaderSettingsView: View {
         range: ClosedRange<Double>,
         step: Double
     ) -> some View {
-        LabeledContent(label) {
-            HStack {
-                Slider(value: value, in: range, step: step)
-                Text(value.wrappedValue, format: .number.precision(.fractionLength(2)))
-                    .monospacedDigit()
-                    .frame(width: 40, alignment: .trailing)
-            }
+        HStack {
+            Text(label)
+                .frame(width: 190, alignment: .leading)
+                .accessibilityHidden(true)
+            Slider(value: value, in: range, step: step)
+                .accessibilityLabel(label)
+                .accessibilityValue(value.wrappedValue.formatted(
+                    .number.precision(.fractionLength(2))
+                ))
+            Text(value.wrappedValue, format: .number.precision(.fractionLength(2)))
+                .monospacedDigit()
+                .frame(width: 40, alignment: .trailing)
+                .accessibilityHidden(true)
         }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+private struct ReaderSettingsPreview: NSViewRepresentable {
+    let settings: ReaderSettings
+    private static let document: ReaderDocument = {
+        let plain = ReaderDocument(bytes: Array("""
+            // A small cache for names returned by the service.
+            const MAX_VISITS: usize = 3;
+            struct NameCache { names: Vec<String> }
+
+            fn greet(name: &str, count: usize) -> String {
+                let message = format!("Hello, {} — welcome back to your reading workspace", name);
+                println!("{} visits: {}", count, message);
+                message
+            }
+            """.utf8))
+        return (try? DocumentLoader().loadSyntax(for: plain)) ?? plain
+    }()
+
+    func makeNSView(context: Context) -> ReaderSettingsPreviewScrollView {
+        ReaderSettingsPreviewScrollView(settings: settings, document: Self.document)
+    }
+
+    func updateNSView(_ scrollView: ReaderSettingsPreviewScrollView, context: Context) {
+        scrollView.apply(settings: settings)
+    }
+}
+
+private final class ReaderSettingsPreviewScrollView: NSScrollView {
+    private let reader: ReaderTextView
+    private let document: ReaderDocument
+    private var settings: ReaderSettings
+    private var displayed = false
+
+    init(settings: ReaderSettings, document: ReaderDocument) {
+        reader = ReaderTextView(settings: settings)
+        self.settings = settings
+        self.document = document
+        super.init(frame: .zero)
+        hasVerticalScroller = true
+        hasHorizontalScroller = true
+        autohidesScrollers = true
+        documentView = reader.view
+        reader.view.setAccessibilityLabel("Reader settings preview")
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        guard !displayed, window != nil, !contentView.bounds.isEmpty else { return }
+        displayed = true
+        // Finish the first AppKit layout before installing TextKit's viewport styles.
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            reader.view.frame = NSRect(origin: .zero, size: contentView.bounds.size)
+            reader.configureGutter(in: self, lineNumbers: settings.lineNumbers)
+            reader.display(document: document)
+            scrollToBeginning()
+            reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+            reader.apply(settings: settings)
+        }
+    }
+
+    func apply(settings: ReaderSettings) {
+        self.settings = settings
+        guard displayed else { return }
+        let wasAtBeginning = abs(contentView.bounds.minX + contentView.contentInsets.left) < 0.5
+            && abs(contentView.bounds.minY + contentView.contentInsets.top) < 0.5
+        reader.apply(settings: settings)
+        if wasAtBeginning { scrollToBeginning() }
+    }
+
+    private func scrollToBeginning() {
+        contentView.scroll(to: NSPoint(
+            x: -contentView.contentInsets.left,
+            y: -contentView.contentInsets.top
+        ))
+        reflectScrolledClipView(contentView)
     }
 }
 

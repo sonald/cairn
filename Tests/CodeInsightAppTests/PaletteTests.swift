@@ -76,7 +76,9 @@ struct PaletteTests {
             "file:\(root.appendingPathComponent("alpha.rs").path)",
             "file:\(root.appendingPathComponent("deep/nested/alpha.rs").path)",
         ])
-        #expect(PalettePanel.fileRows(query: "nested", tree: tree, tabs: []).isEmpty)
+        #expect(PalettePanel.fileRows(query: "nested", tree: tree, tabs: []).count == 2)
+        #expect(PalettePanel.fileRows(query: "src/main.rs", tree: tree, tabs: []).map(\.identity)
+            == ["file:\(srcMain.path)"])
     }
 
     @Test
@@ -297,13 +299,32 @@ struct PaletteTests {
             commands: commands
         )
         #expect(panel.rowsForTesting.count == 20)
-        #expect(panel.footerForTesting == "… 还有 5 条")
+        #expect(panel.footerForTesting == "5 more results")
         #expect(panel.originalResponderForTesting == nil)
-        #expect(panel.window?.frame.width == 380)
-        #expect(panel.window?.frame.height == 258)
-
+        let manyFrame = panel.window!.frame
+        let inputTop = panel.inputFrameForTesting.maxY + manyFrame.minY
+        let table = panel.tableViewForTesting
+        let scroll = table.enclosingScrollView!
+        #expect(scroll.hasVerticalScroller)
+        #expect(scroll.documentVisibleRect.height < table.rect(ofRow: 19).maxY)
+        // Always-visible system scrollers must not take space from one result.
+        scroll.scrollerStyle = .legacy
         panel.setQueryForTesting("> Item 05")
         #expect(panel.rowsForTesting.map(\.title) == ["Go ▸ Item 05"])
+        #expect(panel.window!.frame.maxY == manyFrame.maxY)
+        #expect(panel.inputFrameForTesting.maxY + panel.window!.frame.minY == inputTop)
+        #expect(scroll.hasVerticalScroller == false)
+        #expect(scroll.documentVisibleRect.contains(table.rect(ofRow: 0)))
+        #expect(table.rect(ofRow: 0).height >= 30)
+        #expect(table.rect(ofRow: 0).width == scroll.contentSize.width)
+        panel.setQueryForTesting("> unavailable-command")
+        #expect(panel.rowsForTesting.isEmpty)
+        #expect(panel.emptyMessageForTesting == "No commands found")
+        #expect(panel.selectedIndexForTesting == nil)
+        #expect(scroll.isHidden)
+        #expect(scroll.hasVerticalScroller == false)
+        #expect(panel.window!.frame.maxY == manyFrame.maxY)
+        panel.setQueryForTesting("> Item 05")
         panel.setQueryForTesting("> Item")
         #expect(panel.selectedIndexForTesting == 5)
         panel.setQueryForTesting("> Item 12")
@@ -314,6 +335,40 @@ struct PaletteTests {
         #expect(sentTargetMatches)
         #expect(sentTitle == "Item 12")
         #expect(executionOrder == ["restore", "validate", "send"])
+    }
+
+    @Test
+    func placementTracksOwnerContentAndKeepsAllResultStatesOnScreen() {
+        let screen = NSRect(x: 0, y: 0, width: 2400, height: 1400)
+        let owner = NSRect(x: 200, y: 200, width: 1200, height: 900)
+        let many = PalettePanel.frame(relativeTo: owner, visibleFrame: screen, height: 325)
+        let single = PalettePanel.frame(relativeTo: owner, visibleFrame: screen, height: 115)
+        let empty = PalettePanel.frame(relativeTo: owner, visibleFrame: screen, height: 133)
+        #expect(many.width == 600)
+        #expect(many.midX == owner.midX)
+        #expect(many.maxY == owner.maxY - owner.height * 0.15)
+        #expect(many.maxY == single.maxY && single.maxY == empty.maxY)
+
+        let movedOwner = owner.offsetBy(dx: 180, dy: -90)
+        let moved = PalettePanel.frame(relativeTo: movedOwner, visibleFrame: screen, height: 325)
+        #expect(moved == many.offsetBy(dx: 180, dy: -90))
+        for (width, expected) in [(480.0, 432.0), (1000.0, 560.0), (1800.0, 760.0)] {
+            let resized = PalettePanel.frame(
+                relativeTo: NSRect(x: 200, y: 200, width: width, height: 900),
+                visibleFrame: screen,
+                height: 325
+            )
+            #expect(abs(resized.width - CGFloat(expected)) < 0.01)
+        }
+        // A secondary display can have a negative origin; a partly offscreen
+        // owner uses its visible content area for placement.
+        let secondary = NSRect(x: -1440, y: 200, width: 1440, height: 900)
+        let clippedOwner = NSRect(x: -1700, y: 100, width: 1000, height: 1200)
+        let clipped = PalettePanel.frame(relativeTo: clippedOwner, visibleFrame: secondary, height: 325)
+        #expect(secondary.contains(clipped))
+        #expect(clipped.midX == clippedOwner.intersection(secondary).midX)
+        let small = NSRect(x: 0, y: 0, width: 800, height: 300)
+        #expect(small.contains(PalettePanel.frame(relativeTo: small, visibleFrame: small, height: 325)))
     }
 
     @Test
@@ -341,7 +396,7 @@ struct PaletteTests {
         #expect(panel.inputSelectionForTesting == NSRange(location: 15, length: 0))
         #expect(await waitUntil(timeout: .seconds(10)) {
             panel.rowsForTesting.count == 20
-                && panel.footerForTesting == "… 还有 35 条"
+                && panel.footerForTesting == "35 more results"
                 && panel.rowsForTesting.allSatisfy {
                     $0.title.hasPrefix("target_symbol_")
                 }
@@ -358,14 +413,12 @@ struct PaletteTests {
         )
         defer { panel.close() }
         panel.show(prefill: "#", lockMode: true, relativeTo: nil)
-        #expect(
-            panel.rowsForTesting.map(\.title) == ["Type a project symbol"]
-        )
+        #expect(panel.rowsForTesting.isEmpty)
+        #expect(panel.emptyMessageForTesting == "Type a project symbol")
 
         panel.setQueryForTesting("> Item")
-        #expect(
-            panel.rowsForTesting.map(\.title) == ["No project symbols found"]
-        )
+        #expect(panel.rowsForTesting.isEmpty)
+        #expect(panel.emptyMessageForTesting == "No project symbols found")
     }
 
     @Test
@@ -431,19 +484,17 @@ struct PaletteTests {
         defer { panel.close() }
 
         panel.prepareForTesting(prefill: "@", owner: nil, commands: [])
-        #expect(panel.rowsForTesting.map(\.title) == [
-            "Reading Set has no active file",
-        ])
+        #expect(panel.rowsForTesting.isEmpty)
+        #expect(panel.emptyMessageForTesting == "Reading Set has no active file")
         panel.setQueryForTesting(":12")
-        #expect(panel.rowsForTesting.map(\.title) == [
-            "Reading Set has no active file",
-        ])
+        #expect(panel.rowsForTesting.isEmpty)
+        #expect(panel.emptyMessageForTesting == "Reading Set has no active file")
         panel.setQueryForTesting("")
-        #expect(panel.rowsForTesting.map(\.title) == ["No project open"])
+        #expect(panel.emptyMessageForTesting == "No project open")
         panel.setQueryForTesting("#")
-        #expect(panel.rowsForTesting.map(\.title) == ["Type a project symbol"])
+        #expect(panel.emptyMessageForTesting == "Type a project symbol")
         panel.setQueryForTesting(">")
-        #expect(panel.rowsForTesting.map(\.title) == ["No commands found"])
+        #expect(panel.emptyMessageForTesting == "No commands found")
     }
 }
 

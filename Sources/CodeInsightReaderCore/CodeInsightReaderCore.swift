@@ -14,6 +14,13 @@ public enum HighlightKind: UInt8, Sendable {
     case declarationTitle
     case declarationEmphasis
     case commentFigure
+    case functionCall
+    case property
+    case macro
+    case attribute
+    case parameter
+    case localBinding
+    case enumMember
 }
 
 public enum CommentContentKind: Sendable {
@@ -100,6 +107,8 @@ public enum OutlineKind: String, Hashable, Sendable {
     case `static`
     case typeAlias
     case `class`
+    case field
+    case enumMember
 }
 
 public struct OutlineFacet: Equatable, Sendable {
@@ -108,19 +117,22 @@ public struct OutlineFacet: Equatable, Sendable {
     public let range: CodeInsightCore.ByteRange
     public let nameRange: CodeInsightCore.ByteRange
     public let depth: Int
+    public let detail: String
 
     public init(
         kind: OutlineKind,
         name: String,
         range: CodeInsightCore.ByteRange,
         nameRange: CodeInsightCore.ByteRange,
-        depth: Int
+        depth: Int,
+        detail: String = ""
     ) {
         self.kind = kind
         self.name = name
         self.range = range
         self.nameRange = nameRange
         self.depth = depth
+        self.detail = detail
     }
 }
 
@@ -423,7 +435,8 @@ public final class ReaderDocument: Sendable {
         switch kind {
         case .keyword, .comment, .commentFigure, .string, .number:
             true
-        case .functionName, .typeName, .declarationTitle, .declarationEmphasis:
+        case .functionName, .typeName, .declarationTitle, .declarationEmphasis,
+             .functionCall, .property, .macro, .attribute, .parameter, .localBinding, .enumMember:
             false
         }
     }
@@ -442,6 +455,42 @@ public enum FileTier: String, Sendable {
         } else {
             self = .huge
         }
+    }
+}
+
+func appendLocalBindingHighlights(
+    bindings: [BindingRecord],
+    referencesByBinding: [[CodeInsightCore.ByteRange]],
+    spans: inout [HighlightSpan]
+) {
+    let existing = spans.sorted { $0.range.lowerBound < $1.range.lowerBound }
+    var candidates: [HighlightSpan] = []
+    for (index, binding) in bindings.enumerated() {
+        let kind: HighlightKind
+        switch binding.kind {
+        case .param: kind = .parameter
+        case .letBinding, .assignment, .patternBinding: kind = .localBinding
+        case .importBinding, .globalDecl, .nonlocalDecl: continue
+        }
+        candidates.append(HighlightSpan(range: binding.declarationRange, kind: kind))
+        for range in referencesByBinding[index] {
+            candidates.append(HighlightSpan(range: range, kind: kind))
+        }
+    }
+    candidates.sort { $0.range.lowerBound < $1.range.lowerBound }
+    var cursor = 0
+    var previousEnd: UInt32 = 0
+    for candidate in candidates {
+        while cursor < existing.count,
+              existing[cursor].range.upperBound <= candidate.range.lowerBound {
+            cursor += 1
+        }
+        guard candidate.range.lowerBound >= previousEnd,
+              cursor == existing.count
+                || existing[cursor].range.lowerBound >= candidate.range.upperBound
+        else { continue }
+        spans.append(candidate)
+        previousEnd = candidate.range.upperBound
     }
 }
 
@@ -514,6 +563,7 @@ public struct RustHighlighter: Sendable {
         }
 
         var spans: [HighlightSpan] = []
+        var roles: [Range<UInt32>: HighlightKind] = [:]
         var facets: [OutlineFacet] = []
         var foldCandidates = FoldCandidateAccumulator()
         var stack: [(
@@ -528,13 +578,29 @@ public struct RustHighlighter: Sendable {
         while let current = stack.popLast() {
             let node = current.node
             let kind = node.kind
+            if kind == "call_expression",
+               let function = node.child(namedField: "function"),
+               let name = callableName(in: function) {
+                roles[name.byteRange.lowerBound..<name.byteRange.upperBound] = .functionCall
+            } else if kind == "macro_invocation",
+                      let macro = node.child(namedField: "macro"),
+                      let name = callableName(in: macro) {
+                roles[name.byteRange.lowerBound..<name.byteRange.upperBound] = .macro
+            } else if kind == "attribute",
+                      let name = node.namedChildren.first.flatMap(callableName) {
+                roles[name.byteRange.lowerBound..<name.byteRange.upperBound] = .attribute
+            }
             foldCandidates.visit(
                 node: node,
                 foldDepth: current.foldDepth,
                 bytes: bytes
             )
             let highlight: HighlightKind?
-            if Self.comments.contains(kind) {
+            if let role = roles[node.byteRange.lowerBound..<node.byteRange.upperBound] {
+                highlight = role
+            } else if kind == "field_identifier" {
+                highlight = .property
+            } else if Self.comments.contains(kind) {
                 let range = coreRange(node)
                 highlight = text(in: bytes, range: range).map {
                     CommentContentKind.classify($0) == .figure
@@ -579,13 +645,17 @@ public struct RustHighlighter: Sendable {
                         name: name,
                         range: coreRange(node),
                         nameRange: nameRange,
-                        depth: current.depth
+                        depth: current.depth,
+                        detail: outlineDetail(node: node, kind: outline.kind, bytes: bytes)
                     ))
                 }
             }
 
             let isContainer = kind == "impl_item"
                 || kind == "trait_item"
+                || kind == "struct_item"
+                || kind == "enum_item"
+                || kind == "enum_variant"
                 || (kind == "mod_item" && node.namedChildren.contains {
                     $0.kind == "declaration_list"
                 })
@@ -630,14 +700,19 @@ public struct RustHighlighter: Sendable {
                 }
             }
         }
-        spans.sort {
-            ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
-                < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
-        }
         let references = RustExtractor().localReferences(
             tree: tree,
             bytes: bytes
         )
+        appendLocalBindingHighlights(
+            bindings: references.bindings,
+            referencesByBinding: references.referencesByBinding,
+            spans: &spans
+        )
+        spans.sort {
+            ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
+                < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
+        }
         let folds = foldCandidates.resolve(
             outlineFacets: facets,
             observer: resolutionObserver
@@ -663,6 +738,10 @@ public struct RustHighlighter: Sendable {
             .declarationEmphasis
         case .impl:
             nil
+        case .field:
+            .property
+        case .enumMember:
+            .enumMember
         }
     }
 
@@ -707,11 +786,55 @@ public struct RustHighlighter: Sendable {
         case "type_item":
             kind = .typeAlias
             nameNode = node.namedChildren.first { $0.kind == "type_identifier" }
+        case "field_declaration":
+            kind = .field
+            nameNode = node.child(namedField: "name")
+        case "enum_variant":
+            kind = .enumMember
+            nameNode = node.child(namedField: "name")
         default:
             return nil
         }
         guard let nameNode else { return nil }
         return (kind, nameNode)
+    }
+
+    private func callableName(in node: Node) -> Node? {
+        switch node.kind {
+        case "identifier", "field_identifier": return node
+        case "scoped_identifier": return node.child(namedField: "name")
+        case "field_expression": return node.child(namedField: "field")
+        case "generic_function":
+            return node.child(namedField: "function").flatMap(callableName)
+        default: return nil
+        }
+    }
+
+    private func outlineDetail(node: Node, kind: OutlineKind, bytes: [UInt8]) -> String {
+        func source(_ child: Node?) -> String {
+            guard let child else { return "" }
+            return text(in: bytes, range: coreRange(child))?
+                .split(whereSeparator: \.isWhitespace).joined(separator: " ") ?? ""
+        }
+        let detail: String
+        switch kind {
+        case .fn, .method:
+            let parameters = source(node.child(namedField: "parameters"))
+            let returns = source(node.child(namedField: "return_type"))
+            detail = parameters + (returns.isEmpty ? "" : " -> " + returns)
+        case .field, .const, .static:
+            let type = source(node.child(namedField: "type"))
+            detail = type.isEmpty ? "" : ": " + type
+        case .typeAlias:
+            let type = source(node.child(namedField: "type"))
+            detail = type.isEmpty ? "" : "= " + type
+        case .enumMember:
+            detail = source(node.child(namedField: "body"))
+        case .struct:
+            detail = source(node.namedChildren.first { $0.kind == "ordered_field_declaration_list" })
+        default: detail = ""
+        }
+        return detail.count > 120 ? String(detail.prefix(117)) + "…" : detail
     }
 
     private func implementedTypeName(in node: Node) -> Node? {

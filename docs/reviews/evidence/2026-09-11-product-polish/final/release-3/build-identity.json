@@ -1,0 +1,11 @@
+{
+  "baseline": "695a2d9f21f2a46871b5b44c27907605b82cd907",
+  "sourcePatchSha256": "084a74d11687fd24ed7bebc9734aa2d0ff4995e0f9a16c7cc43b2577a79ccebc",
+  "binarySha256": "4689f773624467f35b9c258ff4e7417da5f1096d6c71364c2eb522f1891f9de6",
+  "bundleIdentifier": "dev.cairn.Cairn.PolishFinal.20260911",
+  "buildVersion": "20260911.3",
+  "appPath": "/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-final/Cairn.app",
+  "zipPath": "/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-final/Cairn.zip",
+  "libgit2": "vendored static",
+  "notarized": false
+}

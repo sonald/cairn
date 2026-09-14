@@ -1490,8 +1490,8 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
     #expect(reader.renderingCoordinator.referenceStyledFragmentCount > 0)
     #expect(reader.renderingCoordinator.referenceAttributeRunCount > 0)
     #expect(referenceRanges.allSatisfy { reference in
-        document.highlightSpans.allSatisfy {
-            !$0.range.overlaps(reference)
+        document.highlightSpans.contains {
+            $0.range == reference && ($0.kind == .parameter || $0.kind == .localBinding)
         }
     })
     #expect(abs(
@@ -1539,7 +1539,9 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
     window.displayIfNeeded()
     #expect(reader.renderingCoordinator.referenceStyledFragmentCount == 0)
     #expect(reader.renderingCoordinator.referenceAttributeRunCount == 0)
-    #expect(renderedColors(in: reader, intersecting: paramRange).isEmpty)
+    #expect(renderedColors(in: reader, intersecting: paramRange).contains {
+        colorsEqual($0, ReaderTheme(settings: ReaderSettings()).color(for: .parameter))
+    })
     let typeSpan = try #require(highlighted.spans.first { $0.kind == .typeName })
     let typeRange = try #require(document.byteUTF16Map.nsRange(
         byteLowerBound: Int(typeSpan.range.lowerBound),
@@ -1551,7 +1553,7 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
 
 @MainActor
 @Test
-func defaultVisualSettingsMatchLegacyRenderingSnapshotByteForByte() throws {
+func defaultVisualSettingsRenderRestrainedDeclarationsAndParameterRoles() throws {
     let fixture = try visualSettingsFixture()
     let (reader, _, window) = renderOffscreen(fixture.document)
     let storage = try #require(reader.view.textStorage)
@@ -1575,16 +1577,16 @@ func defaultVisualSettingsMatchLegacyRenderingSnapshotByteForByte() throws {
     )
     let legacyTheme = ReaderTheme(settings: ReaderSettings())
     let expected = visualSnapshotData(
-        parameterColor: legacyTheme.foregroundColor.withAlphaComponent(0.72),
+        parameterColor: legacyTheme.color(for: .parameter).withAlphaComponent(0.9),
         markerColor: legacyTheme.color(for: .functionName).withAlphaComponent(0.7),
         functionFont: .monospacedSystemFont(
             ofSize: legacyTheme.functionNameFontSize,
-            weight: .semibold
+            weight: NSFont.Weight(rawValue: legacyTheme.functionDeclarationFontWeight)
         ),
-        functionKern: 0.15,
+        functionKern: 0,
         emphasisFont: .monospacedSystemFont(
             ofSize: legacyTheme.fontSize,
-            weight: .semibold
+            weight: NSFont.Weight(rawValue: legacyTheme.declarationEmphasisFontWeight)
         )
     )
 

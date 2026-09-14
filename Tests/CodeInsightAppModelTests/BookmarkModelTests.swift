@@ -678,6 +678,29 @@ func appModelCapturesOnlyTheCurrentReaderDocumentMatchingCapturedSource() async 
     #expect(bookmark.symbolName == "captured")
     #expect(bookmark.symbolKind == OutlineKind.fn.rawValue)
 
+    let navigationGeneration = model.navigationGeneration
+    let snapshotID = model.currentSnapshotID
+    let historyCount = model.navigationHistory.records.count
+    let trailNodeCount = model.readingTrail.nodes.count
+    let trailEdgeCount = model.readingTrail.edges.count
+    model.tabStrip.updateActiveSelection(8)
+
+    #expect(model.selectedByteOffset == 3)
+    #expect(model.bookmarkEligibility() == .eligible)
+    let movedBookmark = try #require(model.captureCurrentBookmark())
+    #expect(movedBookmark.byteOffset == 8)
+    #expect(movedBookmark.projectPath == bookmark.projectPath)
+    #expect(movedBookmark.path == bookmark.path)
+    #expect(movedBookmark.snapshot == bookmark.snapshot)
+    #expect(movedBookmark.contentID == captured.contentID)
+    #expect(movedBookmark.symbolName == bookmark.symbolName)
+    #expect(movedBookmark.symbolKind == bookmark.symbolKind)
+    #expect(model.currentSnapshotID == snapshotID)
+    #expect(model.navigationGeneration == navigationGeneration)
+    #expect(model.navigationHistory.records.count == historyCount)
+    #expect(model.readingTrail.nodes.count == trailNodeCount)
+    #expect(model.readingTrail.edges.count == trailEdgeCount)
+
     try "fn changed_on_disk() {}\n".write(to: file, atomically: true, encoding: .utf8)
     #expect(model.captureCurrentBookmark()?.contentID == captured.contentID)
 

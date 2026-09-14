@@ -58,7 +58,7 @@ public enum PanelPresetModel: String, CaseIterable, Sendable {
     }
 }
 
-public struct PanelLayoutDescription: Equatable, Sendable {
+public struct PanelLayoutDescription: Codable, Equatable, Sendable {
     public let sidebarCollapsed: Bool
     public let readerCollapsed: Bool
     public let contextCollapsed: Bool

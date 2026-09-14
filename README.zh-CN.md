@@ -41,6 +41,15 @@ Cairn 的文件树会显示跳过目录之外的常规非符号链接文件。�
 
 非源码预览不提供 outline、fold、relations、bookmark、compare/diff、Reading Height 或 search 控件；不会打开外链，也不承诺内联本地资源。
 
+## 阅读操作
+
+- `⌘P` 按文件名或项目内相对路径打开文件；`>` 查询命令，`@` 查询当前文件符号，`#` 查询项目符号，`:` 跳到行号。
+- 单击文件打开斜体的预览标签；双击文件、选择 **Open in New Tab**，或在标签右键菜单选择 **Keep Open**，即可保留。后续浏览复用预览标签，保留的标签不会被覆盖；重启恢复的标签也会保留。
+- 点击对比区的 **×**，或选择 **View → Close Comparison**（`⌃⌘W`），结束对比并返回保存的阅读布局。
+- Files 和 Outline 可分别收起；拖动它们之间或 Relations 边界的分隔条调整空间，布局会被记住。大纲可以展开到成员，并显示类型和签名摘要。
+- 状态栏的 **Context** 按钮显示或隐藏定义预览；空预览默认不占空间。信息按钮解释当前分析状态。
+- 设置首屏提供主题、字号、行高、折行和行号，并有实时代码预览；其余选项收在 **Advanced typography**。**Restore Reader Defaults** 应用当前默认排版，不影响项目数据。
+
 ## 可解释阅读工作流
 
 1. 打开项目，并选择项目中实际使用的语言。
@@ -74,8 +83,8 @@ Reading Trail 只属于当前应用会话，重启后按设计从空状态开始
 
 ```bash
 brew install libgit2
-swift build
-.build/debug/codeinsight-app
+CAIRN_LIBGIT2=brew bash scripts/make-app.sh
+open .build/distribution/Cairn.app
 ```
 
 构建可分发的 Cairn.app 时使用静态、关闭网络的 vendored libgit2：

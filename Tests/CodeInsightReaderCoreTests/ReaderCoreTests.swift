@@ -588,21 +588,21 @@ func pythonReaderSpansAndOutlineIncludeBasicSyntax() throws {
             name: "__init__",
             range: ByteRange(lowerBound: 18, upperBound: 79),
             nameRange: ByteRange(lowerBound: 22, upperBound: 30),
-            depth: 1
+            depth: 1, detail: "(self, name)"
         ),
         OutlineFacet(
             kind: .method,
             name: "render",
             range: ByteRange(lowerBound: 85, upperBound: 141),
             nameRange: ByteRange(lowerBound: 95, upperBound: 101),
-            depth: 1
+            depth: 1, detail: "(self)"
         ),
         OutlineFacet(
             kind: .fn,
             name: "make",
             range: ByteRange(lowerBound: 143, upperBound: 192),
             nameRange: ByteRange(lowerBound: 155, upperBound: 159),
-            depth: 0
+            depth: 0, detail: "() -> Widget"
         ),
     ])
     let comments = result.spans.filter { $0.kind == .comment }
@@ -641,6 +641,48 @@ func identifierOccurrencesUseTheDocumentLanguageMode() {
 }
 
 @Test
+func rustReaderRolesAndOutlineDescribeMembersWithoutGuessingReferences() throws {
+    let source = """
+        #[derive(Debug)]
+        struct State { value: usize }
+        enum Event { Ready, Value(usize), Failed { reason: String } }
+        impl State {
+            fn update(&mut self, input: usize) -> usize {
+                let local = input;
+                self.value = compute(local);
+                self.update::<usize>(input);
+                log::debug!("value", local);
+                unknown;
+                self.value
+            }
+        }
+        """
+    let bytes = Array(source.utf8)
+    let result = try RustHighlighter().highlight(bytes: bytes)
+    func tokens(_ kind: HighlightKind) -> [String] {
+        result.spans.filter { $0.kind == kind }.map { text(in: source, range: $0.range) }
+    }
+    #expect(tokens(.functionCall) == ["compute", "update"])
+    #expect(tokens(.macro) == ["debug"])
+    #expect(tokens(.attribute) == ["derive"])
+    #expect(tokens(.property) == ["value", "reason", "value", "value"])
+    #expect(tokens(.enumMember) == ["Ready", "Value", "Failed"])
+    #expect(tokens(.parameter).filter { $0 == "input" }.count == 3)
+    #expect(tokens(.localBinding).contains("local"))
+    #expect(!result.spans.contains { text(in: source, range: $0.range) == "unknown" })
+    for pair in zip(result.spans, result.spans.dropFirst()) {
+        #expect(pair.0.range.upperBound <= pair.1.range.lowerBound)
+    }
+    #expect(result.outlineFacets.map(\.name) == [
+        "State", "value", "Event", "Ready", "Value", "Failed", "reason", "State", "update",
+    ])
+    #expect(result.outlineFacets.map(\.depth) == [0, 1, 0, 1, 1, 1, 2, 0, 1])
+    #expect(result.outlineFacets.first { $0.kind == .field }?.detail == ": usize")
+    #expect(result.outlineFacets.first { $0.name == "Value" }?.detail == "(usize)")
+    #expect(result.outlineFacets.last?.detail == "(&mut self, input: usize) -> usize")
+}
+
+@Test
 func rustHighlighterProducesStableSpans() throws {
     let source = "fn greet(value: usize) -> String { // hi\n    let n = 42; \"ok\".to_string()\n}\n"
     let result = try RustHighlighter().highlight(bytes: Array(source.utf8))
@@ -651,12 +693,15 @@ func rustHighlighterProducesStableSpans() throws {
     #expect(snapshot == [
         "0..<2:keyword",
         "3..<8:functionName",
+        "9..<14:parameter",
         "16..<21:typeName",
         "26..<32:typeName",
         "35..<40:comment",
         "45..<48:keyword",
+        "49..<50:localBinding",
         "53..<55:number",
         "57..<61:string",
+        "62..<71:functionCall",
     ])
     #expect(result.outlineFacets == [OutlineFacet(
         kind: .fn,
@@ -666,7 +711,7 @@ func rustHighlighterProducesStableSpans() throws {
             upperBound: UInt32(source.dropLast().utf8.count)
         ),
         nameRange: ByteRange(lowerBound: 3, upperBound: 8),
-        depth: 0
+        depth: 0, detail: "(value: usize) -> String"
     )])
     let bodyOffset = UInt32(source[..<source.range(of: "let n")!.lowerBound].utf8.count)
     #expect(ReaderDocument(
@@ -871,6 +916,7 @@ func rustHighlighterProducesOutlineSnapshot() throws {
         "0:mod:outer:4..<9",
         "1:struct:Widget:23..<29",
         "1:enum:State:40..<45",
+        "2:enumMember:Ready:48..<53",
         "1:trait:Work:66..<70",
         "2:method:required:84..<92",
         "1:impl:Widget:125..<131",
@@ -1263,7 +1309,7 @@ func rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() throws {
             #expect(matching.map(\.kind) == [.declarationTitle])
         case .mod, .const, .static:
             #expect(matching.map(\.kind) == [.declarationEmphasis])
-        case .impl:
+        case .impl, .field, .enumMember:
             #expect(matching.isEmpty)
         }
     }
@@ -1297,6 +1343,7 @@ func rustHighlighterMatchesFixtureSnapshot() throws {
         "24..<26:keyword",
         "36..<38:keyword",
         "39..<43:functionName",
+        "48..<55:functionCall",
     ])
 }
 

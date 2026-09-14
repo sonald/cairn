@@ -1889,7 +1889,7 @@ public final class AppModel {
         guard let path = Self.relativePath(of: file, under: root) else {
             return .unavailable(.dependency)
         }
-        guard let byteOffset = selectedByteOffset ?? tabStrip.activeTab?.selectionByteOffset,
+        guard let byteOffset = tabStrip.activeTab?.selectionByteOffset ?? selectedByteOffset,
               document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil
         else {
             return .unavailable(.noSelection)
@@ -1907,7 +1907,7 @@ public final class AppModel {
               let file = tabStrip.activeTab?.fileURL,
               let path = Self.relativePath(of: file, under: root),
               let document = tabStrip.activeDocument,
-              let byteOffset = selectedByteOffset ?? tabStrip.activeTab?.selectionByteOffset,
+              let byteOffset = tabStrip.activeTab?.selectionByteOffset ?? selectedByteOffset,
               document.byteUTF16Map.utf16Offset(forByte: Int(byteOffset)) != nil,
               let line = document.lineTable.lineColumn(at: byteOffset)?.line,
               let anchor = currentBookmarkAnchor(),

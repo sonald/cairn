@@ -38,7 +38,6 @@ func pythonReaderHighlightWithFolds(
     var spans: [HighlightSpan] = []
     var facets: [OutlineFacet] = []
     var candidates = FoldCandidateAccumulator()
-    appendPythonKeywordSpans(root: tree.rootNode, spans: &spans)
     pythonWalk(
         tree.rootNode,
         bytes: bytes,
@@ -53,6 +52,11 @@ func pythonReaderHighlightWithFolds(
         observer: nil as (@Sendable (Double, Int, Int) -> Void)?
     )
     let refs = pythonLocalReferences(in: tree, bytes: bytes)
+    appendLocalBindingHighlights(
+        bindings: refs.bindings,
+        referencesByBinding: refs.referencesByBinding,
+        spans: &spans
+    )
     spans.sort {
         ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
             < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
@@ -65,11 +69,21 @@ private func pythonWalk(
     bytes: [UInt8],
     depth: Int,
     directClassMember: Bool,
+    role: HighlightKind? = nil,
     spans: inout [HighlightSpan],
     facets: inout [OutlineFacet],
     candidates: inout FoldCandidateAccumulator
 ) {
+    if !node.isNamed, pythonKeywords.contains(node.kind) {
+        spans.append(HighlightSpan(range: coreRange(node), kind: .keyword))
+        return
+    }
     switch node.kind {
+    case "identifier":
+        if let role {
+            spans.append(HighlightSpan(range: coreRange(node), kind: role))
+        }
+        return
     case "true", "false", "none":
         spans.append(HighlightSpan(range: coreRange(node), kind: .keyword))
         return
@@ -83,6 +97,13 @@ private func pythonWalk(
         spans.append(HighlightSpan(range: coreRange(node), kind: .comment))
         return
     case "decorated_definition":
+        for decorator in node.namedChildren where decorator.kind == "decorator" {
+            pythonWalk(
+                decorator, bytes: bytes, depth: depth,
+                directClassMember: false, spans: &spans,
+                facets: &facets, candidates: &candidates
+            )
+        }
         if let definition = node.child(namedField: "definition"),
            definition.kind == "function_definition"
             || definition.kind == "class_definition"
@@ -116,30 +137,53 @@ private func pythonWalk(
     default:
         break
     }
+    if node.kind == "assignment", directClassMember,
+       let name = node.child(namedField: "left"), name.kind == "identifier",
+       let text = pythonText(bytes, range: coreRange(name))
+    {
+        let detail = node.child(namedField: "type")
+            .flatMap { pythonText(bytes, range: coreRange($0)) }
+            .map { ": " + $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") } ?? ""
+        facets.append(OutlineFacet(
+            kind: .field, name: text, range: coreRange(node),
+            nameRange: coreRange(name), depth: depth, detail: detail
+        ))
+    }
     candidates.visitPython(node: node, foldDepth: depth, bytes: bytes)
-    for child in node.namedChildren {
-        let childDirect = directClassMember && node.kind == "block"
+    for index in 0..<node.childCount {
+        guard let child = node.child(at: index) else { continue }
+        let childDirect = directClassMember
+            && (node.kind == "block" || node.kind == "expression_statement")
+        let childRole: HighlightKind?
+        switch node.kind {
+        case "decorator", "parenthesized_expression":
+            childRole = node.kind == "decorator" ? .attribute : role
+        case "call":
+            childRole = child.byteRange == node.child(namedField: "function")?.byteRange
+                ? (role ?? .functionCall) : nil
+        case "attribute":
+            childRole = child.byteRange == node.child(namedField: "attribute")?.byteRange
+                ? (role ?? .property) : nil
+        case "assignment":
+            childRole = directClassMember
+                && child.byteRange == node.child(namedField: "left")?.byteRange
+                ? .property : nil
+        case "type", "generic_type", "member_type", "union_type":
+            childRole = .typeName
+        default:
+            childRole = role == .typeName ? role : nil
+        }
         pythonWalk(
             child,
             bytes: bytes,
             depth: depth,
             directClassMember: childDirect
                 || (directClassMember && node.kind == "class_definition"),
+            role: childRole,
             spans: &spans,
             facets: &facets,
             candidates: &candidates
         )
-    }
-}
-
-private func appendPythonKeywordSpans(
-    root: Node,
-    spans: inout [HighlightSpan]
-) {
-    for node in root.depthFirst() where !node.isNamed {
-        if pythonKeywords.contains(node.kind) {
-            spans.append(HighlightSpan(range: coreRange(node), kind: .keyword))
-        }
     }
 }
 
@@ -169,7 +213,8 @@ private func pythonDeclarationWalk(
                 name: text,
                 range: range,
                 nameRange: nameRange,
-                depth: depth
+                depth: depth,
+                detail: pythonDeclarationDetail(node, bytes: bytes)
             ))
         }
     }
@@ -180,6 +225,16 @@ private func pythonDeclarationWalk(
         bytes: bytes,
         headerOwner: headerOwner
     )
+    for index in 0..<node.childCount {
+        guard let child = node.child(at: index),
+              child.byteRange != node.child(namedField: "name")?.byteRange,
+              child.byteRange != node.child(namedField: "body")?.byteRange
+        else { continue }
+        pythonWalk(
+            child, bytes: bytes, depth: depth, directClassMember: false,
+            spans: &spans, facets: &facets, candidates: &candidates
+        )
+    }
     if let body = node.child(namedField: "body") {
         candidates.visitPython(node: body, foldDepth: depth, bytes: bytes)
         for child in body.namedChildren {
@@ -194,6 +249,19 @@ private func pythonDeclarationWalk(
             )
         }
     }
+}
+
+private func pythonDeclarationDetail(_ node: Node, bytes: [UInt8]) -> String {
+    guard let parameters = node.child(namedField: "parameters"),
+          let text = pythonText(bytes, range: coreRange(parameters))
+    else { return "" }
+    var detail = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    if let type = node.child(namedField: "return_type"),
+       let result = pythonText(bytes, range: coreRange(type))
+    {
+        detail += " -> " + result.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+    return detail
 }
 
 private func pythonText(

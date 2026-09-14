@@ -61,7 +61,9 @@ public extension ReaderTheme {
     }
 
     var chromeSelectionColor: NSColor {
-        selection == .auto ? .selectedContentBackgroundColor : dynamicColor(chromeSelectionRGB(isDark:))
+        // Custom rows keep their normal foreground, so use the matching
+        // subdued theme fill rather than AppKit's white-text selection fill.
+        dynamicColor(chromeSelectionRGB(isDark:))
     }
 
     var accentColor: NSColor {
@@ -1204,7 +1206,7 @@ public final class ReaderTextView {
         let containers = containing.filter {
             switch $0.kind {
             case .struct, .enum, .trait, .impl, .mod, .class: true
-            case .fn, .method, .const, .static, .typeAlias: false
+            case .fn, .method, .const, .static, .typeAlias, .field, .enumMember: false
             }
         }
         guard let facet = (declarations.isEmpty ? containers : declarations)
@@ -1814,7 +1816,7 @@ public final class ReaderTextView {
             scrollView.rulersVisible = false
             scrollView.verticalRulerView = nil
             ruler = nil
-            view.textContainerInset.width = 12
+            view.textContainerInset.width = 10
             scrollView.tile()
             configureWrapping(in: scrollView)
             return
@@ -1993,6 +1995,7 @@ public final class ReaderTextView {
         primarySelectionRange = displayRange
         view.selectedTextAttributes = [.backgroundColor: NSColor.clear]
         view.setSelectedRange(displayRange)
+        updateCurrentLine(byteOffset: range.lowerBound)
         refreshOccurrenceRendering()
         view.scrollRangeToVisible(displayRange)
         view.showFindIndicator(for: displayRange)
@@ -2409,14 +2412,21 @@ public final class ReaderTextView {
             + foldColumnWidth
             + bookmarkColumnWidth
             + diffColumnWidth
-        view.textContainerInset.width = 12 + ruler.ruleThickness
+        // NSScrollView already offsets its document view past the ruler.
+        view.textContainerInset.width = 10
         scrollView?.tile()
     }
 
     private var lineNumberColumnWidth: CGFloat {
         guard lineNumbers else { return 0 }
         let lineCount = displayedDocument?.lineTable.lineStarts.count ?? 1
-        return max(34, CGFloat(String(lineCount).count * 7 + 12))
+        return ceil((String(lineCount) as NSString).size(
+            withAttributes: [.font: lineNumberFont]
+        ).width) + 12
+    }
+
+    private var lineNumberFont: NSFont {
+        NSFont.monospacedDigitSystemFont(ofSize: max(10, theme.fontSize - 2), weight: .regular)
     }
 
     private var declarationColumnWidth: CGFloat {
@@ -2501,9 +2511,9 @@ public final class ReaderTextView {
             guard line == currentLineNumber else { return }
             let fragmentRect = fragmentRectInTextView(fragment)
             let rect = NSRect(
-                x: textView.visibleRect.minX + rulerThickness,
+                x: textView.visibleRect.minX,
                 y: fragmentRect.minY,
-                width: max(0, textView.visibleRect.width - rulerThickness),
+                width: textView.visibleRect.width,
                 height: fragmentRect.height
             ).intersection(dirtyRect)
             guard !rect.isNull else { return }
@@ -2557,10 +2567,7 @@ public final class ReaderTextView {
         theme.backgroundColor.setFill()
         dirtyRect.intersection(ruler.bounds).fill()
         var lines: [Int] = []
-        let font = NSFont.monospacedDigitSystemFont(
-            ofSize: 10,
-            weight: .regular
-        )
+        let font = lineNumberFont
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .right
         let foldsByLine: [Int: FoldRegion]
@@ -2594,7 +2601,12 @@ public final class ReaderTextView {
         enumerateVisibleLayoutFragments { fragment, line in
             let textRect = fragmentRectInTextView(fragment)
             let rulerRect = ruler.convert(textRect, from: view)
-            guard rulerRect.intersects(dirtyRect) else { return }
+            // Text lies beside the ruler. Test the gutter row, not the text's x range.
+            let rowRect = NSRect(
+                x: ruler.bounds.minX, y: rulerRect.minY,
+                width: ruler.bounds.width, height: rulerRect.height
+            )
+            guard rowRect.intersects(dirtyRect) else { return }
             if lineNumbers {
                 let labelRect = NSRect(
                     x: 2,
@@ -2775,7 +2787,7 @@ public final class ReaderTextView {
             path.line(to: NSPoint(x: rect.minX, y: rect.midY))
             path.close()
             path.fill()
-        case .mod, .const, .static:
+        case .mod, .const, .static, .field, .enumMember:
             NSRect(x: rect.minX, y: rect.midY - 0.5, width: rect.width, height: 1)
                 .fill()
         case .struct, .enum, .trait, .typeAlias, .class:
@@ -2794,6 +2806,10 @@ public final class ReaderTextView {
             color = theme.color(for: .typeName)
         case .mod, .const, .static:
             color = theme.color(for: .declarationEmphasis)
+        case .field:
+            color = theme.color(for: .property)
+        case .enumMember:
+            color = theme.color(for: .enumMember)
         }
         return color.withAlphaComponent(theme.declarationMarkerAlpha)
     }
@@ -2816,7 +2832,8 @@ public final class ReaderTextView {
         view.isSelectable = true
         view.isRichText = false
         view.drawsBackground = true
-        view.textContainerInset = NSSize(width: 12, height: 12)
+        view.textContainerInset = NSSize(width: 10, height: 12)
+        view.textContainer?.lineFragmentPadding = 0
         view.isVerticallyResizable = true
         view.isHorizontallyResizable = true
         view.minSize = .zero
@@ -2936,7 +2953,7 @@ public final class ReaderTextView {
                                 rawValue: theme.functionDeclarationFontWeight
                             )
                         ),
-                        .kern: 0.15,
+                        .kern: theme.functionNameFontSize > theme.fontSize ? 0.15 : 0,
                     ], range: safeRange)
                 case .declarationEmphasis:
                     attributed.addAttribute(
@@ -3148,7 +3165,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
     ) -> [String] {
         let order: [OutlineKind] = [
             .mod, .trait, .impl, .struct, .class, .enum, .typeAlias,
-            .const, .static, .fn, .method,
+            .const, .static, .fn, .method, .field, .enumMember,
         ]
         return order.compactMap { kind in
             guard let count = counts[kind], count > 0 else { return nil }

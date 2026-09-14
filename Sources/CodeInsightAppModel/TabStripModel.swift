@@ -7,6 +7,7 @@ public final class TabStripModel {
     public struct Tab {
         package fileprivate(set) var content: TabContent
         public var fileURL: URL? { content.fileURL }
+        public fileprivate(set) var isPreview: Bool
         public fileprivate(set) var scrollByteOffset: UInt32?
         public fileprivate(set) var selectionByteOffset: UInt32?
         package fileprivate(set) var readingSetScrollOffset: Double?
@@ -53,6 +54,7 @@ public final class TabStripModel {
         if let existing = tabs.firstIndex(where: {
             $0.fileURL?.standardizedFileURL == file
         }) {
+            if inNewTab { keepOpen(existing) }
             activate(existing)
             if let selectionByteOffset {
                 tabs[existing].selectionByteOffset = selectionByteOffset
@@ -63,6 +65,7 @@ public final class TabStripModel {
         activationClock &+= 1
         let tab = Tab(
             content: .file(file),
+            isPreview: !inNewTab,
             scrollByteOffset: nil,
             selectionByteOffset: selectionByteOffset,
             readingSetScrollOffset: nil,
@@ -72,7 +75,7 @@ public final class TabStripModel {
             selectionAnchor: nil,
             lastActivated: activationClock
         )
-        install(tab, inNewTab: inNewTab)
+        install(tab)
     }
 
     package func openReadingSet(
@@ -102,6 +105,7 @@ public final class TabStripModel {
         activationClock &+= 1
         let tab = Tab(
             content: .readingSet(title: title, excerpts: excerpts),
+            isPreview: false,
             scrollByteOffset: nil,
             selectionByteOffset: nil,
             readingSetScrollOffset: nil,
@@ -111,29 +115,29 @@ public final class TabStripModel {
             selectionAnchor: nil,
             lastActivated: activationClock
         )
-        install(tab, inNewTab: true)
+        install(tab)
     }
 
-    private func install(_ tab: Tab, inNewTab: Bool) {
+    private func install(_ tab: Tab) {
         activeDocument = nil
-        if tabs.isEmpty {
-            tabs = [tab]
-            activeIndex = 0
-        } else if inNewTab {
+        if tab.isPreview, let preview = tabs.firstIndex(where: \.isPreview) {
+            tabs[preview] = tab
+            activeIndex = preview
+        } else {
             if tabs.count == maximumCount {
                 let lru = tabs.indices.min {
                     tabs[$0].lastActivated < tabs[$1].lastActivated
                 }!
                 tabs.remove(at: lru)
-                if let activeIndex, lru < activeIndex {
-                    self.activeIndex = activeIndex - 1
-                }
             }
             tabs.append(tab)
             activeIndex = tabs.count - 1
-        } else if let activeIndex {
-            tabs[activeIndex] = tab
         }
+    }
+
+    package func keepOpen(_ index: Int) {
+        guard tabs.indices.contains(index) else { return }
+        tabs[index].isPreview = false
     }
 
     public func activate(_ index: Int) {

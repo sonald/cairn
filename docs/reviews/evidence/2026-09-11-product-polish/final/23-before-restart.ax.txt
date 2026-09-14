@@ -1,0 +1,937 @@
+Window: "Cairn", App: Cairn.
+0 standard window Cairn, Secondary Actions: Raise
+	1 container Description: Reading Trail, Value: actor.rs · open → actor.rs · search → actor.rs:99
+		2 text Reading Trail actor.rs ─open→ actor.rs ─search→ actor.rs:99
+		3 button Trail Details, Description: Show Reading Trail branches, Help: Show the semantic trail and its branches (⌥⌘T)
+	4 split group
+		5 split group
+			6 text Files
+			7 button Description: Collapse Files, Value: Expanded
+			8 button Collapse all files
+			9 scroll area Secondary Actions: Scroll Up, Scroll Down
+				10 outline Files
+					11 row (selectable, collapsed) Description: Folder, Value: .claude, Secondary Actions: Expand
+						12 disclosure triangle 0
+					13 row (selectable, collapsed) Description: Folder, Value: .codex-trace, Secondary Actions: Expand
+						14 disclosure triangle 0
+					15 row (selectable, collapsed) Description: Folder, Value: .zcache, Secondary Actions: Expand
+						16 disclosure triangle 0
+					17 row (selectable, expanded) Description: Folder, Value: crates, Secondary Actions: Collapse
+						18 disclosure triangle 1
+					19 row (selectable, expanded) Description: Folder, Value: ai, Secondary Actions: Collapse
+						20 disclosure triangle 1
+					21 row (selectable, collapsed) Description: Folder, Value: examples, Secondary Actions: Expand
+						22 disclosure triangle 0
+					23 row (selectable, collapsed) Description: Folder, Value: scripts, Secondary Actions: Expand
+						24 disclosure triangle 0
+					25 row (selectable, collapsed) Description: Folder, Value: src, Secondary Actions: Expand
+						26 disclosure triangle 0
+					27 row (selectable, collapsed) Description: Folder, Value: tests, Secondary Actions: Expand
+						28 disclosure triangle 0
+					29 row (selectable) Description: File, Value: .gitignore
+					30 row (selectable) Description: File, Value: Cargo.toml
+					31 row (selectable) Description: File, Value: README.md
+					32 row (selectable, expanded) Description: Folder, Value: knuth-agent, Secondary Actions: Collapse
+						33 disclosure triangle 1
+					34 row (selectable, expanded) Description: Folder, Value: examples, Secondary Actions: Collapse
+						35 disclosure triangle 1
+					36 row (selectable) Description: File, Value: actor.rs
+					37 row (selectable, expanded) Description: Folder, Value: src, Secondary Actions: Collapse
+						38 disclosure triangle 1
+					39 row (selectable, collapsed) Description: Folder, Value: hooks, Secondary Actions: Expand
+						40 disclosure triangle 0
+					41 row (selectable, collapsed) Description: Folder, Value: tools, Secondary Actions: Expand
+						42 disclosure triangle 0
+					43 row (selectable) Description: File, Value: actor.rs
+					44 row (selected) Description: File, Value: agent_step.rs
+					45 row (selectable) Description: File, Value: event_log.rs
+					46 row (selectable) Description: File, Value: harness.rs
+					47 row (selectable) Description: File, Value: lib.rs
+					48 row (selectable) Description: File, Value: Cargo.toml
+					49 row (selectable, collapsed) Description: Folder, Value: knuth-cli, Secondary Actions: Expand
+						50 disclosure triangle 0
+					51 row (selectable, collapsed) Description: Folder, Value: knuth-core, Secondary Actions: Expand
+						52 disclosure triangle 0
+					53 row (selectable, collapsed) Description: Folder, Value: docs, Secondary Actions: Expand
+						54 disclosure triangle 0
+					55 row (selectable) Description: File, Value: .env
+					56 row (selectable) Description: File, Value: .gitignore
+					57 row (selectable) Description: File, Value: Cargo.lock
+					58 row (selectable) Description: File, Value: Cargo.toml
+				59 scroll bar (settable, float) 0
+					60 value indicator (settable, float) 0
+					61 increment arrow button
+					62 decrement arrow button
+					63 increment page button
+					64 decrement page button
+			65 splitter (disabled, settable, float) 303.5
+			66 text Outline
+			67 button Description: Collapse Outline, Value: Expanded
+			68 button Collapse all outline
+			69 scroll area Secondary Actions: Scroll Up, Scroll Down
+				70 outline Outline
+					71 row (selectable, expanded) Secondary Actions: Collapse, Description: Enum AgentStepError
+Enum AgentStepError
+						72 disclosure triangle 1
+					73 row (selectable) Value: (String), Description: Enum case EventSendError
+Enum case EventSendError
+					74 row (selectable) Value: (String), Description: Enum case LLMError
+Enum case LLMError
+					75 row (selectable, expanded) Secondary Actions: Collapse, Description: Enum AgentStepActorMessage
+Enum AgentStepActorMessage
+						76 disclosure triangle 1
+					77 row (selectable) Value: (ai::AssistantMessageEvent), Description: Enum case StreamEvent
+Enum case StreamEvent
+					78 row (selectable) Enum case StreamEnded
+Enum case StreamEnded
+					79 row (selectable) Enum case Cancel
+Enum case Cancel
+					80 row (selectable, expanded) Secondary Actions: Collapse, Description: Struct AgentStepActor
+Struct AgentStepActor
+						81 disclosure triangle 1
+					82 row (selectable) Value: : Model, Description: Field model
+Field model
+					83 row (selectable) Value: : StreamOptions, Description: Field options
+Field options
+					84 row (selectable) Value: : mpsc::Sender<AgentActorMessage>, Description: Field store_tx
+Field store_tx
+					85 row (selectable) Value: : ai::Context, Description: Field context
+Field context
+					86 row (selectable) Value: : StepId, Description: Field step_id
+Field step_id
+					87 row (selectable) Value: : Generation, Description: Field generation
+Field generation
+					88 row (selectable) Value: : ModelStepEndReason, Description: Field step_reason
+Field step_reason
+					89 row (selectable) Value: : Option<AssistantMessage>, Description: Field assistant_message
+Field assistant_message
+					90 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation AgentStepActor
+Implementation AgentStepActor
+						91 disclosure triangle 1
+					92 row (selectable) Value: = AgentStepActorMessage, Description: Type alias Message
+Type alias Message
+					93 row (selectable) Value: (&mut self, ctx: &mut ActorContext<Self::Message>), Description: Method on_start
+Method on_start
+					94 row (selectable) Value: ( &mut self, message: Self::Message, _: &mut ActorContext<Self::Message>, ) -> ControlFlow<()>, Description: Method handle
+Method handle
+					95 row (selectable) Value: (&mut self, ctx: &mut ActorContext<Self::Message>), Description: Method on_stop
+Method on_stop
+					96 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation AgentStepActor
+Implementation AgentStepActor
+						97 disclosure triangle 1
+					98 row (selectable) Description: Method new
+Method new, Value: ( model: Model, options: StreamOptions, store_tx: mpsc::Sender<AgentActorMessage>, context: ai::Context, step_id: Ste…
+					99 row (selectable) Value: (&mut self, event: AgentEvent) -> Result<(), AgentStepError>, Description: Method emit
+Method emit
+					100 row (selectable) Value: (&mut self, event: LiveEvent) -> Result<(), AgentStepError>, Description: Method emit_live
+Method emit_live
+					101 row (selectable) Value: ( &mut self, event: ai::AssistantMessageEvent, ) -> Result<(), AgentStepError>, Description: Method handle_event
+Method handle_event
+					102 row (selectable, expanded) Secondary Actions: Collapse, Description: Struct AgentStepRunner
+Struct AgentStepRunner
+						103 disclosure triangle 1
+					104 row (selectable) Value: : StepId, Description: Field step_id
+Field step_id
+					105 row (selectable) Value: : Generation, Description: Field generation
+Field generation
+					106 row (selectable) Value: : ActorRuntime<AgentStepActorMessage>, Description: Field step_runtime
+Field step_runtime
+					107 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation AgentStepRunner
+Implementation AgentStepRunner
+						108 disclosure triangle 1
+					109 row (selectable) Description: Method new
+Method new, Value: ( step_id: StepId, generation: Generation, model: Model, options: StreamOptions, store_tx: mpsc::Sender<AgentActorMes…
+					110 row (selectable) Value: (&self) -> StepId, Description: Method step_id
+Method step_id
+					111 row (selectable) Value: (&self) -> Generation, Description: Method generation
+Method generation
+					112 row (selectable) Value: (&self), Description: Method cancel
+Method cancel
+					113 row (selectable, expanded) Secondary Actions: Collapse, Description: Module tests
+Module tests
+						114 disclosure triangle 1
+					115 row (selectable) Value: () -> Model, Description: Function mk_model
+Function mk_model
+					116 row (selectable) Value: (stop_reason: StopReason, content: Vec<ContentBlock>) -> AssistantMessage, Description: Function mk_message
+Function mk_message
+					117 row (selectable) Value: (store_tx: mpsc::Sender<AgentActorMessage>) -> AgentStepActor, Description: Function mk_actor
+Function mk_actor
+					118 row (selectable) Value: (), Description: Function length_done_reason_ends_turn_without_panic
+Function length_done_reason_ends_turn_without_panic
+					119 row (selectable) Value: (), Description: Function tooluse_done_reason_ends_turn_without_panic
+Function tooluse_done_reason_ends_turn_without_panic
+					120 row (selectable) Value: (), Description: Function start_step_emits_started_and_ended_with_length_reason
+Function start_step_emits_started_and_ended_with_length_reason
+					121 row (selectable) Value: ( rx: &mut mpsc::Receiver<AgentActorMessage>, ) -> (ModelStepEndReason, Option<AssistantMessage>), Description: Function recv_step_finished
+Function recv_step_finished
+					122 row (selectable) Value: (), Description: Function stream_ended_without_done_reports_error
+Function stream_ended_without_done_reports_error
+					123 row (selectable) Value: (), Description: Function stream_ended_after_done_keeps_done_reason
+Function stream_ended_after_done_keeps_done_reason
+					124 row (selectable) Value: (), Description: Function cancel_message_breaks_with_cancelled_reason
+Function cancel_message_breaks_with_cancelled_reason
+					125 row (selectable) Value: (), Description: Function shutdown_without_done_reports_cancelled
+Function shutdown_without_done_reports_cancelled
+					126 row (selectable) Value: (), Description: Function shutdown_after_done_keeps_completed_reason
+Function shutdown_after_done_keeps_completed_reason
+				127 scroll bar (settable, float) 0
+					128 value indicator (settable, float) 0
+					129 increment arrow button
+					130 decrement arrow button
+					131 increment page button
+					132 decrement page button
+		133 splitter (disabled, settable, float) 188.5
+		134 split group
+			135 scroll area
+				136 radio button harness.rs, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/harness.rs, Value: 0
+				137 button Close harness.rs
+				138 radio button actor.rs, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/actor.rs, Value: 0
+				139 button Close actor.rs
+				140 radio button event_log.rs, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/event_log.rs, Value: 0
+				141 button Close event_log.rs
+				142 radio button spawn_actor, Value: 0
+				143 button Close spawn_actor
+				144 radio button agent_step.rs, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/agent_step.rs, Value: 1
+				145 button Close agent_step.rs
+			146 Description: Reading height, Help: Reading height (⌥⌘0/1/2)
+				147 radio button Description: Full, Value: 1, Help: Full shows the whole file; Structure folds function bodies; Overview keeps only signatures and top-level items
+				148 radio button Description: Structure, Help: Structure folds function bodies and keeps signatures visible, Value: 0
+				149 radio button Description: Overview, Help: Overview keeps only signatures and top-level items; folded bodies stay hidden, Value: 0
+			150 list Description: File path, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/agent_step.rs
+				151 text URL: file:///Users/siancao/work/ai/knuth-rs, Value: knuth-rs
+				152 text URL: file:///Users/siancao/work/ai/knuth-rs/crates, Value: crates
+				153 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent, Value: knuth-agent
+				154 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src, Value: src
+				155 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/agent_step.rs, Value: agent_step.rs
+			156 scroll area Secondary Actions: Scroll Left, Scroll Right, Scroll Up, Scroll Down
+				157 text entry area use std::ops::ControlFlow;
+
+use ai::{AssistantMessage, DoneReason, Model, StreamOptions, stream};
+use async_trait::async_trait;
+use futures::StreamExt;
+use knuth_core::{
+    AgentEvent, LiveEvent, ModelStepEndReason,
+    ids::{Generation, StepId},
+};
+use tokio::sync::mpsc;
+use tracing::debug;
+
+use crate::*;
+
+#[derive(Debug, thiserror::Error)]
+pub enum AgentStepError {
+    #[error("Failed to send event to store: {0}")]
+    EventSendError(String),
+
+    #[error("LLM error: {0}")]
+    LLMError(String),
+}
+
+#[derive(Debug)]
+pub enum AgentStepActorMessage {
+    StreamEvent(ai::AssistantMessageEvent),
+    StreamEnded,
+    Cancel,
+}
+
+struct AgentStepActor {
+    model: Model,
+    options: StreamOptions,
+    store_tx: mpsc::Sender<AgentActorMessage>,
+    context: ai::Context,
+    step_id: StepId,
+    generation: Generation,
+
+    step_reason: ModelStepEndReason,
+    assistant_message: Option<AssistantMessage>,
+}
+
+#[async_trait]
+impl Actor for AgentStepActor {
+    type Message = AgentStepActorMessage;
+
+    async fn on_start(&mut self, ctx: &mut ActorContext<Self::Message>) {
+        let _ = self
+            .emit(AgentEvent::ModelStepStarted {
+                step_id: self.step_id,
+            })
+            .await;
+
+        let Some(tx) = ctx.upgrade() else { return };
+
+        let shutdown = ctx.shutdown.clone();
+        let context = self.context.clone();
+        let model = self.model.clone();
+        let options = self.options.clone();
+
+        tokio::spawn(async move {
+            let mut stream = stream(&model, &context, Some(&options));
+            loop {
+                tokio::select! {
+                    _ = shutdown.cancelled() => break,
+                    event = stream.next() => {
+                        match event {
+                            Some(event) => {
+                                if tx.send(AgentStepActorMessage::StreamEvent(event)).await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => {
+                                let _ = tx.send(AgentStepActorMessage::StreamEnded).await;
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    async fn handle(
+        &mut self,
+        message: Self::Message,
+        _: &mut ActorContext<Self::Message>,
+    ) -> ControlFlow<()> {
+        match message {
+            AgentStepActorMessage::StreamEvent(event) => match self.handle_event(event).await {
+                Ok(()) => ControlFlow::Continue(()),
+                Err(e) => {
+                    self.step_reason = ModelStepEndReason::Error(e.to_string());
+                    ControlFlow::Break(())
+                }
+            },
+            AgentStepActorMessage::StreamEnded => {
+                // A stream that closes without a Done (or Error) event is a broken
+                // stream, not a successful step.
+                if self.assistant_message.is_none() {
+                    self.step_reason =
+                        ModelStepEndReason::Error("stream ended without a Done event".to_string());
+                }
+                ControlFlow::Break(())
+            }
+            AgentStepActorMessage::Cancel => {
+                self.step_reason = ModelStepEndReason::Cancelled;
+                ControlFlow::Break(())
+            }
+        }
+    }
+
+    async fn on_stop(&mut self, ctx: &mut ActorContext<Self::Message>) {
+        if ctx.shutdown.is_cancelled() && self.assistant_message.is_none() {
+            self.step_reason = ModelStepEndReason::Cancelled;
+        }
+
+        // Completion is a control signal, not a domain event: the harness
+        // derives and commits `ModelStepEnded` itself.
+        let _ = self
+            .store_tx
+            .send(AgentActorMessage::StepFinished {
+                step_id: self.step_id,
+                generation: self.generation,
+                reason: self.step_reason.clone(),
+                assistant_message: self.assistant_message.take(),
+            })
+            .await;
+    }
+}
+
+impl AgentStepActor {
+    pub fn new(
+        model: Model,
+        options: StreamOptions,
+        store_tx: mpsc::Sender<AgentActorMessage>,
+        context: ai::Context,
+        step_id: StepId,
+        generation: Generation,
+    ) -> Self {
+        Self {
+            model,
+            options,
+            store_tx,
+            context,
+            step_id,
+            generation,
+            step_reason: ModelStepEndReason::Success,
+            assistant_message: None,
+        }
+    }
+
+    pub async fn emit(&mut self, event: AgentEvent) -> Result<(), AgentStepError> {
+        self.store_tx
+            .send(AgentActorMessage::Step(self.step_id, event))
+            .await
+            .map_err(|e| AgentStepError::EventSendError(e.to_string()))
+    }
+
+    /// Reports streaming progress. Routed through the actor mailbox like
+    /// durable events so subscribers observe both in emission order.
+    async fn emit_live(&mut self, event: LiveEvent) -> Result<(), AgentStepError> {
+        self.store_tx
+            .send(AgentActorMessage::Live(event))
+            .await
+            .map_err(|e| AgentStepError::EventSendError(e.to_string()))
+    }
+
+    async fn handle_event(
+        &mut self,
+        event: ai::AssistantMessageEvent,
+    ) -> Result<(), AgentStepError> {
+        match event {
+            ai::AssistantMessageEvent::Start { .. } => {}
+            ai::AssistantMessageEvent::Done { message, reason } => {
+                self.step_reason = match reason {
+                    DoneReason::Stop => ModelStepEndReason::Success,
+                    DoneReason::Length => ModelStepEndReason::Length,
+                    DoneReason::ToolUse => ModelStepEndReason::ToolUse,
+                };
+                self.assistant_message = Some(message);
+                debug!("Done reason: {:?}", reason);
+            }
+            ai::AssistantMessageEvent::Error { error, .. } => {
+                return Err(AgentStepError::LLMError(
+                    error.error_message.unwrap_or("Unknown error".to_string()),
+                ));
+            }
+
+            ai::AssistantMessageEvent::TextStart { content_index, .. } => {
+                self.emit_live(LiveEvent::AssistantMessageTextStarted {
+                    step_id: self.step_id,
+                    content_index,
+                })
+                .await?;
+            }
+            ai::AssistantMessageEvent::TextDelta {
+                content_index,
+                delta,
+                ..
+            } => {
+                self.emit_live(LiveEvent::AssistantMessageTextDelta {
+                    step_id: self.step_id,
+                    content_index,
+                    delta,
+                })
+                .await?;
+            }
+            ai::AssistantMessageEvent::TextEnd {
+                content_index,
+                content,
+                partial,
+                ..
+            } => {
+                self.emit_live(LiveEvent::AssistantMessageTextCompleted {
+                    step_id: self.step_id,
+                    content_index,
+                    text_content: content,
+                    assistant_message: partial,
+                })
+                .await?;
+            }
+
+            ai::AssistantMessageEvent::ThinkingStart { content_index, .. } => {
+                self.emit_live(LiveEvent::AssistantMessageThinkingStarted {
+                    step_id: self.step_id,
+                    content_index,
+                })
+                .await?;
+            }
+            ai::AssistantMessageEvent::ThinkingDelta {
+                content_index,
+                delta,
+                ..
+            } => {
+                self.emit_live(LiveEvent::AssistantMessageThinkingDelta {
+                    step_id: self.step_id,
+                    content_index,
+                    delta,
+                })
+                .await?;
+            }
+            ai::AssistantMessageEvent::ThinkingEnd {
+                content_index,
+                content,
+                ..
+            } => {
+                self.emit_live(LiveEvent::AssistantMessageThinkingCompleted {
+                    step_id: self.step_id,
+                    content_index,
+                    content,
+                })
+                .await?;
+            }
+
+            // ignore these events; they are handled by the harness after completion
+            // TODO: streaming tool calls need to be handled here?
+            ai::AssistantMessageEvent::ToolCallEnd { .. } => {}
+            ai::AssistantMessageEvent::ToolCallStart { .. } => {}
+            ai::AssistantMessageEvent::ToolCallDelta { .. } => {}
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+pub struct AgentStepRunner {
+    step_id: StepId,
+    generation: Generation,
+    step_runtime: ActorRuntime<AgentStepActorMessage>,
+}
+
+impl AgentStepRunner {
+    pub async fn new(
+        step_id: StepId,
+        generation: Generation,
+        model: Model,
+        options: StreamOptions,
+        store_tx: mpsc::Sender<AgentActorMessage>,
+        context: ai::Context,
+    ) -> Self {
+        let step_runtime = spawn_actor(
+            AgentStepActor::new(model, options, store_tx, context, step_id, generation),
+            100,
+        )
+        .await;
+
+        Self {
+            step_id,
+            generation,
+            step_runtime,
+        }
+    }
+
+    pub fn step_id(&self) -> StepId {
+        self.step_id
+    }
+
+    pub fn generation(&self) -> Generation {
+        self.generation
+    }
+
+    pub async fn cancel(&self) {
+        let _ = self
+            .step_runtime
+            .handle()
+            .send(AgentStepActorMessage::Cancel)
+            .await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ai::providers::faux::{clear_faux_responses, faux_thinking, set_faux_responses};
+    use ai::{
+        Api, AssistantMessage, AssistantMessageEvent, AssistantRole, ContentBlock, KnownApi,
+        ModelCost, Provider, StopReason, ToolCall, Usage,
+    };
+    use serde_json::Map;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    fn mk_model() -> Model {
+        Model {
+            id: "faux".into(),
+            name: "Faux".into(),
+            api: Api::from("faux"),
+            provider: Provider::from("faux"),
+            base_url: String::new(),
+            reasoning: false,
+            thinking_level_map: None,
+            input: vec![],
+            cost: ModelCost::default(),
+            context_window: 128_000,
+            max_tokens: 4096,
+            headers: None,
+            compat: None,
+        }
+    }
+
+    fn mk_message(stop_reason: StopReason, content: Vec<ContentBlock>) -> AssistantMessage {
+        AssistantMessage {
+            role: AssistantRole::Assistant,
+            content,
+            api: Api::known(KnownApi::OpenAIResponses),
+            provider: Provider::from("openai"),
+            model: "test-model".into(),
+            response_model: None,
+            response_id: None,
+            diagnostics: None,
+            usage: Usage::default(),
+            stop_reason,
+            error_message: None,
+            timestamp: 0,
+        }
+    }
+
+    fn mk_actor(store_tx: mpsc::Sender<AgentActorMessage>) -> AgentStepActor {
+        AgentStepActor::new(
+            mk_model(),
+            StreamOptions::default(),
+            store_tx,
+            ai::Context {
+                system_prompt: None,
+                messages: vec![],
+                tools: None,
+            },
+            StepId::new(),
+            Generation::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn length_done_reason_ends_turn_without_panic() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let message = mk_message(StopReason::Length, vec![ContentBlock::text("partial")]);
+
+        step.handle_event(AssistantMessageEvent::Done {
+            reason: DoneReason::Length,
+            message,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(step.step_reason, ModelStepEndReason::Length);
+        assert_eq!(
+            step.assistant_message.unwrap().stop_reason,
+            StopReason::Length
+        );
+    }
+
+    #[tokio::test]
+    async fn tooluse_done_reason_ends_turn_without_panic() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let message = mk_message(
+            StopReason::ToolUse,
+            vec![ContentBlock::ToolCall(ToolCall {
+                id: "call_1".into(),
+                name: "search".into(),
+                arguments: Map::new(),
+                thought_signature: None,
+            })],
+        );
+
+        step.handle_event(AssistantMessageEvent::Done {
+            reason: DoneReason::ToolUse,
+            message,
+        })
+        .await
+        .unwrap();
+
+        assert_eq!(step.step_reason, ModelStepEndReason::ToolUse);
+        assert_eq!(
+            step.assistant_message.unwrap().stop_reason,
+            StopReason::ToolUse
+        );
+    }
+
+    #[tokio::test]
+    async fn start_step_emits_started_and_ended_with_length_reason() {
+        let _guard = crate::test_support::faux_lock();
+        clear_faux_responses();
+        let (tx, mut rx) = mpsc::channel(16);
+        let message = mk_message(
+            StopReason::Length,
+            vec![ContentBlock::text("partial"), faux_thinking("reasoning")],
+        );
+        set_faux_responses(vec![message]);
+
+        let runner = AgentStepRunner::new(
+            StepId::new(),
+            Generation::new(),
+            mk_model(),
+            StreamOptions::default(),
+            tx,
+            ai::Context {
+                system_prompt: None,
+                messages: vec![],
+                tools: None,
+            },
+        )
+        .await;
+
+        let mut messages = Vec::new();
+        loop {
+            let message = timeout(Duration::from_secs(1), rx.recv())
+                .await
+                .expect("step should emit events")
+                .expect("step channel should stay open until ModelStepEnded");
+            let ended = matches!(message, AgentActorMessage::StepFinished { .. });
+            messages.push(message);
+            if ended {
+                break;
+            }
+        }
+        clear_faux_responses();
+
+        let expected_step_id = match messages.first().expect("expected actor messages") {
+            AgentActorMessage::Step(
+                step_id,
+                AgentEvent::ModelStepStarted {
+                    step_id: event_step_id,
+                },
+            ) => {
+                assert_eq!(step_id, event_step_id);
+                *step_id
+            }
+            _ => panic!("first message should be ModelStepStarted"),
+        };
+        // step_id stays readable after the actor has exited.
+        assert_eq!(runner.step_id(), expected_step_id);
+
+        for message in &messages {
+            match message {
+                AgentActorMessage::Step(step_id, event) => {
+                    assert_eq!(*step_id, expected_step_id);
+                    if let AgentEvent::ModelStepStarted { step_id } = event {
+                        assert_eq!(*step_id, expected_step_id);
+                    }
+                }
+                AgentActorMessage::Live(event) => {
+                    assert_eq!(event.step_id(), expected_step_id);
+                }
+                AgentActorMessage::StepFinished { step_id, .. } => {
+                    assert_eq!(*step_id, expected_step_id);
+                }
+                AgentActorMessage::Command(_) => panic!("unexpected actor command"),
+                AgentActorMessage::ToolFinished { .. } => panic!("unexpected ToolFinished"),
+                AgentActorMessage::ToolInputPrepared { .. } => {
+                    panic!("unexpected ToolInputPrepared")
+                }
+                AgentActorMessage::ToolResultFinalized { .. } => {
+                    panic!("unexpected ToolResultFinalized")
+                }
+            }
+        }
+
+        let lifecycle = messages
+            .iter()
+            .filter_map(|message| match message {
+                AgentActorMessage::Step(_, AgentEvent::ModelStepStarted { .. }) => Some("started"),
+                AgentActorMessage::StepFinished { .. } => Some("finished"),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(lifecycle, ["started", "finished"]);
+
+        let live_events = messages
+            .iter()
+            .filter_map(|message| match message {
+                AgentActorMessage::Live(event) => Some((event.name(), event.step_id())),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            live_events,
+            [
+                ("AssistantMessageTextStarted", expected_step_id),
+                ("AssistantMessageTextDelta", expected_step_id),
+                ("AssistantMessageTextCompleted", expected_step_id),
+                ("AssistantMessageThinkingStarted", expected_step_id),
+                ("AssistantMessageThinkingDelta", expected_step_id),
+                ("AssistantMessageThinkingCompleted", expected_step_id),
+            ]
+        );
+
+        match messages.last().expect("expected actor messages") {
+            AgentActorMessage::StepFinished {
+                step_id,
+                generation: _,
+                reason,
+                assistant_message,
+            } => {
+                assert_eq!(*step_id, expected_step_id);
+                assert_eq!(*reason, ModelStepEndReason::Length);
+                assert_eq!(
+                    assistant_message
+                        .as_ref()
+                        .expect("StepFinished should include assistant_message")
+                        .stop_reason,
+                    StopReason::Length
+                );
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn recv_step_finished(
+        rx: &mut mpsc::Receiver<AgentActorMessage>,
+    ) -> (ModelStepEndReason, Option<AssistantMessage>) {
+        loop {
+            match rx.try_recv().expect("expected a StepFinished message") {
+                AgentActorMessage::StepFinished {
+                    reason,
+                    assistant_message,
+                    ..
+                } => return (reason, assistant_message),
+                _ => continue,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn stream_ended_without_done_reports_error() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let mut ctx = test_actor_context();
+
+        let flow = step
+            .handle(AgentStepActorMessage::StreamEnded, &mut ctx)
+            .await;
+
+        assert!(flow.is_break());
+        assert!(matches!(step.step_reason, ModelStepEndReason::Error(_)));
+    }
+
+    #[tokio::test]
+    async fn stream_ended_after_done_keeps_done_reason() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let mut ctx = test_actor_context();
+
+        step.handle_event(AssistantMessageEvent::Done {
+            reason: DoneReason::Stop,
+            message: mk_message(StopReason::Stop, vec![ContentBlock::text("done")]),
+        })
+        .await
+        .unwrap();
+        let flow = step
+            .handle(AgentStepActorMessage::StreamEnded, &mut ctx)
+            .await;
+
+        assert!(flow.is_break());
+        assert_eq!(step.step_reason, ModelStepEndReason::Success);
+    }
+
+    #[tokio::test]
+    async fn cancel_message_breaks_with_cancelled_reason() {
+        let (tx, _rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let mut ctx = test_actor_context();
+
+        let flow = step.handle(AgentStepActorMessage::Cancel, &mut ctx).await;
+
+        assert!(flow.is_break());
+        assert_eq!(step.step_reason, ModelStepEndReason::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn shutdown_without_done_reports_cancelled() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        let mut ctx = test_actor_context();
+        ctx.shutdown.cancel();
+
+        step.on_stop(&mut ctx).await;
+
+        let (reason, assistant_message) = recv_step_finished(&mut rx);
+        assert_eq!(reason, ModelStepEndReason::Cancelled);
+        assert!(assistant_message.is_none());
+    }
+
+    #[tokio::test]
+    async fn shutdown_after_done_keeps_completed_reason() {
+        let (tx, mut rx) = mpsc::channel(4);
+        let mut step = mk_actor(tx);
+        step.handle_event(AssistantMessageEvent::Done {
+            reason: DoneReason::Stop,
+            message: mk_message(StopReason::Stop, vec![ContentBlock::text("done")]),
+        })
+        .await
+        .unwrap();
+        let mut ctx = test_actor_context();
+        ctx.shutdown.cancel();
+
+        step.on_stop(&mut ctx).await;
+
+        let (reason, assistant_message) = recv_step_finished(&mut rx);
+        assert_eq!(reason, ModelStepEndReason::Success);
+        assert_eq!(
+            assistant_message
+                .expect("completed step keeps its message")
+                .stop_reason,
+            StopReason::Stop
+        );
+    }
+}
+
+				158 scroll bar (disabled, settable, float) 0
+				159 scroll bar (settable, float) 0.0009172558761704567
+					160 value indicator (settable, float) 0.0009172558761704567
+					161 increment arrow button
+					162 decrement arrow button
+					163 increment page button
+					164 decrement page button
+				165 ruler
+			166 splitter (disabled, settable, float) 879.5
+		167 splitter (disabled, settable, float) 879.5
+		168 radio button Description: Callers, Value: 1
+		169 radio button Description: Calls, Value: 0
+		170 radio button Description: Implements, Value: 0
+		171 radio button Description: References, Value: 0
+		172 button Freeze Results, Description: Freeze Results as Reading Set, Help: Freeze the currently published source and evidence snapshots as a Reading Set tab
+		173 button Inspector, Description: Show Resolution Inspector, Help: Show Resolution Inspector (⌘I)
+		174 split group Description: Relation list and Resolution Inspector, Help: Drag the divider to resize the relation list and inspector
+			175 text Resolution Inspector
+			176 button Close Resolution Inspector
+			177 scroll area
+				178 text Help: build, Value: build VERIFIED Matched an import binding with no competing source match. SOURCE Matched an import binding with no competing source match. Candidate generation was complete. The source relation result set was complete with 5 results. VERIFICATION The exact provider returned this target from worktree. The source candidate and exact provider target were corroborated. VERIFICATION AVAILABILITY Exact provider is ready. ANALYSIS ENVIRONMENT Safe · build scripts disabled · proc macros disabled
+				179 button Show full audit, Description: Show full resolution audit
+		180 splitter (disabled, settable, float) 569.5
+		181 radio button Description: Follow, Value: 1
+		182 radio button Description: Pin, Value: 0
+		183 button (disabled) ‹
+		184 text 1/1
+		185 button (disabled) ›
+		186 text crates/knuth-agent/src/harness.rs:1006:18 Exact·direct
+		187 scroll area Secondary Actions: Scroll Left, Scroll Right, Scroll Up, Scroll Down
+			188 text entry area     pub async fn build(name: String, description: String, config: AgentConfig) -> Self {
+        let id = SessionId::new();
+
+        let actor = AgentActor::new(id, config);
+        let runtime = spawn_actor(actor, 100).await;
+
+        Self {
+            id,
+            name,
+            description,
+            runtime,
+        }
+    }
+			189 scroll bar (disabled, settable, float) 0
+			190 scroll bar (settable, float) 0.06857142857142857
+				191 value indicator (settable, float) 0.06857142857142857
+				192 increment arrow button
+				193 decrement arrow button
+				194 increment page button
+				195 decrement page button
+			196 ruler
+	197 button Context, Description: Hide definition context, Help: Show or hide the definition context
+	198 text Description: Exact provider status, Value: Exact: ready · Safe (limited), Help: Provider: rust-analyzer
+Tool version: rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06)
+Trust: Safe
+Limitations: build scripts disabled; proc macros disabled
+Features: default
+	199 button Description: Analysis status details, Help: Analysis status and available features
+	200 toolbar
+		201 button Description: Back, Secondary Actions: Move next, Remove from toolbar
+		202 button (disabled) Description: Forward, Secondary Actions: Move previous, Move next, Remove from toolbar
+		203 text Description: Project, Value: knuth-rs
+		204 button Description: Version, Secondary Actions: Move previous, Move next, Remove from toolbar
+		205 button Description: Symbols, Secondary Actions: Move previous, Move next, Remove from toolbar
+		206 button Description: Profile, Secondary Actions: Move previous, Move next, Remove from toolbar
+		207 button Description: Settings, Secondary Actions: Move previous, Remove from toolbar
+	208 close button
+	209 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	210 minimize button
+211 menu bar
+	212 Cairn
+	213 File
+	214 Edit
+	215 Find
+	216 Go
+	217 View
+	218 Relations
+
+The focused UI element is 0 standard window Cairn, Secondary Actions: Raise

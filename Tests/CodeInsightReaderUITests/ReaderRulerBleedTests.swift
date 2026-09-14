@@ -5,13 +5,55 @@ import CodeInsightReaderCore
 import Foundation
 import Testing
 
+@MainActor
+@Test
+func gutterReservesOneWidthBeforeTheFirstGlyph() throws {
+    _ = NSApplication.shared
+    let source = "fn sample(value: usize) {\n    value;\n}\n"
+    let file = URL(fileURLWithPath: "/gutter.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) })
+        .load(file: file).document
+    for style: NSScroller.Style in [.legacy, .overlay] {
+        for size: Double in [10, 13, 24] {
+            let reader = ReaderTextView(settings: ReaderSettings(fontSize: size))
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 600, height: 200))
+            scroll.scrollerStyle = style
+            scroll.hasVerticalScroller = true
+            scroll.autohidesScrollers = false
+            scroll.documentView = reader.view
+            reader.view.frame = scroll.contentView.bounds
+            let window = NSWindow(contentRect: scroll.frame, styleMask: .borderless,
+                                  backing: .buffered, defer: false)
+            window.contentView = scroll
+            reader.display(document: document, fileURL: file)
+            reader.setBookmarkMarkers([1: ["Sample"]])
+            reader.setDiffMarkers([1: .changed])
+            for numbers in [true, false] {
+                reader.configureGutter(in: scroll, lineNumbers: numbers)
+                window.layoutIfNeeded()
+                window.displayIfNeeded()
+                reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+                let ruler = try #require(scroll.verticalRulerView)
+                let gutter = ruler.convert(ruler.bounds, to: scroll)
+                let glyph = scroll.convert(window.convertFromScreen(reader.view.firstRect(
+                    forCharacterRange: NSRange(location: 0, length: 1), actualRange: nil
+                )), from: nil)
+                let gap = glyph.minX - gutter.maxX
+                print("GUTTER_GEOMETRY style=\(style.rawValue) size=\(size) numbers=\(numbers) gutter=\(gutter) clip=\(scroll.contentView.frame) insets=\(scroll.contentInsets) glyph=\(glyph) gap=\(gap)")
+                #expect((8...12).contains(gap), "first glyph gap: \(gap)")
+            }
+            withExtendedLifetime(window) {}
+        }
+    }
+}
+
 // Regression: the ruler must draw its line numbers without letting either its
 // own drawing or NSRulerView's built-in edge hairline reach the header above it.
 // This renders the real hierarchy and checks both pixel outcomes without screen
 // capture permission.
 @MainActor
 @Test
-func rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() throws {
+func rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() async throws {
     let source = (1...120).map { "let value\($0) = \($0);" }.joined(separator: "\n")
     let file = URL(fileURLWithPath: "/bleed.rs")
     let document = try DocumentLoader(source: { _ in Array(source.utf8) })
@@ -43,9 +85,13 @@ func rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() throws {
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
     window.contentView = container
+    window.orderFront(nil)
     window.layoutIfNeeded()
     window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
 
     let bitmap = try #require(
         container.bitmapImageRepForCachingDisplay(in: container.bounds)
@@ -107,4 +153,59 @@ func rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() throws {
         }
     }
     #expect(lineNumberPixels >= 4, "line-number pixels were not rendered")
+
+    ruler.wantsLayer = true
+    reader.apply(settings: ReaderSettings(fontSize: 24, theme: .dark))
+    window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+    reader.apply(settings: ReaderSettings())
+    window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+    reader.apply(settings: ReaderSettings(theme: .dark))
+    window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+
+    let replacement = (1...180).map { "fn switched\($0)() {}" }.joined(separator: "\n")
+    let replacementDocument = try DocumentLoader(source: { _ in Array(replacement.utf8) })
+        .load(file: URL(fileURLWithPath: "/switched.rs")).document
+    reader.view.frame = NSRect(origin: .zero, size: scrollView.contentView.bounds.size)
+    reader.display(document: replacementDocument)
+    window.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+
+    // A normal ruler-only repaint has a narrow dirty rect. The text's x
+    // position must not exclude its line numbers or gutter markers.
+    ruler.needsDisplay = true
+    ruler.displayIfNeeded()
+    try await Task.sleep(for: .milliseconds(100))
+
+    // Read the cached layer. cacheDisplay could request a wider draw and
+    // hide the failure of the preceding ruler-only repaint.
+    let cached = try #require(NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: Int(ceil(ruler.bounds.width * 2)),
+        pixelsHigh: Int(ceil(ruler.bounds.height * 2)),
+        bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+        isPlanar: false, colorSpaceName: .deviceRGB,
+        bytesPerRow: 0, bitsPerPixel: 0
+    ))
+    let graphics = try #require(NSGraphicsContext(bitmapImageRep: cached))
+    graphics.cgContext.scaleBy(x: 2, y: 2)
+    try #require(ruler.layer).render(in: graphics.cgContext)
+    let expected = try #require(NSColor(
+        srgbRed: 133.0 / 255, green: 133.0 / 255, blue: 133.0 / 255, alpha: 1
+    ).usingColorSpace(cached.colorSpace))
+    var refreshedNumberPixels = 0
+    for y in 0..<cached.pixelsHigh {
+        for x in 0..<cached.pixelsWide {
+            guard let pixel = cached.colorAt(x: x, y: y),
+                  abs(pixel.redComponent - expected.redComponent) < 0.05,
+                  abs(pixel.greenComponent - expected.greenComponent) < 0.05,
+                  abs(pixel.blueComponent - expected.blueComponent) < 0.05
+            else { continue }
+            refreshedNumberPixels += 1
+        }
+    }
+    #expect(refreshedNumberPixels >= 4,
+            "No line-number pixels after font/theme reset and switching documents: \(refreshedNumberPixels)")
 }

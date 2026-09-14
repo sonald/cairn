@@ -49,6 +49,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 
     private static let resultLimit = 20
+    private static let rowHeight: CGFloat = 30
+    private static let resultsChromeHeight: CGFloat = 85
     private let appModel: AppModel
     private let symbolModel = SymbolSearchPanelModel()
     private var lockedMode: (mode: Mode, prefix: String)?
@@ -56,10 +58,10 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private let input = NSTextField()
     private let modeLabel = NSTextField(labelWithString: "⌘P")
     private let tableView = NSTableView()
+    private let scrollView = NSScrollView()
+    private let emptyLabel = NSTextField(labelWithString: "")
+    private let hintLabel = NSTextField(labelWithString: "")
     private let footerLabel = NSTextField(labelWithString: "")
-    private var footerHeightConstraint: NSLayoutConstraint?
-    private var footerBottomConstraint: NSLayoutConstraint?
-    private var scrollFooterSpacingConstraint: NSLayoutConstraint?
     private var theme: ReaderTheme
     private var rows: [Row] = []
     private var selectedIndex: Int?
@@ -79,7 +81,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         self.onOpen = onOpen
         theme = ReaderTheme(settings: settings)
         let panel = KeyablePanel(
-            contentRect: NSRect(x: 0, y: 0, width: 380, height: 270),
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 325),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -112,7 +114,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             commands: Self.commandRows(in: NSApp.mainMenu)
         )
         guard let panel = window else { return }
-        panel.center()
+        positionPanel()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(input)
         if let editor = input.currentEditor() as? NSTextView {
@@ -134,6 +136,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         content.layer?.backgroundColor = theme.backgroundColor.cgColor
         content.layer?.borderColor = theme.chromeDividerColor.cgColor
         footerLabel.textColor = theme.chromeTertiaryColor
+        hintLabel.textColor = theme.chromeTertiaryColor
+        emptyLabel.textColor = theme.chromeTertiaryColor
         modeLabel.textColor = theme.chromeTertiaryColor
         tableView.backgroundColor = theme.backgroundColor
         tableView.reloadData()
@@ -145,6 +149,9 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 
     var rowsForTesting: [Row] { rows }
+    var tableViewForTesting: NSTableView { tableView }
+    var emptyMessageForTesting: String { emptyLabel.stringValue }
+    var inputFrameForTesting: NSRect { input.convert(input.bounds, to: nil) }
     var footerForTesting: String { footerLabel.stringValue }
     var selectedIndexForTesting: Int? { selectedIndex }
     var originalResponderForTesting: NSResponder? { originalResponder }
@@ -200,42 +207,56 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         title.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(title)
 
-        let detail = NSTextField(labelWithString: value.detail)
-        detail.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        detail.textColor = theme.chromeTertiaryColor
-        detail.alignment = .right
-        detail.lineBreakMode = .byTruncatingHead
-        detail.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(detail)
-
-        let shortcut = NSTextField(labelWithString: value.shortcut)
-        shortcut.font = .monospacedSystemFont(ofSize: 10, weight: .regular)
-        shortcut.textColor = theme.chromeTertiaryColor
-        shortcut.alignment = .center
-        shortcut.wantsLayer = true
-        shortcut.layer?.cornerRadius = 3
-        shortcut.layer?.borderWidth = value.shortcut.isEmpty ? 0 : 1
-        shortcut.layer?.borderColor = theme.chromeDividerColor.cgColor
-        shortcut.translatesAutoresizingMaskIntoConstraints = false
-        cell.addSubview(shortcut)
-
+        title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+        cell.textField = title
+        cell.toolTip = switch value.payload {
+        case .file(let file): file.path
+        case .location(let file, _, _): file.path + " · " + value.detail
+        default: value.title
+        }
         NSLayoutConstraint.activate([
             title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
             title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            detail.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 8),
-            detail.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            detail.widthAnchor.constraint(lessThanOrEqualToConstant: 180),
-            shortcut.leadingAnchor.constraint(equalTo: detail.trailingAnchor, constant: 8),
-            shortcut.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -12),
-            shortcut.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            shortcut.widthAnchor.constraint(greaterThanOrEqualToConstant:
-                value.shortcut.isEmpty ? 0 : 28),
         ])
+
+        var trailingAnchor = cell.trailingAnchor
+        if !value.shortcut.isEmpty {
+            let shortcut = NSTextField(labelWithString: value.shortcut)
+            shortcut.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            shortcut.textColor = theme.chromeTertiaryColor
+            shortcut.alignment = .right
+            shortcut.setContentCompressionResistancePriority(.required, for: .horizontal)
+            shortcut.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(shortcut)
+            NSLayoutConstraint.activate([
+                shortcut.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                shortcut.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+            ])
+            trailingAnchor = shortcut.leadingAnchor
+        }
+        if !value.detail.isEmpty {
+            let detail = NSTextField(labelWithString: value.detail)
+            detail.font = .systemFont(ofSize: 11)
+            detail.textColor = theme.chromeTertiaryColor
+            detail.alignment = .right
+            detail.lineBreakMode = .byTruncatingHead
+            detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            detail.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(detail)
+            NSLayoutConstraint.activate([
+                detail.leadingAnchor.constraint(greaterThanOrEqualTo: title.trailingAnchor, constant: 12),
+                detail.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+                detail.centerYAnchor.constraint(equalTo: title.centerYAnchor),
+                detail.widthAnchor.constraint(lessThanOrEqualTo: cell.widthAnchor, multiplier: 0.5),
+            ])
+        } else {
+            title.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -12).isActive = true
+        }
         return cell
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        26
+        Self.rowHeight
     }
 
     func tableView(
@@ -302,7 +323,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         modeLabel.setAccessibilityLabel("Palette shortcut")
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        input.placeholderString = "Open file, > command, @ symbol, # project, : line"
+        input.placeholderString = "Open file…"
         input.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         input.isBordered = false
         input.drawsBackground = false
@@ -323,51 +344,66 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         tableView.target = self
         tableView.doubleAction = #selector(openClickedRow(_:))
         tableView.refusesFirstResponder = true
+        tableView.style = .plain
         tableView.rowSizeStyle = .custom
+        tableView.rowHeight = Self.rowHeight
+        tableView.usesAutomaticRowHeights = false
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         tableView.intercellSpacing = .zero
         tableView.setAccessibilityLabel("Palette results")
 
-        let scrollView = NSScrollView()
         scrollView.documentView = tableView
-        scrollView.hasVerticalScroller = true
+        scrollView.borderType = .noBorder
+        scrollView.scrollerStyle = .overlay
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = .init()
+        scrollView.hasHorizontalScroller = false
+        scrollView.horizontalScrollElasticity = .none
         scrollView.autohidesScrollers = true
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        emptyLabel.font = .systemFont(ofSize: 12)
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
+        emptyLabel.setAccessibilityLabel("Palette status")
+
+        hintLabel.font = .systemFont(ofSize: 10.5)
+        hintLabel.lineBreakMode = .byTruncatingTail
+        hintLabel.translatesAutoresizingMaskIntoConstraints = false
         footerLabel.font = .systemFont(ofSize: 10.5)
-        footerLabel.setAccessibilityLabel("Palette status")
+        footerLabel.alignment = .right
+        footerLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        footerLabel.setAccessibilityLabel("Palette result limit")
         footerLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        for view in [modeLabel, input, separator, scrollView, footerLabel] {
+        for view in [modeLabel, input, separator, scrollView, emptyLabel, hintLabel, footerLabel] {
             content.addSubview(view)
         }
-        footerHeightConstraint = footerLabel.heightAnchor.constraint(equalToConstant: 0)
-        footerBottomConstraint = footerLabel.bottomAnchor.constraint(
-            equalTo: content.bottomAnchor
-        )
-        scrollFooterSpacingConstraint = scrollView.bottomAnchor.constraint(
-            equalTo: footerLabel.topAnchor
-        )
         NSLayoutConstraint.activate([
-            modeLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            input.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
+            input.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
+            input.heightAnchor.constraint(equalToConstant: 22),
+            input.trailingAnchor.constraint(equalTo: modeLabel.leadingAnchor, constant: -12),
+            modeLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -20),
             modeLabel.centerYAnchor.constraint(equalTo: input.centerYAnchor),
             modeLabel.widthAnchor.constraint(equalToConstant: 44),
-            input.topAnchor.constraint(equalTo: content.topAnchor, constant: 4),
-            input.leadingAnchor.constraint(equalTo: modeLabel.trailingAnchor, constant: 6),
-            input.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            input.heightAnchor.constraint(equalToConstant: 26),
-            separator.topAnchor.constraint(equalTo: input.bottomAnchor, constant: 4),
+            separator.topAnchor.constraint(equalTo: content.topAnchor, constant: 44),
             separator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             separator.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             separator.heightAnchor.constraint(equalToConstant: 1),
-            scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            scrollFooterSpacingConstraint!,
-            footerLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            footerLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            footerBottomConstraint!,
-            footerHeightConstraint!,
+            scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 8),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
+            scrollView.bottomAnchor.constraint(equalTo: hintLabel.topAnchor, constant: -8),
+            emptyLabel.leadingAnchor.constraint(equalTo: input.leadingAnchor),
+            emptyLabel.trailingAnchor.constraint(equalTo: input.trailingAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
+            hintLabel.leadingAnchor.constraint(equalTo: input.leadingAnchor),
+            hintLabel.trailingAnchor.constraint(lessThanOrEqualTo: footerLabel.leadingAnchor, constant: -8),
+            hintLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
+            hintLabel.heightAnchor.constraint(equalToConstant: 16),
+            footerLabel.trailingAnchor.constraint(equalTo: modeLabel.trailingAnchor),
+            footerLabel.centerYAnchor.constraint(equalTo: hintLabel.centerYAnchor),
         ])
     }
 
@@ -377,7 +413,18 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         owner: NSWindow?,
         commands: [Row]
     ) {
+        if let ownerWindow {
+            NotificationCenter.default.removeObserver(self, name: nil, object: ownerWindow)
+        }
         ownerWindow = owner
+        if let owner {
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
+                         NSWindow.didChangeScreenNotification] {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(ownerGeometryChanged(_:)), name: name, object: owner
+                )
+            }
+        }
         originalResponder = owner?.firstResponder
         capturedCommands = commands
         lockedMode = lockMode
@@ -406,6 +453,16 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         case .projectSymbol: "⌘T"
         case .line: "⌘L"
         }
+        input.placeholderString = switch parsed.mode {
+        case .file: "Open file…"
+        case .command: "Run command…"
+        case .currentSymbol: "Find file symbol…"
+        case .projectSymbol: "Find project symbol…"
+        case .line: "Go to line…"
+        }
+        hintLabel.stringValue = lockedMode == nil
+            ? "> Commands   @ File symbols   # Project symbols   : Line"
+            : "↑↓ Select   ↩ Open   Esc Close"
         switch parsed.mode {
         case .file:
             symbolModel.reset()
@@ -508,43 +565,72 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         }
         let total = candidates.count
         rows = Array(candidates.prefix(Self.resultLimit))
-        if rows.isEmpty {
-            rows = [Row(
-                title: emptyMessage,
-                detail: "",
-                shortcut: "",
-                identity: "message:\(emptyMessage)",
-                payload: nil
-            )]
-            footerLabel.stringValue = ""
-            selectedIndex = nil
-        } else {
-            footerLabel.stringValue = total > Self.resultLimit
-                ? "… 还有 \(total - Self.resultLimit) 条"
-                : ""
-            selectedIndex = previousIdentity.flatMap { identity in
-                rows.firstIndex { $0.identity == identity && $0.isSelectable }
-            } ?? rows.firstIndex(where: \.isSelectable)
-        }
-        let showsFooter = !footerLabel.stringValue.isEmpty
-        footerLabel.isHidden = !showsFooter
-        footerHeightConstraint?.constant = showsFooter ? 14 : 0
-        footerBottomConstraint?.constant = showsFooter ? -5 : 0
-        scrollFooterSpacingConstraint?.constant = showsFooter ? -4 : 0
+        emptyLabel.stringValue = rows.isEmpty ? emptyMessage : ""
+        emptyLabel.isHidden = !rows.isEmpty
+        scrollView.isHidden = rows.isEmpty
+        footerLabel.stringValue = total > Self.resultLimit
+            ? "\(total - Self.resultLimit) more results"
+            : ""
+        footerLabel.isHidden = footerLabel.stringValue.isEmpty
+        selectedIndex = previousIdentity.flatMap { identity in
+            rows.firstIndex { $0.identity == identity && $0.isSelectable }
+        } ?? rows.firstIndex(where: \.isSelectable)
         tableView.reloadData()
-        let listHeight = min(CGFloat(rows.count) * 26 + 4, 200)
-        window?.setContentSize(NSSize(
-            width: 380,
-            height: 35 + listHeight + (showsFooter ? 23 : 0)
-        ))
-        window?.contentView?.layoutSubtreeIfNeeded()
-        if window?.isVisible == true { window?.center() }
+        positionPanel()
         if let selectedIndex {
             tableView.selectRowIndexes([selectedIndex], byExtendingSelection: false)
             tableView.scrollRowToVisible(selectedIndex)
         } else {
             tableView.deselectAll(nil)
         }
+    }
+
+    /// Screen coordinates; resizing results keeps the input's top edge fixed.
+    static func frame(relativeTo ownerContent: NSRect, visibleFrame: NSRect, height: CGFloat) -> NSRect {
+        let safe = visibleFrame.insetBy(dx: 8, dy: 8)
+        let intersection = ownerContent.intersection(visibleFrame)
+        let area = intersection.isEmpty ? visibleFrame : intersection
+        let width = min(max(1, area.width - 48), min(760, max(560, area.width * 0.5)))
+        let minimumTop = safe.minY + min(safe.height, Self.resultsChromeHeight + Self.rowHeight)
+        let top = min(safe.maxY, max(minimumTop, area.maxY - area.height * 0.15))
+        let height = min(height, max(1, top - safe.minY))
+        return NSRect(
+            x: min(max(area.midX - width / 2, safe.minX), safe.maxX - width),
+            y: top - height,
+            width: width,
+            height: height
+        )
+    }
+
+    @objc private func ownerGeometryChanged(_ notification: Notification) {
+        guard window?.isVisible == true else { return }
+        positionPanel()
+    }
+
+    private func positionPanel() {
+        guard let panel = window else { return }
+        let visibleFrame = (ownerWindow?.screen ?? panel.screen ?? NSScreen.main)?.visibleFrame
+            ?? NSRect(x: 0, y: 0, width: 1200, height: 800)
+        let ownerContent = ownerWindow.map { $0.convertToScreen($0.contentLayoutRect) }
+            ?? visibleFrame
+        let resultHeight = rows.isEmpty ? 48 : CGFloat(min(rows.count, 8)) * Self.rowHeight
+        var frame = Self.frame(
+            relativeTo: ownerContent,
+            visibleFrame: visibleFrame,
+            height: Self.resultsChromeHeight + resultHeight
+        )
+        if !rows.isEmpty {
+            let fittingRows = max(1, floor((frame.height - Self.resultsChromeHeight) / Self.rowHeight))
+            let height = Self.resultsChromeHeight + fittingRows * Self.rowHeight
+            frame.origin.y += frame.height - height
+            frame.size.height = height
+        }
+        scrollView.hasVerticalScroller = CGFloat(rows.count) * Self.rowHeight
+            > frame.height - Self.resultsChromeHeight
+        scrollView.verticalScrollElasticity = scrollView.hasVerticalScroller ? .automatic : .none
+        panel.setFrame(frame, display: true)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        tableView.sizeLastColumnToFit()
     }
 
     private func moveSelection(by delta: Int) {
@@ -659,7 +745,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             ordered = open + remaining
         } else {
             ordered = files.filter {
-                contains($0.lastPathComponent, query: query)
+                contains(relative[$0.standardizedFileURL]!, query: query)
             }.sorted {
                 let lhs = relative[$0.standardizedFileURL]!
                 let rhs = relative[$1.standardizedFileURL]!

@@ -40,7 +40,7 @@ struct RelationUXTests {
 
         #expect(controller.selfTestExactStatusAllowsHorizontalCompression)
         let rows = controller.selfTestSidebarRowGeometry
-        #expect(rows.height <= 20)
+        #expect((20...24).contains(rows.height))
         #expect(rows.spacing.height == 0)
     }
 
@@ -1482,7 +1482,7 @@ func relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() async t
         == NSAccessibility.Role.group.rawValue)
     let trailFrame = fixture.controller.selfTestTrailBarFrameInContentView
     let contentFrame = fixture.controller.selfTestContentSplitFrameInContentView
-    #expect(trailFrame.width > 0 && trailFrame.height >= 28)
+    #expect(trailFrame.width > 0 && trailFrame.height >= 24)
     #expect(trailFrame.intersection(contentFrame).isEmpty)
     fixture.controller.selfTestShowTrailPopover()
     #expect(fixture.controller.selfTestTrailPopoverVisible)
@@ -1551,6 +1551,7 @@ func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
     #expect(button.title == "Freeze Path as Reading Set")
     #expect(button.enabled)
     #expect(button.label == "Freeze Path as Reading Set")
+    let layoutBeforeReadingSet = fixture.controller.selfTestPanelCollapses
     fixture.controller.selfTestOpenSelectedTrailAsReadingSet()
 
     guard case .readingSet(let title, let excerpts) =
@@ -1568,9 +1569,13 @@ func trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree()
     #expect(excerpts[0].inspector.nodeTitle == edge.title)
     #expect(fixture.controller.selfTestPanelPreset == .reading)
     #expect(fixture.controller.selfTestPanelCollapses == (true, true, true, true))
+    fixture.controller.renderForSelfTest()
+    #expect(fixture.controller.selfTestReaderPlaceholderText == nil)
+    #expect(!fixture.controller.selfTestReaderSourceVisible)
 
     fixture.controller.selectPreviousTab()
-    #expect(fixture.controller.selfTestPanelCollapses == (false, false, true, true))
+    #expect(fixture.controller.selfTestReaderSourceVisible)
+    #expect(fixture.controller.selfTestPanelCollapses == layoutBeforeReadingSet)
 }
 
 @MainActor

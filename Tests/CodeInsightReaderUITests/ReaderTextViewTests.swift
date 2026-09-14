@@ -169,7 +169,7 @@ func structAndTraitDeclarationNamesUsePrimaryTypography() throws {
 
     let expected = NSFont.monospacedSystemFont(
         ofSize: theme.functionNameFontSize,
-        weight: .semibold
+        weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
     )
     for name in ["Widget", "Work"] {
         let location = (source as NSString).range(of: name).location
@@ -178,6 +178,25 @@ func structAndTraitDeclarationNamesUsePrimaryTypography() throws {
         )
         #expect(font.fontName == expected.fontName)
         #expect(font.pointSize == expected.pointSize)
+    }
+}
+
+@MainActor
+@Test
+func callsAndFieldsKeepBaseMetricsWhenDeclarationEmphasisIsLarge() throws {
+    let source = "fn build(value: usize) { let item = value; item.run(); item.field; }"
+    let bytes = Array(source.utf8)
+    let spans = try RustHighlighter().highlight(bytes: bytes).spans
+    let attributed = attributedSource(source)
+    let theme = ReaderTheme(settings: ReaderSettings(functionNameDelta: 4))
+    ReaderTextView.applyTypography(spans, map: try identityDisplayMap(bytes: bytes),
+                                  to: attributed, theme: theme)
+    let base = NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+    for span in spans where [.functionCall, .property, .parameter, .localBinding].contains(span.kind) {
+        let attributes = attributed.attributes(at: Int(span.range.lowerBound), effectiveRange: nil)
+        let font = try #require(attributes[.font] as? NSFont)
+        #expect(font == base)
+        #expect(attributes[.kern] == nil)
     }
 }
 
@@ -210,7 +229,7 @@ func humanistCommentsKeepASCIIFiguresMonospaced() throws {
 
 @MainActor
 @Test
-func secondaryDeclarationsAreSemiboldWithoutScaling() throws {
+func secondaryDeclarationsKeepConfiguredWeightWithoutScaling() throws {
     let source = "mod area {}\nconst LIMIT: usize = 3;\nstatic FLAG: bool = true;\n"
     let bytes = Array(source.utf8)
     let highlighted = try RustHighlighter().highlight(bytes: bytes)
@@ -226,7 +245,7 @@ func secondaryDeclarationsAreSemiboldWithoutScaling() throws {
 
     let expected = NSFont.monospacedSystemFont(
         ofSize: theme.fontSize,
-        weight: .semibold
+        weight: NSFont.Weight(rawValue: theme.declarationEmphasisFontWeight)
     )
     for name in ["area", "LIMIT", "FLAG"] {
         let location = (source as NSString).range(of: name).location

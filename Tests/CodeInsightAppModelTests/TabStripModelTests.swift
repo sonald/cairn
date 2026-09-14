@@ -10,16 +10,42 @@ func tabStripFocusesDuplicatesAndPreservesAnchors() {
     let model = TabStripModel()
     let a = URL(fileURLWithPath: "/tmp/a.rs")
     let b = URL(fileURLWithPath: "/tmp/b.rs")
+    let c = URL(fileURLWithPath: "/tmp/c.rs")
 
     model.open(a, inNewTab: false)
+    #expect(model.activeTab?.isPreview == true)
     model.updateActiveAnchors(scrollByteOffset: 41, selectionByteOffset: 57)
-    model.open(b, inNewTab: true)
+    let document = ReaderDocument(bytes: Array("fn a() {}".utf8))
+    model.setActiveDocument(document, for: a)
+    model.open(a, inNewTab: true)
+    #expect(model.tabs.count == 1)
+    #expect(model.activeDocument === document)
+    #expect(model.activeTab?.isPreview == false)
+
+    model.open(b, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [a, b])
+    model.activate(0)
+    model.open(c, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [a, c])
+    #expect(model.tabs.filter(\.isPreview).count == 1)
+    #expect(model.activeTab?.fileURL == c)
     model.open(a, inNewTab: true)
 
     #expect(model.tabs.count == 2)
     #expect(model.activeIndex == 0)
     #expect(model.activeTab?.scrollByteOffset == 41)
     #expect(model.activeTab?.selectionByteOffset == 57)
+
+    model.open(c, inNewTab: true, selectionByteOffset: 73)
+    #expect(model.tabs.count == 2)
+    #expect(model.activeTab?.selectionByteOffset == 73)
+    model.open(b, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [a, c, b])
+    let activeBeforeKeep = model.activeIndex
+    model.keepOpen(0)
+    #expect(model.activeIndex == activeBeforeKeep)
+    model.keepOpen(2)
+    #expect(model.tabs.allSatisfy { !$0.isPreview })
 }
 
 @Test
@@ -61,7 +87,7 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
     let model = TabStripModel(maximumCount: 3)
     let fileA = URL(fileURLWithPath: "/tmp/a.rs")
     let fileB = URL(fileURLWithPath: "/tmp/b.rs")
-    model.open(fileA, inNewTab: false)
+    model.open(fileA, inNewTab: true)
     model.updateActiveAnchors(scrollByteOffset: 10, selectionByteOffset: 12)
     model.openReadingSet(
         title: "spawn",
@@ -69,11 +95,12 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
         skippedReasons: ["recorded source is unreadable"]
     )
     model.updateActiveReadingSetScroll(144)
-    model.open(fileB, inNewTab: true)
+    model.open(fileB, inNewTab: false)
 
     #expect(model.tabs.count == 3)
     #expect(model.tabs[1].fileURL == nil)
     #expect(model.tabs[1].title == "spawn")
+    #expect(model.tabs[1].isPreview == false)
     #expect(model.tabs[1].readingSetScrollOffset == 144)
     #expect(model.tabs[1].readingSetSkippedReasons == [
         "recorded source is unreadable",
@@ -92,6 +119,16 @@ func readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() {
     #expect(model.tabs.compactMap(\.fileURL) == [fileA, fileB])
     #expect(model.tabs.filter { $0.fileURL == nil }.count == 1)
     #expect(model.activeIndex == 1)
+
+    let fileC = URL(fileURLWithPath: "/tmp/c.rs")
+    model.open(fileC, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [fileA, fileC])
+    #expect(model.tabs[1].readingSetScrollOffset == 144)
+    let fileD = URL(fileURLWithPath: "/tmp/d.rs")
+    model.open(fileD, inNewTab: true)
+    #expect(model.tabs.count == 3)
+    #expect(model.tabs[0].title == "spawn")
+    #expect(model.tabs.compactMap(\.fileURL) == [fileC, fileD])
 }
 
 @Test

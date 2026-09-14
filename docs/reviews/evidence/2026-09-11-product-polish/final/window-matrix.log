@@ -1,0 +1,32 @@
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/9] Write sources
+[3/9] Write swift-version--58304C5D6DBC2206.txt
+[5/7] Emitting module CodeInsightAppTests
+[6/7] Compiling CodeInsightAppTests MainWindowControllerTests.swift
+[6/8] Write Objects.LinkFileList
+ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[7/8] Linking CodeInsightPackageTests
+Build complete! (7.60s)
+Test Suite 'Selected tests' started at 2026-09-11 13:57:17.027.
+Test Suite 'CodeInsightPackageTests.xctest' started at 2026-09-11 13:57:17.029.
+Test Suite 'CodeInsightPackageTests.xctest' passed at 2026-09-11 13:57:17.029.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.000) seconds
+Test Suite 'Selected tests' passed at 2026-09-11 13:57:17.029.
+	 Executed 0 tests, with 0 failures (0 unexpected) in 0.000 (0.003) seconds
+◇ Test run started.
+↳ Testing Library Version: 1902
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test productPolishRestoresUserPanelWidthsAcrossWindowRebuild() started.
+POLISH_WINDOW_MATRIX theme=Light width=900.0 reader=580.0 sidebar=320.0
+POLISH_WINDOW_MATRIX theme=Light width=1280.0 reader=960.0 sidebar=320.0
+POLISH_WINDOW_MATRIX theme=Light width=1600.0 reader=1280.0 sidebar=320.0
+POLISH_WINDOW_MATRIX theme=Dark width=900.0 reader=580.0 sidebar=320.0
+POLISH_WINDOW_MATRIX theme=Dark width=1280.0 reader=960.0 sidebar=320.0
+POLISH_WINDOW_MATRIX theme=Dark width=1600.0 reader=1280.0 sidebar=320.0
+✔ Test productPolishRestoresUserPanelWidthsAcrossWindowRebuild() passed after 2.297 seconds.
+◇ Test productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() started.
+✔ Test productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() passed after 0.331 seconds.
+✔ Test run with 2 tests in 0 suites passed after 2.630 seconds.

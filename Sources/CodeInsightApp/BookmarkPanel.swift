@@ -10,10 +10,12 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     private let onLineOpen: (BookmarkRecord, UInt32) -> Void
     private let searchField = NSSearchField()
     private let statsLabel = NSTextField(labelWithString: "")
+    private let emptyLabel = NSTextField(wrappingLabelWithString: "")
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
     private let exportButton = NSButton(title: "Export Raw Copy…", target: nil, action: nil)
     private let tableView = NSTableView()
     private let noteView = NSTextView()
+    private let noteLabel = NSTextField(labelWithString: "Select a bookmark to edit its note")
     private let copyButton = NSButton(title: "Copy as Markdown", target: nil, action: nil)
     private let markdownExportButton = NSButton(title: "Export Markdown…", target: nil, action: nil)
     private var rows: [BookmarkRecord] = []
@@ -49,11 +51,18 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     func show(relativeTo owner: NSWindow?) {
         refresh()
         guard let panel = window else { return }
-        if let owner {
-            panel.setFrameOrigin(NSPoint(
-                x: owner.frame.midX - panel.frame.width / 2,
-                y: owner.frame.midY - panel.frame.height / 2
-            ))
+        if let visible = (owner?.screen ?? panel.screen ?? NSScreen.main)?.visibleFrame {
+            let safe = visible.insetBy(dx: 8, dy: 8)
+            let ownerContent = owner.map { $0.convertToScreen($0.contentLayoutRect) } ?? visible
+            let intersection = ownerContent.intersection(visible)
+            let area = intersection.isEmpty ? visible : intersection
+            let width = min(panel.frame.width, safe.width)
+            let height = min(panel.frame.height, safe.height)
+            panel.setFrame(NSRect(
+                x: min(max(area.midX - width / 2, safe.minX), safe.maxX - width),
+                y: min(max(area.midY - height / 2, safe.minY), safe.maxY - height),
+                width: width, height: height
+            ), display: false)
         } else {
             panel.center()
         }
@@ -77,9 +86,10 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             projectPath: $0,
             status: appModel.bookmarkStatus(for:)
         ) } ?? [:]
-        statsLabel.stringValue = "\(rows.count) bookmarks" + counts.keys.sorted {
+        statsLabel.stringValue = "\(rows.count) \(rows.count == 1 ? "bookmark" : "bookmarks")" + counts.keys.sorted {
             $0.displayText < $1.displayText
         }.map { " · \($0.displayText): \(counts[$0] ?? 0)" }.joined()
+        statsLabel.toolTip = statsLabel.stringValue
         let hasError = appModel.bookmarkModel.storageError != nil
         errorLabel.stringValue = hasError
             ? "Bookmarks could not be read. The original file is unchanged."
@@ -87,6 +97,16 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         errorLabel.isHidden = !hasError
         exportButton.isHidden = !hasError
         exportButton.isEnabled = appModel.bookmarkModel.rescueBytes != nil
+        emptyLabel.stringValue = if hasError {
+            "Bookmarks are unavailable"
+        } else if root == nil {
+            "Open a project to see its bookmarks"
+        } else if !searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            "No bookmarks found\nTry a different filter."
+        } else {
+            "No bookmarks yet\nUse Toggle Bookmark (⇧⌘M) while reading a file."
+        }
+        emptyLabel.isHidden = !rows.isEmpty
         tableView.reloadData()
         if let id = selectedID, let row = rows.firstIndex(where: { $0.id == id }) {
             tableView.selectRowIndexes([row], byExtendingSelection: false)
@@ -276,13 +296,20 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         let title = NSTextField(labelWithString: appModel.bookmarkModel.title(for: record))
         title.font = .systemFont(ofSize: 13, weight: .semibold)
         title.lineBreakMode = .byTruncatingMiddle
-        let detail = NSTextField(wrappingLabelWithString:
+        title.toolTip = title.stringValue
+        let detail = NSTextField(labelWithString:
             "\(record.path) · \(snapshotText(record)) · \(status)"
-            + (record.note.isEmpty ? "" : "\n\(record.note)")
         )
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
-        detail.toolTip = status
+        detail.lineBreakMode = .byTruncatingMiddle
+        detail.toolTip = detail.stringValue
+        let note = NSTextField(labelWithString: record.note.replacingOccurrences(of: "\n", with: " "))
+        note.font = .systemFont(ofSize: 11)
+        note.textColor = .secondaryLabelColor
+        note.lineBreakMode = .byTruncatingTail
+        note.toolTip = record.note
+        note.isHidden = record.note.isEmpty
         let open = button("Open", action: #selector(openBookmark(_:)), record: record)
         let delete = button("Delete", action: #selector(deleteBookmark(_:)), record: record)
         let actions = NSStackView(views: [open, delete])
@@ -296,22 +323,29 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
                 "Re-anchor", action: #selector(reanchorBookmark(_:)), record: record
             ))
         }
-        let stack = NSStackView(views: [title, detail])
+        let stack = NSStackView(views: [title, detail, note])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         actions.translatesAutoresizingMaskIntoConstraints = false
+        for label in [title, detail, note] {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            label.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
+        }
+        for action in actions.arrangedSubviews {
+            action.setContentCompressionResistancePriority(.required, for: .horizontal)
+        }
         cell.addSubview(stack)
         cell.addSubview(actions)
         NSLayoutConstraint.activate([
             stack.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 10),
             stack.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: actions.leadingAnchor, constant: -8),
+            stack.trailingAnchor.constraint(equalTo: actions.leadingAnchor, constant: -8),
             actions.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             actions.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
-        cell.setAccessibilityLabel("\(title.stringValue), \(detail.stringValue)")
+        cell.setAccessibilityLabel("\(title.stringValue), \(detail.stringValue), \(record.note)")
         cell.toolTip = status
         return cell
     }
@@ -326,6 +360,8 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         let record = rows[tableView.selectedRow]
         selectedID = record.id
         noteView.string = record.note
+        noteView.isEditable = true
+        noteLabel.stringValue = "Note"
     }
 
     @objc private func openBookmark(_ sender: NSButton) {
@@ -431,6 +467,12 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         searchField.setAccessibilityLabel("Filter bookmarks")
         statsLabel.font = .systemFont(ofSize: 11)
         statsLabel.textColor = .secondaryLabelColor
+        statsLabel.lineBreakMode = .byTruncatingTail
+        statsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        emptyLabel.font = .systemFont(ofSize: 13)
+        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.alignment = .center
+        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         errorLabel.textColor = .systemRed
         errorLabel.setAccessibilityLabel("Bookmark storage error")
         exportButton.target = self
@@ -438,7 +480,16 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         exportButton.setAccessibilityLabel("Export Raw Copy…")
         noteView.delegate = self
         noteView.isRichText = false
+        noteView.isEditable = false
+        noteView.font = .systemFont(ofSize: 13)
+        noteView.textContainerInset = NSSize(width: 6, height: 6)
+        noteView.isHorizontallyResizable = false
+        noteView.autoresizingMask = [.width]
+        noteView.textContainer?.widthTracksTextView = true
         noteView.setAccessibilityLabel("Bookmark note")
+        noteLabel.font = .systemFont(ofSize: 11)
+        noteLabel.textColor = .secondaryLabelColor
+        noteLabel.translatesAutoresizingMaskIntoConstraints = false
         copyButton.target = self
         copyButton.action = #selector(copyMarkdown(_:))
         copyButton.setAccessibilityLabel("Copy as Markdown")
@@ -448,8 +499,11 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         markdownExportButton.setAccessibilityLabel("Export Markdown…")
         markdownExportButton.translatesAutoresizingMaskIntoConstraints = false
         let column = NSTableColumn(identifier: .init("bookmark"))
-        column.width = 540
+        column.resizingMask = .autoresizingMask
         tableView.addTableColumn(column)
+        tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        tableView.style = .plain
+        tableView.intercellSpacing = .zero
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
@@ -457,23 +511,29 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         let scroll = NSScrollView()
         scroll.documentView = tableView
         scroll.hasVerticalScroller = true
+        scroll.autohidesScrollers = true
+        scroll.automaticallyAdjustsContentInsets = false
+        scroll.contentInsets = .init()
+        scroll.hasHorizontalScroller = false
+        scroll.horizontalScrollElasticity = .none
         scroll.translatesAutoresizingMaskIntoConstraints = false
         let noteScroll = NSScrollView()
         noteScroll.documentView = noteView
         noteScroll.hasVerticalScroller = true
+        noteScroll.autohidesScrollers = true
+        noteScroll.automaticallyAdjustsContentInsets = false
+        noteScroll.contentInsets = .init()
+        noteScroll.borderType = .bezelBorder
         noteScroll.translatesAutoresizingMaskIntoConstraints = false
-        let header = NSStackView(views: [searchField, statsLabel])
-        header.orientation = .horizontal
-        header.alignment = .centerY
-        header.spacing = 10
+        let header = NSStackView(views: [searchField, statsLabel, errorLabel, exportButton])
+        header.orientation = .vertical
+        header.alignment = .leading
+        header.spacing = 6
         header.translatesAutoresizingMaskIntoConstraints = false
-        searchField.widthAnchor.constraint(equalToConstant: 260).isActive = true
-        errorLabel.translatesAutoresizingMaskIntoConstraints = false
-        exportButton.translatesAutoresizingMaskIntoConstraints = false
         content.addSubview(header)
-        content.addSubview(errorLabel)
-        content.addSubview(exportButton)
         content.addSubview(scroll)
+        content.addSubview(emptyLabel)
+        content.addSubview(noteLabel)
         content.addSubview(noteScroll)
         content.addSubview(copyButton)
         content.addSubview(markdownExportButton)
@@ -481,15 +541,19 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             header.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             header.topAnchor.constraint(equalTo: content.topAnchor, constant: 12),
-            errorLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            errorLabel.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            errorLabel.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
-            exportButton.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            exportButton.topAnchor.constraint(equalTo: errorLabel.bottomAnchor, constant: 4),
-            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            scroll.topAnchor.constraint(equalTo: exportButton.bottomAnchor, constant: 8),
-            scroll.bottomAnchor.constraint(equalTo: noteScroll.topAnchor, constant: -8),
+            searchField.widthAnchor.constraint(equalTo: header.widthAnchor),
+            statsLabel.widthAnchor.constraint(equalTo: header.widthAnchor),
+            errorLabel.widthAnchor.constraint(equalTo: header.widthAnchor),
+            scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            scroll.bottomAnchor.constraint(equalTo: noteLabel.topAnchor, constant: -8),
+            emptyLabel.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
+            emptyLabel.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
+            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: scroll.leadingAnchor, constant: 12),
+            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: scroll.trailingAnchor, constant: -12),
+            noteLabel.leadingAnchor.constraint(equalTo: noteScroll.leadingAnchor),
+            noteLabel.bottomAnchor.constraint(equalTo: noteScroll.topAnchor, constant: -4),
             noteScroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             noteScroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             noteScroll.heightAnchor.constraint(equalToConstant: 88),
@@ -549,5 +613,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     private func clearSelectedNote() {
         selectedID = nil
         noteView.string = ""
+        noteView.isEditable = false
+        noteLabel.stringValue = "Select a bookmark to edit its note"
     }
 }

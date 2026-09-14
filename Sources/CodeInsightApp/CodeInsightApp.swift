@@ -769,7 +769,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 && heightHeader.shortcut == "⌥⌘0/1/2"
                 && heightHeader.accessibilityLabel == "Reading height"
                 && abs(heightHeader.frame.height - 32) <= 1
-                && abs(heightHeader.controlFrame.width - 216) <= 1
+                && abs(heightHeader.controlFrame.width - 196) <= 1
                 && abs(heightHeader.controlFrame.height - 24) <= 1
                 && heightHeader.frame.contains(heightHeader.controlFrame),
             // §3.1: without a project the sidebar retires around the brand
@@ -779,8 +779,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "emptyStateCarriesOpenProjectWithoutProject":
                 windowController.selfTestEmptyStateExists
                 && windowController.selfTestEmptyStateOpenButtonIsVisibleDefaultAction,
-            "contextPlaceholderVisibleWithoutCandidate":
-                windowController.selfTestContextPlaceholderVisible,
+            "contextRetiredWithoutProject":
+                windowController.selfTestContextPaneCollapsed
+                && !windowController.selfTestContextPlaceholderVisible,
             "contextPlaceholderTextWithoutCandidate":
                 windowController.selfTestContextPlaceholderText
                 == "Click a symbol to see its definition here. ⌘-click jumps to it.",
@@ -2128,22 +2129,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let rulerInsideWindow = geometryOn.windowContentFrame
             .insetBy(dx: -tolerance, dy: -tolerance)
             .contains(geometryOn.rulerFrame)
+        let rulerInClip = geometryOn.clipFrame.intersection(geometryOn.rulerFrame)
+        let occupiedRulerWidth = rulerInClip.isNull ? 0 : rulerInClip.width
         let rulerWidthEquation = abs(
             geometryOn.contentFrame.width
                 - (
                     geometryOn.clipFrame.width
-                        - geometryOn.rulerFrame.width
+                        - occupiedRulerWidth
                 )
         ) <= tolerance
         let disabledWidthEquation = abs(
             geometryOff.contentFrame.width
                 - geometryOff.clipFrame.width
         ) <= tolerance
-        let disabledWidthGainEquation = abs(
-            geometryOff.contentFrame.width
+        let disabledWidthGainEquation =
+            abs(geometryOff.clipFrame.width - geometryOn.clipFrame.width) <= tolerance
+            && abs(geometryOff.contentFrame.width
                 - geometryOn.contentFrame.width
-                - geometryOn.rulerFrame.width
-        ) <= tolerance
+                - occupiedRulerWidth) <= tolerance
         let legacySettings = ReaderSettings()
         controller.applyReaderSettings(legacySettings)
         let legacyFunctionFontName = controller.selfTestLeftReaderFontName(
@@ -2162,7 +2165,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 == NSFont.monospacedSystemFont(
                     ofSize: legacySettings.fontSize
                         + legacySettings.functionNameDelta,
-                    weight: .semibold
+                    weight: NSFont.Weight(rawValue: legacySettings.functionDeclarationFontWeight)
                 ).fontName
             && changedFunctionFontName
                 == NSFont.monospacedSystemFont(
@@ -2221,6 +2224,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         settingsWindowController?.close()
         commitReaderSettings(originalReaderSettings)
 
+        ReaderSettingsWindowController.selfTestEnableAccessibility()
         let settingsController = ReaderSettingsWindowController(
             settings: legacySettings,
             exactCoordinator: model.exactCoordinator,
@@ -2231,6 +2235,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             NSPoint(x: -20_000, y: -20_000)
         )
         settingsController.showWindow(nil)
+        pumpRunLoop()
+        _ = settingsController.selfTestPressReaderControl("Advanced typography")
         pumpRunLoop()
         let settingsGeometry = settingsController.selfTestVisualControlGeometry
         settingsController.close()
@@ -2255,6 +2261,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 geometryOn.hasRuler && geometryOn.rulerThickness > 0,
             "rulerInsideWindowContent": rulerInsideWindow,
             "readerWidthEqualsContainerMinusRuler": rulerWidthEquation,
+            "firstGlyphGapIsReadableWithRuler":
+                geometryOn.firstGlyphGap.map { (8...12).contains($0) } ?? false,
+            "firstGlyphGapIsReadableWithoutRuler":
+                geometryOff.firstGlyphGap.map { (8...12).contains($0) } ?? false,
             "disabledRulerRestoresFullWidth":
                 !geometryOff.hasRuler
                 && geometryOff.rulerThickness == 0
@@ -2305,13 +2315,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "readerWidth": Double(geometryOn.contentFrame.width),
             "readerMinX": Double(geometryOn.contentFrame.minX),
             "readerMaxX": Double(geometryOn.contentFrame.maxX),
+            "firstGlyphGapWithRuler": Double(geometryOn.firstGlyphGap ?? -1),
+            "firstGlyphGapWithoutRuler": Double(geometryOff.firstGlyphGap ?? -1),
+            "readerWidthWithoutRuler": Double(geometryOff.contentFrame.width),
             "containerWidth": Double(geometryOn.scrollFrame.width),
             "containerMinX": Double(geometryOn.scrollFrame.minX),
             "containerMaxX": Double(geometryOn.scrollFrame.maxX),
             "availableContentWidth":
                 Double(
                     geometryOn.clipFrame.width
-                        - geometryOn.rulerFrame.width
+                        - occupiedRulerWidth
                 ),
             "availableContentMinX":
                 Double(geometryOn.contentFrame.minX),
@@ -2953,16 +2966,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "hunkNavMoved": hunkNavMoved,
         ])
 
+        func comparisonCloseButton(in view: NSView) -> NSButton? {
+            if let button = view as? NSButton, button.accessibilityLabel() == "Close Comparison" {
+                return button
+            }
+            return view.subviews.lazy.compactMap(comparisonCloseButton).first
+        }
+        let closeHeaderButton = controller.window?.contentView.flatMap(comparisonCloseButton)
+        let closeHeaderAvailable = closeHeaderButton?.isEnabled == true
+            && closeHeaderButton?.action != nil
+            && closeHeaderButton?.target != nil
         controller.applyPanelPreset(.reading)
         pumpRunLoop()
         let readingPresetCollapsedRight = controller.selfTestSecondaryReaderCollapsed
+        let readingPresetPreservedComparison = model.compare.rightRevision == revision
+            && model.compare.diff != nil
         emitDiffStep("readingPreset", controller: controller, extra: [
             "rightReaderCollapsed": readingPresetCollapsedRight,
+            "comparisonPreserved": readingPresetPreservedComparison,
         ])
 
         let leftReaderBytesBeforeClear = controller.selfTestLeftReaderBytes
-        model.clearCompare()
+        let closeItem = NSApp.mainMenu?.items.compactMap(\.submenu)
+            .first { $0.title == "View" }?.item(withTitle: "Close Comparison")
+        let closeActionDispatched: Bool
+        if let closeItem, let action = closeItem.action, validateMenuItem(closeItem) {
+            closeActionDispatched = NSApp.sendAction(action, to: closeItem.target, from: closeItem)
+        } else {
+            closeActionDispatched = false
+        }
         pumpRunLoop()
+        let closeClearedState = model.compare.rightRevision == nil
+            && model.compare.rightSnapshotID == nil && model.compare.diff == nil
+        let closeCollapsedRight = controller.selfTestSecondaryReaderCollapsed
+        let closeClearedMarkers = controller.selfTestGutterCounts.isEmpty
+        let closeDisabledAfterClosing = closeItem.map { !validateMenuItem($0) } ?? false
+        emitDiffStep("closeComparison", controller: controller, extra: [
+            "actionDispatched": closeActionDispatched,
+            "stateCleared": closeClearedState,
+            "markersCleared": closeClearedMarkers,
+        ])
         var siClassicSettings = readerSettings
         siClassicSettings.theme = .siClassic
         controller.applyReaderSettings(siClassicSettings)
@@ -2989,6 +3032,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     gutterCoexistsWithLineNumbers,
                 "hunkNavMoved": hunkNavMoved,
                 "readingPresetCollapsedRight": readingPresetCollapsedRight,
+                "readingPresetPreservedComparison": readingPresetPreservedComparison,
+                "closeComparisonHeaderAvailable": closeHeaderAvailable,
+                "closeComparisonMenuActionDispatched": closeActionDispatched,
+                "closeComparisonClearedState": closeClearedState,
+                "closeComparisonCollapsedRight": closeCollapsedRight,
+                "closeComparisonClearedMarkers": closeClearedMarkers,
+                "closeComparisonDisabledAfterClosing": closeDisabledAfterClosing,
                 "themeSwitchPreservedLeftReader": themeSwitchPreservedLeftReader,
                 "themeSwitchClearedRightReader": themeSwitchClearedRightReader,
             ],
@@ -6458,23 +6508,45 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let coldContext = context
         let fileCount = pythonModel.fileTree?.fileCount ?? 0
         let coldStats = coldSession.stats
-        let manifestPaths = coldSession.manifest.files.map {
-            coldSession.paths.resolve($0.pathID)
-        }
-        let badManifestPaths = manifestPaths.filter {
-            !$0.hasSuffix(".py") || $0.hasSuffix(".pyi")
-        }
+        let sourceFiles = coldSession.manifest.files.filter { $0.detectedLanguage == .python }
+        let semanticIndexOnlyPython = coldSession.manifest.files.allSatisfy { file in
+            let mode = LanguageMode.classify(
+                path: coldSession.paths.resolve(file.pathID), language: .python
+            )
+            return file.detectedLanguage == mode?.language
+                && coldSession.content(at: file.pathID)?.0.languageMode == mode
+        } && coldSession.contentIndexes.keys.allSatisfy { $0.languageMode.language == .python }
         let treeFiles = pythonFiles(in: pythonModel.fileTree?.children ?? [])
-        let treeOnlyPython = !treeFiles.isEmpty
-            && treeFiles.allSatisfy { $0.pathExtension == "py" }
-        guard treeOnlyPython, badManifestPaths.isEmpty else {
-            finish("python tree contained non-.py paths: \(badManifestPaths)")
+        let snapshotFiles = coldSession.manifest.files.filter {
+            $0.fileMode == .regular || $0.fileMode == .lfsPointer
+        }.map { root.appendingPathComponent(coldSession.paths.resolve($0.pathID)).standardizedFileURL }
+        let treeMatchesSnapshot = Set(treeFiles) == Set(snapshotFiles)
+        guard treeMatchesSnapshot, sourceFiles.count == 204, semanticIndexOnlyPython else {
+            finish("Python workspace/index mismatch: tree=\(treeFiles.count) snapshot=\(snapshotFiles.count) sources=\(sourceFiles.count) semanticIndexOnlyPython=\(semanticIndexOnlyPython)")
         }
+        let configPath = "pyproject.toml"
+        let configFile = root.appendingPathComponent(configPath).standardizedFileURL
+        guard let config = coldSession.manifest.files.first(where: {
+                  coldSession.paths.resolve($0.pathID) == configPath
+              }), config.detectedLanguage == nil,
+              let configBytes = try? Array(Data(contentsOf: configFile)),
+              ContentID.sha256(of: configBytes) == config.contentID,
+              controller.selectFileInSidebar(configFile),
+              await pythonWait(timeout: 30, {
+                  controller.displayedReaderFile?.standardizedFileURL == configFile
+                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewText == String(decoding: configBytes, as: UTF8.self)
+                      && pythonModel.tabStrip.activeDocument == nil
+              })
+        else { finish("Python configuration preview did not match the worktree snapshot") }
         Self.writeJSON([
             "step": "cold-open",
             "language": "python",
             "projectUnit": coldSession.analysisProfile.projectUnitName,
             "fileCount": fileCount,
+            "sourceFileCount": sourceFiles.count,
+            "treeMatchesSnapshot": treeMatchesSnapshot,
+            "configurationPreview": configPath,
             "reused": coldStats.reusedCount,
             "extracted": coldStats.extractedCount,
             "snapshotPhase": pythonModel.snapshotPhase?.rawValue as Any,
@@ -6675,29 +6747,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         guard implementationsUnsupported else {
             finish("implementations must be unsupported")
         }
+        guard let hierarchyDocument = pythonModel.tabStrip.activeDocument,
+              let hierarchyBinding = hierarchyDocument.localBinding(at: hierarchyOffset),
+              hierarchyBinding.binding.kind == .letBinding,
+              !hierarchyBinding.references.isEmpty,
+              let hierarchyManifestFile = coldSession.manifest.files.first(where: {
+                  coldSession.paths.resolve($0.pathID) == hierarchyRelativeFile
+                      && $0.contentID == hierarchyDocument.contentID
+              })
+        else { finish("hierarchy Reader binding or snapshot identity unavailable") }
         controller.showRelations(direction: .references)
-        let referencesAfterUnsupported = await pythonWait(timeout: 5) {
-            guard pythonModel.exactCoordinator.readiness == .ready
+        let localReferencesAfterUnsupported = await pythonWait(timeout: 5) {
+            guard pythonModel.exactCoordinator.readiness == .ready,
+                  pythonModel.relationTree.direction == .references,
+                  let root = pythonModel.relationTree.root,
+                  root.kind == .root, root.symbol == nil, root.subtitle == "Local",
+                  let target = root.target,
+                  target.path == coldSession.paths.resolve(hierarchyManifestFile.pathID),
+                  target.byteOffset == hierarchyBinding.binding.declarationRange.lowerBound,
+                  hierarchyDocument.localBinding(at: target.byteOffset)?.bindingIndex
+                    == hierarchyBinding.bindingIndex,
+                  let edges = root.children,
+                  edges.count == hierarchyBinding.references.count,
+                  edges.allSatisfy({ $0.kind == .edge })
             else { return false }
-            let visible = controller.selfTestVisibleRelationText
-            return visible.contains {
-                $0.contains(" Verified")
-                    || $0.hasPrefix("No verified references")
-                    || $0.hasPrefix("Analysis limited:")
+            return zip(edges, hierarchyBinding.references).allSatisfy { edge, range in
+                edge.target?.path == target.path
+                    && edge.target?.byteOffset == range.lowerBound
+                    && edge.line == hierarchyDocument.lineTable.lineColumn(at: range.lowerBound)?.line
+            } && !controller.selfTestVisibleRelationText.contains {
+                $0.contains("server does not support implementations")
             }
         }
         let referencesVisibleAfterUnsupported =
             controller.selfTestVisibleRelationText
         let coordinatorReadinessAfterUnsupported =
             pythonModel.exactCoordinator.readiness
-        guard referencesAfterUnsupported else {
+        guard localReferencesAfterUnsupported else {
             Self.writeJSON([
                 "step": "references-after-unsupported-diagnostic",
                 "visible": referencesVisibleAfterUnsupported,
                 "readiness": String(describing: coordinatorReadinessAfterUnsupported),
+                "expectedBindingIndex": hierarchyBinding.bindingIndex,
+                "expectedPath": hierarchyRelativeFile,
+                "expectedReferenceOffsets": hierarchyBinding.references.map(\.lowerBound),
                 "elapsedMS": milliseconds(since: startedAt),
             ])
-            finish("references after unsupported implementations failed")
+            finish("local references after unsupported implementations did not match Reader binding")
+        }
+        await pythonModel.relationTree.setRoot(
+            target: .engine(hierarchySymbol),
+            direction: .references
+        )?.value
+        let exactReferencesAfterUnsupportedCount = exactRelationEdgeCount(in: pythonModel)
+        let exactReferencesAfterUnsupported = pythonModel.exactCoordinator.readiness == .ready
+            && pythonModel.relationTree.direction == .references
+            && pythonModel.relationTree.root?.symbol == hierarchySymbol
+            && exactReferencesAfterUnsupportedCount > 0
+        guard exactReferencesAfterUnsupported else {
+            finish("Pyright references after unsupported implementations unavailable")
         }
         Self.writeJSON([
             "step": "real-python-exact",
@@ -6705,6 +6813,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "toolVersion": attribution.toolVersion,
             "definitionTargets": definitions.count,
             "references": referenceCount,
+            "localReferencesAfterUnsupported": hierarchyBinding.references.count,
+            "exactReferencesAfterUnsupported": exactReferencesAfterUnsupportedCount,
             "callers": callerCount,
             "calls": callCount,
             "implementations": "unsupported",
@@ -6774,6 +6884,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         } else {
             coldStats
         }
+        guard let source = pythonModel.documentSource,
+              let expectedConfigBytes = try? commitSnapshot.readBytes(path: configPath),
+              let actualConfigBytes = try? source(configFile),
+              actualConfigBytes == expectedConfigBytes,
+              pythonModel.fileTree?.selectionPath(for: configFile) != nil,
+              controller.selectFileInSidebar(configFile),
+              await pythonWait(timeout: 30, {
+                  controller.displayedReaderFile?.standardizedFileURL == configFile
+                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewText == String(decoding: expectedConfigBytes, as: UTF8.self)
+                      && pythonModel.tabStrip.activeDocument == nil
+              })
+        else { finish("Python configuration preview did not match HEAD~1") }
         pythonModel.switchToWorktree()
         guard await pythonWait(timeout: 120, {
             pythonModel.currentRevision == nil
@@ -6840,8 +6963,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         pythonRecentStore.clear()
 
         let checks = [
-            "treeOnlyPython": treeOnlyPython,
-            "manifestOnlyPython": badManifestPaths.isEmpty,
+            "treeMatchesSnapshot": treeMatchesSnapshot,
+            "sourceFileCountMatchesCorpus": sourceFiles.count == 204,
+            "semanticIndexOnlyPython": semanticIndexOnlyPython,
+            "configurationPreviewMatchesWorktree": true,
+            "configurationPreviewMatchesCommit": true,
             "contentSearchMemory": true,
             "symbolSearchMemory": true,
             "readerOutlineReady": outlineCount > 0,
@@ -6854,7 +6980,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "exactReferences": exactReferences,
             "exactCallHierarchy": callHierarchyExact,
             "implementationsUnsupported": implementationsUnsupported,
-            "referencesAfterUnsupported": referencesAfterUnsupported,
+            "localReferencesAfterUnsupported": localReferencesAfterUnsupported,
+            "exactReferencesAfterUnsupported": exactReferencesAfterUnsupported,
             "compareHunksNonempty": true,
             "compareRightDiffers": rightReaderDiffersFromWorktree,
             "switchToCommitPython": true,
@@ -6941,30 +7068,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let coldSession = session
         let coldContext = context
         let coldStats = coldSession.stats
-        let manifestFiles = coldSession.manifest.files.map {
+        let sourceFiles = coldSession.manifest.files.filter { $0.detectedLanguage == .typescript }
+        let manifestFiles = sourceFiles.map {
             coldSession.paths.resolve($0.pathID)
         }.sorted()
-        let badManifestPaths = manifestFiles.filter {
-            !($0.hasSuffix(".ts") || $0.hasSuffix(".tsx"))
-                || $0.hasSuffix(".d.ts")
-        }
+        let semanticIndexOnlyTypeScript = coldSession.manifest.files.allSatisfy { file in
+            let mode = LanguageMode.classify(
+                path: coldSession.paths.resolve(file.pathID), language: .typescript
+            )
+            return file.detectedLanguage == mode?.language
+                && coldSession.content(at: file.pathID)?.0.languageMode == mode
+        } && coldSession.contentIndexes.keys.allSatisfy { $0.languageMode.language == .typescript }
         let treeFiles = pythonFiles(in: tsModel.fileTree?.children ?? [])
-        let tsCount = treeFiles.filter { $0.pathExtension == "ts" }.count
-        let tsxCount = treeFiles.filter { $0.pathExtension == "tsx" }.count
-        let treeOnlyTS = !treeFiles.isEmpty && treeFiles.allSatisfy {
-            $0.pathExtension == "ts" || $0.pathExtension == "tsx"
-        }
+        let snapshotFiles = coldSession.manifest.files.filter {
+            $0.fileMode == .regular || $0.fileMode == .lfsPointer
+        }.map { root.appendingPathComponent(coldSession.paths.resolve($0.pathID)).standardizedFileURL }
+        let treeMatchesSnapshot = Set(treeFiles) == Set(snapshotFiles)
+        let tsCount = manifestFiles.filter { $0.hasSuffix(".ts") }.count
+        let tsxCount = manifestFiles.filter { $0.hasSuffix(".tsx") }.count
         let manifestHasTsAndTsx = manifestFiles.contains(tsRelative)
             && manifestFiles.contains(tsxRelative)
-        let manifestNoJavaScript = !manifestFiles.contains {
-            $0.hasSuffix(".js") || $0.hasSuffix(".jsx")
-        }
-        guard treeOnlyTS, badManifestPaths.isEmpty,
-              manifestHasTsAndTsx, manifestNoJavaScript
+        guard treeMatchesSnapshot, tsCount == 2, tsxCount == 51,
+              manifestHasTsAndTsx, semanticIndexOnlyTypeScript
         else {
-            finish("TypeScript tree/manifest contained unsupported paths: "
-                + "\(badManifestPaths) files=\(manifestFiles)")
+            finish("TypeScript workspace/index mismatch: tree=\(treeFiles.count) snapshot=\(snapshotFiles.count) ts=\(tsCount) tsx=\(tsxCount) semanticIndexOnlyTypeScript=\(semanticIndexOnlyTypeScript)")
         }
+        let configPath = "package.json"
+        let configFile = root.appendingPathComponent(configPath).standardizedFileURL
+        guard let config = coldSession.manifest.files.first(where: {
+                  coldSession.paths.resolve($0.pathID) == configPath
+              }), config.detectedLanguage == nil,
+              let configBytes = try? Array(Data(contentsOf: configFile)),
+              ContentID.sha256(of: configBytes) == config.contentID,
+              controller.selectFileInSidebar(configFile),
+              await tsWait(timeout: 30, {
+                  controller.displayedReaderFile?.standardizedFileURL == configFile
+                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewText == String(decoding: configBytes, as: UTF8.self)
+                      && tsModel.tabStrip.activeDocument == nil
+              })
+        else { finish("TypeScript configuration preview did not match the worktree snapshot") }
         let profileUnit = coldSession.analysisProfile.projectUnitName
         Self.writeJSON([
             "step": "cold-open",
@@ -6973,6 +7116,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "tsCount": tsCount,
             "tsxCount": tsxCount,
             "fileCount": treeFiles.count,
+            "sourceFileCount": sourceFiles.count,
+            "treeMatchesSnapshot": treeMatchesSnapshot,
+            "configurationPreview": configPath,
             "reused": coldStats.reusedCount,
             "extracted": coldStats.extractedCount,
             "snapshotPhase": tsModel.snapshotPhase?.rawValue as Any,
@@ -7290,6 +7436,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         } else {
             coldStats
         }
+        guard let source = tsModel.documentSource,
+              let expectedConfigBytes = try? commitSnapshot.readBytes(path: configPath),
+              let actualConfigBytes = try? source(configFile),
+              actualConfigBytes == expectedConfigBytes,
+              tsModel.fileTree?.selectionPath(for: configFile) != nil,
+              controller.selectFileInSidebar(configFile),
+              await tsWait(timeout: 30, {
+                  controller.displayedReaderFile?.standardizedFileURL == configFile
+                      && controller.selfTestReaderPreviewKind == "Plain text"
+                      && controller.selfTestReaderPreviewText == String(decoding: expectedConfigBytes, as: UTF8.self)
+                      && tsModel.tabStrip.activeDocument == nil
+              })
+        else { finish("TypeScript configuration preview did not match HEAD~1") }
         var switchToWorktreeTypeScript = false
         tsModel.switchToWorktree()
         guard await tsWait(timeout: 180, {
@@ -7386,10 +7545,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         tsRecentStore.clear()
 
         let checks = [
-            "treeOnlyTypeScript": treeOnlyTS,
+            "treeMatchesSnapshot": treeMatchesSnapshot,
             "treeHasTsAndTsx": tsCount == 2 && tsxCount == 51,
             "manifestHasTsAndTsx": manifestHasTsAndTsx,
-            "manifestNoJavaScript": manifestNoJavaScript,
+            "semanticIndexOnlyTypeScript": semanticIndexOnlyTypeScript,
+            "configurationPreviewMatchesWorktree": true,
+            "configurationPreviewMatchesCommit": true,
             "searchHitTSX": searchHitTSX,
             "profileUnitTSConfig": profileUnit == "tsconfig.json",
             "profileHasNoCargo": profileHasNoCargo,
@@ -9155,6 +9316,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         measuresIdleFootprint: Bool = false
     ) {
         NSApplication.shared.mainMenu = makeMainMenu()
+        applyApplicationAppearance()
         let windowController = MainWindowController(
             model: model,
             settings: readerSettings,
@@ -9675,6 +9837,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         windowController?.nextDiffHunk(sender)
     }
 
+    @objc private func closeComparison(_ sender: Any?) {
+        windowController?.closeComparison()
+    }
+
     @objc private func toggleRelations(_ sender: Any?) {
         windowController?.toggleRelations()
     }
@@ -9756,9 +9922,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     private func commitReaderSettings(_ settings: ReaderSettings) {
         readerSettings = settings
+        applyApplicationAppearance()
         settings.save(to: .standard)
         windowController?.applyReaderSettings(settings)
         settingsWindowController?.update(settings: settings)
+    }
+
+    private func applyApplicationAppearance() {
+        NSApplication.shared.appearance = switch readerSettings.theme {
+        case .dark: NSAppearance(named: .darkAqua)
+        case .light, .siClassic: NSAppearance(named: .aqua)
+        case .auto: nil
+        }
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
@@ -9774,6 +9949,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return model.navigationHistory.canGoForward
         case #selector(previousDiffHunk(_:)), #selector(nextDiffHunk(_:)):
             return !(model.compare.diff?.hunks.isEmpty ?? true)
+        case #selector(closeComparison(_:)):
+            return windowController?.canCloseComparison == true
         case #selector(showCallers(_:)),
             #selector(showCalls(_:)),
             #selector(showImplementations(_:)):
@@ -10136,6 +10313,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
+        let closeComparisonItem = NSMenuItem(
+            title: "Close Comparison",
+            action: #selector(closeComparison(_:)),
+            keyEquivalent: "w"
+        )
+        closeComparisonItem.keyEquivalentModifierMask = [.control, .command]
+        closeComparisonItem.target = self
+        viewMenu.addItem(closeComparisonItem)
         viewMenu.addItem(.separator())
         let foldingItem = NSMenuItem(
             title: "Folding",
@@ -11882,7 +12067,9 @@ private func selfTestListRowCount(in view: NSView) -> Int {
 
 private func rustFiles(in nodes: [FileTreeNode]) -> [URL] {
     nodes.flatMap { node in
-        node.isDirectory ? rustFiles(in: node.children) : [node.url]
+        if node.isDirectory { return rustFiles(in: node.children) }
+        return LanguageMode.classify(path: node.url.path, language: .rust) != nil
+            ? [node.url] : []
     }
 }
 

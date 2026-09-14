@@ -64,13 +64,13 @@ public struct ReaderSettings: Equatable, Sendable {
     package var wrapLines: Bool
 
     public init(
-        lineHeightMultiple: Double = 1.25,
+        lineHeightMultiple: Double = 1.3,
         fontSize: Double = 13,
-        functionNameDelta: Double = 1,
-        parameterReferenceAlpha: Double = 0.72,
+        functionNameDelta: Double = 0,
+        parameterReferenceAlpha: Double = 0.9,
         declarationMarkerAlpha: Double = 0.7,
-        functionDeclarationFontWeight: Double = 0.3,
-        declarationEmphasisFontWeight: Double = 0.3,
+        functionDeclarationFontWeight: Double = 0.23,
+        declarationEmphasisFontWeight: Double = 0.23,
         theme: Theme = .auto,
         syntaxFormatting: Bool = true,
         humanistComments: Bool = false,
@@ -104,16 +104,16 @@ public struct ReaderSettings: Equatable, Sendable {
         self.init(
             lineHeightMultiple: (defaults.object(forKey: Keys.lineHeightMultiple) as? NSNumber)?
                 .doubleValue
-                ?? 1.25,
+                ?? 1.3,
             fontSize: (defaults.object(forKey: Keys.fontSize) as? NSNumber)?.doubleValue
                 ?? 13,
             functionNameDelta: (defaults.object(forKey: Keys.functionNameDelta) as? NSNumber)?
                 .doubleValue
-                ?? 1,
+                ?? 0,
             parameterReferenceAlpha:
                 (defaults.object(forKey: Keys.parameterReferenceAlpha) as? NSNumber)?
                     .doubleValue
-                    ?? 0.72,
+                    ?? 0.9,
             declarationMarkerAlpha:
                 (defaults.object(forKey: Keys.declarationMarkerAlpha) as? NSNumber)?
                     .doubleValue
@@ -122,12 +122,12 @@ public struct ReaderSettings: Equatable, Sendable {
                 (defaults.object(
                     forKey: Keys.functionDeclarationFontWeight
                 ) as? NSNumber)?.doubleValue
-                    ?? 0.3,
+                    ?? 0.23,
             declarationEmphasisFontWeight:
                 (defaults.object(
                     forKey: Keys.declarationEmphasisFontWeight
                 ) as? NSNumber)?.doubleValue
-                    ?? 0.3,
+                    ?? 0.23,
             theme: defaults.string(forKey: Keys.theme).flatMap(Theme.init(rawValue:))
                 ?? .auto,
             syntaxFormatting: (defaults.object(forKey: Keys.syntaxFormatting) as? NSNumber)?
@@ -256,11 +256,14 @@ public struct ReaderTheme: Equatable, Sendable {
         case .dark:
             switch kind {
             case .keyword: 0xE879F9
-            case .comment, .commentFigure: 0xA3E635
+            case .comment, .commentFigure: 0x91AA8B
             case .string: 0xFDA29B
             case .number: 0xC4B5FD
-            case .functionName, .declarationTitle, .declarationEmphasis: 0x84ADFF
-            case .typeName: 0x67E8F9
+            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x84ADFF
+            case .typeName, .property, .parameter: 0x80CBC4
+            case .macro, .attribute: 0xD6A0D9
+            case .enumMember: 0xC4B5FD
+            case .localBinding: 0xD4D4D4
             }
         case .siClassic:
             switch kind {
@@ -268,17 +271,23 @@ public struct ReaderTheme: Equatable, Sendable {
             case .comment, .commentFigure: 0x526B45
             case .string: 0x8A3C2E
             case .number: 0x6E3B6F
-            case .functionName, .declarationTitle, .declarationEmphasis: 0x163A5F
-            case .typeName: 0x245B78
+            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x163A5F
+            case .typeName, .property, .parameter: 0x245B78
+            case .macro, .attribute: 0x7A1F1F
+            case .enumMember: 0x6E3B6F
+            case .localBinding: 0x1F2733
             }
         case .auto, .light:
             switch kind {
             case .keyword: 0x9C36B5
-            case .comment, .commentFigure: 0x4D7C0F
+            case .comment, .commentFigure: 0x536F47
             case .string: 0xB42318
             case .number: 0x7F56D9
-            case .functionName, .declarationTitle, .declarationEmphasis: 0x175CD3
-            case .typeName: 0x087E8B
+            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x175CD3
+            case .typeName, .property, .parameter: 0x087078
+            case .macro, .attribute: 0x9C36B5
+            case .enumMember: 0x7F56D9
+            case .localBinding: 0x1F2328
             }
         }
     }

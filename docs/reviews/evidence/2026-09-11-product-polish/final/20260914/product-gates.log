@@ -1,0 +1,361 @@
+--- product toolchain ---
+ProductName:		macOS
+ProductVersion:		26.6.2
+BuildVersion:		25G83
+Xcode 26.6
+Build version 17F113
+swift-driver version: 1.148.6 Apple Swift version 6.3.3 (swiftlang-6.3.3.1.3 clang-2100.1.1.101)
+Target: arm64-apple-macosx26.0
+rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06)
+pyright 1.1.413
+3.3.0
+v26.8.1
+/opt/homebrew/lib
+├── typescript-language-server@3.3.0
+└── typescript@5.0.2
+
+--- end product toolchain ---
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/8] Write swift-version--58304C5D6DBC2206.txt
+[4/11] Compiling CodeInsightGit GitSnapshot.swift
+[5/11] Compiling CodeInsightGit CommitLog.swift
+[6/11] Emitting module CodeInsightGit
+[7/33] Compiling CodeInsightEngine NamePosting.swift
+[8/34] Emitting module CodeInsightEngine
+[9/34] Compiling CodeInsightEngine ProjectIndexStore.swift
+[10/34] Compiling CodeInsightExact TypeScriptLanguageServerProvider.swift
+[11/34] Compiling CodeInsightExact Sandbox.swift
+[12/34] Compiling CodeInsightExact TrustRegistry.swift
+[13/34] Compiling CodeInsightEngine SymbolSearch.swift
+[14/34] Compiling CodeInsightEngine ModuleMap.swift
+[15/34] Compiling CodeInsightExact Materializer.swift
+[16/34] Compiling CodeInsightExact PyrightProvider.swift
+[17/34] Compiling CodeInsightExact LSP.swift
+[18/34] Compiling CodeInsightExact ExactProvider.swift
+[19/34] Emitting module CodeInsightExact
+[20/34] Compiling CodeInsightExact RustAnalyzerProvider.swift
+[21/34] Compiling CodeInsightEngine ProfileDetector.swift
+[22/34] Compiling CodeInsightEngine IndexCache.swift
+[23/34] Compiling CodeInsightEngine ProjectIndexer.swift
+[24/34] Compiling CodeInsightEngine SnapshotSearch.swift
+[25/34] Compiling CodeInsightEngine Resolver.swift
+[26/34] Compiling CodeInsightEngine CanonicalDump.swift
+[27/34] Compiling CodeInsightEngine ContentIndexDraftCodec.swift
+[28/34] Compiling CodeInsightEngine EngineSession.swift
+[29/34] Compiling CodeInsightEngine GoldSet.swift
+[30/49] Compiling CodeInsightAppModel SymbolSearchPanelModel.swift
+[31/49] Compiling CodeInsightAppModel ExactCoordinator.swift
+[32/49] Compiling CodeInsightAppModel NavigationHistory.swift
+[33/50] Compiling CodeInsightAppModel TabStripModel.swift
+[34/50] Compiling CodeInsightAppModel OutlinePanelModel.swift
+[35/50] Compiling CodeInsightAppModel PanelPresetModel.swift
+[36/50] Compiling CodeInsightAppModel SearchPanelModel.swift
+[37/50] Compiling CodeInsightAppModel SessionCodec.swift
+[38/50] Compiling CodeInsightAppModel ReadingSet.swift
+[39/50] Compiling CodeInsightAppModel RecentProjectsStore.swift
+[40/50] Compiling CodeInsightAppModel RelationTreeModel.swift
+[41/50] Compiling CodeInsightAppModel CompareModel.swift
+[42/50] Compiling CodeInsightAppModel ContextWindowModel.swift
+[43/50] Compiling CodeInsightAppModel BookmarkStore.swift
+[44/50] Compiling CodeInsightAppModel CommitPickerModel.swift
+[45/50] Emitting module CodeInsightAppModel
+[46/50] Compiling CodeInsightAppModel AppModel.swift
+[47/50] Compiling CodeInsightAppModel BookmarkModel.swift
+[48/63] Compiling CodeInsightApp RelationWindowController.swift
+[49/63] Compiling CodeInsightApp PalettePanel.swift
+[50/63] Compiling CodeInsightApp ReadingTrailView.swift
+[51/63] Compiling CodeInsightApp ReadingSetView.swift
+[52/64] Compiling CodeInsightApp SearchPanel.swift
+[53/64] Compiling CodeInsightApp KeyablePanel.swift
+[54/64] Compiling CodeInsightApp MainWindowController.swift
+[55/64] Compiling CodeInsightApp ReaderSettingsWindowController.swift
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:105:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+103 | 
+104 |     static func selfTestEnableAccessibility() {
+105 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+106 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+107 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[56/64] Compiling CodeInsightApp EmptyStateView.swift
+[57/64] Compiling CodeInsightApp BookmarkPanel.swift
+[58/64] Compiling CodeInsightApp CairnMark.swift
+[59/64] Emitting module CodeInsightApp
+[60/64] Compiling CodeInsightApp CodeInsightApp.swift
+[61/64] Compiling CodeInsightApp CommitPickerPopover.swift
+[61/63] Linking codeinsight-app
+[62/63] Applying codeinsight-app
+Build complete! (18.16s)
+✔ Test run with 905 tests in 3 suites passed after 268.882 seconds.
+✔ Test run with 2 tests in 0 suites passed after 0.458 seconds.
+✔ Test run with 2 tests in 0 suites passed after 3.875 seconds.
+PASS: swift test total=909 (main=905 isolated=2 panels=2)
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"profileTitle":"Rust · exact_fixture · default · Safe","profileVisible":true,"readerFile":null,"step":"initial-status","variant":"fake"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":392.44758400000001,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":129.46508399999999,"relationFirstActionableTitle":"relation_root"},"coldFirstActionableSelectable":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"instrumentation-only; not real rust-analyzer","pinned":false,"readerFile":"lib.rs","sameSession":true,"step":"relation-timing","thresholdBasis":"structural-only; real threshold pending host measurement","variant":"delayed-exact-fake","warm":{"relationAllResultsMS":341.47304100000002,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":66.817415999999994,"relationFirstActionableTitle":"relation_root"},"warmFirstActionableSelectable":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyFirstAnswerMS":46.925333999999999,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"fake"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","exactUpgradeMS":329.110209,"pinned":false,"readerFile":"main.rs","step":"exact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextReadyMS":623.42779199999995,"contextSummary":"src\/lib.rs:1:8","contextVisibleDuringSwitch":false,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"fakePrepareFeatures":["defaultFeatures","allFeatures"],"featurePrepared":true,"fuzzyAfterSwitch":true,"menuActionTriggered":true,"oldGenerationRelationResultReturned":true,"oldGenerationRequestInFlight":true,"oldGenerationResultDiscarded":true,"oldGenerationResultReturned":true,"pinned":false,"profileButtonFrame":"{{4, 6}, {180, 28}}","profileButtonVisibleWithGeometry":true,"profileContainerBounds":"{{0, 0}, {188, 40}}","profileTitle":"Rust · exact_fixture · all · Safe","readerFile":"lib.rs","relationActiveBeforeSwitch":true,"relationRestoredAfterSwitch":true,"step":"feature-switch","switchedExactVisible":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextRestored":true,"contextSummary":"src\/lib.rs:1:8","direction":"references","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expectedUseOffset":603,"groupFrame":"{{0, 44}, {359, 44}}","groupTitle":"","groupVisibleWithGeometry":true,"historyBack":true,"historyRecorded":true,"intersection":"{{0, 44}, {359, 44}}","openedOffset":603,"originOffset":0,"pinned":false,"readerFile":"lib.rs","referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"returnedOffset":0,"segmentFrames":["{{1329, 845}, {75, 24}}","{{1405, 845}, {63.5, 24}}","{{1469.5, 845}, {102, 24}}","{{1572.5, 845}, {99.5, 24}}"],"selected":true,"step":"local-references","treeVisible":true,"variant":"reader-index","visibleRect":"{{0, 0}, {359, 712.5}}"}
+{"axLabel":"lib.rs:3","axProvenanceReachable":true,"axReadOnly":true,"axRole":"AXUnknown","axValue":"direct · heuristic also matched, Verified","axValueSettable":false,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","crossFile":true,"declarationExcluded":true,"direction":"references","edgeCount":3,"edgeFrames":["{{0, 66}, {383, 44}}","{{0, 110}, {383, 44}}","{{0, 154}, {383, 44}}"],"edgeTitles":["main.rs:1:20","lib.rs:3","main.rs:4"],"exactEdgeTitles":["lib.rs:3","main.rs:4"],"exactGroupRowCount":2,"exactGroupTitle":null,"exactRowCount":2,"exactStatusText":"Exact: ready · Safe (limited)","exactVisible":true,"fuzzyEdgeTitles":["main.rs:1:20"],"fuzzyRowCount":1,"geometryReadDidNotForceLayout":true,"groupsDoNotOverlap":true,"groupTitle":"Show 1 possible matches","heuristicProvenanceRetained":true,"mixedPresentationHonest":true,"pinned":false,"possibleDisclosure":"Show 1 possible matches","readerFile":"lib.rs","resultsAndControlsDoNotOverlap":true,"rowsVisibleWithGeometry":true,"step":"project-references","variant":"exact+fuzzy","visibleRect":"{{0, 0}, {359, 691.5}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","doubleClickDidNotNavigateTwice":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","historyBack":true,"keyboardAXNotificationCorrect":true,"keyboardDownMovedSelection":true,"keyboardEnterOpened":true,"keyboardKeypadEnterOpened":true,"keyboardRestoredRelationFile":true,"keyboardSelectionNavigated":true,"keyboardUpMovedSelection":true,"navigated":true,"navigationExactlyOnce":true,"noFeedback":true,"noReroot":true,"pinned":false,"readerFile":"lib.rs","selected":true,"selectionCount":1,"step":"reference-single-click-navigation","variant":"fuzzy-two-stage"}
+{"candidateCount":1,"contextAndRelationsReadyMS":1274.368958,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallerVisible":true,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"footprintMB":250.01665496826172,"inferredRowFrame":"{{0, 44}, {359, 44}}","pinned":false,"readerFile":"main.rs","relationsVisibleRect":"{{0, 0}, {359, 691.5}}","step":"relations","variant":"fake","verifiedRowFrame":"{{0, 110}, {359, 44}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"relation-exact-implementations","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","firstSummary":"src\/main.rs:1:5","pinned":false,"readerFile":"lib.rs","restored":true,"secondSummary":"src\/main.rs:3:4","selectedFirst":true,"selectedSecond":true,"step":"relation-follow-context","updatedTwice":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","step":"pinnedExact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","generationIncremented":true,"pinned":true,"readerFile":"lib.rs","rootTitle":"relation_root","selectedEdge":true,"step":"relation-direction-root","variant":"fake"}
+{"candidateCount":1,"contextPreserved":true,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","rootTitle":"answer","selectedEdge":true,"step":"relation-deselect-root","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","navigated":true,"pinned":true,"readerFile":"main.rs","rootTitle":"main","selectedEdge":true,"step":"relation-double-click","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","externalGroupTitle":"","pinned":true,"readerFile":"lib.rs","rootTitle":"Backend","step":"relation-empty-external","variant":"fake"}
+{"bothQueriesFinished":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionRequests":0,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expandedDefinitionValidationRequests":1,"firstBatchUsedNodeReload":true,"heuristicPublishedWhileExactBlocked":true,"pinned":true,"possibleExpanded":true,"possibleRowRetained":true,"readerFile":"lib.rs","step":"relation-first-batch","variant":"blocked-root-exact-fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","inferredPossible":false,"inferredProbable":true,"inferredSubtitle":"direct","pinned":true,"readerFile":"lib.rs","step":"relation-receiver-types","traitObjectPossible":true,"traitObjectSubtitle":"dynamic · name match only","typedPossible":false,"typedStrong":true,"typedSubtitle":"direct","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","full":"No verified references","offline":"Analysis limited: dependencies unavailable offline","partial":"Analysis limited: build scripts disabled; proc macros disabled","pinned":true,"readerFile":"lib.rs","step":"relation-zero-coverage","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Trusted","pinned":false,"profileTitle":"Rust · history · default · Trusted","readerFile":null,"step":"trusted-status","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":null,"step":"trust-revoke","trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"initial-status","variant":"rust-analyzer"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":2544.5812919999998,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":133.762708,"relationFirstActionableTitle":"relation_root"},"coldHeuristicFirstObserved":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"real rust-analyzer","pinned":false,"readerFile":"lib.rs","step":"relation-timing","thresholdBasis":"structural-only; threshold pending host measurement","variant":"rust-analyzer","warm":{"relationAllResultsMS":84.839332999999996,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":69.118082999999999,"relationFirstActionableTitle":"relation_root"},"warmHeuristicFirstObserved":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyVisibleBeforeExact":true,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"rust-analyzer"}
+{"candidateCount":2,"contextExactMS":51.725583999999998,"contextFirstActionableMS":40.745834000000002,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"exact","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"ExactFixtureBackend"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-implementations","textDocumentImplementationReached":true,"variant":"rust-analyzer"}
+{"callHierarchyIncomingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"relation_root"},{"file":"src\/main.rs","symbol":"main"}],"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-incoming-calls","variant":"rust-analyzer"}
+{"callHierarchyOutgoingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"answer"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-outgoing-calls","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":3,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-references","textDocumentReferencesReached":true,"variant":"rust-analyzer"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: deps unavailable (offline) · Safe","noDefinitionRequest":true,"pinned":false,"readerFile":null,"step":"offline-coverage","variant":"rust-analyzer-offline"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · @317b8b4 (materialized) · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"provenanceAttributed":true,"providerRoot":"\/var\/folders\/9k\/7j3z072513z5hkf_xgcxzdzm0000gn\/T\/CodeInsightExactHistorySelfTest-6EE27770-463B-4156-8CFA-62F556DA1C90\/materialized\/317b8b43eff2adabac6b40650f6af0ed1cf26d0f\/4d1bd1001728c15329194887321f4022453c86acde9d77c5f089dbb0ab90c493","providerRootIsMaterialized":true,"readerFile":"main.rs","revision":"317b8b43eff2adabac6b40650f6af0ed1cf26d0f","step":"historicalExact","uiPath":"src\/lib.rs","uiPathIsRepoRelative":true,"variant":"historical-fake"}
+{"answerCallersReady":true,"bothRelationQueriesFinished":true,"callHierarchyIncomingCallsReached":true,"callHierarchyOutgoingCallsReached":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionSkipped":true,"deselectedRootPreserved":true,"deselectPreservedContext":true,"deselectRootReady":true,"directionGenerationIncremented":true,"doubleClickNavigatesAndSetsRoot":true,"exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallersRestored":true,"exactCallerVisible":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactImplementationsVisible":true,"exactReferencesDeclarationExcluded":true,"exactReferencesHeuristicProvenanceRetained":true,"exactReferencesVisible":true,"exactStatusText":"Exact: ready · Safe (limited)","exactStatusVisible":true,"exactVisible":true,"exactZeroCoverageCopyDistinct":true,"exactZeroFullCopyHonest":true,"exactZeroOfflineCopyHonest":true,"exactZeroPartialCopyHonest":true,"expandedDefinitionValidationOnDemand":true,"externalDemotionFileVisible":true,"externalGroupHeaderHonest":true,"externalGroupVisible":true,"featureContextClearedDuringSwitch":true,"featureFuzzyAfterSwitch":true,"featureMenuActionTriggered":true,"featureOldGenerationRelationResultReturned":true,"featureOldGenerationRequestInFlight":true,"featureOldGenerationResultDiscarded":true,"featureOldGenerationResultReturned":true,"featurePrepared":true,"featureProbeFileVisible":true,"featureProfileButtonVisibleWithGeometry":true,"featureRelationActiveBeforeSwitch":true,"featureRelationRestoredAfterSwitch":true,"featureSwitchedExactVisible":true,"firstBatchUsedNodeReload":true,"fuzzyRetained":true,"fuzzyVisible":true,"heuristicPublishedWhileExactBlocked":true,"historicalExactVisible":true,"historicalInitialStatusSafe":true,"historicalProvenanceAttributed":true,"inferredReceiverAbsentFromPossible":true,"inferredReceiverNameMatchNoteAbsent":true,"inferredReceiverProbable":true,"initialProfileTitleSafe":true,"initialProfileVisible":true,"initialStatusSafeBeforeClick":true,"localReferenceContextRestored":true,"localReferenceCountHonest":true,"localReferenceGroupVisibleWithGeometry":true,"localReferenceHistoryBack":true,"localReferenceHistoryRecorded":true,"localReferenceOpenedAtCorrectOffset":true,"localReferenceSelected":true,"localReferencesVisible":true,"mixedReferencePresentationHonest":true,"passed":true,"pinned":true,"pinnedTargetStable":true,"possibleExpandedForValidation":true,"possibleRowRetainedWithoutPromotion":true,"projectReferenceAXProvenanceReachable":true,"projectReferenceAXReadOnly":true,"projectReferenceGroupsDoNotOverlap":true,"projectReferenceResultsAndControlsDoNotOverlap":true,"projectReferenceRowsVisibleWithGeometry":true,"projectReferencesCrossFile":true,"projectReferencesVisible":true,"providerRootIsMaterialized":true,"readerFile":"lib.rs","realOfflineCoverage":"passed","realOfflineCoveragePassedOrSkipped":true,"realProvider":"passed","realProviderPassedOrSkipped":true,"realRelationColdFirstActionableSelectable":true,"realRelationColdTimingFieldsValid":true,"realRelationTimingFileVisible":true,"realRelationWarmFirstActionableSelectable":true,"realRelationWarmTimingFieldsValid":true,"referenceDoubleClickDidNotNavigateTwice":true,"referenceKeyboardAXNotificationCorrect":true,"referenceKeyboardDownMovedSelection":true,"referenceKeyboardEnterOpened":true,"referenceKeyboardKeypadEnterOpened":true,"referenceKeyboardRestoredRelationFile":true,"referenceKeyboardSelectionNavigated":true,"referenceKeyboardUpMovedSelection":true,"referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"referenceSingleClickExactlyOnce":true,"referenceSingleClickHistoryBack":true,"referenceSingleClickNavigated":true,"referenceSingleClickNoFeedback":true,"referenceSingleClickNoReroot":true,"referenceSingleClickSelected":true,"relationColdFirstActionableSelectable":true,"relationColdHeuristicFirst":true,"relationColdTimingFieldsValid":true,"relationFileRestoredAfterDependency":true,"relationFileVisible":true,"relationFollowContextRestored":true,"relationGeometryReadDidNotForceLayout":true,"relationRowsUpdateFollowContext":true,"relationTimingFileVisible":true,"relationTimingSameSession":true,"relationWarmFirstActionableSelectable":true,"relationWarmHeuristicFirst":true,"relationWarmTimingFieldsValid":true,"selectedEdgeDrivesRoot":true,"selectedFirstFollowCaller":true,"selectedForDeselect":true,"selectedForDirection":true,"selectedForOpen":true,"selectedSecondFollowCaller":true,"signatureTraitFileVisible":true,"step":"summary","textDocumentImplementationReached":true,"traitObjectAbsentFromStrongAndProbable":true,"traitObjectStaysPossible":true,"traitObjectSubtitleHonest":true,"trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"typedReceiverAbsentFromPossible":true,"typedReceiverNameMatchNoteAbsent":true,"typedReceiverStrong":true,"uiPathIsRepoRelative":true,"variant":"all","verifiedAndInferredRowsDoNotOverlap":true,"verifiedBadgesHonest":true,"verifiedBadgeVisibleWithGeometry":true,"verifiedRowsVisible":true}
+SELF_TEST_FINISH timestamp=1789346645.949191 pid=47893 channel=exact exit=0
+{"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openProject"}
+{"commitRowFrames":["{{0, 58}, {543, 58}}","{{0, 116}, {543, 58}}"],"contentHeight":480,"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"darkVersionPickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"file":"Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openFile","worktreeByteCount":940}
+{"commitRowFrames":["{{0, 10}, {543, 58}}","{{0, 68}, {543, 58}}"],"contentHeight":480,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":null,"step":"darkComparePickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"commitBlobByteCount":808,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":1,"leftRevision":"worktree","revision":"e362e7a30f5e5feeb8ea7f7daaa5de60e1108623","rightReaderByteCount":808,"rightReaderCollapsed":false,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"rightRevision":"e362e7a30f5e5feeb8ea7f7daaa5de60e1108623","step":"selectHEAD~1"}
+{"diffComputeMS":0.48599999999999999,"expectedGutterCounts":{"added":0,"changed":0,"removed":6},"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":0,"removed":6},"gutterCountsMatch":true,"hunkCount":1,"leftLineCount":45,"leftRevision":"worktree","rightLineCount":39,"rightReaderCollapsed":false,"rightRevision":"e362e7a30f5e5feeb8ea7f7daaa5de60e1108623","step":"gutter"}
+{"afterLine":40,"beforeLine":1,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":1,"hunkNavMoved":true,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":"e362e7a30f5e5feeb8ea7f7daaa5de60e1108623","selectedHunkIndex":0,"step":"nextHunk"}
+{"comparisonPreserved":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":1,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":"e362e7a30f5e5feeb8ea7f7daaa5de60e1108623","step":"readingPreset"}
+{"actionDispatched":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":0,"leftRevision":"worktree","markersCleared":true,"rightReaderCollapsed":true,"rightRevision":null,"stateCleared":true,"step":"closeComparison"}
+{"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/Tests\/CodeInsightExactTests\/Fixtures\/exact_fixture\/src\/lib.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"clearCompareAndApplySIClassic","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+{"closeComparisonClearedMarkers":true,"closeComparisonClearedState":true,"closeComparisonCollapsedRight":true,"closeComparisonDisabledAfterClosing":true,"closeComparisonHeaderAvailable":true,"closeComparisonMenuActionDispatched":true,"darkComparePickerGeometryValid":true,"darkVersionPickerGeometryValid":true,"gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":0,"removed":6},"gutterCountsMatch":true,"hunkNavMoved":true,"passed":true,"readingPresetCollapsedRight":true,"readingPresetPreservedComparison":true,"rightReaderCollapsed":true,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"step":"summary","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+SELF_TEST_FINISH timestamp=1789346694.3919702 pid=49569 channel=diff exit=0
+{"alphaOccurrences":3,"availableContentMaxX":1583,"availableContentMinX":346,"availableContentWidth":1237,"betaOccurrences":2,"containerMaxX":1600,"containerMinX":320,"containerWidth":1280,"currentLine":2,"firstGlyphGapWithoutRuler":10,"firstGlyphGapWithRuler":10,"footprintMB":52.985336303710938,"readerMaxX":1583,"readerMinX":346,"readerWidth":1237,"readerWidthWithoutRuler":1263,"rulerMaxX":346,"rulerMinX":320,"rulerWidth":26,"step":"regular","visibleLineNumbers":[1,2,3]}
+2026-09-14 08:45:05.753 codeinsight-app[51596:22363442] WARNING: Application performed a reentrant operation in its NSTableView delegate. This warning will become an assert in the future.
+{"afterFootprintMB":178.40748596191406,"baselineFootprintMB":134.17306518554688,"candidateCount":18001,"deltaFootprintMB":44.234420776367188,"firstBatchMS":2651.2374589999999,"footer":"201 verified references · partial","historyBack":true,"historyRecorded":true,"possibleDefaultCollapsed":true,"resultTotalMS":2746.5888749999999,"serviceTotalMS":2651.4305839999997,"serviceTruncated":true,"step":"reference-scale","verifiedCount":201,"visibleRowCount":201}
+{"afterFootprintMB":480.15776062011719,"baselineFootprintMB":483.12651062011719,"deltaFootprintMB":-2.96875,"firstVisibleMS":3412.6973750000002,"footprintMB":480.15776062011719,"incrementalFootprintMB":-2.96875,"memoryAssessment":"metric-only: TextKit cache reclamation makes the S7 delta non-attributable; >100 MB absolute baseline predates S7 and is an M7 candidate after attributable measurement","occurrences":200,"step":"huge","styledFragments":172,"totalLines":100000,"visibleLines":35}
+{"referenceAttributeRuns":170,"referenceAttributeRunsWhenOff":0,"referenceScannedCount":170,"referenceStyledFragments":87,"referenceStyledFragmentsWhenOff":0,"step":"references","totalReferences":35000}
+{"alphaOccurrenceCountMatches":true,"blankClickClearsOccurrences":true,"currentLineIsExclusive":true,"didLiveScrollResumesViewportFollow":true,"disabledRulerExpandsReaderByRulerWidth":true,"disabledRulerRestoresFullWidth":true,"firstGlyphGapIsReadableWithoutRuler":true,"firstGlyphGapIsReadableWithRuler":true,"fontMenuChangesByOnePoint":true,"fontMenuLowerBoundDisabledAndClamped":true,"fontMenuPersistsUserDefaults":true,"fontMenuUpdatesFileReaderImmediately":true,"fontMenuUpdatesOpenSettingsImmediately":true,"fontMenuUpperBoundDisabledAndClamped":true,"fontMenuUsesExactKeyEquivalents":true,"hugeOccurrenceCountMatches":true,"idleFootprintUnderBudget":true,"largeReferenceCandidateCountMeasured":true,"largeReferenceFirstBatchMeasured":true,"largeReferenceFootprintUnderBudget":true,"largeReferenceHistoryBack":true,"largeReferenceHistoryRecorded":true,"largeReferencePossibleDefaultCollapsed":true,"largeReferenceResultVisibleWithGeometry":true,"largeReferenceRowsVisible":true,"largeReferenceServicePartialHonest":true,"largeReferenceTotalMeasured":true,"largeReferenceVerifiedCountMeasured":true,"metrics":{"firstVisibleMS":3412.6973750000002,"hugeAfterFootprintMB":480.15776062011719,"hugeBaselineFootprintMB":483.12651062011719,"hugeDeltaFootprintMB":-2.96875,"hugeLineCount":100000,"hugeOccurrenceCount":200,"idleFootprintMB":26.454017639160156,"referenceAttributeRunCount":170,"referenceCandidateCount":18001,"referenceFirstBatchMS":2651.2374589999999,"referenceResultTotalMS":2746.5888749999999,"referenceScaleAfterFootprintMB":178.40748596191406,"referenceScaleBaselineFootprintMB":134.17306518554688,"referenceScaleDeltaFootprintMB":44.234420776367188,"referenceScannedCount":170,"referenceServiceTotalMS":2651.4305839999997,"referenceStyledFragmentCount":87,"referenceVerifiedCount":201,"referenceVisibleRowCount":201,"regularFootprintMB":52.985336303710938,"styledFragmentCount":172,"visibleLineCount":35},"navigationSetsNativePrimarySelection":true,"passed":true,"programmaticNavigationBlocksViewportFollow":true,"readerVisualControlsDoNotOverlap":true,"readerVisualControlsVisibleWithGeometry":true,"readerVisualSettingAppliedImmediately":true,"readerWidthEqualsContainerMinusRuler":true,"referenceFragmentsTrackViewport":true,"referenceLookupIsViewportGated":true,"referenceRunsDoNotTrackFile":true,"referenceRunsTrackViewport":true,"rulerExistsByDefault":true,"rulerInsideWindowContent":true,"rulerLinesTrackViewport":true,"step":"summary","styledFragmentsDoNotTrackFile":true,"styledFragmentsTrackViewport":true,"switchingToBetaReplacesOccurrences":true,"syntaxFormattingOffSuppressesReferenceRuns":true,"visibleLineNumbersMatchFixture":true}
+SELF_TEST_FINISH timestamp=1789346730.546983 pid=51596 channel=reading exit=0
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1789346730.786361 pid=53176 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1789346730.910699 pid=53178 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+[1/3] Write sources
+[3/4] Compiling CodeInsightReaderUI CodeInsightReaderUI.swift
+[3/7] Write sources
+[6/8] Compiling CodeInsightAppModel AppModel.swift
+[7/9] Compiling CodeInsightApp BookmarkPanel.swift
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:105:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+103 | 
+104 |     static func selfTestEnableAccessibility() {
+105 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+106 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+107 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[7/9] Write Objects.LinkFileList
+[8/9] Linking codeinsight-app
+Build of product 'codeinsight-app' complete! (60.32s)
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 23.598917,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 547144904
+  },
+  "fold": {
+    "resolutionMs": 23.680790999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 568296672,
+    "foldLatencyMs": 264.47566699999999
+  },
+  "deltaBytes": 21151768,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (1.42s)
+PASS base
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'codeinsight-app' complete! (0.29s)
+PASS project-git
+PASS project-non-git
+PASS tabs
+PASS search
+PASS reading
+PASS projector
+PASS fold
+PASS diff
+PASS pin
+PASS history
+PASS exact
+PASS switch
+PASS open
+PASS python
+PASS typescript
+PASS mixed
+summary: pass=17 fail=0 hang=0
+artifacts: /Users/siancao/work/ai/vibecoding/codeinsight/.build/self-test-run-20260914-084642-55046
+PASS mixed product self-test
+bookmark official App Support fingerprint before=098d6fe97c903e12240a1111662c7dac725dafbaec38ca09a3e5dfa74078339f
+PASS bookmark product self-test and three-theme visual evidence
+PASS bookmark restart product self-test
+PASS real rust-analyzer and offline coverage
+PASS real Pyright coverage
+PASS real TypeScript coverage
+PASS no new provider processes after product gates
+corpus root: /Users/siancao/.cache/cairn-corpora
+  ok  tokio: be8ee45, 720 .rs files
+  ok  ripgrep: 4649aa9, 98 .rs files
+  ok  python corpus frozen: f55831ee798cd4d7bafab4d50d6dba46e6fce387
+  ok  typescript corpus frozen: f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+[0/1] Planning build
+[1/1] Compiling plugin GenerateManual
+[2/2] Compiling plugin GenerateDoccReference
+Building for debugging...
+[2/7] Write swift-version--58304C5D6DBC2206.txt
+Build complete! (0.96s)
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1789346934.381026 pid=62255 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1789346934.4822478 pid=62256 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'codeinsight-app' complete! (0.31s)
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 27.705375,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 540165296
+  },
+  "fold": {
+    "resolutionMs": 23.828790999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 567149792,
+    "foldLatencyMs": 239.331875
+  },
+  "deltaBytes": 26984496,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf
+PASS  unsupported CLI language exits non-zero
+
+--- tokio gold ---
+{
+  "def5Top5Passed" : 3,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 8,
+  "defTop1Total" : 8,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 17,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  tokio gold
+
+--- ripgrep gold ---
+{
+  "def5Top5Passed" : 2,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 5,
+  "defTop1Total" : 6,
+  "failures" : [
+
+  ],
+  "knownFailures" : 3,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 16,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  ripgrep gold
+
+--- mcp-python-sdk gold ---
+{
+  "def5Top5Passed" : 0,
+  "def5Top5Total" : 0,
+  "defTop1Passed" : 3,
+  "defTop1Total" : 3,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 1,
+  "noStrongViolations" : 0,
+  "total" : 6,
+  "unresolvedPassed" : 1,
+  "unresolvedTotal" : 1
+}
+PASS  mcp-python-sdk gold
+
+--- morphic-typescript gold ---
+{
+  "def5Top5Passed" : 0,
+  "def5Top5Total" : 0,
+  "defTop1Passed" : 6,
+  "defTop1Total" : 6,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 1,
+  "noStrongViolations" : 0,
+  "total" : 10,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  morphic-typescript gold
+
+All gold gates passed.

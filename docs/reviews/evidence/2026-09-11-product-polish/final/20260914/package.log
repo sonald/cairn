@@ -1,0 +1,12 @@
+/Users/siancao/work/ai/vibecoding/codeinsight/Resources/AppIcon.icns
+[0/1] Planning build
+Building for production...
+[0/2] Write swift-version--58304C5D6DBC2206.txt
+Build of product 'codeinsight-app' complete! (1.03s)
+/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.app/Contents/Info.plist: OK
+/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.app: replacing existing signature
+/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.app: valid on disk
+/Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.app: satisfies its Designated Requirement
+No notarization credentials; completed ad-hoc signed bundle flow.
+app: /Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.app
+zip: /Users/siancao/work/ai/vibecoding/codeinsight/.build/polish-20260914/Cairn.zip

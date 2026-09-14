@@ -41,6 +41,15 @@ Cairn's file tree shows regular non-symlink files outside skipped directories. S
 
 Non-source previews do not provide outline, folding, relations, bookmarks, compare/diff, Reading Height, or search controls. External links and inline local resources are not opened.
 
+## Reading controls
+
+- `⌘P` opens a file by name or project-relative path. Prefix the query with `>` for commands, `@` for file symbols, `#` for project symbols, or `:` for a line.
+- A single click opens an italic preview tab. Double-click a file, choose **Open in New Tab**, or use a tab's **Keep Open** menu to retain it. Further browsing reuses the preview and preserves retained tabs; restored session tabs are retained.
+- Close a comparison with its **×** button or **View → Close Comparison** (`⌃⌘W`) to clear the comparison and return to the saved reading layout.
+- Files and Outline have separate collapse controls. Drag their separator or the Relations boundary to adjust space; the app remembers the layout. Outline can expand to members and shows type/signature details.
+- The status bar's **Context** button shows or hides the definition preview. An empty preview stays out of the way until requested. The information button explains the current analysis status.
+- Settings puts theme, font size, line height, wrapping and line numbers first, with a live code preview. **Advanced typography** keeps the other controls available. **Restore Reader Defaults** applies the current defaults without affecting project data.
+
 ## Explainable Reading Workflow
 
 1. Open a project and choose the languages present in it.
@@ -74,8 +83,8 @@ Requires macOS 14+, a Swift 6 toolchain, and Homebrew `libgit2`:
 
 ```bash
 brew install libgit2
-swift build
-.build/debug/codeinsight-app
+CAIRN_LIBGIT2=brew bash scripts/make-app.sh
+open .build/distribution/Cairn.app
 ```
 
 To build a distributable Cairn.app, use static network-disabled vendored libgit2:

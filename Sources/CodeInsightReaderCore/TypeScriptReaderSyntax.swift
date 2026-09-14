@@ -44,7 +44,6 @@ func typeScriptReaderHighlightWithFolds(
     var spans: [HighlightSpan] = []
     var facets: [OutlineFacet] = []
     var candidates = FoldCandidateAccumulator()
-    appendTypeScriptTokenSpans(root: tree.rootNode, spans: &spans)
     typeScriptWalk(
         tree.rootNode,
         bytes: bytes,
@@ -57,11 +56,16 @@ func typeScriptReaderHighlightWithFolds(
         outlineFacets: facets,
         observer: nil as (@Sendable (Double, Int, Int) -> Void)?
     )
+    let references = typeScriptLocalReferences(in: tree, bytes: bytes)
+    appendLocalBindingHighlights(
+        bindings: references.bindings,
+        referencesByBinding: references.referencesByBinding,
+        spans: &spans
+    )
     spans.sort {
         ($0.range.lowerBound, $0.range.upperBound, $0.kind.rawValue)
             < ($1.range.lowerBound, $1.range.upperBound, $1.kind.rawValue)
     }
-    let references = typeScriptLocalReferences(in: tree, bytes: bytes)
     return (spans, facets, folds, references.bindings, references.referencesByBinding)
 }
 
@@ -86,33 +90,16 @@ private func typeScriptGrammar(for mode: LanguageMode) -> OpaquePointer? {
     mode.variant == "tsx" ? tree_sitter_tsx() : tree_sitter_typescript()
 }
 
-private func appendTypeScriptTokenSpans(
-    root: Node,
-    spans: inout [HighlightSpan]
-) {
-    for node in root.depthFirst() {
-        let span: HighlightSpan?
-        switch node.kind {
-        case "comment":
-            span = HighlightSpan(range: coreRange(node), kind: .comment)
-        case "string", "template_string", "regex":
-            span = HighlightSpan(range: coreRange(node), kind: .string)
-        case "number":
-            span = HighlightSpan(range: coreRange(node), kind: .number)
-        case "true", "false", "null", "undefined":
-            span = HighlightSpan(range: coreRange(node), kind: .keyword)
-        case "type_identifier", "predefined_type":
-            span = HighlightSpan(range: coreRange(node), kind: .typeName)
-        default:
-            if !node.isNamed, typeScriptKeywords.contains(node.kind) {
-                span = HighlightSpan(range: coreRange(node), kind: .keyword)
-            } else {
-                span = nil
-            }
-        }
-        if let span {
-            spans.append(span)
-        }
+private func typeScriptTokenKind(_ node: Node) -> HighlightKind? {
+    switch node.kind {
+    case "comment": return .comment
+    case "string", "regex", "string_fragment", "escape_sequence", "`": return .string
+    case "number": return .number
+    case "true", "false", "null", "undefined": return .keyword
+    case "type_identifier", "predefined_type": return .typeName
+    case "property_identifier", "private_property_identifier": return .property
+    default:
+        return !node.isNamed && typeScriptKeywords.contains(node.kind) ? .keyword : nil
     }
 }
 
@@ -120,10 +107,21 @@ private func typeScriptWalk(
     _ node: Node,
     bytes: [UInt8],
     depth: Int,
+    role: HighlightKind? = nil,
     spans: inout [HighlightSpan],
     facets: inout [OutlineFacet],
     candidates: inout FoldCandidateAccumulator
 ) {
+    if let kind = role, node.kind == "identifier"
+        || node.kind == "property_identifier" || node.kind == "private_property_identifier"
+    {
+        spans.append(HighlightSpan(range: coreRange(node), kind: kind))
+        return
+    }
+    if let kind = typeScriptTokenKind(node) {
+        spans.append(HighlightSpan(range: coreRange(node), kind: kind))
+        return
+    }
     visitTypeScriptFoldCandidate(
         node: node,
         foldDepth: depth,
@@ -158,6 +156,28 @@ private func typeScriptWalk(
             spans: &spans,
             facets: &facets
         )
+    case "public_field_definition":
+        appendTypeScriptDeclaration(
+            function: node, bytes: bytes, depth: depth, kind: .field,
+            spans: &spans, facets: &facets
+        )
+    case "enum_declaration":
+        appendTypeScriptDeclaration(
+            function: node, bytes: bytes, depth: depth, kind: .enum,
+            spans: &spans, facets: &facets
+        )
+    case "enum_body":
+        for member in node.namedChildren where member.kind != "comment" {
+            let nameNode = member.kind == "enum_assignment"
+                ? member.child(namedField: "name") : member
+            guard let nameNode,
+                  let name = typeScriptText(bytes, range: coreRange(nameNode))
+            else { continue }
+            facets.append(OutlineFacet(
+                kind: .enumMember, name: name, range: coreRange(member),
+                nameRange: coreRange(nameNode), depth: depth
+            ))
+        }
     case "lexical_declaration", "variable_declaration":
         appendTypeScriptVariableArrowFunctionFacet(
             node,
@@ -166,34 +186,45 @@ private func typeScriptWalk(
             spans: &spans,
             facets: &facets
         )
-    case "export_statement":
-        if let declaration = node.child(namedField: "declaration") {
-            typeScriptWalk(
-                declaration,
-                bytes: bytes,
-                depth: depth,
-                spans: &spans,
-                facets: &facets,
-                candidates: &candidates
-            )
-            return
-        }
     default:
         break
     }
 
-    for child in node.namedChildren {
+    for index in 0..<node.childCount {
+        guard let child = node.child(at: index) else { continue }
+        if ["function_declaration", "generator_function_declaration", "class_declaration",
+            "method_definition", "public_field_definition", "enum_declaration"].contains(node.kind),
+           child.byteRange == node.child(namedField: "name")?.byteRange,
+           child.kind != "computed_property_name"
+        { continue }
         let isBody = node.kind == "function_declaration"
             || node.kind == "generator_function_declaration"
             || node.kind == "method_definition"
         let childDepth = isBody
             && node.child(namedField: "body")?.byteRange == child.byteRange
             ? depth + 1
-            : depth + (node.kind == "class_declaration" ? 1 : 0)
+            : depth + (node.kind == "class_declaration" || node.kind == "enum_declaration" ? 1 : 0)
+        let childRole: HighlightKind?
+        switch node.kind {
+        case "decorator": childRole = .attribute
+        case "parenthesized_expression": childRole = role
+        case "call_expression":
+            childRole = child.byteRange == node.child(namedField: "function")?.byteRange
+                ? (role ?? .functionCall) : nil
+        case "member_expression":
+            childRole = child.byteRange == node.child(namedField: "property")?.byteRange
+                ? (role ?? .property) : nil
+        case "enum_body": childRole = .enumMember
+        case "enum_assignment":
+            childRole = child.byteRange == node.child(namedField: "name")?.byteRange
+                ? .enumMember : nil
+        default: childRole = nil
+        }
         typeScriptWalk(
             child,
             bytes: bytes,
             depth: childDepth,
+            role: childRole,
             spans: &spans,
             facets: &facets,
             candidates: &candidates
@@ -213,16 +244,18 @@ private func appendTypeScriptDeclaration(
           let name = typeScriptText(bytes, range: coreRange(nameNode))
     else { return }
     let nameRange = coreRange(nameNode)
-    spans.append(HighlightSpan(
-        range: nameRange,
-        kind: kind == .class ? .declarationTitle : .functionName
-    ))
+    if nameNode.kind != "computed_property_name" {
+        let highlight: HighlightKind = kind == .field ? .property
+            : (kind == .class || kind == .enum ? .declarationTitle : .functionName)
+        spans.append(HighlightSpan(range: nameRange, kind: highlight))
+    }
     facets.append(OutlineFacet(
         kind: kind,
         name: name,
         range: coreRange(node),
         nameRange: nameRange,
-        depth: depth
+        depth: depth,
+        detail: typeScriptDeclarationDetail(node, bytes: bytes)
     ))
 }
 
@@ -250,9 +283,18 @@ private func appendTypeScriptVariableArrowFunctionFacet(
             name: name,
             range: coreRange(value),
             nameRange: nameRange,
-            depth: depth
+            depth: depth,
+            detail: typeScriptDeclarationDetail(value, bytes: bytes)
         ))
     }
+}
+
+private func typeScriptDeclarationDetail(_ node: Node, bytes: [UInt8]) -> String {
+    let fields = ["type_parameters", "parameters", "parameter", "return_type", "type"]
+    return fields.compactMap { node.child(namedField: $0) }
+        .compactMap { typeScriptText(bytes, range: coreRange($0)) }
+        .map { $0.split(whereSeparator: \.isWhitespace).joined(separator: " ") }
+        .joined()
 }
 
 private func visitTypeScriptFoldCandidate(

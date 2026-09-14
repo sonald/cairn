@@ -55,6 +55,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let indexLabel = NSTextField(labelWithString: "")
     private let refreshIndexButton = NSButton()
     private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let exactInfoButton = NSButton()
+    private let exactStatusPopover = NSPopover()
+    private let contextButton = NSButton(title: "Context", target: nil, action: nil)
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
     private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
@@ -96,6 +99,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
+    private let layoutDefaults: UserDefaults?
+    private var contextVisibilityOverride: Bool?
 
     init(
         model: AppModel,
@@ -104,6 +109,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         measuresIdleFootprint: Bool = false,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
+        layoutDefaults: UserDefaults? = nil,
         onChooseProject: @escaping () -> Void = {},
         onChooseProjectLanguage: @escaping (URL) -> Void = { _ in },
         onShowSettings: @escaping () -> Void = {}
@@ -112,6 +118,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         currentReaderSettings = settings
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
+        self.layoutDefaults = layoutDefaults ?? (offscreen ? nil : .standard)
+        contextVisibilityOverride = self.layoutDefaults?.object(forKey: "Cairn.contextVisible") as? Bool
         self.onChooseProject = onChooseProject
         self.onChooseProjectLanguage = onChooseProjectLanguage
         self.onShowSettings = onShowSettings
@@ -158,7 +166,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 return model.languageMode(for: file)
             }
         )
-        relationController.view.frame.size.width = 500
+        relationController.view.frame.size.width = 360
         relationItem = NSSplitViewItem(viewController: relationController)
         sidebarItem = NSSplitViewItem(
             sidebarWithViewController: sidebarController
@@ -195,7 +203,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerGroupItem.minimumThickness = 300
         readerGroupItem.canCollapse = false
         relationItem.minimumThickness = 300
-        relationItem.maximumThickness = 560
+        relationItem.automaticMaximumThickness = 380
         relationItem.canCollapse = true
         upperSplitController.addSplitViewItem(sidebarItem)
         upperSplitController.addSplitViewItem(readerGroupItem)
@@ -256,11 +264,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             for: .horizontal
         )
         exactLabel.setAccessibilityLabel("Exact provider status")
+        exactInfoButton.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Analysis status details")
+        exactInfoButton.isBordered = false
+        exactInfoButton.action = #selector(showExactStatusDetails(_:))
+        exactInfoButton.toolTip = "Analysis status and available features"
+        exactInfoButton.setAccessibilityLabel("Analysis status details")
+        contextButton.isBordered = false
+        contextButton.font = .systemFont(ofSize: 11)
+        contextButton.image = NSImage(systemSymbolName: "rectangle.bottomthird.inset.filled", accessibilityDescription: nil)
+        contextButton.imagePosition = .imageLeading
+        contextButton.action = #selector(toggleContext(_:))
+        contextButton.toolTip = "Show or hide the definition context"
+        contextButton.setAccessibilityLabel("Show definition context")
 
         let statusStack = NSStackView()
-        statusStack.setViews([indexLabel, refreshIndexButton], in: .leading)
+        statusStack.setViews([contextButton, indexLabel, refreshIndexButton], in: .leading)
         statusStack.setViews([truncatedLabel], in: .center)
-        statusStack.setViews([exactLabel], in: .trailing)
+        statusStack.setViews([exactLabel, exactInfoButton], in: .trailing)
         statusStack.translatesAutoresizingMaskIntoConstraints = false
         statusStack.orientation = .horizontal
         statusStack.alignment = .centerY
@@ -293,7 +313,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 equalTo: contentStack.widthAnchor
             ),
             trailView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
-            trailView.heightAnchor.constraint(equalToConstant: 32),
+            trailView.heightAnchor.constraint(equalToConstant: 26),
             statusBar.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
             statusBar.heightAnchor.constraint(equalToConstant: 24),
             separator.leadingAnchor.constraint(equalTo: statusBar.leadingAnchor),
@@ -326,7 +346,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window.title = "Cairn"
         window.minSize = NSSize(width: 900, height: 600)
         window.contentViewController = contentViewController
+        window.setContentSize(frame.size)
         super.init(window: window)
+        exactInfoButton.target = self
+        contextButton.target = self
         window.delegate = self
         refreshIndexButton.target = self
         refreshIndexButton.action = #selector(refreshProjectIndex(_:))
@@ -350,7 +373,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         toolbar.displayMode = .iconOnly
         toolbar.allowsUserCustomization = false
         if !measuresIdleFootprint {
-            window.toolbarStyle = .unified
+            window.toolbarStyle = .unifiedCompact
             window.titleVisibility = .hidden
             window.toolbar = toolbar
         }
@@ -372,12 +395,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             guard let self, let file = model.selectedFile else { return }
             navigate(to: file, byteOffset: offset, cause: .outline)
         }
+        readerController.onOpenScope = sidebarController.onOpenOutline
+        readerController.onRevealPath = { [weak self] url in
+            guard let self else { return }
+            sidebarItem.isCollapsed = false
+            sidebarController.revealPath(url)
+        }
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
         }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
-            sidebarController.setOutline(facets)
+            sidebarController.setOutline(facets, file: model.selectedFile)
             if let offset = readerController.currentReadingPosition()?.byteOffset {
                 sidebarController.highlightOutline(at: offset)
             }
@@ -441,6 +470,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         secondaryReaderController.onChooseCompareVersion = { [weak self] in
             self?.showCompareCommitPicker()
+        }
+        secondaryReaderController.onCloseComparison = { [weak self] in
+            self?.closeComparison()
         }
         secondaryReaderController.onPreviousDiffHunk = { [weak self] in
             self?.previousDiffHunk(nil)
@@ -554,7 +586,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             onClose: { [weak self] in self?.closeTab($0) }
         )
         render()
-        applyPanelPreset(.reading)
+        applyPanelPreset(.reading, restoring: true)
         observe()
     }
 
@@ -633,7 +665,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         pendingRecentProjectRoot = root
         pendingRecentProjectLanguages = snapshot.languages
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
-            applyPanelPreset(preset)
+            applyPanelPreset(preset, restoring: true)
         }
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -744,6 +776,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestReaderPlaceholderVisible: Bool {
         readerController.selfTestPlaceholderVisible
     }
+    var selfTestReaderSourceVisible: Bool {
+        readerController.selfTestPreviewState.sourceVisible
+    }
     var selfTestReadingByteOffset: UInt32? {
         readerController.currentReadingPosition()?.byteOffset
     }
@@ -754,7 +789,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         rulerFrame: NSRect,
         windowContentFrame: NSRect,
         hasRuler: Bool,
-        rulerThickness: CGFloat
+        rulerThickness: CGFloat,
+        firstGlyphGap: CGFloat?
     ) {
         let geometry = readerController.selfTestReadingGeometry
         let contentFrame = window?.contentView.map {
@@ -767,7 +803,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             geometry.rulerFrame,
             contentFrame,
             geometry.hasRuler,
-            geometry.rulerThickness
+            geometry.rulerThickness,
+            geometry.firstGlyphGap
         )
     }
     var selfTestOccurrenceCount: Int { readerController.selfTestOccurrenceCount }
@@ -1510,13 +1547,69 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         selectRelativeTab(1)
     }
 
+    var canCloseComparison: Bool {
+        model.compare.rightRevision != nil || !secondaryReaderItem.isCollapsed
+    }
+
+    func closeComparison() {
+        guard canCloseComparison else { return }
+        savePanelLayout()
+        model.clearCompare()
+        applyPanelPreset(.reading, restoring: true)
+        render()
+    }
+
     func toggleRelations() {
+        savePanelLayout()
         if relationItem.isCollapsed {
             openRelationsPane()
         } else {
             relationItem.isCollapsed = true
             updateRelationsWidthAdaptation()
         }
+        savePanelLayout()
+    }
+
+    @objc func toggleContext(_ sender: Any?) {
+        guard contentSurfaceMode == .source, !readingSetLayoutActive else { return }
+        savePanelLayout()
+        contextVisibilityOverride = contextItem.isCollapsed
+        layoutDefaults?.set(contextVisibilityOverride, forKey: "Cairn.contextVisible")
+        updateContextVisibility()
+        savePanelLayout()
+    }
+
+    private func updateContextVisibility() {
+        guard contentSurfaceMode == .source, !readingSetLayoutActive else { return }
+        let hasContext = model.contextWindow.candidateCount > 0
+            || model.contextWindow.mode == .pinned
+        let visible = contextVisibilityOverride ?? (panelPreset != .focus && hasContext)
+        contextItem.isCollapsed = !visible
+        contextButton.setAccessibilityLabel(visible ? "Hide definition context" : "Show definition context")
+        contextButton.contentTintColor = visible ? .controlAccentColor : .secondaryLabelColor
+    }
+
+    @objc private func showExactStatusDetails(_ sender: NSButton) {
+        let popover = exactStatusPopover
+        let controller = NSViewController()
+        let detail = NSTextField(wrappingLabelWithString: exactLabel.stringValue + "\n\n"
+            + (exactLabel.toolTip ?? "Provider information is not available yet.")
+            + "\n\nLimited analysis can omit dependency results. Open Settings → Exact to inspect the provider. Repository trust remains unchanged.")
+        detail.isSelectable = true
+        detail.font = .systemFont(ofSize: 12)
+        detail.translatesAutoresizingMaskIntoConstraints = false
+        controller.view = NSView()
+        controller.view.addSubview(detail)
+        NSLayoutConstraint.activate([
+            detail.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor, constant: 16),
+            detail.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor, constant: -16),
+            detail.topAnchor.constraint(equalTo: controller.view.topAnchor, constant: 16),
+            detail.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor, constant: -16),
+            controller.view.widthAnchor.constraint(equalToConstant: 360),
+        ])
+        popover.contentViewController = controller
+        popover.behavior = .transient
+        popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
     }
 
     var canShowResolutionInspector: Bool {
@@ -1536,17 +1629,23 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         trailView.showPopover()
     }
 
-    func applyPanelPreset(_ preset: PanelPresetModel) {
+    func applyPanelPreset(_ preset: PanelPresetModel, restoring: Bool = false) {
         panelPreset = preset
+        if !restoring {
+            layoutDefaults?.removeObject(forKey: panelLayoutKey)
+            contextVisibilityOverride = nil
+            layoutDefaults?.removeObject(forKey: "Cairn.contextVisible")
+        }
         // An explicit preset choice replaces any layout captured for a
         // round-trip through a non-source surface.
         savedSourceSurfaceLayout = nil
         sidebarTemporarilyCollapsedForRelations = false
         applyPanelLayout(
-            readingSetLayoutActive ? PanelPresetModel.focus.layout : preset.layout
+            readingSetLayoutActive ? PanelPresetModel.focus.layout : (restoredPanelLayout() ?? preset.layout)
         )
         contentSurfaceMode = nil
         updateContentSurfaceIfNeeded()
+        updateContextVisibility()
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
@@ -1580,10 +1679,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     /// Opens the Relations pane without ever growing the window: the
     /// sidebar folds first when the reader would fall below its readable
-    /// floor, and the freshly opened pane is capped at the width that fits
-    /// beside the reader (§3.1).
-    /// Opens the Relations pane without ever growing the window: the
-    /// sidebar folds first when the reader would fall below its readable
     /// floor, and the pane's restored thickness is clamped to the width
     /// that fits beside the reader (§3.1).
     private func openRelationsPane() {
@@ -1607,10 +1702,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
         let target = max(
             relationItem.minimumThickness,
-            min(
-                Self.relationsPaneMaximumThickness,
-                available - fittedSidebar - 480 - upperSplit.dividerThickness
-            )
+            available - fittedSidebar - 480 - upperSplit.dividerThickness
         )
         let frameBefore = window?.frame
         // Restoring a collapsed pane re-applies its previous thickness in
@@ -1621,6 +1713,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         capRelationsPane(width: target)
         relationItem.isCollapsed = false
         upperSplit.layoutSubtreeIfNeeded()
+        let preferredWidth = (restoredPanelLayout()?.relationsFraction ?? 0) * available
+        upperSplit.setPosition(available - min(target, max(300, preferredWidth > 0 ? preferredWidth : 360)), ofDividerAt: 1)
         if let frameBefore,
            window?.frame.width ?? 0 > frameBefore.width + 0.5
         {
@@ -1629,22 +1723,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    @ObservationIgnored
-    private static let relationsPaneMaximumThickness: CGFloat = 560
-
     /// Caps the Relations pane's maximum thickness while the window cannot
     /// fit its natural width beside a readable Reader; a nil width releases
     /// the cap. maximumThickness is enforced by the split view itself, so
     /// the cap survives arbitrary layout passes.
     private func capRelationsPane(width: CGFloat?) {
         guard let width, width > 0 else {
-            relationItem.maximumThickness =
-                Self.relationsPaneMaximumThickness
+            relationItem.maximumThickness = NSSplitViewItem.unspecifiedDimension
             return
         }
         relationItem.maximumThickness = max(
             relationItem.minimumThickness,
-            min(Self.relationsPaneMaximumThickness, width)
+            width
         )
     }
 
@@ -1667,36 +1757,18 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             let sidebarWidth = sidebarItem.isCollapsed
                 ? 0
                 : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
-            // Use the natural right-pane width before Auto Layout compresses
-            // it; using the compressed width can trap live resizing above
-            // the narrow-window floor without ever retiring the sidebar.
+            let preferredWidth = upperSplit.arrangedSubviews.last?.frame.width ?? 360
             if !sidebarItem.isCollapsed,
-               available - sidebarWidth - Self.relationsPaneMaximumThickness
+               available - sidebarWidth - preferredWidth
                     - upperSplit.dividerThickness < 480
             {
                 sidebarItem.isCollapsed = true
                 sidebarTemporarilyCollapsedForRelations = true
             }
-            // Cap the pane while its natural width cannot fit beside the
-            // readable Reader; release only when it can. The distinct
-            // thresholds keep window-width crossings from oscillating.
             let sidebarWidthNow = sidebarItem.isCollapsed
                 ? 0
                 : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
-            let naturalFits = available - sidebarWidthNow
-                - Self.relationsPaneMaximumThickness
-                - upperSplit.dividerThickness >= 480
-            if !naturalFits {
-                capRelationsPane(
-                    width: available - sidebarWidthNow
-                        - 480 - upperSplit.dividerThickness
-                )
-                upperSplit.layoutSubtreeIfNeeded()
-            } else if relationItem.maximumThickness
-                != Self.relationsPaneMaximumThickness
-            {
-                capRelationsPane(width: nil)
-            }
+            capRelationsPane(width: available - sidebarWidthNow - 480 - upperSplit.dividerThickness)
         } else {
             capRelationsPane(width: nil)
             if sidebarTemporarilyCollapsedForRelations {
@@ -1711,16 +1783,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         updateRelationsWidthAdaptation()
     }
 
+    func windowWillClose(_ notification: Notification) {
+        savePanelLayout()
+    }
+
     /// Applies the §3.1 panel exit rules when the content surface actually
     /// changes; splitter positions are only touched on transitions.
     private func updateContentSurfaceIfNeeded() {
         let mode = currentContentSurfaceMode()
         guard mode != contentSurfaceMode else { return }
         let previous = contentSurfaceMode
-        contentSurfaceMode = mode
-        if previous == .source, mode != .source {
+        if previous == .source, mode != .source, !readingSetLayoutActive {
+            savePanelLayout()
             savedSourceSurfaceLayout = currentPanelLayout()
         }
+        contentSurfaceMode = mode
         switch mode {
         case .noProject:
             // Brand, Open Project, and recents carry the window; panels
@@ -1747,7 +1824,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 applyPanelLayout(
                     readingSetLayoutActive
                         ? PanelPresetModel.focus.layout
-                        : panelPreset.layout
+                        : (restoredPanelLayout() ?? panelPreset.layout)
                 )
             }
         }
@@ -1757,7 +1834,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// non-source surface restores the user's arrangement, not just the
     /// preset defaults.
     private func currentPanelLayout() -> PanelLayoutDescription {
-        let base = panelPreset.layout
+        let base = restoredPanelLayout() ?? panelPreset.layout
         let upperSplit = upperSplitController.splitView
         let contentSplit = contentSplitController.splitView
         let readerSplit = readerSplitController.splitView
@@ -1798,7 +1875,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             secondaryFraction = base.secondaryReaderFraction
         }
         return PanelLayoutDescription(
-            sidebarCollapsed: sidebarItem.isCollapsed,
+            sidebarCollapsed: sidebarItem.isCollapsed && !sidebarTemporarilyCollapsedForRelations,
             readerCollapsed: readerGroupItem.isCollapsed,
             contextCollapsed: contextItem.isCollapsed,
             relationsCollapsed: relationItem.isCollapsed,
@@ -1817,15 +1894,37 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.isCollapsed = layout.relationsCollapsed
         secondaryReaderItem.isCollapsed = !layout.readerSplit
 
-        // The Reader keeps its thickness when the window narrows; the
-        // sidebar and the relations pane yield before it does.
+        // Keep auxiliary widths steady while the Reader takes available space.
+        // The narrow-window adaptation above preserves its readable floor.
         sidebarItem.holdingPriority = .init(rawValue: 253)
         readerGroupItem.holdingPriority = .init(rawValue: 250)
         relationItem.holdingPriority = .init(rawValue: 252)
         contextItem.holdingPriority = .init(rawValue: 250)
         secondaryReaderItem.holdingPriority = .init(rawValue: 250)
         applyPanelSizes(layout)
-        DispatchQueue.main.async { [weak self] in self?.applyPanelSizes(layout) }
+        DispatchQueue.main.async { [weak self] in
+            self?.applyPanelSizes(layout)
+            self?.updateContextVisibility()
+        }
+    }
+
+    private var panelLayoutKey: String { "Cairn.panelLayout.\(panelPreset.rawValue)" }
+
+    private func restoredPanelLayout() -> PanelLayoutDescription? {
+        guard let data = layoutDefaults?.data(forKey: panelLayoutKey),
+              let layout = try? JSONDecoder().decode(PanelLayoutDescription.self, from: data),
+              [layout.sidebarFraction, layout.contextFraction, layout.relationsFraction,
+               layout.secondaryReaderFraction].allSatisfy({ $0.isFinite && (0...1).contains($0) })
+        else { return nil }
+        return layout
+    }
+
+    private func savePanelLayout() {
+        guard contentSurfaceMode == .source, !readingSetLayoutActive,
+              let layoutDefaults,
+              let data = try? JSONEncoder().encode(currentPanelLayout())
+        else { return }
+        layoutDefaults.set(data, forKey: panelLayoutKey)
     }
 
     func applyReaderSettings(_ settings: ReaderSettings) {
@@ -1963,21 +2062,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         if !layout.relationsCollapsed, !relationItem.isCollapsed, upperSplit.bounds.width > 0 {
             upperSplit.setPosition(
-                upperSplit.bounds.width * (1 - layout.relationsFraction),
+                upperSplit.bounds.width * (1 - layout.relationsFraction) - upperSplit.dividerThickness,
                 ofDividerAt: 1
             )
         }
         let contentSplit = contentSplitController.splitView
-        if !layout.contextCollapsed, contentSplit.bounds.height > 0 {
+        if !layout.contextCollapsed, !contextItem.isCollapsed,
+           contentSplit.bounds.height > 0 {
             contentSplit.setPosition(
-                contentSplit.bounds.height * (1 - layout.contextFraction),
+                contentSplit.bounds.height * (1 - layout.contextFraction) - contentSplit.dividerThickness,
                 ofDividerAt: 0
             )
         }
         let readerSplit = readerSplitController.splitView
         if layout.readerSplit, readerSplit.bounds.width > 0 {
             readerSplit.setPosition(
-                readerSplit.bounds.width * (1 - layout.secondaryReaderFraction),
+                readerSplit.bounds.width * (1 - layout.secondaryReaderFraction) - readerSplit.dividerThickness,
                 ofDividerAt: 0
             )
         }
@@ -2202,6 +2302,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.exactCoordinator.readiness
             _ = model.exactCoordinator.analysisEnvironment
             _ = model.exactCoordinator.trustMode
+            _ = model.contextWindow.stage
+            _ = model.contextWindow.mode
+            _ = model.readingTrail
             _ = model.bookmarkModel.records
             _ = model.bookmarkModel.storageError
             _ = model.bookmarkModel.lastAttemptMessage
@@ -2216,6 +2319,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func render() {
         updateContentSurfaceIfNeeded()
         updateRelationsWidthAdaptation()
+        updateContextVisibility()
         if displayedGeneration != model.generation
             || displayedSnapshotID != model.currentSnapshotID
         {
@@ -2239,12 +2343,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             false
         }
         if nextReadingSetLayout != readingSetLayoutActive {
-            readingSetLayoutActive = nextReadingSetLayout
-            applyPanelLayout(
-                nextReadingSetLayout
-                    ? PanelPresetModel.focus.layout
-                    : panelPreset.layout
-            )
+            if nextReadingSetLayout {
+                savePanelLayout()
+                savedSourceSurfaceLayout = currentPanelLayout()
+                readingSetLayoutActive = true
+                applyPanelLayout(PanelPresetModel.focus.layout)
+            } else {
+                readingSetLayoutActive = false
+                if contentSurfaceMode == .source {
+                    applyPanelLayout(savedSourceSurfaceLayout ?? restoredPanelLayout() ?? panelPreset.layout)
+                    savedSourceSurfaceLayout = nil
+                    updateContextVisibility()
+                }
+            }
         }
         let readingSetAvailability: [(open: Bool, expand: Bool)]? = if case .readingSet(
             _, let excerpts
@@ -2265,6 +2376,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             nil
         }
         let readerFile = readerContent?.fileURL
+        readerController.projectRoot = model.projectRoot
         let selectedSource = readerSource(for: readerFile)
         let selectedLanguageMode = readerFile.flatMap(model.languageMode(for:))
         readerController.display(
@@ -2550,7 +2662,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .indexing:
             readerController.removeEmptyState(placeholder: "Indexing project…")
         case .ready:
-            readerController.removeEmptyState(placeholder: "Select a file to read")
+            readerController.removeEmptyState(placeholder: "Select a file to read · ⌘P to open")
         }
     }
 
@@ -2701,6 +2813,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             trail: model.readingTrail,
             store: model.resolutionExplanations
         )
+        trailView.isHidden = model.readingTrail.nodes.isEmpty || contentSurfaceMode != .source
     }
 
     private func renderCommitButton() {
@@ -3141,6 +3254,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         allowsPendingTopology: Bool = false
     ) {
         captureActiveTabState()
+        savePanelLayout()
         try? model.writeSessionCheckpoint(
             panelPreset: panelPreset,
             allowsPendingTopology: allowsPendingTopology
@@ -3149,6 +3263,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func scheduleSessionCheckpointForApplicationLifecycle() {
         captureActiveTabState()
+        savePanelLayout()
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)
     }
 
@@ -3272,67 +3387,72 @@ final class SidebarViewController: NSViewController,
     private let outlineModel = OutlinePanelModel()
     private var tree: FileTreeModel?
     private var facetRows: [NSNumber] = []
+    private var outlineFile: URL?
+    private var collapsedOutlineOffsets: [URL: Set<UInt32>] = [:]
+    private var isSynchronizingOutlineSelection = false
     private var setInitialDivider = false
     private var isSynchronizingFileSelection = false
+    private var synchronizedFile: URL?
     private var hasSelectedFile = false
+    private var outlineSurfaceHidden = false
+    private var filesCollapsed = false
+    private var outlineCollapsed = false
+    private var isAdjustingSections = false
+    private var expandedDividerFraction: CGFloat = 0.55
+    private var compactSplitHeight: NSLayoutConstraint?
+    private var splitBottomConstraint: NSLayoutConstraint?
     private var splitAutosaveName = "CodeInsightSidebarSplit"
     private var theme = ReaderTheme(settings: ReaderSettings())
-    private var paneSurfaces: [(pane: NSView, header: NSView, label: NSTextField, divider: NSView)] = []
+    private var paneSurfaces: [(pane: NSView, header: NSView, label: NSTextField, divider: NSView, body: NSView, toggle: NSButton)] = []
 
     func setSplitAutosaveName(_ name: String) {
         splitAutosaveName = name
-        if isViewLoaded { splitView.autosaveName = name }
+        filesCollapsed = UserDefaults.standard.bool(forKey: "\(name).filesCollapsed")
+        outlineCollapsed = UserDefaults.standard.bool(forKey: "\(name).outlineCollapsed")
+        expandedDividerFraction = 0.55
+        setInitialDivider = false
     }
 
     /// Hides the symbol outline half of the sidebar for non-source
     /// surfaces; the file tree stays (§3.1).
     func setOutlineHidden(_ hidden: Bool) {
         loadViewIfNeeded()
-        guard symbolScrollView.isHidden != hidden else { return }
-        symbolScrollView.isHidden = hidden
-        outlinePlaceholder.isHidden = hidden
-        splitView.needsLayout = true
+        guard outlineSurfaceHidden != hidden else { return }
+        outlineSurfaceHidden = hidden
+        splitView.arrangedSubviews.last?.isHidden = hidden
+        isAdjustingSections = true
+        splitView.adjustSubviews()
+        isAdjustingSections = false
+        restoreSidebarDividerIfNeeded()
     }
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
         guard isViewLoaded else { return }
+        isSynchronizingFileSelection = true
+        isSynchronizingOutlineSelection = true
+        defer {
+            isSynchronizingFileSelection = false
+            isSynchronizingOutlineSelection = false
+        }
         backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
         fileOutlineView.backgroundColor = theme.chromeColor
         symbolOutlineView.backgroundColor = theme.chromeColor
         for surface in paneSurfaces {
             surface.pane.layer?.backgroundColor = theme.chromeColor.cgColor
-            surface.header.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
-            surface.label.textColor = theme.accentColor
+            surface.header.layer?.backgroundColor = theme.chromeColor.cgColor
+            surface.label.textColor = theme.chromeSecondaryColor
             surface.divider.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+            surface.toggle.contentTintColor = theme.chromeSecondaryColor
         }
-        for outlineView in [fileOutlineView, symbolOutlineView] {
-            for row in 0..<outlineView.numberOfRows {
-                (outlineView.rowView(atRow: row, makeIfNecessary: false)
-                    as? ThemeSelectionRowView)?.selectionColor =
-                    theme.chromeSelectionColor
-                let cell = outlineView.view(
-                    atColumn: 0,
-                    row: row,
-                    makeIfNecessary: false
-                )
-                if let cell = cell as? NSTableCellView {
-                    cell.textField?.textColor = theme.foregroundColor
-                    cell.imageView?.contentTintColor = theme.chromeTertiaryColor
-                } else if let cell = cell as? NSStackView {
-                    (cell.arrangedSubviews.last as? NSTextField)?.textColor =
-                        theme.foregroundColor
-                    (cell.arrangedSubviews.first as? NSImageView)?.contentTintColor =
-                        theme.chromeTertiaryColor
-                }
-            }
-        }
+        fileOutlineView.reloadData()
+        symbolOutlineView.reloadData()
         view.needsDisplay = true
     }
 
     var selfTestOutlineHidden: Bool {
         loadViewIfNeeded()
-        return symbolScrollView.isHidden
+        return outlineSurfaceHidden
     }
     var selfTestFilesPlaceholderText: String? {
         loadViewIfNeeded()
@@ -3443,40 +3563,26 @@ final class SidebarViewController: NSViewController,
         removeProbeDefaults()
         defer { removeProbeDefaults() }
 
-        func splitView() -> NSSplitView {
-            let split = NSSplitView(frame: NSRect(x: 0, y: 0, width: 300, height: 500))
-            split.isVertical = false
-            split.dividerStyle = .thin
-            split.addArrangedSubview(NSView(frame: .zero))
-            split.addArrangedSubview(NSView(frame: .zero))
-            split.autosaveName = name
-            return split
+        func makeController() -> (SidebarViewController, NSWindow) {
+            let controller = SidebarViewController()
+            controller.setSplitAutosaveName(name)
+            controller.loadViewIfNeeded()
+            let window = NSWindow(contentRect: NSRect(x: -10000, y: 0, width: 300, height: 500),
+                                  styleMask: [.borderless], backing: .buffered, defer: false)
+            window.contentViewController = controller
+            window.setContentSize(NSSize(width: 300, height: 500))
+            window.orderFront(nil)
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            return (controller, window)
         }
-
-        let writer = splitView()
-        let writerWindow = NSWindow(
-            contentRect: writer.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        writerWindow.contentView = writer
-        writerWindow.orderFront(nil)
+        let (writer, writerWindow) = makeController()
+        writer.splitView.setPosition(310, ofDividerAt: 0)
         writerWindow.displayIfNeeded()
-        writer.setPosition(310, ofDividerAt: 0)
-        writerWindow.displayIfNeeded()
+        let (reader, readerWindow) = makeController()
+        defer { writerWindow.orderOut(nil); readerWindow.orderOut(nil) }
 
-        let reader = splitView()
-        let readerWindow = NSWindow(
-            contentRect: reader.frame,
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        readerWindow.contentView = reader
-        readerWindow.orderFront(nil)
-        readerWindow.displayIfNeeded()
-        let restored = reader.arrangedSubviews.first?.frame.height ?? 0
+        let restored = reader.splitView.arrangedSubviews.first?.frame.height ?? 0
         let didStore = defaults.dictionaryRepresentation().keys.contains {
             $0.contains(name)
         }
@@ -3486,7 +3592,11 @@ final class SidebarViewController: NSViewController,
     override func loadView() {
         configure(fileOutlineView, column: "File")
         configure(symbolOutlineView, column: "Symbol")
-        symbolOutlineView.indentationPerLevel = 0
+        fileOutlineView.target = self
+        fileOutlineView.doubleAction = #selector(openFileInNewTab(_:))
+        filesCollapsed = UserDefaults.standard.bool(forKey: "\(splitAutosaveName).filesCollapsed")
+        outlineCollapsed = UserDefaults.standard.bool(forKey: "\(splitAutosaveName).outlineCollapsed")
+        symbolOutlineView.indentationPerLevel = 13
         symbolOutlineView.target = self
         symbolOutlineView.action = #selector(openOutlineRow(_:))
 
@@ -3517,7 +3627,8 @@ final class SidebarViewController: NSViewController,
         configurePlaceholders()
         splitView.isVertical = false
         splitView.dividerStyle = .thin
-        splitView.autosaveName = splitAutosaveName
+        // Native autosave also records loading layouts; only persist the
+        // explicit divider fraction and section buttons below.
         splitView.delegate = self
         splitView.addArrangedSubview(pane(
             title: "Files",
@@ -3536,31 +3647,109 @@ final class SidebarViewController: NSViewController,
         backgroundView.wantsLayer = true
         backgroundView.layer?.backgroundColor = theme.chromeColor.cgColor
         backgroundView.addSubview(splitView)
+        let bottom = splitView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor)
+        splitBottomConstraint = bottom
+        compactSplitHeight = splitView.heightAnchor.constraint(equalToConstant: 51)
         NSLayoutConstraint.activate([
             splitView.leadingAnchor.constraint(equalTo: backgroundView.leadingAnchor),
             splitView.trailingAnchor.constraint(equalTo: backgroundView.trailingAnchor),
             splitView.topAnchor.constraint(equalTo: backgroundView.topAnchor),
-            splitView.bottomAnchor.constraint(equalTo: backgroundView.bottomAnchor),
+            bottom,
         ])
         view = backgroundView
         updateFilePlaceholder(isIndexing: false)
         updateOutlinePlaceholder()
+        restoreSidebarDividerIfNeeded()
     }
 
     override func viewDidLayout() {
         super.viewDidLayout()
-        guard !setInitialDivider,
-              splitView.bounds.height > 0,
-              splitView.arrangedSubviews.allSatisfy({ $0.frame.height > 0 })
-        else { return }
-        splitView.setPosition(splitView.bounds.height * 0.65, ofDividerAt: 0)
-        setInitialDivider = true
+        restoreSidebarDividerIfNeeded()
+    }
+
+    func splitViewDidResizeSubviews(_ notification: Notification) {
+        restoreSidebarDividerIfNeeded()
+    }
+
+    func splitView(_ splitView: NSSplitView, resizeSubviewsWithOldSize oldSize: NSSize) {
+        let wasAdjusting = isAdjustingSections
+        isAdjustingSections = true
+        splitView.adjustSubviews()
+        isAdjustingSections = wasAdjusting
+        restoreSidebarDividerIfNeeded()
+    }
+
+    private func restoreSidebarDividerIfNeeded() {
+        guard !isAdjustingSections, paneSurfaces.count == 2 else { return }
+        isAdjustingSections = true
+        defer { isAdjustingSections = false }
+        if !setInitialDivider, !outlineSurfaceHidden,
+           splitView.bounds.height >= 120,
+           splitView.arrangedSubviews.allSatisfy({ $0.frame.height > 0 }) {
+            setInitialDivider = true
+            let defaults = UserDefaults.standard
+            if let fraction = defaults.object(forKey: "\(splitAutosaveName).fraction") as? Double,
+               fraction.isFinite, (0.05...0.95).contains(fraction) {
+                expandedDividerFraction = fraction
+            }
+        }
+        let compact = filesCollapsed && (outlineCollapsed || outlineSurfaceHidden)
+        compactSplitHeight?.constant = outlineSurfaceHidden ? 25 : 50 + splitView.dividerThickness
+        if compact {
+            splitBottomConstraint?.isActive = false
+            compactSplitHeight?.isActive = true
+        } else {
+            compactSplitHeight?.isActive = false
+            splitBottomConstraint?.isActive = true
+        }
+        for (index, surface) in paneSurfaces.enumerated() {
+            let collapsed = index == 0 ? filesCollapsed : outlineCollapsed
+            surface.body.isHidden = collapsed
+            surface.toggle.image = NSImage(systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
+                                           accessibilityDescription: nil)
+            let action = "\(collapsed ? "Expand" : "Collapse") \(surface.label.stringValue)"
+            surface.toggle.toolTip = action
+            surface.toggle.setAccessibilityLabel(action)
+            surface.toggle.setAccessibilityValue(collapsed ? "Collapsed" : "Expanded")
+        }
+        guard !outlineSurfaceHidden, setInitialDivider else { return }
+        let available = splitView.bounds.height - splitView.dividerThickness
+        let requestedPosition = filesCollapsed ? 25
+            : outlineCollapsed ? available - 25
+            : available * expandedDividerFraction
+        let position = self.splitView(splitView, constrainSplitPosition: requestedPosition, ofSubviewAt: 0)
+        if abs(paneSurfaces[0].pane.frame.height - position) > 0.5 {
+            splitView.setPosition(position, ofDividerAt: 0)
+        }
     }
 
     func display(_ tree: FileTreeModel?) {
-        self.tree = tree
         loadViewIfNeeded()
+        var expanded: Set<URL> = []
+        func remember(_ nodes: [FileTreeNode]) {
+            for node in nodes where node.isDirectory {
+                if fileOutlineView.isItemExpanded(node) { expanded.insert(node.url) }
+                remember(node.children)
+            }
+        }
+        remember(self.tree?.children ?? [])
+        let selected = (fileOutlineView.item(atRow: fileOutlineView.selectedRow) as? FileTreeNode)?.url
+        if self.tree?.root != tree?.root { synchronizedFile = nil }
+        isSynchronizingFileSelection = true
+        defer { isSynchronizingFileSelection = false }
+        self.tree = tree
         fileOutlineView.reloadData()
+        func restore(_ nodes: [FileTreeNode]) {
+            for node in nodes where node.isDirectory {
+                if expanded.contains(node.url) { fileOutlineView.expandItem(node) }
+                restore(node.children)
+            }
+        }
+        restore(tree?.children ?? [])
+        if let selected, let node = tree?.selectionPath(for: selected)?.last {
+            let row = fileOutlineView.row(forItem: node)
+            if row >= 0 { fileOutlineView.selectRowIndexes([row], byExtendingSelection: false) }
+        }
     }
 
     func setProjectState(_ state: ProjectState) {
@@ -3584,12 +3773,15 @@ final class SidebarViewController: NSViewController,
     }
 
     @discardableResult
-    func synchronizeFileSelection(to file: URL?) -> Bool {
+    func synchronizeFileSelection(to file: URL?, reveal: Bool = false) -> Bool {
         loadViewIfNeeded()
+        let file = file?.standardizedFileURL
+        guard reveal || file != synchronizedFile else { return true }
         isSynchronizingFileSelection = true
         defer { isSynchronizingFileSelection = false }
         guard let path = tree?.selectionPath(for: file), let node = path.last else {
             fileOutlineView.deselectAll(nil)
+            if !reveal { synchronizedFile = file }
             return true
         }
         for parent in path.dropLast() {
@@ -3604,6 +3796,7 @@ final class SidebarViewController: NSViewController,
             fileOutlineView.selectRowIndexes([row], byExtendingSelection: false)
         }
         fileOutlineView.scrollRowToVisible(row)
+        if !reveal { synchronizedFile = file }
         return true
     }
 
@@ -3621,6 +3814,21 @@ final class SidebarViewController: NSViewController,
         return true
     }
 
+    func revealPath(_ url: URL) {
+        loadViewIfNeeded()
+        if filesCollapsed { toggleSidebarSection(paneSurfaces[0].toggle) }
+        if url.standardizedFileURL == tree?.root.standardizedFileURL {
+            fileOutlineView.deselectAll(nil)
+            fileOutlineView.scroll(.zero)
+        } else {
+            _ = synchronizeFileSelection(to: url, reveal: true)
+            if let node = tree?.selectionPath(for: url)?.last, node.isDirectory {
+                fileOutlineView.expandItem(node)
+            }
+        }
+        view.window?.makeFirstResponder(fileOutlineView)
+    }
+
     var selectedFile: URL? {
         loadViewIfNeeded()
         guard fileOutlineView.selectedRow >= 0,
@@ -3631,22 +3839,46 @@ final class SidebarViewController: NSViewController,
         return node.url
     }
 
-    func setOutline(_ facets: [OutlineFacet]) {
+    func setOutline(_ facets: [OutlineFacet], file: URL? = nil) {
         loadViewIfNeeded()
+        if let previous = outlineFile, !outlineModel.facets.isEmpty {
+            collapsedOutlineOffsets[previous] = Set(outlineModel.facets.indices.compactMap { index in
+                !outlineModel.childIndices[index].isEmpty
+                    && !symbolOutlineView.isItemExpanded(facetRows[index])
+                    ? outlineModel.facets[index].range.lowerBound : nil
+            })
+        }
+        outlineFile = file
         outlineModel.setDocument(facets)
         facetRows = outlineModel.facets.indices.map { NSNumber(value: $0) }
+        isSynchronizingOutlineSelection = true
         symbolOutlineView.reloadData()
+        symbolOutlineView.expandItem(nil, expandChildren: true)
+        if let file, let collapsed = collapsedOutlineOffsets[file] {
+            for index in outlineModel.facets.indices
+            where collapsed.contains(outlineModel.facets[index].range.lowerBound) {
+                symbolOutlineView.collapseItem(facetRows[index])
+            }
+        }
         symbolOutlineView.deselectAll(nil)
+        isSynchronizingOutlineSelection = false
         updateOutlinePlaceholder()
     }
 
     func highlightOutline(at byteOffset: UInt32) {
+        isSynchronizingOutlineSelection = true
+        defer { isSynchronizingOutlineSelection = false }
         let index = outlineModel.highlight(at: byteOffset)
         guard let index else {
             symbolOutlineView.deselectAll(nil)
             return
         }
-        let row = symbolOutlineView.row(forItem: facetRows[index])
+        var visibleIndex = index
+        while symbolOutlineView.row(forItem: facetRows[visibleIndex]) < 0,
+              let parent = outlineModel.parentIndices[visibleIndex] {
+            visibleIndex = parent
+        }
+        let row = symbolOutlineView.row(forItem: facetRows[visibleIndex])
         guard row >= 0, symbolOutlineView.selectedRow != row else { return }
         symbolOutlineView.selectRowIndexes([row], byExtendingSelection: false)
         let rowRect = symbolOutlineView.rect(ofRow: row)
@@ -3665,7 +3897,8 @@ final class SidebarViewController: NSViewController,
         numberOfChildrenOfItem item: Any?
     ) -> Int {
         if outlineView === symbolOutlineView {
-            return item == nil ? facetRows.count : 0
+            return (item as? NSNumber).map { outlineModel.childIndices[$0.intValue].count }
+                ?? outlineModel.rootIndices.count
         }
         return (item as? FileTreeNode)?.children.count ?? tree?.children.count ?? 0
     }
@@ -3675,12 +3908,18 @@ final class SidebarViewController: NSViewController,
         child index: Int,
         ofItem item: Any?
     ) -> Any {
-        if outlineView === symbolOutlineView { return facetRows[index] }
+        if outlineView === symbolOutlineView {
+            let indices = (item as? NSNumber).map { outlineModel.childIndices[$0.intValue] }
+                ?? outlineModel.rootIndices
+            return facetRows[indices[index]]
+        }
         return (item as? FileTreeNode)?.children[index] ?? tree!.children[index]
     }
 
     func outlineView(_ outlineView: NSOutlineView, isItemExpandable item: Any) -> Bool {
-        if outlineView === symbolOutlineView { return false }
+        if outlineView === symbolOutlineView {
+            return (item as? NSNumber).map { !outlineModel.childIndices[$0.intValue].isEmpty } ?? false
+        }
         return (item as? FileTreeNode)?.isDirectory == true
     }
 
@@ -3688,7 +3927,7 @@ final class SidebarViewController: NSViewController,
         _ outlineView: NSOutlineView,
         heightOfRowByItem item: Any
     ) -> CGFloat {
-        20
+        22
     }
 
     func outlineView(
@@ -3709,26 +3948,29 @@ final class SidebarViewController: NSViewController,
         {
             cell.textField?.stringValue = node.name
             cell.textField?.textColor = theme.foregroundColor
-            cell.imageView?.image = fileIcon(isDirectory: node.isDirectory)
-            cell.imageView?.contentTintColor = theme.chromeTertiaryColor
+            cell.imageView?.image = fileIcon(for: node)
+            cell.imageView?.contentTintColor = fileIconColor(for: node)
+            cell.toolTip = node.url.path
             return cell
         }
         let cell = NSTableCellView()
         cell.identifier = identifier
         let image = NSImageView()
-        image.image = fileIcon(isDirectory: node.isDirectory)
-        image.contentTintColor = theme.chromeTertiaryColor
+        image.image = fileIcon(for: node)
+        image.contentTintColor = fileIconColor(for: node)
         image.translatesAutoresizingMaskIntoConstraints = false
         let label = NSTextField(labelWithString: node.name)
+        label.font = .systemFont(ofSize: 12)
         label.textColor = theme.foregroundColor
         label.lineBreakMode = .byTruncatingTail
         label.translatesAutoresizingMaskIntoConstraints = false
         cell.imageView = image
         cell.textField = label
+        cell.toolTip = node.url.path
         cell.addSubview(image)
         cell.addSubview(label)
         NSLayoutConstraint.activate([
-            image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 4),
+            image.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 2),
             image.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
             image.widthAnchor.constraint(equalToConstant: 16),
             image.heightAnchor.constraint(equalToConstant: 16),
@@ -3754,7 +3996,14 @@ final class SidebarViewController: NSViewController,
     func outlineViewSelectionDidChange(_ notification: Notification) {
         guard let outlineView = notification.object as? NSOutlineView else { return }
         if outlineView === symbolOutlineView {
-            return
+            if let event = NSApp.currentEvent,
+               event.type == .leftMouseDown || event.type == .leftMouseUp { return }
+            guard !isSynchronizingOutlineSelection,
+                  outlineView.selectedRow >= 0,
+                  let row = outlineView.item(atRow: outlineView.selectedRow) as? NSNumber,
+                  let offset = outlineModel.open(row.intValue)
+            else { return }
+            onOpenOutline?(offset)
         } else {
             guard !isSynchronizingFileSelection else { return }
             guard outlineView.selectedRow >= 0,
@@ -3767,8 +4016,9 @@ final class SidebarViewController: NSViewController,
     }
 
     @objc private func openOutlineRow(_ sender: NSOutlineView) {
-        guard sender.clickedRow >= 0,
-              let row = sender.item(atRow: sender.clickedRow) as? NSNumber,
+        let index = sender.clickedRow >= 0 ? sender.clickedRow : sender.selectedRow
+        guard index >= 0,
+              let row = sender.item(atRow: index) as? NSNumber,
               let offset = outlineModel.open(row.intValue)
         else { return }
         onOpenOutline?(offset)
@@ -3804,6 +4054,23 @@ final class SidebarViewController: NSViewController,
         false
     }
 
+    func splitView(_ splitView: NSSplitView, constrainSplitPosition proposedPosition: CGFloat,
+                   ofSubviewAt dividerIndex: Int) -> CGFloat {
+        let available = splitView.bounds.height - splitView.dividerThickness
+        if filesCollapsed { return 25 }
+        if outlineCollapsed { return max(25, available - 25) }
+        let minimum = min(100, available / 2)
+        let position = min(max(minimum, proposedPosition), available - minimum)
+        // Record intentional divider moves, not automatic frame changes during
+        // window resizing or a temporary non-source surface.
+        if setInitialDivider, !isAdjustingSections, !outlineSurfaceHidden, available >= 120 {
+            let fraction = min(0.95, max(0.05, position / available))
+            expandedDividerFraction = fraction
+            UserDefaults.standard.set(fraction, forKey: "\(splitAutosaveName).fraction")
+        }
+        return position
+    }
+
     private func configure(_ outlineView: NSOutlineView, column title: String) {
         let column = NSTableColumn(identifier: .init(title))
         column.resizingMask = .autoresizingMask
@@ -3815,6 +4082,9 @@ final class SidebarViewController: NSViewController,
         outlineView.selectionHighlightStyle = .regular
         outlineView.backgroundColor = .clear
         outlineView.usesAlternatingRowBackgroundColors = false
+        outlineView.style = .plain
+        outlineView.indentationPerLevel = 13
+        outlineView.setAccessibilityLabel(title == "File" ? "Files" : "Outline")
     }
 
     private func pane(
@@ -3823,13 +4093,13 @@ final class SidebarViewController: NSViewController,
         scrollView: NSScrollView,
         placeholder: NSView
     ) -> NSView {
-        let label = NSTextField(labelWithString: title.uppercased())
+        let label = NSTextField(labelWithString: title)
         label.font = .systemFont(ofSize: 11, weight: .semibold)
-        label.textColor = theme.accentColor
+        label.textColor = theme.chromeSecondaryColor
         label.translatesAutoresizingMaskIntoConstraints = false
         let header = NSView()
         header.wantsLayer = true
-        header.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+        header.layer?.backgroundColor = theme.chromeColor.cgColor
         header.translatesAutoresizingMaskIntoConstraints = false
         let divider = NSView()
         divider.wantsLayer = true
@@ -3838,7 +4108,7 @@ final class SidebarViewController: NSViewController,
 
         scrollView.documentView = outlineView
         outlineView.rowSizeStyle = .custom
-        outlineView.rowHeight = 20
+        outlineView.rowHeight = 22
         outlineView.intercellSpacing = .zero
         scrollView.hasVerticalScroller = true
         scrollView.autohidesScrollers = true
@@ -3853,24 +4123,56 @@ final class SidebarViewController: NSViewController,
         pane.layer?.backgroundColor = theme.chromeColor.cgColor
         pane.addSubview(header)
         header.addSubview(label)
+        let toggle = NSButton(title: "", target: self, action: #selector(toggleSidebarSection(_:)))
+        toggle.tag = outlineView === fileOutlineView ? 0 : 1
+        toggle.isBordered = false
+        toggle.controlSize = .small
+        toggle.contentTintColor = theme.chromeSecondaryColor
+        toggle.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(toggle)
+        let collapse = NSButton(title: "", target: self, action: #selector(collapseSidebarTree(_:)))
+        collapse.image = NSImage(systemSymbolName: "chevron.up.chevron.down", accessibilityDescription: nil)
+        collapse.tag = outlineView === fileOutlineView ? 0 : 1
+        collapse.isBordered = false
+        collapse.controlSize = .small
+        collapse.contentTintColor = theme.chromeSecondaryColor
+        collapse.toolTip = "Collapse all \(title.lowercased())"
+        collapse.setAccessibilityLabel("Collapse all \(title.lowercased())")
+        collapse.translatesAutoresizingMaskIntoConstraints = false
+        header.addSubview(collapse)
         pane.addSubview(divider)
-        pane.addSubview(scrollView)
-        pane.addSubview(placeholder)
+        let body = NSView()
+        body.translatesAutoresizingMaskIntoConstraints = false
+        pane.addSubview(body)
+        body.addSubview(scrollView)
+        body.addSubview(placeholder)
         NSLayoutConstraint.activate([
             header.topAnchor.constraint(equalTo: pane.topAnchor),
             header.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
             header.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            header.heightAnchor.constraint(equalToConstant: 30),
-            label.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 8),
+            header.heightAnchor.constraint(equalToConstant: 24),
+            toggle.leadingAnchor.constraint(equalTo: header.leadingAnchor, constant: 4),
+            toggle.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            toggle.widthAnchor.constraint(equalToConstant: 18),
+            toggle.heightAnchor.constraint(equalToConstant: 22),
+            label.leadingAnchor.constraint(equalTo: toggle.trailingAnchor, constant: 3),
             label.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            collapse.trailingAnchor.constraint(equalTo: header.trailingAnchor, constant: -6),
+            collapse.centerYAnchor.constraint(equalTo: header.centerYAnchor),
+            collapse.widthAnchor.constraint(equalToConstant: 22),
+            collapse.heightAnchor.constraint(equalToConstant: 22),
             divider.topAnchor.constraint(equalTo: header.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
             divider.heightAnchor.constraint(equalToConstant: 1),
-            scrollView.topAnchor.constraint(equalTo: divider.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
-            scrollView.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            body.topAnchor.constraint(equalTo: divider.bottomAnchor),
+            body.leadingAnchor.constraint(equalTo: pane.leadingAnchor),
+            body.trailingAnchor.constraint(equalTo: pane.trailingAnchor),
+            body.bottomAnchor.constraint(equalTo: pane.bottomAnchor),
+            scrollView.topAnchor.constraint(equalTo: body.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: body.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: body.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: body.bottomAnchor),
             placeholder.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
             placeholder.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
             placeholder.leadingAnchor.constraint(
@@ -3882,7 +4184,7 @@ final class SidebarViewController: NSViewController,
                 constant: -8
             ),
         ])
-        paneSurfaces.append((pane, header, label, divider))
+        paneSurfaces.append((pane, header, label, divider, body, toggle))
         return pane
     }
 
@@ -3941,6 +4243,32 @@ final class SidebarViewController: NSViewController,
         onChooseProject?()
     }
 
+    @objc private func toggleSidebarSection(_ sender: NSButton) {
+        let defaults = UserDefaults.standard
+        let available = splitView.bounds.height - splitView.dividerThickness
+        if !filesCollapsed, !outlineCollapsed, !outlineSurfaceHidden, available >= 120 {
+            expandedDividerFraction = paneSurfaces[0].pane.frame.height / available
+            defaults.set(expandedDividerFraction,
+                         forKey: "\(splitAutosaveName).fraction")
+        }
+        if sender.tag == 0 {
+            filesCollapsed.toggle()
+            defaults.set(filesCollapsed, forKey: "\(splitAutosaveName).filesCollapsed")
+        } else {
+            outlineCollapsed.toggle()
+            defaults.set(outlineCollapsed, forKey: "\(splitAutosaveName).outlineCollapsed")
+        }
+        restoreSidebarDividerIfNeeded()
+        view.needsLayout = true
+        view.window?.makeFirstResponder(sender)
+    }
+
+    @objc private func collapseSidebarTree(_ sender: NSButton) {
+        let outline = sender.tag == 0 ? fileOutlineView : symbolOutlineView
+        outline.collapseItem(nil, collapseChildren: true)
+        view.window?.makeFirstResponder(outline)
+    }
+
     private func outlineCell(for facet: OutlineFacet) -> NSView {
         let identifier = NSUserInterfaceItemIdentifier("OutlineFacetCell")
         let cell: NSStackView
@@ -3956,8 +4284,15 @@ final class SidebarViewController: NSViewController,
                 image.heightAnchor.constraint(equalToConstant: 14),
             ])
             let label = NSTextField(labelWithString: "")
+            label.font = .systemFont(ofSize: 12)
             label.lineBreakMode = .byTruncatingTail
-            cell = NSStackView(views: [image, label])
+            label.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
+            let detail = NSTextField(labelWithString: "")
+            detail.font = .systemFont(ofSize: 11)
+            detail.lineBreakMode = .byTruncatingTail
+            detail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            detail.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            cell = NSStackView(views: [image, label, detail])
             cell.identifier = identifier
             cell.orientation = .horizontal
             cell.alignment = .centerY
@@ -3965,16 +4300,43 @@ final class SidebarViewController: NSViewController,
         }
         let image = cell.arrangedSubviews[0] as! NSImageView
         let label = cell.arrangedSubviews[1] as! NSTextField
-        image.contentTintColor = theme.chromeTertiaryColor
+        let detail = cell.arrangedSubviews[2] as! NSTextField
+        image.contentTintColor = symbolColor(for: facet.kind)
         label.textColor = theme.foregroundColor
         image.image = NSImage(
             systemSymbolName: symbolName(for: facet.kind),
-            accessibilityDescription: facet.kind.rawValue
+            accessibilityDescription: nil
         )
         label.stringValue = facet.name
+        detail.stringValue = facet.detail
+        detail.textColor = theme.chromeSecondaryColor
+        detail.isHidden = facet.detail.isEmpty
+        let kind = switch facet.kind {
+        case .fn: "Function"
+        case .method: "Method"
+        case .struct: "Struct"
+        case .class: "Class"
+        case .enum: "Enum"
+        case .trait: "Trait"
+        case .impl: "Implementation"
+        case .mod: "Module"
+        case .const: "Constant"
+        case .static: "Static"
+        case .typeAlias: "Type alias"
+        case .field: "Field"
+        case .enumMember: "Enum case"
+        }
+        cell.toolTip = [kind, facet.name, facet.detail].filter { !$0.isEmpty }.joined(separator: " ")
+        image.setAccessibilityElement(false)
+        label.setAccessibilityElement(false)
+        detail.setAccessibilityElement(false)
+        cell.setAccessibilityElement(true)
+        cell.setAccessibilityChildren([])
+        cell.setAccessibilityLabel("\(kind) \(facet.name)")
+        cell.setAccessibilityValue(facet.detail)
         cell.edgeInsets = NSEdgeInsets(
             top: 0,
-            left: 4 + CGFloat(facet.depth) * 12,
+            left: 2,
             bottom: 0,
             right: 4
         )
@@ -3993,14 +4355,50 @@ final class SidebarViewController: NSViewController,
         case .const: "c.square"
         case .static: "s.square"
         case .typeAlias: "t.square"
+        case .field: "shippingbox"
+        case .enumMember: "list.bullet.indent"
         }
     }
 
-    private func fileIcon(isDirectory: Bool) -> NSImage? {
-        NSImage(
-            systemSymbolName: isDirectory ? "folder" : "doc",
-            accessibilityDescription: isDirectory ? "Folder" : "File"
-        )?.withSymbolConfiguration(.init(hierarchicalColor: theme.chromeTertiaryColor))
+    private func symbolColor(for kind: OutlineKind) -> NSColor {
+        switch kind {
+        case .struct, .class, .trait, .typeAlias: theme.color(for: .typeName)
+        case .enum, .enumMember, .const, .static: theme.color(for: .number)
+        case .fn, .method: theme.color(for: .functionName)
+        case .field: theme.chromeSecondaryColor
+        case .impl, .mod: theme.chromeSecondaryColor
+        }
+    }
+
+    private func fileIcon(for node: FileTreeNode) -> NSImage? {
+        let symbol: String
+        if node.isDirectory {
+            symbol = "folder"
+        } else if LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript]) != nil {
+            symbol = "curlybraces"
+        } else {
+            symbol = switch node.url.pathExtension.lowercased() {
+            case "json", "toml", "yaml", "yml", "lock": "slider.horizontal.3"
+            case "md", "txt", "rst": "doc.text"
+            case "png", "jpg", "jpeg", "svg": "photo"
+            case "swift": "swift"
+            default: "doc"
+            }
+        }
+        return NSImage(
+            systemSymbolName: symbol,
+            accessibilityDescription: node.isDirectory ? "Folder" : "File"
+        )
+    }
+
+    private func fileIconColor(for node: FileTreeNode) -> NSColor {
+        guard !node.isDirectory else { return theme.chromeSecondaryColor }
+        return switch LanguageMode.classify(path: node.url.path, languages: [.rust, .python, .typescript])?.language {
+        case .rust: theme.color(for: .string)
+        case .python: theme.color(for: .number)
+        case .typescript: theme.color(for: .functionName)
+        default: theme.chromeSecondaryColor
+        }
     }
 }
 
@@ -4009,26 +4407,42 @@ private final class TabStripView: NSView {
     private weak var model: TabStripModel?
     private var onActivate: ((Int) -> Void)?
     private var onClose: ((Int) -> Void)?
+    private let scrollView = NSScrollView()
+    private let tabs = NSStackView()
+    private var displayedKeys: [String] = []
+    private var displayedActiveIndex: Int?
+    private var previousClipSize = NSSize.zero
     private var theme = ReaderTheme(settings: ReaderSettings())
-
-    override var isFlipped: Bool { true }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-        setAccessibilityElement(true)
         setAccessibilityRole(.tabGroup)
         setAccessibilityLabel("Open files")
+        scrollView.drawsBackground = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        tabs.orientation = .horizontal
+        tabs.alignment = .centerY
+        tabs.spacing = 1
+        tabs.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = tabs
+        addSubview(scrollView)
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: topAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            tabs.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            tabs.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            tabs.heightAnchor.constraint(equalTo: heightAnchor),
+        ])
     }
 
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    func configure(
-        _ model: TabStripModel,
-        onActivate: @escaping (Int) -> Void,
-        onClose: @escaping (Int) -> Void
-    ) {
+    func configure(_ model: TabStripModel, onActivate: @escaping (Int) -> Void,
+                   onClose: @escaping (Int) -> Void) {
         self.model = model
         self.onActivate = onActivate
         self.onClose = onClose
@@ -4037,105 +4451,127 @@ private final class TabStripView: NSView {
 
     func apply(settings: ReaderSettings) {
         theme = ReaderTheme(settings: settings)
-        needsDisplay = true
-    }
-
-    func refresh() {
-        isHidden = model?.tabs.isEmpty != false
-        setAccessibilityValue(model?.activeTab?.title ?? "")
-        needsDisplay = true
+        displayedKeys = []
+        refresh()
     }
 
     var activeTitle: String { model?.activeTab?.title ?? "" }
 
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        theme.chromeHeaderColor.setFill()
-        bounds.fill()
+    override func layout() {
+        super.layout()
+        let size = scrollView.contentView.bounds.size
+        guard size != previousClipSize else { return }
+        previousClipSize = size
+        revealActiveTab()
+    }
+
+    func refresh() {
         guard let model else { return }
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineBreakMode = .byTruncatingMiddle
-        for index in model.tabs.indices {
-            let rect = tabRect(index: index, count: model.tabs.count)
-            if model.tabs.count > 1, index == model.activeIndex {
-                theme.backgroundColor.setFill()
-                rect.fill()
+        isHidden = model.tabs.isEmpty
+        setAccessibilityValue(activeTitle)
+        let keys = model.tabs.map {
+            ($0.fileURL?.path ?? "") + "\n" + $0.title + "\n" + String($0.isPreview)
+        }
+        guard keys != displayedKeys || model.activeIndex != displayedActiveIndex else { return }
+        displayedKeys = keys
+        displayedActiveIndex = model.activeIndex
+        for tab in tabs.arrangedSubviews {
+            tabs.removeArrangedSubview(tab)
+            tab.removeFromSuperview()
+        }
+        for (index, tab) in model.tabs.enumerated() {
+            let active = index == model.activeIndex
+            var title = tab.title
+            if model.tabs.filter({ $0.title == title }).count > 1, let file = tab.fileURL {
+                let peers = model.tabs.compactMap { $0.title == tab.title ? $0.fileURL : nil }
+                let components = file.pathComponents
+                for length in 2...components.count {
+                    let suffix = components.suffix(length).joined(separator: "/")
+                    if peers.filter({ $0.pathComponents.suffix(length).joined(separator: "/") == suffix }).count == 1 {
+                        title = suffix
+                        break
+                    }
+                }
             }
-            let titleRect = rect.insetBy(dx: 10, dy: 7)
-            let closeWidth: CGFloat = 18
-            let textRect = NSRect(
-                x: titleRect.minX,
-                y: titleRect.minY,
-                width: max(0, titleRect.width - closeWidth),
-                height: titleRect.height
-            )
-            (model.tabs[index].title as NSString).draw(
-                in: textRect,
-                withAttributes: [
-                    .font: NSFont.systemFont(
-                        ofSize: 11,
-                        weight: index == model.activeIndex ? .semibold : .regular
-                    ),
-                    .foregroundColor: theme.foregroundColor,
-                    .paragraphStyle: paragraph,
-                ]
-            )
-            ("×" as NSString).draw(
-                in: closeRect(for: rect),
-                withAttributes: [
-                    .font: NSFont.systemFont(ofSize: 12),
-                    .foregroundColor: theme.foregroundColor.withAlphaComponent(0.65),
-                ]
-            )
+            let button = NSButton(title: title, target: self, action: #selector(activate(_:)))
+            button.tag = index
+            button.isBordered = false
+            button.font = .systemFont(ofSize: 12, weight: active ? .semibold : .regular)
+            if tab.isPreview, let font = button.font {
+                button.font = NSFontManager.shared.convert(font, toHaveTrait: .italicFontMask)
+            }
+            button.alignment = .left
+            button.lineBreakMode = .byTruncatingMiddle
+            button.contentTintColor = active ? theme.foregroundColor : theme.chromeSecondaryColor
+            button.toolTip = tab.fileURL?.path ?? tab.title
+            button.setAccessibilityRole(.radioButton)
+            button.setAccessibilityValue(active ? 1 : 0)
+            button.setAccessibilityLabel(title + (tab.isPreview ? ", Preview" : ""))
+            let help = (tab.fileURL?.path ?? tab.title)
+                + (tab.isPreview ? ". Preview tab; choose Keep Open to retain it." : "")
+            button.setAccessibilityHelp(help)
+            let menu = NSMenu(title: title)
+            menu.autoenablesItems = false
+            let keepOpen = NSMenuItem(title: "Keep Open", action: #selector(keepTabOpen(_:)), keyEquivalent: "")
+            keepOpen.target = self
+            keepOpen.tag = index
+            keepOpen.isEnabled = tab.isPreview
+            menu.addItem(keepOpen)
+            button.menu = menu
+            let close = NSButton(title: "", target: self, action: #selector(closeTab(_:)))
+            close.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
+            close.tag = index
+            close.isBordered = false
+            close.controlSize = .small
+            close.contentTintColor = theme.chromeSecondaryColor
+            close.setAccessibilityLabel("Close " + title)
+            close.toolTip = "Close " + tab.title
+            let row = NSStackView(views: [button, close])
+            row.orientation = .horizontal
+            row.alignment = .centerY
+            row.spacing = 6
+            row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 4)
+            row.wantsLayer = true
+            row.layer?.backgroundColor = (active ? theme.backgroundColor : theme.chromeHeaderColor).cgColor
+            row.menu = menu
+            let width = min(220, max(110, button.intrinsicContentSize.width + 42))
+            tabs.addArrangedSubview(row)
+            NSLayoutConstraint.activate([
+                row.widthAnchor.constraint(equalToConstant: width),
+                row.heightAnchor.constraint(equalTo: heightAnchor),
+                close.widthAnchor.constraint(equalToConstant: 22),
+                close.heightAnchor.constraint(equalToConstant: 22),
+            ])
+        }
+        layoutSubtreeIfNeeded()
+        revealActiveTab()
+    }
+
+    private func revealActiveTab() {
+        if let active = model?.activeIndex, tabs.arrangedSubviews.indices.contains(active) {
+            tabs.scrollToVisible(tabs.arrangedSubviews[active].frame)
         }
     }
 
-    override func mouseDown(with event: NSEvent) {
-        guard let model else { return }
-        let point = convert(event.locationInWindow, from: nil)
-        guard let index = model.tabs.indices.first(where: {
-            tabRect(index: $0, count: model.tabs.count).contains(point)
-        }) else { return }
-        if closeRect(
-            for: tabRect(index: index, count: model.tabs.count)
-        ).contains(point) {
-            onClose?(index)
-        } else {
-            onActivate?(index)
-        }
-    }
-
-    private func tabRect(index: Int, count: Int) -> NSRect {
-        guard count > 0 else { return .zero }
-        let width = min(180, bounds.width / CGFloat(count))
-        return NSRect(
-            x: CGFloat(index) * width,
-            y: 0,
-            width: width,
-            height: bounds.height
-        )
-    }
-
-    private func closeRect(for tabRect: NSRect) -> NSRect {
-        NSRect(
-            x: tabRect.maxX - 24,
-            y: tabRect.minY + 6,
-            width: 18,
-            height: tabRect.height - 12
-        )
+    @objc private func activate(_ sender: NSButton) { onActivate?(sender.tag) }
+    @objc private func closeTab(_ sender: NSButton) { onClose?(sender.tag) }
+    @objc private func keepTabOpen(_ sender: NSMenuItem) {
+        model?.keepOpen(sender.tag)
+        refresh()
     }
 }
 
 @MainActor
 private final class ReadingHeightControl: NSSegmentedControl {
-    private var theme = ReaderTheme(settings: ReaderSettings())
-    private let segmentWidths: [CGFloat] = [56, 82, 78]
+    private let segmentWidths: [CGFloat] = [48, 76, 72]
 
     init() {
         super.init(frame: .zero)
         segmentCount = ReadingHeightLevel.allCases.count
         trackingMode = .selectOne
-        segmentStyle = .rounded
+        segmentStyle = .texturedRounded
+        controlSize = .small
+        font = .systemFont(ofSize: 11)
         for level in ReadingHeightLevel.allCases {
             setLabel(level.title, forSegment: level.rawValue)
         }
@@ -4175,58 +4611,9 @@ private final class ReadingHeightControl: NSSegmentedControl {
     }
 
     func apply(settings: ReaderSettings) {
-        theme = ReaderTheme(settings: settings)
         needsDisplay = true
     }
 
-    override func draw(_ dirtyRect: NSRect) {
-        let border = NSBezierPath(
-            roundedRect: bounds.insetBy(dx: 0.5, dy: 0.5),
-            xRadius: 7, yRadius: 7)
-        theme.chromeColor.setFill()
-        border.fill()
-        theme.chromeDividerColor.setStroke()
-        border.lineWidth = 1
-        border.stroke()
-
-        var x = bounds.minX
-        for index in 0..<segmentCount {
-            let width = segmentWidths[index]
-            let rect = NSRect(x: x, y: bounds.minY, width: width, height: bounds.height)
-            if index == selectedSegment {
-                NSGraphicsContext.saveGraphicsState()
-                border.addClip()
-                theme.backgroundColor.setFill()
-                rect.fill()
-                theme.accentColor.setFill()
-                NSRect(x: rect.minX, y: rect.minY + 1, width: rect.width, height: 2)
-                    .fill()
-                NSGraphicsContext.restoreGraphicsState()
-            }
-            if index > 0 {
-                theme.chromeDividerColor.setFill()
-                NSRect(
-                    x: rect.minX, y: rect.minY + 1, width: 1,
-                    height: max(0, rect.height - 2)
-                ).fill()
-            }
-            let title = label(forSegment: index) ?? ""
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: NSFont.systemFont(ofSize: 10, weight: .semibold),
-                .foregroundColor: index == selectedSegment
-                    ? theme.accentColor : theme.chromeSecondaryColor,
-            ]
-            let size = (title as NSString).size(withAttributes: attributes)
-            (title as NSString).draw(
-                at: NSPoint(
-                    x: rect.midX - size.width / 2,
-                    y: rect.midY - size.height / 2
-                ),
-                withAttributes: attributes
-            )
-            x += width
-        }
-    }
 }
 
 @MainActor
@@ -4241,6 +4628,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onLiveScroll: (() -> Void)?
     var onFocusNotice: ((String) -> Void)?
     var onSelectionChange: ((UInt32) -> Void)?
+    var onOpenScope: ((UInt32) -> Void)?
+    var onRevealPath: ((URL) -> Void)?
+    var projectRoot: URL?
     var onDocumentChange: ((URL, ReaderDocument?) -> Void)?
     var onOpenPreviewLink: ((URL) -> Void)?
     var onReadingSetScrollChange: ((Double) -> Void)?
@@ -4250,6 +4640,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onExpandReadingSetExcerpt: ((Int) -> Void)?
     var onViewReadingSetEvidence: ((Int) -> Void)?
     var onChooseCompareVersion: (() -> Void)?
+    var onCloseComparison: (() -> Void)?
     var onPreviousDiffHunk: (() -> Void)?
     var onNextDiffHunk: (() -> Void)?
     var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
@@ -4268,6 +4659,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let tabStripView = TabStripView()
     private let readerHeader = NSView()
     private let readerHeaderDivider = NSView()
+    private let pathControl = NSPathControl()
     private let scopeHeader = NSView()
     private let scopeHeaderContent = NSStackView()
     private let scopeHeaderDivider = NSView()
@@ -4403,11 +4795,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         } else {
             tabStripView.isHidden = true
             configureReaderHeader()
+            pathControl.pathStyle = .standard
+            pathControl.controlSize = .small
+            pathControl.isEditable = false
+            pathControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            pathControl.target = self
+            pathControl.action = #selector(revealBreadcrumb(_:))
+            pathControl.setAccessibilityLabel("File path")
+            pathControl.isHidden = true
             configureScopeHeader()
             configureFindBar()
             let stack = NSStackView(views: [
                 readerHeader,
                 findBar,
+                pathControl,
                 readerArea,
             ])
             stack.orientation = .vertical
@@ -4418,6 +4819,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 readerArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
                 findBar.heightAnchor.constraint(equalToConstant: 31),
+                pathControl.heightAnchor.constraint(equalToConstant: 24),
+                pathControl.widthAnchor.constraint(equalTo: stack.widthAnchor),
             ])
             view = stack
         }
@@ -4440,6 +4843,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
         textView.onCaretChange = { [weak self] byteOffset in
             self?.renderScopeHeader(at: byteOffset)
+            self?.onSelectionChange?(byteOffset)
         }
 
         let relationMenu = NSMenu(title: "Relations")
@@ -4510,6 +4914,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             for: .horizontal
         )
         readingHeightShortcutLabel.font = .systemFont(ofSize: 10)
+        readingHeightShortcutLabel.isHidden = true
         readingHeightControl.target = self
         readingHeightControl.action = #selector(changeReadingHeight(_:))
 
@@ -4538,7 +4943,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             row.centerYAnchor.constraint(
                 equalTo: readerHeader.centerYAnchor,
                 constant: -0.5),
-            readingHeightControl.widthAnchor.constraint(equalToConstant: 216),
+            readingHeightControl.widthAnchor.constraint(equalToConstant: 196),
             readingHeightControl.heightAnchor.constraint(equalToConstant: 24),
             tabStripView.heightAnchor.constraint(equalToConstant: 30),
             readerHeaderDivider.leadingAnchor.constraint(
@@ -4636,10 +5041,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 Self.scopeKindTitle(facet.kind),
                 color: readerTheme.color(for: .keyword)
             ))
-            scopeHeaderContent.addArrangedSubview(scopeLabel(
-                facet.name,
-                color: readerTheme.foregroundColor
-            ))
+            let button = NSButton(title: facet.name, target: self, action: #selector(openScope(_:)))
+            button.isBordered = false
+            button.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+            button.contentTintColor = readerTheme.foregroundColor
+            button.tag = Int(facet.nameRange.lowerBound)
+            button.toolTip = "Go to \(facet.name)"
+            button.setAccessibilityLabel("Go to \(facet.name)")
+            scopeHeaderContent.addArrangedSubview(button)
         }
         let location = "\(file.lastPathComponent):\(line)"
         scopeHeaderContent.addArrangedSubview(scopeLabel(
@@ -4650,6 +5059,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let scopes = facets.map {
             "\(Self.scopeKindTitle($0.kind)) \($0.name)"
         }.joined(separator: ", ")
+        scopeHeader.setAccessibilityElement(false)
         scopeHeader.setAccessibilityLabel(
             "Current scope: \(scopes), \(file.lastPathComponent) line \(line)"
         )
@@ -4658,6 +5068,29 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private func hideScopeHeader() {
         scopeHeader.isHidden = true
         scopeHeader.setAccessibilityLabel("Current scope")
+    }
+
+    @objc private func openScope(_ sender: NSButton) {
+        guard let offset = UInt32(exactly: sender.tag) else { return }
+        if let onOpenScope { onOpenScope(offset) }
+        else { _ = textView.activate(atByteOffset: offset) }
+    }
+
+    @objc private func revealBreadcrumb(_ sender: NSPathControl) {
+        guard let url = sender.clickedPathItem?.url else { return }
+        onRevealPath?(url)
+    }
+
+    private func updatePathControl() {
+        guard !showsCompareControls else { return }
+        pathControl.isHidden = displayedFile == nil
+        guard let file = displayedFile else { pathControl.pathItems = []; return }
+        pathControl.url = file
+        pathControl.toolTip = file.path
+        if let root = projectRoot,
+           let index = pathControl.pathItems.firstIndex(where: { $0.url?.standardizedFileURL == root.standardizedFileURL }) {
+            pathControl.pathItems = Array(pathControl.pathItems.dropFirst(index))
+        }
     }
 
     private func scopeLabel(_ title: String, color: NSColor) -> NSTextField {
@@ -4729,14 +5162,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         findCloseButton.action = #selector(closeFind(_:))
         findCloseButton.setAccessibilityLabel("Close find bar")
 
-        let spacer = NSView()
-        spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        findField.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        findField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let row = NSStackView(views: [
             findField,
             findCaseButton,
             findPreviousButton,
             findNextButton,
-            spacer,
             findStatusLabel,
             findCloseButton,
         ])
@@ -4752,7 +5184,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             row.leadingAnchor.constraint(equalTo: findBar.leadingAnchor, constant: 13),
             row.trailingAnchor.constraint(equalTo: findBar.trailingAnchor, constant: -8),
             row.centerYAnchor.constraint(equalTo: findBar.centerYAnchor, constant: -0.5),
-            findField.widthAnchor.constraint(equalToConstant: 240),
+            findField.widthAnchor.constraint(greaterThanOrEqualToConstant: 140),
             findField.heightAnchor.constraint(equalToConstant: 22),
             findCaseButton.widthAnchor.constraint(equalToConstant: 34),
             findPreviousButton.widthAnchor.constraint(equalToConstant: 24),
@@ -5011,6 +5443,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         compareVersionButton.target = self
         compareVersionButton.action = #selector(chooseCompareVersion(_:))
         compareVersionButton.setAccessibilityLabel("Comparison version")
+        compareVersionButton.lineBreakMode = .byTruncatingMiddle
+        compareVersionButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         previousHunkButton.title = "↑"
         previousHunkButton.bezelStyle = .inline
@@ -5023,9 +5457,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         nextHunkButton.action = #selector(nextDiffHunk(_:))
         nextHunkButton.setAccessibilityLabel("Next diff hunk")
 
+        let closeButton = NSButton()
+        closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
+        closeButton.isBordered = false
+        closeButton.target = self
+        closeButton.action = #selector(closeComparison(_:))
+        closeButton.toolTip = "Close Comparison (⌃⌘W)"
+        closeButton.setAccessibilityLabel("Close Comparison")
         let spacer = NSView()
         let controls = NSStackView(views: [
-            compareVersionButton, spacer, previousHunkButton, nextHunkButton,
+            compareVersionButton, spacer, previousHunkButton, nextHunkButton, closeButton,
         ])
         controls.orientation = .horizontal
         controls.alignment = .centerY
@@ -5054,6 +5495,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             controls.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             controls.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
             controls.heightAnchor.constraint(equalToConstant: 28),
+            closeButton.widthAnchor.constraint(equalToConstant: 22),
+            closeButton.heightAnchor.constraint(equalToConstant: 22),
             summaryScroll.topAnchor.constraint(equalTo: controls.bottomAnchor, constant: 2),
             summaryScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 8),
             summaryScroll.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
@@ -5077,6 +5520,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     @objc private func chooseCompareVersion(_ sender: Any?) {
         onChooseCompareVersion?()
+    }
+
+    @objc private func closeComparison(_ sender: Any?) {
+        onCloseComparison?()
     }
 
     @objc private func previousDiffHunk(_ sender: Any?) {
@@ -5165,6 +5612,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         onRetry: @escaping () -> Void
     ) {
         loadViewIfNeeded()
+        pathControl.isHidden = true
         readingHeightControl.isEnabled = false
         label.isHidden = true
         scrollView?.isHidden = true
@@ -5203,6 +5651,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     func removeEmptyState(placeholder: String) {
         emptyStateView?.removeFromSuperview()
         emptyStateView = nil
+        guard displayedReadingSetKey == nil else { return }
         scrollView?.isHidden = false
         readingHeightControl.isEnabled = displayedDocument != nil
         if displayedFile == nil {
@@ -5606,14 +6055,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     ) {
         loadViewIfNeeded()
         view.layoutSubtreeIfNeeded()
-        let labels = scopeHeaderContent.arrangedSubviews.compactMap {
-            $0 as? NSTextField
-        }
+        let labels = scopeHeaderContent.arrangedSubviews.compactMap { $0 as? NSControl }
         return (
             scopeHeader.isHidden,
             scopeHeader.convert(scopeHeader.bounds, to: nil),
             readerArea.convert(readerArea.bounds, to: nil),
-            labels.map(\.stringValue),
+            labels.map { ($0 as? NSButton)?.title ?? $0.stringValue },
             labels.map { label in
                 guard let parent = label.superview else { return .zero }
                 return parent.convert(
@@ -5637,6 +6084,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         guard showsCompareControls else { return }
         loadViewIfNeeded()
         compareVersionButton.title = versionTitle
+        compareVersionButton.toolTip = versionTitle
         previousHunkButton.isEnabled = hunkCount > 0
         nextHunkButton.isEnabled = hunkCount > 0
         previousHunkButton.toolTip = hunkCount == 0
@@ -5800,27 +6248,41 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         contentFrame: NSRect,
         rulerFrame: NSRect,
         hasRuler: Bool,
-        rulerThickness: CGFloat
+        rulerThickness: CGFloat,
+        firstGlyphGap: CGFloat?
     ) {
         loadViewIfNeeded()
         guard let scrollView else {
-            return (.zero, .zero, .zero, .zero, false, 0)
+            return (.zero, .zero, .zero, .zero, false, 0, nil)
         }
         let ruler = scrollView.verticalRulerView
+        let rulerFrame = ruler?.convert(ruler?.bounds ?? .zero, to: nil) ?? .zero
+        let clipFrame = scrollView.contentView.convert(scrollView.contentView.bounds, to: nil)
         let visible = textView.view.convert(textView.view.visibleRect, to: nil)
-        let gutterWidth = max(0, textView.view.textContainerInset.width - 12)
+            .intersection(clipFrame)
+        let textMinX = rulerFrame.intersects(visible)
+            ? max(visible.minX, rulerFrame.maxX) : visible.minX
+        let contentFrame = NSRect(
+            x: textMinX, y: visible.minY,
+            width: max(0, visible.maxX - textMinX), height: visible.height
+        )
+        let firstGlyphGap: CGFloat?
+        if let window = textView.view.window, !textView.view.string.isEmpty {
+            let glyph = window.convertFromScreen(textView.view.firstRect(
+                forCharacterRange: NSRange(location: 0, length: 1), actualRange: nil
+            ))
+            firstGlyphGap = glyph.isEmpty ? nil : glyph.minX - contentFrame.minX
+        } else {
+            firstGlyphGap = nil
+        }
         return (
             scrollView.convert(scrollView.bounds, to: nil),
-            scrollView.contentView.convert(scrollView.contentView.bounds, to: nil),
-            NSRect(
-                x: visible.minX + gutterWidth,
-                y: visible.minY,
-                width: max(0, visible.width - gutterWidth),
-                height: visible.height
-            ),
-            ruler?.convert(ruler?.bounds ?? .zero, to: nil) ?? .zero,
+            clipFrame,
+            contentFrame,
+            rulerFrame,
             scrollView.hasVerticalRuler,
-            ruler?.ruleThickness ?? 0
+            ruler?.ruleThickness ?? 0,
+            firstGlyphGap
         )
     }
     var compareVersionAnchor: NSView {
@@ -5884,6 +6346,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readingPositionTask?.cancel()
         loadGeneration &+= 1
         displayedFile = nil
+        updatePathControl()
         displayedSnapshotID = nil
         displayedLanguageMode = nil
         displayedDocument = nil
@@ -6386,7 +6849,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         scrollView?.isHidden = false
         readingHeightControl.isHidden = false
         readingHeightControl.isEnabled = false
-        readingHeightShortcutLabel.isHidden = false
+        readingHeightShortcutLabel.isHidden = true
         let rerunFind = !findBar.isHidden
         if rerunFind {
             invalidateFind()
@@ -6394,6 +6857,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             textView.setFindMatches([], selectedIndex: nil)
         }
         displayedFile = file
+        updatePathControl()
         if !showsCompareControls {
             fileNameLabel.stringValue = file?.lastPathComponent ?? ""
         }
@@ -6415,7 +6879,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             findStatusLabel.stringValue = ""
             displayedDocument = nil
             clearPreview()
-            label.stringValue = "Select a file to read"
+            label.stringValue = "Select a file to read · ⌘P to open"
             label.isHidden = false
             textView.clear()
             hideScopeHeader()

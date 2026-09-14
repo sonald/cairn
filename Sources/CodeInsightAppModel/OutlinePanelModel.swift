@@ -6,7 +6,9 @@ public final class OutlinePanelModel {
     public private(set) var facets: [OutlineFacet] = []
     public private(set) var selectedIndex: Int?
 
-    private var parentIndices: [Int?] = []
+    public private(set) var parentIndices: [Int?] = []
+    public private(set) var rootIndices: [Int] = []
+    public private(set) var childIndices: [[Int]] = []
 
     public init() {}
 
@@ -19,6 +21,8 @@ public final class OutlinePanelModel {
         }
         selectedIndex = nil
         parentIndices = Array(repeating: nil, count: facets.count)
+        rootIndices = []
+        childIndices = Array(repeating: [], count: facets.count)
         var stack: [Int] = []
         for index in self.facets.indices {
             while let parent = stack.last,
@@ -27,6 +31,11 @@ public final class OutlinePanelModel {
                 stack.removeLast()
             }
             parentIndices[index] = stack.last
+            if let parent = stack.last {
+                childIndices[parent].append(index)
+            } else {
+                rootIndices.append(index)
+            }
             stack.append(index)
         }
     }

@@ -1,0 +1,14 @@
+[
+  {
+    "theme": "dark",
+    "minimumSyntaxContrast": 6.61
+  },
+  {
+    "theme": "siClassic",
+    "minimumSyntaxContrast": 5.21
+  },
+  {
+    "theme": "auto, .light",
+    "minimumSyntaxContrast": 4.96
+  }
+]

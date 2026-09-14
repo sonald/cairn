@@ -16,6 +16,7 @@ final class SearchPanel: NSWindowController,
     private let caseButton = NSButton()
     private let regexButton = NSButton()
     private let outlineView = NSOutlineView()
+    private let scrollView = NSScrollView()
     private let placeholderLabel = NSTextField(labelWithString: "")
     private let statusLabel = NSTextField(labelWithString: "0 matches in 0 files")
     private let truncatedLabel = NSTextField(labelWithString: "")
@@ -23,6 +24,7 @@ final class SearchPanel: NSWindowController,
     private let onOpen: (URL, UInt32, ContentID?) -> Void
     private var reloadTask: Task<Void, Never>?
     private weak var ownerWindow: NSWindow?
+    private weak var originalResponder: NSResponder?
 
     init(
         appModel: AppModel,
@@ -32,11 +34,13 @@ final class SearchPanel: NSWindowController,
         self.onOpen = onOpen
         let panel = KeyablePanel(
             contentRect: NSRect(x: 0, y: 0, width: 720, height: 520),
-            styleMask: [.titled, .fullSizeContentView, .nonactivatingPanel],
+            styleMask: [.titled, .resizable, .fullSizeContentView, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
+        panel.title = "Find in Project"
         panel.titleVisibility = .hidden
+        panel.minSize = NSSize(width: 480, height: 320)
         panel.titlebarAppearsTransparent = true
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = true
@@ -51,24 +55,58 @@ final class SearchPanel: NSWindowController,
     }
 
     func show(relativeTo owner: NSWindow?) {
+        if let ownerWindow {
+            NotificationCenter.default.removeObserver(self, name: nil, object: ownerWindow)
+        }
         ownerWindow = owner
+        originalResponder = owner?.firstResponder
+        if let owner {
+            for name in [NSWindow.didMoveNotification, NSWindow.didResizeNotification,
+                         NSWindow.didChangeScreenNotification] {
+                NotificationCenter.default.addObserver(
+                    self, selector: #selector(ownerGeometryChanged(_:)), name: name, object: owner
+                )
+            }
+        }
         input.stringValue = ""
         panelModel.setQuery("")
         applyProjectState()
         render()
 
         guard let panel = window else { return }
-        if let owner {
-            panel.setFrameOrigin(NSPoint(
-                x: owner.frame.midX - panel.frame.width / 2,
-                y: owner.frame.midY - panel.frame.height / 2
-            ))
-        } else {
-            panel.center()
-        }
+        positionPanel()
         panel.makeKeyAndOrderFront(nil)
         panel.makeFirstResponder(input)
     }
+
+    @objc private func ownerGeometryChanged(_ notification: Notification) {
+        guard window?.isVisible == true else { return }
+        positionPanel()
+    }
+
+    private func positionPanel() {
+        guard let panel = window,
+              let screen = ownerWindow?.screen ?? panel.screen ?? NSScreen.main
+        else { return }
+        let visible = screen.visibleFrame.insetBy(dx: 12, dy: 12)
+        let ownerContent = ownerWindow.map { $0.convertToScreen($0.contentLayoutRect) } ?? visible
+        let intersection = ownerContent.intersection(visible)
+        let area = intersection.isEmpty ? visible : intersection
+        let size = NSSize(
+            width: min(panel.frame.width, max(480, area.width - 32), visible.width),
+            height: min(panel.frame.height, max(320, area.height - 32), visible.height)
+        )
+        panel.setFrame(NSRect(
+            x: min(max(area.midX - size.width / 2, visible.minX), visible.maxX - size.width),
+            y: min(max(area.midY - size.height / 2, visible.minY), visible.maxY - size.height),
+            width: size.width,
+            height: size.height
+        ), display: true)
+        panel.contentView?.layoutSubtreeIfNeeded()
+        outlineView.sizeLastColumnToFit()
+    }
+
+    var outlineViewForTesting: NSOutlineView { outlineView }
 
     func refreshProjectState() {
         guard window?.isVisible == true else { return }
@@ -236,6 +274,8 @@ final class SearchPanel: NSWindowController,
                 ]
             ))
             cell.textField?.attributedStringValue = text
+            cell.textField?.lineBreakMode = .byTruncatingMiddle
+            cell.toolTip = group.path
             return cell
         }
         if let message = item as? String {
@@ -248,6 +288,7 @@ final class SearchPanel: NSWindowController,
         guard let match = item as? SearchPanelModel.Match else { return nil }
         let cell = reusableCell(identifier: "SearchMatch", in: outlineView)
         cell.textField?.attributedStringValue = styledMatch(match)
+        cell.toolTip = "Line \(match.value.line): \(match.value.lineText)"
         return cell
     }
 
@@ -309,7 +350,8 @@ final class SearchPanel: NSWindowController,
     }
 
     private func configureView() {
-        input.placeholderString = "Find in project"
+        input.placeholderString = "Find in project…"
+        input.setAccessibilityLabel("Find in project")
         input.delegate = self
         input.font = .systemFont(ofSize: 15)
         input.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -342,23 +384,35 @@ final class SearchPanel: NSWindowController,
         outlineView.target = self
         outlineView.doubleAction = #selector(openClickedRow(_:))
         outlineView.refusesFirstResponder = true
+        outlineView.style = .plain
+        outlineView.indentationPerLevel = 14
         outlineView.rowSizeStyle = .custom
+        outlineView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        outlineView.setAccessibilityLabel("Project search results")
         outlineView.intercellSpacing = .zero
 
-        let scrollView = NSScrollView()
         scrollView.documentView = outlineView
         scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentInsets = .init()
+        scrollView.horizontalScrollElasticity = .none
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         placeholderLabel.textColor = .secondaryLabelColor
         placeholderLabel.alignment = .center
+        placeholderLabel.maximumNumberOfLines = 3
+        placeholderLabel.lineBreakMode = .byWordWrapping
+        placeholderLabel.setAccessibilityLabel("Project search status")
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        truncatedLabel.stringValue = "results truncated"
+        truncatedLabel.stringValue = "Results truncated"
         truncatedLabel.textColor = .systemOrange
         truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -382,10 +436,11 @@ final class SearchPanel: NSWindowController,
             caseButton.widthAnchor.constraint(equalToConstant: 42),
             regexButton.widthAnchor.constraint(equalToConstant: 42),
             scrollView.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 10),
-            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor),
-            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             scrollView.bottomAnchor.constraint(equalTo: statusLabel.topAnchor, constant: -8),
-            placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
+            placeholderLabel.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor, constant: 16),
+            placeholderLabel.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor, constant: -16),
             placeholderLabel.centerYAnchor.constraint(equalTo: scrollView.centerYAnchor),
             statusLabel.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 16),
             statusLabel.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
@@ -485,6 +540,8 @@ final class SearchPanel: NSWindowController,
         truncatedLabel.isHidden = !panelModel.isTruncated
         placeholderLabel.stringValue = panelModel.placeholder
         placeholderLabel.isHidden = panelModel.placeholder.isEmpty
+        scrollView.isHidden = panelModel.groups.isEmpty
+        scrollView.verticalScrollElasticity = panelModel.groups.isEmpty ? .none : .automatic
         if panelModel.isSearching {
             spinner.startAnimation(nil)
         } else {
@@ -589,6 +646,7 @@ final class SearchPanel: NSWindowController,
         window?.orderOut(nil)
         if restoreFocus {
             ownerWindow?.makeKey()
+            ownerWindow?.makeFirstResponder(originalResponder)
         }
     }
 }

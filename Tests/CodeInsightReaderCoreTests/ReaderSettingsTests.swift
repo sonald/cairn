@@ -5,13 +5,13 @@ import Testing
 @Test
 func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
     #expect(ReaderSettings() == ReaderSettings(
-        lineHeightMultiple: 1.25,
+        lineHeightMultiple: 1.3,
         fontSize: 13,
-        functionNameDelta: 1,
-        parameterReferenceAlpha: 0.72,
+        functionNameDelta: 0,
+        parameterReferenceAlpha: 0.9,
         declarationMarkerAlpha: 0.7,
-        functionDeclarationFontWeight: 0.3,
-        declarationEmphasisFontWeight: 0.3,
+        functionDeclarationFontWeight: 0.23,
+        declarationEmphasisFontWeight: 0.23,
         theme: .auto,
         syntaxFormatting: true,
         humanistComments: false,
@@ -47,12 +47,12 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
 }
 
 @Test
-func readerVisualSettingsKeepLegacyDefaultsAndClampEveryBoundary() {
+func readerVisualSettingsKeepReadableDefaultsAndClampEveryBoundary() {
     let defaults = ReaderSettings()
-    #expect(defaults.parameterReferenceAlpha == 0.72)
+    #expect(defaults.parameterReferenceAlpha == 0.9)
     #expect(defaults.declarationMarkerAlpha == 0.7)
-    #expect(defaults.functionDeclarationFontWeight == 0.3)
-    #expect(defaults.declarationEmphasisFontWeight == 0.3)
+    #expect(defaults.functionDeclarationFontWeight == 0.23)
+    #expect(defaults.declarationEmphasisFontWeight == 0.23)
 
     let low = ReaderSettings(
         parameterReferenceAlpha: -1,
@@ -93,10 +93,10 @@ func readerSettingsPersistRoundTripThroughInjectedUserDefaults() throws {
     let defaults = try #require(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
     let missingKeys = ReaderSettings(defaults: defaults)
-    #expect(missingKeys.parameterReferenceAlpha == 0.72)
+    #expect(missingKeys.parameterReferenceAlpha == 0.9)
     #expect(missingKeys.declarationMarkerAlpha == 0.7)
-    #expect(missingKeys.functionDeclarationFontWeight == 0.3)
-    #expect(missingKeys.declarationEmphasisFontWeight == 0.3)
+    #expect(missingKeys.functionDeclarationFontWeight == 0.23)
+    #expect(missingKeys.declarationEmphasisFontWeight == 0.23)
     #expect(missingKeys.syntaxFormatting)
     #expect(missingKeys.lineNumbers)
     #expect(!missingKeys.wrapLines)

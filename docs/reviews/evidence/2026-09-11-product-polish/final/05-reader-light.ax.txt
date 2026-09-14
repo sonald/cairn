@@ -1,0 +1,311 @@
+The following is a diff from the previous accessibility tree for Window: "Cairn" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 18-24
+~16 standard window Cairn, Secondary Actions: Raise
+~	17 split group
++		18 split group
++			19 text Files
++			20 button Description: Collapse Files, Value: Expanded
++			21 button Collapse all files
++			22 scroll area Secondary Actions: Scroll Up, Scroll Down
++				23 outline Files
++					24 row (selectable, collapsed) Description: Folder, Value: .claude, Secondary Actions: Expand
++						25 disclosure triangle 0
++					26 row (selectable, collapsed) Description: Folder, Value: .codex-trace, Secondary Actions: Expand
++						27 disclosure triangle 0
++					28 row (selectable, collapsed) Description: Folder, Value: .zcache, Secondary Actions: Expand
++						29 disclosure triangle 0
++					30 row (selectable, expanded) Description: Folder, Value: crates, Secondary Actions: Collapse
++						31 disclosure triangle 1
++					32 row (selectable, collapsed) Description: Folder, Value: ai, Secondary Actions: Expand
++						33 disclosure triangle 0
++					34 row (selectable, expanded) Description: Folder, Value: knuth-agent, Secondary Actions: Collapse
++						35 disclosure triangle 1
++					36 row (selectable, collapsed) Description: Folder, Value: examples, Secondary Actions: Expand
++						37 disclosure triangle 0
++					38 row (selectable, expanded) Description: Folder, Value: src, Secondary Actions: Collapse
++						39 disclosure triangle 1
++					40 row (selectable, collapsed) Description: Folder, Value: hooks, Secondary Actions: Expand
++						41 disclosure triangle 0
++					42 row (selectable, collapsed) Description: Folder, Value: tools, Secondary Actions: Expand
++						43 disclosure triangle 0
++					44 row (selected) Description: File, Value: actor.rs
++					45 row (selectable) Description: File, Value: agent_step.rs
++					46 row (selectable) Description: File, Value: event_log.rs
++					47 row (selectable) Description: File, Value: harness.rs
++					48 row (selectable) Description: File, Value: lib.rs
++					49 row (selectable) Description: File, Value: Cargo.toml
++					50 row (selectable, collapsed) Description: Folder, Value: knuth-cli, Secondary Actions: Expand
++						51 disclosure triangle 0
++					52 row (selectable, collapsed) Description: Folder, Value: knuth-core, Secondary Actions: Expand
++						53 disclosure triangle 0
++					54 row (selectable, collapsed) Description: Folder, Value: docs, Secondary Actions: Expand
++						55 disclosure triangle 0
++					56 row (selectable) Description: File, Value: .env
++					57 row (selectable) Description: File, Value: .gitignore
++					58 row (selectable) Description: File, Value: Cargo.lock
++					59 row (selectable) Description: File, Value: Cargo.toml
++				60 scroll bar (settable, float) 0
++					61 value indicator (settable, float) 0
++					62 increment arrow button
++					63 decrement arrow button
++					64 increment page button
++					65 decrement page button
++			66 splitter (disabled, settable, float) 446
++			67 text Outline
++			68 button Description: Collapse Outline, Value: Expanded
++			69 button Collapse all outline
++			70 scroll area Secondary Actions: Scroll Up, Scroll Down
++				71 outline Outline
++					72 row (selected, expanded) Secondary Actions: Collapse, Description: Struct ActorContext
+Struct ActorContext
++						73 disclosure triangle 1
++					74 row (selectable) Value: : mpsc::WeakSender<M>, Description: Field self_tx
+Field self_tx
++					75 row (selectable) Value: : CancellationToken, Description: Field shutdown
+Field shutdown
++					76 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation ActorContext
+Implementation ActorContext
++						77 disclosure triangle 1
++					78 row (selectable) Value: (&self) -> Option<mpsc::Sender<M>>, Description: Method upgrade
+Method upgrade
++					79 row (selectable) Value: () -> ActorContext<M>, Description: Function test_actor_context
+Function test_actor_context
++					80 row (selectable, expanded) Secondary Actions: Collapse, Description: Trait Actor
+Trait Actor
++						81 disclosure triangle 1
++					82 row (selectable) Value: (&mut self, _ctx: &mut ActorContext<Self::Message>), Description: Method on_start
+Method on_start
++					83 row (selectable) Value: ( &mut self, message: Self::Message, ctx: &mut ActorContext<Self::Message>, ) -> ControlFlow<()>, Description: Method handle
+Method handle
++					84 row (selectable) Value: (&mut self, _ctx: &mut ActorContext<Self::Message>), Description: Method on_stop
+Method on_stop
++					85 row (selectable, expanded) Secondary Actions: Collapse, Description: Struct ActorHandle
+Struct ActorHandle
++						86 disclosure triangle 1
++					87 row (selectable) Value: : mpsc::Sender<M>, Description: Field tx
+Field tx
++					88 row (selectable, expanded) Secondary Actions: Collapse, Description: Enum AskError
+Enum AskError
++						89 disclosure triangle 1
++					90 row (selectable) Enum case MailboxSendError
+Enum case MailboxSendError
++					91 row (selectable) Enum case ReplyDropped
+Enum case ReplyDropped
++					92 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation ActorHandle
+Implementation ActorHandle
++						93 disclosure triangle 1
++					94 row (selectable) Value: (&self, message: M) -> Result<(), AskError>, Description: Method send
+Method send
++					95 row (selectable) Value: (&self) -> ActorHandle<M>, Description: Method addr
+Method addr
++					96 row (selectable) Value: ( &self, build_msg: impl FnOnce(oneshot::Sender<R>) -> M, ) -> Result<R, AskError>, Description: Method ask
+Method ask
++					97 row (selectable, expanded) Secondary Actions: Collapse, Description: Struct ActorRuntime
+Struct ActorRuntime
++						98 disclosure triangle 1
++					99 row (selectable) Value: : ActorHandle<M>, Description: Field handle
+Field handle
++					100 row (selectable) Value: : JoinHandle<()>, Description: Field task
+Field task
++					101 row (selectable) Value: : CancellationToken, Description: Field shutdown
+Field shutdown
++					102 row (selectable, expanded) Secondary Actions: Collapse, Description: Implementation ActorRuntime
+Implementation ActorRuntime
++						103 disclosure triangle 1
++					104 row (selectable) Value: (self), Description: Method shutdown
+Method shutdown
++					105 row (selectable) Value: (&self) -> &ActorHandle<M>, Description: Method handle
+Method handle
++					106 row (selectable) Value: (mut actor: A, mailbox_size: usize) -> ActorRuntime<A::Message>, Description: Function spawn_actor
+Function spawn_actor
++				107 scroll bar (settable, float) 0
++					108 value indicator (settable, float) 0
++					109 increment arrow button
++					110 decrement arrow button
++					111 increment page button
++					112 decrement page button
++		113 splitter (disabled, settable, float) 256
++		114 split group
++			115 scroll area
++				116 radio button actor.rs, Description: actor.rs, Preview, Value: 1, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/actor.rs. Preview tab; choose Keep Open to retain it.
++				117 button Close actor.rs
++			118 Description: Reading height, Help: Reading height (⌥⌘0/1/2)
++				119 radio button Description: Full, Value: 1, Help: Full shows the whole file; Structure folds function bodies; Overview keeps only signatures and top-level items
++				120 radio button Description: Structure, Help: Structure folds function bodies and keeps signatures visible, Value: 0
++				121 radio button Description: Overview, Help: Overview keeps only signatures and top-level items; folded bodies stay hidden, Value: 0
++			122 list Description: File path, Help: /Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/actor.rs
++				123 text URL: file:///Users/siancao/work/ai/knuth-rs, Value: knuth-rs
++				124 text URL: file:///Users/siancao/work/ai/knuth-rs/crates, Value: crates
++				125 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent, Value: knuth-agent
++				126 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src, Value: src
++				127 text URL: file:///Users/siancao/work/ai/knuth-rs/crates/knuth-agent/src/actor.rs, Value: actor.rs
++			128 scroll area Secondary Actions: Scroll Left, Scroll Right, Scroll Up, Scroll Down
++				129 text entry area use async_trait::async_trait;
+use std::fmt::Debug;
+use std::ops::ControlFlow;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
+
+pub struct ActorContext<M> {
+    self_tx: mpsc::WeakSender<M>,
+    pub shutdown: CancellationToken,
+}
+
+impl<M> ActorContext<M> {
+    pub fn upgrade(&self) -> Option<mpsc::Sender<M>> {
+        self.self_tx.upgrade()
+    }
+}
+
+/// Build a detached `ActorContext` for unit-testing `handle`/`on_stop` without a runtime.
+#[cfg(test)]
+pub(crate) fn test_actor_context<M>() -> ActorContext<M> {
+    let (tx, _rx) = mpsc::channel(1);
+    ActorContext {
+        self_tx: tx.downgrade(),
+        shutdown: CancellationToken::new(),
+    }
+}
+
+#[async_trait]
+pub trait Actor: Send + 'static {
+    type Message: Send + 'static;
+
+    async fn on_start(&mut self, _ctx: &mut ActorContext<Self::Message>) {}
+    async fn handle(
+        &mut self,
+        message: Self::Message,
+        ctx: &mut ActorContext<Self::Message>,
+    ) -> ControlFlow<()>;
+    async fn on_stop(&mut self, _ctx: &mut ActorContext<Self::Message>) {}
+}
+
+#[derive(Debug, Clone)]
+pub struct ActorHandle<M> {
+    tx: mpsc::Sender<M>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AskError {
+    #[error("Mailbox send error")]
+    MailboxSendError,
+
+    #[error("actor dropped the reply channel")]
+    ReplyDropped,
+}
+
+impl<M> ActorHandle<M> {
+    pub async fn send(&self, message: M) -> Result<(), AskError> {
+        self.tx
+            .send(message)
+            .await
+            .map_err(|_| AskError::MailboxSendError)
+    }
+
+    pub fn addr(&self) -> ActorHandle<M> {
+        ActorHandle {
+            tx: self.tx.clone(),
+        }
+    }
+
+    pub async fn ask<R>(
+        &self,
+        build_msg: impl FnOnce(oneshot::Sender<R>) -> M,
+    ) -> Result<R, AskError> {
+        let (reply, receiver) = oneshot::channel();
+        self.send(build_msg(reply)).await?;
+
+        receiver.await.map_err(|_| AskError::ReplyDropped)
+    }
+}
+
+#[derive(Debug)]
+pub struct ActorRuntime<M> {
+    handle: ActorHandle<M>,
+    task: JoinHandle<()>,
+    shutdown: CancellationToken,
+}
+
+impl<M> ActorRuntime<M> {
+    pub async fn shutdown(self) {
+        self.shutdown.cancel();
+        let _ = self.task.await;
+    }
+
+    pub fn handle(&self) -> &ActorHandle<M> {
+        &self.handle
+    }
+}
+
+pub async fn spawn_actor<A: Actor>(mut actor: A, mailbox_size: usize) -> ActorRuntime<A::Message> {
+    let (tx, mut rx) = mpsc::channel(mailbox_size);
+    let shutdown = CancellationToken::new();
+
+    let ctrl = shutdown.clone();
+
+    let mut ctx = ActorContext {
+        self_tx: tx.downgrade(),
+        shutdown: shutdown.clone(),
+    };
+
+    let task = tokio::spawn(async move {
+        actor.on_start(&mut ctx).await;
+        loop {
+            tokio::select! {
+                biased;
+
+                _ = ctrl.cancelled() => break,
+                maybe_message = rx.recv() => match maybe_message {
+                    Some(message) => {
+                        match actor.handle(message, &mut ctx).await {
+                            ControlFlow::Continue(_) => {}
+                            ControlFlow::Break(_) => {
+                                break
+                            }
+                        }
+                    }
+                    None => break,
+                }
+            }
+        }
+        actor.on_stop(&mut ctx).await;
+    });
+
+    ActorRuntime {
+        handle: ActorHandle { tx },
+        task,
+        shutdown,
+    }
+}
+
++				130 scroll bar (disabled, settable, float) 0
++				131 scroll bar (settable, float) 0
++					132 value indicator (settable, float) 0
++					133 increment arrow button
++					134 decrement arrow button
++					135 increment page button
++					136 decrement page button
++				137 ruler
++			138 splitter (disabled, settable, float) 1024
++		139 splitter (disabled, settable, float) 1024
++		140 splitter (disabled, settable, float) 828
++	141 button Context, Description: Show definition context, Help: Show or hide the definition context
++	142 text Description: Exact provider status, Value: Exact: ready · Safe (limited), Help: Provider: rust-analyzer
+Tool version: rust-analyzer 0.0.0 (9074e9b4c6 2026-09-06)
+Trust: Safe
+Limitations: build scripts disabled; proc macros disabled
+Features: default
++	143 button Description: Analysis status details, Help: Analysis status and available features
++	144 toolbar
++		145 button (disabled) Description: Back, Secondary Actions: Move next, Remove from toolbar
++		146 button (disabled) Description: Forward, Secondary Actions: Move previous, Move next, Remove from toolbar
++		147 text Description: Project, Value: knuth-rs
++		148 button Description: Version, Secondary Actions: Move previous, Move next, Remove from toolbar
++		149 button Description: Symbols, Secondary Actions: Move previous, Move next, Remove from toolbar
++		150 button Description: Profile, Secondary Actions: Move previous, Move next, Remove from toolbar
++		151 button Description: Settings, Secondary Actions: Move previous, Remove from toolbar
++	152 close button
++	153 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
++	154 minimize button
+The focused UI element is 16 standard window Cairn, Secondary Actions: Raise

@@ -1,0 +1,27 @@
+The following is a diff from the previous accessibility tree for Window: "Bookmarks" with ~ and + representing changed and added elements, respectively. Removed elements are summarized by ID range.
+Removed element IDs: 0-153
++162 system dialog Bookmarks, Secondary Actions: Raise
++	163 search text field (settable) Filter bookmarks
++		164 button Search
++	165 text 2 bookmarks · Exact content: 2
++	166 scroll area
++		167 table Bookmarks
++			168 row (selectable)
++				169 cell upgrade, crates/knuth-agent/src/actor.rs · Worktree · Exact content, 
++					170 text Help: upgrade, Value: upgrade crates/knuth-agent/src/actor.rs · Worktree · Exact content
++					171 button Open, Description: Open bookmark, ID: BA9013C0-D51F-46D7-B8D1-83A8E7DCCD47
++					172 button Delete, Description: Delete bookmark, ID: BA9013C0-D51F-46D7-B8D1-83A8E7DCCD47
++			173 row (selectable)
++				174 cell ActorContext, crates/knuth-agent/src/actor.rs · Worktree · Exact content, Product polish QA — layout and restart check.
++					175 text Help: ActorContext, Value: ActorContext crates/knuth-agent/src/actor.rs · Worktree · Exact content Product polish QA — layout and restart check.
++					176 button Open, Description: Open bookmark, ID: 3620B510-AF05-444A-B07F-1D4FB380F6AA
++					177 button Delete, Description: Delete bookmark, ID: 3620B510-AF05-444A-B07F-1D4FB380F6AA
++	178 text Select a bookmark to edit its note
++	179 scroll area
++		180 text entry area Bookmark note
++	181 button Copy as Markdown
++	182 button Export Markdown…
++	183 close button
++	184 zoom button
++	185 text Bookmarks
+The focused UI element is 163 search text field (settable) Filter bookmarks
