@@ -568,6 +568,53 @@ func replayOffsetUsesASymbolOnlyWhenItsDeclarationIsUnique() throws {
     #expect(restored.fallback == .fileHead)
 }
 
+@Test
+func replayOffsetReturnsToTheOriginalFunctionWhenCodeMovedAboveIt() throws {
+    // Saved position points inside `target` as it was; a function has
+    // since been inserted above it, so the saved line/column would land
+    // inside the wrong function. The unique symbol anchor must win.
+    let previous = "fn target() {}\n"
+    let updated = "fn inserted() {}\nfn target() {}\n"
+    let root = try temporaryProject(["a.rs": updated])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = root.appendingPathComponent("a.rs")
+
+    let restored = try AppModel.replayOffset(
+        jumpRecord(
+            "a.rs",
+            contentID: ContentID.sha256(of: Array(previous.utf8)),
+            offset: 11,
+            line: 1,
+            column: 12,
+            symbolAnchor: "target"
+        ),
+        file: file,
+        source: nil
+    )
+    #expect(restored.offset == byteOffset(of: "target", in: updated))
+    #expect(restored.fallback == .symbol)
+
+    // An ambiguous anchor (two overloads) must degrade to the saved
+    // line/column instead of guessing a declaration.
+    let ambiguous = "fn dup() {}\nfn dup() {}\nfn tail() {}\n"
+    let ambiguousRoot = try temporaryProject(["b.rs": ambiguous])
+    defer { try? FileManager.default.removeItem(at: ambiguousRoot) }
+    let degraded = try AppModel.replayOffset(
+        jumpRecord(
+            "b.rs",
+            contentID: ContentID.sha256(of: [0]),
+            offset: 99,
+            line: 3,
+            column: 4,
+            symbolAnchor: "dup"
+        ),
+        file: ambiguousRoot.appendingPathComponent("b.rs"),
+        source: nil
+    )
+    #expect(degraded.offset == byteOffset(of: "tail", in: ambiguous))
+    #expect(degraded.fallback == .line)
+}
+
 @MainActor
 @Test
 func appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() async throws {

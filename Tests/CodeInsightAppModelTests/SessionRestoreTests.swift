@@ -224,8 +224,9 @@ func sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() async thr
     #expect(projectTab.selectionAnchor?.byteOffset
         == LineTable(bytes: source).byteOffset(line: 2, column: 4))
     #expect(projectTab.selectionAnchor?.byteOffset != lineSelection.byteOffset)
-    #expect(model.replayNotice?.contains("selection restored by line and column")
-        == true)
+    #expect(model.replayNotice?.contains(
+        "selection restored by unique symbol anchor"
+    ) == true)
 
     let dependencyTab = model.tabStrip.tabs[2]
     #expect(dependencyTab.fileURL?.standardizedFileURL
@@ -1142,6 +1143,99 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
     #expect(cleared.tabs.isEmpty)
     #expect(cleared.projectRoot == root.path)
     #expect(store.lastSessionProjectPath == root.path)
+}
+
+@MainActor
+@Test
+func sessionRestoreReinstatesPreviewFlagAndLRUEvictionOrder() async throws {
+    let root = try sessionRestoreProject([
+        "a.rs": "fn a() {}\n",
+        "b.rs": "fn b() {}\n",
+        "c.rs": "fn c() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "a.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil,
+                isPreview: true,
+                activationRank: 0
+            )),
+            .file(.init(
+                path: "b.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil,
+                activationRank: 2
+            )),
+            .file(.init(
+                path: "c.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil,
+                activationRank: 1
+            )),
+        ]
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.tabStrip.tabs.count == 3)
+    #expect(model.tabStrip.activeIndex == 1)
+    #expect(model.tabStrip.tabs[0].isPreview == true)
+    #expect(model.tabStrip.activeTab?.fileURL?.lastPathComponent == "b.rs")
+    // The relative activation order was rebuilt: the active tab is the
+    // freshest and a is the next eviction candidate.
+    #expect(model.tabStrip.tabs[0].lastActivated
+        < model.tabStrip.tabs[2].lastActivated)
+    #expect(model.tabStrip.tabs[2].lastActivated
+        < model.tabStrip.tabs[1].lastActivated)
+}
+
+@MainActor
+@Test
+func sessionRestoreReportsWhenTheSavedActiveTabIsUnavailable() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: "missing.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let model = AppModel(indexService: SessionRestoreIndexService())
+
+    #expect(await model.restoreSession(snapshot))
+
+    #expect(model.tabStrip.tabs.count == 1)
+    #expect(model.tabStrip.activeIndex == 0)
+    #expect(model.replayNotice?.contains(
+        "saved active tab unavailable; activated the first restored tab"
+    ) == true)
 }
 
 private func encodeJSONString(_ value: String) -> String {

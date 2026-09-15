@@ -18,7 +18,7 @@ public final class TabStripModel {
 
         package var title: String { content.title }
 
-        fileprivate var lastActivated: UInt64
+        package var lastActivated: UInt64
     }
 
     public private(set) var tabs: [Tab] = []
@@ -32,6 +32,7 @@ public final class TabStripModel {
     }
 
     private var activationClock: UInt64 = 0
+    private var isRestoringBatch = false
 
     public init(maximumCount: Int = 10) {
         precondition(maximumCount > 0)
@@ -43,6 +44,89 @@ public final class TabStripModel {
         activeIndex = nil
         activeDocument = nil
         activationClock = 0
+        isRestoringBatch = false
+    }
+
+    /// Batch restoration installs the saved strip verbatim: no preview
+    /// replacement, deduplication-driven activation, or LRU eviction runs
+    /// per tab (the snapshot was validated to fit the strip's contract),
+    /// and relative activation ranks rebuild the LRU order without the
+    /// runtime activation clock ever crossing process boundaries.
+    package func beginRestoredBatch() {
+        isRestoringBatch = true
+    }
+
+    @discardableResult
+    package func installRestoredFileTab(
+        _ file: URL,
+        isPreview: Bool,
+        activationRank: Int?,
+        anchorContentID: ContentID?,
+        scrollAnchor: SessionCodec.Anchor?,
+        selectionAnchor: SessionCodec.Anchor?
+    ) -> Int? {
+        guard isRestoringBatch else { return nil }
+        let file = file.standardizedFileURL
+        guard !tabs.contains(where: {
+            $0.fileURL?.standardizedFileURL == file
+        }) else { return nil }
+        let tab = Tab(
+            content: .file(file),
+            isPreview: isPreview,
+            scrollByteOffset: scrollAnchor?.byteOffset,
+            selectionByteOffset: selectionAnchor?.byteOffset,
+            readingSetScrollOffset: nil,
+            readingSetSkippedReasons: [],
+            anchorContentID: anchorContentID,
+            scrollAnchor: scrollAnchor,
+            selectionAnchor: selectionAnchor,
+            lastActivated: UInt64(max(activationRank ?? tabs.count, 0))
+        )
+        tabs.append(tab)
+        return tabs.count - 1
+    }
+
+    @discardableResult
+    package func installRestoredReadingSetTab(
+        title: String,
+        excerpts: [ReadingSetExcerpt],
+        skippedReasons: [String],
+        scrollOffset: Double?,
+        activationRank: Int?
+    ) -> Int? {
+        guard isRestoringBatch else { return nil }
+        let tab = Tab(
+            content: .readingSet(title: title, excerpts: excerpts),
+            isPreview: false,
+            scrollByteOffset: nil,
+            selectionByteOffset: nil,
+            readingSetScrollOffset: scrollOffset,
+            readingSetSkippedReasons: skippedReasons,
+            anchorContentID: nil,
+            scrollAnchor: nil,
+            selectionAnchor: nil,
+            lastActivated: UInt64(max(activationRank ?? tabs.count, 0))
+        )
+        tabs.append(tab)
+        return tabs.count - 1
+    }
+
+    /// Ends a restore batch: the active tab gets the freshest activation,
+    /// and the clock resumes above every restored rank so subsequent
+    /// opens, activations, and LRU evictions behave exactly as they did
+    /// before the restart.
+    package func endRestoredBatch(activating index: Int?) {
+        guard isRestoringBatch else { return }
+        isRestoringBatch = false
+        activationClock = max(
+            activationClock,
+            tabs.map(\.lastActivated).max() ?? 0
+        )
+        guard let index, tabs.indices.contains(index) else {
+            activeIndex = tabs.indices.first
+            return
+        }
+        activate(index)
     }
 
     public func open(

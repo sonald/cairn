@@ -65,17 +65,28 @@ package enum SessionCodec {
         package let anchorContentID: ContentID?
         package let scrollAnchor: Anchor?
         package let selectionAnchor: Anchor?
+        /// Preview tabs are transient single-visit tabs; at most one may
+        /// exist in a snapshot. Missing in v1/v2 data (always false).
+        package let isPreview: Bool
+        /// Relative LRU rank (0 = least recently activated). The runtime
+        /// activation clock is never persisted; nil means unknown (v1/v2),
+        /// in which case the saved tab order is the rank.
+        package let activationRank: Int?
 
         package init(
             path: String,
             anchorContentID: ContentID?,
             scrollAnchor: Anchor?,
-            selectionAnchor: Anchor?
+            selectionAnchor: Anchor?,
+            isPreview: Bool = false,
+            activationRank: Int? = nil
         ) {
             self.path = path
             self.anchorContentID = anchorContentID
             self.scrollAnchor = scrollAnchor
             self.selectionAnchor = selectionAnchor
+            self.isPreview = isPreview
+            self.activationRank = activationRank
         }
     }
 
@@ -84,17 +95,20 @@ package enum SessionCodec {
         package let excerpts: [ReadingSetExcerpt]
         package let scrollOffset: Double?
         package let skippedReasons: [String]
+        package let activationRank: Int?
 
         package init(
             title: String,
             excerpts: [ReadingSetExcerpt],
             scrollOffset: Double?,
-            skippedReasons: [String] = []
+            skippedReasons: [String] = [],
+            activationRank: Int? = nil
         ) {
             self.title = title
             self.excerpts = excerpts
             self.scrollOffset = scrollOffset
             self.skippedReasons = skippedReasons
+            self.activationRank = activationRank
         }
     }
 
@@ -183,6 +197,7 @@ package enum SessionCodec {
               snapshot.revision.map({ byteCount($0) <= 4_096 }) ?? true
         else { throw CodecError.invalid }
 
+        var previewCount = 0
         for tab in snapshot.tabs {
             switch tab {
             case .file(let file):
@@ -193,17 +208,25 @@ package enum SessionCodec {
                 try validateContentID(file.anchorContentID)
                 try validateAnchor(file.scrollAnchor)
                 try validateAnchor(file.selectionAnchor)
+                try validateActivation(file.activationRank)
+                if file.isPreview { previewCount += 1 }
             case .readingSet(let readingSet):
                 guard byteCount(readingSet.title) <= 4_096,
                       readingSet.excerpts.count <= 50,
                       readingSet.scrollOffset.map({ $0.isFinite && $0 >= 0 }) ?? true,
                       readingSet.skippedReasons.allSatisfy({ byteCount($0) <= 4_096 })
                 else { throw CodecError.invalid }
+                try validateActivation(readingSet.activationRank)
                 for excerpt in readingSet.excerpts {
                     try validate(excerpt)
                 }
             }
         }
+        guard previewCount <= 1 else { throw CodecError.invalid }
+    }
+
+    private static func validateActivation(_ rank: Int?) throws {
+        guard rank.map({ $0 >= 0 }) ?? true else { throw CodecError.invalid }
     }
 
     private static func validateFilePath(
@@ -311,10 +334,13 @@ package enum SessionCodec {
             revision = snapshot.revision
             activeTabOrdinal = snapshot.activeTabOrdinal
             panelPreset = snapshot.panelPreset
-            tabs = snapshot.tabs.map(TabDTO.init)
+            tabs = snapshot.tabs.enumerated().map { TabDTO($1, ordinal: $0) }
         }
 
         func snapshot() throws -> Snapshot {
+            func decodeTabs() throws -> [Tab] {
+                try tabs.enumerated().map { try $1.tab(ordinal: $0) }
+            }
             switch schemaVersion {
             case 1:
                 guard languages == nil else { throw CodecError.invalid }
@@ -324,7 +350,7 @@ package enum SessionCodec {
                     revision: revision,
                     activeTabOrdinal: activeTabOrdinal,
                     panelPreset: panelPreset,
-                    tabs: try tabs.map { try $0.tab() }
+                    tabs: try decodeTabs()
                 )
             case 2, 3:
                 guard language == nil,
@@ -336,7 +362,7 @@ package enum SessionCodec {
                     revision: revision,
                     activeTabOrdinal: activeTabOrdinal,
                     panelPreset: panelPreset,
-                    tabs: try tabs.map { try $0.tab() }
+                    tabs: try decodeTabs()
                 )
             default:
                 throw DecodeError.unsupportedSchemaVersion(schemaVersion)
@@ -359,8 +385,10 @@ package enum SessionCodec {
         let excerpts: [ExcerptDTO]?
         let scrollOffset: Double?
         let skippedReasons: [String]?
+        let isPreview: Bool?
+        let activationRank: Int?
 
-        init(_ tab: Tab) {
+        init(_ tab: Tab, ordinal: Int) {
             switch tab {
             case .file(let file):
                 kind = .file
@@ -372,6 +400,8 @@ package enum SessionCodec {
                 excerpts = nil
                 scrollOffset = nil
                 skippedReasons = nil
+                isPreview = file.isPreview
+                activationRank = file.activationRank ?? ordinal
             case .readingSet(let readingSet):
                 kind = .readingSet
                 path = nil
@@ -382,10 +412,12 @@ package enum SessionCodec {
                 excerpts = readingSet.excerpts.map(ExcerptDTO.init)
                 scrollOffset = readingSet.scrollOffset
                 skippedReasons = readingSet.skippedReasons
+                isPreview = nil
+                activationRank = readingSet.activationRank ?? ordinal
             }
         }
 
-        func tab() throws -> Tab {
+        func tab(ordinal: Int) throws -> Tab {
             switch kind {
             case .file:
                 guard let path,
@@ -398,20 +430,24 @@ package enum SessionCodec {
                     path: path,
                     anchorContentID: anchorContentID,
                     scrollAnchor: scrollAnchor?.anchor,
-                    selectionAnchor: selectionAnchor?.anchor
+                    selectionAnchor: selectionAnchor?.anchor,
+                    isPreview: isPreview ?? false,
+                    activationRank: activationRank ?? ordinal
                 ))
             case .readingSet:
                 guard let title, let excerpts, let skippedReasons,
                       path == nil,
                       anchorContentID == nil,
                       scrollAnchor == nil,
-                      selectionAnchor == nil
+                      selectionAnchor == nil,
+                      isPreview == nil
                 else { throw CodecError.invalid }
                 return .readingSet(ReadingSetTab(
                     title: title,
                     excerpts: excerpts.map { $0.excerpt },
                     scrollOffset: scrollOffset,
-                    skippedReasons: skippedReasons
+                    skippedReasons: skippedReasons,
+                    activationRank: activationRank ?? ordinal
                 ))
             }
         }

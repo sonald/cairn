@@ -66,6 +66,98 @@ func tabStripEvictsTheLeastRecentlyUsedTabAtItsLimit() {
 
 @Test
 @MainActor
+func restoredTabBatchReinstatesPreviewFlagsAndLRUEvictionOrder() {
+    let model = TabStripModel(maximumCount: 3)
+    let a = URL(fileURLWithPath: "/tmp/a.rs")
+    let b = URL(fileURLWithPath: "/tmp/b.rs")
+    let c = URL(fileURLWithPath: "/tmp/c.rs")
+    let d = URL(fileURLWithPath: "/tmp/d.rs")
+
+    // Realistic saved strip: the active tab always carries the freshest
+    // rank; the preview is the least recently used tab here.
+    model.beginRestoredBatch()
+    #expect(model.installRestoredFileTab(
+        a,
+        isPreview: true,
+        activationRank: 0,
+        anchorContentID: nil,
+        scrollAnchor: nil,
+        selectionAnchor: nil
+    ) == 0)
+    #expect(model.installRestoredFileTab(
+        b,
+        isPreview: false,
+        activationRank: 2,
+        anchorContentID: nil,
+        scrollAnchor: nil,
+        selectionAnchor: nil
+    ) == 1)
+    #expect(model.installRestoredFileTab(
+        c,
+        isPreview: false,
+        activationRank: 1,
+        anchorContentID: nil,
+        scrollAnchor: nil,
+        selectionAnchor: nil
+    ) == 2)
+    // Duplicate files keep the first occurrence, like a live open would.
+    #expect(model.installRestoredFileTab(
+        a,
+        isPreview: false,
+        activationRank: 9,
+        anchorContentID: nil,
+        scrollAnchor: nil,
+        selectionAnchor: nil
+    ) == nil)
+    model.endRestoredBatch(activating: 1)
+
+    #expect(model.tabs.compactMap(\.fileURL) == [a, b, c])
+    #expect(model.activeIndex == 1)
+    #expect(model.tabs[0].isPreview == true)
+
+    // The next overflow open evicts by the restored LRU order: a (rank 0)
+    // goes first, and the strip's only preview goes with it.
+    model.open(d, inNewTab: true)
+    #expect(model.tabs.compactMap(\.fileURL) == [b, c, d])
+    #expect(model.tabs.allSatisfy { !$0.isPreview })
+    // A subsequent preview replaces its own slot only.
+    let e = URL(fileURLWithPath: "/tmp/e.rs")
+    model.open(e, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [b, d, e])
+    let f = URL(fileURLWithPath: "/tmp/f.rs")
+    model.open(f, inNewTab: false)
+    #expect(model.tabs.compactMap(\.fileURL) == [b, d, f])
+    #expect(model.tabs.filter(\.isPreview).count == 1)
+    #expect(model.activeTab?.fileURL == f)
+}
+
+@Test
+@MainActor
+func restoredTabBatchOutsideABatchInstallsNothing() {
+    let model = TabStripModel()
+    let a = URL(fileURLWithPath: "/tmp/a.rs")
+    #expect(model.installRestoredFileTab(
+        a,
+        isPreview: false,
+        activationRank: 0,
+        anchorContentID: nil,
+        scrollAnchor: nil,
+        selectionAnchor: nil
+    ) == nil)
+    #expect(model.installRestoredReadingSetTab(
+        title: "frozen",
+        excerpts: [],
+        skippedReasons: [],
+        scrollOffset: nil,
+        activationRank: 0
+    ) == nil)
+    // Ending a batch that never began is a no-op.
+    model.endRestoredBatch(activating: 0)
+    #expect(model.tabs.isEmpty)
+}
+
+@Test
+@MainActor
 func switchingTabsReleasesTheInactiveReaderDocument() {
     let model = TabStripModel()
     let file = URL(fileURLWithPath: "/tmp/a.rs")

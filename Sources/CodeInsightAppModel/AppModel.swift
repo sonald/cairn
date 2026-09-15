@@ -1064,7 +1064,17 @@ public final class AppModel {
         guard !languages.isEmpty else { return nil }
         var entries: [SessionCodec.Tab] = []
         entries.reserveCapacity(tabStrip.tabs.count)
-        for tab in tabStrip.tabs {
+        // Relative LRU order: rank tabs by their activation recency so the
+        // restored strip evicts in the same order without ever persisting
+        // the runtime activation clock.
+        let rankedIndices = tabStrip.tabs.indices.sorted {
+            tabStrip.tabs[$0].lastActivated < tabStrip.tabs[$1].lastActivated
+        }
+        var ranks: [Int] = Array(repeating: 0, count: tabStrip.tabs.count)
+        for (rank, index) in rankedIndices.enumerated() {
+            ranks[index] = rank
+        }
+        for (index, tab) in tabStrip.tabs.enumerated() {
             switch tab.content {
             case .file(let file):
                 let path: String
@@ -1079,14 +1089,17 @@ public final class AppModel {
                     path: path,
                     anchorContentID: tab.anchorContentID,
                     scrollAnchor: tab.scrollAnchor,
-                    selectionAnchor: tab.selectionAnchor
+                    selectionAnchor: tab.selectionAnchor,
+                    isPreview: tab.isPreview,
+                    activationRank: ranks[index]
                 )))
             case .readingSet(let title, let excerpts):
                 entries.append(.readingSet(.init(
                     title: title,
                     excerpts: excerpts,
                     scrollOffset: tab.readingSetScrollOffset,
-                    skippedReasons: tab.readingSetSkippedReasons
+                    skippedReasons: tab.readingSetSkippedReasons,
+                    activationRank: ranks[index]
                 )))
             }
         }
@@ -1322,6 +1335,11 @@ public final class AppModel {
             selectionFallback: ReplayFallbackKind?
         )] = [:]
         var successfulOrdinals: [Int] = []
+        // The strip installs as one batch: no per-tab open side effects
+        // (preview replacement, dedup activation, LRU eviction), with the
+        // saved preview flag and relative activation ranks reinstated.
+        tabStrip.beginRestoredBatch()
+        defer { tabStrip.endRestoredBatch(activating: nil) }
         for (oldOrdinal, entry) in snapshot.tabs.enumerated() {
             guard canPublishWorkspaceResult(
                 generation: restoreGeneration,
@@ -1345,12 +1363,14 @@ public final class AppModel {
                    !node.isDirectory,
                    languageMode(for: file) == nil
                 {
-                    tabStrip.open(
+                    guard let newIndex = tabStrip.installRestoredFileTab(
                         file,
-                        inNewTab: true,
-                        selectionByteOffset: nil
-                    )
-                    guard let newIndex = tabStrip.activeIndex else { continue }
+                        isPreview: saved.isPreview,
+                        activationRank: saved.activationRank,
+                        anchorContentID: nil,
+                        scrollAnchor: nil,
+                        selectionAnchor: nil
+                    ) else { continue }
                     oldToNew[oldOrdinal] = (newIndex, nil, nil)
                     successfulOrdinals.append(oldOrdinal)
                     continue
@@ -1377,17 +1397,14 @@ public final class AppModel {
                     if !canPublish { return false }
                     continue
                 }
-                tabStrip.open(
+                guard let newIndex = tabStrip.installRestoredFileTab(
                     file,
-                    inNewTab: true,
-                    selectionByteOffset: resolved.selectionAnchor?.byteOffset
-                )
-                tabStrip.updateActiveSessionAnchors(
-                    contentID: resolved.contentID,
+                    isPreview: saved.isPreview,
+                    activationRank: saved.activationRank,
+                    anchorContentID: resolved.contentID,
                     scrollAnchor: resolved.scrollAnchor,
                     selectionAnchor: resolved.selectionAnchor
-                )
-                guard let newIndex = tabStrip.activeIndex else { continue }
+                ) else { continue }
                 oldToNew[oldOrdinal] = (
                     newIndex,
                     resolved.scrollFallback,
@@ -1395,13 +1412,13 @@ public final class AppModel {
                 )
                 successfulOrdinals.append(oldOrdinal)
             case .readingSet(let saved):
-                tabStrip.openReadingSet(
+                guard let newIndex = tabStrip.installRestoredReadingSetTab(
                     title: saved.title,
                     excerpts: saved.excerpts,
-                    skippedReasons: saved.skippedReasons
-                )
-                tabStrip.updateActiveReadingSetScroll(saved.scrollOffset)
-                guard let newIndex = tabStrip.activeIndex else { continue }
+                    skippedReasons: saved.skippedReasons,
+                    scrollOffset: saved.scrollOffset,
+                    activationRank: saved.activationRank
+                ) else { continue }
                 oldToNew[oldOrdinal] = (newIndex, nil, nil)
                 successfulOrdinals.append(oldOrdinal)
             }
@@ -1415,10 +1432,15 @@ public final class AppModel {
 
         let selected = snapshot.activeTabOrdinal.flatMap { oldToNew[$0] }
             ?? successfulOrdinals.first.flatMap { oldToNew[$0] }
-        if let selected {
-            activateTab(selected.index)
-        }
         var notices: [String] = []
+        if let savedActive = snapshot.activeTabOrdinal,
+           oldToNew[savedActive] == nil,
+           selected != nil
+        {
+            notices.append(
+                "saved active tab unavailable; activated the first restored tab"
+            )
+        }
         if revisionUnavailable {
             notices.append("saved revision unavailable; restored against current worktree")
         }
@@ -1438,6 +1460,9 @@ public final class AppModel {
             }
         }
         replayNotice = notices.isEmpty ? nil : notices.joined(separator: " · ")
+        // Finish the batch before the restored state is observed: the
+        // active tab takes the freshest activation slot.
+        tabStrip.endRestoredBatch(activating: selected?.index)
         // The restored state is complete: release write protection and
         // commit the first full snapshot for this project so the disk
         // reflects what was restored, not what the previous session left.
@@ -3799,12 +3824,12 @@ public final class AppModel {
         if record.contentID == nil, byteIsValid {
             return (record.byteOffset, .byteUnverified)
         }
-        if let lineOffset = document.lineTable.byteOffset(
-            line: record.line,
-            column: record.column
-        ) {
-            return (lineOffset, .line)
-        }
+        // Content changed: a unique symbol anchor returns to the original
+        // declaration even when code was inserted above it, while the
+        // saved line/column would land in whatever now occupies that
+        // position. Line/column only applies when no unique symbol
+        // matches (including ambiguous overloads, which must degrade
+        // rather than guess).
         if let symbolAnchor = record.symbolAnchor {
             let facets = if tier == .regular {
                 document.outlineFacets
@@ -3816,6 +3841,12 @@ public final class AppModel {
             if matches.count == 1, let facet = matches.first {
                 return (facet.nameRange.lowerBound, .symbol)
             }
+        }
+        if let lineOffset = document.lineTable.byteOffset(
+            line: record.line,
+            column: record.column
+        ) {
+            return (lineOffset, .line)
         }
         return (0, .fileHead)
     }

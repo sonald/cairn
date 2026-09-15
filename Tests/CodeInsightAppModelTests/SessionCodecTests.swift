@@ -659,3 +659,143 @@ private func sessionCodecFails(_ body: () throws -> Void) -> Bool {
         return true
     }
 }
+
+@Test
+func sessionCodecRoundTripsPreviewFlagAndActivationRank() throws {
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: nil,
+        activeTabOrdinal: 1,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "pinned.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil,
+                isPreview: false,
+                activationRank: 3
+            )),
+            .file(.init(
+                path: "glance.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil,
+                isPreview: true,
+                activationRank: 1
+            )),
+            .readingSet(.init(
+                title: "frozen",
+                excerpts: [],
+                scrollOffset: 4,
+                activationRank: 2
+            )),
+        ]
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    guard case .file(let pinned) = decoded.tabs[0],
+          case .file(let glance) = decoded.tabs[1],
+          case .readingSet(let set) = decoded.tabs[2]
+    else {
+        Issue.record("unexpected tab kinds")
+        return
+    }
+    #expect(pinned.isPreview == false)
+    #expect(pinned.activationRank == 3)
+    #expect(glance.isPreview == true)
+    #expect(glance.activationRank == 1)
+    #expect(set.activationRank == 2)
+
+    // Two previews in one snapshot are invalid.
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.rust],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: PanelPresetModel.reading.rawValue,
+                tabs: [
+                    .file(.init(
+                        path: "a.rs",
+                        anchorContentID: nil,
+                        scrollAnchor: nil,
+                        selectionAnchor: nil,
+                        isPreview: true
+                    )),
+                    .file(.init(
+                        path: "b.rs",
+                        anchorContentID: nil,
+                        scrollAnchor: nil,
+                        selectionAnchor: nil,
+                        isPreview: true
+                    )),
+                ]
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+
+    // Negative activation ranks are invalid.
+    #expect(sessionCodecFails {
+        _ = try SessionCodec.encode(
+            SessionCodec.Snapshot(
+                projectRoot: "/tmp/project",
+                languages: [.rust],
+                revision: nil,
+                activeTabOrdinal: nil,
+                panelPreset: PanelPresetModel.reading.rawValue,
+                tabs: [
+                    .file(.init(
+                        path: "a.rs",
+                        anchorContentID: nil,
+                        scrollAnchor: nil,
+                        selectionAnchor: nil,
+                        activationRank: -1
+                    )),
+                ]
+            ),
+            maximumTabCount: 10,
+            dependencyAllowed: { _ in false }
+        )
+    })
+}
+
+@Test
+func sessionCodecDecodesV2WithoutPreviewOrRankAsPinnedInSavedOrder() throws {
+    let legacy = """
+    {"schemaVersion":2,"projectRoot":"/tmp/project","languages":[0],
+     "revision":null,"activeTabOrdinal":0,"panelPreset":"reading",
+     "tabs":[{"kind":"file","path":"a.rs","anchorContentID":null,
+     "scrollAnchor":null,"selectionAnchor":null},
+     {"kind":"file","path":"b.rs","anchorContentID":null,
+     "scrollAnchor":null,"selectionAnchor":null}]}
+    """
+    let decoded = try SessionCodec.decode(
+        Data(legacy.data(using: .utf8)!),
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    guard case .file(let a) = decoded.tabs[0],
+          case .file(let b) = decoded.tabs[1]
+    else {
+        Issue.record("unexpected tab kinds")
+        return
+    }
+    #expect(a.isPreview == false)
+    #expect(b.isPreview == false)
+    // v1/v2 data carries no LRU information; the saved order is the rank.
+    #expect(a.activationRank == 0)
+    #expect(b.activationRank == 1)
+}
