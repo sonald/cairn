@@ -54,6 +54,55 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
         $0,
         ReaderTheme(settings: ReaderSettings()).color(for: .keyword)
     ) })
+
+    @MainActor
+    final class ScrollDuringLayout: NSObject, @preconcurrency NSTextViewportLayoutControllerDelegate {
+        let clipView: NSClipView
+        var depth = 0
+        var maximumDepth = 0
+        var scrollCount = 0
+
+        init(clipView: NSClipView) {
+            self.clipView = clipView
+        }
+
+        func viewportBounds(for controller: NSTextViewportLayoutController) -> CGRect {
+            clipView.bounds
+        }
+
+        func textViewportLayoutController(
+            _ controller: NSTextViewportLayoutController,
+            configureRenderingSurfaceFor fragment: NSTextLayoutFragment
+        ) {
+        }
+
+        func textViewportLayoutControllerDidLayout(_ controller: NSTextViewportLayoutController) {
+            depth += 1
+            maximumDepth = max(maximumDepth, depth)
+            defer { depth -= 1 }
+            // Reproduce the bounds notification caused by TextKit resizing its document
+            // after layout, with a finite budget so the regression cannot overflow the stack.
+            guard scrollCount < 4 else { return }
+            scrollCount += 1
+            clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.minY - 1))
+        }
+    }
+
+    // A Follow-pane resize reduces the reader viewport before the next user scroll.
+    scrollView.setFrameSize(NSSize(width: scrollView.frame.width, height: 120))
+    window.displayIfNeeded()
+    let viewport = try #require(reader.view.textLayoutManager?.textViewportLayoutController)
+    let original = try #require(viewport.delegate)
+    let probe = ScrollDuringLayout(clipView: scrollView.contentView)
+    viewport.delegate = probe
+    defer { viewport.delegate = original }
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: 100))
+    #expect(probe.scrollCount > 0, "The scroll must reach the native viewport layout delegate")
+    #expect(probe.maximumDepth == 1, "Bounds changes during layout must not start nested viewport layout")
+    let scrollCount = probe.scrollCount
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: 200))
+    #expect(probe.scrollCount > scrollCount, "Later scrolling must still update the viewport")
+    #expect(probe.maximumDepth == 1)
 }
 
 @MainActor

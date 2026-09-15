@@ -497,6 +497,7 @@ public final class ReaderTextView {
     private weak var ruler: NSRulerView?
     private var lineNumbers = true
     private var wrapLines: Bool
+    private var isValidatingVisibleRenderingAttributes = false
     private var occurrenceSelectionByteOffset: UInt32?
     private var findMatchByteRanges: [ByteRange]?
     private var findSelectionIndex: Int?
@@ -3012,6 +3013,11 @@ public final class ReaderTextView {
     }
 
     private func validateVisibleRenderingAttributes(in layoutManager: NSTextLayoutManager) {
+        // TextKit can resize the document and post scroll notifications during layout.
+        // Finish this pass before another notification can start viewport layout again.
+        guard !isValidatingVisibleRenderingAttributes else { return }
+        isValidatingVisibleRenderingAttributes = true
+        defer { isValidatingVisibleRenderingAttributes = false }
         let controller = layoutManager.textViewportLayoutController
         controller.layoutViewport()
         guard let viewportRange = controller.viewportRange else { return }
