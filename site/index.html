@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cairn is a native, read-only code reader for macOS. Explore symbols, call relationships and Git snapshots in Rust, Python, TypeScript and TSX.">
+  <meta name="theme-color" content="#255747">
+  <title>Cairn — Find your way through code</title>
+  <meta property="og:title" content="Cairn — Find your way through code">
+  <meta property="og:description" content="A quiet space to understand unfamiliar code. Native to macOS. Read-only by design.">
+  <meta property="og:type" content="website">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <header class="wrap header">
+    <a class="wordmark" href="./" aria-label="Cairn home">Cairn</a>
+    <nav aria-label="Main navigation">
+      <a href="#why">Why Cairn</a>
+      <a href="#start">Get started</a>
+      <a href="https://github.com/sonald/cairn">GitHub <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="main">
+    <section class="hero wrap" aria-labelledby="headline">
+      <h1 id="headline">Find your way<br>through <em>code.</em></h1>
+      <p class="intro">A quiet space to understand unfamiliar code.<br>Native to macOS. Read-only by design.</p>
+      <div class="actions">
+        <a class="button primary" href="#start">Build for macOS</a>
+        <a class="button" href="https://github.com/sonald/cairn">Explore the source</a>
+      </div>
+      <p class="requirements">macOS 14+ <span>·</span> Swift 6 <span>·</span> Open source</p>
+      <figure>
+        <a class="screenshot-link" href="./assets/reader.png" aria-label="View full-size Cairn application screenshot">
+          <img class="reader" src="./assets/reader.png" width="992" height="768" fetchpriority="high" alt="Cairn’s native macOS reader showing Rust source, a project file tree, a symbol outline, and Full, Structure and Overview reading controls.">
+        </a>
+        <figcaption>Your code. A little more context.</figcaption>
+      </figure>
+    </section>
+    <section id="why" class="features wrap" aria-labelledby="features-title">
+      <ul class="languages" aria-label="Supported source languages">
+        <li>Rust</li><li>Python</li><li>TypeScript</li><li>TSX</li>
+      </ul>
+      <h2 id="features-title">Less searching. More understanding.</h2>
+      <div class="columns">
+        <article>
+          <span class="number" aria-hidden="true">01</span>
+          <h3>Follow the connections</h3>
+          <p>Find a symbol, follow its callers, and bring definitions into view. Keep the context close to the code.</p>
+        </article>
+        <article>
+          <span class="number" aria-hidden="true">02</span>
+          <h3>Read across time</h3>
+          <p>Explore Git snapshots and compare versions side by side, without checking out a commit or changing your working tree.</p>
+        </article>
+        <article>
+          <span class="number" aria-hidden="true">03</span>
+          <h3>Keep your bearings</h3>
+          <p>Save bookmarks and notes. Freeze a path as a Reading Set to return to its captured source and evidence after a restart.</p>
+        </article>
+      </div>
+    </section>
+    <section id="start" class="start" aria-labelledby="start-title">
+      <div class="wrap start-grid">
+        <div>
+          <h2 id="start-title">Start with a codebase.<br>Leave with a mental model.</h2>
+          <p>Build Cairn on your Mac with a Swift 6 toolchain.</p>
+          <a class="guide" href="https://github.com/sonald/cairn#build-and-run">Read the build guide <span aria-hidden="true">↗</span></a>
+        </div>
+        <div class="terminal">
+          <div class="terminal-bar"><span aria-hidden="true">● ● ●</span><span>Terminal</span><span></span></div>
+          <pre aria-label="Commands to clone, build and open Cairn"><code><span class="comment"># Run in Terminal</span>
+git clone https://github.com/sonald/cairn.git
+cd cairn
+brew install libgit2
+CAIRN_LIBGIT2=brew bash scripts/make-app.sh
+open .build/distribution/Cairn.app</code></pre>
+          <p class="build-note">Local build · ad-hoc signed · not notarized</p>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="wrap footer">
+    <a class="wordmark" href="./">Cairn</a>
+    <nav aria-label="Footer navigation">
+      <a href="https://github.com/sonald/cairn/blob/main/README.zh-CN.md" lang="zh-CN">中文说明</a>
+      <a href="https://github.com/sonald/cairn/blob/main/LICENSE">MIT License</a>
+      <a href="https://github.com/sonald/cairn">GitHub</a>
+    </nav>
+  </footer>
+</body>
+</html>
