@@ -523,6 +523,10 @@ public final class AppModel {
     public private(set) var navigationGeneration: UInt64 = 0
     public private(set) var activeNavigationRequest: NavigationRequest?
     public private(set) var replayNotice: String?
+    /// Set when the latest session checkpoint write failed, e.g. because
+    /// the disk was full or the store directory was unwritable. The status
+    /// bar surfaces it; the next successful write clears it.
+    public private(set) var sessionSaveNotice: String?
     /// Set when an index-derived navigation was rejected because the target
     /// content no longer matches the indexed bytes. Cleared when a semantic
     /// navigation verifies again or the workspace republishes a snapshot.
@@ -596,6 +600,19 @@ public final class AppModel {
     @ObservationIgnored private var replayTask: Task<Void, Never>?
     @ObservationIgnored private var semanticValidationTask: Task<Void, Never>?
     @ObservationIgnored private var sessionCheckpointTask: Task<Void, Never>?
+    /// When the current dirty checkpoint period started. Continuous
+    /// activity keeps re-arming the 250 ms debounce, so this instant caps
+    /// how long a dirty state can stay unsaved (~2 s).
+    @ObservationIgnored private var sessionCheckpointDirtyAt: ContinuousClock.Instant?
+    /// True while a session restore owns the workspace: the tab strip is
+    /// empty or partial, so checkpoint writes (debounced, lifecycle, or
+    /// project-switch flushes) must not replace the last valid on-disk
+    /// snapshot. Frame-scoped to `restoreSession`: armed once the target
+    /// workspace is installed, released after the fully restored state
+    /// commits its first snapshot, or on any exit where the generation
+    /// guard keeps blocking writes until another complete workspace
+    /// publishes.
+    @ObservationIgnored private var sessionRestoreWriteSuspension = false
     @ObservationIgnored private var sessionURL: URL?
     package private(set) var projectRoot: URL?
     private var lastInstalledProjectRoot: URL?
@@ -696,16 +713,25 @@ public final class AppModel {
 
     package func scheduleSessionCheckpoint(panelPreset: PanelPresetModel) {
         guard sessionURL != nil, !isRefreshingIndex else { return }
+        if sessionCheckpointTask == nil {
+            sessionCheckpointDirtyAt = .now
+        }
         sessionCheckpointTask?.cancel()
         let checkpointGeneration = lastInstalledGeneration
         let checkpointLanguages = projectLanguages
+        let debounceDeadline = ContinuousClock.now + .milliseconds(250)
+        let dirtyDeadline = (sessionCheckpointDirtyAt ?? .now) + .seconds(2)
         sessionCheckpointTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: .milliseconds(250))
+            try? await Task.sleep(
+                until: min(debounceDeadline, dirtyDeadline),
+                clock: .continuous
+            )
             guard !Task.isCancelled,
                   let self,
                   lastInstalledGeneration == checkpointGeneration,
                   projectLanguages == checkpointLanguages
             else { return }
+            sessionCheckpointDirtyAt = nil
             try? writeSessionCheckpointNow(
                 panelPreset: panelPreset,
                 allowsPendingTopology: false
@@ -761,22 +787,30 @@ public final class AppModel {
         panelPreset: PanelPresetModel,
         allowsPendingTopology: Bool
     ) throws {
-        guard let sessionURL,
+        guard !sessionRestoreWriteSuspension,
+              let sessionURL,
               let snapshot = makeSessionSnapshot(
                   panelPreset: panelPreset,
                   allowsPendingTopology: allowsPendingTopology
               )
         else { return }
-        let data = try SessionCodec.encode(
-            snapshot,
-            maximumTabCount: tabStrip.maximumCount,
-            dependencyAllowed: exactLocationIsInDependency
-        )
-        try FileManager.default.createDirectory(
-            at: sessionURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        try data.write(to: sessionURL, options: .atomic)
+        do {
+            let data = try SessionCodec.encode(
+                snapshot,
+                maximumTabCount: tabStrip.maximumCount,
+                dependencyAllowed: exactLocationIsInDependency
+            )
+            try FileManager.default.createDirectory(
+                at: sessionURL.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            try data.write(to: sessionURL, options: .atomic)
+            if sessionSaveNotice != nil { sessionSaveNotice = nil }
+        } catch {
+            sessionSaveNotice =
+                "Reading session not saved: \(Self.failureSummary(error))"
+            throw error
+        }
     }
 
     private func makeSessionSnapshot(
@@ -926,6 +960,7 @@ public final class AppModel {
     }
 
     package func restoreSession(_ snapshot: SessionCodec.Snapshot) async -> Bool {
+        cancelPendingSessionCheckpoint()
         let root = URL(
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
@@ -961,6 +996,17 @@ public final class AppModel {
               ),
               snapshotPhase == .fullReady
         else { return false }
+
+        // The workspace is installed but the tab strip is still empty or
+        // partial until the loop below finishes. Suspend checkpoint writes
+        // so an exit, a debounced save, or a project-switch flush cannot
+        // replace the last valid snapshot with this intermediate state.
+        // Every exit past this point either reinstalls a fully restored
+        // state (which commits a fresh snapshot first) or fails a
+        // generation guard, after which `makeSessionSnapshot` keeps
+        // blocking writes until another complete workspace publishes.
+        sessionRestoreWriteSuspension = true
+        defer { sessionRestoreWriteSuspension = false }
 
         var revisionUnavailable = false
         if let revision = snapshot.revision {
@@ -1145,6 +1191,18 @@ public final class AppModel {
             }
         }
         replayNotice = notices.isEmpty ? nil : notices.joined(separator: " · ")
+        // The restored state is complete: release write protection and
+        // commit the first full snapshot for this project so the disk
+        // reflects what was restored, not what the previous session left.
+        sessionRestoreWriteSuspension = false
+        if sessionURL != nil,
+           let preset = PanelPresetModel(rawValue: snapshot.panelPreset)
+        {
+            try? writeSessionCheckpointNow(
+                panelPreset: preset,
+                allowsPendingTopology: false
+            )
+        }
         return true
     }
 

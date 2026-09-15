@@ -604,6 +604,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func openProject(root: URL, language: LanguageID) {
+        flushSessionBeforeProjectSwitch(to: root)
         cancelSessionRestore()
         let root = root.standardizedFileURL
         lastOpenedProjectRoot = root
@@ -617,6 +618,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func openProject(root: URL, languages: [LanguageID]) {
         guard let normalized = try? LanguageMode.normalize(languages: languages)
         else { return }
+        flushSessionBeforeProjectSwitch(to: root)
         cancelSessionRestore()
         let root = root.standardizedFileURL
         lastOpenedProjectRoot = root
@@ -632,6 +634,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             try? await model.openProject(root: root, languages: normalized)
         }
         render()
+    }
+
+    /// Capture the outgoing project's reader state and write its session
+    /// snapshot before the workspace is torn down, so switching projects
+    /// cannot lose the last scroll/caret position. Reopening the project
+    /// that is already open does not flush or reset anything.
+    private func flushSessionBeforeProjectSwitch(to root: URL) {
+        guard let current = model.projectRoot,
+              current.standardizedFileURL != root.standardizedFileURL
+        else { return }
+        checkpointSessionSynchronously()
     }
 
     func openRecentProject(_ root: URL) {
@@ -2286,6 +2299,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.navigationGeneration
             _ = model.replayNotice
             _ = model.staleIndexNotice
+            _ = model.sessionSaveNotice
             _ = model.isRefreshingIndex
             _ = model.indexRefreshNotice
             _ = model.projectFailureReason
@@ -2778,6 +2792,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             coverageStatus,
             model.replayNotice,
             model.staleIndexNotice,
+            model.sessionSaveNotice,
         ]
             .compactMap { $0 }
             .joined(separator: " · ")

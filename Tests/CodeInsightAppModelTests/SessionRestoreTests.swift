@@ -597,6 +597,231 @@ func mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() async throw
         == pythonDependency.path)
 }
 
+@MainActor
+@Test
+func midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
+    // A large regular-tier dependency file keeps the restore loop busy in
+    // its second tab while the workspace is already fully installed.
+    let slowDependency = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightSlowDependency-\(UUID().uuidString).rs"
+        )
+    let slowLine = "pub fn slow() { let a = 1; } "
+        + String(repeating: "x", count: 1_400) + "\n"
+    try String(repeating: slowLine, count: 3_000)
+        .write(to: slowDependency, atomically: true, encoding: .utf8)
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: slowDependency)
+    }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightMidRestoreSession-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    try FileManager.default.createDirectory(
+        at: stateRoot,
+        withIntermediateDirectories: true
+    )
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    let oldSnapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let oldBytes = try SessionCodec.encode(
+        oldSnapshot,
+        maximumTabCount: model.tabStrip.maximumCount,
+        dependencyAllowed: exactLocationIsInDependency
+    )
+    try oldBytes.write(to: sessionURL, options: .atomic)
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+
+    let restoring = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+            .file(.init(
+                path: slowDependency.path,
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ]
+    )
+    let restoreTask = Task { await model.restoreSession(restoring) }
+    // Once the first tab is installed the restore is between tabs; a
+    // synchronous save attempt there (e.g. quit or project switch) must
+    // not overwrite the last valid snapshot with the partial tab strip.
+    var bytesAfterMidRestoreWrite: Data?
+    #expect(await testWaitUntil("first restored tab installed") {
+        model.tabStrip.tabs.count == 1
+    })
+    try? model.writeSessionCheckpoint(panelPreset: .reading)
+    bytesAfterMidRestoreWrite = try Data(contentsOf: sessionURL)
+
+    #expect(await restoreTask.value == true)
+    #expect(bytesAfterMidRestoreWrite == oldBytes)
+    // The completed restore commits its own first full snapshot.
+    let committed = try #require(model.loadSessionSnapshot().snapshot)
+    #expect(committed.tabs.count == 2)
+    #expect(committed.tabs.compactMap { tab -> String? in
+        guard case .file(let file) = tab else { return nil }
+        return file.path
+    } == ["main.rs", slowDependency.path])
+}
+
+@MainActor
+@Test
+func syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightBlockedRestoreSession-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    try FileManager.default.createDirectory(
+        at: stateRoot,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let gatedService = GatedSessionRestoreIndexService(blockedRoot: root)
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: gatedService
+    )
+    let oldSnapshot = SessionCodec.Snapshot(
+        projectRoot: root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: []
+    )
+    let oldBytes = try SessionCodec.encode(
+        oldSnapshot,
+        maximumTabCount: model.tabStrip.maximumCount,
+        dependencyAllowed: exactLocationIsInDependency
+    )
+    try oldBytes.write(to: sessionURL, options: .atomic)
+
+    let restoreTask = Task {
+        await model.restoreSession(SessionCodec.Snapshot(
+            projectRoot: root.path,
+            language: .rust,
+            revision: nil,
+            activeTabOrdinal: 0,
+            panelPreset: PanelPresetModel.reading.rawValue,
+            tabs: [
+                .file(.init(
+                    path: "main.rs",
+                    anchorContentID: nil,
+                    scrollAnchor: nil,
+                    selectionAnchor: nil
+                )),
+            ]
+        ))
+    }
+    #expect(await testWaitUntil("blocked restore indexing started") {
+        await gatedService.hasStartedBlockedIndex()
+    })
+    try? model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(try Data(contentsOf: sessionURL) == oldBytes)
+
+    // Interrupt the blocked restore with a real project open; the restore
+    // must end without ever having replaced the on-disk snapshot.
+    let otherRoot = try sessionRestoreProject(["other.rs": "fn other() {}\n"])
+    defer { try? FileManager.default.removeItem(at: otherRoot) }
+    model.openProject(root: otherRoot)
+    #expect(await restoreTask.value == false)
+    #expect(try Data(contentsOf: sessionURL) == oldBytes)
+}
+
+@MainActor
+@Test
+func sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    // A regular file where the session directory should live makes every
+    // write fail without touching any previous data.
+    let blocker = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightSessionWriteBlocker-\(UUID().uuidString)"
+        )
+    try Data().write(to: blocker)
+    let sessionURL = blocker.appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: blocker) }
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+
+    #expect(throws: Error.self) {
+        try model.writeSessionCheckpoint(panelPreset: .reading)
+    }
+    #expect(model.sessionSaveNotice?.hasPrefix("Reading session not saved:") == true)
+    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+
+    try FileManager.default.removeItem(at: blocker)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.sessionSaveNotice == nil)
+    #expect(FileManager.default.fileExists(atPath: sessionURL.path))
+}
+
+@MainActor
+@Test
+func continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightDirtyDeadlineSession-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+
+    // Reschedule faster than the 250 ms debounce window for longer than
+    // the 2 s dirty deadline: the checkpoint must still be committed.
+    let startedAt = ContinuousClock.now
+    while ContinuousClock.now < startedAt + .seconds(3) {
+        model.scheduleSessionCheckpoint(panelPreset: .reading)
+        try await Task.sleep(for: .milliseconds(50))
+    }
+    #expect(FileManager.default.fileExists(atPath: sessionURL.path))
+}
+
 private struct SessionRestoreIndexService: IndexService {
     func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached {
