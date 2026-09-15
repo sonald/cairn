@@ -279,7 +279,7 @@ func sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() asy
 
 @MainActor
 @Test
-func invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() throws {
+func sessionLoadProblemsAreClassifiedAndPreserveOrQuarantineData() throws {
     let stateRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
         "CodeInsightInvalidSession-\(UUID().uuidString)",
         isDirectory: true
@@ -289,22 +289,31 @@ func invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() throws {
         at: stateRoot,
         withIntermediateDirectories: true
     )
-    defer {
-        try? FileManager.default.removeItem(at: stateRoot)
-        #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
-    }
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(
         sessionURL: sessionURL,
         indexService: SessionRestoreIndexService()
     )
 
+    // Legacy data written by a future schema stays untouched.
     try Data("{\"schemaVersion\":99}".utf8).write(to: sessionURL)
-    let invalid = model.loadSessionSnapshot()
-    #expect(invalid.snapshot == nil)
-    #expect(invalid.discarded)
-    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
-    #expect(!model.loadSessionSnapshot().discarded)
+    let future = model.loadLegacySessionSnapshot()
+    #expect(future.snapshot == nil)
+    #expect(future.problem == .unsupportedSchemaVersion(99))
+    #expect(FileManager.default.fileExists(atPath: sessionURL.path))
 
+    // Corrupt legacy data is quarantined once, not deleted.
+    try Data("not json".utf8).write(to: sessionURL)
+    let corruptLegacy = model.loadLegacySessionSnapshot()
+    #expect(corruptLegacy.snapshot == nil)
+    #expect(corruptLegacy.problem == .corruptFile)
+    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(FileManager.default.fileExists(atPath: sessionURL.path + ".corrupt"))
+
+    // A saved project whose directory vanished is kept for later, not
+    // deleted, and reports an explicit problem.
     let missingRoot = SessionCodec.Snapshot(
         projectRoot: stateRoot.appendingPathComponent("gone").path,
         language: .rust,
@@ -313,15 +322,48 @@ func invalidOrMissingRootSessionIsDeletedAndReportedOnlyOnce() throws {
         panelPreset: PanelPresetModel.reading.rawValue,
         tabs: []
     )
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(
+                for: URL(
+                    fileURLWithPath: missingRoot.projectRoot,
+                    isDirectory: true
+                )
+            ) + ".json"
+        )
+    try FileManager.default.createDirectory(
+        at: perProjectURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
     try SessionCodec.encode(
         missingRoot,
         maximumTabCount: model.tabStrip.maximumCount,
         dependencyAllowed: exactLocationIsInDependency
-    ).write(to: sessionURL)
-    let missing = model.loadSessionSnapshot()
+    ).write(to: perProjectURL)
+    let missing = model.loadSessionSnapshot(
+        forProject: URL(
+            fileURLWithPath: missingRoot.projectRoot,
+            isDirectory: true
+        )
+    )
     #expect(missing.snapshot == nil)
-    #expect(missing.discarded)
-    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(missing.problem == .projectUnavailable)
+    #expect(FileManager.default.fileExists(atPath: perProjectURL.path))
+
+    // Corrupt per-project data is quarantined once and reports only once.
+    try Data("not json either".utf8).write(to: perProjectURL)
+    let corruptProject = model.loadSessionSnapshot(
+        forProject: URL(
+            fileURLWithPath: missingRoot.projectRoot,
+            isDirectory: true
+        )
+    )
+    #expect(corruptProject.snapshot == nil)
+    #expect(corruptProject.problem == .corruptFile)
+    #expect(!FileManager.default.fileExists(atPath: perProjectURL.path))
+    #expect(FileManager.default.fileExists(
+        atPath: perProjectURL.path + ".corrupt"
+    ))
 }
 
 @MainActor
@@ -455,7 +497,7 @@ func mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() 
     model.openInNewTab(root.appendingPathComponent("app.ts"))
     try model.writeSessionCheckpoint(panelPreset: .reading)
 
-    let snapshot = try #require(model.loadSessionSnapshot().snapshot)
+    let snapshot = try #require(model.loadSessionSnapshot(forProject: root).snapshot)
     #expect(snapshot.languages == [.rust, .python, .typescript])
     #expect(snapshot.revision == revision)
     #expect(snapshot.activeTabOrdinal == model.tabStrip.activeIndex)
@@ -642,7 +684,16 @@ func midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() async throws {
         maximumTabCount: model.tabStrip.maximumCount,
         dependencyAllowed: exactLocationIsInDependency
     )
-    try oldBytes.write(to: sessionURL, options: .atomic)
+    // The last valid snapshot lives at this project's per-project path.
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
+    try FileManager.default.createDirectory(
+        at: perProjectURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try oldBytes.write(to: perProjectURL, options: .atomic)
     defer { try? FileManager.default.removeItem(at: stateRoot) }
 
     let restoring = SessionCodec.Snapshot(
@@ -675,12 +726,14 @@ func midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() async throws {
         model.tabStrip.tabs.count == 1
     })
     try? model.writeSessionCheckpoint(panelPreset: .reading)
-    bytesAfterMidRestoreWrite = try Data(contentsOf: sessionURL)
+    bytesAfterMidRestoreWrite = try Data(contentsOf: perProjectURL)
 
     #expect(await restoreTask.value == true)
     #expect(bytesAfterMidRestoreWrite == oldBytes)
     // The completed restore commits its own first full snapshot.
-    let committed = try #require(model.loadSessionSnapshot().snapshot)
+    let committed = try #require(
+        model.loadSessionSnapshot(forProject: root).snapshot
+    )
     #expect(committed.tabs.count == 2)
     #expect(committed.tabs.compactMap { tab -> String? in
         guard case .file(let file) = tab else { return nil }
@@ -722,7 +775,15 @@ func syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() async throws 
         maximumTabCount: model.tabStrip.maximumCount,
         dependencyAllowed: exactLocationIsInDependency
     )
-    try oldBytes.write(to: sessionURL, options: .atomic)
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
+    try FileManager.default.createDirectory(
+        at: perProjectURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    try oldBytes.write(to: perProjectURL, options: .atomic)
 
     let restoreTask = Task {
         await model.restoreSession(SessionCodec.Snapshot(
@@ -745,7 +806,7 @@ func syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() async throws 
         await gatedService.hasStartedBlockedIndex()
     })
     try? model.writeSessionCheckpoint(panelPreset: .reading)
-    #expect(try Data(contentsOf: sessionURL) == oldBytes)
+    #expect(try Data(contentsOf: perProjectURL) == oldBytes)
 
     // Interrupt the blocked restore with a real project open; the restore
     // must end without ever having replaced the on-disk snapshot.
@@ -753,7 +814,7 @@ func syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() async throws 
     defer { try? FileManager.default.removeItem(at: otherRoot) }
     model.openProject(root: otherRoot)
     #expect(await restoreTask.value == false)
-    #expect(try Data(contentsOf: sessionURL) == oldBytes)
+    #expect(try Data(contentsOf: perProjectURL) == oldBytes)
 }
 
 @MainActor
@@ -761,14 +822,18 @@ func syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() async throws 
 func sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() async throws {
     let root = try sessionRestoreProject(["main.rs": "fn saved() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
-    // A regular file where the session directory should live makes every
-    // write fail without touching any previous data.
+    // A regular file where the session store directory should live makes
+    // every write fail without touching any previous data.
     let blocker = FileManager.default.temporaryDirectory
         .appendingPathComponent(
             "CodeInsightSessionWriteBlocker-\(UUID().uuidString)"
         )
     try Data().write(to: blocker)
     let sessionURL = blocker.appendingPathComponent("session.json")
+    let perProjectURL = blocker.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
     defer { try? FileManager.default.removeItem(at: blocker) }
     let model = AppModel(
         sessionURL: sessionURL,
@@ -783,12 +848,12 @@ func sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() async throw
         try model.writeSessionCheckpoint(panelPreset: .reading)
     }
     #expect(model.sessionSaveNotice?.hasPrefix("Reading session not saved:") == true)
-    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(!FileManager.default.fileExists(atPath: perProjectURL.path))
 
     try FileManager.default.removeItem(at: blocker)
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(model.sessionSaveNotice == nil)
-    #expect(FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(FileManager.default.fileExists(atPath: perProjectURL.path))
 }
 
 @MainActor
@@ -802,6 +867,10 @@ func continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() async throws 
             isDirectory: true
         )
     let sessionURL = stateRoot.appendingPathComponent("session.json")
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
     defer { try? FileManager.default.removeItem(at: stateRoot) }
     let model = AppModel(
         sessionURL: sessionURL,
@@ -819,7 +888,268 @@ func continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() async throws 
         model.scheduleSessionCheckpoint(panelPreset: .reading)
         try await Task.sleep(for: .milliseconds(50))
     }
-    #expect(FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(FileManager.default.fileExists(atPath: perProjectURL.path))
+}
+
+@MainActor
+@Test
+func perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() async throws {
+    let rootA = try sessionRestoreProject([
+        "a.rs": "fn alpha() {}\n",
+        "b.rs": "fn beta() {}\n",
+    ])
+    let rootB = try sessionRestoreProject([
+        "c.rs": "fn gamma() {}\n",
+    ])
+    defer {
+        try? FileManager.default.removeItem(at: rootA)
+        try? FileManager.default.removeItem(at: rootB)
+    }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightPerProjectSessions-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    let pointerSuite = "CodeInsightPerProject-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: pointerSuite)!
+    defer {
+        try? FileManager.default.removeItem(at: stateRoot)
+        defaults.removePersistentDomain(forName: pointerSuite)
+    }
+    let store = RecentProjectsStore(defaults: defaults)
+    let model = AppModel(
+        sessionURL: sessionURL,
+        recentProjectsStore: store,
+        indexService: SessionRestoreIndexService()
+    )
+
+    func loadFor(_ root: URL) -> SessionCodec.Snapshot? {
+        model.loadSessionSnapshot(forProject: root).snapshot
+    }
+
+    // Project A: open two tabs and save.
+    try model.openProject(root: rootA, language: .rust)
+    try #require(await testWaitUntil("A installed") {
+        model.snapshotPhase == .fullReady
+    })
+    model.openInNewTab(rootA.appendingPathComponent("a.rs"))
+    model.openInNewTab(rootA.appendingPathComponent("b.rs"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(store.lastSessionProjectPath == rootA.path)
+    let savedA = try #require(loadFor(rootA))
+    #expect(savedA.tabs.count == 2)
+
+    // Switch to project B: one tab, saved separately.
+    model.openProject(root: rootB)
+    try #require(await testWaitUntil("B installed") {
+        model.snapshotPhase == .fullReady
+            && model.fileTree?.root.standardizedFileURL
+                == rootB.standardizedFileURL
+    })
+    model.openInNewTab(rootB.appendingPathComponent("c.rs"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(store.lastSessionProjectPath == rootB.path)
+    #expect(loadFor(rootB)?.tabs.count == 1)
+
+    // Both snapshots survived the switch and restore independently.
+    let reloadedA = try #require(loadFor(rootA))
+    #expect(reloadedA.projectRoot == rootA.path)
+    #expect(reloadedA.tabs.compactMap { tab -> String? in
+        guard case .file(let file) = tab else { return nil }
+        return file.path
+    } == ["a.rs", "b.rs"])
+    #expect(await model.restoreSession(reloadedA) == true)
+    #expect(model.tabStrip.tabs.count == 2)
+    #expect(model.tabStrip.tabs.compactMap(\.fileURL?.lastPathComponent)
+        == ["a.rs", "b.rs"])
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(store.lastSessionProjectPath == rootA.path)
+}
+
+@MainActor
+@Test
+func legacyV1SessionMigratesToPerProjectStoreOnce() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightLegacyMigration-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    try FileManager.default.createDirectory(
+        at: stateRoot,
+        withIntermediateDirectories: true
+    )
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let pointerSuite = "CodeInsightLegacyMigration-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: pointerSuite)!
+    defer { defaults.removePersistentDomain(forName: pointerSuite) }
+    let store = RecentProjectsStore(defaults: defaults)
+    let model = AppModel(
+        sessionURL: sessionURL,
+        recentProjectsStore: store,
+        indexService: SessionRestoreIndexService()
+    )
+
+    // Hand-written v1 payload: single language field, one file tab.
+    try """
+    {"schemaVersion":1,"projectRoot":\(encodeJSONString(root.path)),
+     "language":0,"revision":null,"activeTabOrdinal":0,
+     "panelPreset":"reading","tabs":[{"kind":"file","path":"main.rs",
+     "anchorContentID":null,"scrollAnchor":null,"selectionAnchor":null}]}
+    """.data(using: .utf8)!.write(to: sessionURL, options: .atomic)
+
+    let legacy = model.loadLegacySessionSnapshot()
+    let snapshot = try #require(legacy.snapshot)
+    #expect(snapshot.language == .rust)
+    #expect(snapshot.tabs.count == 1)
+    #expect(store.lastSessionProjectPath == nil)
+
+    // Restoring and checkpointing writes the per-project file, updates
+    // the pointer, and retires the legacy file exactly once.
+    #expect(await model.restoreSession(snapshot))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(store.lastSessionProjectPath == root.path)
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
+    #expect(FileManager.default.fileExists(atPath: perProjectURL.path))
+    #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+    #expect(FileManager.default.fileExists(
+        atPath: sessionURL.path + ".migrated"
+    ))
+    #expect(model.loadLegacySessionSnapshot().snapshot == nil)
+
+    // The migrated data round-trips through the per-project store.
+    let migrated = try #require(
+        model.loadSessionSnapshot(forProject: root).snapshot
+    )
+    #expect(migrated.tabs.count == 1)
+}
+
+@MainActor
+@Test
+func futureVersionPerProjectSnapshotIsPreservedAndNotOverwritten() async throws {
+    let root = try sessionRestoreProject(["main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightFutureSchema-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
+    try FileManager.default.createDirectory(
+        at: perProjectURL.deletingLastPathComponent(),
+        withIntermediateDirectories: true
+    )
+    let futureBytes = Data("{\"schemaVersion\":99}".utf8)
+    try futureBytes.write(to: perProjectURL, options: .atomic)
+
+    let blocked = model.loadSessionSnapshot(forProject: root)
+    #expect(blocked.snapshot == nil)
+    #expect(blocked.problem == .unsupportedSchemaVersion(99))
+
+    // Opening and saving the project must not touch the newer file.
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+    model.openInNewTab(root.appendingPathComponent("main.rs"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(try Data(contentsOf: perProjectURL) == futureBytes)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot == nil)
+}
+
+@MainActor
+@Test
+func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async throws {
+    let root = try sessionRestoreProject([
+        "main.rs": "fn main() {}\n",
+        "other.rs": "fn other() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightClearSession-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    let pointerSuite = "CodeInsightClearSession-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: pointerSuite)!
+    defer {
+        try? FileManager.default.removeItem(at: stateRoot)
+        defaults.removePersistentDomain(forName: pointerSuite)
+    }
+    let store = RecentProjectsStore(defaults: defaults)
+    let model = AppModel(
+        sessionURL: sessionURL,
+        recentProjectsStore: store,
+        indexService: SessionRestoreIndexService()
+    )
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+    model.openInNewTab(root.appendingPathComponent("main.rs"))
+    model.openInNewTab(root.appendingPathComponent("other.rs"))
+    model.navigationHistory.push(JumpRecord(
+        path: "main.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: nil,
+        snapshotID: nil
+    ))
+    model.readingTrail.recordNavigation(
+        from: nil,
+        to: JumpRecord(
+            path: "other.rs",
+            contentID: nil,
+            byteOffset: 0,
+            line: 1,
+            column: 1,
+            symbolAnchor: nil,
+            snapshotID: nil
+        )
+    )
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 2)
+
+    try model.clearSessionForCurrentProject(panelPreset: .reading)
+
+    #expect(model.tabStrip.tabs.isEmpty)
+    #expect(model.navigationHistory.records.isEmpty)
+    #expect(model.readingTrail.nodes.isEmpty)
+    #expect(model.selectedFile == nil)
+    // The cleared state is committed as an empty snapshot, so a later
+    // exit cannot resurrect the old tabs.
+    let cleared = try #require(
+        model.loadSessionSnapshot(forProject: root).snapshot
+    )
+    #expect(cleared.tabs.isEmpty)
+    #expect(cleared.projectRoot == root.path)
+    #expect(store.lastSessionProjectPath == root.path)
+}
+
+private func encodeJSONString(_ value: String) -> String {
+    let array = String(
+        decoding: (try? JSONEncoder().encode([value])) ?? Data(),
+        as: UTF8.self
+    )
+    return String(array.dropFirst().dropLast())
 }
 
 private struct SessionRestoreIndexService: IndexService {

@@ -604,36 +604,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     func openProject(root: URL, language: LanguageID) {
-        flushSessionBeforeProjectSwitch(to: root)
-        cancelSessionRestore()
-        let root = root.standardizedFileURL
-        lastOpenedProjectRoot = root
-        lastOpenedProjectLanguages = [language]
-        pendingRecentProjectRoot = root
-        pendingRecentProjectLanguages = [language]
-        try? model.openProject(root: root, language: language)
-        render()
+        openProjectWithSavedSession(
+            root: root,
+            languages: [language],
+            overridesSavedLanguages: true
+        )
     }
 
     func openProject(root: URL, languages: [LanguageID]) {
         guard let normalized = try? LanguageMode.normalize(languages: languages)
         else { return }
-        flushSessionBeforeProjectSwitch(to: root)
-        cancelSessionRestore()
-        let root = root.standardizedFileURL
-        lastOpenedProjectRoot = root
-        lastOpenedProjectLanguages = normalized
-        pendingRecentProjectRoot = root
-        pendingRecentProjectLanguages = normalized
-        guard normalized.count > 1 else {
-            try? model.openProject(root: root, language: normalized[0])
-            render()
-            return
-        }
-        Task {
-            try? await model.openProject(root: root, languages: normalized)
-        }
-        render()
+        openProjectWithSavedSession(
+            root: root,
+            languages: normalized,
+            overridesSavedLanguages: true
+        )
     }
 
     /// Capture the outgoing project's reader state and write its session
@@ -647,13 +632,66 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         checkpointSessionSynchronously()
     }
 
-    func openRecentProject(_ root: URL) {
-        openProject(
+    func openRecentProject(_ root: URL, forcingReopen: Bool = false) {
+        openProjectWithSavedSession(
             root: root,
             languages: recentProjectsStore.languages(
                 for: root.standardizedFileURL.path
-            )
+            ),
+            overridesSavedLanguages: false,
+            forcingReopen: forcingReopen
         )
+    }
+
+    /// Unified "user opened a project" boundary covering Open, Recent,
+    /// dropped directories, and Retry: a project that is already being
+    /// read just focuses its window; a project with a saved reading
+    /// session restores it (an explicit language choice overrides the
+    /// saved combination); otherwise it opens fresh. The outgoing project
+    /// is always flushed first.
+    private func openProjectWithSavedSession(
+        root: URL,
+        languages: [LanguageID],
+        overridesSavedLanguages: Bool,
+        forcingReopen: Bool = false
+    ) {
+        let root = root.standardizedFileURL
+        if !forcingReopen,
+           model.projectRoot?.standardizedFileURL == root,
+           case .ready = model.projectState,
+           !overridesSavedLanguages || model.projectLanguages == languages
+        {
+            window?.makeKeyAndOrderFront(nil)
+            return
+        }
+        if let snapshot = model.loadSessionSnapshot(forProject: root).snapshot {
+            flushSessionBeforeProjectSwitch(to: root)
+            cancelSessionRestore()
+            restoreSession(
+                snapshot,
+                overridingLanguages: overridesSavedLanguages ? languages : nil
+            )
+            return
+        }
+        openProjectFresh(root: root, languages: languages)
+    }
+
+    private func openProjectFresh(root: URL, languages: [LanguageID]) {
+        flushSessionBeforeProjectSwitch(to: root)
+        cancelSessionRestore()
+        lastOpenedProjectRoot = root
+        lastOpenedProjectLanguages = languages
+        pendingRecentProjectRoot = root
+        pendingRecentProjectLanguages = languages
+        guard languages.count > 1 else {
+            try? model.openProject(root: root, language: languages[0])
+            render()
+            return
+        }
+        Task {
+            try? await model.openProject(root: root, languages: languages)
+        }
+        render()
     }
 
     func retryLastOpenedProject() {
@@ -667,22 +705,28 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
-    func restoreSession(_ snapshot: SessionCodec.Snapshot) {
+    func restoreSession(
+        _ snapshot: SessionCodec.Snapshot,
+        overridingLanguages: [LanguageID]? = nil
+    ) {
         cancelSessionRestore()
         let root = URL(
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
         ).standardizedFileURL
         lastOpenedProjectRoot = root
-        lastOpenedProjectLanguages = snapshot.languages
+        lastOpenedProjectLanguages = overridingLanguages ?? snapshot.languages
         pendingRecentProjectRoot = root
-        pendingRecentProjectLanguages = snapshot.languages
+        pendingRecentProjectLanguages = overridingLanguages ?? snapshot.languages
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
             applyPanelPreset(preset, restoring: true)
         }
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let restored = await model.restoreSession(snapshot)
+            let restored = await model.restoreSession(
+                snapshot,
+                overridingLanguages: overridingLanguages
+            )
             guard restored, !Task.isCancelled else { return }
             pendingTabRestore = model.tabStrip.activeTab
             render()
@@ -693,6 +737,41 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func cancelSessionRestore() {
         sessionRestoreTask?.cancel()
         sessionRestoreTask = nil
+    }
+
+    /// Clears this project's saved reading session after an explicit
+    /// confirmation: all tabs close (discarding their Reading Sets) and
+    /// the navigation state is dropped; the source tree, bookmarks, and
+    /// global settings are untouched.
+    func confirmClearReadingSession() {
+        guard model.projectRoot != nil else { return }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Clear This Project’s Reading Session?"
+        alert.informativeText = "All open tabs close, including any Reading "
+            + "Sets they contain, and the saved reading position, tabs, and "
+            + "reading trail are discarded. Files, bookmarks, and settings "
+            + "are not touched."
+        alert.addButton(withTitle: "Clear Reading Session")
+        alert.addButton(withTitle: "Cancel")
+        guard let window else { return }
+        alert.beginSheetModal(for: window) { [weak self] response in
+            guard response == .alertFirstButtonReturn else { return }
+            self?.clearReadingSession()
+        }
+    }
+
+    func clearReadingSessionForSelfTest() {
+        clearReadingSession()
+    }
+
+    private func clearReadingSession() {
+        cancelSessionRestore()
+        // A write failure here already surfaces through the model's
+        // session save notice; the cleared in-memory state stands.
+        try? model.clearSessionForCurrentProject(panelPreset: panelPreset)
+        pendingTabRestore = nil
+        render()
     }
 
     func refreshRecentProjects() {
@@ -2300,6 +2379,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.replayNotice
             _ = model.staleIndexNotice
             _ = model.sessionSaveNotice
+            _ = model.sessionLoadNotice
             _ = model.isRefreshingIndex
             _ = model.indexRefreshNotice
             _ = model.projectFailureReason
@@ -2793,6 +2873,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             model.replayNotice,
             model.staleIndexNotice,
             model.sessionSaveNotice,
+            model.sessionLoadNotice,
         ]
             .compactMap { $0 }
             .joined(separator: " · ")

@@ -386,15 +386,29 @@ private struct CodeInsightApplication {
                         "CAIRN_BOOKMARK_SESSION_URL"
                     ].map(URL.init(fileURLWithPath:)) ?? AppModel.defaultSessionURL
                 }
+                // One store shared by the model and the delegate: the model
+                // advances the last-session pointer when a project's
+                // snapshot is written, and launch reads the same pointer.
+                let launchRecentStore = RecentProjectsStore()
                 let appModel: AppModel
                 if let bookmarkSessionURL {
-                    appModel = AppModel(sessionURL: bookmarkSessionURL)
+                    appModel = AppModel(
+                        sessionURL: bookmarkSessionURL,
+                        recentProjectsStore: launchRecentStore
+                    )
                 } else {
                     appModel = runsSelfTest
                         ? AppModel()
-                        : AppModel(sessionURL: AppModel.defaultSessionURL)
+                        : AppModel(
+                            sessionURL: AppModel.defaultSessionURL,
+                            recentProjectsStore: launchRecentStore
+                        )
                 }
-                delegate = AppDelegate(startedAt: startedAt, model: appModel)
+                delegate = AppDelegate(
+                    startedAt: startedAt,
+                    model: appModel,
+                    recentProjectsStore: launchRecentStore
+                )
             }
         }
         if let pythonRoot = pythonSelfTestRoot {
@@ -6921,13 +6935,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         ])
 
         controller.checkpointSessionSynchronously()
-        guard let session = pythonModel.loadSessionSnapshot().snapshot,
+        guard let session = pythonModel.loadSessionSnapshot(
+            forProject: root
+        ).snapshot,
               session.language == .python
         else {
             finish("session checkpoint language not Python")
         }
         pythonRecentStore.record(root, language: .python)
-        controller.openRecentProject(root)
+        controller.openRecentProject(root, forcingReopen: true)
         guard await pythonWait(timeout: 120, {
             pythonModel.snapshotPhase == .fullReady
                 && pythonReady()
@@ -7498,14 +7514,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         ])
 
         controller.checkpointSessionSynchronously()
-        guard let persisted = tsModel.loadSessionSnapshot().snapshot,
+        guard let persisted = tsModel.loadSessionSnapshot(
+            forProject: root
+        ).snapshot,
               persisted.language == .typescript
         else {
             finish("session checkpoint language not TypeScript")
         }
         tsRecentStore.record(root, language: .typescript)
         var recentReopenTypeScript = false
-        controller.openRecentProject(root)
+        controller.openRecentProject(root, forcingReopen: true)
         guard await tsWait(timeout: 180, {
             tsModel.snapshotPhase == .fullReady
                 && tsModel.exactCoordinator.readiness == .ready
@@ -8375,7 +8393,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             finish("checkpoint TSX reader was not active")
         }
         controller.checkpointSessionSynchronously()
-        guard let savedSnapshot = model.loadSessionSnapshot().snapshot else {
+        guard let savedSnapshot = model.loadSessionSnapshot(
+            forProject: root
+        ).snapshot else {
             finish("checkpoint did not persist session")
         }
         guard savedSnapshot.languages == [.rust, .python, .typescript],
@@ -8387,7 +8407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let recentStore = recentProjectsStore
         recentStore.record(root, languages: savedLangs)
         model.exactCoordinator.shutdown()
-        controller.openRecentProject(root)
+        controller.openRecentProject(root, forcingReopen: true)
         let reopenDeadline = Date(timeIntervalSinceNow: 30)
         var reopenOK = false
         while Date() < reopenDeadline {
@@ -9335,26 +9355,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         self.windowController = windowController
         windowController.showWindow(nil)
         guard !offscreen else { return }
-        let session = model.loadSessionSnapshot()
-        if let snapshot = session.snapshot {
+        if let snapshot = launchSessionSnapshot() {
             windowController.restoreSession(snapshot)
-        } else if session.discarded {
-            presentDiscardedSessionNotice()
         }
     }
 
-    private func presentDiscardedSessionNotice() {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Previous Session Couldn’t Be Restored"
-        alert.informativeText = "Cairn discarded invalid or unavailable session "
-            + "data. Open a project to continue."
-        alert.addButton(withTitle: "OK")
-        if let window = windowController?.window {
-            alert.beginSheetModal(for: window)
-        } else {
-            alert.runModal()
+    /// The snapshot to reopen at launch: the last project's per-project
+    /// file, or — before that pointer ever exists — the legacy single-file
+    /// session, migrated once. A missing or unreadable snapshot shows the
+    /// welcome surface; recoverable problems surface through the window's
+    /// status bar instead of a modal.
+    private func launchSessionSnapshot() -> SessionCodec.Snapshot? {
+        if let lastPath = recentProjectsStore.lastSessionProjectPath {
+            return model.loadSessionSnapshot(
+                forProject: URL(fileURLWithPath: lastPath, isDirectory: true)
+            ).snapshot
         }
+        return model.loadLegacySessionSnapshot().snapshot
     }
 
     private func enlargedWindowLayout(
@@ -9454,6 +9471,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     @objc private func openProject(_ sender: Any?) {
         chooseLanguagesProject(nil)
+    }
+
+    @objc private func clearReadingSession(_ sender: Any?) {
+        windowController?.confirmClearReadingSession()
     }
 
     @objc private func openPythonProject(_ sender: Any?) {
@@ -10091,6 +10112,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         )
         closeTabItem.target = self
         fileMenu.addItem(closeTabItem)
+        let clearSessionItem = NSMenuItem(
+            title: "Clear Reading Session…",
+            action: #selector(clearReadingSession(_:)),
+            keyEquivalent: ""
+        )
+        clearSessionItem.target = self
+        fileMenu.addItem(clearSessionItem)
         fileMenu.addItem(.separator())
         let refreshIndexItem = NSMenuItem(
             title: "Refresh Index",

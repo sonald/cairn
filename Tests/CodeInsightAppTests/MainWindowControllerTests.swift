@@ -858,6 +858,115 @@ private func mainWindowCapturePNG(_ view: NSView, at url: URL) throws {
     try data.write(to: url)
 }
 
+@MainActor
+@Test
+func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "main.rs": "fn main() {}\n",
+        "other.rs": "fn other() {}\n",
+    ])
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "MainWindowRecentRestore-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let suiteName = "MainWindowRecentRestore-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: stateRoot)
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+    let store = RecentProjectsStore(defaults: defaults)
+    let model = AppModel(
+        sessionURL: stateRoot.appendingPathComponent("session.json"),
+        recentProjectsStore: store,
+        indexService: MainWindowWorkingIndexService()
+    )
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true,
+        recentProjectsStore: store,
+        recordsRecentProjects: true
+    )
+    defer { controller.close() }
+
+    // Open, build up a tab strip, and save the reading session.
+    controller.openProject(root: root, language: .rust)
+    try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.openFileInNewTabForSelfTest(root.appendingPathComponent("main.rs"))
+    controller.openFileInNewTabForSelfTest(root.appendingPathComponent("other.rs"))
+    try #require(await mainWindowWaitUntil(model.tabStrip.tabs.count == 2))
+    controller.checkpointSessionSynchronously()
+    try #require(store.lastSessionProjectPath == root.path)
+
+    // Reopening the project with a saved snapshot restores the tabs
+    // instead of opening a fresh empty workspace.
+    controller.openRecentProject(root, forcingReopen: true)
+    try #require(await mainWindowWaitUntil(
+        model.snapshotPhase == .fullReady
+            && model.tabStrip.tabs.count == 2
+    ))
+    #expect(model.tabStrip.tabs.compactMap(\.fileURL?.lastPathComponent)
+        .sorted() == ["main.rs", "other.rs"])
+}
+
+@MainActor
+@Test
+func reopeningTheProjectBeingReadFocusesWithoutResetting() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "main.rs": "fn main() {}\n",
+        "other.rs": "fn other() {}\n",
+    ])
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "MainWindowSameProjectFocus-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    defer {
+        try? FileManager.default.removeItem(at: root)
+        try? FileManager.default.removeItem(at: stateRoot)
+    }
+    let model = AppModel(
+        sessionURL: stateRoot.appendingPathComponent("session.json"),
+        indexService: MainWindowWorkingIndexService()
+    )
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: UserDefaults(
+            suiteName: "MainWindowSameProjectFocus-\(UUID().uuidString)"
+        )!),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+
+    controller.openProject(root: root, language: .rust)
+    try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.openFileInNewTabForSelfTest(root.appendingPathComponent("main.rs"))
+    controller.openFileInNewTabForSelfTest(root.appendingPathComponent("other.rs"))
+    try #require(await mainWindowWaitUntil(model.tabStrip.tabs.count == 2))
+    let generationBefore = model.generation
+
+    // Re-selecting the project that is already being read neither resets
+    // the workspace nor disturbs the tab strip.
+    controller.openRecentProject(root)
+    #expect(model.generation == generationBefore)
+    #expect(model.tabStrip.tabs.count == 2)
+}
+
+private struct MainWindowWorkingIndexService: IndexService {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+        try await Task.detached {
+            try ProjectIndexer().index(root: root, language: language)
+        }.value
+    }
+}
+
 private func mainWindowTemporaryProject(
     _ files: [String: String]
 ) throws -> URL {

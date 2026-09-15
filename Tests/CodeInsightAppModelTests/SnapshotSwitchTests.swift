@@ -410,10 +410,14 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
         isDirectory: true
     )
     let sessionURL = stateRoot.appendingPathComponent("session.json")
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: root) + ".json"
+        )
     defer {
         try? FileManager.default.removeItem(at: root)
         try? FileManager.default.removeItem(at: stateRoot)
-        #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+        #expect(!FileManager.default.fileExists(atPath: perProjectURL.path))
     }
     let initial = try ProjectIndexer().index(root: root)
     let service = ControlledSnapshotIndexService(
@@ -432,7 +436,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
     model.openInNewTab(root.appendingPathComponent("main.rs"))
     model.openInNewTab(root.appendingPathComponent("other.rs"))
     try model.writeSessionCheckpoint(panelPreset: .reading)
-    let worktreeData = try Data(contentsOf: sessionURL)
+    let worktreeData = try Data(contentsOf: perProjectURL)
 
     model.scheduleSessionCheckpoint(panelPreset: .compare)
     model.switchToCommit("C")
@@ -441,9 +445,9 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
     })
     try await Task.sleep(for: .milliseconds(350))
 
-    #expect(try Data(contentsOf: sessionURL) == worktreeData)
+    #expect(try Data(contentsOf: perProjectURL) == worktreeData)
     try model.writeSessionCheckpoint(panelPreset: .compare)
-    #expect(try Data(contentsOf: sessionURL) == worktreeData)
+    #expect(try Data(contentsOf: perProjectURL) == worktreeData)
 
     model.closeTab(1)
     try model.writeSessionCheckpoint(
@@ -451,7 +455,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
         allowsPendingTopology: true
     )
     let pendingTopology = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )
@@ -465,7 +469,7 @@ func delayedSessionCheckpointNeverMixesSnapshotGenerations() async throws {
     })
     try model.writeSessionCheckpoint(panelPreset: .compare)
     let committed = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )
@@ -1855,7 +1859,17 @@ func refreshInProgressSuppressesSessionCheckpoints() async throws {
     try fixture.commit("initial")
     let sessionURL = FileManager.default.temporaryDirectory
         .appendingPathComponent("CodeInsightRefreshCheckpoint-\(UUID().uuidString).json")
-    defer { try? FileManager.default.removeItem(at: sessionURL) }
+    let perProjectURL = sessionURL.deletingLastPathComponent()
+        .appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: fixture.root) + ".json"
+        )
+    defer {
+        try? FileManager.default.removeItem(at: sessionURL)
+        try? FileManager.default.removeItem(
+            at: perProjectURL.deletingLastPathComponent()
+        )
+    }
     let service = ControlledSnapshotIndexService(
         initialSession: try ProjectIndexer().index(root: fixture.root),
         worktreeSnapshot: TestSnapshot(label: "open", files: mixedFiles),
@@ -1885,7 +1899,7 @@ func refreshInProgressSuppressesSessionCheckpoints() async throws {
     model.scheduleSessionCheckpoint(panelPreset: .reading)
     try await Task.sleep(for: .milliseconds(400))
     #expect(
-        !FileManager.default.fileExists(atPath: sessionURL.path),
+        !FileManager.default.fileExists(atPath: perProjectURL.path),
         "a half-installed refresh must not be checkpointed"
     )
     await service.releaseFull("refresh")
@@ -1894,7 +1908,7 @@ func refreshInProgressSuppressesSessionCheckpoints() async throws {
     })
     model.scheduleSessionCheckpoint(panelPreset: .reading)
     #expect(await testWaitUntil("checkpoint after completion") {
-        FileManager.default.fileExists(atPath: sessionURL.path)
+        FileManager.default.fileExists(atPath: perProjectURL.path)
     })
 }
 

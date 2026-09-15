@@ -960,11 +960,15 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
     )
     let sessionURL = stateRoot.appendingPathComponent("session.json")
     let fixture = try await makeRelationNavigationFixture(sessionURL: sessionURL)
+    let perProjectURL = stateRoot.appendingPathComponent("sessions")
+        .appendingPathComponent(
+            AppModel.sessionProjectKey(for: fixture.root) + ".json"
+        )
     defer {
         fixture.controller.close()
         try? FileManager.default.removeItem(at: fixture.root)
         try? FileManager.default.removeItem(at: stateRoot)
-        #expect(!FileManager.default.fileExists(atPath: sessionURL.path))
+        #expect(!FileManager.default.fileExists(atPath: perProjectURL.path))
     }
     let main = fixture.root.appendingPathComponent("main.rs")
     let selection = byteOffset(of: "target();", in: fixture.mainSource)
@@ -985,7 +989,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
     fixture.controller.checkpointSessionSynchronously()
 
     var snapshot = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: fixture.model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )
@@ -1012,7 +1016,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
     fixture.model.tabStrip.updateActiveReadingSetScroll(37)
     try fixture.model.writeSessionCheckpoint(panelPreset: .reading)
     snapshot = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: fixture.model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )
@@ -1027,7 +1031,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
 
     fixture.controller.closeActiveTab()
     snapshot = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: fixture.model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )
@@ -1041,7 +1045,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
         )
     }
     snapshot = try SessionCodec.decode(
-        Data(contentsOf: sessionURL),
+        Data(contentsOf: perProjectURL),
         maximumTabCount: fixture.model.tabStrip.maximumCount,
         dependencyAllowed: { _ in false }
     )

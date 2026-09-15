@@ -21,7 +21,7 @@ func sessionCodecWritesV2LanguageArrayAndDecodesV1Singleton() throws {
     let object = try #require(
         JSONSerialization.jsonObject(with: data) as? [String: Any]
     )
-    #expect(object["schemaVersion"] as? Int == 2)
+    #expect(object["schemaVersion"] as? Int == 3)
     #expect(object["languages"] as? [Int] == [Int(LanguageID.python.rawValue)])
     #expect(object["language"] == nil)
     #expect(try SessionCodec.decode(
@@ -101,7 +101,7 @@ func sessionCodecRoundTripsCanonicalLanguageArrayWithSortedKeys() throws {
     #expect(decoded.language == .rust)
 
     let json = try #require(String(data: data, encoding: .utf8))
-    #expect(json == "{\"languages\":[0,1,2],\"panelPreset\":\"reading\",\"projectRoot\":\"\\/tmp\\/project\",\"schemaVersion\":2,\"tabs\":[]}")
+    #expect(json == "{\"languages\":[0,1,2],\"panelPreset\":\"reading\",\"projectRoot\":\"\\/tmp\\/project\",\"schemaVersion\":3,\"tabs\":[]}")
 }
 
 @Test
@@ -387,7 +387,7 @@ func sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() throws 
     let json = try #require(String(data: data, encoding: .utf8))
     let unknown = try #require(
         json.replacingOccurrences(
-            of: "\"schemaVersion\":2",
+            of: "\"schemaVersion\":3",
             with: "\"schemaVersion\":9"
         ).data(using: .utf8)
     )

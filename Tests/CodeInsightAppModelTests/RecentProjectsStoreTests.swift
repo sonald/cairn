@@ -25,6 +25,29 @@ func recentProjectsStoreRecordsDeduplicatesMovesToFrontLimitsAndPersists() {
 }
 
 @Test
+func recentProjectsStoreLastSessionProjectSurvivesRecentsClear() {
+    let suiteName = "RecentProjectsStoreTests-\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suiteName)!
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+    let store = RecentProjectsStore(defaults: defaults)
+
+    #expect(store.lastSessionProjectPath == nil)
+    store.lastSessionProjectPath = "/projects/with-snapshot"
+    #expect(store.lastSessionProjectPath == "/projects/with-snapshot")
+
+    let reloaded = RecentProjectsStore(defaults: UserDefaults(suiteName: suiteName)!)
+    #expect(reloaded.lastSessionProjectPath == "/projects/with-snapshot")
+
+    // Clearing the recents list is a UI entry-point action; it must not
+    // delete any project's saved reading session pointer.
+    store.clear()
+    #expect(store.lastSessionProjectPath == "/projects/with-snapshot")
+
+    store.lastSessionProjectPath = nil
+    #expect(store.lastSessionProjectPath == nil)
+}
+
+@Test
 func recentProjectsStoreTracksLanguageByPathAndOverridesOnReRecord() {
     let suiteName = "RecentProjectsStoreTests-\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!

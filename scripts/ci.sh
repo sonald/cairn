@@ -30,8 +30,8 @@ panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPr
 # AppKit window-state isolation: the bookmark pair and the panel-rebuild pair
 # each finish in their own SwiftPM process. Mixing the rebuild pair with a later
 # async inspector test can exit 0 before the Swift Testing summary. Never accept
-# that exit code alone. All 913 tests must report completion exactly once.
-expected_main_test_count=909
+# that exit code alone. All 916 tests must report completion exactly once.
+expected_main_test_count=916
 expected_isolated_test_count=2
 expected_panel_test_count=2
 

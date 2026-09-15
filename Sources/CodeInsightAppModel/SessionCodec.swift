@@ -2,6 +2,14 @@ import CodeInsightCore
 import Foundation
 
 package enum SessionCodec {
+    /// Decode failures that callers must handle differently: future
+    /// schema versions must be preserved untouched, while invalid data
+    /// may be quarantined and re-recorded.
+    package enum DecodeError: Error, Equatable {
+        case unsupportedSchemaVersion(Int)
+        case invalid
+    }
+
     package struct Snapshot: Sendable {
         package let projectRoot: String
         package let languages: [LanguageID]
@@ -132,9 +140,23 @@ package enum SessionCodec {
     ) throws -> Snapshot {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .millisecondsSince1970
-        let envelope = try decoder.decode(Envelope.self, from: data)
-        guard envelope.schemaVersion == 1 || envelope.schemaVersion == 2
-        else { throw CodecError.invalid }
+        let envelope: Envelope
+        do {
+            envelope = try decoder.decode(Envelope.self, from: data)
+        } catch {
+            // A newer Cairn may write fields this version cannot decode;
+            // check the version before treating the data as corrupt so
+            // future snapshots are preserved rather than quarantined.
+            if let probe = try? decoder.decode(VersionProbe.self, from: data),
+               !(1...3).contains(probe.schemaVersion)
+            {
+                throw DecodeError.unsupportedSchemaVersion(probe.schemaVersion)
+            }
+            throw error
+        }
+        guard (1...3).contains(envelope.schemaVersion) else {
+            throw DecodeError.unsupportedSchemaVersion(envelope.schemaVersion)
+        }
         let snapshot = try envelope.snapshot()
         try validate(
             snapshot,
@@ -267,6 +289,10 @@ package enum SessionCodec {
         case invalid
     }
 
+    private struct VersionProbe: Codable {
+        let schemaVersion: Int
+    }
+
     private struct Envelope: Codable {
         let schemaVersion: Int
         let projectRoot: String
@@ -278,7 +304,7 @@ package enum SessionCodec {
         let tabs: [TabDTO]
 
         init(_ snapshot: Snapshot) {
-            schemaVersion = 2
+            schemaVersion = 3
             projectRoot = snapshot.projectRoot
             languages = snapshot.languages
             language = nil
@@ -300,7 +326,7 @@ package enum SessionCodec {
                     panelPreset: panelPreset,
                     tabs: try tabs.map { try $0.tab() }
                 )
-            case 2:
+            case 2, 3:
                 guard language == nil,
                       let languages
                 else { throw CodecError.invalid }
@@ -313,7 +339,7 @@ package enum SessionCodec {
                     tabs: try tabs.map { try $0.tab() }
                 )
             default:
-                throw CodecError.invalid
+                throw DecodeError.unsupportedSchemaVersion(schemaVersion)
             }
         }
     }
