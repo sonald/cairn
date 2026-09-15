@@ -1733,15 +1733,21 @@ public final class ReaderTextView {
             for: NSRange(location: location, length: 0)
         )
         updateCurrentLine(byteOffset: byteOffset)
-        view.scrollRangeToVisible(lineRange)
+        revealLineRange(lineRange)
+    }
+
+    private func revealLineRange(_ range: NSRange) {
+        view.scrollRangeToVisible(range)
+        view.showFindIndicator(for: range)
         if let scrollView = view.enclosingScrollView {
             let clipView = scrollView.contentView
-            if clipView.bounds.origin.x != 0 {
-                clipView.scroll(to: NSPoint(x: 0, y: clipView.bounds.origin.y))
-                scrollView.reflectScrolledClipView(clipView)
-            }
+            // The ruler reserves a left inset; zero would hide code behind it.
+            clipView.scroll(to: NSPoint(
+                x: -clipView.contentInsets.left,
+                y: clipView.bounds.origin.y
+            ))
+            scrollView.reflectScrolledClipView(clipView)
         }
-        view.showFindIndicator(for: lineRange)
     }
 
     public func restore(
@@ -1784,7 +1790,7 @@ public final class ReaderTextView {
             )
             let clipView = scrollView.contentView
             clipView.scroll(to: NSPoint(
-                x: clipView.bounds.origin.x,
+                x: -clipView.contentInsets.left,
                 y: lineRect.minY
             ))
             scrollView.reflectScrolledClipView(clipView)
@@ -2032,8 +2038,7 @@ public final class ReaderTextView {
         )
         view.setSelectedRange(range)
         updateCurrentLine(line: line)
-        view.scrollRangeToVisible(range)
-        view.showFindIndicator(for: range)
+        revealLineRange(range)
         return true
     }
 

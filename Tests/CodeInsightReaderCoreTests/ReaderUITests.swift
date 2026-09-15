@@ -365,30 +365,39 @@ func wrapSettingReversesEveryTextKitAndScrollerProperty() {
 @MainActor
 @Test
 func revealResetsHorizontalScrollAfterNavigation() throws {
-    let source = (0..<40)
-        .map { "let value\($0) = \($0);" }
-        .joined(separator: "\n")
-    let highlighted = try RustHighlighter().highlight(bytes: Array(source.utf8))
-    let document = ReaderDocument(
-        bytes: Array(source.utf8),
-        highlightSpans: highlighted.spans,
-        outlineFacets: highlighted.outlineFacets
-    )
-    let (reader, scrollView, window) = renderOffscreen(document)
-    defer { withExtendedLifetime(window) {} }
-
-    let clipView = scrollView.contentView
-    let targetOffset = document.lineTable.lineStarts[20]
-    reader.reveal(byteOffset: targetOffset)
-    let y = clipView.bounds.origin.y
-    #expect(y > 0)
-
-    clipView.scroll(to: NSPoint(x: 120, y: y))
-    scrollView.reflectScrolledClipView(clipView)
-    #expect(clipView.bounds.origin.x == 120)
-
-    reader.reveal(byteOffset: document.lineTable.lineStarts[30])
-    #expect(clipView.bounds.origin.x == 0)
+    _ = NSApplication.shared
+    let source = (0..<80).map { "let value\($0) = \"" + String(repeating: "x", count: 160) + "\";" }.joined(separator: "\n")
+    let file = URL(fileURLWithPath: "/navigation.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) }).load(file: file).document
+    let reader = ReaderTextView(settings: ReaderSettings())
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 240))
+    scroll.documentView = reader.view
+    reader.view.frame = scroll.contentView.bounds
+    let window = NSWindow(contentRect: scroll.frame, styleMask: .borderless, backing: .buffered, defer: false)
+    window.contentView = scroll
+    reader.display(document: document, fileURL: file)
+    reader.configureGutter(in: scroll, lineNumbers: true)
+    window.layoutIfNeeded()
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    for action in ["symbol", "restore", "diff"] {
+        scroll.contentView.scroll(to: NSPoint(x: 150, y: 0))
+        #expect(scroll.contentView.bounds.minX > 0)
+        let offset = document.lineTable.lineStarts[40]
+        switch action {
+        case "symbol":
+            reader.reveal(byteOffset: offset)
+            reader.activate(atByteOffset: offset)
+        case "restore":
+            reader.restore(scrollByteOffset: offset, selectionByteOffset: offset)
+        default:
+            #expect(reader.revealDiffLine(41))
+        }
+        window.layoutIfNeeded()
+        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        #expect(abs(scroll.contentView.bounds.minX + scroll.contentView.contentInsets.left) < 1, "\(action): \(scroll.contentView.bounds)")
+        #expect(scroll.contentView.bounds.minY > 0, "Must still navigate vertically")
+    }
+    withExtendedLifetime(window) {}
 }
 
 @MainActor
