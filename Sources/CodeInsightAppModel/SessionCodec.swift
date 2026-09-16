@@ -468,7 +468,7 @@ package enum SessionCodec {
         let shift = records.count - kept.count
         return NavigationState(
             records: kept,
-            cursor: min(max(history.cursor - shift, 0), kept.count),
+            cursor: max(min(max(history.cursor, 0), records.count) - shift, 0),
             forwardRecord: history.forwardRecord.map(sanitized)
         )
     }

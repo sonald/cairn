@@ -914,6 +914,24 @@ func sessionCodecClampsHistoryCursorAndCapsTrailNodes() throws {
     #expect(decoded.navigationHistory?.cursor == 0)
 }
 
+@Test
+func sessionCodecClampsExtremeCursorBeforeTrimmingHistory() throws {
+    let record = SessionCodec.NavigationState.Record(
+        jump: .init(path: "main.rs", contentID: nil, byteOffset: 0,
+                    line: 1, column: 1, symbolAnchor: nil, revision: nil),
+        trailNodeID: nil
+    )
+    for (cursor, expected) in [(Int.min, 0), (Int.max, 200)] {
+        let restored = SessionCodec.sanitized(
+            .init(records: Array(repeating: record, count: 201),
+                  cursor: cursor, forwardRecord: nil),
+            trailNodeIDs: []
+        )
+        #expect(restored.records.count == 200)
+        #expect(restored.cursor == expected)
+    }
+}
+
 private func sessionCodecInspector()
     -> ReadingSetExcerpt.FrozenInspectorDisplay
 {
