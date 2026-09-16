@@ -27,24 +27,15 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
 
     controller.showWindow(nil)
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
-    let window = try #require(controller.window)
-    let contentView = try #require(window.contentView)
+    _ = try #require(controller.window?.contentView)
     let initialSliders = controller.selfTestReaderAccessibilityElements.filter {
         $0.accessibilityRole?() == .slider
     }
     #expect(initialSliders.count == 1)
     #expect(initialSliders.first?.accessibilityLabel?() == "Line height")
     #expect(controller.selfTestReaderToggleCount == 2)
-    let lineHeight = try #require(readerSettingsDescendants(contentView)
-        .compactMap { $0 as? NSSlider }.first)
-    #expect(window.makeFirstResponder(lineHeight))
-    let arrow = try #require(NSEvent.keyEvent(
-        with: .keyDown, location: .zero, modifierFlags: [],
-        timestamp: 0, windowNumber: window.windowNumber, context: nil,
-        characters: "\u{F703}", charactersIgnoringModifiers: "\u{F703}",
-        isARepeat: false, keyCode: 124
-    ))
-    lineHeight.keyDown(with: arrow)
+    let lineHeight = try #require(initialSliders.first)
+    #expect(lineHeight.accessibilityPerformIncrement?() == true)
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
     #expect(updatedSettings.lineHeightMultiple > ReaderSettings().lineHeightMultiple)
 

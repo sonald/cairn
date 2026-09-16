@@ -63,32 +63,34 @@ final class ReaderSettingsWindowController: NSWindowController {
         func collect(_ view: NSView) -> [NSView] {
             [view] + view.subviews.flatMap(collect)
         }
-        func isVisible(_ view: NSView) -> Bool {
-            var current: NSView? = view
-            while let candidate = current {
-                if candidate.isHidden { return false }
-                current = candidate.superview
+        // SwiftUI can expose virtual AX sliders without NSSlider subviews.
+        // AX frames are screen coordinates; keep all geometry in content coordinates.
+        func frame(_ element: AnyObject) -> NSRect {
+            guard let window, let screenFrame = element.accessibilityFrame?() else {
+                return .zero
             }
-            return view.window === window && !view.bounds.isEmpty
+            return contentView.convert(window.convertFromScreen(screenFrame), from: nil)
         }
-        let controls = collect(contentView).compactMap { $0 as? NSControl }
-            .filter(isVisible)
-        let sliders = controls.compactMap { $0 as? NSSlider }
-        let visualSliders = sliders.filter {
-            $0.accessibilityLabel() != "Line height"
+        let elements = selfTestReaderAccessibilityElements
+        let visualSliders = elements.filter {
+            $0.accessibilityRole?() == .slider
+                && $0.accessibilityLabel?() != "Line height"
         }
-        let visualIdentities = Set(visualSliders.map(ObjectIdentifier.init))
-        func frame(_ view: NSView) -> NSRect {
-            view.convert(view.bounds, to: contentView)
+        let controlRoles: Set<NSAccessibility.Role> = [
+            .slider, .button, .checkBox, .radioButton, .popUpButton, .incrementor, .textField,
+        ]
+        let existingControls = elements.filter { element in
+            guard let role = element.accessibilityRole?(), controlRoles.contains(role) else {
+                return false
+            }
+            return !visualSliders.contains { $0 === element }
         }
-        return (
-            visualSliders.map(frame),
-            controls.filter {
-                !visualIdentities.contains(ObjectIdentifier($0))
-            }.map(frame),
-            visualSliders.first?.enclosingScrollView.map { frame($0.contentView) }
-                ?? contentView.bounds
-        )
+        let frames = visualSliders.map(frame)
+        let visibleFrame = collect(contentView).compactMap { $0 as? NSScrollView }
+            .map { $0.contentView.convert($0.contentView.bounds, to: contentView) }
+            .first { visible in frames.first.map { visible.intersects($0) } ?? false }
+            ?? contentView.bounds
+        return (frames, existingControls.map(frame), visibleFrame)
     }
 
     var selfTestReaderToggleCount: Int {
