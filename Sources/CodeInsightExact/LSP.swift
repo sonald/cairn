@@ -358,6 +358,17 @@ public final class LSPClient: @unchecked Sendable {
         return diagnosticTextLocked
     }
 
+    var diagnosticSummary: String {
+        condition.lock()
+        defer { condition.unlock() }
+        let errors = String(decoding: stderr, as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = errors.isEmpty
+            ? serverDiagnostics.trimmingCharacters(in: .whitespacesAndNewlines)
+            : errors
+        return text.count > 1_000 ? "…" + text.suffix(1_000) : text
+    }
+
     var isQuiescent: Bool {
         condition.lock()
         defer { condition.unlock() }
@@ -365,7 +376,7 @@ public final class LSPClient: @unchecked Sendable {
     }
 
     private var diagnosticTextLocked: String {
-        return (String(data: stderr, encoding: .utf8) ?? "")
+        return String(decoding: stderr, as: UTF8.self)
             + serverDiagnostics
     }
 
@@ -479,7 +490,9 @@ public final class LSPClient: @unchecked Sendable {
         timeout: TimeInterval
     ) throws -> Any {
         let result = try request("initialize", params: [
-            "processId": ProcessInfo.processInfo.processIdentifier,
+            // Sandboxed servers cannot probe the parent with kill(pid, 0).
+            // CProcessGuard already reaps them when the client exits or crashes.
+            "processId": NSNull(),
             "clientInfo": ["name": "CodeInsight", "version": "4"],
             "rootUri": rootURL.absoluteString,
             "workspaceFolders": [[
@@ -567,7 +580,7 @@ public final class LSPClient: @unchecked Sendable {
         }
         if let readError { throw readError }
         if let process, !process.isRunning {
-            let detail = String(data: stderr, encoding: .utf8) ?? ""
+            let detail = String(decoding: stderr, as: UTF8.self)
             throw LSPError.processExited(process.terminationStatus, detail)
         }
         if reachedEOF { throw LSPError.connectionClosed }
@@ -597,7 +610,7 @@ public final class LSPClient: @unchecked Sendable {
         if !shouldContinue() { throw LSPError.cancelled(method) }
         if let readError { throw readError }
         if let process, !process.isRunning {
-            let detail = String(data: stderr, encoding: .utf8) ?? ""
+            let detail = String(decoding: stderr, as: UTF8.self)
             throw LSPError.processExited(process.terminationStatus, detail)
         }
         if reachedEOF || closed { throw LSPError.connectionClosed }
@@ -694,6 +707,9 @@ public final class LSPClient: @unchecked Sendable {
             }
             condition.lock()
             stderr.append(data)
+            if stderr.count > 16_384 {
+                stderr = Data(stderr.suffix(16_384))
+            }
             let observer = diagnosticObserver
             let diagnostic = diagnosticTextLocked
             condition.unlock()

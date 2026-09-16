@@ -3039,6 +3039,47 @@ func rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue()
 }
 
 @Test
+func pyrightExitReadinessIncludesBoundedDiagnosticTail() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let response = try LSPFraming.encode([
+        "jsonrpc": "2.0", "id": 1,
+        "result": ["capabilities": ["definitionProvider": true]],
+    ])
+    let frame = try #require(String(data: response, encoding: .utf8))
+    let output = String(repeating: "x", count: 70_000)
+        + "\nError: Cannot find module pyright-langserver\n"
+    let client = try LSPClient(
+        executableURL: URL(fileURLWithPath: "/bin/sh"),
+        arguments: ["-c", "printf '%s' '\(frame)'; sleep 0.2; printf '%s' '\(output)' >&2; exit 1"]
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("unexpected restart") },
+        projectURL: root,
+        snapshot: DirectorySnapshot(root: root, files: []),
+        requestTimeout: 2,
+        closeGrace: 0.05,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer { session.close() }
+    let deadline = Date().addingTimeInterval(3)
+    while Date() < deadline {
+        if case .unavailable = session.readiness,
+           client.diagnosticText.contains("Cannot find module") { break }
+        Thread.sleep(forTimeInterval: 0.01)
+    }
+    guard case .unavailable(let reason) = session.readiness else {
+        Issue.record("expected exited provider to be unavailable")
+        return
+    }
+    #expect(reason.contains("pyright exited (1)"))
+    #expect(reason.contains("Error: Cannot find module pyright-langserver"))
+    #expect(reason.count < 1_100)
+    #expect(client.diagnosticText.utf8.count <= 16_384)
+}
+
+@Test
 func diagnosticObserverFiresForStderrOutsideClientLock() async throws {
     let client = try LSPClient(
         executableURL: URL(fileURLWithPath: "/bin/sh"),
@@ -3208,6 +3249,60 @@ func ciProcessGuardUnregisterKillsOwnedGroupLeaderAndGrandchild() throws {
             + " grandchildAliveAfterUnregister=\(grandchildAliveAfterUnregister)"
     )
     #expect(!grandchildAliveAfterUnregister)
+}
+
+@Test
+func pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    guard let executable = PyrightProvider.findExecutable(projectURL: root) else {
+        print("SKIP pyright parent-probe regression: pyright-langserver is not installed")
+        return
+    }
+    let cache = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: cache) }
+    try Data("def answer():\n    return 42\n".utf8)
+        .write(to: root.appendingPathComponent("helper.py"))
+    let source = "from helper import answer\nanswer()\n"
+    try Data(source.utf8).write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["helper.py", "main.py"])
+    let session: any ExactSession
+    do {
+        let provider = try PyrightProvider(
+            projectURL: root,
+            executableURL: executable,
+            cacheURL: cache,
+            requestTimeout: 10,
+            closeGrace: 1
+        )
+        session = try provider.prepare(
+            snapshot: snapshot,
+            profile: ExactProfileKey(snapshot: snapshot, language: .python),
+            trustMode: .safe
+        )
+        print("pyright parent-probe regression: \(provider.toolVersion)")
+    } catch ExactError.unavailable(let detail) where detail.contains("sandbox-exec") {
+        print("SKIP pyright parent-probe regression: \(detail); noBareExecution=true")
+        return
+    }
+    defer { session.close() }
+    // Pyright probes the parent every 3 seconds; cross two probes before querying.
+    Thread.sleep(forTimeInterval: 6.5)
+    if case .unavailable(let reason) = session.readiness {
+        Issue.record("Pyright exited before the definition request: \(reason)")
+        return
+    }
+    let call = try #require(source.range(of: "answer()", options: .backwards))
+    let location = try onlyDefinitionLocation(try session.definition(
+        file: "main.py",
+        byteOffset: source[..<call.lowerBound].utf8.count
+    ))
+    #expect(session.readiness == .ready)
+    #expect(location.file == "helper.py")
+    #expect(location.line == 1)
+    #expect(location.column == 5)
+    session.close()
+    #expect(session.readiness == .closed)
 }
 
 @Test

@@ -326,6 +326,14 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
     var readiness: ExactReadiness {
         stateLock.lock()
         defer { stateLock.unlock() }
+        if case .unavailable(let reason) = state {
+            // Read at presentation time so diagnostics arriving after process exit
+            // are included too.
+            let diagnostic = client.diagnosticSummary
+            if !diagnostic.isEmpty {
+                return .unavailable(reason + "\n" + diagnostic)
+            }
+        }
         return state
     }
 

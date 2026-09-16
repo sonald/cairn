@@ -617,6 +617,12 @@ public final class ExactCoordinator {
         }
     }
 
+    public func refreshReadiness() {
+        if case .unavailable(let reason) = active?.session.readiness {
+            readiness = .unavailable(reason)
+        }
+    }
+
     public func refreshTrust() async {
         trustedRepositories = await trustRegistry.trustedRepositories()
     }
@@ -719,8 +725,8 @@ public final class ExactCoordinator {
             )
         } catch {
             guard isCurrent(current) else { return nil }
-            if isUnavailable(current.session.readiness) {
-                readiness = .unavailable(String(describing: error))
+            if case .unavailable(let reason) = current.session.readiness {
+                readiness = .unavailable(reason)
             }
             return .unavailable(String(describing: error))
         }
@@ -769,8 +775,8 @@ public final class ExactCoordinator {
             )
         } catch {
             guard isCurrent(current) else { return nil }
-            if isUnavailable(current.session.readiness) {
-                readiness = .unavailable(String(describing: error))
+            if case .unavailable(let reason) = current.session.readiness {
+                readiness = .unavailable(reason)
             }
             return nil
         }

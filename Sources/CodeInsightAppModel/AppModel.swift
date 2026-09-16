@@ -1817,6 +1817,10 @@ public final class AppModel {
         indexService.flushPersistentIndexCache()
     }
 
+    public func restartExactAnalysis() {
+        prepareExact(generation: generation)
+    }
+
     public func grantCurrentRepositoryTrust() async throws {
         guard let root = projectRoot else { return }
         let trustGeneration = generation

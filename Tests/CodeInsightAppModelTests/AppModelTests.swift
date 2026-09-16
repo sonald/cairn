@@ -1624,6 +1624,49 @@ func rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() async throws {
 
 @MainActor
 @Test
+func restartExactAnalysisRetriesFailedProviderWithoutChangingReadingState() async throws {
+    let root = try temporaryGitProject([
+        "main.rs": "fn main() {}\n",
+        "Cargo.toml": "[package]\nname = \"retry-test\"\nversion = \"0.1.0\"\n"
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let calls = OSAllocatedUnfairLock(initialState: 0)
+    let coordinator = ExactCoordinator(
+        providerFactory: { _, _ in
+            calls.withLock { $0 += 1 }
+            throw ExactError.unavailable("test provider failed")
+        },
+        sandboxAvailable: { true },
+        trustRegistry: TrustRegistry(fileURL: root.appendingPathComponent("trust.json"))
+    )
+    let model = AppModel(indexService: ProjectIndexService(), exactCoordinator: coordinator)
+    defer { coordinator.shutdown() }
+    try await model.openProject(root: root, languages: [.rust])
+    try #require(model.snapshotPhase == .fullReady, "\(String(describing: model.projectFailureReason))")
+    model.navigate(to: root.appendingPathComponent("main.rs"))
+    #expect(await testWaitUntil("initial provider fails") {
+        if case .unavailable = coordinator.readiness { return true }
+        return false
+    })
+    let generation = model.generation
+    let selectedFile = model.selectedFile
+    let trust = coordinator.trustMode
+    let before = calls.withLock { $0 }
+    try #require(before > 0)
+    model.restartExactAnalysis()
+    #expect(await testWaitUntil("manual retry finishes") {
+        if case .unavailable = coordinator.readiness {
+            return calls.withLock { $0 } == before + 1
+        }
+        return false
+    })
+    #expect(model.generation == generation)
+    #expect(model.selectedFile == selectedFile)
+    #expect(coordinator.trustMode == trust)
+}
+
+@MainActor
+@Test
 func sameProfileNavigationDoesNotResetContextOrRelationIdentity() async throws {
     let root = try temporaryGitProject([
         "main.rs": "fn a() {}\n",
@@ -2859,21 +2902,22 @@ func contextWindowPresentsLocalBindingKind() async throws {
 
 @MainActor
 @Test
-func contextWindowExplainsUnresolvedExternalCrate() async throws {
-    let source = "use std::io::Read;\nfn f() { Read(); }"
-    let root = try temporaryProject(["main.rs": source])
-    defer { try? FileManager.default.removeItem(at: root) }
-    let session = try ProjectIndexer().index(root: root)
-    let model = ContextWindowModel()
-    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+func contextWindowExplainsUnresolvedImport() async throws {
+    for (language, file, source, usage) in [
+        (LanguageID.rust, "main.rs", "use std::io::Read;\nfn f() { Read(); }", "Read();"),
+        (.python, "main.py", "from missing_module import helper\nhelper()\n", "helper()"),
+    ] {
+        let root = try temporaryProject([file: source])
+        defer { try? FileManager.default.removeItem(at: root) }
+        let session = try ProjectIndexer().index(root: root, language: language)
+        let model = ContextWindowModel()
+        model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
 
-    model.tokenClicked(
-        file: "main.rs",
-        offset: byteOffset(of: "Read();", in: source)
-    )
-    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
+        model.tokenClicked(file: file, offset: byteOffset(of: usage, in: source))
+        #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
-    #expect(model.selectedCandidate?.excerpt == "external crate — not resolved (M1)")
+        #expect(model.selectedCandidate?.excerpt == "Import target could not be resolved.")
+    }
 }
 
 private actor ControlledIndexService: IndexService {

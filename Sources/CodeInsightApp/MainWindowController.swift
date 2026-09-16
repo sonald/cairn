@@ -1676,26 +1676,52 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     @objc private func showExactStatusDetails(_ sender: NSButton) {
+        model.exactCoordinator.refreshReadiness()
+        renderExactStatus()
         let popover = exactStatusPopover
         let controller = NSViewController()
-        let detail = NSTextField(wrappingLabelWithString: exactLabel.stringValue + "\n\n"
+        let detail = NSTextView(frame: NSRect(x: 0, y: 0, width: 328, height: 300))
+        detail.string = exactLabel.stringValue + "\n\n"
             + (exactLabel.toolTip ?? "Provider information is not available yet.")
-            + "\n\nLimited analysis can omit dependency results. Open Settings → Exact to inspect the provider. Repository trust remains unchanged.")
+            + "\n\nLimited analysis can omit dependency results. Restart Analysis retries the current provider without changing repository trust."
+        detail.isEditable = false
         detail.isSelectable = true
         detail.font = .systemFont(ofSize: 12)
-        detail.translatesAutoresizingMaskIntoConstraints = false
+        detail.drawsBackground = false
+        detail.textContainer?.widthTracksTextView = true
+        detail.autoresizingMask = [.width]
+        let scroll = NSScrollView()
+        scroll.drawsBackground = false
+        scroll.hasVerticalScroller = true
+        scroll.documentView = detail
         controller.view = NSView()
-        controller.view.addSubview(detail)
+        let restart = NSButton(title: "Restart Analysis", target: self, action: #selector(restartExactAnalysis(_:)))
+        restart.bezelStyle = .rounded
+        restart.isEnabled = model.snapshotPhase == .fullReady
+            && model.exactCoordinator.readiness != .preparing
+        let stack = NSStackView(views: [scroll, restart])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 12
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        controller.view.addSubview(stack)
         NSLayoutConstraint.activate([
-            detail.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor, constant: 16),
-            detail.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor, constant: -16),
-            detail.topAnchor.constraint(equalTo: controller.view.topAnchor, constant: 16),
-            detail.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor, constant: -16),
+            stack.leadingAnchor.constraint(equalTo: controller.view.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: controller.view.trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: controller.view.topAnchor, constant: 16),
+            stack.bottomAnchor.constraint(equalTo: controller.view.bottomAnchor, constant: -16),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(equalToConstant: 300),
             controller.view.widthAnchor.constraint(equalToConstant: 360),
         ])
         popover.contentViewController = controller
         popover.behavior = .transient
         popover.show(relativeTo: sender.bounds, of: sender, preferredEdge: .maxY)
+    }
+
+    @objc private func restartExactAnalysis(_ sender: NSButton) {
+        exactStatusPopover.close()
+        model.restartExactAnalysis()
     }
 
     var canShowResolutionInspector: Bool {

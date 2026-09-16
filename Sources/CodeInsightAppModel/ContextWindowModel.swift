@@ -437,7 +437,7 @@ public final class ContextWindowModel {
             if resolution.certainty == .unresolved,
                resolution.target.localKind == .importBinding
             {
-                text = "external crate — not resolved (M1)"
+                text = "Import target could not be resolved."
             } else if let contentID = contentID(
                 at: resolution.target.pathID,
                 in: session
