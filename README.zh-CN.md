@@ -57,7 +57,7 @@ Cairn 的文件树会显示跳过目录之外的常规非符号链接文件。�
 3. 使用 `⌥⌘T` 打开 Trail Details 或 Branches，检查当前路径，并在不丢弃兄弟分支的前提下恢复较早节点。
 4. 在 Relations 中使用 **Freeze Results**，或在 Trail 中使用 **Freeze Path as Reading Set**。生成的 Reading Set 会保留冻结源码和证据，并可在 Cairn 重启后恢复。
 
-Reading Trail 只属于当前应用会话，重启后按设计从空状态开始。Reading Set 是冻结证据集，不是可编辑的整理清单。折叠只作用于文件 Reader：`⌥⌘0/1/2` 分别选择 Full、Structure、Overview，`⌥⌘F` 聚焦当前作用域。当前产品界面文案为英文，Cairn 尚未提供完整本地化。
+每个项目保存各自的阅读现场：标签（含预览状态与最近使用顺序）、当前文件与位置、带分支的 Reading Trail 以及前进/后退状态，在退出、关窗或切换项目后重新打开时一并恢复。恢复的 Trail 证据会标注为来自更早会话的冻结快照；需要当前证据请重新查询关系。**File → Clear Reading Session…** 会在明确确认后丢弃该项目的保存现场。Reading Set 是冻结证据集，不是可编辑的整理清单。折叠只作用于文件 Reader：`⌥⌘0/1/2` 分别选择 Full、Structure、Overview，`⌥⌘F` 聚焦当前作用域。当前产品界面文案为英文，Cairn 尚未提供完整本地化。
 
 ## 书签与笔记
 

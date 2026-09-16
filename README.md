@@ -57,7 +57,7 @@ Non-source previews do not provide outline, folding, relations, bookmarks, compa
 3. Use `⌥⌘T` to open Trail Details or Branches, inspect the current route, and restore an earlier node without discarding sibling branches.
 4. Use **Freeze Results** in Relations or **Freeze Path as Reading Set** in the Trail. The resulting Reading Set keeps frozen source and evidence and can be restored after restarting Cairn.
 
-The Reading Trail belongs to the current app session and intentionally starts empty after a restart. A Reading Set is a frozen evidence set, not an editable curation list. Folding applies only to a file Reader: `⌥⌘0/1/2` selects Full, Structure, or Overview, and `⌥⌘F` focuses the current scope. Product UI labels are currently English; Cairn does not yet provide full localization.
+Each project keeps its own reading session: tabs (with their preview state and recency order), the current file and position, the Reading Trail with its branches, and Back/Forward state all return when the project reopens after quitting, closing the window, or switching projects. Restored trail evidence is labeled as frozen in an earlier session; re-query a relation for current evidence. **File → Clear Reading Session…** discards a project's saved scene after an explicit confirmation. A Reading Set is a frozen evidence set, not an editable curation list. Folding applies only to a file Reader: `⌥⌘0/1/2` selects Full, Structure, or Overview, and `⌥⌘F` focuses the current scope. Product UI labels are currently English; Cairn does not yet provide full localization.
 
 ## Bookmarks and Notes
 

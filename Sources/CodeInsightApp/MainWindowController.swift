@@ -2380,6 +2380,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.staleIndexNotice
             _ = model.sessionSaveNotice
             _ = model.sessionLoadNotice
+            _ = model.isRestoringSession
             _ = model.isRefreshingIndex
             _ = model.indexRefreshNotice
             _ = model.projectFailureReason
@@ -2866,6 +2867,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         let indexStatus = [
             focusNotice,
+            model.isRestoringSession ? "Restoring reading session…" : nil,
             initialIndexStatus,
             model.isRefreshingIndex ? "Refreshing index…" : nil,
             model.indexRefreshNotice,

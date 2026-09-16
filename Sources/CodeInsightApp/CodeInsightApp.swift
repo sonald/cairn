@@ -223,6 +223,33 @@ private struct CodeInsightApplication {
         if let bookmarkRestartSessionURL {
             runBookmarkSelfTestRestart(sessionURL: bookmarkRestartSessionURL)
         }
+        // Two-process reading-session acceptance: the first process builds
+        // a real reading state and checkpoints it; the restart process
+        // relaunches the same build and verifies the restored scene.
+        // Both need CAIRN_SESSION_SELFTEST_URL and an isolated defaults
+        // suite so no user data is touched.
+        let sessionSelfTestRoot = arguments.firstIndex(of: "--self-test-session")
+            .flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+        if arguments.contains("--self-test-session"), sessionSelfTestRoot == nil {
+            FileHandle.standardError.write(Data(
+                "usage: codeinsight-app --self-test-session <rust-project-root>\n".utf8
+            ))
+            Darwin.exit(2)
+        }
+        let sessionSelfTestRestart = arguments.contains("--self-test-session-restart")
+        let sessionSelfTestActive = sessionSelfTestRoot != nil || sessionSelfTestRestart
+        if sessionSelfTestActive,
+           ProcessInfo.processInfo.environment["CAIRN_SESSION_SELFTEST_URL"] == nil
+            || ProcessInfo.processInfo.environment["CAIRN_SESSION_SELFTEST_DEFAULTS"] == nil
+        {
+            FileHandle.standardError.write(Data((
+                "usage: CAIRN_SESSION_SELFTEST_URL=<session.json> "
+                    + "CAIRN_SESSION_SELFTEST_DEFAULTS=<suite> "
+                    + "codeinsight-app --self-test-session[-restart]\n"
+            ).utf8))
+            Darwin.exit(2)
+        }
         let delegate: AppDelegate
         if let relationTimingTarget {
             let temporaryRoot = FileManager.default.temporaryDirectory
@@ -391,9 +418,36 @@ private struct CodeInsightApplication {
                 // snapshot is written, and launch reads the same pointer.
                 let launchRecentStore = RecentProjectsStore()
                 let appModel: AppModel
-                if let bookmarkSessionURL {
+                if let sessionSelfTestURL = sessionSelfTestActive
+                    ? ProcessInfo.processInfo.environment[
+                        "CAIRN_SESSION_SELFTEST_URL"
+                    ].map(URL.init(fileURLWithPath:))
+                    : nil,
+                   let suiteName = ProcessInfo.processInfo.environment[
+                       "CAIRN_SESSION_SELFTEST_DEFAULTS"
+                   ],
+                   let isolatedDefaults = UserDefaults(suiteName: suiteName)
+                {
+                    let isolatedStore = RecentProjectsStore(
+                        defaults: isolatedDefaults
+                    )
+                    appModel = AppModel(
+                        sessionURL: sessionSelfTestURL,
+                        recentProjectsStore: isolatedStore
+                    )
+                    delegate = AppDelegate(
+                        startedAt: startedAt,
+                        model: appModel,
+                        recentProjectsStore: isolatedStore
+                    )
+                } else if let bookmarkSessionURL {
                     appModel = AppModel(
                         sessionURL: bookmarkSessionURL,
+                        recentProjectsStore: launchRecentStore
+                    )
+                    delegate = AppDelegate(
+                        startedAt: startedAt,
+                        model: appModel,
                         recentProjectsStore: launchRecentStore
                     )
                 } else {
@@ -403,12 +457,12 @@ private struct CodeInsightApplication {
                             sessionURL: AppModel.defaultSessionURL,
                             recentProjectsStore: launchRecentStore
                         )
+                    delegate = AppDelegate(
+                        startedAt: startedAt,
+                        model: appModel,
+                        recentProjectsStore: launchRecentStore
+                    )
                 }
-                delegate = AppDelegate(
-                    startedAt: startedAt,
-                    model: appModel,
-                    recentProjectsStore: launchRecentStore
-                )
             }
         }
         if let pythonRoot = pythonSelfTestRoot {
@@ -512,6 +566,10 @@ private struct CodeInsightApplication {
                 ))
             } else if let bookmarkSelfTestRoot {
                 delegate.runBookmarkSelfTest(root: bookmarkSelfTestRoot)
+            } else if let sessionSelfTestRoot {
+                delegate.runSessionSelfTest(root: sessionSelfTestRoot)
+            } else if sessionSelfTestRestart {
+                delegate.runSessionSelfTestRestart()
             } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
             } else if let nonSourceSelfTestRoot {
@@ -8660,6 +8718,261 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             channel: channel,
             status: oneTab.pass && twoTabs.pass ? 0 : 1
         )
+    }
+
+    /// Reading-session acceptance, first process: builds a real reading
+    /// scene (tabs, preview-free strip, semantic trail with a sibling
+    /// branch, back/forward state, reading position) against the real
+    /// project-open entry, checkpoints it, and records expectations for
+    /// the restart process. All state goes through the env-provided
+    /// isolated session URL and defaults suite.
+    func runSessionSelfTest(root: URL) -> Never {
+        let channel = "session"
+        launch(offscreen: false)
+        guard let controller = windowController,
+              let window = controller.window
+        else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "window unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        window.setContentSize(NSSize(width: 1_200, height: 800))
+        window.orderFrontRegardless()
+        controller.openProject(root: root)
+        guard waitUntil(timeout: 90, condition: {
+            if case .ready = self.model.projectState { return true }
+            return false
+        }), model.projectRoot?.standardizedFileURL == root.standardizedFileURL
+        else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "project not ready"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let main = root.appendingPathComponent("main.rs")
+        let other = root.appendingPathComponent("other.rs")
+        let third = root.appendingPathComponent("third.rs")
+        controller.openFileInNewTabForSelfTest(main)
+        controller.openFileInNewTabForSelfTest(other)
+        controller.openFileInNewTabForSelfTest(third)
+        guard waitUntil(timeout: 15, condition: {
+            self.model.tabStrip.tabs.count == 3
+        }) else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "tabs unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        // Trail with a sibling branch: main → other, back to main, main →
+        // third. Explicit semantic requests so the shared pipeline records
+        // both history and trail.
+        func jump(_ file: URL, offset: UInt32) -> JumpRecord {
+            JumpRecord(
+                path: file.lastPathComponent,
+                contentID: nil,
+                byteOffset: offset,
+                line: 1,
+                column: offset + 1,
+                symbolAnchor: nil,
+                snapshotID: model.currentSnapshotID,
+                revision: model.currentRevision
+            )
+        }
+        func semantic(_ file: URL, offset: UInt32, leaving: JumpRecord?) {
+            model.navigate(
+                NavigationRequest(
+                    destination: SourceDestination(file: file, byteOffset: offset),
+                    cause: .relation,
+                    policy: .explicitSemantic
+                ),
+                leaving: leaving
+            )
+        }
+        semantic(other, offset: 0, leaving: jump(main, offset: 0))
+        model.goBack(from: jump(other, offset: 0))
+        guard waitUntil(timeout: 10, condition: {
+            self.model.readingTrail.edges.count == 1
+                && self.model.navigationHistory.canGoForward
+                // Wait for the back's replay to publish before the next
+                // navigation, so the two never race for the active tab.
+                && self.model.activeNavigationRequest?.destination.file
+                    .standardizedFileURL == main.standardizedFileURL
+        }) else {
+            Self.writeJSON([
+                "channel": channel,
+                "passed": false,
+                "error": "back unavailable",
+            ] as [String: Any])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        semantic(third, offset: 0, leaving: jump(main, offset: 0))
+        guard waitUntil(timeout: 15, condition: {
+            controller.displayedReaderFile?.standardizedFileURL
+                == third.standardizedFileURL
+                && self.model.tabStrip.activeDocument != nil
+        }) else {
+            Self.writeJSON([
+                "channel": channel,
+                "passed": false,
+                "error": "reader unavailable",
+                "displayed": controller.displayedReaderFile?.path ?? "",
+                "activeTab": controller.selfTestActiveTabFile?.path ?? "",
+                "activeDocument": self.model.tabStrip.activeDocument == nil,
+                "lastRequest": self.model.activeNavigationRequest?.destination.file
+                    .lastPathComponent ?? "",
+                "tabs": self.model.tabStrip.tabs.map {
+                    $0.fileURL?.lastPathComponent ?? ""
+                },
+                "activeIndex": self.model.tabStrip.activeIndex ?? -1,
+                "trailEdges": self.model.readingTrail.edges.count,
+            ] as [String: Any])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        // Reading position on the active tab through the real reader
+        // callbacks, then flush the checkpoint.
+        controller.setReadingPositionForSelfTest(
+            scrollByteOffset: 3,
+            selectionByteOffset: 7
+        )
+        pumpRunLoop()
+        controller.checkpointSessionSynchronously()
+
+        let tabs = model.tabStrip.tabs
+        let expectations: [String: Any] = [
+            "root": root.standardizedFileURL.path,
+            "tabPaths": tabs.map { $0.fileURL?.lastPathComponent ?? "" },
+            "activeIndex": model.tabStrip.activeIndex ?? -1,
+            "scrollAnchor": tabs[model.tabStrip.activeIndex ?? 0]
+                .scrollAnchor?.byteOffset ?? UInt32.max,
+            "selectionAnchor": tabs[model.tabStrip.activeIndex ?? 0]
+                .selectionAnchor?.byteOffset ?? UInt32.max,
+            "trailNodes": model.readingTrail.orderedNodes().count,
+            "trailEdges": model.readingTrail.edges.count,
+            "historyCursor": model.navigationHistory.cursor,
+            "historyRecords": model.navigationHistory.records.count,
+            "canGoBack": model.navigationHistory.canGoBack,
+            "canGoForward": model.navigationHistory.canGoForward,
+        ]
+        writeSessionSelfTestExpectations(expectations)
+        let saved = model.loadSessionSnapshot(forProject: root).snapshot
+        let checks: [String: Bool] = [
+            "saved": saved != nil,
+            "savedTabs": saved?.tabs.count == 3,
+            "savedTrail": saved?.readingTrail?.edges.count == 2,
+            "savedHistory": saved?.navigationHistory?.records.count
+                == model.navigationHistory.records.count,
+            "pointer": recentProjectsStore.lastSessionProjectPath
+                == root.standardizedFileURL.path,
+        ]
+        let passed = checks.values.allSatisfy { $0 }
+        Self.writeJSON([
+            "channel": channel,
+            "passed": passed,
+            "checks": checks,
+            "expectations": expectations,
+        ] as [String: Any])
+        Self.exitSelfTest(channel: channel, status: passed ? 0 : 1)
+    }
+
+    /// Reading-session acceptance, second process: relaunches the same
+    /// build against the isolated store; the normal launch path (pointer
+    // → per-project snapshot → restoreSession) must rebuild the scene the
+    /// first process recorded.
+    func runSessionSelfTestRestart() -> Never {
+        let channel = "session-restart"
+        launch(offscreen: false)
+        guard let controller = windowController else {
+            Self.writeJSON(["channel": channel, "passed": false, "error": "window unavailable"])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        guard let expected = readSessionSelfTestExpectations() else {
+            Self.writeJSON([
+                "channel": channel,
+                "passed": false,
+                "error": "expectations unavailable",
+            ])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let rootPath = expected["root"] as? String ?? ""
+        let restored = waitUntil(timeout: 120, condition: {
+            self.model.projectRoot?.standardizedFileURL.path == rootPath
+                && self.model.snapshotPhase == .fullReady
+                && self.model.tabStrip.tabs.count == (expected["tabPaths"] as? [String])?.count
+        })
+        guard restored else {
+            Self.writeJSON([
+                "channel": channel,
+                "passed": false,
+                "error": "restore did not complete",
+                "tabs": self.model.tabStrip.tabs.count,
+            ])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        let tabPaths = model.tabStrip.tabs.map {
+            $0.fileURL?.lastPathComponent ?? ""
+        }
+        let activeIndex = model.tabStrip.activeIndex ?? -1
+        let trailNodes = model.readingTrail.orderedNodes().count
+        let trailEdges = model.readingTrail.edges.count
+        let historyCursor = model.navigationHistory.cursor
+        let historyRecords = model.navigationHistory.records.count
+        let checks: [String: Bool] = [
+            "tabOrder": tabPaths == (expected["tabPaths"] as? [String] ?? []),
+            "activeTab": activeIndex == (expected["activeIndex"] as? Int ?? -1),
+            "scrollAnchor": Int(model.tabStrip.activeTab?.scrollAnchor?.byteOffset ?? .max)
+                == (expected["scrollAnchor"] as? Int ?? -1),
+            "selectionAnchor": Int(
+                model.tabStrip.activeTab?.selectionAnchor?.byteOffset ?? .max
+            ) == (expected["selectionAnchor"] as? Int ?? -1),
+            "trailNodes": trailNodes == (expected["trailNodes"] as? Int ?? -1),
+            "trailEdges": trailEdges == (expected["trailEdges"] as? Int ?? -1),
+            "trailActive": model.readingTrail.activeNodeID != nil,
+            "historyCursor": historyCursor == (expected["historyCursor"] as? Int ?? -1),
+            "historyRecords": historyRecords == (expected["historyRecords"] as? Int ?? -1),
+            "canGoBack": model.navigationHistory.canGoBack
+                == (expected["canGoBack"] as? Bool ?? false),
+            "canGoForward": model.navigationHistory.canGoForward
+                == (expected["canGoForward"] as? Bool ?? false),
+            "readerDisplaysActiveTab": {
+                guard tabPaths.indices.contains(activeIndex) else { return false }
+                return controller.selfTestActiveTabFile?.lastPathComponent
+                    == tabPaths[activeIndex]
+            }(),
+        ]
+        let passed = checks.values.allSatisfy { $0 }
+        let output: [String: Any] = [
+            "channel": channel,
+            "passed": passed,
+            "processRestart": true,
+            "checks": checks,
+            "tabPaths": tabPaths,
+            "trailEdges": trailEdges,
+            "historyCursor": historyCursor,
+        ]
+        if let data = try? JSONSerialization.data(
+            withJSONObject: output,
+            options: [.sortedKeys]
+        ) {
+            FileHandle.standardOutput.write(data)
+            FileHandle.standardOutput.write(Data([0x0A]))
+        }
+        Darwin.exit(passed ? 0 : 1)
+    }
+
+    private func writeSessionSelfTestExpectations(_ value: [String: Any]) {
+        guard let path = ProcessInfo.processInfo.environment[
+            "CAIRN_SESSION_SELFTEST_EXPECTATIONS"
+        ] else { return }
+        if let data = try? JSONSerialization.data(
+            withJSONObject: value,
+            options: [.sortedKeys]
+        ) {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    private func readSessionSelfTestExpectations() -> [String: Any]? {
+        guard let path = ProcessInfo.processInfo.environment[
+            "CAIRN_SESSION_SELFTEST_EXPECTATIONS"
+        ],
+            let data = try? Data(contentsOf: URL(fileURLWithPath: path))
+        else { return nil }
+        return (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
     }
 
     func runBookmarkSelfTest(root: URL) -> Never {

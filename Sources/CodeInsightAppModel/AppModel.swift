@@ -530,6 +530,9 @@ public final class AppModel {
     /// Set when loading a saved session hit a recoverable problem (corrupt
     /// data, newer schema, unavailable project directory).
     public private(set) var sessionLoadNotice: String?
+    /// True while a saved reading session is being restored; the status
+    /// bar shows the restoring hint instead of a modal.
+    public private(set) var isRestoringSession = false
     /// Set when an index-derived navigation was rejected because the target
     /// content no longer matches the indexed bytes. Cleared when a semantic
     /// navigation verifies again or the workspace republishes a snapshot.
@@ -1346,6 +1349,8 @@ public final class AppModel {
         overridingLanguages: [LanguageID]? = nil
     ) async -> Bool {
         cancelPendingSessionCheckpoint()
+        isRestoringSession = true
+        defer { isRestoringSession = false }
         let root = URL(
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
@@ -3070,16 +3075,96 @@ public final class AppModel {
     }
 
     public func goBack(from current: JumpRecord) {
-        guard let record = navigationHistory.goBack(from: NavigationRecord(
+        let currentRecord = NavigationRecord(
             jump: current,
             trailNodeID: readingTrail.activeNodeID
-        )) else { return }
-        replay(record)
+        )
+        guard let record = navigationHistory.peekBack(from: currentRecord)
+        else { return }
+        commitHistoryNavigation(record) { [weak self] in
+            guard let self else { return }
+            _ = navigationHistory.goBack(from: currentRecord)
+            replay(record)
+        }
     }
 
     public func goForward() {
-        guard let record = navigationHistory.goForwardRecord() else { return }
-        replay(record)
+        guard let record = navigationHistory.peekForward() else { return }
+        commitHistoryNavigation(record) { [weak self] in
+            guard let self else { return }
+            _ = navigationHistory.goForwardRecord()
+            replay(record)
+        }
+    }
+
+    /// Back/Forward must not consume the cursor for a destination that
+    /// cannot be shown: the target is validated first, and a restored
+    /// record that points at another version verifies that version before
+    /// the cursor moves. Cancellation across generations simply drops the
+    /// commit; it never rolls back a newer project's state.
+    private func commitHistoryNavigation(
+        _ record: NavigationRecord,
+        commit: @escaping () -> Void
+    ) {
+        guard canReplayTarget(record) else {
+            replayNotice =
+                "that destination is unavailable; the current view was kept"
+            return
+        }
+        guard record.jump.snapshotID == nil,
+              !exactLocationIsInDependency(record.jump.path),
+              let revision = record.jump.revision,
+              revision != currentRevision,
+              let root = projectRoot
+        else {
+            commit()
+            return
+        }
+        let generationAtRequest = generation
+        let navigationGenerationAtRequest = navigationGeneration
+        let languages = projectLanguages
+        Task { [weak self] in
+            let available = await Task.detached {
+                (try? CommitSnapshot(
+                    repositoryURL: root,
+                    revision: revision
+                )) != nil
+            }.value
+            guard let self,
+                  canPublishWorkspaceResult(
+                      generation: generationAtRequest,
+                      root: root,
+                      languages: languages
+                  ),
+                  navigationGeneration == navigationGenerationAtRequest
+            else { return }
+            guard available else {
+                replayNotice =
+                    "that saved version is unavailable; the current view was kept"
+                return
+            }
+            commit()
+        }
+    }
+
+    /// Synchronous reachability of a replay target: inside the project
+    /// (or a dependency path) and present on disk when it is a source
+    /// file the language modes know.
+    private func canReplayTarget(_ record: NavigationRecord) -> Bool {
+        let jump = record.jump
+        if exactLocationIsInDependency(jump.path) {
+            return FileManager.default.fileExists(atPath: jump.path)
+        }
+        guard let root = fileTree?.root else { return false }
+        let file = root.appendingPathComponent(jump.path).standardizedFileURL
+        guard file.pathComponents.starts(with: root.pathComponents),
+              file.pathComponents.count > root.pathComponents.count
+        else { return false }
+        if languageMode(for: file) == nil {
+            return fileTree?.selectionPath(for: file)?.last.map { !$0.isDirectory }
+                ?? false
+        }
+        return FileManager.default.fileExists(atPath: file.path)
     }
 
     public func restoreTrailNode(_ id: TrailNodeID) {

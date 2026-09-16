@@ -1348,59 +1348,42 @@ func sessionCheckpointPersistsAndRestoresNavigationHistoryAndTrail() async throw
 @MainActor
 @Test
 func failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() async throws {
-    let root = try sessionRestoreProject(["a.rs": "fn alpha() {}\n"])
+    let root = try sessionRestoreProject([
+        "a.rs": "fn alpha() {}\n",
+        "b.rs": "fn beta() {}\n",
+    ])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel(indexService: SessionRestoreIndexService())
     try model.openProject(root: root, language: .rust)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
     })
-    let first = JumpRecord(
-        path: "a.rs",
-        contentID: nil,
-        byteOffset: 0,
-        line: 1,
-        column: 1,
-        symbolAnchor: "alpha",
-        snapshotID: nil
-    )
-    model.navigate(
-        NavigationRequest(
-            destination: SourceDestination(
-                file: root.appendingPathComponent("a.rs"),
-                byteOffset: 0
-            ),
-            cause: .outline,
-            policy: .explicitSemantic
-        )
-    )
-    model.navigate(
-        NavigationRequest(
-            destination: SourceDestination(
-                file: root.appendingPathComponent("a.rs"),
-                byteOffset: 4
-            ),
-            cause: .relation,
-            policy: .explicitSemantic
-        ),
-        leaving: first
-    )
-    model.goBack(from: JumpRecord(
-        path: "a.rs",
+    // A concrete reading position on a real file, so the viewport is
+    // observable when a later replay fails.
+    let live = JumpRecord(
+        path: "b.rs",
         contentID: nil,
         byteOffset: 4,
         line: 1,
         column: 5,
-        symbolAnchor: "alpha",
+        symbolAnchor: "beta",
         snapshotID: nil
-    ))
-    let cursorBefore = model.navigationHistory.cursor
-    let activeBefore = model.readingTrail.activeNodeID
-
-    // A replay whose target file cannot be resolved must not consume the
-    // cursor or move the active trail node.
+    )
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("b.rs"),
+                byteOffset: 4
+            ),
+            cause: .relation,
+            policy: .explicitSemantic
+        )
+    )
+    try #require(await testWaitUntil("viewport established") {
+        model.selectedFile?.lastPathComponent == "b.rs"
+    })
     model.navigationHistory.push(NavigationRecord(jump: JumpRecord(
-        path: "../outside.rs",
+        path: "missing.rs",
         contentID: nil,
         byteOffset: 0,
         line: 1,
@@ -1408,11 +1391,30 @@ func failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() async throws {
         symbolAnchor: nil,
         snapshotID: nil
     )))
-    let cursorAfterPush = model.navigationHistory.cursor
-    model.goForward()
-    #expect(model.navigationHistory.cursor == cursorAfterPush)
+    model.navigationHistory.push(NavigationRecord(jump: live))
+    // One valid hop back to the live record; let its replay settle so
+    // the baseline below reflects the post-replay state.
+    model.goBack(from: live)
+    try #require(await testWaitUntil("valid back consumed") {
+        model.navigationHistory.cursor == 1
+            && model.activeNavigationRequest?.cause == .historyReplay
+    })
+    try await Task.sleep(for: .milliseconds(150))
+    let cursorBefore = model.navigationHistory.cursor
+    let activeBefore = model.readingTrail.activeNodeID
+    let selectedBefore = model.selectedFile
+
+    // The next record back points at a file that does not exist: the
+    // cursor, active trail node, and viewport must all stay put.
+    model.goBack(from: live)
+    #expect(model.navigationHistory.cursor == cursorBefore)
     #expect(model.readingTrail.activeNodeID == activeBefore)
-    #expect(model.navigationHistory.cursor >= cursorBefore)
+    #expect(model.selectedFile == selectedBefore)
+    #expect(model.replayNotice?.contains("destination is unavailable") == true)
+
+    // The failed back leaves the strip consistent: the earlier forward
+    // hop is still recorded, so forward stays available.
+    #expect(model.navigationHistory.canGoForward)
 }
 
 private func encodeJSONString(_ value: String) -> String {

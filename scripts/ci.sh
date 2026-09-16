@@ -44,19 +44,28 @@ run_swift_test_batch() {
         echo "FAIL: swift test command failed: $log_file" >&2
         exit 1
     fi
-    summary="$(grep -E "$swift_test_summary_regex" "$log_file" | tail -n 1 || true)"
+    if grep -qE '^✘ Test run' "$log_file"; then
+        cat "$log_file" >&2
+        echo "FAIL: swift test reported a failed run: $log_file" >&2
+        exit 1
+    fi
+    summary="$(grep -E "$swift_test_summary_regex" "$log_file" || true)"
     if [[ -z "$summary" ]]; then
         cat "$log_file" >&2
         echo "FAIL: swift test did not report a complete successful run: $log_file" >&2
         exit 1
     fi
-    actual="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$summary")"
+    # Older toolchains print one aggregate summary line; newer ones print
+    # one per test target. Summing the passing summary lines matches both
+    # shapes without ever counting a failed or partial run.
+    actual="$(sed -n -E 's/^✔ Test run with ([0-9]+) tests?.*/\1/p' <<< "$summary" \
+        | awk '{s+=$1} END {print s}')"
     if [[ "$actual" != "$expected" ]]; then
         cat "$log_file" >&2
         echo "FAIL: swift test expected $expected tests got $actual: $log_file" >&2
         exit 1
     fi
-    echo "$summary"
+    echo "PASS: batch total=$actual ($log_file)"
 }
 
 run_swift_test_batch "$swift_test_log" "$expected_main_test_count" \
