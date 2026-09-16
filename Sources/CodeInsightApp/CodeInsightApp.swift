@@ -618,6 +618,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     func applicationWillTerminate(_ notification: Notification) {
         windowController?.checkpointSessionSynchronously()
         model.exactCoordinator.shutdown()
+        if ProcessInfo.processInfo.arguments.contains("--self-test-session") {
+            Self.writeJSON(["channel": "session-termination", "willTerminate": true])
+        }
     }
 
     func applicationDidResignActive(_ notification: Notification) {
@@ -8823,50 +8826,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             ] as [String: Any])
             Self.exitSelfTest(channel: channel, status: 1)
         }
-        // Reading position on the active tab through the real reader
-        // callbacks, then flush the checkpoint.
+        // Choose a real line in the middle of the fixture, far from the
+        // top of the viewport. Do not checkpoint here: normal termination
+        // must capture the final Reader position before debounce fires.
+        let bytes = (try? Data(contentsOf: third)).map(Array.init) ?? []
+        let lineStart = bytes.indices.first { $0 > bytes.count / 2 && bytes[$0 - 1] == 10 } ?? 0
+        let selection = UInt32(min(lineStart + 4, max(0, bytes.count - 1)))
         controller.setReadingPositionForSelfTest(
-            scrollByteOffset: 3,
-            selectionByteOffset: 7
+            scrollByteOffset: UInt32(lineStart), selectionByteOffset: selection
         )
-        pumpRunLoop()
-        controller.checkpointSessionSynchronously()
+        guard waitUntil(timeout: 10, condition: {
+            controller.selfTestReaderCaretByteOffset == selection
+                && controller.selfTestReadingByteOffset != nil
+        }) else { Self.exitSelfTest(channel: channel, status: 1) }
 
         let tabs = model.tabStrip.tabs
         let expectations: [String: Any] = [
             "root": root.standardizedFileURL.path,
             "tabPaths": tabs.map { $0.fileURL?.lastPathComponent ?? "" },
             "activeIndex": model.tabStrip.activeIndex ?? -1,
-            "scrollAnchor": tabs[model.tabStrip.activeIndex ?? 0]
-                .scrollAnchor?.byteOffset ?? UInt32.max,
-            "selectionAnchor": tabs[model.tabStrip.activeIndex ?? 0]
-                .selectionAnchor?.byteOffset ?? UInt32.max,
-            "trailNodes": model.readingTrail.orderedNodes().count,
-            "trailEdges": model.readingTrail.edges.count,
+            "scrollAnchor": controller.selfTestReadingByteOffset ?? UInt32.max,
+            "selectionAnchor": controller.selfTestReaderCaretByteOffset ?? UInt32.max,
+            "trailNodeIDs": model.readingTrail.orderedNodes().map { $0.id.rawValue.uuidString },
+            "trailEdges": model.readingTrail.edges.map { [$0.from.rawValue.uuidString, $0.to.rawValue.uuidString] },
+            "trailActiveID": model.readingTrail.activeNodeID?.rawValue.uuidString ?? "",
             "historyCursor": model.navigationHistory.cursor,
             "historyRecords": model.navigationHistory.records.count,
             "canGoBack": model.navigationHistory.canGoBack,
             "canGoForward": model.navigationHistory.canGoForward,
         ]
         writeSessionSelfTestExpectations(expectations)
-        let saved = model.loadSessionSnapshot(forProject: root).snapshot
-        let checks: [String: Bool] = [
-            "saved": saved != nil,
-            "savedTabs": saved?.tabs.count == 3,
-            "savedTrail": saved?.readingTrail?.edges.count == 2,
-            "savedHistory": saved?.navigationHistory?.records.count
-                == model.navigationHistory.records.count,
-            "pointer": recentProjectsStore.lastSessionProjectPath
-                == root.standardizedFileURL.path,
-        ]
-        let passed = checks.values.allSatisfy { $0 }
-        Self.writeJSON([
-            "channel": channel,
-            "passed": passed,
-            "checks": checks,
-            "expectations": expectations,
-        ] as [String: Any])
-        Self.exitSelfTest(channel: channel, status: passed ? 0 : 1)
+        guard tabs.count == 3, model.readingTrail.edges.count == 2 else {
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+        Self.writeJSON(["channel": channel, "passed": true, "expectations": expectations])
+        NSApplication.shared.terminate(nil)
+        fatalError("Session self-test termination was cancelled")
     }
 
     /// Reading-session acceptance, second process: relaunches the same
@@ -8894,11 +8889,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 && self.model.snapshotPhase == .fullReady
                 && self.model.tabStrip.tabs.count == (expected["tabPaths"] as? [String])?.count
         })
-        guard restored else {
+        let expectedPaths = expected["tabPaths"] as? [String] ?? []
+        let expectedActive = expected["activeIndex"] as? Int ?? -1
+        let readerReady = restored && waitUntil(timeout: 15, condition: {
+            expectedPaths.indices.contains(expectedActive)
+                && controller.displayedReaderFile?.lastPathComponent == expectedPaths[expectedActive]
+                && Int(controller.selfTestReadingByteOffset ?? .max) == (expected["scrollAnchor"] as? Int ?? -1)
+                && Int(controller.selfTestReaderCaretByteOffset ?? .max) == (expected["selectionAnchor"] as? Int ?? -1)
+        })
+        guard readerReady else {
             Self.writeJSON([
                 "channel": channel,
                 "passed": false,
-                "error": "restore did not complete",
+                "error": "Reader restoration did not complete",
                 "tabs": self.model.tabStrip.tabs.count,
             ])
             Self.exitSelfTest(channel: channel, status: 1)
@@ -8907,21 +8910,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             $0.fileURL?.lastPathComponent ?? ""
         }
         let activeIndex = model.tabStrip.activeIndex ?? -1
-        let trailNodes = model.readingTrail.orderedNodes().count
-        let trailEdges = model.readingTrail.edges.count
+        let trailNodes = model.readingTrail.orderedNodes().map { $0.id.rawValue.uuidString }
+        let trailEdges = model.readingTrail.edges.map { [$0.from.rawValue.uuidString, $0.to.rawValue.uuidString] }
         let historyCursor = model.navigationHistory.cursor
         let historyRecords = model.navigationHistory.records.count
-        let checks: [String: Bool] = [
+        var checks: [String: Bool] = [
             "tabOrder": tabPaths == (expected["tabPaths"] as? [String] ?? []),
             "activeTab": activeIndex == (expected["activeIndex"] as? Int ?? -1),
-            "scrollAnchor": Int(model.tabStrip.activeTab?.scrollAnchor?.byteOffset ?? .max)
+            "scrollAnchor": Int(controller.selfTestReadingByteOffset ?? .max)
                 == (expected["scrollAnchor"] as? Int ?? -1),
             "selectionAnchor": Int(
-                model.tabStrip.activeTab?.selectionAnchor?.byteOffset ?? .max
+                controller.selfTestReaderCaretByteOffset ?? .max
             ) == (expected["selectionAnchor"] as? Int ?? -1),
-            "trailNodes": trailNodes == (expected["trailNodes"] as? Int ?? -1),
-            "trailEdges": trailEdges == (expected["trailEdges"] as? Int ?? -1),
-            "trailActive": model.readingTrail.activeNodeID != nil,
+            "trailNodes": trailNodes == (expected["trailNodeIDs"] as? [String] ?? []),
+            "trailEdges": trailEdges == (expected["trailEdges"] as? [[String]] ?? []),
+            "trailActive": model.readingTrail.activeNodeID?.rawValue.uuidString == (expected["trailActiveID"] as? String),
             "historyCursor": historyCursor == (expected["historyCursor"] as? Int ?? -1),
             "historyRecords": historyRecords == (expected["historyRecords"] as? Int ?? -1),
             "canGoBack": model.navigationHistory.canGoBack
@@ -8930,10 +8933,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 == (expected["canGoForward"] as? Bool ?? false),
             "readerDisplaysActiveTab": {
                 guard tabPaths.indices.contains(activeIndex) else { return false }
-                return controller.selfTestActiveTabFile?.lastPathComponent
+                return controller.displayedReaderFile?.lastPathComponent
                     == tabPaths[activeIndex]
             }(),
         ]
+        controller.goBack(nil)
+        checks["backAfterRestart"] = waitUntil(timeout: 10) {
+            controller.displayedReaderFile?.lastPathComponent == "main.rs"
+        }
+        controller.goForward(nil)
+        checks["forwardAfterRestart"] = waitUntil(timeout: 10) {
+            controller.displayedReaderFile?.lastPathComponent == "third.rs"
+        }
         let passed = checks.values.allSatisfy { $0 }
         let output: [String: Any] = [
             "channel": channel,

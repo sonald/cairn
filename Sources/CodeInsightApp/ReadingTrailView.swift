@@ -291,7 +291,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         tableScroll.drawsBackground = false
         tableScroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let leftHeader = trailHeader(title: "READING TRAIL", detail: "THIS SESSION")
+        let leftHeader = trailHeader(title: "READING TRAIL", detail: "PROJECT HISTORY")
         let left = NSView()
         left.translatesAutoresizingMaskIntoConstraints = false
         left.addSubview(leftHeader)
