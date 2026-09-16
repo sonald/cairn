@@ -48,6 +48,7 @@ final class RelationWindowController: NSViewController,
     private var nodeReloadCount = 0
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var inspectorMode: InspectorMode?
+    private var frozenInspectorGeneration: UInt64?
     private var inspectorSplitFraction: CGFloat = 0.5
     private var adjustingInspectorSplit = false
     private let verificationReadiness: () -> ExactCoordinator.Readiness
@@ -1260,6 +1261,7 @@ final class RelationWindowController: NSViewController,
         onOpenFormerCandidate: (() -> Void)? = nil
     ) {
         loadViewIfNeeded()
+        frozenInspectorGeneration = model.generation
         inspectorMode = .frozen(
             display,
             onOpenFormerCandidate: onOpenFormerCandidate
@@ -1294,6 +1296,7 @@ final class RelationWindowController: NSViewController,
     }
 
     private func hideInspector() {
+        frozenInspectorGeneration = nil
         inspectorMode = nil
         guard !inspectorView.isHidden else { return }
         inspectorView.isHidden = true
@@ -1347,6 +1350,9 @@ final class RelationWindowController: NSViewController,
     }
 
     private func render() {
+        if case .frozen = inspectorMode, frozenInspectorGeneration != model.generation {
+            hideInspector()
+        }
         directionControl.selectedSegment = segment(for: model.direction)
         readingSetButton.isEnabled = !readingSetNodes().isEmpty
         if model.root == nil {

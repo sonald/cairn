@@ -140,3 +140,37 @@ func relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() t
 private func inspectorGeometryViews(in view: NSView) -> [NSView] {
     [view] + view.subviews.flatMap(inspectorGeometryViews(in:))
 }
+
+@MainActor
+@Test
+func frozenInspectorClosesWhenProjectContextChanges() async {
+    _ = NSApplication.shared
+    let model = RelationTreeModel()
+    let controller = RelationWindowController(model: model, languageMode: { _ in nil })
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 620)
+    let display = ReadingSetExcerpt.FrozenInspectorDisplay(
+        nodeTitle: "old_project_symbol", badge: .verified, why: "Captured evidence",
+        sourceBody: "Project A", verificationTitle: "VERIFICATION",
+        verificationBody: "Captured result", correctionBody: "",
+        availabilityBody: "", environmentBody: "", auditRows: [],
+        accessibilityValue: "Project A evidence", capturedAt: Date(),
+        formerCandidateAvailable: true
+    )
+    var oldProjectActionCalls = 0
+    for state: ProjectState in [
+        .indexing(root: URL(fileURLWithPath: "/tmp/project-b"), startedAt: .now),
+        .empty,
+    ] {
+        controller.showFrozenInspector(display) { oldProjectActionCalls += 1 }
+        #expect(controller.selfTestInspectorIsFrozen)
+        model.updateProjectState(state)
+        // Drain the observation callback queued on the main actor.
+        for _ in 0..<10 { await Task.yield() }
+        controller.view.layoutSubtreeIfNeeded()
+        #expect(!controller.selfTestInspectorIsFrozen)
+        #expect(!controller.selfTestInspectorVisible)
+        controller.selfTestOpenFormerCandidate()
+        #expect(oldProjectActionCalls == 0)
+    }
+}

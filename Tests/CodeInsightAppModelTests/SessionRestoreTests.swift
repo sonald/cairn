@@ -1129,7 +1129,13 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
     try model.writeSessionCheckpoint(panelPreset: .reading)
     #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 2)
 
+    let relationGeneration = model.relationTree.generation
     try model.clearSessionForCurrentProject(panelPreset: .reading)
+    #expect(model.relationTree.generation != relationGeneration)
+    #expect(model.relationTree.root == nil)
+    #expect(model.projectRoot == root)
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(try String(contentsOf: root.appendingPathComponent("main.rs"), encoding: .utf8) == "fn main() {}\n")
 
     #expect(model.tabStrip.tabs.isEmpty)
     #expect(model.navigationHistory.records.isEmpty)

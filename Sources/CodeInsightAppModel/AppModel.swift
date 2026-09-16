@@ -1079,6 +1079,7 @@ public final class AppModel {
         navigationHistory.reset()
         readingTrail.reset()
         resolutionExplanations.removeAll()
+        relationTree.updateProjectState(projectState)
         selectedFile = nil
         selectedByteOffset = nil
         activeNavigationRequest = nil
