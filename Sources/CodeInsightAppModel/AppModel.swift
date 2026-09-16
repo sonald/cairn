@@ -3791,29 +3791,88 @@ public final class AppModel {
     }
 
     private func replay(_ record: NavigationRecord) {
-        guard let targetSnapshotID = record.jump.snapshotID,
-              targetSnapshotID != currentSnapshotID
-        else {
-            replayWithinCurrentSnapshot(record)
-            return
-        }
-        guard projectRoot != nil else { return }
-        guard let destination = snapshotDestinations[targetSnapshotID] else {
-            if currentSnapshotID == nil {
+        let jump = record.jump
+        if let targetSnapshotID = jump.snapshotID {
+            // In-process navigation: the live mapping is authoritative.
+            if targetSnapshotID == currentSnapshotID {
                 replayWithinCurrentSnapshot(record)
+                return
+            }
+            guard projectRoot != nil else { return }
+            guard let destination = snapshotDestinations[targetSnapshotID] else {
+                if currentSnapshotID == nil {
+                    replayWithinCurrentSnapshot(record)
+                }
+                return
+            }
+            let replaysWorktree: Bool = if case .worktree = destination {
+                true
+            } else {
+                false
+            }
+            pendingReplay = (record, replaysWorktree, false)
+            switch destination {
+            case .worktree:
+                switchSnapshot(revision: nil)
+            case let .commit(revision, _):
+                switchSnapshot(revision: revision)
             }
             return
         }
-        let replaysWorktree: Bool = if case .worktree = destination {
-            true
-        } else {
-            false
+        // Restored (or dependency) record: there is no live SnapshotID to
+        // look up, so the persisted revision decides the destination. A
+        // nil revision means the worktree and must switch back to it
+        // rather than replay into the commit currently being read.
+        guard !exactLocationIsInDependency(jump.path) else {
+            replayWithinCurrentSnapshot(record)
+            return
         }
-        pendingReplay = (record, replaysWorktree, false)
-        switch destination {
-        case .worktree:
-            switchSnapshot(revision: nil)
-        case let .commit(revision, _):
+        if jump.revision == currentRevision {
+            replayWithinCurrentSnapshot(record)
+            return
+        }
+        replayAcrossVersions(record, revision: jump.revision)
+    }
+
+    /// Replays a restored record whose target version differs from the one
+    /// on screen. The target revision is verified before switching so an
+    /// unavailable historical version keeps the current viewport and
+    /// reports the failure instead of tearing the workspace down.
+    private func replayAcrossVersions(
+        _ record: NavigationRecord,
+        revision: String?
+    ) {
+        guard let root = projectRoot else { return }
+        let replayGeneration = generation
+        let replayNavigationGeneration = navigationGeneration
+        replayTask?.cancel()
+        replayTask = Task { [weak self] in
+            let available: Bool
+            if let revision {
+                available = await Task.detached {
+                    (try? CommitSnapshot(
+                        repositoryURL: root,
+                        revision: revision
+                    )) != nil
+                }.value
+            } else {
+                available = true
+            }
+            guard let self,
+                  !Task.isCancelled,
+                  canPublishWorkspaceResult(
+                      generation: replayGeneration,
+                      root: root,
+                      languages: projectLanguages
+                  ),
+                  navigationGeneration == replayNavigationGeneration
+            else { return }
+            guard available else {
+                replayNotice = "that saved version is unavailable; "
+                    + "the current view was kept"
+                return
+            }
+            pendingReplay = (record, false, false)
             switchSnapshot(revision: revision)
         }
     }

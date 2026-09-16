@@ -1761,10 +1761,10 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
         ($0 as? NSTextField)?.stringValue
     }
     #expect(emptyText.contains(
-        "Follow symbols to build a trail · this session only"
+        "Follow symbols to build a trail · restored across sessions"
     ))
     #expect(view.accessibilityValue() as? String
-        == "Follow symbols to build a trail · this session only")
+        == "Follow symbols to build a trail · restored across sessions")
     #expect(try button().title == "Trail Details")
     #expect(try !button().isEnabled)
 
@@ -1794,6 +1794,76 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
     #expect(try button().title == "Branches · 2")
     #expect(try button().toolTip
         == "Show the semantic trail and its branches (⌥⌘T)")
+}
+
+@MainActor
+@Test
+func trailDetailLabelsEvidenceRestoredFromAnEarlierSession() throws {
+    _ = NSApplication.shared
+    let trail = ReadingTrail()
+    let view = ReadingTrailView(frame: NSRect(x: 0, y: 0, width: 900, height: 32))
+    let saved = TrailNodeID()
+    let restored = TrailNodeID()
+    // Exactly what a decoded session installs: a frozen display with no
+    // live explanation reference and no observed snapshot.
+    trail.restore(
+        nodes: [
+            TrailNode(id: saved, jump: JumpRecord(
+                path: "main.rs",
+                contentID: nil,
+                byteOffset: 0,
+                line: 1,
+                column: 1,
+                symbolAnchor: "saved",
+                snapshotID: nil
+            )),
+            TrailNode(id: restored, jump: JumpRecord(
+                path: "a.rs",
+                contentID: nil,
+                byteOffset: 0,
+                line: 1,
+                column: 1,
+                symbolAnchor: "restored",
+                snapshotID: nil
+            )),
+        ],
+        edges: [
+            TrailEdge(
+                from: saved,
+                to: restored,
+                cause: .relation,
+                observedAtNavigation: nil,
+                currentExplanationID: nil,
+                frozenInspectorDisplay: ReadingSetExcerpt.FrozenInspectorDisplay(
+                    nodeTitle: "restored",
+                    badge: .verified,
+                    why: "rust-analyzer returned this target.",
+                    sourceBody: "Matched a declaration in the same file.",
+                    verificationTitle: "VERIFICATION",
+                    verificationBody: "Verified at capture.",
+                    correctionBody: "",
+                    availabilityBody: "rust-analyzer ready at capture",
+                    environmentBody: "default · Trusted at capture",
+                    auditRows: [
+                        .init(label: "Source", value: "worktree captured"),
+                    ],
+                    accessibilityValue: "Verified restored at capture",
+                    capturedAt: Date(timeIntervalSince1970: 1_786_200_000),
+                    formerCandidateAvailable: false
+                ),
+                readingSetRole: "Definition"
+            ),
+        ],
+        activeNodeID: restored
+    )
+    view.display(trail: trail, store: ResolutionExplanationStore())
+    #expect(view.selectNode(path: "a.rs"))
+
+    let detail = view.detailValue
+    #expect(detail.contains("Evidence at navigation"))
+    #expect(detail.contains("frozen in an earlier session"))
+    #expect(detail.contains("Only that session's display snapshot was kept"))
+    #expect(!detail.contains("Evidence changed after navigation"))
 }
 
 @MainActor

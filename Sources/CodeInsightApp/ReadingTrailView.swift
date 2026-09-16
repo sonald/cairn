@@ -402,7 +402,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         if titles.isEmpty {
             let empty = NSTextField(
                 labelWithString:
-                    "Follow symbols to build a trail · this session only"
+                    "Follow symbols to build a trail · restored across sessions"
             )
             empty.font = .systemFont(ofSize: 11)
             empty.textColor = theme.chromeTertiaryColor
@@ -437,7 +437,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         branchButton.isEnabled = !(trail?.nodes.isEmpty ?? true)
         setAccessibilityValue(
             breadcrumbText.isEmpty
-                ? "Follow symbols to build a trail · this session only"
+                ? "Follow symbols to build a trail · restored across sessions"
                 : breadcrumbText
         )
     }
@@ -465,6 +465,11 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let incoming = incomingEdge(to: selectedID, in: trail)
         let observed = incoming?.observedAtNavigation?.explanation
         let current = incoming?.currentExplanationID.flatMap { store?.value(for: $0) }
+        // A frozen display with no live explanation reference is an edge
+        // restored from an earlier session: only the display snapshot
+        // survived, so it is labeled as historical rather than current.
+        let isRestoredEvidence = incoming?.frozenInspectorDisplay != nil
+            && incoming?.currentExplanationID == nil
         var sections = [
             displayName(node),
             locationText(node.jump),
@@ -476,12 +481,21 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             incoming.map { causeText($0.cause) } ?? "session root",
             "",
             "EXPLANATION",
-            "Evidence at navigation · frozen snapshot",
+            isRestoredEvidence
+                ? "Evidence at navigation · frozen in an earlier session"
+                : "Evidence at navigation · frozen snapshot",
             observed.map(explanationText) ?? "No relation explanation was attached.",
             "",
             "Current evidence",
             current.map(explanationText) ?? "No newer explanation is available.",
         ]
+        if isRestoredEvidence {
+            sections += [
+                "",
+                "Only that session's display snapshot was kept; "
+                    + "re-query the relation for current evidence.",
+            ]
+        }
         if let observed, let current,
            explanationText(observed) != explanationText(current)
         {

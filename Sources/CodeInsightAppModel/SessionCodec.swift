@@ -26,7 +26,9 @@ package enum SessionCodec {
             revision: String?,
             activeTabOrdinal: Int?,
             panelPreset: String,
-            tabs: [Tab]
+            tabs: [Tab],
+            navigationHistory: NavigationState? = nil,
+            readingTrail: TrailState? = nil
         ) {
             self.init(
                 projectRoot: projectRoot,
@@ -34,7 +36,9 @@ package enum SessionCodec {
                 revision: revision,
                 activeTabOrdinal: activeTabOrdinal,
                 panelPreset: panelPreset,
-                tabs: tabs
+                tabs: tabs,
+                navigationHistory: navigationHistory,
+                readingTrail: readingTrail
             )
         }
 

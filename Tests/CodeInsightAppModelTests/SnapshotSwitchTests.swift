@@ -533,6 +533,161 @@ func sessionRestoreInstallsRevisionBeforeActivatingFrozenReadingSet() async thro
 
 @MainActor
 @Test
+func restoredTrailNodeReplaysByItsSavedRevisionAndWorktreeRecordSwitchesBack()
+    async throws
+{
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    try snapshotWrite(
+        "fn committed() {}\n",
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    try fixture.git("add", "main.rs")
+    try fixture.commit("saved")
+    let revision = try fixture.git("rev-parse", "HEAD")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    try snapshotWrite(
+        "fn worktree() {}\n",
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    let model = AppModel(indexService: ProjectIndexService())
+
+    // Restored trail: a commit node and a worktree node, both without a
+    // runtime SnapshotID (as a decoded snapshot carries them).
+    let commitNode = TrailNodeID()
+    let worktreeNode = TrailNodeID()
+    let commitJump = SessionCodec.Jump(
+        path: "main.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "committed",
+        revision: revision
+    )
+    let worktreeJump = SessionCodec.Jump(
+        path: "main.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "worktree",
+        revision: nil
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: fixture.root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ],
+        readingTrail: SessionCodec.TrailState(
+            nodes: [
+                .init(id: commitNode.rawValue, jump: commitJump),
+                .init(id: worktreeNode.rawValue, jump: worktreeJump),
+            ],
+            edges: [
+                .init(
+                    from: commitNode.rawValue,
+                    to: worktreeNode.rawValue,
+                    cause: "relation",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+            ],
+            activeNodeID: worktreeNode.rawValue
+        )
+    )
+    #expect(await model.restoreSession(snapshot))
+    #expect(model.currentRevision == nil)
+    #expect(model.readingTrail.nodes.count == 2)
+
+    // Replaying the commit node must switch to that version even though
+    // no in-process SnapshotID maps to it.
+    model.restoreTrailNode(commitNode)
+    try #require(await testWaitUntil("commit version installed") {
+        model.currentRevision == revision
+            && model.snapshotPhase == .fullReady
+    })
+    #expect(model.activeNavigationRequest?.cause == .historyReplay)
+
+    // Replaying the worktree node switches back to the worktree instead
+    // of reusing the commit that is on screen.
+    model.restoreTrailNode(worktreeNode)
+    try #require(await testWaitUntil("worktree restored") {
+        model.currentRevision == nil && model.snapshotPhase == .fullReady
+    })
+}
+
+@MainActor
+@Test
+func replayingAnUnavailableSavedRevisionKeepsTheCurrentView() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    try snapshotWrite(
+        "fn worktree() {}\n",
+        to: fixture.root.appendingPathComponent("main.rs")
+    )
+    let model = AppModel(indexService: ProjectIndexService())
+    let ghostNode = TrailNodeID()
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: fixture.root.path,
+        language: .rust,
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [
+            .file(.init(
+                path: "main.rs",
+                anchorContentID: nil,
+                scrollAnchor: nil,
+                selectionAnchor: nil
+            )),
+        ],
+        readingTrail: SessionCodec.TrailState(
+            nodes: [
+                .init(
+                    id: ghostNode.rawValue,
+                    jump: SessionCodec.Jump(
+                        path: "main.rs",
+                        contentID: nil,
+                        byteOffset: 0,
+                        line: 1,
+                        column: 1,
+                        symbolAnchor: "ghost",
+                        revision: "0123456789abcdef0123456789abcdef01234567"
+                    )
+                ),
+            ],
+            edges: [],
+            activeNodeID: ghostNode.rawValue
+        )
+    )
+    #expect(await model.restoreSession(snapshot))
+    let generationBefore = model.generation
+    let activeBefore = model.readingTrail.activeNodeID
+
+    model.restoreTrailNode(ghostNode)
+
+    try #require(await testWaitUntil("unavailable version reported") {
+        model.replayNotice?.contains("unavailable") == true
+    })
+    // The viewport, generation, and active trail node are untouched.
+    #expect(model.generation == generationBefore)
+    #expect(model.currentRevision == nil)
+    #expect(model.snapshotPhase == .fullReady)
+    #expect(model.readingTrail.activeNodeID == activeBefore)
+}
+
+@MainActor
+@Test
 func switchingAgainCancelsAndDiscardsTheOlderSnapshot() async throws {
     let root = try snapshotTemporaryProject(["main.rs": "fn initial() {}"])
     defer { try? FileManager.default.removeItem(at: root) }
