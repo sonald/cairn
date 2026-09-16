@@ -3137,97 +3137,52 @@ public final class AppModel {
         }
     }
 
+    // Pending commands use a private history copy so rapid Back/Forward
+    // still accumulate while the visible cursor waits for successful loading.
+    @ObservationIgnored private var pendingHistoryNavigation: (
+        generation: UInt64, navigationGeneration: UInt64,
+        history: NavigationHistory
+    )?
+
     public func goBack(from current: JumpRecord) {
-        let currentRecord = NavigationRecord(
-            jump: current,
-            trailNodeID: readingTrail.activeNodeID
-        )
-        guard let record = navigationHistory.peekBack(from: currentRecord)
-        else { return }
-        commitHistoryNavigation(record) { [weak self] in
-            guard let self else { return }
-            _ = navigationHistory.goBack(from: currentRecord)
-            replay(record)
-        }
+        navigateHistory(backFrom: NavigationRecord(
+            jump: current, trailNodeID: readingTrail.activeNodeID
+        ))
     }
 
     public func goForward() {
-        guard let record = navigationHistory.peekForward() else { return }
-        commitHistoryNavigation(record) { [weak self] in
+        navigateHistory(backFrom: nil)
+    }
+
+    private func navigateHistory(backFrom current: NavigationRecord?) {
+        let history: NavigationHistory
+        if let pending = pendingHistoryNavigation,
+           pending.generation == generation,
+           pending.navigationGeneration == navigationGeneration {
+            history = pending.history
+        } else {
+            history = NavigationHistory()
+            let state = navigationHistory.exportState()
+            history.restore(records: state.records, cursor: state.cursor,
+                            forwardRecord: state.forwardRecord)
+        }
+        let record = if let current {
+            history.goBack(from: current)
+        } else {
+            history.goForwardRecord()
+        }
+        guard let record else { return }
+        let state = history.exportState()
+        pendingHistoryNavigation = (generation, navigationGeneration, history)
+        replay(record) { [weak self] in
             guard let self else { return }
-            _ = navigationHistory.goForwardRecord()
-            replay(record)
+            navigationHistory.restore(records: state.records, cursor: state.cursor,
+                                      forwardRecord: state.forwardRecord)
+            pendingHistoryNavigation = nil
         }
-    }
-
-    /// Back/Forward must not consume the cursor for a destination that
-    /// cannot be shown: the target is validated first, and a restored
-    /// record that points at another version verifies that version before
-    /// the cursor moves. Cancellation across generations simply drops the
-    /// commit; it never rolls back a newer project's state.
-    private func commitHistoryNavigation(
-        _ record: NavigationRecord,
-        commit: @escaping () -> Void
-    ) {
-        guard canReplayTarget(record) else {
-            replayNotice =
-                "that destination is unavailable; the current view was kept"
-            return
+        if pendingHistoryNavigation != nil {
+            pendingHistoryNavigation = (generation, navigationGeneration, history)
         }
-        guard record.jump.snapshotID == nil,
-              !exactLocationIsInDependency(record.jump.path),
-              let revision = record.jump.revision,
-              revision != currentRevision,
-              let root = projectRoot
-        else {
-            commit()
-            return
-        }
-        let generationAtRequest = generation
-        let navigationGenerationAtRequest = navigationGeneration
-        let languages = projectLanguages
-        Task { [weak self] in
-            let available = await Task.detached {
-                (try? CommitSnapshot(
-                    repositoryURL: root,
-                    revision: revision
-                )) != nil
-            }.value
-            guard let self,
-                  canPublishWorkspaceResult(
-                      generation: generationAtRequest,
-                      root: root,
-                      languages: languages
-                  ),
-                  navigationGeneration == navigationGenerationAtRequest
-            else { return }
-            guard available else {
-                replayNotice =
-                    "that saved version is unavailable; the current view was kept"
-                return
-            }
-            commit()
-        }
-    }
-
-    /// Synchronous reachability of a replay target: inside the project
-    /// (or a dependency path) and present on disk when it is a source
-    /// file the language modes know.
-    private func canReplayTarget(_ record: NavigationRecord) -> Bool {
-        let jump = record.jump
-        if exactLocationIsInDependency(jump.path) {
-            return FileManager.default.fileExists(atPath: jump.path)
-        }
-        guard let root = fileTree?.root else { return false }
-        let file = root.appendingPathComponent(jump.path).standardizedFileURL
-        guard file.pathComponents.starts(with: root.pathComponents),
-              file.pathComponents.count > root.pathComponents.count
-        else { return false }
-        if languageMode(for: file) == nil {
-            return fileTree?.selectionPath(for: file)?.last.map { !$0.isDirectory }
-                ?? false
-        }
-        return FileManager.default.fileExists(atPath: file.path)
     }
 
     public func restoreTrailNode(_ id: TrailNodeID) {
@@ -3938,97 +3893,150 @@ public final class AppModel {
         resolutionExplanations.retain(readingTrail.referencedExplanationIDs)
     }
 
-    private func replay(_ record: NavigationRecord) {
+    private func replay(
+        _ record: NavigationRecord,
+        onSuccess: (() -> Void)? = nil
+    ) {
         let jump = record.jump
+        if exactLocationIsInDependency(jump.path) {
+            replayWithinCurrentSnapshot(record, onSuccess: onSuccess)
+            return
+        }
         if let targetSnapshotID = jump.snapshotID {
-            // In-process navigation: the live mapping is authoritative.
-            if targetSnapshotID == currentSnapshotID {
-                replayWithinCurrentSnapshot(record)
+            if targetSnapshotID == currentSnapshotID || currentSnapshotID == nil {
+                replayWithinCurrentSnapshot(record, onSuccess: onSuccess)
                 return
             }
-            guard projectRoot != nil else { return }
             guard let destination = snapshotDestinations[targetSnapshotID] else {
-                if currentSnapshotID == nil {
-                    replayWithinCurrentSnapshot(record)
-                }
+                pendingHistoryNavigation = nil
+                replayNotice = "that saved version is unavailable; the current view was kept"
                 return
             }
-            let replaysWorktree: Bool = if case .worktree = destination {
-                true
-            } else {
-                false
-            }
-            pendingReplay = (record, replaysWorktree, false)
             switch destination {
             case .worktree:
-                switchSnapshot(revision: nil)
+                replayAcrossVersions(record, revision: nil,
+                                     replayedAgainstCurrentWorktree: true,
+                                     onSuccess: onSuccess)
             case let .commit(revision, _):
-                switchSnapshot(revision: revision)
+                replayAcrossVersions(record, revision: revision, onSuccess: onSuccess)
             }
-            return
+        } else if jump.revision == currentRevision {
+            replayWithinCurrentSnapshot(record, onSuccess: onSuccess)
+        } else {
+            replayAcrossVersions(record, revision: jump.revision, onSuccess: onSuccess)
         }
-        // Restored (or dependency) record: there is no live SnapshotID to
-        // look up, so the persisted revision decides the destination. A
-        // nil revision means the worktree and must switch back to it
-        // rather than replay into the commit currently being read.
-        guard !exactLocationIsInDependency(jump.path) else {
-            replayWithinCurrentSnapshot(record)
-            return
-        }
-        if jump.revision == currentRevision {
-            replayWithinCurrentSnapshot(record)
-            return
-        }
-        replayAcrossVersions(record, revision: jump.revision)
     }
 
-    /// Replays a restored record whose target version differs from the one
-    /// on screen. The target revision is verified before switching so an
-    /// unavailable historical version keeps the current viewport and
-    /// reports the failure instead of tearing the workspace down.
+    /// Prepare the destination before changing the visible workspace. A
+    /// missing blob, failed index, or cancelled request leaves it intact.
     private func replayAcrossVersions(
         _ record: NavigationRecord,
-        revision: String?
+        revision: String?,
+        replayedAgainstCurrentWorktree: Bool = false,
+        onSuccess: (() -> Void)? = nil
     ) {
-        guard let root = projectRoot else { return }
+        guard let root = projectRoot,
+              let file = safeProjectFile(record.jump.path, under: root)
+        else { return }
         let replayGeneration = generation
+        let languages = projectLanguages
+        let mode = languageMode(for: file)
+        navigationGeneration &+= 1
         let replayNavigationGeneration = navigationGeneration
         replayTask?.cancel()
-        replayTask = Task { [weak self] in
-            let available: Bool
-            if let revision {
-                available = await Task.detached {
-                    (try? CommitSnapshot(
-                        repositoryURL: root,
-                        revision: revision
-                    )) != nil
-                }.value
-            } else {
-                available = true
+        replayTask = Task { [weak self, indexService] in
+            do {
+                let snapshot = try await indexService.captureSnapshot(
+                    root: root, revision: revision, languages: languages
+                )
+                guard snapshot.listFiles().contains(where: { entry in
+                    guard entry.path == record.jump.path else { return false }
+                    switch entry.fileMode {
+                    case .regular, .lfsPointer: return true
+                    case .symlink, .gitlink: return false
+                    }
+                }) else { throw CocoaError(.fileReadNoSuchFile) }
+                try Task.checkCancellation()
+                let source: DocumentLoader.ContentSource?
+                if revision == nil {
+                    source = nil
+                } else {
+                    source = { _ in try snapshot.readBytes(path: record.jump.path) }
+                }
+                let position: (offset: UInt32, fallback: ReplayFallbackKind) = try await detachedValue {
+                    if let mode {
+                        return try Self.replayOffset(record.jump, file: file,
+                                                     source: source, languageMode: mode)
+                    }
+                    // Non-source previews also need an actual read; a tree
+                    // entry or fileExists cannot establish readability.
+                    if let source { _ = try source(file) }
+                    else { _ = try Data(contentsOf: file) }
+                    return (offset: UInt32(0), fallback: ReplayFallbackKind.exact)
+                }
+                let prepared = try await indexService.prepareSnapshots(
+                    snapshot, root: root, languages: languages
+                )
+                var completed: [EngineSession] = []
+                for item in prepared {
+                    completed.append(try await indexService.completeSnapshot(item))
+                    try Task.checkCancellation()
+                }
+                guard let self,
+                      canPublishWorkspaceResult(generation: replayGeneration,
+                                                root: root, languages: languages),
+                      navigationGeneration == replayNavigationGeneration
+                else { return }
+                guard validatedWorkspaceSessions(completed, languages: languages,
+                                                 snapshotID: snapshot.snapshotID) != nil
+                else { throw CocoaError(.fileReadCorruptFile) }
+                snapshotTask?.cancel()
+                compareSnapshotTask?.cancel()
+                endIndexRefresh()
+                compare.clear()
+                generation &+= 1
+                bookmarkModel.workspaceDidChange(to: generation)
+                exactCoordinator.invalidate(generation: generation)
+                commitPicker.setCurrentRevision(revision)
+                pendingReplay = nil
+                publishFirstPaint(snapshot, root: root, revision: revision,
+                                  generation: generation, languages: languages)
+                _ = installWorkspaceSessions(completed, generation: generation,
+                                             root: root, languages: languages,
+                                             expectedSnapshotID: snapshot.snapshotID,
+                                             phase: .fullReady)
+                lastInstalledRevision = currentRevision
+                lastInstalledProjectRoot = projectRoot
+                lastInstalledGeneration = generation
+                prepareExact(generation: generation)
+                onSuccess?()
+                readingTrail.restore(record.trailNodeID)
+                replayNotice = Self.replayNotice(
+                    fallback: position.fallback,
+                    replayedAgainstCurrentWorktree: replayedAgainstCurrentWorktree
+                        && record.jump.snapshotID != snapshot.snapshotID
+                )
+                navigate(NavigationRequest(
+                    destination: SourceDestination(file: file, byteOffset: mode == nil ? nil : position.offset),
+                    cause: .historyReplay, policy: .replay
+                ))
+            } catch {
+                guard let self, !Task.isCancelled,
+                      canPublishWorkspaceResult(generation: replayGeneration,
+                                                root: root, languages: languages),
+                      navigationGeneration == replayNavigationGeneration
+                else { return }
+                pendingHistoryNavigation = nil
+                replayNotice = "that destination or saved version is unavailable; the current view was kept"
             }
-            guard let self,
-                  !Task.isCancelled,
-                  canPublishWorkspaceResult(
-                      generation: replayGeneration,
-                      root: root,
-                      languages: projectLanguages
-                  ),
-                  navigationGeneration == replayNavigationGeneration
-            else { return }
-            guard available else {
-                replayNotice = "that saved version is unavailable; "
-                    + "the current view was kept"
-                return
-            }
-            pendingReplay = (record, false, false)
-            switchSnapshot(revision: revision)
         }
     }
 
     private func replayWithinCurrentSnapshot(
         _ record: NavigationRecord,
         replayedAgainstCurrentWorktree: Bool = false,
-        opensInNewTab: Bool = false
+        opensInNewTab: Bool = false,
+        onSuccess: (() -> Void)? = nil
     ) {
         guard let root = fileTree?.root else { return }
         let jump = record.jump
@@ -4038,28 +4046,7 @@ public final class AppModel {
             : root.appendingPathComponent(jump.path).standardizedFileURL
         guard dependency || file.pathComponents.starts(with: root.pathComponents)
         else { return }
-        if !dependency,
-           let selectionPath = fileTree?.selectionPath(for: file),
-           let node = selectionPath.last,
-           !node.isDirectory,
-           languageMode(for: file) == nil
-        {
-            readingTrail.restore(record.trailNodeID)
-            replayNotice = nil
-            if opensInNewTab {
-                openInNewTab(file, selectionByteOffset: nil)
-            } else {
-                navigate(
-                    NavigationRequest(
-                        destination: SourceDestination(file: file),
-                        cause: .historyReplay,
-                        policy: .replay
-                    )
-                )
-            }
-            return
-        }
-        guard let languageMode = languageMode(for: file) else { return }
+        let languageMode = languageMode(for: file)
         let source = dependency ? nil : documentSource
         let replayGeneration = generation
         navigationGeneration &+= 1
@@ -4070,15 +4057,23 @@ public final class AppModel {
             let replayed: (offset: UInt32, fallback: ReplayFallbackKind)
             do {
                 replayed = try await detachedValue {
-                    try Self.replayOffset(
-                        jump,
-                        file: file,
-                        source: source,
-                        languageMode: languageMode
-                    )
+                    if let languageMode {
+                        return try Self.replayOffset(
+                            jump, file: file, source: source, languageMode: languageMode
+                        )
+                    }
+                    if let source { _ = try source(file) }
+                    else { _ = try Data(contentsOf: file) }
+                    return (offset: UInt32(0), fallback: ReplayFallbackKind.exact)
                 }
                 try Task.checkCancellation()
             } catch {
+                guard let self, !Task.isCancelled,
+                      generation == replayGeneration,
+                      navigationGeneration == replayNavigationGeneration
+                else { return }
+                pendingHistoryNavigation = nil
+                replayNotice = "that destination is unavailable; the current view was kept"
                 return
             }
             guard let self,
@@ -4091,19 +4086,20 @@ public final class AppModel {
                   currentSnapshotID == replaySnapshotID,
                   self.languageMode(for: file) == languageMode
             else { return }
+            onSuccess?()
             readingTrail.restore(record.trailNodeID)
             replayNotice = Self.replayNotice(
                 fallback: replayed.fallback,
                 replayedAgainstCurrentWorktree: replayedAgainstCurrentWorktree
             )
             if opensInNewTab {
-                openInNewTab(file, selectionByteOffset: replayed.offset)
+                openInNewTab(file, selectionByteOffset: languageMode == nil ? nil : replayed.offset)
             } else {
                 navigate(
                     NavigationRequest(
                         destination: SourceDestination(
                             file: file,
-                            byteOffset: replayed.offset
+                            byteOffset: languageMode == nil ? nil : replayed.offset
                         ),
                         cause: .historyReplay,
                         policy: .replay

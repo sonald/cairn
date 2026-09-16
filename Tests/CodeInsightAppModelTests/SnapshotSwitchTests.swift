@@ -857,7 +857,9 @@ func passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() async throws {
 
     model.goBack(from: mainRecord)
 
-    #expect(model.selectedFile?.standardizedFileURL == readme.standardizedFileURL)
+    #expect(await testWaitUntil("non-source replay loaded") {
+        model.selectedFile?.standardizedFileURL == readme.standardizedFileURL
+    })
     #expect(model.selectedByteOffset == nil)
     #expect(model.tabStrip.activeDocument == nil)
 }
@@ -2274,4 +2276,75 @@ func singleLanguageOpenSharesTheWorkspaceResetBoundaries() async throws {
     #expect(model.isRefreshingIndex == false)
     #expect(model.compare.rightRevision == nil)
     #expect(!model.hasPendingReplay)
+}
+
+@MainActor
+@Test
+func restoredHistoryLoadsFileOnlyPresentInCommit() async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let target = fixture.root.appendingPathComponent("old.rs")
+    let current = fixture.root.appendingPathComponent("main.rs")
+    try snapshotWrite("fn old() {}\n", to: target)
+    try snapshotWrite("fn main() {}\n", to: current)
+    try fixture.git("add", ".")
+    try fixture.commit("saved")
+    let revision = try fixture.git("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+    try FileManager.default.removeItem(at: target)
+    let model = AppModel()
+    model.openProject(root: fixture.root)
+    try #require(await testWaitUntil("ready") { model.snapshotPhase == .fullReady })
+    model.navigate(to: current)
+    let saved = JumpRecord(path: "old.rs", contentID: nil, byteOffset: 3, line: 1, column: 4, symbolAnchor: nil, snapshotID: nil, revision: revision)
+    model.navigationHistory.push(saved)
+    model.goBack(from: snapshotJumpRecord("main.rs", offset: 0, snapshotID: try #require(model.currentSnapshotID)))
+    for _ in 0..<200 {
+        if model.selectedFile == target && model.currentRevision == revision { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    try #require(model.selectedFile == target && model.currentRevision == revision)
+    #expect(model.navigationHistory.cursor == 0)
+    model.goForward()
+    try #require(await testWaitUntil("forward returns to worktree") { model.selectedFile == current && model.currentRevision == nil })
+    #expect(model.navigationHistory.cursor == 1)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func historyReadFailureKeepsCursorVersionAndViewport(crossVersion: Bool) async throws {
+    let fixture = try SnapshotGitFixture()
+    defer { fixture.remove() }
+    let target = fixture.root.appendingPathComponent("old.rs")
+    let current = fixture.root.appendingPathComponent("main.rs")
+    try snapshotWrite("fn main() {}\n", to: current)
+    try fixture.git("add", ".")
+    try fixture.commit("without target")
+    let revision = try fixture.git("rev-parse", "HEAD").trimmingCharacters(in: .whitespacesAndNewlines)
+    try snapshotWrite("fn old() {}\n", to: target)
+    let model = AppModel()
+    model.openProject(root: fixture.root)
+    try #require(await testWaitUntil("ready") { model.snapshotPhase == .fullReady })
+    model.navigate(to: current, byteOffset: 3)
+    let saved = JumpRecord(path: "old.rs", contentID: nil, byteOffset: 0, line: 1, column: 1, symbolAnchor: nil, snapshotID: nil, revision: crossVersion ? revision : nil)
+    model.navigationHistory.push(saved)
+    let history = model.navigationHistory.exportState()
+    let active = model.readingTrail.activeNodeID
+    let snapshot = model.currentSnapshotID
+    if !crossVersion {
+        try FileManager.default.removeItem(at: target)
+        try FileManager.default.createDirectory(at: target, withIntermediateDirectories: true)
+    }
+    model.goBack(from: snapshotJumpRecord("main.rs", offset: 3, snapshotID: try #require(snapshot)))
+    for _ in 0..<200 {
+        if model.replayNotice?.contains("unavailable") == true { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.replayNotice?.contains("unavailable") == true)
+    #expect(model.navigationHistory.cursor == history.cursor)
+    #expect(model.navigationHistory.exportState().forwardRecord == history.forwardRecord)
+    #expect(model.currentSnapshotID == snapshot)
+    #expect(model.currentRevision == nil)
+    #expect(model.selectedFile == current)
+    #expect(model.selectedByteOffset == 3)
+    #expect(model.readingTrail.activeNodeID == active)
 }
