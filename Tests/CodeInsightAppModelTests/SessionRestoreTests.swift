@@ -1413,6 +1413,11 @@ func failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() async throws {
     // The next record back points at a file that does not exist: the
     // cursor, active trail node, and viewport must all stay put.
     model.goBack(from: live)
+    let failureDeadline = ContinuousClock.now + .seconds(2)
+    while model.replayNotice?.contains("destination is unavailable") != true,
+          ContinuousClock.now < failureDeadline {
+        try await Task.sleep(for: .milliseconds(10))
+    }
     #expect(model.navigationHistory.cursor == cursorBefore)
     #expect(model.readingTrail.activeNodeID == activeBefore)
     #expect(model.selectedFile == selectedBefore)

@@ -85,8 +85,10 @@ struct RelationUXTests {
 
         fixture.model.updateProjectState(.empty)
         await pumpRunLoop()
-        #expect(fixture.controller.selfTestInspectorIsFrozen)
-        #expect(fixture.controller.selfTestInspectorVisible)
+        // The frozen excerpt remains valid, but a departed project must
+        // not leave its inspector visible in the next project's window.
+        #expect(!fixture.controller.selfTestInspectorIsFrozen)
+        #expect(!fixture.controller.selfTestInspectorVisible)
         #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
     }
 
