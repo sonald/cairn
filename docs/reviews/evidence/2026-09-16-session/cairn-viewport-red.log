@@ -1,0 +1,24 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() started.
+✘ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() recorded an issue at RelationNavigationTests.swift:1108:5: Expectation failed: fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL
+↳ fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL → false
+↳   fixture.model.selectedFile?.standardizedFileURL → nil
+↳   file.standardizedFileURL → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/CodeInsightRelationNavigation-F8802F87-7D20-4E88-A0C2-7378D39240A8/main.rs
+↳     _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/CodeInsightRelationNavigation-F8802F87-7D20-4E88-A0C2-7378D39240A8/main.rs
+↳       _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/CodeInsightRelationNavigation-F8802F87-7D20-4E88-A0C2-7378D39240A8/main.rs
+✘ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() recorded an issue at RelationNavigationTests.swift:1113:5: Expectation failed: fixture.controller.selfTestReadingByteOffset == scroll
+↳ fixture.controller.selfTestReadingByteOffset == scroll → false
+↳   fixture.controller.selfTestReadingByteOffset → 0
+↳     some → 0
+↳   scroll → 1894
+✘ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() recorded an issue at RelationNavigationTests.swift:1114:5: Expectation failed: fixture.controller.selfTestReaderCaretByteOffset == selection
+↳ fixture.controller.selfTestReaderCaretByteOffset == selection → false
+↳   fixture.controller.selfTestReaderCaretByteOffset → 3866
+↳     some → 3866
+↳   selection → 1898
+✘ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() failed after 3.391 seconds with 3 issues.
+✘ Test run with 1 test in 0 suites failed after 3.392 seconds with 3 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

@@ -1,0 +1,19 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionReadFailurePreservesFileAndCanRetry() started.
+✘ Test sessionReadFailurePreservesFileAndCanRetry() recorded an issue at SessionRestoreTests.swift:1658:5: Expectation failed: inaccessible.problem == .readFailed
+↳ inaccessible.problem == .readFailed → false
+↳   inaccessible.problem → nil
+↳     some → .readFailed
+✘ Test sessionReadFailurePreservesFileAndCanRetry() recorded an issue at SessionRestoreTests.swift:1660:5: Expectation failed: try Data(contentsOf: disk) == original
+↳ try Data(contentsOf: disk) == original → <not evaluated>
+✘ Test sessionReadFailurePreservesFileAndCanRetry() recorded an issue at SessionRestoreTests.swift:1661:5: Expectation failed: model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1
+↳ model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1 → false
+↳   model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count → 0
+↳     some → 0
+↳     some → 1
+✘ Test sessionReadFailurePreservesFileAndCanRetry() failed after 0.022 seconds with 3 issues.
+✘ Test run with 1 test in 0 suites failed after 0.022 seconds with 3 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppModelTests (Swift Testing)

@@ -1,0 +1,7 @@
+error: Process '/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/libexec/swift/pm/swiftpm-testing-helper --test-bundle-path /Users/siancao/work/ai/vibecoding/codeinsight/.build/out/Products/Debug/CodeInsightAppModelTests.xctest/Contents/MacOS/CodeInsightAppModelTests --no-parallel --filter sessionCodecClampsExtremeCursorBeforeTrimmingHistory /Users/siancao/work/ai/vibecoding/codeinsight/.build/out/Products/Debug/CodeInsightAppModelTests.xctest/Contents/MacOS/CodeInsightAppModelTests --testing-library swift-testing' exited with unexpected signal code 5
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionCodecClampsExtremeCursorBeforeTrimmingHistory() started.
+Note: Some test targets reported failures:
+  - CodeInsightAppModelTests (Swift Testing)

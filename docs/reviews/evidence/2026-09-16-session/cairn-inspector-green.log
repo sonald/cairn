@@ -1,0 +1,14 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test frozenInspectorClosesWhenProjectContextChanges() started.
+◇ Test relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() started.
+✔ Test relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() passed after 0.184 seconds.
+✔ Test frozenInspectorClosesWhenProjectContextChanges() passed after 0.237 seconds.
+✔ Test run with 2 tests in 0 suites passed after 0.237 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() started.
+✔ Test clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() passed after 0.023 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.023 seconds.

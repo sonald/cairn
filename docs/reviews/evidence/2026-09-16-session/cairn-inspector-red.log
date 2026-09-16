@@ -1,0 +1,490 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test frozenInspectorClosesWhenProjectContextChanges() started.
+✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:171:9: Expectation failed: !controller.selfTestInspectorIsFrozen
+↳ !controller.selfTestInspectorIsFrozen → true
+↳   controller.selfTestInspectorIsFrozen → false
+↳     controller → <CodeInsightApp.RelationWindowController: 0x759ce20600>
+↳       onOpen → nil
+↳       onTreeChange → nil
+↳       onOpenReadingSet → nil
+↳       model → CodeInsightAppModel.RelationTreeModel
+↳         _root → CodeInsightAppModel.RelationTreeModel.Node
+↳           some → CodeInsightAppModel.RelationTreeModel.Node
+↳             kind → .loading
+↳             title → "Index building…"
+↳             subtitle → nil
+↳             badge → nil
+↳             dispatchLabel → nil
+↳             modifiers → []
+↳             target → nil
+↳             line → nil
+↳             symbol → nil
+↳             representsLocation → false
+↳             expansionIdentity → nil
+↳             explanation → nil
+↳             explanationID → nil
+↳             children → []
+↳               some → []
+↳             isExpandable → false
+↳             parent → nil
+↳             evidence → []
+↳             cycleKey → nil
+↳             queryTarget → nil
+↳             callSites → []
+↳             nextCallSiteIndex → 0
+↳             loadRequestID → nil
+↳             loadTask → nil
+↳             loadedEdge → nil
+↳         _direction → .callers
+↳         _generation → 1
+↳         _requestID → 1
+↳         _selectedRelationSymbol → nil
+↳         _heuristicCandidateCount → 0
+↳         _relationQueryContexts → [:]
+↳         queryTimeout → 30.0 seconds
+↳           _low → 11553255926290448384
+↳           _high → 1
+↳         _exactResolver → nil
+↳         _exactRelationsResolver → nil
+↳         _exactBatch → nil
+↳         _possibleValidationBatch → nil
+↳         _scheduledPossibleRows → []
+↳         _cancelExactBatch → nil
+↳         _session → nil
+↳         _context → nil
+↳         _$observationRegistrar → ObservationRegistrar(extent: Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent)
+↳           extent → Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent
+↳             context → Context(state: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer))
+↳               state → _ManagedCriticalState<State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer)
+↳                 buffer → Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer
+↳       directionControl → <NSSegmentedControl: 0x759d37c000>
+↳       outlineView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4119RelationOutlineView: 0x759cd48000>
+↳         lastAccessibilityNotification → nil
+↳         accessibilityNotificationCount → 0
+↳       scrollView → <NSScrollView: 0x759ce40000>
+↳       container → <NSView: 0x759d37ca00>
+↳       headerSurface → <NSView: 0x759d37cc80>
+↳       contentSplit → <NSSplitView: 0x1036c1410>
+↳       listPane → <NSView: 0x759d37cf00>
+↳       inspectorView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4123ResolutionInspectorView: 0x1036c1a90>
+↳         header → <NSView: 0x759d37d180>
+↳         headerTitle → <NSTextField: 0x1036c2110>
+↳         captureChip → <CodeInsightApp.RelationChipView: 0x759ce20f00>
+↳           label → <NSTextField: 0x1036c2490>
+↳           dashedBorder → <CAShapeLayer: 0x759d38b840>
+↳         closeButton → <NSButton: 0x759d3✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:172:9: Expectation failed: !controller.selfTestInspectorVisible
+↳ !controller.selfTestInspectorVisible → true
+↳   controller.selfTestInspectorVisible → false
+↳     controller → <CodeInsightApp.RelationWindowController: 0x759ce20600>
+↳       onOpen → nil
+↳       onTreeChange → nil
+↳       onOpenReadingSet → nil
+↳       model → CodeInsightAppModel.RelationTreeModel
+↳         _root → CodeInsightAppModel.RelationTreeModel.Node
+↳           some → CodeInsightAppModel.RelationTreeModel.Node
+↳             kind → .loading
+↳             title → "Index building…"
+↳             subtitle → nil
+↳             badge → nil
+↳             dispatchLabel → nil
+↳             modifiers → []
+↳             target → nil
+↳             line → nil
+↳             symbol → nil
+↳             representsLocation → false
+↳             expansionIdentity → nil
+↳             explanation → nil
+↳             explanationID → nil
+↳             children → []
+↳               some → []
+↳             isExpandable → false
+↳             parent → nil
+↳             evidence → []
+↳             cycleKey → nil
+↳             queryTarget → nil
+↳             callSites → []
+↳             nextCallSiteIndex → 0
+↳             loadRequestID → nil
+↳             loadTask → nil
+↳             loadedEdge → nil
+↳         _direction → .callers
+↳         _generation → 1
+↳         _requestID → 1
+↳         _selectedRelationSymbol → nil
+↳         _heuristicCandidateCount → 0
+↳         _relationQueryContexts → [:]
+↳         queryTimeout → 30.0 seconds
+↳           _low → 11553255926290448384
+↳           _high → 1
+↳         _exactResolver → nil
+↳         _exactRelationsResolver → nil
+↳         _exactBatch → nil
+↳         _possibleValidationBatch → nil
+↳         _scheduledPossibleRows → []
+↳         _cancelExactBatch → nil
+↳         _session → nil
+↳         _context → nil
+↳         _$observationRegistrar → ObservationRegistrar(extent: Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent)
+↳           extent → Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent
+↳             context → Context(state: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer))
+↳               state → _ManagedCriticalState<State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer)
+↳                 buffer → Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer
+↳       directionControl → <NSSegmentedControl: 0x759d37c000>
+↳       outlineView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4119RelationOutlineView: 0x759cd48000>
+↳         lastAccessibilityNotification → nil
+↳         accessibilityNotificationCount → 0
+↳       scrollView → <NSScrollView: 0x759ce40000>
+↳       container → <NSView: 0x759d37ca00>
+↳       headerSurface → <NSView: 0x759d37cc80>
+↳       contentSplit → <NSSplitView: 0x1036c1410>
+↳       listPane → <NSView: 0x759d37cf00>
+↳       inspectorView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4123ResolutionInspectorView: 0x1036c1a90>
+↳         header → <NSView: 0x759d37d180>
+↳         headerTitle → <NSTextField: 0x1036c2110>
+↳         captureChip → <CodeInsightApp.RelationChipView: 0x759ce20f00>
+↳           label → <NSTextField: 0x1036c2490>
+↳           dashedBorder → <CAShapeLayer: 0x759d38b840>
+↳         closeButton → <NSButton: 0x759d37d680>
+↳         scrollView → <NSScrollView: 0x759ce40500>
+↳         documentView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4121InspectorDocumentView: 0x759d37d900>
+↳         content → <NSStackView: 0x759d37db80>
+↳         nodeTitle → <NSTextField: 0x1036c3f90>
+↳         badge → <CodeInsightApp.RelationChipView: 0x759ce21500>
+↳           label → <NSTextField: 0x1036c4310>
+↳           dashedBorder → <CAShapeLayer: 0x759d8cc840>
+↳         why → <NSTextField: 0x1036c4690>
+↳         sourceTitle → <NSTextField: 0x759d8d0000>
+↳         sourceBody → <NSTextField: 0x759d8d0380>
+↳         sourceSection → <NSStackView: 0x759d37e080>
+↳         verificationTitle → <NSTextField: 0x759d8d0700>
+↳         verificationBody → <NSTextField: 0x759d8d0a80>
+↳         verificationSection → <NSStackView: 0x759d37e300>
+↳         correctionTitle → <NSTextField: 0x759d8d0e00>
+↳         correctionBody → <NSTextField: 0x759d8d1180>
+↳         correctionSection → <NSStackView: 0x759d37e580>
+↳         availabilityTitle → <NSTextField: 0x759d8d1500>
+↳         availabilityBody → <NSTextField: 0x759d8d1880>
+↳         availabilitySection → <NSStackView: 0x759d37e800>
+↳         environmentTitle → <NSTextField: 0x759d8d1c00>
+↳         environmentBody → <NSTextField: 0x759d8d1f80>
+↳         environmentSection → <NSStackView: 0x759d37ea80>
+↳         auditButton → <NSButton: 0x759d37ed00>
+↳         auditStack → <NSStackView: 0x759d37ef80>
+↳         formerCandidateButton → <NSButton: 0x759d37f200>
+↳         theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳           selection → .auto
+↳           lineHeightMultiple → 1.3
+↳           fontSize → 13.0
+↳           functionNameFontSize → 13.0
+↳           parameterReferenceAlpha → 0.9
+↳           declarationMarkerAlpha → 0.7
+↳           functionDeclarationFontWeight → 0.23
+↳           declarationEmphasisFontWeight → 0.23
+↳           syntaxFormatting → true
+↳           humanistComments → false
+↳       inspectButton → <NSButton: 0x759d949400>
+↳       readingSetButton → <NSButton: 0x759d949680>
+↳       placeholderLabel → <NSTextField: 0x759d8d3100>
+↳       currentTarget → nil
+↳       currentDocument → nil
+↳       layoutPassCount → 4
+↳       selfTestOpenSelectionCount → 0
+↳       wholeTreeReloadCount → 2
+↳       nodeReloadCount → 0
+↳       theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳         selection → .auto
+↳         lineHeightMultiple → 1.3
+↳         fontSize → 13.0
+↳         functionNameFontSize → 13.0
+↳         parameterReferenceAlpha → 0.9
+↳         declarationMarkerAlpha → 0.7
+↳         functionDeclarationFontWeight → 0.23
+↳         declarationEmphasisFontWeight → 0.23
+↳         syntaxFormatting → true
+↳         humanistComments → false
+↳       inspectorMode → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳         some → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳           frozen → (CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳             .0 → FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true)
+↳               nodeTitle → "old_project_symbol"
+↳               badge → .verified
+↳               why → "Captured evidence"
+↳               sourceBody → "Project A"
+↳               verificationTitle → "VERIFICATION"
+↳               verificationBody → "Captured result"
+↳               correctionBody → ""
+↳               availabilityBody → ""
+↳               environmentBody → ""
+↳               auditRows → []
+↳               accessibilityValue → "Project A evidence"
+↳               capturedAt → 2026-09-16 03:06:20 +0000
+↳                 timeIntervalSinceReferenceDate → 811220780.535474
+↳               formerCandidateAvailable → true
+↳       inspectorSplitFraction → 0.5
+↳       adjustingInspectorSplit → false
+↳       inspectorReplacesList → false
+↳     selfTestInspectorVisible → true
+✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:174:9: Expectation failed: oldProjectActionCalls == 0
+↳ oldProjectActionCalls == 0 → false
+↳   oldProjectActionCalls → 1
+✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:171:9: Expectation failed: !controller.selfTestInspectorIsFrozen
+↳ !controller.selfTestInspectorIsFrozen → true
+↳   controller.selfTestInspectorIsFrozen → false
+↳     controller → <CodeInsightApp.RelationWindowController: 0x759ce20600>
+↳       onOpen → nil
+↳       onTreeChange → nil
+↳       onOpenReadingSet → nil
+↳       model → CodeInsightAppModel.RelationTreeModel
+↳         _root → nil
+↳         _direction → .callers
+↳         _generation → 2
+↳         _requestID → 2
+↳         _selectedRelationSymbol → nil
+↳         _heuristicCandidateCount → 0
+↳         _relationQueryContexts → [:]
+↳         queryTimeout → 30.0 seconds
+↳           _low → 11553255926290448384
+↳           _high → 1
+↳         _exactResolver → nil
+↳         _exactRelationsResolver → nil
+↳         _exactBatch → nil
+↳         _possibleValidationBatch → nil
+↳         _scheduledPossibleRows → []
+↳         _cancelExactBatch → nil
+↳         _session → nil
+↳         _context → nil
+↳         _$observationRegistrar → ObservationRegistrar(extent: Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent)
+↳           extent → Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent
+↳             context → Context(state: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer))
+↳               state → _ManagedCriticalState<State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer)
+↳                 buffer → Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer
+↳       directionControl → <NSSegmentedControl: 0x759d37c000>
+↳       outlineView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4119RelationOutlineView: 0x759cd48000>
+↳         lastAccessibilityNotification → nil
+↳         accessibilityNotificationCount → 0
+↳       scrollView → <NSScrollView: 0x759ce40000>
+↳       container → <NSView: 0x759d37ca00>
+↳       headerSurface → <NSView: 0x759d37cc80>
+↳       contentSplit → <NSSplitView: 0x1036c1410>
+↳       listPane → <NSView: 0x759d37cf00>
+↳       inspectorView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4123ResolutionInspectorView: 0x1036c1a90>
+↳         header → <NSView: 0x759d37d180>
+↳         headerTitle → <NSTextField: 0x1036c2110>
+↳         captureChip → <CodeInsightApp.RelationChipView: 0x759ce20f00>
+↳           label → <NSTextField: 0x1036c2490>
+↳           dashedBorder → <CAShapeLayer: 0x759d38b840>
+↳         closeButton → <NSButton: 0x759d37d680>
+↳         scrollView → <NSScrollView: 0x759ce40500>
+↳         documentView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4121InspectorDocumentView: 0x759d37d900>
+↳         content → <NSStackView: 0x759d37db80>
+↳         nodeTitle → <NSTextField: 0x1036c3f90>
+↳         badge → <CodeInsightApp.RelationChipView: 0x759ce21500>
+↳           label → <NSTextField: 0x1036c4310>
+↳           dashedBorder → <CAShapeLayer: 0x759d8cc840>
+↳         why → <NSTextField: 0x1036c4690>
+↳         sourceTitle → <NSTextField: 0x759d8d0000>
+↳         sourceBody → <NSTextField: 0x759d8d0380>
+↳         sourceSection → <NSStackView: 0x759d37e080>
+↳         verificationTitle → <NSTextField: 0x759d8d0700>
+↳         verificationBody → <NSTextField: 0x759d8d0a80>
+↳         verificationSection → <NSStackView: 0x759d37e300>
+↳         correctionTitle → <NSTextField: 0x759d8d0e00>
+↳         correctionBody → <NSTextField: 0x759d8d1180>
+↳         correctionSection → <NSStackView: 0x759d37e580>
+↳         availabilityTitle → <NSTextField: 0x759d8d1500>
+↳         availabilityBody → <NSTextField: 0x759d8d1880>
+↳         availabilitySection → <NSStackView: 0x759d37e800>
+↳         environmentTitle → <NSTextField: 0x759d8d1c00>
+↳         environmentBody → <NSTextField: 0x759d8d1f80>
+↳         environmentSection → <NSStackView: 0x759d37ea80>
+↳         auditButton → <NSButton: 0x759d37ed00>
+↳         auditStack → <NSStackView: 0x759d37ef80>
+↳         formerCandidateButton → <NSButton: 0x759d37f200>
+↳         theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳           selection → .auto
+↳           lineHeightMultiple → 1.3
+↳           fontSize → 13.0
+↳           functionNameFontSize → 13.0
+↳           parameterReferenceAlpha → 0.9
+↳           declarationMarkerAlpha → 0.7
+↳           functionDeclarationFontWeight → 0.23
+↳           declarationEmphasisFontWeight → 0.23
+↳           syntaxFormatting → true
+↳           humanistComments → false
+↳       inspectButton → <NSButton: 0x759d949400>
+↳       readingSetButton → <NSButton: 0x759d949680>
+↳       placeholderLabel → <NSTextField: 0x759d8d3100>
+↳       currentTarget → nil
+↳       currentDocument → nil
+↳       layoutPassCount → 8
+↳       selfTestOpenSelectionCount → 0
+↳       wholeTreeReloadCount → 3
+↳       nodeReloadCount → 0
+↳       theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳         selection → .auto
+↳         lineHeightMultiple → 1.3
+↳         fontSize → 13.0
+↳         functionNameFontSize → 13.0
+↳         parameterReferenceAlpha → 0.9
+↳         declarationMarkerAlpha → 0.7
+↳         functionDeclarationFontWeight → 0.23
+↳         declarationEmphasisFontWeight → 0.23
+↳         syntaxFormatting → true
+↳         humanistComments → false
+↳       inspectorMode → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳         some → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳           frozen → (CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳             .0 → FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true)
+↳               nodeTitle → "old_project_symbol"
+↳               badge → .verified
+↳               why → "Captured evidence"
+↳               sourceBody → "Project A"
+↳               verificationTitle → "VERIFICATION"
+↳               verificationBody → "Captured result"
+↳               correctionBody → ""
+↳               availabilityBody → ""
+↳               environmentBody → ""
+↳               auditRows → []
+↳               accessibilityValue → "Project A evidence"
+↳               capturedAt → 2026-09-16 03:06:20 +0000
+↳                 timeIntervalSinceReferenceDate → 811220780.535474
+↳               formerCandidateAvailable → true
+↳       inspectorSplitFraction → 0.5
+↳       adjustingInspectorSplit → false
+↳       inspectorReplacesList → false
+↳     selfTestInspectorIsFrozen → true
+✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:172:9: Expectation failed: !controller.selfTestInspectorVisible
+↳ !controller.selfTestInspectorVisible → true
+↳   controller.selfTestInspectorVisible → false
+↳     controller → <CodeInsightApp.RelationWindowController: 0x759ce20600>
+↳       onOpen → nil
+↳       onTreeChange → nil
+↳       onOpenReadingSet → nil
+↳       model → CodeInsightAppModel.RelationTreeModel
+↳         _root → nil
+↳         _direction → .callers
+↳         _generation → 2
+↳         _requestID → 2
+↳         _selectedRelationSymbol → nil
+↳         _heuristicCandidateCount → 0
+↳         _relationQueryContexts → [:]
+↳         queryTimeout → 30.0 seconds
+↳           _low → 11553255926290448384
+↳           _high → 1
+↳         _exactResolver → nil
+↳         _exactRelationsResolver → nil
+↳         _exactBatch → nil
+↳         _possibleValidationBatch → nil
+↳         _scheduledPossibleRows → []
+↳         _cancelExactBatch → nil
+↳         _session → nil
+↳         _context → nil
+↳         _$observationRegistrar → ObservationRegistrar(extent: Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent)
+↳           extent → Observation.ObservationRegistrar.(unknown context at $2c447596c).Extent
+↳             context → Context(state: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer))
+↳               state → _ManagedCriticalState<State>(buffer: Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer)
+↳                 buffer → Observation._ManagedCriticalState<Observation.ObservationRegistrar.(unknown context at $2c44759b0).State>.(unknown context at $2c447584c).LockedBuffer
+↳       directionControl → <NSSegmentedControl: 0x759d37c000>
+↳       outlineView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4119RelationOutlineView: 0x759cd48000>
+↳         lastAccessibilityNotification → nil
+↳         accessibilityNotificationCount → 0
+↳       scrollView → <NSScrollView: 0x759ce40000>
+↳       container → <NSView: 0x759d37ca00>
+↳       headerSurface → <NSView: 0x759d37cc80>
+↳       contentSplit → <NSSplitView: 0x1036c1410>
+↳       listPane → <NSView: 0x759d37cf00>
+↳       inspectorView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4123ResolutionInspectorView: 0x1036c1a90>
+↳         header → <NSView: 0x759d37d180>
+↳         headerTitle → <NSTextField: 0x1036c2110>
+↳         captureChip → <CodeInsightApp.RelationChipView: 0x759ce20f00>
+↳           label → <NSTextField: 0x1036c2490>
+↳           dashedBorder → <CAShapeLayer: 0x759d38b840>
+↳         closeButton → <NSButton: 0x759d37d680>
+↳         scrollView → <NSScrollView: 0x759ce40500>
+↳         documentView → <_TtC14CodeInsightAppP33_47CFB0C77DBCC38F5BC838FEA1F77A4121InspectorDocumentView: 0x759d37d900>
+↳         content → <NSStackView: 0x759d37db80>
+↳         nodeTitle → <NSTextField: 0x1036c3f90>
+↳         badge → <CodeInsightApp.RelationChipView: 0x759ce21500>
+↳           label → <NSTextField: 0x1036c4310>
+↳           dashedBorder → <CAShapeLayer: 0x759d8cc840>
+↳         why → <NSTextField: 0x1036c4690>
+↳         sourceTitle → <NSTextField: 0x759d8d0000>
+↳         sourceBody → <NSTextField: 0x759d8d0380>
+↳         sourceSection → <NSStackView: 0x759d37e080>
+↳         verificationTitle → <NSTextField: 0x759d8d0700>
+↳         verificationBody → <NSTextField: 0x759d8d0a80>
+↳         verificationSection → <NSStackView: 0x759d37e300>
+↳         correctionTitle → <NSTextField: 0x759d8d0e00>
+↳         correctionBody → <NSTextField: 0x759d8d1180>
+↳         correctionSection → <NSStackView: 0x759d37e580>
+↳         availabilityTitle → <NSTextField: 0x759d8d1500>
+↳         availabilityBody → <NSTextField: 0x759d8d1880>
+↳         availabilitySection → <NSStackView: 0x759d37e800>
+↳         environmentTitle → <NSTextField: 0x759d8d1c00>
+↳         environmentBody → <NSTextField: 0x759d8d1f80>
+↳         environmentSection → <NSStackView: 0x759d37ea80>
+↳         auditButton → <NSButton: 0x759d37ed00>
+↳         auditStack → <NSStackView: 0x759d37ef80>
+↳         formerCandidateButton → <NSButton: 0x759d37f200>
+↳         theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳           selection → .auto
+↳           lineHeightMultiple → 1.3
+↳           fontSize → 13.0
+↳           functionNameFontSize → 13.0
+↳           parameterReferenceAlpha → 0.9
+↳           declarationMarkerAlpha → 0.7
+↳           functionDeclarationFontWeight → 0.23
+↳           declarationEmphasisFontWeight → 0.23
+↳           syntaxFormatting → true
+↳           humanistComments → false
+↳       inspectButton → <NSButton: 0x759d949400>
+↳       readingSetButton → <NSButton: 0x759d949680>
+↳       placeholderLabel → <NSTextField: 0x759d8d3100>
+↳       currentTarget → nil
+↳       currentDocument → nil
+↳       layoutPassCount → 8
+↳       selfTestOpenSelectionCount → 0
+↳       wholeTreeReloadCount → 3
+↳       nodeReloadCount → 0
+↳       theme → ReaderTheme(selection: CodeInsightReaderCore.ReaderSettings.Theme.auto, lineHeightMultiple: 1.3, fontSize: 13.0, functionNameFontSize: 13.0, parameterReferenceAlpha: 0.9, declarationMarkerAlpha: 0.7, functionDeclarationFontWeight: 0.23, declarationEmphasisFontWeight: 0.23, syntaxFormatting: true, humanistComments: false)
+↳         selection → .auto
+↳         lineHeightMultiple → 1.3
+↳         fontSize → 13.0
+↳         functionNameFontSize → 13.0
+↳         parameterReferenceAlpha → 0.9
+↳         declarationMarkerAlpha → 0.7
+↳         functionDeclarationFontWeight → 0.23
+↳         declarationEmphasisFontWeight → 0.23
+↳         syntaxFormatting → true
+↳         humanistComments → false
+↳       inspectorMode → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳         some → .frozen(CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳           frozen → (CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true), onOpenFormerCandidate: Optional((Function)))
+↳             .0 → FrozenInspectorDisplay(nodeTitle: "old_project_symbol", badge: CodeInsightAppModel.ReadingSetExcerpt.FrozenInspectorDisplay.Badge.verified, why: "Captured evidence", sourceBody: "Project A", verificationTitle: "VERIFICATION", verificationBody: "Captured result", correctionBody: "", availabilityBody: "", environmentBody: "", auditRows: [], accessibilityValue: "Project A evidence", capturedAt: 2026-09-16 03:06:20 +0000, formerCandidateAvailable: true)
+↳               nodeTitle → "old_project_symbol"
+↳               badge → .verified
+↳               why → "Captured evidence"
+↳               sourceBody → "Project A"
+↳               verificationTitle → "VERIFICATION"
+↳               verificationBody → "Captured result"
+↳               correctionBody → ""
+↳               availabilityBody → ""
+↳               environmentBody → ""
+↳               auditRows → []
+↳               accessibilityValue → "Project A evidence"
+↳               capturedAt → 2026-09-16 03:06:20 +0000
+↳                 timeIntervalSinceReferenceDate → 811220780.535474
+↳               formerCandidateAvailable → true
+↳       inspectorSplitFraction → 0.5
+↳       adjustingInspectorSplit → false
+↳       inspectorReplacesList → false
+↳     selfTestInspectorVisible → true
+✘ Test frozenInspectorClosesWhenProjectContextChanges() recorded an issue at RelationInspectorGeometryTests.swift:174:9: Expectation failed: oldProjectActionCalls == 0
+↳ oldProjectActionCalls == 0 → false
+↳   oldProjectActionCalls → 2
+✘ Test frozenInspectorClosesWhenProjectContextChanges() failed after 0.152 seconds with 6 issues.
+✘ Test run with 1 test in 0 suites failed after 0.152 seconds with 6 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

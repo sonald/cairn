@@ -1,0 +1,18 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionReopenRetriesAfterSavedFileBecomesReadable() started.
+✘ Test sessionReopenRetriesAfterSavedFileBecomesReadable() recorded an issue at SessionOpenBoundaryTests.swift:77:5: Expectation failed: model.tabStrip.activeTab?.fileURL == file
+↳ model.tabStrip.activeTab?.fileURL == file → false
+↳   model.tabStrip.activeTab?.fileURL → nil
+↳   file → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/SessionRetry-FE297AE8-097D-442E-B288-8EADD06C83FB/main.rs
+↳     _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/SessionRetry-FE297AE8-097D-442E-B288-8EADD06C83FB/main.rs
+↳       _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/SessionRetry-FE297AE8-097D-442E-B288-8EADD06C83FB/main.rs
+✘ Test sessionReopenRetriesAfterSavedFileBecomesReadable() recorded an issue at SessionOpenBoundaryTests.swift:78:5: Expectation failed: model.sessionLoadNotice == nil
+↳ model.sessionLoadNotice == nil → false
+↳   model.sessionLoadNotice → "Saved reading session could not be read; it is kept untouched. Retry opening the project"
+↳     some → "Saved reading session could not be read; it is kept untouched. Retry opening the project"
+✘ Test sessionReopenRetriesAfterSavedFileBecomesReadable() failed after 2.418 seconds with 2 issues.
+✘ Test run with 1 test in 0 suites failed after 2.418 seconds with 2 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

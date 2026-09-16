@@ -1,0 +1,16 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerVisualSettingControlsAreVisibleAndDoNotOverlap() started.
+✔ Test readerVisualSettingControlsAreVisibleAndDoNotOverlap() passed after 0.981 seconds.
+◇ Suite RelationUXTests started.
+◇ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() started.
+✔ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() passed after 0.221 seconds.
+✔ Suite RelationUXTests passed after 0.221 seconds.
+✔ Test run with 2 tests in 1 suite passed after 1.202 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() started.
+✔ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() passed after 0.197 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.197 seconds.

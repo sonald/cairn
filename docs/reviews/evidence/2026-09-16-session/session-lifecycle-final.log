@@ -1,0 +1,34 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() started.
+✔ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() passed after 0.460 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.460 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionRestoreOldTaskCannotReleaseNewTaskProtection() started.
+✔ Test sessionRestoreOldTaskCannotReleaseNewTaskProtection() passed after 0.038 seconds.
+◇ Test sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() started.
+✔ Test sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() passed after 0.027 seconds.
+◇ Test sessionReadFailurePreservesFileAndCanRetry() started.
+✔ Test sessionReadFailurePreservesFileAndCanRetry() passed after 0.016 seconds.
+◇ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() started.
+✔ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() passed after 0.018 seconds.
+◇ Test restoredTrailNodeReplaysByItsSavedRevisionAndWorktreeRecordSwitchesBack() started.
+✔ Test restoredTrailNodeReplaysByItsSavedRevisionAndWorktreeRecordSwitchesBack() passed after 0.099 seconds.
+◇ Test replayingAnUnavailableSavedRevisionKeepsTheCurrentView() started.
+✔ Test replayingAnUnavailableSavedRevisionKeepsTheCurrentView() passed after 0.037 seconds.
+◇ Test passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() started.
+✔ Test passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() passed after 0.024 seconds.
+◇ Test snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() started.
+✔ Test snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() passed after 0.110 seconds.
+◇ Test oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() started.
+✔ Test oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() passed after 0.041 seconds.
+◇ Test crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() started.
+✔ Test crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() passed after 0.041 seconds.
+◇ Test crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() started.
+✔ Test crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() passed after 0.038 seconds.
+◇ Test sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() started.
+✔ Test sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() passed after 0.028 seconds.
+✔ Test run with 12 tests in 0 suites passed after 0.523 seconds.

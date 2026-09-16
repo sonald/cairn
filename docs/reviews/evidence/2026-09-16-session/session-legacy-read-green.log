@@ -1,0 +1,14 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionLoadProblemsAreClassifiedAndPreserveOrQuarantineData() started.
+✔ Test sessionLoadProblemsAreClassifiedAndPreserveOrQuarantineData() passed after 0.007 seconds.
+◇ Test sessionReadFailurePreservesFileAndCanRetry() started.
+✔ Test sessionReadFailurePreservesFileAndCanRetry() passed after 0.017 seconds.
+◇ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() started.
+✔ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() passed after 0.018 seconds.
+◇ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+◇ Test case passing 1 argument futureSchema → false to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+◇ Test case passing 1 argument futureSchema → true to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+✔ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) with 2 test cases passed after 0.035 seconds.
+✔ Test run with 4 tests in 0 suites passed after 0.079 seconds.

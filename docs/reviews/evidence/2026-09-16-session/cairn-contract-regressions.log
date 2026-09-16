@@ -1,0 +1,14 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite RelationUXTests started.
+◇ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() started.
+✔ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() passed after 0.336 seconds.
+✔ Suite RelationUXTests passed after 0.336 seconds.
+✔ Test run with 1 test in 1 suite passed after 0.336 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() started.
+✔ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() passed after 0.201 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.201 seconds.

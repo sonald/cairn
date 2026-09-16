@@ -1,5 +1,7 @@
 # Cairn 恢复阅读现场——实现与验收记录
 
+> 2026-09-16 更新：本记录中的两进程证据范围已由独立审查修正；修复与最终验收以 [2026-09-16 修复记录](../reviews/2026-09-16-reading-session-restore-fixes.md) 为准。
+
 日期：2026-09-15。设计方案：`docs/plans/2026-09-15-reading-session-restore-plan.md`。
 实现切片提交：S1 `d93b146`、S2 `5e96e0b`、S3 `0b2d69c`、S4a `7ed2fa8`、S4b `3f340f4`、S5（本提交）。
 

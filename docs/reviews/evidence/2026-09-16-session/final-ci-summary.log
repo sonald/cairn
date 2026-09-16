@@ -1,0 +1,13 @@
+command: bash scripts/ci.sh
+source commit: 45b1061
+exit: 0
+PASS: batch total=942 (.build/ci-swift-test.log)
+PASS: batch total=2 (.build/ci-swift-test-isolated.log)
+PASS: batch total=2 (.build/ci-swift-test-panels.log)
+PASS: swift test total=946 (main=942 isolated=2 panels=2)
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+SELF_TEST_FINISH timestamp=1789530344.528094 pid=12697 channel=exact exit=0
+SELF_TEST_FINISH timestamp=1789530396.342504 pid=13949 channel=diff exit=0
+SELF_TEST_FINISH timestamp=1789530429.6342502 pid=13987 channel=reading exit=0
+SELF_TEST_FINISH timestamp=1789530429.85327 pid=14010 channel=projector exit=0
+SELF_TEST_FINISH timestamp=1789530429.97347 pid=14011 channel=fold exit=0

@@ -1,0 +1,51 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+◇ Test case passing 1 argument futureSchema → false to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → false at SessionRestoreTests.swift:1708:5: Expectation failed: result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed)
+↳ result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed) → false
+↳   result.problem → nil
+↳   (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed) → .readFailed
+↳     some → .readFailed
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → false at SessionRestoreTests.swift:1713:5: Expectation failed: !FileManager.default.fileExists(atPath: disk.path)
+↳ !FileManager.default.fileExists(atPath: disk.path) → true
+↳   FileManager.default.fileExists(atPath: disk.path) → false
+↳     FileManager.default → <NSFileManager: 0x10472ff70>
+↳     disk.path → "/var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/CodeInsightSessionRestore-81EA20E3-A60C-45D9-9B1C-8A3E0ABF7E1B/sessions/2abd0bd6c929c1268dbc714155c31ee5743ae0995b92d3f9dc6a20901ceed697.json"
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → false at SessionRestoreTests.swift:1718:5: Expectation failed: model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1
+↳ model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1 → false
+↳   model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count → 0
+↳     some → 0
+↳     some → 1
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → false at SessionRestoreTests.swift:1723:5: Expectation failed: model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99)
+↳ model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99) → false
+↳   model.loadSessionSnapshot(forProject: root).problem → nil
+↳     some → .unsupportedSchemaVersion(99)
+↳       unsupportedSchemaVersion → 99
+◇ Test case passing 1 argument futureSchema → true to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → true at SessionRestoreTests.swift:1708:5: Expectation failed: result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed)
+↳ result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed) → false
+↳   result.problem → nil
+↳   (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed) → .unsupportedSchemaVersion(99)
+↳     some → .unsupportedSchemaVersion(99)
+↳       unsupportedSchemaVersion → 99
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → true at SessionRestoreTests.swift:1713:5: Expectation failed: !FileManager.default.fileExists(atPath: disk.path)
+↳ !FileManager.default.fileExists(atPath: disk.path) → true
+↳   FileManager.default.fileExists(atPath: disk.path) → false
+↳     FileManager.default → <NSFileManager: 0x10472ff70>
+↳     disk.path → "/var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/CodeInsightSessionRestore-4DE308BC-E6F8-46E5-BF6F-E73BC8812D3B/sessions/d1e1775ffe8875c8c1bfcc145cc714aa1e8eaa6fe460717900f523d06911e29c.json"
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → true at SessionRestoreTests.swift:1718:5: Expectation failed: model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1
+↳ model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1 → false
+↳   model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count → 0
+↳     some → 0
+↳     some → 1
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) recorded an issue with 1 argument futureSchema → true at SessionRestoreTests.swift:1723:5: Expectation failed: model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99)
+↳ model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99) → false
+↳   model.loadSessionSnapshot(forProject: root).problem → nil
+↳     some → .unsupportedSchemaVersion(99)
+↳       unsupportedSchemaVersion → 99
+✘ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) with 2 test cases failed after 0.043 seconds with 8 issues.
+✘ Test run with 1 test in 0 suites failed after 0.043 seconds with 8 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppModelTests (Swift Testing)

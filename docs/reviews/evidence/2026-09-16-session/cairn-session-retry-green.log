@@ -1,0 +1,8 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() started.
+✔ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() passed after 0.449 seconds.
+◇ Test sessionReopenRetriesAfterSavedFileBecomesReadable() started.
+✔ Test sessionReopenRetriesAfterSavedFileBecomesReadable() passed after 0.300 seconds.
+✔ Test run with 2 tests in 0 suites passed after 0.749 seconds.
