@@ -41,3 +41,39 @@ private func sessionBoundaryWait(_ predicate: () -> Bool) async -> Bool {
     }
     return false
 }
+
+@MainActor
+@Test
+func sessionReopenRetriesAfterSavedFileBecomesReadable() async throws {
+    _ = NSApplication.shared
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("SessionRetry-\(UUID())")
+    let state = root.appendingPathComponent("state")
+    try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    let file = root.appendingPathComponent("main.rs")
+    try "fn main() {}".write(to: file, atomically: true, encoding: .utf8)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let writer = AppModel(sessionURL: state.appendingPathComponent("session.json"))
+    try writer.openProject(root: root, language: .rust)
+    try #require(await sessionBoundaryWait { writer.snapshotPhase == .fullReady })
+    writer.openInNewTab(file)
+    try writer.writeSessionCheckpoint(panelPreset: .reading)
+    let snapshot = state.appendingPathComponent("sessions")
+        .appendingPathComponent(AppModel.sessionProjectKey(for: root) + ".json")
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: snapshot.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path) }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"))
+    let controller = MainWindowController(model: model, settings: ReaderSettings(), offscreen: true)
+    defer { controller.close() }
+    controller.openRecentProject(root)
+    try #require(await sessionBoundaryWait { model.snapshotPhase == .fullReady })
+    #expect(model.sessionLoadNotice != nil)
+    #expect(model.tabStrip.tabs.isEmpty)
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: snapshot.path)
+    controller.openRecentProject(root)
+    let deadline = ContinuousClock.now + .seconds(2)
+    while model.tabStrip.tabs.isEmpty && ContinuousClock.now < deadline {
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(model.tabStrip.activeTab?.fileURL == file)
+    #expect(model.sessionLoadNotice == nil)
+}

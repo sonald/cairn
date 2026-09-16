@@ -648,6 +648,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if !forcingReopen,
            model.projectRoot?.standardizedFileURL == root,
            case .ready = model.projectState,
+           model.sessionLoadNotice == nil,
            !overridesSavedLanguages || model.projectLanguages == languages
         {
             window?.makeKeyAndOrderFront(nil)
