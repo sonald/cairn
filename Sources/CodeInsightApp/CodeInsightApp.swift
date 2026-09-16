@@ -2425,10 +2425,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 error: "M6 reference scale copy failed: \(error)"
             )
         }
-        controller.openProject(root: root)
+        // Opening the same project now focuses its existing reading session.
+        // The fixture added above needs an explicit index refresh instead.
+        let beforeReferenceRefresh = model.generation
+        controller.refreshProjectIndex(nil)
         guard waitUntil(timeout: 30, condition: {
             if case .failed = self.model.projectState { return true }
-            if self.model.fileTree != nil
+            if !self.model.isRefreshingIndex
+                && self.model.generation > beforeReferenceRefresh
+                && self.model.fileTree != nil
                 && self.model.snapshotPhase == .fullReady
             {
                 return true
