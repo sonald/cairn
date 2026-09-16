@@ -621,17 +621,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    /// Capture the outgoing project's reader state and write its session
-    /// snapshot before the workspace is torn down, so switching projects
-    /// cannot lose the last scroll/caret position. Reopening the project
-    /// that is already open does not flush or reset anything.
-    private func flushSessionBeforeProjectSwitch(to root: URL) {
-        guard let current = model.projectRoot,
-              current.standardizedFileURL != root.standardizedFileURL
-        else { return }
-        checkpointSessionSynchronously()
-    }
-
     func openRecentProject(_ root: URL, forcingReopen: Bool = false) {
         openProjectWithSavedSession(
             root: root,
@@ -664,8 +653,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             window?.makeKeyAndOrderFront(nil)
             return
         }
+        // Every actual reopen, including a language change on the same root,
+        // captures the latest reader state before consulting the saved snapshot.
+        checkpointSessionSynchronously()
         if let snapshot = model.loadSessionSnapshot(forProject: root).snapshot {
-            flushSessionBeforeProjectSwitch(to: root)
             cancelSessionRestore()
             restoreSession(
                 snapshot,
@@ -677,7 +668,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func openProjectFresh(root: URL, languages: [LanguageID]) {
-        flushSessionBeforeProjectSwitch(to: root)
         cancelSessionRestore()
         lastOpenedProjectRoot = root
         lastOpenedProjectLanguages = languages
@@ -873,6 +863,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestReadingByteOffset: UInt32? {
         readerController.currentReadingPosition()?.byteOffset
+    }
+    var selfTestReaderCaretByteOffset: UInt32? {
+        readerController.selfTestReaderCaretByteOffset
     }
     var selfTestReadingGeometry: (
         scrollFrame: NSRect,
@@ -6329,6 +6322,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
     var selfTestPrimarySelectionRange: NSRange? {
         textView.primarySelectionRange
+    }
+    var selfTestReaderCaretByteOffset: UInt32? {
+        textView.byteOffset(forCharacterIndex: textView.view.selectedRange().location)
     }
     func selfTestEmitOutlineFollow(at byteOffset: UInt32) {
         onOutlineFollowPositionChange?(byteOffset)

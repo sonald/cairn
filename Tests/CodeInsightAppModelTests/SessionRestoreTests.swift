@@ -1558,3 +1558,169 @@ private func sessionRestoreCurrentHEAD(_ root: URL) throws -> String {
     return String(decoding: data, as: UTF8.self)
         .trimmingCharacters(in: .whitespacesAndNewlines)
 }
+
+@MainActor
+@Test
+func sessionRestoreOldTaskCannotReleaseNewTaskProtection() async throws {
+    let a = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let b = try sessionRestoreProject(["b.rs": "fn b() {}", "c.rs": "fn c() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for root in [a, b, state] { try? FileManager.default.removeItem(at: root) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    func snapshot(_ root: URL, _ names: [String]) -> SessionCodec.Snapshot {
+        .init(projectRoot: root.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+              panelPreset: PanelPresetModel.reading.rawValue,
+              tabs: names.map { .file(.init(path: $0, anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil)) })
+    }
+    let savedB = snapshot(b, ["b.rs", "c.rs"])
+    #expect(await model.restoreSession(savedB))
+    let disk = state.appendingPathComponent("sessions/" + AppModel.sessionProjectKey(for: b) + ".json")
+    let original = try Data(contentsOf: disk)
+    var gates: [String: CheckedContinuation<Void, Never>] = [:]
+    model.sessionFileResolutionWillBegin = { file in
+        if file.lastPathComponent != "c.rs" {
+            await withCheckedContinuation { gates[file.lastPathComponent] = $0 }
+        }
+    }
+    let first = Task { await model.restoreSession(snapshot(a, ["a.rs"])) }
+    try #require(await testWaitUntil("A resolver gated") { gates["a.rs"] != nil })
+    first.cancel()
+    let second = Task { await model.restoreSession(savedB) }
+    try #require(await testWaitUntil("B resolver gated") { gates["b.rs"] != nil })
+    gates.removeValue(forKey: "a.rs")?.resume()
+    #expect(await first.value == false)
+    #expect(model.isRestoringSession)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(try Data(contentsOf: disk) == original)
+    gates.removeValue(forKey: "b.rs")?.resume()
+    #expect(await second.value)
+    #expect(model.tabStrip.tabs.compactMap { $0.fileURL?.lastPathComponent } == ["b.rs", "c.rs"])
+    #expect(model.loadSessionSnapshot(forProject: b).snapshot?.tabs.count == 2)
+}
+
+@MainActor
+@Test
+func sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    let snapshot = SessionCodec.Snapshot(projectRoot: root.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue, tabs: [.file(.init(path: "a.rs", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil))])
+    #expect(await model.restoreSession(snapshot))
+    var gate: CheckedContinuation<Void, Never>?
+    model.sessionFileResolutionWillBegin = { _ in await withCheckedContinuation { gate = $0 } }
+    let task = Task { await model.restoreSession(snapshot) }
+    try #require(await testWaitUntil("resolver gated") { gate != nil })
+    task.cancel()
+    gate?.resume()
+    #expect(await task.value == false)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1)
+    model.sessionFileResolutionWillBegin = nil
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("fresh open") { model.snapshotPhase == .fullReady })
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
+}
+
+@MainActor
+@Test
+func sessionReadFailurePreservesFileAndCanRetry() async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
+    let model = AppModel(sessionURL: state.appendingPathComponent("session.json"), indexService: SessionRestoreIndexService())
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("fresh open") { model.snapshotPhase == .fullReady })
+    model.openInNewTab(root.appendingPathComponent("a.rs"))
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    let disk = state.appendingPathComponent("sessions/" + AppModel.sessionProjectKey(for: root) + ".json")
+    let original = try Data(contentsOf: disk)
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: disk.path)
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: disk.path) }
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot == nil)
+    #expect(FileManager.default.fileExists(atPath: disk.path))
+    #expect(!FileManager.default.fileExists(atPath: disk.path + ".corrupt"))
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: disk.path)
+    model.tabStrip.reset()
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(try Data(contentsOf: disk) == original)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
+    // A non-searchable parent must also be a read error, not a missing snapshot.
+    try original.write(to: disk)
+    let directory = disk.deletingLastPathComponent()
+    try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: directory.path)
+    let inaccessible = model.loadSessionSnapshot(forProject: root)
+    try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path)
+    #expect(inaccessible.problem == .readFailed)
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(try Data(contentsOf: disk) == original)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1)
+}
+
+@MainActor
+@Test
+func sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() async throws {
+    let a = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let b = try sessionRestoreProject(["b.rs": "fn b() {}"])
+    let state = try sessionRestoreProject([:])
+    let offline = URL(fileURLWithPath: a.path + "-offline")
+    defer { for path in [a, b, state, offline] { try? FileManager.default.removeItem(at: path) } }
+    let legacy = state.appendingPathComponent("session.json")
+    let snapshot = SessionCodec.Snapshot(projectRoot: a.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue, tabs: [.file(.init(path: "a.rs", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil))])
+    let bytes = try SessionCodec.encode(snapshot, maximumTabCount: 12, dependencyAllowed: exactLocationIsInDependency)
+    try bytes.write(to: legacy)
+    try FileManager.default.moveItem(at: a, to: offline)
+    let model = AppModel(sessionURL: legacy, indexService: SessionRestoreIndexService())
+    #expect(model.loadLegacySessionSnapshot().problem == .projectUnavailable)
+    try model.openProject(root: b, language: .rust)
+    try #require(await testWaitUntil("B open") { model.snapshotPhase == .fullReady })
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    #expect(FileManager.default.fileExists(atPath: legacy.path))
+    #expect(!FileManager.default.fileExists(atPath: legacy.path + ".migrated"))
+    try FileManager.default.moveItem(at: offline, to: a)
+    let recovered = try #require(model.loadSessionSnapshot(forProject: a).snapshot)
+    #expect(await model.restoreSession(recovered))
+    #expect(model.loadSessionSnapshot(forProject: a).snapshot?.tabs.count == 1)
+    #expect(!FileManager.default.fileExists(atPath: legacy.path))
+    #expect(try Data(contentsOf: URL(fileURLWithPath: legacy.path + ".migrated")) == bytes)
+}
+
+@MainActor
+@Test(arguments: [false, true])
+func sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema: Bool) async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn a() {}"])
+    let state = try sessionRestoreProject([:])
+    defer { for path in [root, state] { try? FileManager.default.removeItem(at: path) } }
+    let legacy = state.appendingPathComponent("session.json")
+    defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacy.path) }
+    let snapshot = SessionCodec.Snapshot(projectRoot: root.path, language: .rust, revision: nil, activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue, tabs: [.file(.init(path: "a.rs", anchorContentID: nil, scrollAnchor: nil, selectionAnchor: nil))])
+    let valid = try SessionCodec.encode(snapshot, maximumTabCount: 12, dependencyAllowed: exactLocationIsInDependency)
+    try (futureSchema ? Data("{\"schemaVersion\":99}".utf8) : valid).write(to: legacy)
+    if !futureSchema { try FileManager.default.setAttributes([.posixPermissions: 0], ofItemAtPath: legacy.path) }
+    let model = AppModel(sessionURL: legacy, indexService: SessionRestoreIndexService())
+    let result = model.loadSessionSnapshot(forProject: root)
+    #expect(result.problem == (futureSchema ? .unsupportedSchemaVersion(99) : .readFailed))
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("open with protected legacy") { model.snapshotPhase == .fullReady })
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    let disk = state.appendingPathComponent("sessions/" + AppModel.sessionProjectKey(for: root) + ".json")
+    #expect(!FileManager.default.fileExists(atPath: disk.path))
+    try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacy.path)
+    try valid.write(to: legacy)
+    let retry = try #require(model.loadSessionSnapshot(forProject: root).snapshot)
+    #expect(await model.restoreSession(retry))
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.count == 1)
+    #expect(FileManager.default.fileExists(atPath: disk.path))
+    // An explicit clear is also an escape hatch while legacy cannot be decoded.
+    try FileManager.default.removeItem(at: disk)
+    try Data("{\"schemaVersion\":99}".utf8).write(to: legacy)
+    #expect(model.loadSessionSnapshot(forProject: root).problem == .unsupportedSchemaVersion(99))
+    try model.clearSessionForCurrentProject(panelPreset: .reading)
+    #expect(model.loadSessionSnapshot(forProject: root).snapshot?.tabs.isEmpty == true)
+}

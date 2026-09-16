@@ -1065,7 +1065,11 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
         fixture.controller.close()
         try? FileManager.default.removeItem(at: fixture.root)
     }
-    let selection = byteOffset(of: "target();", in: fixture.mainSource)
+    let source = "fn target() {\n" + (0..<180).map { "    // checkpoint \($0)\n" }.joined() + "}\n"
+    let file = fixture.root.appendingPathComponent("main.rs")
+    try source.write(to: file, atomically: true, encoding: .utf8)
+    let scroll = byteOffset(of: "    // checkpoint 90", in: source)
+    let selection = scroll + 4
     let snapshot = SessionCodec.Snapshot(
         projectRoot: fixture.root.path,
         language: .rust,
@@ -1076,18 +1080,18 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
             .file(.init(
                 path: "main.rs",
                 anchorContentID: ContentID.sha256(
-                    of: Array(fixture.mainSource.utf8)
+                    of: Array(source.utf8)
                 ),
                 scrollAnchor: .init(
-                    byteOffset: 0,
-                    line: 1,
+                    byteOffset: scroll,
+                    line: 92,
                     column: 1,
                     symbolAnchor: "target"
                 ),
                 selectionAnchor: .init(
                     byteOffset: selection,
-                    line: 3,
-                    column: 27,
+                    line: 92,
+                    column: 5,
                     symbolAnchor: "target"
                 )
             )),
@@ -1095,24 +1099,19 @@ func sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() async th
     )
 
     fixture.controller.restoreSession(snapshot)
-    try #require(await relationTestWaitUntil(
-        "session tab and document are restored",
-        {
-            fixture.model.snapshotPhase == .fullReady
-                && fixture.controller.displayedReaderFile?.standardizedFileURL
-                    == fixture.root.appendingPathComponent("main.rs")
-                        .standardizedFileURL
-                && fixture.controller.selfTestActiveTabSelectionByteOffset
-                    == selection
-                && fixture.controller.selfTestReadingByteOffset == 0
-        }
-    ))
+    let deadline = ContinuousClock.now + .seconds(3)
+    while ContinuousClock.now < deadline {
+        if fixture.controller.selfTestReadingByteOffset == scroll,
+           fixture.controller.selfTestReaderCaretByteOffset == selection { break }
+        try await Task.sleep(for: .milliseconds(10))
+    }
+    #expect(fixture.model.selectedFile?.standardizedFileURL == file.standardizedFileURL)
 
     #expect(fixture.controller.selfTestPanelPreset == .relations)
     #expect(fixture.controller.selfTestTabCount == 1)
     #expect(fixture.controller.selfTestActiveTabIndex == 0)
-    #expect(fixture.controller.selfTestReadingByteOffset == 0)
-    #expect(fixture.controller.selfTestActiveTabSelectionByteOffset == selection)
+    #expect(fixture.controller.selfTestReadingByteOffset == scroll)
+    #expect(fixture.controller.selfTestReaderCaretByteOffset == selection)
 }
 
 @MainActor

@@ -610,24 +610,19 @@ public final class AppModel {
     /// activity keeps re-arming the 250 ms debounce, so this instant caps
     /// how long a dirty state can stay unsaved (~2 s).
     @ObservationIgnored private var sessionCheckpointDirtyAt: ContinuousClock.Instant?
-    /// True while a session restore owns the workspace: the tab strip is
-    /// empty or partial, so checkpoint writes (debounced, lifecycle, or
-    /// project-switch flushes) must not replace the last valid on-disk
-    /// snapshot. Frame-scoped to `restoreSession`: armed once the target
-    /// workspace is installed, released after the fully restored state
-    /// commits its first snapshot, or on any exit where the generation
-    /// guard keeps blocking writes until another complete workspace
-    /// publishes.
-    @ObservationIgnored private var sessionRestoreWriteSuspension = false
+    /// The generation whose tabs are incomplete. A failed/cancelled restore
+    /// remains protected until a complete restore or a new workspace open.
+    @ObservationIgnored private var sessionRestoreWriteSuspension: UInt64?
+    @ObservationIgnored private var sessionRestoreOwner: UUID?
+    @ObservationIgnored package var sessionFileResolutionWillBegin: (@MainActor (URL) async -> Void)?
     /// Legacy single-file session store (v1/v2 data): the anchor whose
     /// directory also holds the per-project `sessions/` store.
     @ObservationIgnored private var sessionURL: URL?
     /// Updated on every successful per-project checkpoint write so launch
     /// knows which project to reopen. Nil in tests that pass no store.
     @ObservationIgnored private var sessionProjectPointer: RecentProjectsStore?
-    /// Project keys whose on-disk snapshot was written by a newer Cairn
-    /// schema. Their files must be preserved untouched until the user
-    /// explicitly clears them.
+    /// Snapshots that cannot safely be read stay protected until a successful
+    /// retry or an explicit clear (including future schemas and I/O failures).
     @ObservationIgnored private var sessionOverwriteBlockedKeys: Set<String> = []
     /// Root of a legacy snapshot that was loaded for migration; the legacy
     /// file is retired only after that exact project completes its first
@@ -771,6 +766,8 @@ public final class AppModel {
             /// Undecodable data; the file was quarantined as *.corrupt and
             /// the project may record a fresh session.
             case corruptFile
+            /// Temporary read/permission failure; preserve and block writes until a successful retry.
+            case readFailed
             /// Written by a newer Cairn; the file is kept untouched and
             /// must not be overwritten.
             case unsupportedSchemaVersion(Int)
@@ -832,13 +829,42 @@ public final class AppModel {
     package func loadSessionSnapshot(
         forProject root: URL
     ) -> SessionLoadResult {
-        guard let sessionURL,
-              let fileURL = sessionFileURL(forProjectRoot: root.path),
-              FileManager.default.fileExists(atPath: fileURL.path)
+        guard let fileURL = sessionFileURL(forProjectRoot: root.path)
         else { return SessionLoadResult(snapshot: nil) }
+        let projectKey = Self.sessionProjectKey(for: root)
+        let data: Data
+        do {
+            data = try Data(contentsOf: fileURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            // Only absence permits fallback. fileExists also returns false
+            // for inaccessible parent directories, which must remain protected.
+            let legacy = loadLegacySessionSnapshot()
+            if let problem = legacy.problem {
+                sessionLoadNotice = Self.sessionLoadProblemText(problem)
+                switch problem {
+                case .readFailed, .unsupportedSchemaVersion:
+                    // The old root is unknown. Do not let a fresh checkpoint
+                    // hide this file from a later successful migration retry.
+                    sessionOverwriteBlockedKeys.insert(projectKey)
+                case .corruptFile, .projectUnavailable:
+                    sessionOverwriteBlockedKeys.remove(projectKey)
+                }
+                return legacy
+            }
+            sessionOverwriteBlockedKeys.remove(projectKey)
+            sessionLoadNotice = nil
+            guard let snapshot = legacy.snapshot,
+                  Self.isSameProjectRoot(snapshot.projectRoot, root)
+            else { return SessionLoadResult(snapshot: nil) }
+            return legacy
+        } catch {
+            sessionOverwriteBlockedKeys.insert(projectKey)
+            sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
+            return SessionLoadResult(snapshot: nil, problem: .readFailed)
+        }
         do {
             let snapshot = try SessionCodec.decode(
-                Data(contentsOf: fileURL),
+                data,
                 maximumTabCount: tabStrip.maximumCount,
                 dependencyAllowed: exactLocationIsInDependency
             )
@@ -860,6 +886,7 @@ public final class AppModel {
                 sessionLoadNotice = Self.sessionLoadProblemText(.corruptFile)
                 return SessionLoadResult(snapshot: nil, problem: .corruptFile)
             }
+            sessionOverwriteBlockedKeys.remove(projectKey)
             sessionLoadNotice = nil
             return SessionLoadResult(snapshot: snapshot)
         } catch SessionCodec.DecodeError.unsupportedSchemaVersion(let version) {
@@ -874,21 +901,35 @@ public final class AppModel {
                 problem: .unsupportedSchemaVersion(version)
             )
         } catch {
-            try? quarantineCorruptSession(at: fileURL)
+            do {
+                try quarantineCorruptSession(at: fileURL)
+                sessionOverwriteBlockedKeys.remove(projectKey)
+            } catch {
+                sessionOverwriteBlockedKeys.insert(projectKey)
+                sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
+                return SessionLoadResult(snapshot: nil, problem: .readFailed)
+            }
             sessionLoadNotice = Self.sessionLoadProblemText(.corruptFile)
             return SessionLoadResult(snapshot: nil, problem: .corruptFile)
         }
     }
 
     /// Loads the legacy single-file session (v1/v2 data) for one-time
-    /// migration. Only consulted when no last-project pointer exists.
+    /// migration at launch or when reopening its project without a new snapshot.
     package func loadLegacySessionSnapshot() -> SessionLoadResult {
-        guard let sessionURL,
-              FileManager.default.fileExists(atPath: sessionURL.path)
-        else { return SessionLoadResult(snapshot: nil) }
+        guard let sessionURL else { return SessionLoadResult(snapshot: nil) }
+        let data: Data
+        do {
+            data = try Data(contentsOf: sessionURL)
+        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
+            return SessionLoadResult(snapshot: nil)
+        } catch {
+            sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
+            return SessionLoadResult(snapshot: nil, problem: .readFailed)
+        }
         do {
             let snapshot = try SessionCodec.decode(
-                Data(contentsOf: sessionURL),
+                data,
                 maximumTabCount: tabStrip.maximumCount,
                 dependencyAllowed: exactLocationIsInDependency
             )
@@ -910,7 +951,12 @@ public final class AppModel {
                 problem: .unsupportedSchemaVersion(version)
             )
         } catch {
-            try? quarantineCorruptSession(at: sessionURL)
+            do {
+                try quarantineCorruptSession(at: sessionURL)
+            } catch {
+                sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
+                return SessionLoadResult(snapshot: nil, problem: .readFailed)
+            }
             return SessionLoadResult(snapshot: nil, problem: .corruptFile)
         }
     }
@@ -930,6 +976,8 @@ public final class AppModel {
         switch problem {
         case .corruptFile:
             "Saved reading session was unreadable; it can record a new one"
+        case .readFailed:
+            "Saved reading session could not be read; it is kept untouched. Retry opening the project"
         case .unsupportedSchemaVersion(let version):
             "Saved reading session needs a newer Cairn (schema \(version)); "
                 + "it is kept untouched"
@@ -954,7 +1002,7 @@ public final class AppModel {
         panelPreset: PanelPresetModel,
         allowsPendingTopology: Bool
     ) throws {
-        guard !sessionRestoreWriteSuspension,
+        guard sessionRestoreWriteSuspension != generation,
               let sessionURL,
               let snapshot = makeSessionSnapshot(
                   panelPreset: panelPreset,
@@ -1000,8 +1048,7 @@ public final class AppModel {
         for projectRoot: String
     ) {
         guard let sessionURL,
-              legacySessionRootPendingMigration == projectRoot
-                || legacySessionRootPendingMigration == nil,
+              legacySessionRootPendingMigration == projectRoot,
               FileManager.default.fileExists(atPath: sessionURL.path)
         else { return }
         let backupURL = URL(
@@ -1349,8 +1396,12 @@ public final class AppModel {
         overridingLanguages: [LanguageID]? = nil
     ) async -> Bool {
         cancelPendingSessionCheckpoint()
+        let owner = UUID()
+        sessionRestoreOwner = owner
         isRestoringSession = true
-        defer { isRestoringSession = false }
+        defer {
+            if sessionRestoreOwner == owner { isRestoringSession = false }
+        }
         let root = URL(
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
@@ -1363,6 +1414,9 @@ public final class AppModel {
         } catch {
             return false
         }
+        // Bind protection to the workspace being opened. Failure keeps its
+        // partial state protected; a later fresh open advances the generation.
+        sessionRestoreWriteSuspension = generation &+ 1
         let worktreeGeneration: UInt64
         if languages.count == 1 {
             do {
@@ -1397,8 +1451,7 @@ public final class AppModel {
         // state (which commits a fresh snapshot first) or fails a
         // generation guard, after which `makeSessionSnapshot` keeps
         // blocking writes until another complete workspace publishes.
-        sessionRestoreWriteSuspension = true
-        defer { sessionRestoreWriteSuspension = false }
+        sessionRestoreWriteSuspension = generation
 
         var revisionUnavailable = false
         if let revision = snapshot.revision {
@@ -1415,6 +1468,7 @@ public final class AppModel {
             )
             else { return false }
             if revisionExists {
+                sessionRestoreWriteSuspension = generation &+ 1
                 switchSnapshot(revision: revision)
                 let revisionGeneration = generation
                 let revisionTask = snapshotTask
@@ -1428,6 +1482,7 @@ public final class AppModel {
                 if snapshotPhase != .fullReady {
                     revisionUnavailable = true
                     let fallbackGeneration: UInt64
+                    sessionRestoreWriteSuspension = generation &+ 1
                     do {
                         if languages.count == 1 {
                             try openProject(root: root, language: languages[0])
@@ -1471,7 +1526,11 @@ public final class AppModel {
         // (preview replacement, dedup activation, LRU eviction), with the
         // saved preview flag and relative activation ranks reinstated.
         tabStrip.beginRestoredBatch()
-        defer { tabStrip.endRestoredBatch(activating: nil) }
+        defer {
+            if sessionRestoreOwner == owner, generation == restoreGeneration {
+                tabStrip.endRestoredBatch(activating: nil)
+            }
+        }
         for (oldOrdinal, entry) in snapshot.tabs.enumerated() {
             guard canPublishWorkspaceResult(
                 generation: restoreGeneration,
@@ -1510,6 +1569,7 @@ public final class AppModel {
                 guard let languageMode = languageMode(for: file) else {
                     continue
                 }
+                await sessionFileResolutionWillBegin?(file)
                 let resolved = await Self.resolveSessionFile(
                     saved,
                     file: file,
@@ -1595,6 +1655,9 @@ public final class AppModel {
         // Finish the batch before the restored state is observed: the
         // active tab takes the freshest activation slot.
         tabStrip.endRestoredBatch(activating: selected?.index)
+        // Publish the active file and navigation generation as well as the
+        // strip selection, so the Reader applies its pending saved position.
+        if let selected { activateTab(selected.index) }
         // Navigation state (history + trail) installs after the tabs so
         // the committed first snapshot captures the complete reading
         // state, not a half-restored one.
@@ -1602,7 +1665,7 @@ public final class AppModel {
         // The restored state is complete: release write protection and
         // commit the first full snapshot for this project so the disk
         // reflects what was restored, not what the previous session left.
-        sessionRestoreWriteSuspension = false
+        sessionRestoreWriteSuspension = nil
         if sessionURL != nil,
            let preset = PanelPresetModel(rawValue: snapshot.panelPreset)
         {
