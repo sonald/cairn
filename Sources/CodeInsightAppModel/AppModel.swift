@@ -1109,8 +1109,135 @@ public final class AppModel {
             revision: lastInstalledRevision,
             activeTabOrdinal: tabStrip.activeIndex,
             panelPreset: panelPreset.rawValue,
-            tabs: entries
+            tabs: entries,
+            navigationHistory: Self.persistedNavigation(
+                navigationHistory.exportState()
+            ),
+            readingTrail: Self.persistedTrail(readingTrail)
         )
+    }
+
+    /// Converts a runtime jump for the disk: the process-local SnapshotID
+    /// is dropped; the revision (nil = worktree) carries the version
+    /// identity instead.
+    nonisolated package static func persistedJump(
+        _ record: JumpRecord
+    ) -> SessionCodec.Jump {
+        SessionCodec.Jump(
+            path: record.path,
+            contentID: record.contentID,
+            byteOffset: record.byteOffset,
+            line: record.line,
+            column: record.column,
+            symbolAnchor: record.symbolAnchor,
+            revision: record.revision
+        )
+    }
+
+    nonisolated package static func runtimeJump(
+        _ jump: SessionCodec.Jump
+    ) -> JumpRecord {
+        JumpRecord(
+            path: jump.path,
+            contentID: jump.contentID,
+            byteOffset: jump.byteOffset,
+            line: jump.line,
+            column: jump.column,
+            symbolAnchor: jump.symbolAnchor,
+            snapshotID: nil,
+            revision: jump.revision
+        )
+    }
+
+    nonisolated package static func persistedNavigation(
+        _ state: (
+            records: [NavigationRecord],
+            cursor: Int,
+            forwardRecord: NavigationRecord?
+        )
+    ) -> SessionCodec.NavigationState {
+        func persisted(_ record: NavigationRecord) -> SessionCodec.NavigationState.Record {
+            SessionCodec.NavigationState.Record(
+                jump: persistedJump(record.jump),
+                trailNodeID: record.trailNodeID?.rawValue
+            )
+        }
+        return SessionCodec.NavigationState(
+            records: state.records.map(persisted),
+            cursor: state.cursor,
+            forwardRecord: state.forwardRecord.map(persisted)
+        )
+    }
+
+    package static func persistedTrail(
+        _ trail: ReadingTrail
+    ) -> SessionCodec.TrailState {
+        SessionCodec.TrailState(
+            nodes: trail.orderedNodes().map { node in
+                SessionCodec.TrailState.Node(
+                    id: node.id.rawValue,
+                    jump: persistedJump(node.jump)
+                )
+            },
+            edges: trail.edges.map { edge in
+                SessionCodec.TrailState.Edge(
+                    from: edge.from.rawValue,
+                    to: edge.to.rawValue,
+                    cause: edge.cause.persistenceKey,
+                    frozenInspectorDisplay: edge.frozenInspectorDisplay,
+                    readingSetRole: edge.readingSetRole
+                )
+            },
+            activeNodeID: trail.activeNodeID?.rawValue
+        )
+    }
+
+    /// Installs the saved navigation state verbatim: no push or
+    /// recordNavigation calls that could duplicate nodes or truncate the
+    /// forward branch. Runtime jumps keep snapshotID nil — this run
+    /// rebinds them when they are replayed.
+    private func installRestoredNavigation(
+        from snapshot: SessionCodec.Snapshot
+    ) {
+        if let trailState = snapshot.readingTrail {
+            let nodes = trailState.nodes.map { node in
+                TrailNode(
+                    id: TrailNodeID(rawValue: node.id),
+                    jump: Self.runtimeJump(node.jump)
+                )
+            }
+            let edges: [TrailEdge] = trailState.edges.compactMap { edge in
+                guard let cause = NavigationCause(persistenceKey: edge.cause)
+                else { return nil }
+                return TrailEdge(
+                    from: TrailNodeID(rawValue: edge.from),
+                    to: TrailNodeID(rawValue: edge.to),
+                    cause: cause,
+                    observedAtNavigation: nil,
+                    currentExplanationID: nil,
+                    frozenInspectorDisplay: edge.frozenInspectorDisplay,
+                    readingSetRole: edge.readingSetRole
+                )
+            }
+            readingTrail.restore(
+                nodes: nodes,
+                edges: edges,
+                activeNodeID: trailState.activeNodeID.map(TrailNodeID.init(rawValue:))
+            )
+        }
+        if let historyState = snapshot.navigationHistory {
+            func restored(_ record: SessionCodec.NavigationState.Record) -> NavigationRecord {
+                NavigationRecord(
+                    jump: Self.runtimeJump(record.jump),
+                    trailNodeID: record.trailNodeID.map(TrailNodeID.init(rawValue:))
+                )
+            }
+            navigationHistory.restore(
+                records: historyState.records.map(restored),
+                cursor: historyState.cursor,
+                forwardRecord: historyState.forwardRecord.map(restored)
+            )
+        }
     }
 
     /// Shared open lifecycle for both entry points: cancels in-flight
@@ -1463,6 +1590,10 @@ public final class AppModel {
         // Finish the batch before the restored state is observed: the
         // active tab takes the freshest activation slot.
         tabStrip.endRestoredBatch(activating: selected?.index)
+        // Navigation state (history + trail) installs after the tabs so
+        // the committed first snapshot captures the complete reading
+        // state, not a half-restored one.
+        installRestoredNavigation(from: snapshot)
         // The restored state is complete: release write protection and
         // commit the first full snapshot for this project so the disk
         // reflects what was restored, not what the previous session left.

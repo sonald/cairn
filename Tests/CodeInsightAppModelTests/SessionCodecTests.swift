@@ -651,6 +651,289 @@ private func sessionExcerpt(
     )
 }
 
+@Test
+func sessionCodecRoundTripsNavigationHistoryAndTrail() throws {
+    let nodeA = UUID()
+    let nodeB = UUID()
+    let nodeC = UUID()
+    let jumpA = SessionCodec.Jump(
+        path: "a.rs",
+        contentID: ContentID.sha256(of: [1]),
+        byteOffset: 4,
+        line: 1,
+        column: 5,
+        symbolAnchor: "alpha",
+        revision: "abc123"
+    )
+    let jumpB = SessionCodec.Jump(
+        path: "b.rs",
+        contentID: nil,
+        byteOffset: 9,
+        line: 2,
+        column: 3,
+        symbolAnchor: nil,
+        revision: nil
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: "abc123",
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: SessionCodec.NavigationState(
+            records: [
+                .init(jump: jumpA, trailNodeID: nodeA),
+                .init(jump: jumpB, trailNodeID: nodeB),
+            ],
+            cursor: 1,
+            forwardRecord: .init(jump: jumpB, trailNodeID: nodeC)
+        ),
+        readingTrail: SessionCodec.TrailState(
+            nodes: [
+                .init(id: nodeA, jump: jumpA),
+                .init(id: nodeB, jump: jumpB),
+            ],
+            edges: [
+                .init(
+                    from: nodeA,
+                    to: nodeB,
+                    cause: "relation",
+                    frozenInspectorDisplay: sessionCodecInspector(),
+                    readingSetRole: "Definition"
+                ),
+            ],
+            activeNodeID: nodeB
+        )
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let history = try #require(decoded.navigationHistory)
+    #expect(history.records.count == 2)
+    #expect(history.cursor == 1)
+    #expect(history.records[0].trailNodeID == nodeA)
+    #expect(history.records[0].jump.revision == "abc123")
+    #expect(history.records[0].jump.contentID == ContentID.sha256(of: [1]))
+    // nodeC is not a trail node in this snapshot, so the dangling
+    // reference is nulled while the jump itself stays navigable.
+    #expect(history.forwardRecord?.trailNodeID == nil)
+    #expect(history.forwardRecord?.jump.path == "b.rs")
+
+    let trail = try #require(decoded.readingTrail)
+    #expect(trail.nodes.map(\.id) == [nodeA, nodeB])
+    #expect(trail.activeNodeID == nodeB)
+    #expect(trail.edges.count == 1)
+    #expect(trail.edges[0].cause == "relation")
+    #expect(trail.edges[0].readingSetRole == "Definition")
+    // Evidence is stored as the frozen display, not a live explanation ID.
+    let evidence = try #require(trail.edges[0].frozenInspectorDisplay)
+    #expect(evidence.nodeTitle == "spawn")
+    #expect(evidence.badge == .verified)
+}
+
+@Test
+func sessionCodecSanitizesInvalidTrailEdgesAndHistoryReferences() throws {
+    let nodeA = UUID()
+    let nodeB = UUID()
+    let nodeC = UUID()
+    let jump = SessionCodec.Jump(
+        path: "a.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: nil,
+        revision: nil
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: SessionCodec.NavigationState(
+            records: [
+                // Dangling trail reference must be nulled, jump kept.
+                .init(jump: jump, trailNodeID: UUID()),
+            ],
+            cursor: 5,
+            forwardRecord: nil
+        ),
+        readingTrail: SessionCodec.TrailState(
+            nodes: [
+                .init(id: nodeA, jump: jump),
+                .init(id: nodeB, jump: jump),
+                .init(id: nodeC, jump: jump),
+            ],
+            edges: [
+                // Valid edge.
+                .init(
+                    from: nodeA,
+                    to: nodeB,
+                    cause: "outline",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+                // Self loop.
+                .init(
+                    from: nodeB,
+                    to: nodeB,
+                    cause: "outline",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+                // Unknown cause.
+                .init(
+                    from: nodeB,
+                    to: nodeC,
+                    cause: "teleport",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+                // Dangling endpoint.
+                .init(
+                    from: nodeC,
+                    to: UUID(),
+                    cause: "search",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+                // Second parent for nodeC would create a branch with two
+                // parents; the first parent wins.
+                .init(
+                    from: nodeA,
+                    to: nodeC,
+                    cause: "search",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+                // Cycle attempt (nodeA already has no parent, but this
+                // edge would make nodeB a child of nodeC which is a child
+                // of nodeA — allowed; the real cycle is nodeA -> nodeB
+                // then nodeB -> nodeA).
+                .init(
+                    from: nodeC,
+                    to: nodeA,
+                    cause: "search",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+            ],
+            activeNodeID: UUID()
+        )
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let trail = try #require(decoded.readingTrail)
+    #expect(trail.edges.count == 2)
+    #expect(trail.edges.map(\.cause) == ["outline", "search"])
+    #expect(trail.edges.map(\.to) == [nodeB, nodeC])
+    // A missing active node clears the pointer instead of failing.
+    #expect(trail.activeNodeID == nil)
+    let history = try #require(decoded.navigationHistory)
+    #expect(history.records.count == 1)
+    #expect(history.records[0].trailNodeID == nil)
+    #expect(history.cursor == 1)
+}
+
+@Test
+func sessionCodecClampsHistoryCursorAndCapsTrailNodes() throws {
+    let nodes = (0..<520).map { index in
+        SessionCodec.TrailState.Node(
+            id: UUID(),
+            jump: SessionCodec.Jump(
+                path: "f\(index).rs",
+                contentID: nil,
+                byteOffset: 0,
+                line: 1,
+                column: 1,
+                symbolAnchor: nil,
+                revision: nil
+            )
+        )
+    }
+    let edges = zip(nodes, nodes.dropFirst()).map { from, to in
+        SessionCodec.TrailState.Edge(
+            from: from.id,
+            to: to.id,
+            cause: "relation",
+            frozenInspectorDisplay: nil,
+            readingSetRole: nil
+        )
+    }
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: nil,
+        activeTabOrdinal: nil,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: SessionCodec.NavigationState(
+            records: [],
+            cursor: 99,
+            forwardRecord: nil
+        ),
+        readingTrail: SessionCodec.TrailState(
+            nodes: nodes,
+            edges: edges,
+            activeNodeID: nodes.last?.id
+        )
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let trail = try #require(decoded.readingTrail)
+    #expect(trail.nodes.count == 500)
+    #expect(trail.activeNodeID == nodes.last?.id)
+    #expect(trail.edges.count == trail.nodes.count - 1)
+    // The cursor clamps into 0...records.count instead of failing.
+    #expect(decoded.navigationHistory?.cursor == 0)
+}
+
+private func sessionCodecInspector()
+    -> ReadingSetExcerpt.FrozenInspectorDisplay
+{
+    ReadingSetExcerpt.FrozenInspectorDisplay(
+        nodeTitle: "spawn",
+        badge: .verified,
+        why: "rust-analyzer returned this target.",
+        sourceBody: "Matched a declaration in the same file.",
+        verificationTitle: "VERIFICATION",
+        verificationBody: "Verified at capture.",
+        correctionBody: "",
+        availabilityBody: "rust-analyzer ready at capture",
+        environmentBody: "default · Trusted at capture",
+        auditRows: [.init(label: "Source", value: "worktree captured")],
+        accessibilityValue: "Verified spawn at capture",
+        capturedAt: Date(timeIntervalSince1970: 1_786_200_000),
+        formerCandidateAvailable: false
+    )
+}
+
 private func sessionCodecFails(_ body: () throws -> Void) -> Bool {
     do {
         try body()

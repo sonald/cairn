@@ -1238,6 +1238,183 @@ func sessionRestoreReportsWhenTheSavedActiveTabIsUnavailable() async throws {
     ) == true)
 }
 
+@MainActor
+@Test
+func sessionCheckpointPersistsAndRestoresNavigationHistoryAndTrail() async throws {
+    let root = try sessionRestoreProject([
+        "a.rs": "fn alpha() {}\n",
+        "b.rs": "fn beta() {}\n",
+        "c.rs": "fn gamma() {}\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let stateRoot = FileManager.default.temporaryDirectory
+        .appendingPathComponent(
+            "CodeInsightNavigationSession-\(UUID().uuidString)",
+            isDirectory: true
+        )
+    let sessionURL = stateRoot.appendingPathComponent("session.json")
+    defer { try? FileManager.default.removeItem(at: stateRoot) }
+    let model = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+
+    // A → B → back to A → C: a sibling branch with a real forward branch.
+    func jump(_ name: String) -> JumpRecord {
+        JumpRecord(
+            path: "\(name).rs",
+            contentID: nil,
+            byteOffset: 0,
+            line: 1,
+            column: 1,
+            symbolAnchor: name,
+            snapshotID: nil
+        )
+    }
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("a.rs"),
+                byteOffset: 0
+            ),
+            cause: .outline,
+            policy: .explicitSemantic
+        )
+    )
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("b.rs"),
+                byteOffset: 0
+            ),
+            cause: .relation,
+            policy: .explicitSemantic
+        ),
+        leaving: jump("a")
+    )
+    model.goBack(from: jump("b"))
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("c.rs"),
+                byteOffset: 0
+            ),
+            cause: .search,
+            policy: .explicitSemantic
+        ),
+        leaving: jump("a")
+    )
+    let liveHistory = model.navigationHistory.exportState()
+    let liveTrailNodes = model.readingTrail.orderedNodes()
+    #expect(model.readingTrail.edges.count == 2)
+
+    try model.writeSessionCheckpoint(panelPreset: .reading)
+    let snapshot = try #require(
+        model.loadSessionSnapshot(forProject: root).snapshot
+    )
+    let savedTrail = try #require(snapshot.readingTrail)
+    let savedHistory = try #require(snapshot.navigationHistory)
+    #expect(savedTrail.nodes.count == liveTrailNodes.count)
+    #expect(savedTrail.edges.map(\.cause) == ["relation", "search"])
+    #expect(savedTrail.activeNodeID == model.readingTrail.activeNodeID?.rawValue)
+    #expect(savedHistory.records.count == liveHistory.records.count)
+    #expect(savedHistory.cursor == liveHistory.cursor)
+
+    // A fresh model restores the same navigation state without adding
+    // duplicate nodes or replaying navigation events.
+    let restored = AppModel(
+        sessionURL: sessionURL,
+        indexService: SessionRestoreIndexService()
+    )
+    #expect(await restored.restoreSession(snapshot))
+    #expect(restored.readingTrail.nodes.count == liveTrailNodes.count)
+    #expect(restored.readingTrail.edges.count == 2)
+    #expect(restored.readingTrail.edges.map(\.cause) == [.relation, .search])
+    #expect(restored.readingTrail.activeNodeID?.rawValue
+        == savedTrail.activeNodeID)
+    #expect(restored.navigationHistory.navigationRecords.count
+        == savedHistory.records.count)
+    #expect(restored.navigationHistory.cursor == savedHistory.cursor)
+    #expect(restored.navigationHistory.canGoBack
+        == model.navigationHistory.canGoBack)
+    #expect(restored.navigationHistory.canGoForward
+        == model.navigationHistory.canGoForward)
+}
+
+@MainActor
+@Test
+func failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() async throws {
+    let root = try sessionRestoreProject(["a.rs": "fn alpha() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: SessionRestoreIndexService())
+    try model.openProject(root: root, language: .rust)
+    try #require(await testWaitUntil("project installed") {
+        model.snapshotPhase == .fullReady
+    })
+    let first = JumpRecord(
+        path: "a.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: "alpha",
+        snapshotID: nil
+    )
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("a.rs"),
+                byteOffset: 0
+            ),
+            cause: .outline,
+            policy: .explicitSemantic
+        )
+    )
+    model.navigate(
+        NavigationRequest(
+            destination: SourceDestination(
+                file: root.appendingPathComponent("a.rs"),
+                byteOffset: 4
+            ),
+            cause: .relation,
+            policy: .explicitSemantic
+        ),
+        leaving: first
+    )
+    model.goBack(from: JumpRecord(
+        path: "a.rs",
+        contentID: nil,
+        byteOffset: 4,
+        line: 1,
+        column: 5,
+        symbolAnchor: "alpha",
+        snapshotID: nil
+    ))
+    let cursorBefore = model.navigationHistory.cursor
+    let activeBefore = model.readingTrail.activeNodeID
+
+    // A replay whose target file cannot be resolved must not consume the
+    // cursor or move the active trail node.
+    model.navigationHistory.push(NavigationRecord(jump: JumpRecord(
+        path: "../outside.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: nil,
+        snapshotID: nil
+    )))
+    let cursorAfterPush = model.navigationHistory.cursor
+    model.goForward()
+    #expect(model.navigationHistory.cursor == cursorAfterPush)
+    #expect(model.readingTrail.activeNodeID == activeBefore)
+    #expect(model.navigationHistory.cursor >= cursorBefore)
+}
+
 private func encodeJSONString(_ value: String) -> String {
     let array = String(
         decoding: (try? JSONEncoder().encode([value])) ?? Data(),

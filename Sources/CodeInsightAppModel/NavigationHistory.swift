@@ -530,6 +530,33 @@ public enum NavigationCause: Equatable, Sendable {
     case tabActivation
 }
 
+public extension NavigationCause {
+    /// Stable key used when a trail edge is persisted; SessionCodec's
+    /// accepted-cause set must stay in sync with these strings.
+    var persistenceKey: String {
+        switch self {
+        case .fileSelection: "fileSelection"
+        case .outline: "outline"
+        case .relation: "relation"
+        case .search: "search"
+        case .historyReplay: "historyReplay"
+        case .tabActivation: "tabActivation"
+        }
+    }
+
+    init?(persistenceKey: String) {
+        switch persistenceKey {
+        case "fileSelection": self = .fileSelection
+        case "outline": self = .outline
+        case "relation": self = .relation
+        case "search": self = .search
+        case "historyReplay": self = .historyReplay
+        case "tabActivation": self = .tabActivation
+        default: return nil
+        }
+    }
+}
+
 public struct NavigationPolicy: Equatable, Sendable {
     public let blockViewportFollow: Bool
     public let recordInTrail: Bool
@@ -696,6 +723,13 @@ public final class ReadingTrail {
     public private(set) var nodes: [TrailNodeID: TrailNode] = [:]
     public private(set) var edges: [TrailEdge] = []
     public private(set) var activeNodeID: TrailNodeID?
+    /// Insertion order of node IDs: navigation order must survive export,
+    /// so the dictionary's unordered keys are never used for it.
+    private var nodeOrder: [TrailNodeID] = []
+
+    /// Upper bound shared by the runtime and the on-disk snapshot so a
+    /// trail cannot balloon in memory and only "lose" data at restart.
+    public static let nodeLimit = 500
 
     public init() {}
 
@@ -726,6 +760,7 @@ public final class ReadingTrail {
             ))
         }
         activeNodeID = destinationID
+        trimToNodeLimit()
         return destinationID
     }
 
@@ -740,12 +775,67 @@ public final class ReadingTrail {
     public func reset() {
         nodes.removeAll(keepingCapacity: true)
         edges.removeAll(keepingCapacity: true)
+        nodeOrder.removeAll(keepingCapacity: true)
         activeNodeID = nil
+    }
+
+    /// Nodes in navigation insertion order, for persistence.
+    public func orderedNodes() -> [TrailNode] {
+        nodeOrder.compactMap { nodes[$0] }
+    }
+
+    /// Batch restore: rebuilds the graph without synthesizing navigation
+    /// events, preserving node identity (UUIDs), edge order, and the
+    /// active node. Caller-provided data is trusted to satisfy the trail
+    /// invariants (the session codec validates them on decode).
+    public func restore(
+        nodes restoredNodes: [TrailNode],
+        edges restoredEdges: [TrailEdge],
+        activeNodeID restoredActiveNodeID: TrailNodeID?
+    ) {
+        reset()
+        for node in restoredNodes.prefix(Self.nodeLimit) {
+            guard nodes[node.id] == nil else { continue }
+            nodes[node.id] = node
+            nodeOrder.append(node.id)
+        }
+        let known = Set(nodeOrder)
+        edges = restoredEdges.filter { known.contains($0.from) && known.contains($0.to) }
+        activeNodeID = restoredActiveNodeID.flatMap {
+            known.contains($0) ? $0 : nil
+        }
+    }
+
+    /// Keeps the active node and its ancestor chain up to the limit, then
+    /// the most recent navigation nodes; when the chain alone exceeds the
+    /// limit, the nodes nearest the active end survive and the earliest
+    /// survivor becomes a truncated root.
+    private func trimToNodeLimit() {
+        guard nodeOrder.count > Self.nodeLimit else { return }
+        var keepOrder: [TrailNodeID] = []
+        var seen = Set<TrailNodeID>()
+        var cursor = activeNodeID
+        while let current = cursor, keepOrder.count < Self.nodeLimit {
+            if nodes[current] != nil, seen.insert(current).inserted {
+                keepOrder.append(current)
+            }
+            cursor = edges.last(where: { $0.to == current })?.from
+        }
+        for id in nodeOrder.reversed() where keepOrder.count < Self.nodeLimit {
+            if seen.insert(id).inserted { keepOrder.append(id) }
+        }
+        let keep = Set(keepOrder)
+        nodes = nodes.filter { keep.contains($0.key) }
+        nodeOrder = nodeOrder.filter { keep.contains($0) }
+        edges = edges.filter {
+            keep.contains($0.from) && keep.contains($0.to)
+        }
     }
 
     private func appendNode(_ jump: JumpRecord) -> TrailNodeID {
         let node = TrailNode(jump: jump)
         nodes[node.id] = node
+        nodeOrder.append(node.id)
         return node.id
     }
 }
@@ -761,6 +851,35 @@ public final class NavigationHistory {
 
     public init() {}
 
+    /// A batch export of the full navigation state, including the private
+    /// forward record, for persistence.
+    public func exportState() -> (
+        records: [NavigationRecord],
+        cursor: Int,
+        forwardRecord: NavigationRecord?
+    ) {
+        (navigationRecords, cursor, forwardRecord)
+    }
+
+    /// Batch restore: installs records, cursor, and forward record
+    /// verbatim without replaying pushes (which would truncate the
+    /// forward branch or deduplicate entries). The cursor's legal range
+    /// is 0...records.count.
+    public func restore(
+        records restoredRecords: [NavigationRecord],
+        cursor restoredCursor: Int,
+        forwardRecord restoredForwardRecord: NavigationRecord?
+    ) {
+        navigationRecords = Array(
+            restoredRecords.suffix(Self.limit)
+        )
+        cursor = min(
+            max(restoredCursor, 0),
+            navigationRecords.count
+        )
+        forwardRecord = restoredForwardRecord
+    }
+
     public var canGoBack: Bool {
         cursor > 0
     }
@@ -768,6 +887,23 @@ public final class NavigationHistory {
     public var canGoForward: Bool {
         cursor + 1 < records.count
             || (cursor + 1 == records.count && forwardRecord != nil)
+    }
+
+    /// The record goBack would move to, without committing the move.
+    public func peekBack(
+        from current: NavigationRecord
+    ) -> NavigationRecord? {
+        guard canGoBack else { return nil }
+        return navigationRecords[cursor - 1]
+    }
+
+    /// The record goForward would move to, without committing the move.
+    public func peekForward() -> NavigationRecord? {
+        guard canGoForward else { return nil }
+        if cursor + 1 < records.count {
+            return navigationRecords[cursor + 1]
+        }
+        return forwardRecord
     }
 
     public func push(_ record: JumpRecord) {
