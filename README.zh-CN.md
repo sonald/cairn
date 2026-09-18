@@ -95,6 +95,8 @@ bash scripts/make-app.sh
 open .build/distribution/Cairn.app
 ```
 
+公共头文件与 shim 会由脚本自动同步至 `Sources/CLibGit2Vendored`（生成目录，请勿手动修改）。
+
 `scripts/make-app.sh` 默认使用 ad-hoc 签名，不执行公证或 staple。Developer ID 签名和公证需要显式签名身份或 Apple 凭据；本仓库尚未执行这些步骤。
 
 ## CLI 示例

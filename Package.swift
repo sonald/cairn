@@ -10,31 +10,56 @@ if libgit2Mode != "brew" && libgit2Mode != "vendored" {
 
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let vendoredLibGit2 = packageRoot.appendingPathComponent("Vendor/libgit2")
-if libgit2Mode == "vendored",
-   !FileManager.default.fileExists(
-       atPath: vendoredLibGit2.appendingPathComponent("lib/libgit2.a").path
-   ) {
-    fatalError("Run scripts/vendor-libgit2.sh before using CAIRN_LIBGIT2=vendored")
+let vendoredLibGit2Headers = packageRoot.appendingPathComponent("Sources/CLibGit2Vendored/include")
+if libgit2Mode == "vendored" {
+    if !FileManager.default.fileExists(
+        atPath: vendoredLibGit2.appendingPathComponent("lib/libgit2.a").path
+    ) {
+        fatalError("Run scripts/vendor-libgit2.sh before using CAIRN_LIBGIT2=vendored")
+    }
+    if !FileManager.default.fileExists(
+        atPath: vendoredLibGit2Headers.appendingPathComponent("git2.h").path
+    ) {
+        fatalError(
+            "Vendored libgit2 headers are not staged into Sources/CLibGit2Vendored/include; "
+                + "re-run scripts/vendor-libgit2.sh (scripts/make-app.sh also refreshes them)"
+        )
+    }
 }
 
-let libgit2SwiftSettings: [SwiftSetting] = [
-    .unsafeFlags([
-        "-Xcc", "-I" + (libgit2Mode == "vendored"
-            ? vendoredLibGit2.appendingPathComponent("include").path
-            : "/opt/homebrew/opt/libgit2/include"),
-    ]),
-]
-let libgit2LinkerSettings: [LinkerSetting] = if libgit2Mode == "vendored" {
-    [
-        .unsafeFlags(["-L" + vendoredLibGit2.appendingPathComponent("lib").path]),
-        .linkedFramework("CoreFoundation"),
-        .linkedFramework("Security"),
-        .linkedLibrary("iconv"),
-        .linkedLibrary("z"),
-    ]
+// Vendored mode builds CLibGit2 as a regular C target whose public headers are
+// part of the package graph, so every build engine resolves them without
+// target-local -I flags (swiftbuild's explicit module builds do not propagate
+// unsafeFlags to transitive dependents). Brew mode keeps the pkg-config
+// systemLibrary.
+let clibGit2Target: Target = if libgit2Mode == "vendored" {
+    .target(
+        name: "CLibGit2",
+        path: "Sources/CLibGit2Vendored",
+        publicHeadersPath: "include",
+        linkerSettings: [
+            .unsafeFlags(["-L" + vendoredLibGit2.appendingPathComponent("lib").path]),
+            .linkedLibrary("git2"),
+            .linkedFramework("CoreFoundation"),
+            .linkedFramework("Security"),
+            .linkedLibrary("iconv"),
+            .linkedLibrary("z"),
+        ]
+    )
 } else {
-    [.unsafeFlags(["-L/opt/homebrew/opt/libgit2/lib"])]
+    .systemLibrary(
+        name: "CLibGit2",
+        pkgConfig: "libgit2",
+        providers: [.brew(["libgit2"])]
+    )
 }
+
+let libgit2SwiftSettings: [SwiftSetting] = libgit2Mode == "brew"
+    ? [.unsafeFlags(["-Xcc", "-I/opt/homebrew/opt/libgit2/include"])]
+    : []
+let libgit2LinkerSettings: [LinkerSetting] = libgit2Mode == "brew"
+    ? [.unsafeFlags(["-L/opt/homebrew/opt/libgit2/lib"])]
+    : []
 
 let package = Package(
     name: "CodeInsight",
@@ -61,11 +86,7 @@ let package = Package(
         ),
     ],
     targets: [
-        .systemLibrary(
-            name: "CLibGit2",
-            pkgConfig: libgit2Mode == "brew" ? "libgit2" : nil,
-            providers: libgit2Mode == "brew" ? [.brew(["libgit2"])] : []
-        ),
+        clibGit2Target,
         .target(
             name: "CTreeSitter",
             path: "Sources/CTreeSitter",

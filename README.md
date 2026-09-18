@@ -101,6 +101,8 @@ bash scripts/make-app.sh
 open .build/distribution/Cairn.app
 ```
 
+Public headers and shims are staged automatically by scripts into `Sources/CLibGit2Vendored` (generated files, do not edit manually).
+
 `scripts/make-app.sh` defaults to ad-hoc signing and does not notarize or staple. Developer ID signing and notarization require an explicit identity or Apple credentials; they have not been executed for this repository.
 
 ## CLI Examples

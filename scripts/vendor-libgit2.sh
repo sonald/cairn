@@ -64,6 +64,23 @@ mkdir -p "$TARGET/lib"
 cp "$STAGE/lib/libgit2.a" "$TARGET/lib/libgit2.a"
 cp "$SOURCE/COPYING" "$TARGET/LICENSE"
 
+# Public headers and shim for the CLibGit2 C target (vendored mode); refreshed on every
+# vendoring run so the package graph carries the matching headers.
+VENDORED_STAGE="$REPO_ROOT/Sources/CLibGit2Vendored"
+rm -rf "$VENDORED_STAGE"
+mkdir -p "$VENDORED_STAGE/include"
+cp -R "$TARGET/include"/* "$VENDORED_STAGE/include/"
+cp "$REPO_ROOT/Sources/CLibGit2/shim.h" "$VENDORED_STAGE/include/shim.h"
+cat > "$VENDORED_STAGE/shim.c" <<'EOF'
+#include "shim.h"
+EOF
+cat > "$VENDORED_STAGE/include/module.modulemap" <<'EOF'
+module CLibGit2 [system] {
+    header "shim.h"
+    export *
+}
+EOF
+
 cat > "$TARGET/VENDORED.md" <<EOF
 # Vendored libgit2
 
@@ -73,6 +90,7 @@ cat > "$TARGET/VENDORED.md" <<EOF
 - SHA-256: \`$LIBGIT2_SHA256\`
 - Vendored date: $VENDORED_DATE
 - Vendoring method: downloaded and statically built by \`scripts/vendor-libgit2.sh\`
+- Header staging: \`Sources/CLibGit2Vendored/include\` (generated, gitignored)
 - License: GPL-2.0 with linking exception; see \`LICENSE\`.
 - Deployment target: macOS \`${MACOSX_DEPLOYMENT_TARGET:-14.0}\`
 
@@ -80,4 +98,4 @@ The build disables SSH, HTTP(S), NTLM, and GSSAPI transports. Cairn only reads
 local Git object databases.
 EOF
 
-echo "vendored libgit2 ${LIBGIT2_TAG} -> $TARGET/lib/libgit2.a"
+echo "vendored libgit2 ${LIBGIT2_TAG} -> $TARGET/lib/libgit2.a, headers -> $VENDORED_STAGE/include"

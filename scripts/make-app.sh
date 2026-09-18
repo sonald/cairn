@@ -18,6 +18,29 @@ if [[ -z "${CAIRN_LIBGIT2:-}" ]]; then
         exit 1
     fi
 fi
+
+if [[ "${CAIRN_LIBGIT2:-}" == "vendored" ]]; then
+    if [[ ! -f "$REPO_ROOT/Vendor/libgit2/lib/libgit2.a" ]]; then
+        echo "make-app: CAIRN_LIBGIT2=vendored requires Vendor/libgit2; run scripts/vendor-libgit2.sh" >&2
+        exit 1
+    fi
+    # Refresh the CLibGit2 C target's generated public headers and shim (self-healing
+    # after git clean -x or a vendored version bump).
+    VENDORED_STAGE="$REPO_ROOT/Sources/CLibGit2Vendored"
+    rm -rf "$VENDORED_STAGE"
+    mkdir -p "$VENDORED_STAGE/include"
+    cp -R "$REPO_ROOT/Vendor/libgit2/include"/* "$VENDORED_STAGE/include/"
+    cp "$REPO_ROOT/Sources/CLibGit2/shim.h" "$VENDORED_STAGE/include/shim.h"
+    cat > "$VENDORED_STAGE/shim.c" <<'EOF'
+#include "shim.h"
+EOF
+    cat > "$VENDORED_STAGE/include/module.modulemap" <<'EOF'
+module CLibGit2 [system] {
+    header "shim.h"
+    export *
+}
+EOF
+fi
 SIGNING_IDENTITY="${CAIRN_CODESIGN_IDENTITY:--}"
 BUNDLE_IDENTIFIER="${CAIRN_BUNDLE_IDENTIFIER:-dev.cairn.Cairn}"
 NOTARY_PROFILE="${CAIRN_NOTARY_PROFILE:-}"
@@ -120,7 +143,13 @@ bundle_homebrew_dylibs() {
 
 if otool -L "$APP/Contents/MacOS/codeinsight-app" \
     | grep -q '^[[:space:]]*/opt/homebrew/'; then
-    echo "Bundling Homebrew libgit2 dylibs (vendored static fallback)."
+    if [[ "${CAIRN_LIBGIT2:-}" == "vendored" ]]; then
+        echo "make-app: vendored build must not reference Homebrew libraries:" >&2
+        otool -L "$APP/Contents/MacOS/codeinsight-app" \
+            | grep '^[[:space:]]*/opt/homebrew/' >&2
+        exit 1
+    fi
+    echo "Bundling Homebrew dylibs (CAIRN_LIBGIT2=brew)."
     bundle_homebrew_dylibs "$APP/Contents/MacOS/codeinsight-app"
 fi
 
