@@ -1,0 +1,38 @@
+/Users/siancao/work/ai/vibecoding/codeinsight/Resources/AppIcon.icns
+Building for production...
+[Computing dependencies]
+[1 / 2] CodeInsightRustExtractor
+Build complete! (0.41秒)
+Bundling Homebrew libgit2 dylibs (vendored static fallback).
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssl.3.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssl.3.dylib
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Info.plist: OK
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib: replacing existing signature
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssl.3.dylib: replacing existing signature
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib: replacing existing signature
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libcrypto.3.dylib: replacing existing signature
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib: replacing existing signature
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app: replacing existing signature
+--prepared:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+--prepared:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssl.3.dylib
+--validated:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+--prepared:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+--prepared:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+--validated:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libssl.3.dylib
+--validated:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+--validated:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+--prepared:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+--validated:/private/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app: valid on disk
+/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app: satisfies its Designated Requirement
+No notarization credentials; completed ad-hoc signed bundle flow.
+app: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.app
+zip: /tmp/cairn-final-acceptance-20260918/delivery/Cairn.zip

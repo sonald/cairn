@@ -1,0 +1,3 @@
+materialize failed: Error Domain=NSCocoaErrorDomain Code=257 "The file “oldcommit” couldn’t be opened because you don’t have permission to view it." UserInfo={NSURL=file:///private/tmp/cairn-materializer-independent/cache/oldcommit, NSFilePath=/private/tmp/cairn-materializer-independent/cache/oldcommit, NSUnderlyingError=0x74f90204e0 {Error Domain=NSPOSIXErrorDomain Code=13 "Permission denied"}}
+references after failed materialize: 1
+clear failed: directoriesInUse(["/tmp/cairn-materializer-independent/cache/commit/config"])

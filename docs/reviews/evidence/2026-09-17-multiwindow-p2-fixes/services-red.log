@@ -1,0 +1,36 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[2 / 7] CodeInsightAppTests-product
+[9 / 14] CodeInsightAppTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[15 / 19] CodeInsightAppTests-product
+Build complete! (2.36秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+◇ Test case passing 1 argument retainedDirectory → false to appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+✘ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) recorded an issue with 1 argument retainedDirectory → false at MultiWindowAppServicesTests.swift:91:5: Expectation failed: await appServicesEventually { coordinator.readiness == expected }
+↳ // This terminal state proves prepare ran again; simply clearing the
+↳ // maintenance flag would leave readiness at off(cache maintenance).
+↳ await appServicesEventually { coordinator.readiness == expected } → <not evaluated>
+◇ Test case passing 1 argument retainedDirectory → true to appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+✘ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) recorded an issue with 1 argument retainedDirectory → true at MultiWindowAppServicesTests.swift:91:5: Expectation failed: await appServicesEventually { coordinator.readiness == expected }
+↳ // This terminal state proves prepare ran again; simply clearing the
+↳ // maintenance flag would leave readiness at off(cache maintenance).
+↳ await appServicesEventually { coordinator.readiness == expected } → <not evaluated>
+✘ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) with 2 test cases failed after 21.016 seconds with 2 issues.
+◇ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() started.
+✘ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() recorded an issue at MultiWindowAppServicesTests.swift:169:5: Expectation failed: delegate.trustListModel.repositories == expected
+↳ delegate.trustListModel.repositories == expected → false
+↳   delegate.trustListModel.repositories → []
+↳   expected → [CodeInsightExact.TrustedRepository(path: "/var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/AppGrant-2EE81052-F8A3-423A-8B22-B91EFBE69C8F/project", grantedAt: 2026-09-17 06:26:19 +0000)]
+✘ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() recorded an issue at MultiWindowAppServicesTests.swift:170:5: Expectation failed: coordinators[1].trustedRepositories == expected
+↳ coordinators[1].trustedRepositories == expected → false
+↳   coordinators[1].trustedRepositories → []
+↳   expected → [CodeInsightExact.TrustedRepository(path: "/var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/AppGrant-2EE81052-F8A3-423A-8B22-B91EFBE69C8F/project", grantedAt: 2026-09-17 06:26:19 +0000)]
+✘ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() failed after 0.807 seconds with 2 issues.
+✘ Test run with 2 tests in 0 suites failed after 21.823 seconds with 4 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

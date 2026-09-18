@@ -1,0 +1,158 @@
+[
+  {
+    "file": "063d512353e8eb56b6fbe0ef8a6c0492c43dd770fd58f6db8cd0037c27521f05.json",
+    "languages": [
+      0
+    ],
+    "navigationHistory": {
+      "cursor": 0,
+      "records": []
+    },
+    "panelPreset": "reading",
+    "projectRoot": "/tmp/cairn-mw-independent-20260917/cancel-project",
+    "readingTrail": {
+      "edges": [],
+      "nodes": []
+    },
+    "schemaVersion": 3,
+    "tabs": []
+  },
+  {
+    "file": "3fdb9e0089018f773a7d4f8924a9eab27f018976e6e3f8d16de33bdd11facded.json",
+    "activeTabOrdinal": 0,
+    "languages": [
+      0
+    ],
+    "navigationHistory": {
+      "cursor": 0,
+      "records": []
+    },
+    "panelPreset": "reading",
+    "projectRoot": "/tmp/cairn-mw-independent-20260917/第二个 项目",
+    "readingTrail": {
+      "edges": [],
+      "nodes": []
+    },
+    "schemaVersion": 3,
+    "tabs": [
+      {
+        "activationRank": 0,
+        "anchorContentID": {
+          "algorithm": 1,
+          "bytes": [
+            174,
+            193,
+            140,
+            74,
+            162,
+            238,
+            91,
+            234,
+            12,
+            41,
+            86,
+            141,
+            182,
+            255,
+            62,
+            19,
+            52,
+            103,
+            93,
+            188,
+            197,
+            134,
+            189,
+            116,
+            119,
+            7,
+            126,
+            73,
+            30,
+            79,
+            67,
+            203
+          ]
+        },
+        "isPreview": true,
+        "kind": "file",
+        "path": "src/lib.rs",
+        "scrollAnchor": {
+          "byteOffset": 0,
+          "column": 1,
+          "line": 1,
+          "symbolAnchor": "beta"
+        }
+      }
+    ]
+  },
+  {
+    "file": "c1113cbe8954fe1f1f49c920baf9c1b3cba5d537b56e1624f785653201f0e5d2.json",
+    "activeTabOrdinal": 0,
+    "languages": [
+      0
+    ],
+    "navigationHistory": {
+      "cursor": 0,
+      "records": []
+    },
+    "panelPreset": "reading",
+    "projectRoot": "/tmp/cairn-mw-independent-20260917/alpha",
+    "readingTrail": {
+      "edges": [],
+      "nodes": []
+    },
+    "schemaVersion": 3,
+    "tabs": [
+      {
+        "activationRank": 0,
+        "anchorContentID": {
+          "algorithm": 1,
+          "bytes": [
+            148,
+            183,
+            52,
+            33,
+            119,
+            41,
+            106,
+            78,
+            16,
+            53,
+            197,
+            160,
+            107,
+            157,
+            100,
+            29,
+            225,
+            93,
+            228,
+            227,
+            119,
+            241,
+            192,
+            135,
+            74,
+            23,
+            170,
+            196,
+            187,
+            62,
+            162,
+            206
+          ]
+        },
+        "isPreview": true,
+        "kind": "file",
+        "path": "src/lib.rs",
+        "scrollAnchor": {
+          "byteOffset": 0,
+          "column": 1,
+          "line": 1,
+          "symbolAnchor": "alpha"
+        }
+      }
+    ]
+  }
+]

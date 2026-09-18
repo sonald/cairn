@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 28.796458999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 540312872
+  },
+  "fold": {
+    "resolutionMs": 31.600166999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 562349376,
+    "foldLatencyMs": 260.696958
+  },
+  "deltaBytes": 22036504,
+  "status": "pass"
+}

@@ -884,6 +884,9 @@ func recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() async throws
         recentProjectsStore: store,
         indexService: MainWindowWorkingIndexService()
     )
+    // §7.3: the model reports checkpoint writes; the app layer owns the
+    // launch pointer. Tests wire the same rule the AppDelegate applies.
+    model.onSessionCheckpointWritten = { store.lastSessionProjectPath = $0 }
     let controller = MainWindowController(
         model: model,
         settings: ReaderSettings(),

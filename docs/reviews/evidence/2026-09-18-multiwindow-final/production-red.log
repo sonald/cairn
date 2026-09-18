@@ -1,0 +1,619 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[17 / 127]
+[31 / 126]
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[48 / 136]
+[50 / 136] TreeSitterKit
+[58 / 150] TreeSitterKit
+[60 / 153] CTreeSitterPython
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[68 / 174] CTreeSitter
+[73 / 189] CodeInsightRustExtractor
+[74 / 189] CodeInsightRustExtractor
+[81 / 181] CodeInsightPythonExtractor
+[86 / 189] CodeInsightExact
+[91 / 185] CodeInsightExact
+[96 / 187] CodeInsightRustExtractor
+[100 / 187] CodeInsightTypeScriptExtractor
+[105 / 180] CodeInsightReaderCore
+[107 / 189] CodeInsightReaderCore
+[110 / 208] PythonExtractorTests-product
+[112 / 211] CodeInsightExact
+[115 / 211] CodeInsightReaderCore
+[119 / 211] PythonExtractorTests-product
+[124 / 211] CodeInsightReaderCore
+[131 / 203] CodeInsightReaderCore
+[132 / 209] CodeInsightEngine
+[134 / 216] codeinsight-product
+[135 / 216] TreeSitterKitTests-product
+[140 / 218] TreeSitterKitTests-product
+[142 / 218] CodeInsightEngine
+[144 / 218] CodeInsightEngine
+[147 / 221] CodeInsightEngine
+[151 / 222] CodeInsightAppModel
+[152 / 222] TreeSitterKitTests-product
+[155 / 220] CodeInsightEngine
+[158 / 223] CodeInsightAppModel
+[161 / 238] CodeInsightEngine
+[168 / 238] CodeInsightAppModel
+[171 / 234] PythonExtractorTests-product
+[178 / 237] TypeScriptExtractorTests-product
+[180 / 237] CodeInsightAppModel
+[180 / 243] CodeInsightExactTests-product
+[183 / 240] PythonExtractorTests-product
+[185 / 240] CodeInsightAppModel
+[189 / 238] CodeInsightEngineTests-product
+[192 / 237] CodeInsightEngineTests-product
+[193 / 242] RustExtractorTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[194 / 243] codeinsight-product
+[196 / 249] CodeInsightAppModel
+[197 / 249] RustExtractorTests-product
+[200 / 249] RustExtractorTests-product
+[201 / 249] CodeInsightEngineTests-product
+[203 / 249] CodeInsightEngineTests-product
+[204 / 249] CodeInsightReaderUI
+[206 / 249] CodeInsightEngineTests-product
+[207 / 246] CodeInsightEngineTests-product
+[208 / 246] CodeInsightAppModel
+[213 / 246] CodeInsightReaderUITests-product
+[214 / 254] CodeInsightReaderUITests-product
+[216 / 254] CodeInsightReaderCoreTests-product
+[216 / 254] CodeInsightReaderUITests-product
+[217 / 254] CodeInsightEngineTests-product
+[219 / 254] CodeInsightReaderCoreTests-product
+[220 / 254] RustExtractorTests-product
+[222 / 254] RustExtractorTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1012:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1010 |     ) throws {
+1011 |         guard sessionRestoreWriteSuspension != generation,
+1012 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1013 |               let snapshot = makeSessionSnapshot(
+1014 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[223 / 254] CodeInsightReaderCoreTests-product
+[225 / 254] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: RustExtractorTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[226 / 254] RustExtractorTests-product
+[229 / 257] CodeInsightReaderCoreTests-product
+[235 / 261] CodeInsightReaderUITests-product
+[238 / 260] CodeInsightApp
+[241 / 272] CodeInsightApp
+[241 / 284] codeinsight-app-product
+[243 / 296] codeinsight-app-product
+[243 / 296] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:181:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+179 | 
+180 |     static func selfTestEnableAccessibility() {
+181 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+182 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+183 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[244 / 296] CodeInsightApp
+[246 / 296] codeinsight-app-product
+[247 / 296] CodeInsightEngineTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightExactTests/CodeInsightExactTests.swift:1711:9: warning: variable 'client' was written to, but never read
+1709 |     let clientToServer = Pipe()
+1710 |     let serverToClient = Pipe()
+1711 |     var client: LSPClient? = LSPClient(
+     |         `- warning: variable 'client' was written to, but never read
+1712 |         readHandle: serverToClient.fileHandleForReading,
+1713 |         writeHandle: clientToServer.fileHandleForWriting
+[249 / 296] codeinsight-app-product
+[250 / 296] codeinsight-app-product
+[254 / 298] CodeInsightApp
+[256 / 298] CodeInsightApp
+[263 / 301] CodeInsightExactTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightExactTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[267 / 304] CodeInsightExactTests-product
+[268 / 304] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightEngineTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[270 / 310] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:181:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+179 | 
+180 |     static func selfTestEnableAccessibility() {
+181 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+182 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+183 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[275 / 307] CodeInsightAppModelTests-product
+[277 / 307] CodeInsightAppModelTests-product
+[278 / 307] CodeInsightAppModelTests-product
+[279 / 307] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:323:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+321 |     let model = fixture.model
+322 | 
+323 |     try model.openProject(root: fixture.root)
+    |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+324 |     #expect(await testWaitUntil("ready") {
+325 |         if case .ready = model.projectState { return true }
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:436:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+434 |     coordinator.suspendPrepares(for: fixture.root)
+435 |     #expect(coordinator.prepareIsSuspended(for: fixture.root))
+436 |     try coordinator.prepare(
+    |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+437 |         projectURL: fixture.root,
+438 |         revision: nil,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:448:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+446 |     coordinator.resumePrepares(for: fixture.root)
+447 |     #expect(!coordinator.prepareIsSuspended(for: fixture.root))
+448 |     try coordinator.prepare(
+    |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+449 |         projectURL: fixture.root,
+450 |         revision: nil,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:555:9: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+553 |     #expect(materializer.isUnderMaintenance)
+554 |     for (index, coordinator) in [windowA, windowB].enumerated() {
+555 |         try coordinator.prepare(
+    |         `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+556 |             projectURL: fixture.root,
+557 |             revision: nil,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:567:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+565 |     materializer.endMaintenance()
+566 |     #expect(!materializer.isUnderMaintenance)
+567 |     try windowA.prepare(projectURL: fixture.root, revision: nil, generation: 3)
+    |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+568 |     #expect(await testWaitUntil("ready") { windowA.readiness == .ready })
+569 |     #expect(state.prepareCount == 1)
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/MultiWindowSharingTests.swift:592:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+590 |     let model = AppModel(exactCoordinator: coordinator)
+591 |     try await coordinator.grantTrust(root)
+592 |     try model.openProject(root: root)
+    |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+593 |     try #require(await testWaitUntil("trusted provider ready") {
+594 |         coordinator.readiness == .ready && model.snapshotPhase == .fullReady
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[280 / 307] CodeInsightAppModelTests-product
+[281 / 307] CodeInsightReaderCoreTests-product
+[282 / 313] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[285 / 313] CodeInsightReaderCoreTests-product
+[286 / 313] CodeInsightAppModelTests-product
+[287 / 313] CodeInsightAppModelTests-product
+[290 / 313] CodeInsightApp
+[292 / 313] CodeInsightApp
+[292 / 313]
+[296 / 313] CodeInsightReaderCoreTests-product
+[298 / 313] CodeInsightEngineTests-product
+[298 / 313] CodeInsightAppModelTests-product
+[298 / 313] CodeInsightApp
+[298 / 313] CodeInsightAppModelTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift:1830:27: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1828 |         return
+1829 |     }
+1830 |     let renamedHits = try await session.searchSymbols(
+     |                           `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1831 |         query: "renamed",
+1832 |         limit: 10,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift:1837:26: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1835 |     )
+1836 |     #expect(!renamedHits.isEmpty, "#renamed must be indexed after refresh")
+1837 |     let targetHits = try await session.searchSymbols(
+     |                          `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+1838 |         query: "target",
+1839 |         limit: 10,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift:2093:20: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+2091 |         return
+2092 |     }
+2093 |     let hits = try await session.searchSymbols(
+     |                    `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+2094 |         query: "renamed",
+2095 |         limit: 10,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift:2151:18: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+2149 |     // refresh may not publish anything into the new workspace afterwards.
+2150 |     let secondModelTask = Task { @MainActor in
+2151 |         _ = try? await model.openProject(root: second.root, language: .rust)
+     |                  `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+2152 |     }
+2153 |     await service.releaseFull("refresh")
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/SnapshotSwitchTests.swift:2202:9: warning: initialization of immutable value 'firstOpen' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+2200 |     )
+2201 |     let model = AppModel(indexService: service)
+2202 |     let firstOpen = Task { @MainActor in
+     |         `- warning: initialization of immutable value 'firstOpen' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+2203 |         try? await model.openProject(
+2204 |             root: first.root,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/AppModelTests.swift:3370:25: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3368 |         generation: 1
+3369 |     )
+3370 |     let firstHits = try await firstSession.searchSymbols(
+     |                         `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3371 |         query: "first_only",
+3372 |         limit: 10,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/AppModelTests.swift:3382:26: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3380 |         generation: 2
+3381 |     )
+3382 |     let secondHits = try await secondSession.searchSymbols(
+     |                          `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3383 |         query: "second_only",
+3384 |         limit: 10,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppModelTests/AppModelTests.swift:3448:20: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3446 |         #expect(service.retainedContentIDsForDiagnostics.count == 1)
+3447 |     }
+3448 |     let hits = try await original.searchSymbols(query: "revision_0", limit: 10, boost: SearchBoost(), context: QueryContext(snapshotID: original.snapshotID, analysisProfileID: original.analysisProfile.id, generation: 1))
+     |                    `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+3449 |     #expect(hits.count == 1)
+3450 | }
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[298 / 313] CodeInsightApp
+[298 / 313] CodeInsightAppModelTests-product
+[300 / 313] CodeInsightAppModelTests-product/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppModelTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10890 |         weak var openButton: NSButton?
+10891 | 
+10892 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+10893 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10894 |         }
+10895 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10891 | 
+10892 |         @objc func checkboxChanged(_ sender: NSButton) {
+10893 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |         }
+10895 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10898:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10896 |         var selection: [LanguageID]? {
+10897 |             var selected: [LanguageID] = []
+10898 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10899 |                 selected.append(.rust)
+10900 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10901:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10899 |                 selected.append(.rust)
+10900 |             }
+10901 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10902 |                 selected.append(.python)
+10903 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10904:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10902 |                 selected.append(.python)
+10903 |             }
+10904 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10905 |                 selected.append(.typescript)
+10906 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11111:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11109 |                 await coordinator.stopAllWorkForCacheClear()
+11110 |             }
+11111 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11112 |             return .cleared
+11113 |         } catch {
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[304 / 316] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[306 / 316] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10890 |         weak var openButton: NSButton?
+10891 | 
+10892 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+10893 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10894 |         }
+10895 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10891 | 
+10892 |         @objc func checkboxChanged(_ sender: NSButton) {
+10893 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |         }
+10895 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10898:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10896 |         var selection: [LanguageID]? {
+10897 |             var selected: [LanguageID] = []
+10898 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10899 |                 selected.append(.rust)
+10900 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10901:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10899 |                 selected.append(.rust)
+10900 |             }
+10901 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10902 |                 selected.append(.python)
+10903 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10904:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10902 |                 selected.append(.python)
+10903 |             }
+10904 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10905 |                 selected.append(.typescript)
+10906 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11111:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11109 |                 await coordinator.stopAllWorkForCacheClear()
+11110 |             }
+11111 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11112 |             return .cleared
+11113 |         } catch {
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[308 / 317] CodeInsightApp
+[311 / 316] CodeInsightAppTests-product
+[323 / 328] CodeInsightAppTests-product
+[328 / 331] CodeInsightAppTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2498:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2496 |     )
+2497 | 
+2498 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2499 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2500 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2537:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2535 |     // The Reader caret moves to a call of `second`; the global command must
+2536 |     // query second, leaving the pinned preview untouched.
+2537 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2538 |         at: byteOffset(of: "second();", in: fixture.mainSource)
+2539 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2573:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+2571 |     )
+2572 |     fixture.controller.showRelations(direction: .references)
+2573 |     try await pumpRunLoop()
+     |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+2574 |     #expect(fixture.model.relationTree.root == nil)
+2575 | }
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2601:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2599 |     fixture.controller.window?.setContentSize(NSSize(width: 900, height: 600))
+2600 |     fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+2601 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2602 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2603 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2643:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2641 |             == main.standardizedFileURL
+2642 |     })
+2643 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2644 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2645 |     )
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[330 / 334] CodeInsightAppTests-product/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+
+[333 / 333] codeinsight-product
+Build complete! (62.03秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() started.
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() recorded an issue at MultiWindowAppServicesTests.swift:215:5: Expectation failed: first.model.bookmarkModel.records.count == 2
+↳ first.model.bookmarkModel.records.count == 2 → false
+↳   first.model.bookmarkModel.records.count → 1
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() recorded an issue at MultiWindowAppServicesTests.swift:216:5: Expectation failed: second.model.bookmarkModel.records.count == 2
+↳ second.model.bookmarkModel.records.count == 2 → false
+↳   second.model.bookmarkModel.records.count → 1
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() recorded an issue at MultiWindowAppServicesTests.swift:217:5: Expectation failed: try BookmarkStore(fileURL: root.appendingPathComponent("bookmarks.json")).load().count == 2
+↳ try BookmarkStore(fileURL: root.appendingPathComponent("bookmarks.json")).load().count == 2 → <not evaluated>
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() recorded an issue at MultiWindowAppServicesTests.swift:219:9: Expectation failed: controller.model.exactCoordinator.trustRegistry === registry
+↳ controller.model.exactCoordinator.trustRegistry === registry → false
+↳   controller.model.exactCoordinator.trustRegistry → CodeInsightExact.TrustRegistry
+↳     $defaultActor → (Opaque Value)
+↳     fileURL → file:///Users/siancao/Library/Application%20Support/CodeInsight/trust.json
+↳       _url → Foundation._SwiftURL
+↳         _parseInfo → Foundation.URLParseInfo
+↳           urlString → "file:///Users/siancao/Library/Application%20Support/CodeInsight/trust.json"
+↳           schemeRange → 0[utf8] ..< 4[utf8]
+↳             some → 0[utf8] ..< 4[utf8]
+↳               lowerBound → 0[utf8]
+↳                 _rawBits → 4
+↳               upperBound → 4[utf8]
+↳                 _rawBits → 262148
+↳           userRange → nil
+↳           passwordRange → nil
+↳           hostRange → 7[utf8] ..< 7[utf8]
+↳             some → 7[utf8] ..< 7[utf8]
+↳               lowerBound → 7[utf8]
+↳                 _rawBits → 458756
+↳               upperBound → 7[utf8]
+↳                 _rawBits → 458756
+↳           portRange → nil
+↳           pathRange → 7[utf8] ..< 74[utf8]
+↳             some → 7[utf8] ..< 74[utf8]
+↳               lowerBound → 7[utf8]
+↳                 _rawBits → 458756
+↳               upperBound → 74[utf8]
+↳                 _rawBits → 4849668
+↳           queryRange → nil
+↳           fragmentRange → nil
+↳           isIPLiteral → false
+↳           didPercentEncodeHost → false
+↳           pathHasFileID → false
+↳           encodedComponents → EncodedComponentSet(rawValue: 0)
+↳             rawValue → 0
+↳         _baseURL → nil
+↳         _encoding → Unicode (UTF-8)
+↳           rawValue → 4
+↳         _isCanonicalFileURL → false
+↳         _nsurlLock → ()
+↳     entries → ["/Users/siancao/work/ai/oatmeal": CodeInsightExact.TrustRegistry.(unknown context at $10cb9df28).Entry(mode: "trusted", grantedAt: 2026-07-23 11:10:09 +0000), "/Users/siancao/work/readings/rlm-minimal": CodeInsightExact.TrustRegistry.(unknown context at $10cb9df28).Entry(mode: "trusted", grantedAt: 2026-09-15 08:55:09 +0000), "/Users/siancao/tmp/tokio-tokio-1.47.1": CodeInsightExact.TrustRegistry.(unknown context at $10cb9df28).Entry(mode: "trusted", grantedAt: 2026-07-28 08:54:32 +0000), "/Users/siancao/work/ai/morphic": CodeInsightExact.TrustRegistry.(unknown context at $10cb9df28).Entry(mode: "trusted", grantedAt: 2026-08-13 00:38:10 +0000)]
+↳   registry → CodeInsightExact.TrustRegistry
+↳     $defaultActor → (Opaque Value)
+↳     fileURL → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/ProductionServices-66EF1FEE-7A73-4BF9-8986-FB1C128C4144/trust.json
+↳       _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/ProductionServices-66EF1FEE-7A73-4BF9-8986-FB1C128C4144/trust.json
+↳         _url → file:///var/folders/9k/7j3z072513z5hkf_xgcxzdzm0000gn/T/ProductionServices-66EF1FEE-7A73-4BF9-8986-FB1C128C4144/trust.json
+↳     entries → [:]
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() recorded an issue at MultiWindowAppServicesTests.swift:226:9: Expectation failed: coordinator.readiness == .off("cache maintenance")
+↳ coordinator.readiness == .off("cache maintenance") → false
+↳   coordinator.readiness → .preparing
+↳     off → "cache maintenance"
+✘ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() failed after 0.783 seconds with 5 issues.
+↳ /// Exercise main's production assembly, including the first window. Building
+↳ /// two models by hand would miss an independently injected bootstrap model.
+✘ Test run with 1 test in 0 suites failed after 0.783 seconds with 5 issues.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

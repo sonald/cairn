@@ -1,0 +1,20 @@
+{
+  "bundle": "/tmp/cairn-mw-independent-20260917/Cairn.app",
+  "bundleIdentifier": "dev.cairn.Cairn.independent20260917",
+  "version": "0.1.independent",
+  "executableSHA256": "40be2e9b4e1bcf676b394ec2ad313e9eecff757c9543896d6a599d3efe4c7409",
+  "builtExecutableSHA256": "a01dec4f4395fd5df51ea765a22cfcf281e963c9f1083cd0a6d3d0e51320913c",
+  "documentTypes": [
+    {
+      "CFBundleTypeName": "Project Folder",
+      "CFBundleTypeRole": "Viewer",
+      "LSHandlerRank": "Alternate",
+      "LSItemContentTypes": [
+        "public.folder"
+      ]
+    }
+  ],
+  "baseCommit": "90c6526",
+  "build": "fresh debug build; existing bundle resources/frameworks; isolated identifier; ad-hoc resigned",
+  "trackedDiffSHA256": "33e689f864320fe4748926bc38447f40d62e368a44df3c3a9c89e961374de516"
+}

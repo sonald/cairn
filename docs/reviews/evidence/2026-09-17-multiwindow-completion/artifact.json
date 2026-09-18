@@ -1,0 +1,11 @@
+{
+  "bundle": "/tmp/cairn-full-independent-20260917/Cairn.app",
+  "bundleID": "dev.cairn.Cairn.fullverify20260917",
+  "isolatedHome": "/tmp/cairn-full-independent-20260917/home",
+  "builtBinarySHA256": "0fe88e4eec00942fb81a8e4f1aaf19c9a2d3603d232a57d8bc5af0afad1204e2",
+  "copiedBeforeSigningSHA256": "0fe88e4eec00942fb81a8e4f1aaf19c9a2d3603d232a57d8bc5af0afad1204e2",
+  "signedBinarySHA256": "271c5f6eba328fa74717ce486bc5842203b5e5004ec4f3e899098b44446865e9",
+  "buildCodeSectionSHA256": "c8009b4aa20ccd9d9288c909de25742f46c4d88af18acd7831d3403eb7d31950",
+  "appCodeSectionSHA256": "c8009b4aa20ccd9d9288c909de25742f46c4d88af18acd7831d3403eb7d31950",
+  "ciExit": 0
+}

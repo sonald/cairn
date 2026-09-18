@@ -407,6 +407,33 @@ private struct CodeInsightApplication {
                     ),
                     recentProjectsStore: pythonRecentStore
                 )
+            } else if arguments.contains("--self-test-multiwindow") {
+                // Multi-window acceptance: one process, isolated session
+                // store, isolated defaults, temp trust and cache (§11).
+                let storageRoot = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(
+                        "CodeInsightMultiWindowStorage-\(UUID().uuidString)",
+                        isDirectory: true
+                    )
+                let multiWindowDefaults = UserDefaults(
+                    suiteName: "CodeInsightMultiWindow-\(UUID().uuidString)"
+                )!
+                let multiWindowStore = RecentProjectsStore(
+                    defaults: multiWindowDefaults
+                )
+                let multiWindowSessionURL = storageRoot
+                    .appendingPathComponent("session.json")
+                delegate = AppDelegate.production(
+                    startedAt: startedAt,
+                    sessionURL: multiWindowSessionURL,
+                    recentProjectsStore: multiWindowStore,
+                    sharedTrustRegistry: TrustRegistry(
+                        fileURL: storageRoot.appendingPathComponent("trust.json")
+                    ),
+                    sharedMaterializer: Materializer(
+                        rootURL: storageRoot.appendingPathComponent("materialized")
+                    )
+                )
             } else {
                 let bookmarkSessionURL = bookmarkSelfTestRoot.map { _ in
                     ProcessInfo.processInfo.environment[
@@ -450,16 +477,15 @@ private struct CodeInsightApplication {
                         model: appModel,
                         recentProjectsStore: launchRecentStore
                     )
-                } else {
-                    appModel = runsSelfTest
-                        ? AppModel()
-                        : AppModel(
-                            sessionURL: AppModel.defaultSessionURL,
-                            recentProjectsStore: launchRecentStore
-                        )
+                } else if runsSelfTest {
                     delegate = AppDelegate(
                         startedAt: startedAt,
-                        model: appModel,
+                        model: AppModel(),
+                        recentProjectsStore: launchRecentStore
+                    )
+                } else {
+                    delegate = AppDelegate.production(
+                        startedAt: startedAt,
                         recentProjectsStore: launchRecentStore
                     )
                 }
@@ -570,6 +596,8 @@ private struct CodeInsightApplication {
                 delegate.runSessionSelfTest(root: sessionSelfTestRoot)
             } else if sessionSelfTestRestart {
                 delegate.runSessionSelfTestRestart()
+            } else if arguments.contains("--self-test-multiwindow") {
+                delegate.runMultiWindowSelfTest()
             } else if arguments.contains("--self-test") {
                 delegate.runSelfTest()
             } else if let nonSourceSelfTestRoot {
@@ -586,45 +614,297 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     NSMenuDelegate
 {
     private let startedAt: ContinuousClock.Instant
-    private let model: AppModel
+    /// Model injected by self-test entry points; production launches pass
+    /// none and every window gets its own model assembled from the shared
+    /// trust registry / materializer / bookmark store (§4).
+    private let injectedModel: AppModel?
     private let exactSelfTestProviderState: ExactSelfTestProviderState?
     private let relationTimingTemporaryRoot: URL?
     private let recentProjectsStore: RecentProjectsStore
+    /// Session store anchor for windows the application assembles itself;
+    /// self-tests inject an isolated URL so multi-window acceptance never
+    /// touches real user data (§11).
+    private let windowSessionURL: URL?
     private var readerSettings = ReaderSettings(defaults: .standard)
-    private var windowController: MainWindowController?
-    private var settingsWindowController: ReaderSettingsWindowController?
-    private var mixedLanguageCheckboxes: [NSButton] = []
-    private weak var mixedLanguageOpenButton: NSButton?
+    // Window collection and routing state (all MainActor, §4.1).
+    private var projectWindows: [MainWindowController] = []
+    /// Most-recently-active project window, recency-ordered (last = most
+    /// recent). Drives the launch restore target and blank-window choice.
+    private var activeWindowOrder: [MainWindowController] = []
+    private weak var lastActiveProjectWindow: MainWindowController?
+    private(set) var settingsWindowController: ReaderSettingsWindowController?
+    /// Shared single-instance services owned by the application, injected
+    /// into every window's model (§8.2/§8.3).
+    private let sharedTrustRegistry: TrustRegistry
+    private let sharedMaterializer: Materializer
+    // Launch Services open requests (§5.2): queued until launch finished;
+    // processed strictly serially afterwards.
+    private var pendingOpenURLs: [URL] = []
+    private var receivedExplicitOpenRequest = false
+    private var launchFinished = false
+    private var isDrainingOpenRequests = false
+    /// Set while quitting so no new project work starts (§7.2).
+    private var isTerminating = false
+    /// Projects whose session checkpoint was successfully written at least
+    /// once this run; only those may become the restore target (§7.3).
+    private var persistedProjects: Set<String> = []
 
     init(
         startedAt: ContinuousClock.Instant,
-        model: AppModel = AppModel(),
+        model: AppModel? = nil,
         exactSelfTestProviderState: ExactSelfTestProviderState? = nil,
         relationTimingTemporaryRoot: URL? = nil,
-        recentProjectsStore: RecentProjectsStore = RecentProjectsStore()
+        recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
+        windowSessionURL: URL? = nil,
+        sharedTrustRegistry: TrustRegistry = TrustRegistry(),
+        sharedMaterializer: Materializer = Materializer()
     ) {
         self.startedAt = startedAt
-        self.model = model
+        self.injectedModel = model
         self.exactSelfTestProviderState = exactSelfTestProviderState
         self.relationTimingTemporaryRoot = relationTimingTemporaryRoot
         self.recentProjectsStore = recentProjectsStore
+        self.windowSessionURL = windowSessionURL
+        self.sharedTrustRegistry = sharedTrustRegistry
+        self.sharedMaterializer = sharedMaterializer
+    }
+
+    /// Normal application entry point; tests override storage locations only.
+    static func production(
+        startedAt: ContinuousClock.Instant,
+        sessionURL: URL = AppModel.defaultSessionURL,
+        recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
+        sharedTrustRegistry: TrustRegistry = TrustRegistry(),
+        sharedMaterializer: Materializer = Materializer()
+    ) -> AppDelegate {
+        AppDelegate(
+            startedAt: startedAt,
+            recentProjectsStore: recentProjectsStore,
+            windowSessionURL: sessionURL,
+            sharedTrustRegistry: sharedTrustRegistry,
+            sharedMaterializer: sharedMaterializer
+        )
+    }
+
+    /// Model behind the self-test accessors (`model`) and the first window.
+    /// Injected models keep their own singletons; production windows share
+    /// the application's instances.
+    private lazy var bootstrapModel: AppModel = makeWindowModel()
+
+    /// The one process-wide bookmark authority (§8.1).
+    private lazy var sharedBookmarkStore = SharedBookmarkStore(
+        fileURL: (windowSessionURL ?? AppModel.defaultSessionURL)
+            .deletingLastPathComponent()
+            .appendingPathComponent("bookmarks.json")
+    )
+
+    private var model: AppModel {
+        if let injectedModel {
+            return injectedModel
+        }
+        return bootstrapModel
+    }
+
+    private func makeWindowModel() -> AppModel {
+        AppModel(
+            sessionURL: windowSessionURL ?? AppModel.defaultSessionURL,
+            recentProjectsStore: recentProjectsStore,
+            sharedBookmarkStore: sharedBookmarkStore,
+            exactCoordinator: ExactCoordinator(
+                trustRegistry: sharedTrustRegistry,
+                materializer: sharedMaterializer
+            )
+        )
+    }
+
+    /// The window self-test helpers inspect; multi-window routing never
+    /// relies on this alias.
+    private var windowController: MainWindowController? {
+        projectWindows.first
+    }
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Menus and shared storage exist before the first open request can
+        // arrive; no project is opened here (§5.2).
+        if NSApplication.shared.mainMenu == nil {
+            NSApplication.shared.mainMenu = makeMainMenu()
+        }
+        applyApplicationAppearance()
+    }
+
+    func application(_ application: NSApplication, open urls: [URL]) {
+        receivedExplicitOpenRequest = true
+        pendingOpenURLs.append(contentsOf: urls)
+        guard launchFinished else { return }
+        drainOpenRequests()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        launch(offscreen: false)
+        if !receivedExplicitOpenRequest {
+            launch(offscreen: false)
+        } else {
+            NSApplication.shared.mainMenu = makeMainMenu()
+            applyApplicationAppearance()
+            drainOpenRequests()
+            // All explicit requests failed or were cancelled: keep exactly
+            // one welcome window instead of restoring an unrelated project
+            // (§5.2 step 4).
+            if projectWindows.isEmpty {
+                makeWindowWithModel(model, offscreen: false)?.showWindow(nil)
+            }
+        }
+        launchFinished = true
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        windowController?.checkpointSessionSynchronously()
-        model.exactCoordinator.shutdown()
+        // Idempotent final fallback: checkpoints already ran during the
+        // terminate reply; this only catches paths that bypassed approval.
+        for controller in projectWindows {
+            controller.checkpointSessionSynchronously()
+        }
+        for controller in projectWindows {
+            controller.model.exactCoordinator.shutdown()
+        }
         if ProcessInfo.processInfo.arguments.contains("--self-test-session") {
             Self.writeJSON(["channel": "session-termination", "willTerminate": true])
         }
     }
 
     func applicationDidResignActive(_ notification: Notification) {
-        windowController?.scheduleSessionCheckpointForApplicationLifecycle()
+        for controller in projectWindows {
+            controller.scheduleSessionCheckpointForApplicationLifecycle()
+        }
+    }
+
+    // MARK: - Self-test accessors (multi-window lifecycle coverage)
+
+    var selfTestProjectWindowCount: Int { projectWindows.count }
+
+    func selfTestProjectWindow(_ index: Int) -> MainWindowController? {
+        projectWindows.indices.contains(index) ? projectWindows[index] : nil
+    }
+
+    var selfTestIsDrainingOpenRequests: Bool { isDrainingOpenRequests }
+
+    func selfTestLaunchOffscreen() {
+        launch(offscreen: true)
+    }
+
+    func selfTestEnqueueOpenRequest(
+        root: URL,
+        languages: [LanguageID]?,
+        sourceWindow: MainWindowController? = nil
+    ) {
+        enqueueOpenRequest(
+            root: root,
+            languages: languages,
+            sourceWindow: sourceWindow
+        )
+    }
+
+    /// Decision offered for a failed final save during quit.
+    enum QuitSaveFailureDecision: Equatable {
+        case retry
+        case skipWindow
+        case cancelQuit
+    }
+
+    func applicationShouldTerminate(
+        _ sender: NSApplication
+    ) -> NSApplication.TerminateReply {
+        // Closing the last project window with Settings still open routes
+        // through the same termination path (§7.2).
+        guard !isTerminating else { return .terminateNow }
+        isTerminating = true
+        // Final capture/save per window. A failure is handled per window:
+        // retry re-runs that window's save, skip proceeds without it while
+        // the OTHER windows still get their final save, and cancelling
+        // aborts the quit with every window intact (§7.2).
+        let proceed = finalizeQuitSaves { controller, error in
+            let alert = NSAlert()
+            alert.alertStyle = .warning
+            alert.messageText = "Reading Session Not Saved"
+            alert.informativeText =
+                "The reading session for "
+                + (controller.projectURL?.lastPathComponent ?? "a project")
+                + " could not be saved: \(String(describing: error))"
+                + " The previous file on disk is kept."
+            alert.addButton(withTitle: "Retry Save")
+            alert.addButton(withTitle: "Quit Without Saving")
+            alert.addButton(withTitle: "Cancel Quit")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn:
+                return .retry
+            case .alertSecondButtonReturn:
+                return .skipWindow
+            default:
+                return .cancelQuit
+            }
+        }
+        guard proceed else {
+            isTerminating = false
+            return .terminateCancel
+        }
+        let closing = projectWindows
+        Task { @MainActor in
+            for controller in closing {
+                controller.beginTerminateTeardown()
+            }
+            // Await every window's teardown, including windows whose close
+            // was already running when the quit started: their providers
+            // must exit before the process may end (§7.2).
+            for controller in closing {
+                await controller.teardownCompletion()
+            }
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
+    /// Runs the final per-window save loop. `prompt` decides what a failed
+    /// save means; tests inject scripted decisions. Windows that are
+    /// already closing had their final save (or approved skip) in their
+    /// own approval stage and are not asked again. Returns false when the
+    /// quit was cancelled.
+    func finalizeQuitSaves(
+        prompt: (MainWindowController, any Error) -> QuitSaveFailureDecision
+    ) -> Bool {
+        var skipped = Set<ObjectIdentifier>()
+        while true {
+            var failure: (controller: MainWindowController, error: any Error)?
+            for controller in projectWindows
+            where !controller.isClosing
+                && !skipped.contains(ObjectIdentifier(controller))
+            {
+                do {
+                    try controller.checkpointSessionSynchronouslyReportingFailure()
+                } catch {
+                    failure = (controller, error)
+                    break
+                }
+            }
+            guard let failure else { return true }
+            switch prompt(failure.controller, failure.error) {
+            case .retry:
+                continue
+            case .skipWindow:
+                skipped.insert(ObjectIdentifier(failure.controller))
+                continue
+            case .cancelQuit:
+                return false
+            }
+        }
+    }
+
+    func applicationShouldTerminateAfterLastWindowClosed(
+        _ sender: NSApplication
+    ) -> Bool {
+        // Project windows alone decide termination; the global Settings
+        // window must not keep the app (or block quit) on its own, and a
+        // window whose teardown is still finishing no longer counts as
+        // open (§7.2).
+        projectWindows.allSatisfy(\.isClosing)
     }
 
     func runSelfTest() {
@@ -692,8 +972,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let languageOpenEnabledAtThree = languageOpenButton?.isEnabled == true
         languageCheckboxes.forEach { $0.performClick(nil) }
         let languageOpenDisabledAfterClearing = languageOpenButton?.isEnabled == false
-        mixedLanguageCheckboxes = []
-        mixedLanguageOpenButton = nil
 
         windowController.applyPanelPreset(.reading)
         pumpRunLoop()
@@ -5358,11 +5636,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             extra: ["profileTitle": controller.selfTestProfileTitle]
         )
 
+        let settingsTrustModel = TrustListModel()
+        settingsTrustModel.replace(coordinator.trustedRepositories)
         let settingsController = ReaderSettingsWindowController(
             settings: readerSettings,
-            exactCoordinator: coordinator,
+            trustModel: settingsTrustModel,
             onRevoke: { repositoryURL in
                 try? await trustModel.revokeRepositoryTrust(repositoryURL)
+                await settingsTrustModel.refresh(from: coordinator.trustRegistry)
+            },
+            onClearCache: {
+                do {
+                    try await coordinator.clearMaterializedCache()
+                    return .cleared
+                } catch {
+                    return .failed(error.localizedDescription)
+                }
             },
             onChange: { _ in }
         )
@@ -5371,9 +5660,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         defer { settingsController.close() }
 
         let trustView = NSHostingView(rootView: TrustSettingsView(
-            coordinator: coordinator,
+            trustModel: settingsTrustModel,
             onRevoke: { repositoryURL in
                 try? await trustModel.revokeRepositoryTrust(repositoryURL)
+                await settingsTrustModel.refresh(from: coordinator.trustRegistry)
             }
         ))
         let layoutWindow = NSWindow(
@@ -8869,6 +9159,239 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         fatalError("Session self-test termination was cancelled")
     }
 
+    /// Multi-window acceptance (§3.1/§3.2/§7.1): two isolated projects in
+    /// two windows with two models; duplicate and alias requests activate
+    /// instead of duplicating; closing one window keeps the other working.
+    /// Runs entirely offscreen against an isolated session store wired by
+    /// the `--self-test-multiwindow` entry point.
+    func runMultiWindowSelfTest() -> Never {
+        let channel = "multiwindow"
+
+        func fail(_ error: String) -> Never {
+            Self.writeJSON([
+                "channel": channel, "passed": false, "error": error,
+            ] as [String: Any])
+            Self.exitSelfTest(channel: channel, status: 1)
+        }
+
+        func makeProject(_ files: [String: String]) -> URL? {
+            let root = FileManager.default.temporaryDirectory
+                .appendingPathComponent(
+                    "CodeInsightMultiWindow-\(UUID().uuidString)",
+                    isDirectory: true
+                )
+            do {
+                try FileManager.default.createDirectory(
+                    at: root,
+                    withIntermediateDirectories: true
+                )
+                for (path, contents) in files {
+                    let file = root.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(
+                        at: file.deletingLastPathComponent(),
+                        withIntermediateDirectories: true
+                    )
+                    try contents.write(
+                        to: file,
+                        atomically: true,
+                        encoding: .utf8
+                    )
+                }
+                for arguments in [
+                    ["init", "-q"],
+                    ["config", "user.name", "CodeInsight Tests"],
+                    ["config", "user.email", "tests@codeinsight.invalid"],
+                    ["add", "-A"],
+                    ["commit", "-q", "-m", "fixture"],
+                ] {
+                    let process = Process()
+                    process.currentDirectoryURL = root
+                    process.executableURL = URL(
+                        fileURLWithPath: "/usr/bin/git"
+                    )
+                    process.arguments = arguments
+                    try process.run()
+                    process.waitUntilExit()
+                    guard process.terminationStatus == 0 else { return nil }
+                }
+                return root
+            } catch {
+                try? FileManager.default.removeItem(at: root)
+                return nil
+            }
+        }
+
+        guard let projectA = makeProject([
+            "src/lib.rs": "pub fn alpha() {}\n",
+            "src/main.rs": "fn main() { crate::alpha(); }\n",
+        ]) else { return fail("project A fixture unavailable") }
+        guard let projectB = makeProject([
+            "src/lib.rs": "pub fn beta() {}\n",
+        ]) else { return fail("project B fixture unavailable") }
+
+        launch(offscreen: true)
+        // Pre-record language preferences so the open pipeline never shows
+        // the modal language picker inside the self-test.
+        recentProjectsStore.record(projectA, language: .rust)
+        recentProjectsStore.record(projectB, language: .rust)
+
+        enqueueOpenRequest(
+            root: projectA,
+            languages: nil,
+            sourceWindow: nil
+        )
+        guard waitUntil(timeout: 60, condition: {
+            self.projectWindows.first?.model.projectState
+                .isReadyForMultiWindowSelfTest == true
+        }) else { return fail("project A never became ready") }
+
+        // A second request plus an alias of the first, submitted together:
+        // the alias activates A's window; B gets a new one (§3.1).
+        let alias = URL(
+            fileURLWithPath: projectA.path + "/.",
+            isDirectory: true
+        )
+        enqueueOpenRequest(root: alias, languages: nil, sourceWindow: nil)
+        enqueueOpenRequest(
+            root: projectB,
+            languages: nil,
+            sourceWindow: nil
+        )
+        guard waitUntil(timeout: 60, condition: {
+            self.projectWindows.count == 2
+                && self.projectWindows.last?.model.projectState
+                    .isReadyForMultiWindowSelfTest == true
+        }) else { return fail("project B never became ready in a new window") }
+
+        guard projectWindows.count == 2 else {
+            return fail("alias request duplicated a window")
+        }
+        let windowA = projectWindows[0]
+        let windowB = projectWindows[1]
+        guard windowA.model !== windowB.model,
+              windowA.projectURL?.standardizedFileURL
+                == projectA.standardizedFileURL,
+              windowB.projectURL?.standardizedFileURL
+                == projectB.standardizedFileURL
+        else { return fail("window claiming or model isolation broken") }
+        guard windowA.window?.title == "\(projectA.lastPathComponent) — Cairn",
+              windowB.window?.title == "\(projectB.lastPathComponent) — Cairn"
+        else { return fail("window titles not project-scoped") }
+
+        // Reading state is per-window: tabs opened in A never appear in B.
+        windowA.openFileInNewTabForSelfTest(
+            projectA.appendingPathComponent("src/main.rs")
+        )
+        guard waitUntil(timeout: 15, condition: {
+            windowA.model.tabStrip.tabs.count == 1
+        }) else { return fail("tab never opened in A") }
+        guard windowB.model.tabStrip.tabs.isEmpty else {
+            return fail("A's tab leaked into B's model")
+        }
+        // A later alias-only request activates A's window without
+        // resetting it and without creating a window (§3.1).
+        guard windowA.model.projectRoot?.standardizedFileURL
+            == projectA.standardizedFileURL
+        else { return fail("alias activation reset A") }
+        enqueueOpenRequest(root: alias, languages: nil, sourceWindow: nil)
+        guard waitUntil(timeout: 15, condition: {
+            self.activeWindowOrder.last === windowA
+        }) else { return fail("alias request did not activate A's window") }
+        guard projectWindows.count == 2 else {
+            return fail("alias request duplicated a window")
+        }
+
+        // Closing B (approved close through AppKit) removes it from the
+        // collection and leaves A working (§7.1).
+        windowB.window?.performClose(nil)
+        // Immediately re-request B while its teardown is still running:
+        // the pipeline must wait for the old session writer to finish
+        // instead of racing a second model for the same project (review
+        // F2). Exactly one B window exists afterwards.
+        enqueueOpenRequest(root: projectB, languages: nil, sourceWindow: nil)
+        // The old B window keeps its ready state until its asynchronous
+        // teardown runs, so the reopened B is identified by NOT closing.
+        guard waitUntil(timeout: 30, condition: {
+            self.projectWindows.count == 2
+                && self.projectWindows.last?.isClosing == false
+                && self.projectWindows.last?.model.projectState
+                    .isReadyForMultiWindowSelfTest == true
+                && self.projectWindows.last?.projectURL?.standardizedFileURL
+                    == projectB.standardizedFileURL
+                && self.projectWindows.first === windowA
+        }) else { return fail("immediate reopen of B did not serialize with its close") }
+        guard projectWindows.filter({
+            $0.projectURL?.standardizedFileURL == projectB.standardizedFileURL
+        }).count == 1
+        else { return fail("reopened B produced duplicate windows") }
+        guard waitUntil(timeout: 15, condition: {
+            self.projectWindows.count == 2
+        }) else { return fail("closing B did not retire its window") }
+        guard projectWindows.first === windowA,
+              windowA.model.projectState.isReadyForMultiWindowSelfTest,
+              windowA.model.tabStrip.tabs.count == 1,
+              projectWindows[1].isClosing == false
+        else { return fail("A disturbed by B's close") }
+
+        // Cancel a first open (review F1): the claim is released, the
+        // auto-created blank window goes away, and the repeat request
+        // loads the project.
+        guard let projectC = makeProject([
+            "src/lib.rs": "pub fn gamma() {}\n",
+        ]) else { return fail("project C fixture unavailable") }
+        languagePickerOverride = { _ in nil }
+        enqueueOpenRequest(root: projectC, languages: nil, sourceWindow: nil)
+        guard waitUntil(timeout: 15, condition: {
+            !self.isDrainingOpenRequests && self.pendingOpenURLs.isEmpty
+        }) else { return fail("cancelled open never finished draining") }
+        // The auto-created window closes with an asynchronous teardown;
+        // wait for the collection to settle back to A + B.
+        guard waitUntil(timeout: 15, condition: {
+            self.projectWindows.count == 2
+                && self.projectWindows.allSatisfy({
+                    $0.projectURL?.standardizedFileURL
+                        != projectC.standardizedFileURL
+                })
+        }) else { return fail("cancelled request left a claimed window behind") }
+        languagePickerOverride = { _ in [.rust] }
+        enqueueOpenRequest(root: projectC, languages: nil, sourceWindow: nil)
+        guard waitUntil(timeout: 60, condition: {
+            self.projectWindows.count == 3
+                && self.projectWindows.last?.model.projectState
+                    .isReadyForMultiWindowSelfTest == true
+        }) else { return fail("repeat request after cancel did not load C") }
+        guard let windowC = projectWindows.last,
+              windowC.projectURL?.standardizedFileURL
+                == projectC.standardizedFileURL
+        else { return fail("C loaded into the wrong window") }
+
+        // Projects left per-project snapshots behind (§7.3).
+        windowA.checkpointSessionSynchronously()
+        let sessionsDirectory = (windowSessionURL ?? AppModel.defaultSessionURL)
+            .deletingLastPathComponent()
+            .appendingPathComponent("sessions", isDirectory: true)
+        let persisted = (try? FileManager.default.contentsOfDirectory(
+            at: sessionsDirectory,
+            includingPropertiesForKeys: nil
+        ))?.count ?? 0
+        guard persisted >= 2 else {
+            return fail("per-project snapshots missing on disk")
+        }
+
+        try? FileManager.default.removeItem(at: projectA)
+        try? FileManager.default.removeItem(at: projectB)
+        try? FileManager.default.removeItem(at: projectC)
+        Self.writeJSON([
+            "channel": channel,
+            "passed": true,
+            "windows": projectWindows.count,
+            "persistedSnapshots": persisted,
+            "titleA": windowA.window?.title ?? "",
+        ] as [String: Any])
+        Self.exitSelfTest(channel: channel, status: 0)
+    }
+
+
     /// Reading-session acceptance, second process: relaunches the same
     /// build against the isolated store; the normal launch path (pointer
     // → per-project snapshot → restoreSession) must rebuild the scene the
@@ -9666,26 +10189,186 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     ) {
         NSApplication.shared.mainMenu = makeMainMenu()
         applyApplicationAppearance()
+        // The launch restore target is known before the window exists, so
+        // its frame autosave can be project-scoped from the start (§6.4).
+        let snapshot = offscreen ? nil : launchSessionSnapshot()
+        let autosave = snapshot.map {
+            NSWindow.FrameAutosaveName(
+                "CodeInsightMainWindow-"
+                    + AppModel.sessionProjectKey(
+                        for: URL(
+                            fileURLWithPath: $0.projectRoot,
+                            isDirectory: true
+                        )
+                    )
+            )
+        }
+        let windowController = makeWindowWithModel(
+            model,
+            offscreen: offscreen,
+            measuresIdleFootprint: measuresIdleFootprint,
+            frameAutosaveName: autosave
+        )
+        windowController?.showWindow(nil)
+        guard !offscreen, let windowController else { return }
+        if let snapshot {
+            windowController.restoreSession(snapshot)
+        }
+    }
+
+    /// Shared assembly for every main window: fresh model (or the injected
+    /// self-test model for the first window), shared singletons, routing
+    /// callbacks. Production and self-tests use the same path (§4).
+    private func makeWindowWithModel(
+        _ windowModel: AppModel,
+        offscreen: Bool,
+        measuresIdleFootprint: Bool = false,
+        frameAutosaveName: NSWindow.FrameAutosaveName? = nil
+    ) -> MainWindowController? {
+        guard !isTerminating else { return nil }
+        windowModel.onSessionCheckpointWritten = { [weak self] projectRoot in
+            self?.handleSessionCheckpointWritten(projectRoot)
+        }
         let windowController = MainWindowController(
-            model: model,
+            model: windowModel,
             settings: readerSettings,
             offscreen: offscreen,
             measuresIdleFootprint: measuresIdleFootprint,
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
+            frameAutosaveName: frameAutosaveName,
             onChooseProject: { [weak self] in
                 self?.chooseLanguagesProject(nil)
             },
-            onChooseProjectLanguage: { [weak self] in
-                self?.chooseLanguagesProject($0)
+            onChooseProjectLanguage: { [weak self] root, source in
+                self?.chooseLanguagesProject(root, from: source)
             },
             onShowSettings: { [weak self] in self?.showSettings(nil) }
         )
-        self.windowController = windowController
-        windowController.showWindow(nil)
-        guard !offscreen else { return }
-        if let snapshot = launchSessionSnapshot() {
-            windowController.restoreSession(snapshot)
+        registerProjectWindow(windowController)
+        // Cascade fresh windows away from the previous one while staying
+        // inside the visible screen area (§6.4).
+        if !offscreen, let previous = activeWindowOrder.last?.window,
+           previous !== windowController.window,
+           let screen = NSScreen.main?.visibleFrame
+        {
+            let offset: CGFloat = 28
+            let origin = previous.frame.origin
+            let candidate = NSPoint(
+                x: origin.x + offset,
+                y: max(screen.minY, origin.y - offset)
+            )
+            if screen.contains(NSPoint(x: candidate.x, y: candidate.y)) {
+                windowController.window?.setFrameOrigin(candidate)
+            }
+        }
+        // Track creation order as initial activity order even offscreen:
+        // it is application-internal bookkeeping and lets programmatic
+        // dispatch find the window while no key window exists.
+        handleProjectWindowBecameActive(windowController)
+        return windowController
+    }
+
+    /// Routing registration shared by production assembly and tests that
+    /// build their own windows (§4: one assembly path, isolated storage).
+    func registerProjectWindow(_ windowController: MainWindowController) {
+        windowController.onProjectWindowClosing = { [weak self] controller in
+            self?.handleProjectWindowStartedClosing(controller)
+        }
+        windowController.onProjectWindowClosed = { [weak self] controller in
+            self?.handleProjectWindowFinishedTeardown(controller)
+        }
+        windowController.onProjectWindowBecameActive = { [weak self] controller in
+            self?.handleProjectWindowBecameActive(controller)
+        }
+        windowController.model.bookmarkModel.onSharedRecordsChanged = {
+            [weak windowController] in
+            windowController?.renderForSelfTest()
+        }
+        projectWindows.append(windowController)
+    }
+
+    /// Creates a blank welcome window (⌘N / fallback surface).
+    @discardableResult
+    private func createBlankWindow() -> MainWindowController? {
+        guard let controller = makeWindowWithModel(
+            makeWindowModel(),
+            offscreen: false
+        ) else { return nil }
+        controller.showWindow(nil)
+        return controller
+    }
+
+    private func handleProjectWindowBecameActive(
+        _ controller: MainWindowController
+    ) {
+        activeWindowOrder.removeAll { $0 === controller }
+        activeWindowOrder.append(controller)
+        lastActiveProjectWindow = controller
+    }
+
+    /// A window started closing: it stays in the collection (still
+    /// claiming its project, so a repeat open can find and wait for it)
+    /// until its asynchronous teardown finishes; routing skips closing
+    /// windows through `isClosing` (§7.1).
+    private func handleProjectWindowStartedClosing(
+        _ controller: MainWindowController
+    ) {
+        if let root = controller.projectURL?.path {
+            // A successfully saved project stays a valid restore target
+            // even after its window closed (§7.3).
+            if persistedProjects.contains(root) {
+                updateLaunchRestorePointer()
+            }
+        }
+        refreshWindowTitles()
+        // Closing the last project window quits (Settings stays out of
+        // the decision); closing windows no longer count as open (§7.2).
+        let openRemaining = projectWindows.contains { !$0.isClosing }
+        if !openRemaining && launchFinished && !isTerminating {
+            NSApplication.shared.terminate(nil)
+        }
+    }
+
+    /// A window finished its teardown: its project claim was released and
+    /// its provider exited, so the controller leaves the collection only
+    /// now (§7.1).
+    private func handleProjectWindowFinishedTeardown(
+        _ controller: MainWindowController
+    ) {
+        projectWindows.removeAll { $0 === controller }
+        activeWindowOrder.removeAll { $0 === controller }
+        if lastActiveProjectWindow === controller {
+            lastActiveProjectWindow = activeWindowOrder.last
+        }
+    }
+
+    /// Window titles distinguish sibling projects sharing a name (§6.3).
+    private func refreshWindowTitles() {
+        let identities = projectWindows.compactMap(\.projectURL)
+        for controller in projectWindows {
+            controller.updateWindowTitle(among: identities)
+        }
+    }
+
+    private func handleSessionCheckpointWritten(_ projectRoot: String) {
+        persistedProjects.insert(projectRoot)
+        if lastActiveProjectWindow?.model.projectRoot?.path == projectRoot {
+            updateLaunchRestorePointer()
+        }
+    }
+
+    /// The restore target follows the most recently active project that
+    /// has persisted a session this run (§7.3).
+    private func updateLaunchRestorePointer() {
+        guard !persistedProjects.isEmpty else { return }
+        for controller in activeWindowOrder.reversed() {
+            if let root = controller.projectURL?.path,
+               persistedProjects.contains(root)
+            {
+                recentProjectsStore.lastSessionProjectPath = root
+                return
+            }
         }
     }
 
@@ -9792,18 +10475,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         )
     }
 
-    func applicationShouldTerminateAfterLastWindowClosed(
-        _ sender: NSApplication
-    ) -> Bool {
-        true
-    }
-
     @objc private func openProject(_ sender: Any?) {
         chooseLanguagesProject(nil)
     }
 
     @objc private func clearReadingSession(_ sender: Any?) {
-        windowController?.confirmClearReadingSession()
+        projectCommandTarget()?.confirmClearReadingSession()
     }
 
     @objc private func openPythonProject(_ sender: Any?) {
@@ -9821,19 +10498,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         panel.allowsMultipleSelection = false
         panel.prompt = "Open"
         if panel.runModal() == .OK, let root = panel.url {
-            windowController?.openProject(root: root, language: language)
+            enqueueOpenRequest(
+                root: root,
+                languages: [language],
+                sourceWindow: projectCommandTarget()
+            )
         }
     }
 
     @objc private func openRecentProject(_ sender: NSMenuItem) {
         guard let path = sender.representedObject as? String else { return }
-        windowController?.openRecentProject(URL(
-            fileURLWithPath: path,
-            isDirectory: true
-        ))
+        enqueueOpenRequest(
+            root: URL(fileURLWithPath: path, isDirectory: true),
+            languages: nil,
+            sourceWindow: projectCommandTarget()
+        )
     }
 
-    private func chooseLanguagesProject(_ root: URL?) {
+    private func chooseLanguagesProject(
+        _ root: URL?,
+        from sourceWindow: MainWindowController? = nil
+    ) {
         let selectedRoot: URL
         if let root {
             selectedRoot = root
@@ -9848,29 +10533,284 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             }
             selectedRoot = panelRoot
         }
-        let alert = makeLanguageSelectionAlert(for: selectedRoot)
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            mixedLanguageCheckboxes = []
-            mixedLanguageOpenButton = nil
+        enqueueOpenRequest(
+            root: selectedRoot,
+            languages: nil,
+            sourceWindow: sourceWindow ?? projectCommandTarget()
+        )
+    }
+
+    // MARK: - Project open routing (§3.1)
+
+    private struct PendingOpenRequest {
+        let root: URL
+        /// Explicit language choice (Open Python / Open TypeScript); nil
+        /// means saved session / Recents / picker decide.
+        let languages: [LanguageID]?
+        let sourceWindow: MainWindowController?
+    }
+
+    private func enqueueOpenRequest(
+        root: URL,
+        languages: [LanguageID]?,
+        sourceWindow: MainWindowController?
+    ) {
+        pendingOpenURLs.append(root)
+        requestContexts.append(
+            PendingOpenRequest(
+                root: root,
+                languages: languages,
+                sourceWindow: sourceWindow
+            )
+        )
+        drainOpenRequests()
+    }
+
+    /// Per-URL context for requests submitted directly (menu/recents);
+    /// Launch Services entries only carry URLs and take the default
+    /// context as the queue drains.
+    private var requestContexts: [PendingOpenRequest] = []
+
+    private func nextRequestContext(for root: URL) -> PendingOpenRequest {
+        if let index = requestContexts.firstIndex(where: {
+            $0.root.standardizedFileURL == root.standardizedFileURL
+        }) {
+            return requestContexts.remove(at: index)
+        }
+        return PendingOpenRequest(root: root, languages: nil, sourceWindow: nil)
+    }
+
+    /// Serial open pipeline: validates, dedupes, and routes one request at
+    /// a time so language pickers queue instead of interleaving (§3.3).
+    private func drainOpenRequests() {
+        guard !isDrainingOpenRequests else { return }
+        guard !pendingOpenURLs.isEmpty else {
+            // Explicit requests that all failed or were cancelled leave a
+            // welcome window rather than restoring an old project (§5.2).
+            if launchFinished && receivedExplicitOpenRequest,
+               projectWindows.isEmpty
+            {
+                createBlankWindow()
+            }
             return
         }
-        var selected: [LanguageID] = []
-        if mixedLanguageCheckboxes[0].state == .on {
-            selected.append(.rust)
+        isDrainingOpenRequests = true
+        Task { @MainActor [weak self] in
+            while let self, !self.pendingOpenURLs.isEmpty {
+                let url = self.pendingOpenURLs.removeFirst()
+                await self.processOpenRequest(url)
+            }
+            guard let self else { return }
+            self.isDrainingOpenRequests = false
+            // Requests queued while the final item was still processing
+            // restart the pipeline instead of waiting forever.
+            if !self.pendingOpenURLs.isEmpty {
+                self.drainOpenRequests()
+            } else if self.launchFinished && self.receivedExplicitOpenRequest,
+                self.projectWindows.isEmpty
+            {
+                self.createBlankWindow()
+            }
         }
-        if mixedLanguageCheckboxes[1].state == .on {
-            selected.append(.python)
+    }
+
+    /// Canonical project identity (§3.2): file URL only, real directory,
+    /// symlink-resolved standardized path. Returns an error message for
+    /// anything the app cannot open as a project.
+    static func projectIdentity(
+        for url: URL
+    ) -> Result<URL, OpenIdentityFailure> {
+        guard url.isFileURL else {
+            return .failure(OpenIdentityFailure(
+                path: url.path.isEmpty ? url.absoluteString : url.path,
+                reason: "not a local folder"
+            ))
         }
-        if mixedLanguageCheckboxes[2].state == .on {
-            selected.append(.typescript)
+        // Resolve symlinks first so aliases point at the real directory.
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(
+            atPath: resolved.path,
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue else {
+            return .failure(OpenIdentityFailure(
+                path: url.path,
+                reason: "does not exist or is not a folder"
+            ))
         }
-        let languages = selected.isEmpty
-            ? nil
-            : try? LanguageMode.normalize(languages: selected)
-        mixedLanguageCheckboxes = []
-        mixedLanguageOpenButton = nil
-        guard let languages else { return }
-        windowController?.openProject(root: selectedRoot, languages: languages)
+        return .success(resolved)
+    }
+
+    struct OpenIdentityFailure: Error {
+        let path: String
+        let reason: String
+
+        var message: String { "\(path) \(reason)" }
+    }
+
+    private func processOpenRequest(_ url: URL) async {
+        guard !isTerminating else { return }
+        let context = nextRequestContext(for: url)
+        switch Self.projectIdentity(for: url) {
+        case .failure(let failure):
+            reportOpenFailure(failure.message, preferredWindow: context.sourceWindow)
+            return
+        case .success(let identity):
+            await openProjectIdentity(identity, context: context)
+        }
+    }
+
+    private func reportOpenFailure(
+        _ message: String,
+        preferredWindow: MainWindowController?
+    ) {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Cannot Open Project"
+        alert.informativeText = message
+        // The error surfaces in the window that started the request; a
+        // missing one falls back to the most recent project window rather
+        // than a stranger's (§6.2).
+        guard let window = preferredWindow?.window ?? activeWindowOrder.last?.window
+        else {
+            alert.runModal()
+            return
+        }
+        Task { @MainActor in
+            await withCheckedContinuation { continuation in
+                alert.beginSheetModal(for: window) { _ in
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    private func windowController(
+        forProject identity: URL
+    ) -> MainWindowController? {
+        projectWindows.first {
+            $0.projectURL?.standardizedFileURL == identity.standardizedFileURL
+        }
+    }
+
+    private func openProjectIdentity(
+        _ identity: URL,
+        context: PendingOpenRequest
+    ) async {
+        if let existing = windowController(forProject: identity) {
+            if existing.isClosing {
+                // A closing window still claims the project; wait for its
+                // session writer to finish before reopening (§4.1). The
+                // controller stays in the collection while closing, so the
+                // wait is found and the claim is released afterwards.
+                await existing.waitForCloseCompletion()
+            } else {
+                activateWindow(existing)
+                // An explicit language choice on an already-open project
+                // runs the existing confirm-and-reload flow in its window.
+                if let languages = context.languages,
+                   existing.model.projectRoot != nil,
+                   existing.model.projectLanguages != languages
+                {
+                    existing.openProject(root: identity, languages: languages)
+                }
+                return
+            }
+        }
+        guard !isTerminating else { return }
+        // Pick the destination window: source window when blank, then the
+        // active blank window, then any blank window, then a new window.
+        let destination: MainWindowController
+        let autoCreated: Bool
+        if let source = context.sourceWindow, source.isUnclaimedForReuse {
+            destination = source
+            autoCreated = false
+        } else if let active = lastActiveProjectWindow,
+                  active.isUnclaimedForReuse,
+                  active !== context.sourceWindow
+        {
+            destination = active
+            autoCreated = false
+        } else if let blank = projectWindows.first(where: \.isUnclaimedForReuse) {
+            destination = blank
+            autoCreated = false
+        } else if let created = createBlankWindow() {
+            destination = created
+            autoCreated = true
+        } else {
+            return
+        }
+        // Claim before any asynchronous load so duplicate requests resolve
+        // to this window (§3.2 step 5).
+        destination.claimProject(identity)
+        destination.adoptProjectFrameAutosave(for: identity)
+        refreshWindowTitles()
+
+        // Language resolution order (§3.3): an explicit menu choice wins
+        // over everything; then the saved session; then a Recents record;
+        // the picker only runs for first opens.
+        if let explicit = context.languages {
+            destination.openProject(root: identity, languages: explicit)
+            activateWindow(destination)
+            return
+        }
+        let windowModel = destination.model
+        let load = windowModel.loadSessionSnapshot(forProject: identity)
+        if let snapshot = load.snapshot {
+            destination.restoreSession(snapshot)
+            activateWindow(destination)
+            return
+        }
+        if recentProjectsStore.storedLanguagesIfRecorded(
+            for: identity.path
+        ) != nil {
+            destination.openRecentProject(identity)
+            activateWindow(destination)
+            return
+        }
+        let picked = await presentLanguageSelection(for: identity)
+        guard !isTerminating, let picked else {
+            // Cancelled (or terminating): this request's claim is released
+            // first so a repeat request starts over. Only the window this
+            // request created goes away; a user-created blank window stays
+            // (§3.3).
+            destination.releaseProjectClaim()
+            refreshWindowTitles()
+            if autoCreated, destination.isUnclaimedForReuse {
+                destination.window?.performClose(nil)
+            }
+            return
+        }
+        destination.openProject(root: identity, languages: picked)
+        activateWindow(destination)
+    }
+
+    private func activateWindow(_ controller: MainWindowController) {
+        guard let window = controller.window else { return }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.makeKeyAndOrderFront(nil)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        handleProjectWindowBecameActive(controller)
+    }
+
+    /// The one-at-a-time language picker for first opens. Dialog state is
+    /// local to the alert, never shared across windows (§6.2). Tests and
+    /// self-tests may substitute a scripted picker through the override.
+    var languagePickerOverride: (@MainActor (URL) async -> [LanguageID]?)?
+
+    private func presentLanguageSelection(
+        for root: URL
+    ) async -> [LanguageID]? {
+        if let languagePickerOverride {
+            return await languagePickerOverride(root)
+        }
+        let alert = makeLanguageSelectionAlert(for: root)
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            return nil
+        }
+        return alert.languageSelection
     }
 
     /// Directories the file-name probe skips; mirrors the indexer's fixed
@@ -9936,8 +10876,42 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         return (ordered, capped)
     }
 
-    private func makeLanguageSelectionAlert(for root: URL) -> NSAlert {
-        let alert = NSAlert()
+    /// Language picker state lives entirely inside one alert presentation
+    /// so a queued second open can never overwrite the visible choice
+    /// (§6.2). The gate is the checkbox targets; nothing survives the
+    /// modal session.
+    private final class LanguageSelectionGate: NSObject {
+        var checkboxes: [NSButton] = []
+        weak var openButton: NSButton?
+
+        @objc func checkboxChanged(_ sender: NSButton) {
+            openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+        }
+
+        var selection: [LanguageID]? {
+            var selected: [LanguageID] = []
+            if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+                selected.append(.rust)
+            }
+            if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+                selected.append(.python)
+            }
+            if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+                selected.append(.typescript)
+            }
+            guard !selected.isEmpty else { return nil }
+            return try? LanguageMode.normalize(languages: selected)
+        }
+    }
+
+    private final class LanguageSelectionAlert: NSAlert {
+        var gate = LanguageSelectionGate()
+
+        var languageSelection: [LanguageID]? { gate.selection }
+    }
+
+    private func makeLanguageSelectionAlert(for root: URL) -> LanguageSelectionAlert {
+        let alert = LanguageSelectionAlert()
         alert.messageText = "Choose Languages"
         alert.informativeText =
             "Choose 1 to 3 languages for \(root.lastPathComponent)."
@@ -9964,11 +10938,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             for: root,
             storedLanguage: stored
         )
-        mixedLanguageCheckboxes = options.map { title in
+        let gate = alert.gate
+        gate.checkboxes = options.map { title in
             let checkbox = NSButton(
                 checkboxWithTitle: title,
-                target: self,
-                action: #selector(mixedCheckboxChanged(_:))
+                target: gate,
+                action: #selector(
+                    LanguageSelectionGate.checkboxChanged(_:)
+                )
             )
             checkbox.setAccessibilityLabel(title)
             let language: LanguageID = switch title {
@@ -9987,13 +10964,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         alert.accessoryView = stack
         let openButton = alert.buttons[0]
         openButton.isEnabled = !preselected.languages.isEmpty
-        mixedLanguageOpenButton = openButton
+        gate.openButton = openButton
         return alert
-    }
-
-    @objc private func mixedCheckboxChanged(_ sender: NSButton) {
-        let count = mixedLanguageCheckboxes.filter { $0.state == .on }.count
-        mixedLanguageOpenButton?.isEnabled = count >= 1
     }
 
     @objc private func clearRecentProjects(_ sender: Any?) {
@@ -10055,23 +11027,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         menu.addItem(clearItem)
     }
 
-    @objc private func showSettings(_ sender: Any?) {
+    /// Shared trust list state for the Settings window; refreshed after
+    /// every grant/revoke so it always reflects the shared registry.
+    private(set) lazy var trustListModel = TrustListModel()
+
+    @objc func showSettings(_ sender: Any?) {
         if settingsWindowController == nil {
             settingsWindowController = ReaderSettingsWindowController(
                 settings: readerSettings,
-                exactCoordinator: model.exactCoordinator,
+                trustModel: trustListModel,
                 onRevoke: { [weak self] repositoryURL in
-                    guard let self else { return }
-                    do {
-                        try await model.revokeRepositoryTrust(repositoryURL)
-                    } catch {
-                        presentTrustError(error)
-                    }
+                    await self?.revokeRepositoryTrustAppLevel(repositoryURL)
+                },
+                onClearCache: { [weak self] in
+                    await self?.clearMaterializedCacheAppLevel() ?? .failed("application unavailable")
                 }
             ) { [weak self] settings in
                 guard let self else { return }
                 commitReaderSettings(settings)
             }
+        }
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.trustListModel.refresh(from: self.sharedTrustRegistry)
         }
         settingsWindowController?.update(settings: readerSettings)
         settingsWindowController?.showWindow(nil)
@@ -10079,10 +11057,78 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         NSApplication.shared.activate(ignoringOtherApps: true)
     }
 
+    /// Application-level trust revoke (§8.2): stops every window whose
+    /// project matches, waits for the providers to exit, then writes the
+    /// registry and refreshes all surfaces.
+    private func revokeRepositoryTrustAppLevel(_ repositoryURL: URL) async {
+        do {
+            let canonical = repositoryURL.resolvingSymlinksInPath()
+                .standardizedFileURL.path
+            // Stop affected projects first; unaffected windows only need
+            // their trust lists refreshed afterwards.
+            for controller in projectWindows {
+                guard let root = controller.projectURL,
+                      root.path == canonical
+                else { continue }
+                try await controller.model.revokeRepositoryTrust(repositoryURL)
+            }
+            try await sharedTrustRegistry.revoke(repositoryURL)
+            for controller in projectWindows {
+                await controller.model.exactCoordinator.refreshTrust()
+            }
+            await trustListModel.refresh(from: sharedTrustRegistry)
+        } catch {
+            await trustListModel.refresh(from: sharedTrustRegistry)
+            presentTrustError(error)
+        }
+    }
+
+    /// Application-level cache clear (§8.4): stops all projects' Exact
+    /// work, waits for their directories to be released, then deletes the
+    /// shared cache. Reader/index/tabs/sessions stay untouched.
+    func clearMaterializedCacheAppLevel() async -> MaterializedCacheClearOutcome {
+        // Maintenance mode spans the whole operation: every coordinator
+        // sharing this materializer refuses new prepares until the clear
+        // finished (successfully or not), so nothing can claim a directory
+        // mid-deletion — including windows created while we wait (§8.4).
+        sharedMaterializer.beginMaintenance()
+        defer {
+            sharedMaterializer.endMaintenance()
+            for controller in projectWindows {
+                controller.model.restartExactAnalysis()
+            }
+        }
+        do {
+            let coordinators = projectWindows.map(\.model.exactCoordinator)
+            for coordinator in coordinators {
+                await coordinator.stopAllWorkForCacheClear()
+            }
+            try await sharedMaterializer.clear()
+            return .cleared
+        } catch {
+            return .failed(
+                "Cache could not be cleared: \(String(describing: error))"
+            )
+        }
+    }
+
+    func grantCurrentRepositoryTrustAppLevel(_ targetModel: AppModel) async throws {
+        try await targetModel.grantCurrentRepositoryTrust()
+        for controller in projectWindows {
+            await controller.model.exactCoordinator.refreshTrust()
+        }
+        await trustListModel.refresh(from: sharedTrustRegistry)
+    }
+
     @objc private func trustThisRepository(_ sender: Any?) {
-        guard let window = windowController?.window,
-              model.canTrustCurrentRepository
+        // Capture the target window now: after the sheet returns, the
+        // user may have switched windows — the confirmation must still
+        // apply to (and only to) this project (§6.2).
+        guard let controller = projectCommandTarget(),
+              let window = controller.window,
+              controller.model.canTrustCurrentRepository
         else { return }
+        let targetModel = controller.model
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Trust This Repository?"
@@ -10091,167 +11137,246 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         alert.addButton(withTitle: "Trust")
         alert.addButton(withTitle: "Cancel")
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn, let self else { return }
+            guard response == .alertFirstButtonReturn, !controller.isClosing else { return }
             Task { @MainActor in
+                guard !controller.isClosing else { return }
                 do {
-                    try await model.grantCurrentRepositoryTrust()
+                    try await self?.grantCurrentRepositoryTrustAppLevel(targetModel)
                 } catch {
-                    presentTrustError(error)
+                    // Errors surface in the window that started the
+                    // operation; if it is gone, they are dropped rather
+                    // than pasted onto another project (§6.2).
+                    guard !controller.isClosing else { return }
+                    self?.presentTrustError(error, in: window)
                 }
             }
         }
     }
 
-    private func presentTrustError(_ error: any Error) {
+    private func presentTrustError(
+        _ error: any Error,
+        in window: NSWindow? = nil
+    ) {
         let alert = NSAlert(error: error)
-        if let window = windowController?.window {
-            alert.beginSheetModal(for: window)
+        // The error belongs to the window that started the operation; if
+        // that window is gone it is shown app-modal, never as a sheet on
+        // some other project's window (§6.2).
+        let targetWindow = window ?? projectCommandTarget()?.window
+        if let targetWindow, targetWindow.isVisible {
+            alert.beginSheetModal(for: targetWindow)
         } else {
             alert.runModal()
         }
     }
 
+    // MARK: - Menu routing (§6.1)
+
+    /// Resolves the project window a menu action/shortcut applies to:
+    /// key window when it is (or belongs to) a project window, otherwise
+    /// the main window; global app windows (Settings, About) disable
+    /// project commands without falling back.
+    func projectCommandTarget() -> MainWindowController? {
+        projectCommandTarget(
+            keyWindow: NSApplication.shared.keyWindow,
+            mainWindow: NSApplication.shared.mainWindow
+        )
+    }
+
+    /// Resolution core with explicit windows so tests can drive routing
+    /// deterministically; production always funnels through the overload
+    /// above.
+    func projectCommandTarget(
+        keyWindow: NSWindow?,
+        mainWindow: NSWindow?
+    ) -> MainWindowController? {
+        if let keyWindow {
+            for controller in projectWindows
+            where !controller.isClosing && controller.controls(window: keyWindow) {
+                return controller
+            }
+            // A key window owned by this app but not by any project window
+            // is a global surface: no project target, no fallback (§6.1.3).
+            if NSApplication.shared.windows.contains(keyWindow) {
+                return nil
+            }
+        }
+        if let mainWindow {
+            for controller in projectWindows
+            where !controller.isClosing && controller.controls(window: mainWindow) {
+                return controller
+            }
+        }
+        // An inactive application cannot receive user keyboard or menu
+        // input, so no user command is being stolen here: programmatic
+        // dispatch (self-tests, assistive scripting) targets the most
+        // recently active project window instead of nothing (§6.1.5 keeps
+        // its no-fallback rule for real key-window input).
+        if !NSApplication.shared.isActive {
+            if let lastActiveProjectWindow, !lastActiveProjectWindow.isClosing {
+                return lastActiveProjectWindow
+            }
+            return activeWindowOrder.last { !$0.isClosing }
+        }
+        return nil
+    }
+
+    /// ⌘N: a fresh blank welcome window; never auto-restores (§6.3).
+    @objc private func newWindow(_ sender: Any?) {
+        createBlankWindow()
+    }
+
+    /// ⇧⌘W: close the routed project window itself.
+    @objc private func closeProjectWindow(_ sender: Any?) {
+        projectCommandTarget()?.window?.performClose(nil)
+    }
+
     @objc private func openSymbol(_ sender: Any?) {
-        windowController?.showSymbolSearch()
+        projectCommandTarget()?.showSymbolSearch()
     }
 
     @objc private func quickOpen(_ sender: Any?) {
-        windowController?.showPalette()
+        projectCommandTarget()?.showPalette()
     }
 
     @objc private func openCommandPalette(_ sender: Any?) {
-        windowController?.showPalette(prefill: ">")
+        projectCommandTarget()?.showPalette(prefill: ">")
     }
 
     @objc private func goToLine(_ sender: Any?) {
-        windowController?.showPalette(prefill: ":")
+        projectCommandTarget()?.showPalette(prefill: ":")
     }
 
     @objc private func findInProject(_ sender: Any?) {
-        windowController?.showProjectSearch()
+        projectCommandTarget()?.showProjectSearch()
     }
 
     @objc private func findInFile(_ sender: Any?) {
-        _ = windowController?.showFindBar()
+        _ = projectCommandTarget()?.showFindBar()
     }
 
     @objc private func findNext(_ sender: Any?) {
-        windowController?.findNextMatch()
+        projectCommandTarget()?.findNextMatch()
     }
 
     @objc private func findPrevious(_ sender: Any?) {
-        windowController?.findPreviousMatch()
+        projectCommandTarget()?.findPreviousMatch()
     }
 
     @objc private func openSelectedFileInNewTab(_ sender: Any?) {
-        windowController?.openSelectedFileInNewTab()
+        projectCommandTarget()?.openSelectedFileInNewTab()
     }
 
     @objc private func closeActiveTab(_ sender: Any?) {
-        windowController?.closeActiveTab()
+        guard let target = projectCommandTarget() else { return }
+        if target.model.tabStrip.tabs.isEmpty {
+            // ⌘W with nothing to close falls through to the window (§6.3).
+            target.window?.performClose(nil)
+        } else {
+            target.closeActiveTab()
+        }
     }
 
     @objc private func refreshProjectIndex(_ sender: Any?) {
-        windowController?.refreshProjectIndex(sender)
+        projectCommandTarget()?.refreshProjectIndex(sender)
     }
 
     @objc private func selectPreviousTab(_ sender: Any?) {
-        windowController?.selectPreviousTab()
+        projectCommandTarget()?.selectPreviousTab()
     }
 
     @objc private func selectNextTab(_ sender: Any?) {
-        windowController?.selectNextTab()
+        projectCommandTarget()?.selectNextTab()
     }
 
     @objc private func previousContextCandidate(_ sender: Any?) {
-        windowController?.selectPreviousContextCandidate(sender)
+        projectCommandTarget()?.selectPreviousContextCandidate(sender)
     }
 
     @objc private func nextContextCandidate(_ sender: Any?) {
-        windowController?.selectNextContextCandidate(sender)
+        projectCommandTarget()?.selectNextContextCandidate(sender)
     }
 
     @objc private func goBack(_ sender: Any?) {
-        windowController?.goBack(sender)
+        projectCommandTarget()?.goBack(sender)
     }
 
     @objc private func goForward(_ sender: Any?) {
-        windowController?.goForward(sender)
+        projectCommandTarget()?.goForward(sender)
     }
 
     @objc private func previousDiffHunk(_ sender: Any?) {
-        windowController?.previousDiffHunk(sender)
+        projectCommandTarget()?.previousDiffHunk(sender)
     }
 
     @objc private func nextDiffHunk(_ sender: Any?) {
-        windowController?.nextDiffHunk(sender)
+        projectCommandTarget()?.nextDiffHunk(sender)
     }
 
     @objc private func closeComparison(_ sender: Any?) {
-        windowController?.closeComparison()
+        projectCommandTarget()?.closeComparison()
     }
 
     @objc private func toggleRelations(_ sender: Any?) {
-        windowController?.toggleRelations()
+        projectCommandTarget()?.toggleRelations()
     }
 
     @objc private func applyPanelPreset(_ sender: NSMenuItem) {
         guard let rawValue = sender.representedObject as? String,
               let preset = PanelPresetModel(rawValue: rawValue)
         else { return }
-        windowController?.applyPanelPreset(preset)
+        projectCommandTarget()?.applyPanelPreset(preset)
     }
 
     @objc private func showCallers(_ sender: Any?) {
-        windowController?.showRelations(direction: .callers)
+        projectCommandTarget()?.showRelations(direction: .callers)
     }
 
     @objc private func showCalls(_ sender: Any?) {
-        windowController?.showRelations(direction: .calls)
+        projectCommandTarget()?.showRelations(direction: .calls)
     }
 
     @objc private func showImplementations(_ sender: Any?) {
-        windowController?.showRelations(direction: .implementations)
+        projectCommandTarget()?.showRelations(direction: .implementations)
     }
 
     @objc private func showResolutionInspector(_ sender: Any?) {
-        windowController?.showResolutionInspector()
+        projectCommandTarget()?.showResolutionInspector()
     }
 
     @objc private func showReadingTrail(_ sender: Any?) {
-        windowController?.showReadingTrail()
+        projectCommandTarget()?.showReadingTrail()
     }
 
     @objc private func toggleFold(_ sender: Any?) {
-        _ = windowController?.toggleFoldAtSelection()
+        _ = projectCommandTarget()?.toggleFoldAtSelection()
     }
 
     @objc private func toggleBookmark(_ sender: Any?) {
-        windowController?.toggleBookmark()
+        projectCommandTarget()?.toggleBookmark()
     }
 
     @objc private func showBookmarks(_ sender: Any?) {
-        windowController?.showBookmarks()
+        projectCommandTarget()?.showBookmarks()
     }
 
     @objc private func closeBookmarks(_ sender: Any?) {
-        windowController?.closeBookmarks()
+        projectCommandTarget()?.closeBookmarks()
     }
 
     @objc private func useFullReadingHeight(_ sender: Any?) {
-        _ = windowController?.setReadingHeightLevel(.full)
+        _ = projectCommandTarget()?.setReadingHeightLevel(.full)
     }
 
     @objc private func useStructureReadingHeight(_ sender: Any?) {
-        _ = windowController?.setReadingHeightLevel(.structure)
+        _ = projectCommandTarget()?.setReadingHeightLevel(.structure)
     }
 
     @objc private func useOverviewReadingHeight(_ sender: Any?) {
-        _ = windowController?.setReadingHeightLevel(.overview)
+        _ = projectCommandTarget()?.setReadingHeightLevel(.overview)
     }
 
     @objc private func focusCurrentScope(_ sender: Any?) {
-        _ = windowController?.toggleFocusCurrentScope()
+        _ = projectCommandTarget()?.toggleFocusCurrentScope()
     }
 
     @objc private func increaseReaderFontSize(_ sender: Any?) {
@@ -10274,7 +11399,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         readerSettings = settings
         applyApplicationAppearance()
         settings.save(to: .standard)
-        windowController?.applyReaderSettings(settings)
+        // Reader preferences are global: every project window follows (§6.4).
+        for controller in projectWindows {
+            controller.applyReaderSettings(settings)
+        }
         settingsWindowController?.update(settings: settings)
     }
 
@@ -10287,69 +11415,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        // Same routed target the action itself uses (§6.1): a global key
+        // window disables project commands entirely.
+        let target = projectCommandTarget()
+        let model = target?.model
         switch menuItem.action {
         case #selector(refreshProjectIndex(_:)):
-            return windowController?.canRefreshIndex == true
+            return target?.canRefreshIndex == true
         case #selector(findInFile(_:)), #selector(findNext(_:)),
             #selector(findPrevious(_:)):
-            return windowController?.canFindInFile == true
+            return target?.canFindInFile == true
         case #selector(goBack(_:)):
-            return model.navigationHistory.canGoBack
+            return model?.navigationHistory.canGoBack == true
         case #selector(goForward(_:)):
-            return model.navigationHistory.canGoForward
+            return model?.navigationHistory.canGoForward == true
         case #selector(previousDiffHunk(_:)), #selector(nextDiffHunk(_:)):
-            return !(model.compare.diff?.hunks.isEmpty ?? true)
+            return !(model?.compare.diff?.hunks.isEmpty ?? true)
         case #selector(closeComparison(_:)):
-            return windowController?.canCloseComparison == true
+            return target?.canCloseComparison == true
         case #selector(showCallers(_:)),
             #selector(showCalls(_:)),
             #selector(showImplementations(_:)):
-            return windowController?.canShowRelationsFromReaderSurface == true
+            return target?.canShowRelationsFromReaderSurface == true
         case #selector(showResolutionInspector(_:)):
-            return windowController?.canShowResolutionInspector == true
+            return target?.canShowResolutionInspector == true
         case #selector(showReadingTrail(_:)):
-            return windowController?.canShowReadingTrail == true
+            return target?.canShowReadingTrail == true
         case #selector(toggleFold(_:)):
-            return windowController?.canToggleFoldAtSelection == true
+            return target?.canToggleFoldAtSelection == true
         case #selector(toggleBookmark(_:)):
-            let help = windowController?.bookmarkCommandAccessibilityHelp
+            let help = target?.bookmarkCommandAccessibilityHelp
             menuItem.toolTip = help
             menuItem.setAccessibilityHelp(help)
-            return windowController?.canToggleBookmark == true
-        case #selector(showBookmarks(_:)):
-            return true
+            return target?.canToggleBookmark == true
+        case #selector(showBookmarks(_:)), #selector(applyPanelPreset(_:)),
+            #selector(toggleRelations(_:)), #selector(previousContextCandidate(_:)),
+            #selector(nextContextCandidate(_:)):
+            return target != nil
         case #selector(closeBookmarks(_:)):
-            return windowController?.bookmarksPanelIsVisible == true
+            return target?.bookmarksPanelIsVisible == true
         case #selector(useFullReadingHeight(_:)):
             menuItem.state =
-                windowController?.readingHeightLevel == .full
+                target?.readingHeightLevel == .full
                 ? .on : .off
-            return true
+            return target != nil
         case #selector(useStructureReadingHeight(_:)):
             menuItem.state =
-                windowController?.readingHeightLevel == .structure
+                target?.readingHeightLevel == .structure
                 ? .on : .off
-            return true
+            return target != nil
         case #selector(useOverviewReadingHeight(_:)):
             menuItem.state =
-                windowController?.readingHeightLevel == .overview
+                target?.readingHeightLevel == .overview
                 ? .on : .off
-            return true
+            return target != nil
         case #selector(focusCurrentScope(_:)):
-            menuItem.state = windowController?.isFocusMode == true ? .on : .off
-            return windowController?.canFocusCurrentScope == true
+            menuItem.state = target?.isFocusMode == true ? .on : .off
+            return target?.canFocusCurrentScope == true
         case #selector(increaseReaderFontSize(_:)):
             return readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
         case #selector(decreaseReaderFontSize(_:)):
             return readerSettings.fontSize > ReaderSettings.fontSizeRange.lowerBound
         case #selector(trustThisRepository(_:)):
-            return model.canTrustCurrentRepository
+            return model?.canTrustCurrentRepository == true
         case #selector(openSelectedFileInNewTab(_:)):
-            return windowController?.selectedSidebarFile != nil
+            return target?.selectedSidebarFile != nil
         case #selector(closeActiveTab(_:)):
-            return !model.tabStrip.tabs.isEmpty
+            // Always available on a project window: no tabs left means it
+            // closes the window (§6.3).
+            return target != nil
+        case #selector(closeProjectWindow(_:)):
+            return target != nil
         case #selector(selectPreviousTab(_:)), #selector(selectNextTab(_:)):
-            return model.tabStrip.tabs.count > 1
+            return (model?.tabStrip.tabs.count ?? 0) > 1
+        case #selector(clearReadingSession(_:)):
+            return model?.projectRoot != nil
+        case #selector(quickOpen(_:)), #selector(openCommandPalette(_:)),
+            #selector(goToLine(_:)), #selector(findInProject(_:)),
+            #selector(openSymbol(_:)):
+            return target != nil
         default:
             return true
         }
@@ -10395,6 +11539,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         )
         openItem.target = self
         fileMenu.addItem(openItem)
+        let newWindowItem = NSMenuItem(
+            title: "New Window",
+            action: #selector(newWindow(_:)),
+            keyEquivalent: "n"
+        )
+        newWindowItem.target = self
+        fileMenu.addItem(newWindowItem)
         let openPythonItem = NSMenuItem(
             title: "Open Python Project…",
             action: #selector(openPythonProject(_:)),
@@ -10441,6 +11592,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         )
         closeTabItem.target = self
         fileMenu.addItem(closeTabItem)
+        let closeWindowItem = NSMenuItem(
+            title: "Close Window",
+            action: #selector(closeProjectWindow(_:)),
+            keyEquivalent: "w"
+        )
+        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
+        closeWindowItem.target = self
+        fileMenu.addItem(closeWindowItem)
         let clearSessionItem = NSMenuItem(
             title: "Clear Reading Session…",
             action: #selector(clearReadingSession(_:)),
@@ -10815,7 +11974,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         relationsItem.submenu = relationsMenu
         mainMenu.addItem(relationsItem)
 
+        // System window menu: switching, minimizing, Bring All to Front
+        // (§6.3). The same instance must back the menu bar item and
+        // NSApplication.windowsMenu so AppKit populates it once.
+        let windowMenuItem = NSMenuItem()
+        let windowMenu = makeWindowMenu()
+        windowMenuItem.submenu = windowMenu
+        mainMenu.addItem(windowMenuItem)
+        NSApplication.shared.windowsMenu = windowMenu
+
         return mainMenu
+    }
+
+    private func makeWindowMenu() -> NSMenu {
+        let windowMenu = NSMenu(title: "Window")
+        windowMenu.autoenablesItems = true
+        return windowMenu
     }
 
     private static func menuItems(in menu: NSMenu?) -> [NSMenuItem] {
@@ -12394,6 +13568,14 @@ private func milliseconds(since start: ContinuousClock.Instant) -> Double {
     let duration = start.duration(to: .now)
     return Double(duration.components.seconds) * 1_000
         + Double(duration.components.attoseconds) / 1_000_000_000_000_000
+}
+
+extension ProjectState {
+    /// Ready check shared by the multi-window self-test.
+    var isReadyForMultiWindowSelfTest: Bool {
+        if case .ready = self { return true }
+        return false
+    }
 }
 
 @MainActor

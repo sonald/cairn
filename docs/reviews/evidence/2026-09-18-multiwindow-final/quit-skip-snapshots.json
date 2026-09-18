@@ -1,0 +1,185 @@
+[
+  {
+    "activeTabOrdinal": 0,
+    "languages": [
+      0
+    ],
+    "navigationHistory": {
+      "cursor": 0,
+      "records": []
+    },
+    "panelPreset": "reading",
+    "projectRoot": "/tmp/cairn-final-acceptance-20260918/alpha",
+    "readingTrail": {
+      "edges": [],
+      "nodes": []
+    },
+    "schemaVersion": 3,
+    "tabs": [
+      {
+        "activationRank": 0,
+        "anchorContentID": {
+          "algorithm": 1,
+          "bytes": [
+            234,
+            69,
+            86,
+            84,
+            191,
+            253,
+            72,
+            0,
+            100,
+            59,
+            160,
+            68,
+            106,
+            158,
+            149,
+            139,
+            52,
+            110,
+            43,
+            29,
+            24,
+            221,
+            231,
+            104,
+            213,
+            28,
+            121,
+            222,
+            48,
+            216,
+            239,
+            236
+          ]
+        },
+        "isPreview": true,
+        "kind": "file",
+        "path": "src/lib.rs",
+        "scrollAnchor": {
+          "byteOffset": 0,
+          "column": 1,
+          "line": 1,
+          "symbolAnchor": "alpha"
+        }
+      }
+    ]
+  },
+  {
+    "activeTabOrdinal": 0,
+    "languages": [
+      0
+    ],
+    "navigationHistory": {
+      "cursor": 1,
+      "records": [
+        {
+          "jump": {
+            "byteOffset": 0,
+            "column": 1,
+            "contentID": {
+              "algorithm": 1,
+              "bytes": [
+                137,
+                166,
+                78,
+                251,
+                222,
+                115,
+                99,
+                224,
+                140,
+                39,
+                242,
+                213,
+                149,
+                159,
+                237,
+                178,
+                185,
+                252,
+                32,
+                174,
+                38,
+                185,
+                45,
+                133,
+                221,
+                189,
+                177,
+                212,
+                35,
+                41,
+                60,
+                195
+              ]
+            },
+            "line": 1,
+            "path": "src/lib.rs",
+            "symbolAnchor": "beta"
+          }
+        }
+      ]
+    },
+    "panelPreset": "reading",
+    "projectRoot": "/tmp/cairn-final-acceptance-20260918/第二个 项目",
+    "readingTrail": {
+      "edges": [],
+      "nodes": []
+    },
+    "schemaVersion": 3,
+    "tabs": [
+      {
+        "activationRank": 0,
+        "anchorContentID": {
+          "algorithm": 1,
+          "bytes": [
+            198,
+            19,
+            205,
+            205,
+            86,
+            32,
+            205,
+            226,
+            124,
+            18,
+            88,
+            173,
+            215,
+            77,
+            234,
+            140,
+            211,
+            156,
+            149,
+            214,
+            179,
+            65,
+            223,
+            221,
+            236,
+            194,
+            154,
+            64,
+            30,
+            131,
+            91,
+            73
+          ]
+        },
+        "isPreview": true,
+        "kind": "file",
+        "path": "src/extra.rs",
+        "scrollAnchor": {
+          "byteOffset": 0,
+          "column": 1,
+          "line": 1,
+          "symbolAnchor": "extra"
+        }
+      }
+    ]
+  }
+]

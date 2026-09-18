@@ -59,6 +59,12 @@ Non-source previews do not provide outline, folding, relations, bookmarks, compa
 
 Each project keeps its own reading session: tabs (with their preview state and recency order), the current file and position, the Reading Trail with its branches, and Back/Forward state all return when the project reopens after quitting, closing the window, or switching projects. Restored trail evidence is labeled as frozen in an earlier session; re-query a relation for current evidence. **File → Clear Reading Session…** discards a project's saved scene after an explicit confirmation. A Reading Set is a frozen evidence set, not an editable curation list. Folding applies only to a file Reader: `⌥⌘0/1/2` selects Full, Structure, or Overview, and `⌥⌘F` focuses the current scope. Product UI labels are currently English; Cairn does not yet provide full localization.
 
+## Multiple Projects and Windows
+
+- One process reads several projects side by side: `⌘N` opens a blank window, and each project owns its window, tabs, navigation history, index, and Exact session. Reopening an already-open project (menu, Recents, or `open -a Cairn <dir>`) activates its existing window — including through symlinked or `.`/`..`-decorated paths — instead of building a duplicate.
+- Opening a project reuses a still-blank window when one is at hand, then falls back to a new window. `⌘W` closes the active tab, and closes the window once no tabs remain; `⌘⇧W` closes the window. Titles read `project — Cairn` and the system Window menu lists every window.
+- Trust, bookmarks, and the materialized-snapshot cache are shared application state: bookmark edits from one window appear in the other, revoking trust stops the affected project's analysis, and clearing the cache from Settings stops all Exact work first. Closing a single window only releases its own resources.
+
 ## Bookmarks and Notes
 
 - In a primary project file, press `⌘⇧M` to toggle a bookmark; press `⌘⌥B` to open Bookmarks.

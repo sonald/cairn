@@ -1,0 +1,50 @@
+{
+  "binarySHA256": "0fe88e4eec00942fb81a8e4f1aaf19c9a2d3603d232a57d8bc5af0afad1204e2",
+  "fixtureSHA256": "86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578",
+  "thresholdMs": 400,
+  "runs": [
+    {
+      "run": "active-before",
+      "status": "fail",
+      "foldLatencyMs": 522.68925,
+      "deltaBytes": 147456
+    },
+    {
+      "run": "paused-1",
+      "status": "pass",
+      "foldLatencyMs": 260.847084,
+      "deltaBytes": 21463040
+    },
+    {
+      "run": "paused-2",
+      "status": "pass",
+      "foldLatencyMs": 271.088167,
+      "deltaBytes": 20922416
+    },
+    {
+      "run": "active-after",
+      "status": "fail",
+      "foldLatencyMs": 531.090084,
+      "deltaBytes": 25378840
+    },
+    {
+      "run": "clean-1",
+      "status": "pass",
+      "foldLatencyMs": 255.671666,
+      "deltaBytes": 23085104
+    },
+    {
+      "run": "clean-2",
+      "status": "pass",
+      "foldLatencyMs": 260.696958,
+      "deltaBytes": 22036504
+    },
+    {
+      "run": "clean-3",
+      "status": "pass",
+      "foldLatencyMs": 297.111084,
+      "deltaBytes": 16220208
+    }
+  ],
+  "intervention": "SIGSTOP then SIGCONT group 81509 for paired comparison; subsequently SIGTERM verified headless group 81509 and agent-browser daemon 81508; foreground Chrome PID 2464 preserved"
+}

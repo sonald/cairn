@@ -1,0 +1,211 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[2 / 4] codeinsight-app-product
+[9 / 11] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10888:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10885 |         weak var openButton: NSButton?
+10886 | 
+10887 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+10888 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10889 |         }
+10890 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10888:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10886 | 
+10887 |         @objc func checkboxChanged(_ sender: NSButton) {
+10888 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10889 |         }
+10890 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10891 |         var selection: [LanguageID]? {
+10892 |             var selected: [LanguageID] = []
+10893 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |                 selected.append(.rust)
+10895 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10896:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |                 selected.append(.rust)
+10895 |             }
+10896 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10897 |                 selected.append(.python)
+10898 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10899:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10897 |                 selected.append(.python)
+10898 |             }
+10899 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10900 |                 selected.append(.typescript)
+10901 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11106:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11104 |                 await coordinator.stopAllWorkForCacheClear()
+11105 |             }
+11106 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11107 |             return .cleared
+11108 |         } catch {
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[11 / 11] codeinsight-app-product
+[15 / 24] CodeInsightApp
+[17 / 26] CodeInsightApp
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10888:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10885 |         weak var openButton: NSButton?
+10886 | 
+10887 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+10888 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10889 |         }
+10890 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10888:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10886 | 
+10887 |         @objc func checkboxChanged(_ sender: NSButton) {
+10888 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10889 |         }
+10890 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10893:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10891 |         var selection: [LanguageID]? {
+10892 |             var selected: [LanguageID] = []
+10893 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |                 selected.append(.rust)
+10895 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10896:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10894 |                 selected.append(.rust)
+10895 |             }
+10896 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10897 |                 selected.append(.python)
+10898 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:10899:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10897 |                 selected.append(.python)
+10898 |             }
+10899 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10900 |                 selected.append(.typescript)
+10901 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11106:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11104 |                 await coordinator.stopAllWorkForCacheClear()
+11105 |             }
+11106 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11107 |             return .cleared
+11108 |         } catch {
+
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[20 / 29] CodeInsightApp
+[23 / 24] CodeInsightAppTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+Build complete! (31.77秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() started.
+✔ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() passed after 0.464 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.464 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test revocationBlocksNewProvidersAndRestartsCurrentGenerationSafely() started.
+✔ Test revocationBlocksNewProvidersAndRestartsCurrentGenerationSafely() passed after 0.129 seconds.
+◇ Test shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() started.
+✔ Test shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() passed after 0.117 seconds.
+◇ Test sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() started.
+✔ Test sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() passed after 0.133 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.380 seconds.

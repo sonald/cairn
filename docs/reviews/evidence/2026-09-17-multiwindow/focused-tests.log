@@ -1,0 +1,32 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test projectIdentityNormalizesAliasesAndRejectsInvalidTargets() started.
+✔ Test projectIdentityNormalizesAliasesAndRejectsInvalidTargets() passed after 0.010 seconds.
+◇ Test windowClaimAndCloseRetireAWindowFromReuse() started.
+✔ Test windowClaimAndCloseRetireAWindowFromReuse() passed after 0.661 seconds.
+◇ Test menuRoutingResolvesProjectWindowsPanelsAndGlobalWindows() started.
+2026-09-17 10:05:44.857 swiftpm-testing-helper[85711:3824629] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-17 10:05:44.857 swiftpm-testing-helper[85711:3824623] Error received in message reply handler: Connection invalid
+✔ Test menuRoutingResolvesProjectWindowsPanelsAndGlobalWindows() passed after 1.063 seconds.
+✔ Test run with 3 tests in 0 suites passed after 1.736 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test sharedBookmarkStoreInterleavesTwoWindowsWithoutLosingUpdates() started.
+✔ Test sharedBookmarkStoreInterleavesTwoWindowsWithoutLosingUpdates() passed after 0.117 seconds.
+◇ Test sharedBookmarkStoreNotifiesBothWindows() started.
+✔ Test sharedBookmarkStoreNotifiesBothWindows() passed after 0.001 seconds.
+◇ Test sharedBookmarkStoreRetainsDirtyTableForRetryAcrossWindows() started.
+✔ Test sharedBookmarkStoreRetainsDirtyTableForRetryAcrossWindows() passed after 0.004 seconds.
+◇ Test materializerReferenceCountProtectsSharedDirectory() started.
+✔ Test materializerReferenceCountProtectsSharedDirectory() passed after 0.177 seconds.
+◇ Test materializerQuotaEvictsOnlyUnreferencedDirectories() started.
+✔ Test materializerQuotaEvictsOnlyUnreferencedDirectories() passed after 0.286 seconds.
+◇ Test sharedTrustRegistryServesTwoCoordinators() started.
+✔ Test sharedTrustRegistryServesTwoCoordinators() passed after 0.010 seconds.
+◇ Test appModelCloseProjectResetsStateAndStopsExact() started.
+✔ Test appModelCloseProjectResetsStateAndStopsExact() passed after 0.218 seconds.
+◇ Test coordinatorShutdownAndWaitReleasesMaterializedDirectory() started.
+✔ Test coordinatorShutdownAndWaitReleasesMaterializedDirectory() passed after 0.177 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.993 seconds.

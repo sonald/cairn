@@ -1,0 +1,5 @@
+2026-09-17 14:09:46.716 codeinsight-app[38399:4255636] Failure on line 688 in function id scheduleApplicationNotification(LSNotificationCode, NSWorkspaceNotificationCenter *): noErr == _LSModifyNotification(notificationID, 1, &code, 0, NULL, NULL, NULL)
+2026-09-17 14:09:47.057 codeinsight-app[38399:4255636] Error received in message reply handler: Connection invalid
+2026-09-17 14:09:47.057 codeinsight-app[38399:4255637] Connection Invalid error for service com.apple.hiservices-xpcservice.
+{"channel":"multiwindow","passed":true,"persistedSnapshots":2,"titleA":"CodeInsightMultiWindow-4257B7A9-6C74-46CB-BCDF-19A00A23D367 — Cairn","windows":3}
+SELF_TEST_FINISH timestamp=1789625387.852473 pid=38399 channel=multiwindow exit=0

@@ -9,7 +9,7 @@ if [[ $# -lt 3 || $# -gt 6 || ! -d "$1" || ! -d "$2" || ! -f "$3" || \
 usage: bash scripts/run-self-tests.sh <git-repo> <non-git-dir> <open-file> [<python-git-repo> [<typescript-git-repo> [<mixed-git-repo>]]]
 
 Positional channels are frozen:
-  3 args            = 14 base channels
+  3 args            = 15 base channels
   4th arg must be   Python (channel 15)
   5th arg must be   Python then TypeScript (channel 16)
   6th arg must be   Python then TypeScript then Mixed (channel 17)
@@ -209,6 +209,7 @@ run_case() {
 # Keep each channel as an explicit independent process. The historical hang was
 # observed when unlike channels were hidden inside a shell for-loop.
 run_case base --self-test
+run_case multiwindow --self-test-multiwindow
 swift build -c release ${swift_options[@]+"${swift_options[@]}"} \
     --product codeinsight-app
 binary="$PWD/.build/release/codeinsight-app"
@@ -278,9 +279,9 @@ fi
 echo "summary: pass=$pass_count fail=$fail_count hang=$hang_count"
 echo "artifacts: $output_dir"
 
-if [[ -n "$mixed_repo" && ( $pass_count -ne 17 || $fail_count -ne 0 || \
+if [[ -n "$mixed_repo" && ( $pass_count -ne 18 || $fail_count -ne 0 || \
       $hang_count -ne 0 ) ]]; then
-    echo "mixed 17-channel gate requires pass=17 fail=0 hang=0" >&2
+    echo "mixed 18-channel gate requires pass=18 fail=0 hang=0" >&2
     exit 1
 fi
 

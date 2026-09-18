@@ -618,9 +618,10 @@ public final class AppModel {
     /// Legacy single-file session store (v1/v2 data): the anchor whose
     /// directory also holds the per-project `sessions/` store.
     @ObservationIgnored private var sessionURL: URL?
-    /// Updated on every successful per-project checkpoint write so launch
-    /// knows which project to reopen. Nil in tests that pass no store.
-    @ObservationIgnored private var sessionProjectPointer: RecentProjectsStore?
+    /// Notified after a per-project checkpoint was successfully written.
+    /// The launch restore pointer is application-owned state (§7.3): the
+    /// model only reports the fact, it never writes the global pointer.
+    @ObservationIgnored package var onSessionCheckpointWritten: (@MainActor (String) -> Void)?
     /// Snapshots that cannot safely be read stay protected until a successful
     /// retry or an explicit clear (including future schemas and I/O failures).
     @ObservationIgnored private var sessionOverwriteBlockedKeys: Set<String> = []
@@ -692,6 +693,7 @@ public final class AppModel {
     package convenience init(
         sessionURL: URL,
         recentProjectsStore: RecentProjectsStore? = nil,
+        sharedBookmarkStore: SharedBookmarkStore? = nil,
         indexService: any IndexService = ProjectIndexService(),
         contextWindow: ContextWindowModel = ContextWindowModel(),
         exactCoordinator: ExactCoordinator = ExactCoordinator(),
@@ -708,12 +710,16 @@ public final class AppModel {
             navigationSink: navigationSink
         )
         self.sessionURL = sessionURL.standardizedFileURL
-        self.sessionProjectPointer = recentProjectsStore
-        self.bookmarkModel = BookmarkModel(store: BookmarkStore(
-            fileURL: sessionURL.standardizedFileURL
-                .deletingLastPathComponent()
-                .appendingPathComponent("bookmarks.json")
-        ))
+        // One shared records authority per process when the application
+        // provides it; otherwise this model owns a private one (tests,
+        // single-window paths) (§8.1).
+        self.bookmarkModel = BookmarkModel(
+            sharedStore: sharedBookmarkStore ?? SharedBookmarkStore(
+                fileURL: sessionURL.standardizedFileURL
+                    .deletingLastPathComponent()
+                    .appendingPathComponent("bookmarks.json")
+            )
+        )
     }
 
     package static var defaultSessionURL: URL {
@@ -1030,10 +1036,12 @@ public final class AppModel {
             try data.write(to: targetURL, options: .atomic)
             if sessionSaveNotice != nil { sessionSaveNotice = nil }
             if sessionLoadNotice != nil { sessionLoadNotice = nil }
-            // The project just produced a valid snapshot: it is now the
-            // launch restore target, and a legacy file it was migrated
-            // from can be retired (kept as a one-time backup).
-            sessionProjectPointer?.lastSessionProjectPath = snapshot.projectRoot
+            // Report the successful write; the application layer decides
+            // whether this project becomes the launch restore target
+            // (§7.3 — background checkpoints no longer move the pointer
+            // implicitly). A legacy file the snapshot was migrated from
+            // can now be retired (kept as a one-time backup).
+            onSessionCheckpointWritten?(snapshot.projectRoot)
             retireLegacySessionIfPendingMigration(
                 for: snapshot.projectRoot
             )
@@ -1295,6 +1303,61 @@ public final class AppModel {
     /// workspace work, advances the workspace generation, and resets
     /// per-project state. Snapshot switches and index refreshes keep their
     /// own narrower scopes (tabs, trail, and history survive those).
+    /// Explicit project teardown for a closing window (§7.1): cancels
+    /// every task this model owns, invalidates late installs by advancing
+    /// the generation, resets the in-memory project state, and waits for
+    /// the Exact provider to actually exit before releasing its cache
+    /// references. Idempotent; never touches global caches or other
+    /// windows' state.
+    public func closeProject() async {
+        snapshotTask?.cancel()
+        compareSnapshotTask?.cancel()
+        replayTask?.cancel()
+        semanticValidationTask?.cancel()
+        sessionCheckpointTask?.cancel()
+        snapshotTask = nil
+        compareSnapshotTask = nil
+        replayTask = nil
+        semanticValidationTask = nil
+        sessionCheckpointTask = nil
+        sessionCheckpointDirtyAt = nil
+        compare.clear()
+        generation &+= 1
+        bookmarkModel.workspaceDidChange(to: generation)
+        workspaceSessions.removeAll(keepingCapacity: true)
+        commitPicker.setCurrentRevision(nil)
+        currentSnapshotID = nil
+        snapshotDestinations.removeAll(keepingCapacity: true)
+        pendingReplay = nil
+        documentSource = nil
+        // A closing window bypasses the transition state machine: its
+        // surfaces are closing with it, and no late callback may publish a
+        // ready/failed state back onto this model (§7.1).
+        projectState = .empty
+        contextWindow.updateProjectState(.empty, root: nil, contentSource: nil)
+        relationTree.updateProjectState(.empty)
+        projectRoot = nil
+        projectLanguages = []
+        snapshotPhase = nil
+        coverage = SnapshotCoverage(filesIndexed: 0, filesTotal: 0)
+        fileTree = nil
+        selectedFile = nil
+        selectedByteOffset = nil
+        activeNavigationRequest = nil
+        navigationGeneration &+= 1
+        navigationHistory.reset()
+        readingTrail.reset()
+        resolutionExplanations.removeAll()
+        replayNotice = nil
+        staleIndexNotice = nil
+        projectFailureReason = nil
+        sessionRestoreWriteSuspension = nil
+        endIndexRefresh()
+        tabStrip.reset()
+        contextWindow.cancelExactUpgrade()
+        await exactCoordinator.shutdownAndWait()
+    }
+
     private func beginWorkspaceOpen(
         root: URL,
         languages: [LanguageID]
@@ -1833,14 +1896,17 @@ public final class AppModel {
     }
 
     public func revokeRepositoryTrust(_ repositoryURL: URL) async throws {
-        let trustGeneration = generation
         try await exactCoordinator.revokeTrust(repositoryURL)
-        guard generation == trustGeneration,
-              projectRoot?.resolvingSymlinksInPath().standardizedFileURL
-                == repositoryURL.resolvingSymlinksInPath().standardizedFileURL,
+        guard projectRoot?.resolvingSymlinksInPath().standardizedFileURL
+            == repositoryURL.resolvingSymlinksInPath().standardizedFileURL,
               case .ready = projectState
         else { return }
-        prepareExact(generation: trustGeneration)
+        // Re-prepare in Safe mode with the CURRENT generation: a feature
+        // or commit switch during the revoke's await changed it, and the
+        // switch's own prepare was refused while trust revocation was
+        // suspended — that project is left "off" unless this call restarts
+        // it against the now-untrusted registry (§8.2).
+        prepareExact(generation: generation)
     }
 
     public func switchFeatureSelection(_ featureSelection: FeatureSelection) {

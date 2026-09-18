@@ -1,0 +1,17 @@
+Extracted targeted failure lines. Full raw log: /tmp/cairn-p2-fixes-20260917/red.log
+Initial cache fixture failures excluded; services-red.log contains the corrected valid repro.
+✘ Test existingAppSettingsRefreshesSharedTrustOnEveryOpen() recorded an issue at MultiWindowAppServicesTests.swift:99:5: Expectation failed: await appServicesEventually { delegate.trustListModel.repositories.count == 2 }
+✘ Test existingAppSettingsRefreshesSharedTrustOnEveryOpen() failed after 10.282 seconds with 1 issue.
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() recorded an issue at MultiWindowAppServicesTests.swift:115:9: Expectation failed: !delegate.validateMenuItem(item)
+✘ Test globalSettingsDisablesEveryTargetlessProjectMenu() failed after 0.509 seconds with 8 issues.
+✘ Test cancelledProjectWindowUsesNextProjectsFrameAutosave() recorded an issue at MultiWindowLifecycleTests.swift:169:5: Expectation failed: window.frameAutosaveName.isEmpty
+✘ Test cancelledProjectWindowUsesNextProjectsFrameAutosave() recorded an issue at MultiWindowLifecycleTests.swift:176:5: Expectation failed: window.frameAutosaveName == NSWindow.FrameAutosaveName(
+✘ Test cancelledProjectWindowUsesNextProjectsFrameAutosave() failed after 0.223 seconds with 2 issues.
+✔ Test suspendedPrepareIsRefusedUntilTheSuspensionLifts() passed after 0.084 seconds.

@@ -2430,7 +2430,7 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
     #expect(model.selectedCandidate?.provenanceBadge.contains(dependency.path) == true)
 }
 
-private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
+final class ExactTestProvider: ExactProvider, @unchecked Sendable {
     var capabilities: ExactCapabilities {
         state.hasReferencesCapability
             ? [.definition, .references]
@@ -2475,7 +2475,7 @@ private final class ExactTestProvider: ExactProvider, @unchecked Sendable {
     }
 }
 
-private final class ExactProviderState: @unchecked Sendable {
+final class ExactProviderState: @unchecked Sendable {
     typealias Behavior = @Sendable (Int, String, Int) throws -> ExactLocation?
 
     private let lock = NSLock()
@@ -2570,7 +2570,7 @@ private final class ExactProviderState: @unchecked Sendable {
     }
 }
 
-private final class ExactStateSession: ExactSession, @unchecked Sendable {
+final class ExactStateSession: ExactSession, @unchecked Sendable {
     var negotiatedCapabilities: ExactCapabilities {
         state.hasReferencesCapability
             ? [.definition, .references]

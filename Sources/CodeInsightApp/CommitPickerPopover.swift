@@ -182,8 +182,12 @@ final class CommitPickerPopover: NSViewController,
         popover.performClose(nil)
     }
 
-    func chooseCommit(_ revision: String) -> Bool {
-        guard let commit = appModel.commitPicker.commits.first(where: {
+    /// Closes the popover when its owning window goes away (§7.1).
+    func dismiss() {
+        popover.performClose(nil)
+    }
+
+    func chooseCommit(_ revision: String) -> Bool {        guard let commit = appModel.commitPicker.commits.first(where: {
             $0.fullSHA == revision || $0.shortSHA == revision
         }) else { return false }
         choose(commit)

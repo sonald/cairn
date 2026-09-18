@@ -1,0 +1,16 @@
+{
+  "ciExit": 0,
+  "testCount": 978,
+  "main": 974,
+  "isolated": 2,
+  "panels": 2,
+  "foldLatencyMs": 253.860959,
+  "deltaBytes": 22528048,
+  "sourceUnchangedDuringFinalCI": true,
+  "releaseSHA256": "4eb83050ac674a20015566dbffcc708e45e050c3ed2ac1bd7bec63b9de915904",
+  "deliveredAppSHA256": "56abaf7a67d641379410bb27afb9f4db6ed6f34c13ad788adb593dcc0d987716",
+  "deliveredZipSHA256": "eb0003cb35db4230eef9228d94daf6e645161a30ba7a4970ef6925850093c6fe",
+  "deliveryApp": "/tmp/cairn-final-acceptance-20260918/delivery/Cairn.app",
+  "deliveryZip": "/tmp/cairn-final-acceptance-20260918/delivery/Cairn.zip",
+  "matrix": "W01-W20 PASS"
+}

@@ -212,11 +212,21 @@ public final class ExactCoordinator {
     @ObservationIgnored private let providerFactory: ProviderFactory
     @ObservationIgnored private let snapshotFactory: SnapshotFactory?
     @ObservationIgnored private let sandboxAvailable: @Sendable () -> Bool
-    @ObservationIgnored private let trustRegistry: TrustRegistry
+    /// The registry this coordinator consults; application-owned shared
+    /// instance in production (§8.2).
+    public let trustRegistry: TrustRegistry
     @ObservationIgnored private let materializer: Materializer
     @ObservationIgnored private var overlay = ExactOverlay()
     private var active: Active?
     @ObservationIgnored private var prepareTask: Task<Void, Never>?
+    /// Project root the in-flight prepare targets; lets an app-level trust
+    /// revoke stop only the affected project's preparation (§8.2).
+    @ObservationIgnored private var prepareRoot: URL?
+    /// Projects whose prepares are suspended (trust revocation in flight,
+    /// cache maintenance): no new session may read the registry or claim
+    /// cache directories until the coordinating operation finishes (§8.2,
+    /// §8.4).
+    @ObservationIgnored private var suspendedPrepares: Set<String> = []
     @ObservationIgnored private var epoch: UInt64 = 0
     @ObservationIgnored private var expectedGeneration: UInt64 = 0
     @ObservationIgnored private var closeTask: Task<Void, Never>?
@@ -342,15 +352,21 @@ public final class ExactCoordinator {
         let previousClose = closeTask
         let previousPrepare = prepareTask
         let oldSession = active?.session
+        let oldMaterialized = active?.materializedRoot
+        let materializer = materializer
         oldSession?.cancel()
         prepareTask?.cancel()
         prepareTask = nil
+        prepareRoot = nil
         if previousClose != nil || previousPrepare != nil || oldSession != nil {
             closeTask = Task.detached(priority: .utility) {
                 await previousClose?.value
                 await previousPrepare?.value
                 if let oldSession {
                     oldSession.close()
+                }
+                if let oldMaterialized {
+                    materializer.release(oldMaterialized)
                 }
             }
         } else {
@@ -364,17 +380,43 @@ public final class ExactCoordinator {
 
     public func shutdown() {
         epoch &+= 1
+        let previousClose = closeTask
+        let previousPrepare = prepareTask
         prepareTask?.cancel()
         prepareTask = nil
-        closeTask?.cancel()
+        prepareRoot = nil
         closeTask = nil
         let oldSession = active?.session
+        let oldMaterialized = active?.materializedRoot
+        let materializer = materializer
         active = nil
         oldSession?.cancel()
+        // The active session closes synchronously (existing contract); the
+        // cancelled prepare and the prior close chain finish in the
+        // background with a completion handle nobody loses (§7.1).
         oldSession?.close()
         readiness = .off("application terminating")
         analysisEnvironment = nil
         trustMode = nil
+        if previousClose != nil || previousPrepare != nil || oldMaterialized != nil {
+            closeTask = Task.detached(priority: .utility) {
+                await previousClose?.value
+                await previousPrepare?.value
+                if let oldMaterialized {
+                    materializer.release(oldMaterialized)
+                }
+            }
+        }
+    }
+
+    /// Awaitable, idempotent shutdown used by explicit window/project
+    /// close: waits until cancelled prepare work, the previous close chain,
+    /// and the old session's provider have all finished exiting, so the
+    /// caller may safely release or delete cache directories afterwards.
+    public func shutdownAndWait() async {
+        shutdown()
+        let chain = closeTask
+        await chain?.value
     }
 
     func cancel(batch: ExactRequestBatch) {
@@ -451,6 +493,20 @@ public final class ExactCoordinator {
         generation: UInt64
     ) {
         let root = projectURL.standardizedFileURL
+        // A suspended project rejects the prepare outright: its trust or
+        // its cache is being revoked, and a session that slipped through
+        // now could keep running on stale permissions (§8.2).
+        guard !suspendedPrepares.contains(Self.canonicalRepositoryPath(root))
+        else {
+            invalidate(generation: generation)
+            readiness = .off("trust revoking")
+            return
+        }
+        guard !materializer.isUnderMaintenance else {
+            invalidate(generation: generation)
+            readiness = .off("cache maintenance")
+            return
+        }
         let language = analysisProfile.language
         let featureSelection = analysisProfile.featureSelection
         let profilePrefix = profileRoot
@@ -462,6 +518,7 @@ public final class ExactCoordinator {
         let sandboxAvailable = sandboxAvailable
         let trustRegistry = trustRegistry
         let materializer = materializer
+        prepareRoot = root
 
         let priorClose = closeTask
         prepareTask = Task { [weak self] in
@@ -486,6 +543,17 @@ public final class ExactCoordinator {
 
             do {
                 let prepared = try await Task.detached(priority: .utility) {
+                    // A prepare that fails, is cancelled, or becomes stale
+                    // must give its materialized directory back; only a
+                    // successfully returned Prepared keeps the reference
+                    // (its release then follows the session lifecycle).
+                    var retainedDirectory: URL?
+                    var installed = false
+                    defer {
+                        if let retainedDirectory, !installed {
+                            materializer.release(retainedDirectory)
+                        }
+                    }
                     let snapshot: any Snapshot = if let snapshotFactory {
                         try snapshotFactory(root, revision)
                     } else {
@@ -513,10 +581,12 @@ public final class ExactCoordinator {
                                 language: language
                             )
                         }
-                        let resolvedWorkspaceRoot = try materializer.materialize(
-                            commit,
-                            configFingerprint: profile.configFingerprint
-                        ).url
+                        let resolvedWorkspaceRoot = try materializer
+                            .materializeAndRetain(
+                                commit,
+                                configFingerprint: profile.configFingerprint
+                            ).url
+                        retainedDirectory = resolvedWorkspaceRoot
                         materializedRoot = resolvedWorkspaceRoot
                         providerRoot = profileRootURL(
                             workspaceRoot: resolvedWorkspaceRoot,
@@ -572,6 +642,7 @@ public final class ExactCoordinator {
                         profile: profile,
                         trustMode: trustMode
                     )
+                    installed = true
                     return Prepared(active: Active(
                         generation: generation,
                         key: key,
@@ -586,10 +657,15 @@ public final class ExactCoordinator {
                     ))
                 }.value
                 guard self.epoch == currentEpoch,
-                  self.expectedGeneration == generation,
-                  !Task.isCancelled
+                      self.expectedGeneration == generation,
+                      !Task.isCancelled
                 else {
-                    await Task.detached { prepared.active.session.close() }.value
+                    await Task.detached {
+                        prepared.active.session.close()
+                        if let materialized = prepared.active.materializedRoot {
+                            materializer.release(materialized)
+                        }
+                    }.value
                     return
                 }
                 self.active = prepared.active
@@ -613,7 +689,10 @@ public final class ExactCoordinator {
                     ? .off("Safe exact disabled: \(error)")
                     : .unavailable(String(describing: error))
             }
-            if self.epoch == currentEpoch { self.prepareTask = nil }
+            if self.epoch == currentEpoch {
+                self.prepareTask = nil
+                self.prepareRoot = nil
+            }
         }
     }
 
@@ -640,8 +719,61 @@ public final class ExactCoordinator {
     }
 
     public func revokeTrust(_ repositoryURL: URL) async throws {
+        // From the first line, new prepares for this project are refused:
+        // waiting for old work to exit must not race a fresh trusted
+        // prepare that still reads the unrevoked registry (§8.2).
+        let suspendedRoot = Self.canonicalRepositoryPath(repositoryURL)
+        suspendedPrepares.insert(suspendedRoot)
+        defer { suspendedPrepares.remove(suspendedRoot) }
+        await stopWorkspaces(rootedAt: repositoryURL)
         try await trustRegistry.revoke(repositoryURL)
         await refreshTrust()
+    }
+
+    /// Whether prepares for `repositoryURL` are currently suspended.
+    public func prepareIsSuspended(for repositoryURL: URL) -> Bool {
+        suspendedPrepares.contains(Self.canonicalRepositoryPath(repositoryURL))
+    }
+
+    /// Suspends and resumes prepares for tests and app-level maintenance.
+    func suspendPrepares(for repositoryURL: URL) {
+        suspendedPrepares.insert(Self.canonicalRepositoryPath(repositoryURL))
+    }
+
+    func resumePrepares(for repositoryURL: URL) {
+        suspendedPrepares.remove(Self.canonicalRepositoryPath(repositoryURL))
+    }
+
+    /// Stops and awaits the exit of every prepare/session this coordinator
+    /// runs for `repositoryURL`. Safe to call for unrelated roots.
+    public func stopWorkspaces(rootedAt repositoryURL: URL) async {
+        let target = Self.canonicalRepositoryPath(repositoryURL)
+        let affectsActive = active.map {
+            Self.canonicalRepositoryPath($0.workspaceRoot) == target
+        } ?? false
+        let affectsPrepare = prepareRoot.map {
+            Self.canonicalRepositoryPath($0) == target
+        } ?? false
+        guard affectsActive || affectsPrepare else { return }
+        let stoppedGeneration = expectedGeneration
+        invalidate(generation: stoppedGeneration)
+        await closeTask?.value
+        readiness = .off("trust revoked")
+    }
+
+    nonisolated private static func canonicalRepositoryPath(
+        _ url: URL
+    ) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Stops and awaits every prepare/session this coordinator runs,
+    /// regardless of project — used by the app-level cache clear (§8.4).
+    public func stopAllWorkForCacheClear() async {
+        let stoppedGeneration = expectedGeneration
+        invalidate(generation: stoppedGeneration)
+        await closeTask?.value
+        readiness = .off("materialized cache cleared")
     }
 
     public func clearMaterializedCache() async throws {
@@ -650,7 +782,9 @@ public final class ExactCoordinator {
         let previousPrepare = prepareTask
         prepareTask?.cancel()
         prepareTask = nil
+        prepareRoot = nil
         let oldSession = active?.session
+        let oldMaterialized = active?.materializedRoot
         active = nil
         oldSession?.cancel()
         readiness = .off("materialized cache cleared")
@@ -662,6 +796,9 @@ public final class ExactCoordinator {
         try await Task.detached(priority: .utility) {
             if let oldSession {
                 oldSession.close()
+            }
+            if let oldMaterialized {
+                materializer.release(oldMaterialized)
             }
             try materializer.clear()
         }.value

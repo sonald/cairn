@@ -1,0 +1,31 @@
+2026-09-17 13:50:59.564 codeinsight-app[27604:4197452] Error received in message reply handler: Connection invalid
+2026-09-17 13:50:59.564 codeinsight-app[27604:4197461] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-17 13:51:07.399 codeinsight-app[27615:4197738] Error received in message reply handler: Connection invalid
+2026-09-17 13:51:07.399 codeinsight-app[27615:4197739] Connection Invalid error for service com.apple.hiservices-xpcservice.
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 75.533833000000001,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 501073120
+  },
+  "fold": {
+    "resolutionMs": 59.949334,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 527402232,
+    "foldLatencyMs": 585.073125
+  },
+  "deltaBytes": 26329112,
+  "status": "fail"
+}
+fold perf artifacts: .build/m11-fold-perf

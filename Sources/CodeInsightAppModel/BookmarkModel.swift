@@ -3,6 +3,125 @@ import CodeInsightReaderCore
 import Foundation
 import Observation
 
+/// Single-process authority for bookmark records and their persistence
+/// state (§8.1): one instance shared by every window's BookmarkModel.
+/// Jump/attempt state stays per-window in BookmarkModel.
+@MainActor
+@Observable
+package final class SharedBookmarkStore {
+    package private(set) var records: [BookmarkRecord] = []
+    package private(set) var storageError: BookmarkStoreError?
+    package private(set) var rescueBytes: Data?
+    package private(set) var isDirty = false
+
+    @ObservationIgnored private let store: BookmarkStore?
+    @ObservationIgnored private var observers: [UUID: @MainActor () -> Void] = [:]
+
+    package init(fileURL: URL) {
+        self.store = BookmarkStore(fileURL: fileURL)
+        load()
+    }
+
+    package init(store: BookmarkStore?) {
+        self.store = store
+        if store != nil { load() }
+    }
+
+    /// An empty in-memory store for tests that never touch disk.
+    package init() {
+        self.store = nil
+    }
+
+    /// Loads from disk exactly once, at creation. A later reload would
+    /// clobber a dirty in-memory table with stale disk contents (§8.1).
+    private func load() {
+        guard let store else { return }
+        do {
+            records = try store.load()
+            storageError = nil
+            rescueBytes = nil
+            isDirty = false
+        } catch let error as BookmarkStoreError {
+            records = []
+            storageError = error
+            rescueBytes = try? store.rawBytes()
+            isDirty = false
+        } catch {
+            records = []
+            storageError = .unreadable
+            rescueBytes = try? store.rawBytes()
+            isDirty = false
+        }
+    }
+
+    /// Read-modify-write boundary: computes the next table from the latest
+    /// shared records and persists it in one MainActor operation. Callers
+    /// must not `await` between reading `records` and committing.
+    @discardableResult
+    package func commit(_ candidate: [BookmarkRecord]) -> Bool {
+        guard let store else {
+            records = candidate
+            storageError = nil
+            rescueBytes = nil
+            isDirty = false
+            notifyObservers()
+            return true
+        }
+        guard rescueBytes == nil || storageError == nil else {
+            notifyObservers()
+            return false
+        }
+        do {
+            try store.replace(candidate)
+            records = candidate
+            storageError = nil
+            rescueBytes = nil
+            isDirty = false
+            notifyObservers()
+            return true
+        } catch let error as BookmarkStoreError {
+            guard error == .writeFailed else {
+                storageError = error
+                notifyObservers()
+                return false
+            }
+            // Write failed: the newest in-memory table stays authoritative
+            // and dirty; the next commit retries from it (§8.1).
+            records = candidate
+            storageError = error
+            isDirty = true
+            notifyObservers()
+            return true
+        } catch {
+            storageError = .writeFailed
+            records = candidate
+            isDirty = true
+            notifyObservers()
+            return true
+        }
+    }
+
+    /// Registers a per-window change callback; returns the removal token.
+    @discardableResult
+    package func addObserver(
+        _ observer: @escaping @MainActor () -> Void
+    ) -> UUID {
+        let token = UUID()
+        observers[token] = observer
+        return token
+    }
+
+    package func removeObserver(_ token: UUID) {
+        observers.removeValue(forKey: token)
+    }
+
+    private func notifyObservers() {
+        for observer in observers.values {
+            observer()
+        }
+    }
+}
+
 package enum BookmarkStatus: Hashable, Sendable {
     case exactContent
     case drifted
@@ -125,10 +244,30 @@ package final class BookmarkModel {
     }
 
     package private(set) var lastAttemptMessage: AttemptMessage?
-    package private(set) var records: [BookmarkRecord] = []
-    package private(set) var storageError: BookmarkStoreError?
-    package private(set) var rescueBytes: Data?
-    package private(set) var isDirty = false
+    /// Records and persistence state come from the shared store when one
+    /// is attached; otherwise this per-model array serves storeless tests.
+    @ObservationIgnored private var localRecords: [BookmarkRecord] = []
+    package var records: [BookmarkRecord] {
+        get { sharedStore?.records ?? localRecords }
+        set { localRecords = newValue }
+    }
+
+    package var storageError: BookmarkStoreError? {
+        sharedStore?.storageError
+    }
+
+    package var rescueBytes: Data? {
+        sharedStore?.rescueBytes
+    }
+
+    package var isDirty: Bool {
+        sharedStore?.isDirty ?? false
+    }
+
+    /// Fired when the shared records changed (any window, including this
+    /// one) so owning surfaces re-render (§8.1).
+    package var onSharedRecordsChanged: (@MainActor () -> Void)?
+
     package private(set) var workspaceGeneration: UInt64 = 0
     package private(set) var bookmarkAttemptGeneration: UInt64 = 0
     @ObservationIgnored private var bookmarkJumpTask: Task<Void, Never>?
@@ -137,37 +276,37 @@ package final class BookmarkModel {
         generation: UInt64,
         workspaceGeneration: UInt64
     )?
-    @ObservationIgnored private let store: BookmarkStore?
+    @ObservationIgnored private let sharedStore: SharedBookmarkStore?
 
     package init(store: BookmarkStore? = nil) {
-        self.store = store
-        if store != nil { reload() }
+        if let store {
+            let shared = SharedBookmarkStore(store: store)
+            self.sharedStore = shared
+            registerSharedObserver()
+        } else {
+            self.sharedStore = nil
+        }
     }
 
+    package init(sharedStore: SharedBookmarkStore) {
+        self.sharedStore = sharedStore
+        registerSharedObserver()
+    }
+
+    /// The stored closure only weakly captures this model, so a deallocated
+    /// window's entry is inert without explicit removal.
+    private func registerSharedObserver() {
+        guard let sharedStore else { return }
+        sharedStore.addObserver { [weak self] in
+            self?.onSharedRecordsChanged?()
+        }
+    }
+
+    package var sharedRecordStore: SharedBookmarkStore? { sharedStore }
+
     package func reload() {
-        guard let store else {
-            records = []
-            storageError = nil
-            rescueBytes = nil
-            isDirty = false
-            return
-        }
-        do {
-            records = try store.load()
-            storageError = nil
-            rescueBytes = nil
-            isDirty = false
-        } catch let error as BookmarkStoreError {
-            records = []
-            storageError = error
-            rescueBytes = try? store.rawBytes()
-            isDirty = false
-        } catch {
-            records = []
-            storageError = .unreadable
-            rescueBytes = try? store.rawBytes()
-            isDirty = false
-        }
+        guard sharedStore == nil else { return }
+        records = []
     }
 
     package func filteredRecords(projectPath: String, query: String = "") -> [BookmarkRecord] {
@@ -362,36 +501,11 @@ package final class BookmarkModel {
 
     @discardableResult
     private func commit(_ candidate: [BookmarkRecord]) -> Bool {
-        guard let store else {
+        guard let sharedStore else {
             records = candidate
-            storageError = nil
-            rescueBytes = nil
-            isDirty = false
             return true
         }
-        guard rescueBytes == nil || storageError == nil else { return false }
-        do {
-            try store.replace(candidate)
-            records = candidate
-            storageError = nil
-            rescueBytes = nil
-            isDirty = false
-            return true
-        } catch let error as BookmarkStoreError {
-            guard error == .writeFailed else {
-                storageError = error
-                return false
-            }
-            records = candidate
-            storageError = error
-            isDirty = true
-            return true
-        } catch {
-            storageError = .writeFailed
-            records = candidate
-            isDirty = true
-            return true
-        }
+        return sharedStore.commit(candidate)
     }
 
     package func workspaceDidChange(to generation: UInt64) {

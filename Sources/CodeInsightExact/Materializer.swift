@@ -2,6 +2,12 @@ import CodeInsightCore
 import CodeInsightGit
 import Foundation
 
+public enum MaterializerError: Error, Equatable {
+    /// Cache clearing was refused because directories are still in use by
+    /// active Exact sessions (§8.4).
+    case directoriesInUse([String])
+}
+
 public final class Materializer: @unchecked Sendable {
     public static let defaultQuotaBytes: UInt64 = 2 * 1024 * 1024 * 1024
 
@@ -10,6 +16,10 @@ public final class Materializer: @unchecked Sendable {
     private let quotaBytes: UInt64
     private let lock = NSLock()
     private let completeMarker = ".complete"
+    /// Reference counts per canonical directory path: preparing providers
+    /// and active sessions each hold one reference; quota eviction only
+    /// reclaims directories with zero references (§8.3).
+    private var inUseCounts: [String: Int] = [:]
 
     public init(
         rootURL: URL? = nil,
@@ -24,6 +34,26 @@ public final class Materializer: @unchecked Sendable {
         _ snapshot: CommitSnapshot,
         configFingerprint: String
     ) throws -> (url: URL, filesWritten: Int) {
+        try materialize(snapshot, configFingerprint: configFingerprint, retaining: false)
+    }
+
+    /// Same as `materialize`, but registers the caller's reference within
+    /// the same lock that created (or confirmed) the directory, so the
+    /// directory cannot be evicted between returning and registering.
+    @discardableResult
+    public func materializeAndRetain(
+        _ snapshot: CommitSnapshot,
+        configFingerprint: String
+    ) throws -> (url: URL, filesWritten: Int) {
+        try materialize(snapshot, configFingerprint: configFingerprint, retaining: true)
+    }
+
+    @discardableResult
+    private func materialize(
+        _ snapshot: CommitSnapshot,
+        configFingerprint: String,
+        retaining: Bool
+    ) throws -> (url: URL, filesWritten: Int) {
         lock.lock()
         defer { lock.unlock() }
 
@@ -37,7 +67,20 @@ public final class Materializer: @unchecked Sendable {
         let marker = destination.appendingPathComponent(completeMarker)
         if FileManager.default.fileExists(atPath: marker.path) {
             try touch(destination)
-            try enforceQuota(keeping: destination)
+            if retaining {
+                retainLocked(destination)
+                do {
+                    try enforceQuota(keeping: destination)
+                } catch {
+                    // The caller never receives the URL when this throws;
+                    // undo the new reference so the directory cannot stay
+                    // un-clearable forever (review F7).
+                    releaseLocked(destination)
+                    throw error
+                }
+            } else {
+                try enforceQuota(keeping: destination)
+            }
             return (destination, 0)
         }
 
@@ -83,15 +126,102 @@ public final class Materializer: @unchecked Sendable {
         }
         try FileManager.default.moveItem(at: staging, to: destination)
         try touch(destination)
-        try enforceQuota(keeping: destination)
+        if retaining {
+            retainLocked(destination)
+            do {
+                try enforceQuota(keeping: destination)
+            } catch {
+                releaseLocked(destination)
+                throw error
+            }
+        } else {
+            try enforceQuota(keeping: destination)
+        }
         return (destination, filesWritten)
+    }
+
+    /// Registers one more user of an already-materialized directory.
+    public func retain(_ url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        retainLocked(url)
+    }
+
+    private func retainLocked(_ url: URL) {
+        inUseCounts[Self.canonicalKey(url), default: 0] += 1
+    }
+
+    /// Drops one reference; the last release makes the directory
+    /// evictable again. Releasing an unretained directory is a no-op so
+    /// cleanup paths stay idempotent.
+    public func release(_ url: URL) {
+        lock.lock()
+        defer { lock.unlock() }
+        releaseLocked(url)
+    }
+
+    private func releaseLocked(_ url: URL) {
+        let key = Self.canonicalKey(url)
+        guard let count = inUseCounts[key] else { return }
+        if count > 1 {
+            inUseCounts[key] = count - 1
+        } else {
+            inUseCounts.removeValue(forKey: key)
+        }
+    }
+
+    public func referenceCount(for url: URL) -> Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return inUseCounts[Self.canonicalKey(url)] ?? 0
+    }
+
+    /// Number of distinct directories currently protected by at least one
+    /// reference.
+    public var retainedDirectoryCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return inUseCounts.count
     }
 
     public func clear() throws {
         lock.lock()
         defer { lock.unlock() }
         guard FileManager.default.fileExists(atPath: rootURL.path) else { return }
+        let inUse = inUseCounts.keys.sorted()
+        guard inUse.isEmpty else {
+            throw MaterializerError.directoriesInUse(inUse)
+        }
         try FileManager.default.removeItem(at: rootURL)
+    }
+
+    private static func canonicalKey(_ url: URL) -> String {
+        url.standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    // MARK: - Cache maintenance (§8.4)
+
+    private var maintenanceDepth = 0
+
+    /// True while an application-level clear is stopping sessions and
+    /// deleting the cache; ExactCoordinator refuses new prepares so no
+    /// fresh session can claim a directory mid-deletion.
+    public var isUnderMaintenance: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return maintenanceDepth > 0
+    }
+
+    public func beginMaintenance() {
+        lock.lock()
+        defer { lock.unlock() }
+        maintenanceDepth += 1
+    }
+
+    public func endMaintenance() {
+        lock.lock()
+        defer { lock.unlock() }
+        maintenanceDepth = max(0, maintenanceDepth - 1)
     }
 
     public static func materializedURL(
@@ -185,8 +315,18 @@ public final class Materializer: @unchecked Sendable {
         }
 
         var total = entries.reduce(UInt64(0)) { $0 + $1.size }
+        // Quota is a soft cap: in-use directories are never reclaimed even
+        // when the total stays above the quota; they become collectable
+        // again once their references drop to zero (§8.3). Directory URLs
+        // from directory enumerations carry trailing slashes, so the
+        // "keep current" comparison uses canonical keys — a raw URL
+        // compare silently evicted the directory just written.
+        let currentKey = Self.canonicalKey(current)
         for entry in entries.sorted(by: { $0.lastAccess < $1.lastAccess })
-        where total > quotaBytes && entry.url != current {
+        where total > quotaBytes && Self.canonicalKey(entry.url) != currentKey {
+            guard inUseCounts[Self.canonicalKey(entry.url)] == nil else {
+                continue
+            }
             try FileManager.default.removeItem(at: entry.url)
             total -= entry.size
             let parent = entry.url.deletingLastPathComponent()

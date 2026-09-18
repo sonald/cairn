@@ -1,0 +1,15 @@
+{
+  "appPID": 58619,
+  "providers": [
+    {
+      "pid": 58632,
+      "command": "/opt/homebrew/bin/rust-analyzer",
+      "cwd": "p58632\nfcwd\nn/private/tmp/cairn-final-acceptance-20260918/alpha"
+    },
+    {
+      "pid": 59328,
+      "command": "/opt/homebrew/bin/rust-analyzer",
+      "cwd": "p59328\nfcwd\nn/private/tmp/cairn-final-acceptance-20260918/第二个 项目"
+    }
+  ]
+}

@@ -924,6 +924,9 @@ func perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() async throws
         recentProjectsStore: store,
         indexService: SessionRestoreIndexService()
     )
+    // §7.3: the model reports checkpoint writes; the app layer owns the
+    // launch pointer. Tests wire the same rule the AppDelegate applies.
+    model.onSessionCheckpointWritten = { store.lastSessionProjectPath = $0 }
 
     func loadFor(_ root: URL) -> SessionCodec.Snapshot? {
         model.loadSessionSnapshot(forProject: root).snapshot
@@ -993,6 +996,9 @@ func legacyV1SessionMigratesToPerProjectStoreOnce() async throws {
         recentProjectsStore: store,
         indexService: SessionRestoreIndexService()
     )
+    // §7.3: the model reports checkpoint writes; the app layer owns the
+    // launch pointer. Tests wire the same rule the AppDelegate applies.
+    model.onSessionCheckpointWritten = { store.lastSessionProjectPath = $0 }
 
     // Hand-written v1 payload: single language field, one file tab.
     try """
@@ -1099,6 +1105,9 @@ func clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() async th
         recentProjectsStore: store,
         indexService: SessionRestoreIndexService()
     )
+    // §7.3: the model reports checkpoint writes; the app layer owns the
+    // launch pointer. Tests wire the same rule the AppDelegate applies.
+    model.onSessionCheckpointWritten = { store.lastSessionProjectPath = $0 }
     try model.openProject(root: root, language: .rust)
     try #require(await testWaitUntil("project installed") {
         model.snapshotPhase == .fullReady
@@ -1436,7 +1445,7 @@ private func encodeJSONString(_ value: String) -> String {
     return String(array.dropFirst().dropLast())
 }
 
-private struct SessionRestoreIndexService: IndexService {
+struct SessionRestoreIndexService: IndexService {
     func index(root: URL, language: LanguageID) async throws -> EngineSession {
         try await Task.detached {
             try ProjectIndexer().index(root: root, language: language)

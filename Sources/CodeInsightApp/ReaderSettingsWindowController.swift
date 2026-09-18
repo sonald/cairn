@@ -3,31 +3,74 @@ import CodeInsightAppModel
 import CodeInsightReaderCore
 import CodeInsightReaderUI
 import CodeInsightExact
+import Observation
 import SwiftUI
+
+/// Application-level trust list state for the Settings window: reads the
+/// one shared registry instead of pinning some window's ExactCoordinator
+/// (§6.4). The AppDelegate refreshes it after grant/revoke.
+@MainActor
+@Observable
+final class TrustListModel {
+    private(set) var repositories: [TrustedRepository] = []
+
+    func refresh(from registry: TrustRegistry) async {
+        repositories = await registry.trustedRepositories()
+    }
+
+    /// Synchronous replacement from a coordinator's already-refreshed
+    /// snapshot.
+    func replace(coordinator: ExactCoordinator) {
+        repositories = coordinator.trustedRepositories
+    }
+
+    /// Synchronous replacement from an explicit list (self-test paths).
+    func replace(_ repositories: [TrustedRepository]) {
+        self.repositories = repositories
+    }
+}
+
+/// Result of the app-level materialized-cache clear (§8.4).
+enum MaterializedCacheClearOutcome: Equatable {
+    case cleared
+    case failed(String)
+
+    var message: String? {
+        switch self {
+        case .cleared: "Materialized cache cleared."
+        case .failed(let reason): reason
+        }
+    }
+}
 
 @MainActor
 final class ReaderSettingsWindowController: NSWindowController {
     private let hostingController: NSHostingController<SettingsView>
-    private let exactCoordinator: ExactCoordinator
+    private let trustModel: TrustListModel
     private let onRevoke: @MainActor (URL) async -> Void
+    private let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
     private let onChange: @MainActor (ReaderSettings) -> Void
     private(set) var currentSettings: ReaderSettings
 
+    /// Production initializer: global operations stay application-owned.
     init(
         settings: ReaderSettings,
-        exactCoordinator: ExactCoordinator,
+        trustModel: TrustListModel,
         onRevoke: @escaping @MainActor (URL) async -> Void,
+        onClearCache: @escaping @MainActor () async -> MaterializedCacheClearOutcome,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
         currentSettings = settings
-        self.exactCoordinator = exactCoordinator
+        self.trustModel = trustModel
         self.onRevoke = onRevoke
+        self.onClearCache = onClearCache
         self.onChange = onChange
         hostingController = NSHostingController(
             rootView: SettingsView(
                 settings: settings,
-                exactCoordinator: exactCoordinator,
+                trustModel: trustModel,
                 onRevoke: onRevoke,
+                onClearCache: onClearCache,
                 onChange: onChange
             )
         )
@@ -38,6 +81,36 @@ final class ReaderSettingsWindowController: NSWindowController {
         super.init(window: window)
     }
 
+    /// Test/single-coordinator initializer kept for existing coverage.
+    /// The list seeds synchronously from the coordinator's in-memory
+    /// snapshot; revoke/clear refresh it from the registry afterwards.
+    convenience init(
+        settings: ReaderSettings,
+        exactCoordinator: ExactCoordinator,
+        onRevoke: @escaping @MainActor (URL) async -> Void,
+        onChange: @escaping @MainActor (ReaderSettings) -> Void
+    ) {
+        let trustModel = TrustListModel()
+        trustModel.replace(coordinator: exactCoordinator)
+        self.init(
+            settings: settings,
+            trustModel: trustModel,
+            onRevoke: { url in
+                await onRevoke(url)
+                await trustModel.refresh(from: exactCoordinator.trustRegistry)
+            },
+            onClearCache: {
+                do {
+                    try await exactCoordinator.clearMaterializedCache()
+                    return .cleared
+                } catch {
+                    return .failed(error.localizedDescription)
+                }
+            },
+            onChange: onChange
+        )
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
@@ -46,8 +119,9 @@ final class ReaderSettingsWindowController: NSWindowController {
         currentSettings = settings
         hostingController.rootView = SettingsView(
             settings: settings,
-            exactCoordinator: exactCoordinator,
+            trustModel: trustModel,
             onRevoke: onRevoke,
+            onClearCache: onClearCache,
             onChange: onChange
         )
     }
@@ -130,8 +204,9 @@ final class ReaderSettingsWindowController: NSWindowController {
 
 private struct SettingsView: View {
     let settings: ReaderSettings
-    let exactCoordinator: ExactCoordinator
+    let trustModel: TrustListModel
     let onRevoke: @MainActor (URL) async -> Void
+    let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
     let onChange: @MainActor (ReaderSettings) -> Void
     @State private var cacheMessage: String? = nil
     @State private var confirmsCacheClear = false
@@ -142,7 +217,7 @@ private struct SettingsView: View {
                 .tabItem { Label("Reader", systemImage: "textformat") }
             VStack(spacing: 12) {
                 TrustSettingsView(
-                    coordinator: exactCoordinator,
+                    trustModel: trustModel,
                     onRevoke: onRevoke
                 )
                 Divider()
@@ -160,12 +235,9 @@ private struct SettingsView: View {
                     ) {
                         Button("Clear", role: .destructive) {
                             Task {
-                                do {
-                                    try await exactCoordinator.clearMaterializedCache()
-                                    cacheMessage = "Materialized cache cleared."
-                                } catch {
-                                    cacheMessage = error.localizedDescription
-                                }
+                                // App-level clear: stops every project's
+                                // Exact work before deleting (§8.4).
+                                cacheMessage = await onClearCache().message
                             }
                         }
                         Button("Cancel", role: .cancel) {}
@@ -400,13 +472,13 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
 }
 
 struct TrustSettingsView: View {
-    @Bindable var coordinator: ExactCoordinator
+    @Bindable var trustModel: TrustListModel
     let onRevoke: @MainActor (URL) async -> Void
     @State private var confirmRevokeRepository: TrustedRepository? = nil
 
     var body: some View {
         Group {
-            if coordinator.trustedRepositories.isEmpty {
+            if trustModel.repositories.isEmpty {
                 VStack(spacing: 8) {
                     Image(systemName: "checkmark.shield")
                         .font(.system(size: 28))
@@ -418,7 +490,7 @@ struct TrustSettingsView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List(coordinator.trustedRepositories) { repository in
+                List(trustModel.repositories) { repository in
                     HStack(spacing: 12) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(repository.path)
@@ -460,6 +532,5 @@ struct TrustSettingsView: View {
                 }
             }
         }
-        .task { await coordinator.refreshTrust() }
     }
 }

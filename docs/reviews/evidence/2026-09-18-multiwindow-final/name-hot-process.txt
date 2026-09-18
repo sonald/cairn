@@ -1,0 +1,2 @@
+58619     1 /Applications/Cairn.app/Contents/MacOS/codeinsight-app
+58631 58619 /Applications/Cairn.app/Contents/MacOS/codeinsight-app

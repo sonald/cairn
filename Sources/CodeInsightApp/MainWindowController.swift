@@ -71,9 +71,36 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     )
     private let recentProjectsStore: RecentProjectsStore
     private let recordsRecentProjects: Bool
+    /// True for offscreen windows built by self-tests; their teardown skips
+    /// scheduling asynchronous cleanup into the shared test run loop.
+    private let isOffscreenTestWindow: Bool
     private let onChooseProject: () -> Void
-    private let onChooseProjectLanguage: (URL) -> Void
+    private let onChooseProjectLanguage: (URL, MainWindowController) -> Void
     private let onShowSettings: () -> Void
+    /// Reports the controller to the application as soon as AppKit starts
+    /// closing its window so routing excludes it immediately; the retained
+    /// controller keeps finishing its asynchronous teardown afterwards.
+    var onProjectWindowClosing: ((MainWindowController) -> Void)?
+    /// Reports the controller once its asynchronous teardown finished and
+    /// its project claim was released; the application drops it from the
+    /// window collection here, not when the window disappears (§7.1).
+    var onProjectWindowClosed: ((MainWindowController) -> Void)?
+    /// Notifies the application that this window became the active project
+    /// window (restore-target ordering, blank-window preference).
+    var onProjectWindowBecameActive: ((MainWindowController) -> Void)?
+    /// Claimed project identity (standardized, symlink-resolved). Set before
+    /// any asynchronous load starts and kept through the whole closing
+    /// sequence; `nil` while the window shows the welcome surface.
+    private(set) var projectURL: URL?
+    /// True once window closing was approved; rejects new project work.
+    private(set) var isClosing = false
+    /// Waiters for the completion of an approved close (a repeated open of
+    /// the same project must wait for the previous session writer to end).
+    private var closeWaiters: [CheckedContinuation<Void, Never>] = []
+    /// The running asynchronous teardown, if one started.
+    private(set) var teardownTask: Task<Void, Never>?
+    /// Session anchors restored/kept even when the load later failed, used
+    /// by Retry; cleared only by teardown.
     private var displayedGeneration: UInt64?
     private var displayedSnapshotID: SnapshotID?
     private var displayedNavigationGeneration: UInt64?
@@ -101,6 +128,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var currentReaderSettings = ReaderSettings()
     private let layoutDefaults: UserDefaults?
     private var contextVisibilityOverride: Bool?
+    /// Per-window frame autosave: project windows derive it from the project
+    /// identity so siblings never fight over `CodeInsightMainWindow`; blank
+    /// windows keep the legacy name only when nothing better applies.
+    private let frameAutosaveName: NSWindow.FrameAutosaveName?
 
     init(
         model: AppModel,
@@ -110,19 +141,24 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
         layoutDefaults: UserDefaults? = nil,
+        frameAutosaveName: NSWindow.FrameAutosaveName? = nil,
         onChooseProject: @escaping () -> Void = {},
-        onChooseProjectLanguage: @escaping (URL) -> Void = { _ in },
+        onChooseProjectLanguage: @escaping (URL, MainWindowController) -> Void = {
+            _, _ in
+        },
         onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
         currentReaderSettings = settings
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
+        self.isOffscreenTestWindow = offscreen
         self.layoutDefaults = layoutDefaults ?? (offscreen ? nil : .standard)
         contextVisibilityOverride = self.layoutDefaults?.object(forKey: "Cairn.contextVisible") as? Bool
         self.onChooseProject = onChooseProject
         self.onChooseProjectLanguage = onChooseProjectLanguage
         self.onShowSettings = onShowSettings
+        self.frameAutosaveName = frameAutosaveName
         sidebarController.setSplitAutosaveName(
             offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
         )
@@ -378,8 +414,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             window.toolbar = toolbar
         }
         if !offscreen {
-            window.center()
-            window.setFrameAutosaveName("CodeInsightMainWindow")
+            if let frameAutosaveName {
+                window.setFrameAutosaveName(frameAutosaveName)
+            } else {
+                window.center()
+                window.setFrameAutosaveName("CodeInsightMainWindow")
+            }
         }
         sidebarController.onOpenFile = { [weak self] url in
             self?.navigate(to: url)
@@ -637,7 +677,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// read just focuses its window; a project with a saved reading
     /// session restores it (an explicit language choice overrides the
     /// saved combination); otherwise it opens fresh. The outgoing project
-    /// is always flushed first.
+    /// is always flushed first. The project identity is claimed before any
+    /// asynchronous load starts so duplicate requests resolve to this
+    /// window.
     private func openProjectWithSavedSession(
         root: URL,
         languages: [LanguageID],
@@ -645,6 +687,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         forcingReopen: Bool = false
     ) {
         let root = root.standardizedFileURL
+        claimProject(root)
         if !forcingReopen,
            model.projectRoot?.standardizedFileURL == root,
            case .ready = model.projectState,
@@ -652,6 +695,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
            !overridesSavedLanguages || model.projectLanguages == languages
         {
             window?.makeKeyAndOrderFront(nil)
+            render()
             return
         }
         // Every actual reopen, including a language change on the same root,
@@ -705,6 +749,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             fileURLWithPath: snapshot.projectRoot,
             isDirectory: true
         ).standardizedFileURL
+        claimProject(root)
         lastOpenedProjectRoot = root
         lastOpenedProjectLanguages = overridingLanguages ?? snapshot.languages
         pendingRecentProjectRoot = root
@@ -730,6 +775,72 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sessionRestoreTask = nil
     }
 
+    /// Registers the project identity this window is now responsible for.
+    /// Called before any asynchronous load so a duplicate request can find
+    /// this window while it is still indexing/restoring.
+    func claimProject(_ root: URL) {
+        let identity = root.resolvingSymlinksInPath().standardizedFileURL
+        projectURL = identity
+    }
+
+    /// A blank window that claims a project adopts the project-scoped frame
+    /// autosave so sibling windows stop sharing one name (§6.4). Switching
+    /// away from the shared blank default is expected; a window that
+    /// already carries a project-specific name keeps it.
+    func adoptProjectFrameAutosave(for root: URL) {
+        guard projectURL == root.resolvingSymlinksInPath().standardizedFileURL,
+              let window,
+              window.frameAutosaveName.isEmpty
+                || window.frameAutosaveName
+                    == NSWindow.FrameAutosaveName("CodeInsightMainWindow")
+        else { return }
+        window.setFrameAutosaveName(NSWindow.FrameAutosaveName(
+            "CodeInsightMainWindow-"
+                + AppModel.sessionProjectKey(for: root)
+        ))
+    }
+
+    /// Releases a claim whose open never completed (cancelled language
+    /// pick, terminated request) so the window returns to the blank pool
+    /// and a repeat request starts over (§3.3).
+    func releaseProjectClaim() {
+        guard !isClosing else { return }
+        projectURL = nil
+        window?.setFrameAutosaveName("")
+    }
+
+    /// A window that can transparently take over an open request: it has
+    /// not claimed a project and is neither opening/restoring nor closing.
+    /// Showing the welcome surface alone does not make a window reusable.
+    var isUnclaimedForReuse: Bool {
+        projectURL == nil && !isClosing && sessionRestoreTask == nil
+    }
+
+    /// True when this controller owns `window` as its project main window
+    /// or one of its tool panels/sheets; used for menu routing.
+    func controls(window candidate: NSWindow?) -> Bool {
+        guard let candidate else { return false }
+        if candidate === window { return true }
+        if let searchPanel, searchPanel.window === candidate { return true }
+        if let bookmarkPanel, bookmarkPanel.window === candidate { return true }
+        if let palettePanel, palettePanel.window === candidate { return true }
+        if candidate.sheetParent === window { return true }
+        return false
+    }
+
+    /// Resolves another window's panels the same way menu routing does;
+    /// exposed for tests.
+    func panelKind(of candidate: NSWindow?) -> String? {
+        guard let candidate, candidate !== window else { return nil }
+        if let searchPanel, searchPanel.window === candidate { return "search" }
+        if let bookmarkPanel, bookmarkPanel.window === candidate {
+            return "bookmarks"
+        }
+        if let palettePanel, palettePanel.window === candidate { return "palette" }
+        if candidate.sheetParent === window { return "sheet" }
+        return nil
+    }
+
     /// Clears this project's saved reading session after an explicit
     /// confirmation: all tabs close (discarding their Reading Sets) and
     /// the navigation state is dropped; the source tree, bookmarks, and
@@ -747,8 +858,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         alert.addButton(withTitle: "Cancel")
         guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            self?.clearReadingSession()
+            guard response == .alertFirstButtonReturn,
+                  let self, !self.isClosing else { return }
+            self.clearReadingSession()
         }
     }
 
@@ -1895,8 +2007,135 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         updateRelationsWidthAdaptation()
     }
 
+    func windowDidBecomeMain(_ notification: Notification) {
+        onProjectWindowBecameActive?(self)
+    }
+
+    /// Approval stage: capture the reading state and run the final
+    /// checkpoint before anything is torn down. A failed save offers
+    /// retry / cancel close / continue here — `windowWillClose` is too
+    /// late to ask. Nothing irreversible happens yet.
+    func windowShouldClose(_ sender: NSWindow) -> Bool {
+        if isClosing { return true }
+        while true {
+            do {
+                try checkpointSessionSynchronouslyReportingFailure()
+                return true
+            } catch {
+                guard let window else { return true }
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = "Reading Session Not Saved"
+                alert.informativeText =
+                    "The reading session for "
+                    + (projectURL?.lastPathComponent ?? "this project")
+                    + " could not be saved: "
+                    + Self.sessionSaveFailureSummary(error)
+                    + " The previous file on disk is kept."
+                alert.addButton(withTitle: "Retry Save")
+                alert.addButton(withTitle: "Close Without Saving")
+                alert.addButton(withTitle: "Cancel")
+                switch alert.runModal() {
+                case .alertFirstButtonReturn:
+                    continue
+                case .alertSecondButtonReturn:
+                    return true
+                default:
+                    return false
+                }
+            }
+        }
+    }
+
+    nonisolated private static func sessionSaveFailureSummary(
+        _ error: any Error
+    ) -> String {
+        let text = String(describing: error)
+        return String(text.prefix(200))
+    }
+
+    /// Approved-close stage: mark closing (routing stops here), flush what
+    /// can still be flushed synchronously, then finish the asynchronous
+    /// teardown (task cancellation, Exact provider exit) while the
+    /// application keeps this controller alive. Idempotent.
     func windowWillClose(_ notification: Notification) {
+        // Final synchronous capture happens before anything tears down;
+        // failures already surfaced (and were approved) in windowShouldClose.
+        beginTeardown(runFinalCheckpoint: true)
+    }
+
+    /// Shared teardown entry for window close and application termination
+    /// (§7.1). The controller keeps claiming its project (and stays in the
+    /// application's collection) until the asynchronous finish released it,
+    /// so a repeat open of the same project waits instead of racing a
+    /// second session writer. Idempotent.
+    func beginTeardown(runFinalCheckpoint: Bool) {
+        guard !isClosing else { return }
+        isClosing = true
+        if runFinalCheckpoint {
+            checkpointSessionSynchronously()
+        }
         savePanelLayout()
+        onProjectWindowClosing?(self)
+        closeAuxiliaryPanels()
+        cancelSessionRestore()
+        escapeMonitor.map(NSEvent.removeMonitor)
+        escapeMonitor = nil
+        teardownTask = Task { [weak self] in
+            guard let self else { return }
+            await self.model.closeProject()
+            self.projectURL = nil
+            self.onProjectWindowClosed?(self)
+            self.resumeCloseWaiters()
+        }
+    }
+
+    /// Closes every tool surface this window owns so no orphan panel
+    /// outlives its project window. Panels are dismissed with orderOut:
+    /// their controllers own the windows, so window.close()'s
+    /// released-when-closed semantics would over-release them once the
+    /// controller reference drops.
+    private func closeAuxiliaryPanels() {
+        palettePanel?.window?.orderOut(nil)
+        palettePanel = nil
+        searchPanel?.window?.orderOut(nil)
+        searchPanel = nil
+        bookmarkPanel?.closePanel()
+        bookmarkPanel = nil
+        commitPickerPopover?.dismiss()
+        commitPickerPopover = nil
+        compareCommitPickerPopover?.dismiss()
+        compareCommitPickerPopover = nil
+    }
+
+    /// Suspends until an approved close finished its asynchronous teardown.
+    func waitForCloseCompletion() async {
+        guard isClosing else { return }
+        await withCheckedContinuation { continuation in
+            closeWaiters.append(continuation)
+        }
+    }
+
+    /// Teardown entry for application termination: identical to a window
+    /// close except that the terminator already ran (or explicitly skipped)
+    /// the final saves, so no second checkpoint runs here. The terminator
+    /// then awaits `teardownCompletion()` for every window, including ones
+    /// whose close is still finishing (§7.2).
+    func beginTerminateTeardown() {
+        beginTeardown(runFinalCheckpoint: false)
+    }
+
+    /// Waits for this window's asynchronous teardown to finish (provider
+    /// exit, cache reference release, claim release). Returns immediately
+    /// when teardown never started.
+    func teardownCompletion() async {
+        await teardownTask?.value
+    }
+
+    private func resumeCloseWaiters() {
+        let waiters = closeWaiters
+        closeWaiters = []
+        waiters.forEach { $0.resume() }
     }
 
     /// Applies the §3.1 panel exit rules when the content surface actually
@@ -2576,6 +2815,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             projectLabel.stringValue = "Cairn"
             projectLabel.textColor = .secondaryLabelColor
         }
+        updateWindowTitle()
         window?.toolbar?.items.first {
             $0.itemIdentifier == Self.projectItemIdentifier
         }?.menuFormRepresentation?.title = projectLabel.stringValue
@@ -2739,6 +2979,29 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return menu
     }
 
+    /// "project-name — Cairn"; sibling projects sharing a name are told
+    /// apart by their parent directory (§6.3). The title bar itself stays
+    /// hidden (toolbar style) — the title serves the Window menu, Mission
+    /// Control, and AppKit switcher surfaces.
+    func updateWindowTitle(among siblings: [URL] = []) {
+        guard let window else { return }
+        guard let identity = projectURL ?? model.fileTree?.root else {
+            window.title = "Cairn"
+            return
+        }
+        let name = identity.lastPathComponent
+        let disambiguation = siblings.first { other in
+            other != identity && other.lastPathComponent == name
+        }
+        if let disambiguation {
+            let parent = disambiguation.deletingLastPathComponent()
+                .lastPathComponent
+            window.title = "\(name) (\(parent)) — Cairn"
+        } else {
+            window.title = "\(name) — Cairn"
+        }
+    }
+
     private func renderEmptyState() {
         if case .ready = model.projectState, let root = pendingRecentProjectRoot {
             if recordsRecentProjects {
@@ -2754,6 +3017,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let retry = { [weak self] in
             _ = self?.retryLastOpenedProject()
         }
+        let openDropped = { [weak self] (root: URL) in
+            guard let self else { return }
+            self.onChooseProjectLanguage(root, self)
+        }
         switch model.projectState {
         case .empty:
             readerController.showEmptyState(
@@ -2761,7 +3028,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 failed: false,
                 onChooseProject: onChooseProject,
                 onOpenRecent: { [weak self] in self?.openRecentProject($0) },
-                onOpenDropped: onChooseProjectLanguage,
+                onOpenDropped: openDropped,
                 onRetry: retry
             )
         case .failed:
@@ -2771,7 +3038,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
                 onOpenRecent: { [weak self] in self?.openRecentProject($0) },
-                onOpenDropped: onChooseProjectLanguage,
+                onOpenDropped: openDropped,
                 onRetry: retry
             )
         case .indexing:
@@ -3085,9 +3352,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         alert.addButton(withTitle: "Cancel")
         guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
-            guard response == .alertFirstButtonReturn else { return }
-            _ = self?.model.bookmarkModel.delete(id: id)
-            self?.render()
+            guard response == .alertFirstButtonReturn,
+                  let self, !self.isClosing else { return }
+            _ = self.model.bookmarkModel.delete(id: id)
+            self.render()
         }
     }
 
@@ -3374,6 +3642,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         captureActiveTabState()
         savePanelLayout()
         try? model.writeSessionCheckpoint(
+            panelPreset: panelPreset,
+            allowsPendingTopology: allowsPendingTopology
+        )
+    }
+
+    /// Same checkpoint, but reports the save failure so the close approval
+    /// stage can offer retry/cancel/continue (§7.1).
+    func checkpointSessionSynchronouslyReportingFailure(
+        allowsPendingTopology: Bool = false
+    ) throws {
+        captureActiveTabState()
+        savePanelLayout()
+        try model.writeSessionCheckpoint(
             panelPreset: panelPreset,
             allowsPendingTopology: allowsPendingTopology
         )

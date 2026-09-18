@@ -1,0 +1,12 @@
+{
+  "ciExit": 0,
+  "totalTests": 972,
+  "main": 968,
+  "isolated": 2,
+  "panels": 2,
+  "releaseSHA256": "4163ef74bbeecd439bf955cc0bf35d803ce73eb02a668eee7d5e5269e1724b12",
+  "uiBundle": "/tmp/cairn-p2-fixes-20260917/Cairn.app",
+  "uiBuild": "debug executable after targeted GREEN, ad-hoc signed bundle",
+  "uiBundleID": "dev.cairn.Cairn.p2fixes20260917",
+  "uiHome": "/tmp/cairn-p2-fixes-20260917/home"
+}

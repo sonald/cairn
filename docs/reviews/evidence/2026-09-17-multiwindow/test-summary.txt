@@ -1,0 +1,20 @@
+✔ Test run with 18 tests in 0 suites passed after 0.016 seconds.
+✔ Test run with 8 tests in 0 suites passed after 7.038 seconds.
+✔ Test run with 30 tests in 0 suites passed after 8.403 seconds.
+✔ Test run with 11 tests in 0 suites passed after 0.011 seconds.
+✔ Test run with 18 tests in 0 suites passed after 1.490 seconds.
+✔ Test run with 119 tests in 0 suites passed after 340.876 seconds.
+✔ Test run with 19 tests in 0 suites passed after 13.491 seconds.
+✔ Test run with 100 tests in 0 suites passed after 16.092 seconds.
+✔ Test run with 125 tests in 0 suites passed after 14.578 seconds.
+✔ Test run with 16 tests in 0 suites passed after 0.041 seconds.
+✘ Test run with 116 tests in 3 suites failed after 76.320 seconds with 1 issue.
+✔ Test run with 376 tests in 0 suites passed after 36.450 seconds.
+MAIN_TOTAL=956
+CI_EXIT=1
+FAILED_EXPECTATION=NSScreen.main
+SCREEN_RETRY_EXIT=0; 1 test passed (normal permissions)
+FOCUSED_EXIT=0; 3 routing + 8 sharing tests passed
+SELF_TEST_MULTIWINDOW_EXIT=0
+ISOLATED_REMAINING_4=NOT_RUN (CI stopped at main batch)
+LATER_CI_GATES=NOT_RUN

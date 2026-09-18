@@ -1,0 +1,14 @@
+[
+  {
+    "pid": 58632,
+    "command": "/opt/homebrew/bin/rust-analyzer",
+    "cwd": "p58632\nfcwd\nn/private/tmp/cairn-final-acceptance-20260918/alpha",
+    "aliveAfterAlphaClose": false
+  },
+  {
+    "pid": 59328,
+    "command": "/opt/homebrew/bin/rust-analyzer",
+    "cwd": "p59328\nfcwd\nn/private/tmp/cairn-final-acceptance-20260918/第二个 项目",
+    "aliveAfterAlphaClose": true
+  }
+]
