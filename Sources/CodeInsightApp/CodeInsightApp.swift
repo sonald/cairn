@@ -68,6 +68,60 @@ private func foldPerformanceArguments(
     )
 }
 
+private struct WrapPerformanceRequest {
+    let fixture: URL
+    let wrapOn: Bool
+    let scenario: String
+    let output: URL
+    let codeSHA: String
+    let warmupCount: Int
+    let sampleCount: Int
+}
+
+/// Argument surface for the soft-wrap performance mode (§7.4.1):
+/// `--self-test-wrap --fixture <path> --wrap <on|off>
+///  --scenario <initial|toggle|resize|reading-set> --output <path>`
+/// plus optional `--code-sha`, `--warmup`, and `--samples`.
+private func wrapPerformanceArguments(
+    _ arguments: [String]
+) -> WrapPerformanceRequest? {
+    guard arguments.contains("--self-test-wrap"),
+          let fixtureIndex = arguments.firstIndex(of: "--fixture"),
+          arguments.indices.contains(fixtureIndex + 1),
+          let wrapIndex = arguments.firstIndex(of: "--wrap"),
+          arguments.indices.contains(wrapIndex + 1),
+          ["on", "off"].contains(arguments[wrapIndex + 1]),
+          let scenarioIndex = arguments.firstIndex(of: "--scenario"),
+          arguments.indices.contains(scenarioIndex + 1),
+          ["initial", "toggle", "resize", "reading-set"]
+              .contains(arguments[scenarioIndex + 1]),
+          let outputIndex = arguments.firstIndex(of: "--output"),
+          arguments.indices.contains(outputIndex + 1)
+    else { return nil }
+    func value(after flag: String) -> String? {
+        guard let index = arguments.firstIndex(of: flag),
+              arguments.indices.contains(index + 1)
+        else { return nil }
+        return arguments[index + 1]
+    }
+    let warmup = value(after: "--warmup").flatMap(Int.init) ?? 5
+    let samples = value(after: "--samples").flatMap(Int.init) ?? 30
+    guard warmup >= 0, samples >= 1, samples <= 200 else { return nil }
+    return WrapPerformanceRequest(
+        fixture: URL(
+            fileURLWithPath: arguments[fixtureIndex + 1]
+        ).standardizedFileURL,
+        wrapOn: arguments[wrapIndex + 1] == "on",
+        scenario: arguments[scenarioIndex + 1],
+        output: URL(
+            fileURLWithPath: arguments[outputIndex + 1]
+        ).standardizedFileURL,
+        codeSHA: value(after: "--code-sha") ?? "unknown",
+        warmupCount: warmup,
+        sampleCount: samples
+    )
+}
+
 private struct DiffSelfTestTarget {
     let file: URL
     let path: String
@@ -124,6 +178,22 @@ private struct CodeInsightApplication {
                 (
                     "usage: codeinsight-app --fold-perf-mode <control|fold> "
                         + "--fold-perf-fixture <path> --fold-perf-out <json>\n"
+                ).utf8
+            ))
+            Darwin.exit(2)
+        }
+        let wrapPerformanceRequested = arguments.contains("--self-test-wrap")
+        let wrapPerformance = wrapPerformanceRequested
+            ? wrapPerformanceArguments(arguments)
+            : nil
+        if wrapPerformanceRequested, wrapPerformance == nil {
+            FileHandle.standardError.write(Data(
+                (
+                    "usage: codeinsight-app --self-test-wrap --fixture <path> "
+                        + "--wrap <on|off> "
+                        + "--scenario <initial|toggle|resize|reading-set> "
+                        + "--output <json> [--code-sha <sha>] "
+                        + "[--warmup N] [--samples N]\n"
                 ).utf8
             ))
             Darwin.exit(2)
@@ -197,6 +267,10 @@ private struct CodeInsightApplication {
                 fixture: foldPerformance.fixture,
                 output: foldPerformance.output
             )
+        }
+        if let wrapPerformance {
+            app.setActivationPolicy(.prohibited)
+            runWrapPerformance(wrapPerformance)
         }
         app.setActivationPolicy(.regular)
         let exactRoot = arguments.firstIndex(of: "--self-test-exact")
@@ -13549,6 +13623,646 @@ private func runFoldPerformance(
     }
     withExtendedLifetime((reader, window, scrollView)) {}
     write(object, status: configurationIsExact ? 0 : 1)
+}
+
+/// Soft-wrap performance mode (§7.4.1/§7.4.2). Unlike the fold runner, this
+/// entry must not hard-code `wrapLines = false`: the requested wrap state is
+/// a parameter, and the effective configuration (width tracking, scroller
+/// visibility) is verified against the request instead of echoing it back.
+@MainActor
+private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
+    func write(_ object: [String: Any], status: Int32) -> Never {
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: object,
+                options: [.sortedKeys]
+            )
+            try data.write(to: request.output, options: .atomic)
+        } catch {
+            FileHandle.standardError.write(Data("\(error)\n".utf8))
+            Darwin.exit(1)
+        }
+        Darwin.exit(status)
+    }
+
+    // Reading Set cards gain wrap support in S2b; until then this scenario is
+    // an explicit `unsupported`, never a fabricated baseline (§7.4.3).
+    if request.scenario == "reading-set" {
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": "reading-set",
+            "requestedWrap": request.wrapOn,
+            "status": "unsupported",
+            "reason": "Reading Set wrap reflow lands in S2b; "
+                + "no wrap-on layout exists on this baseline",
+        ], status: 0)
+    }
+
+    var fixtureBytes: [UInt8] = []
+    do {
+        fixtureBytes = Array(try Data(
+            contentsOf: request.fixture,
+            options: .mappedIfSafe
+        ))
+    } catch {
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "error",
+            "error": "fixture read failed: \(error)",
+        ], status: 1)
+    }
+
+    let peakBytes = OSAllocatedUnfairLock(
+        initialState: physicalFootprintBytes() ?? 0
+    )
+    let samplerQueue = DispatchQueue(label: "com.codeinsight.wrap-perf-sampler")
+    let sampler = DispatchSource.makeTimerSource(queue: samplerQueue)
+    sampler.schedule(
+        deadline: .now(),
+        repeating: .milliseconds(25),
+        leeway: .milliseconds(2)
+    )
+    let sampleMemory: @Sendable () -> Void = {
+        guard let bytes = physicalFootprintBytes() else { return }
+        peakBytes.withLock { $0 = max($0, bytes) }
+    }
+    sampler.setEventHandler(handler: sampleMemory)
+    sampler.resume()
+
+    // Main-thread stall probe: a 5ms heartbeat on a background queue whose
+    // main-queue continuations record how late they actually ran. The maximum
+    // lateness over the window approximates the longest contiguous stall.
+    let stallWindow = OSAllocatedUnfairLock(initialState: 0.0)
+    let stallQueue = DispatchQueue(label: "com.codeinsight.wrap-perf-stall")
+    let stallTimer = DispatchSource.makeTimerSource(queue: stallQueue)
+    stallTimer.schedule(
+        deadline: .now(),
+        repeating: .milliseconds(5),
+        leeway: .milliseconds(1)
+    )
+    // Explicit @Sendable typing keeps this handler nonisolated: it runs on the
+    // probe queue, only its main-queue continuation touches main state.
+    let heartbeat: @Sendable () -> Void = {
+        let scheduled = ContinuousClock.now
+        DispatchQueue.main.async {
+            let lateness = milliseconds(since: scheduled)
+            stallWindow.withLock { $0 = max($0, lateness) }
+        }
+    }
+    stallTimer.setEventHandler(handler: heartbeat)
+    stallTimer.resume()
+
+    func stopProbes() -> (peak: UInt64, longestStallMs: Double) {
+        sampler.cancel()
+        stallTimer.cancel()
+        samplerQueue.sync {}
+        stallQueue.sync {}
+        return (peakBytes.withLock { $0 }, stallWindow.withLock { $0 })
+    }
+
+    // Stall samples during fixture load and initial setup would swamp the
+    // per-scenario budget; the measurement window starts clean (§7.4.2).
+    func resetStallProbe() {
+        stallWindow.withLock { $0 = 0 }
+    }
+
+    let reader = ReaderTextView()
+    var baseSettings = ReaderSettings()
+    baseSettings.fontSize = 13
+    baseSettings.lineNumbers = true
+    baseSettings.theme = .siClassic
+
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    let host = NSView(frame: NSRect(x: 0, y: 0, width: 1440, height: 900))
+    window.contentView = host
+    let scrollView = NSScrollView(
+        frame: NSRect(x: 100, y: 60, width: 1220, height: 780)
+    )
+    scrollView.hasVerticalScroller = true
+    scrollView.hasHorizontalScroller = true
+    // Overlay + autohide scrollers never consume content-view space, so the
+    // clip geometry stays exactly 1200x760 across wrap toggles (legacy
+    // scrollers appearing and disappearing would drift it by a knob width
+    // and break the configuration check).
+    scrollView.scrollerStyle = .overlay
+    scrollView.autohidesScrollers = true
+    scrollView.documentView = reader.view
+    host.addSubview(scrollView)
+    reader.view.frame = scrollView.contentView.bounds
+
+    func fitViewport() {
+        for _ in 0..<4 {
+            scrollView.tile()
+            let size = scrollView.contentView.bounds.size
+            let delta = NSSize(width: 1200 - size.width, height: 760 - size.height)
+            guard abs(delta.width) > 0.01 || abs(delta.height) > 0.01 else {
+                break
+            }
+            scrollView.setFrameSize(NSSize(
+                width: scrollView.frame.width + delta.width,
+                height: scrollView.frame.height + delta.height
+            ))
+        }
+        scrollView.tile()
+    }
+
+    func layoutLooksComplete() -> Bool {
+        guard let manager = reader.view.textLayoutManager else { return false }
+        guard manager.textViewportLayoutController.viewportRange != nil
+        else { return false }
+        guard let fragment = manager.textLayoutFragment(for: .zero)
+        else { return false }
+        return !fragment.textLineFragments.isEmpty
+    }
+
+    // Offscreen windows never order front, so displayIfNeeded performs no
+    // drawing. cacheDisplay runs the real draw callbacks (including the
+    // reader's background pass) into a bitmap: that counter is the honest
+    // "frame actually rendered" signal (§7.4.2).
+    guard let drawBitmap = NSBitmapImageRep(
+        bitmapDataPlanes: nil,
+        pixelsWide: 1200 * 2,
+        pixelsHigh: 760 * 2,
+        bitsPerSample: 8,
+        samplesPerPixel: 4,
+        hasAlpha: true,
+        isPlanar: false,
+        colorSpaceName: .deviceRGB,
+        bytesPerRow: 0,
+        bitsPerPixel: 0
+    ) else {
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "error",
+            "error": "draw bitmap allocation failed",
+        ], status: 1)
+    }
+
+    func measureFirstFrame(
+        since start: ContinuousClock.Instant,
+        timeout: TimeInterval
+    ) -> Double? {
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        let baselineDraws = reader.backgroundDrawCount
+        while Date() < deadline {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.004))
+            reader.view.textLayoutManager?.textViewportLayoutController
+                .layoutViewport()
+            window.displayIfNeeded()
+            // Render the VISIBLE region, exactly what a real first frame
+            // paints; rendering the full document bounds would charge
+            // off-screen layout to the first-frame metric.
+            var drawRect = reader.view.visibleRect.intersection(reader.view.bounds)
+            if drawRect.isEmpty { drawRect = reader.view.bounds }
+            reader.view.cacheDisplay(in: drawRect, to: drawBitmap)
+            if reader.backgroundDrawCount > baselineDraws, layoutLooksComplete() {
+                return milliseconds(since: start)
+            }
+        }
+        return nil
+    }
+
+    // Settled = geometry stops moving for three consecutive 16ms pumps. This
+    // is an observed quiet period, not a fixed sleep, and each geometry
+    // adjustment during the window is counted (the pre-S1 stand-in for
+    // restorePassCount diagnostics).
+    func measureSettled(timeout: TimeInterval) -> (ms: Double, adjustments: Int)? {
+        let started = ContinuousClock.now
+        let deadline = Date(timeIntervalSinceNow: timeout)
+        var lastSignature: (height: CGFloat, originY: CGFloat)?
+        var stablePumps = 0
+        var adjustments = 0
+        while Date() < deadline {
+            // 5ms pumps keep the quiet-period floor small while still letting
+            // main-queue follow-ups (deferred validation, TextKit height
+            // corrections) land and register as signature changes.
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+            reader.view.textLayoutManager?.textViewportLayoutController
+                .layoutViewport()
+            window.displayIfNeeded()
+            let signature = (
+                height: reader.view.frame.height,
+                originY: reader.view.enclosingScrollView?.contentView.bounds.minY ?? 0
+            )
+            if let lastSignature,
+               lastSignature.height == signature.height,
+               lastSignature.originY == signature.originY
+            {
+                stablePumps += 1
+                if stablePumps >= 3 {
+                    return (milliseconds(since: started), adjustments)
+                }
+            } else {
+                stablePumps = 0
+                if lastSignature != nil { adjustments += 1 }
+                lastSignature = signature
+            }
+        }
+        return nil
+    }
+
+    let loader = DocumentLoader(
+        source: { file in Array(try Data(contentsOf: file, options: .mappedIfSafe)) }
+    )
+    let initialDocument: ReaderDocument
+    do {
+        initialDocument = try loader.load(file: request.fixture).document
+    } catch {
+        let probes = stopProbes()
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "error",
+            "error": "fixture load failed: \(error)",
+            "peakPhysBytes": probes.peak,
+        ], status: 1)
+    }
+    let syntaxResult = OSAllocatedUnfairLock(
+        initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none
+    )
+    loader.loadSyntax(for: initialDocument) { result in
+        syntaxResult.withLock { $0 = result }
+    }
+    guard waitUntil(timeout: 30, condition: {
+        syntaxResult.withLock { $0 != nil }
+    }), let result = syntaxResult.withLock({ $0 })
+    else {
+        let probes = stopProbes()
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "timeout",
+            "error": "syntax load timed out",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": probes.peak,
+        ], status: 1)
+    }
+    let document: ReaderDocument
+    switch result {
+    case .success(let loaded):
+        document = loaded
+    case .failure(let error):
+        let probes = stopProbes()
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "error",
+            "error": "syntax load failed: \(error)",
+            "peakPhysBytes": probes.peak,
+        ], status: 1)
+    }
+
+    func settingsFor(wrap: Bool) -> ReaderSettings {
+        var settings = baseSettings
+        settings.wrapLines = wrap
+        return settings
+    }
+
+    var samples: [[String: Any]] = []
+    var timedOut = false
+    // Wrap-state bits captured while the requested configuration was actually
+    // installed: the toggle scenario leaves the opposite state behind for the
+    // next cycle, so reading end state would misreport the measured run.
+    var measuredWrapState: (
+        widthTracking: Bool,
+        horizontalScroller: Bool,
+        horizontallyResizable: Bool
+    )?
+    func captureWrapState() {
+        measuredWrapState = (
+            widthTracking: reader.view.textContainer?.widthTracksTextView == true,
+            horizontalScroller: scrollView.hasHorizontalScroller,
+            horizontallyResizable: reader.view.isHorizontallyResizable
+        )
+    }
+    let measurementStart = {
+        // The machine's real scroll-bar preference (often legacy "Always")
+        // is only delivered once the runloop runs during fixture/syntax
+        // loading, and that notification resets scrollers that were styled
+        // before it arrived. Re-pin the overlay style here so the clip
+        // geometry is stable across the whole measurement window.
+        scrollView.scrollerStyle = .overlay
+        window.displayIfNeeded()
+        fitViewport()
+        // Stall samples during fixture load and initial setup would swamp
+        // the per-scenario budget; the window starts clean (§7.4.2).
+        stallWindow.withLock { $0 = 0 }
+    }
+
+    switch request.scenario {
+    case "initial":
+        reader.apply(settings: settingsFor(wrap: request.wrapOn))
+        _ = measurementStart()
+        for cycle in 0..<(request.warmupCount + request.sampleCount) {
+            // The timed action is the full re-display: projection build,
+            // storage install, layout, and first render.
+            let started = ContinuousClock.now
+            reader.display(document: document, fileURL: request.fixture)
+            guard let firstFrame = measureFirstFrame(
+                since: started,
+                timeout: 10
+            ), let settled = measureSettled(timeout: 10)
+            else {
+                timedOut = true
+                break
+            }
+            captureWrapState()
+            samples.append([
+                "cycle": cycle,
+                "warmup": cycle < request.warmupCount,
+                "firstFrameMs": firstFrame,
+                "settledMs": settled.ms,
+                "settleAdjustments": settled.adjustments,
+            ])
+        }
+    case "toggle":
+        reader.apply(settings: settingsFor(wrap: !request.wrapOn))
+        reader.display(document: document, fileURL: request.fixture)
+        _ = measurementStart()
+        guard measureFirstFrame(
+            since: ContinuousClock.now,
+            timeout: 10
+        ) != nil, measureSettled(timeout: 10) != nil
+        else {
+            timedOut = true
+            break
+        }
+        for cycle in 0..<(request.warmupCount + request.sampleCount) {
+            // Timed half: the settings apply that flips to the requested
+            // wrap state, through the first rendered frame.
+            let started = ContinuousClock.now
+            reader.apply(settings: settingsFor(wrap: request.wrapOn))
+            guard let firstFrame = measureFirstFrame(
+                since: started,
+                timeout: 10
+            ), let settled = measureSettled(timeout: 10)
+            else {
+                timedOut = true
+                break
+            }
+            captureWrapState()
+            samples.append([
+                "cycle": cycle,
+                "warmup": cycle < request.warmupCount,
+                "toggleFirstFrameMs": firstFrame,
+                "toggleSettledMs": settled.ms,
+                "settleAdjustments": settled.adjustments,
+            ])
+            // Untimed half: return to the opposite state for the next cycle.
+            reader.apply(settings: settingsFor(wrap: !request.wrapOn))
+            if measureFirstFrame(since: ContinuousClock.now, timeout: 10) == nil
+                || measureSettled(timeout: 10) == nil
+            {
+                timedOut = true
+                break
+            }
+        }
+    case "resize":
+        reader.apply(settings: settingsFor(wrap: request.wrapOn))
+        reader.display(document: document, fileURL: request.fixture)
+        _ = measurementStart()
+        guard measureFirstFrame(
+            since: ContinuousClock.now,
+            timeout: 10
+        ) != nil, measureSettled(timeout: 10) != nil
+        else {
+            timedOut = true
+            break
+        }
+        let baseWidth = scrollView.frame.width
+        for cycle in 0..<(request.warmupCount + request.sampleCount) {
+            var steps: [[String: Any]] = []
+            for targetWidth in [baseWidth - 340, baseWidth] {
+                let started = ContinuousClock.now
+                scrollView.setFrameSize(NSSize(
+                    width: targetWidth,
+                    height: scrollView.frame.height
+                ))
+                scrollView.tile()
+                guard let firstFrame = measureFirstFrame(
+                    since: started,
+                    timeout: 10
+                ), let settled = measureSettled(timeout: 10)
+                else {
+                    timedOut = true
+                    break
+                }
+                steps.append([
+                    "widthPt": targetWidth,
+                    "stepMs": milliseconds(since: started),
+                    "firstFrameMs": firstFrame,
+                    "settledMs": settled.ms,
+                    "settleAdjustments": settled.adjustments,
+                ])
+            }
+            samples.append([
+                "cycle": cycle,
+                "warmup": cycle < request.warmupCount,
+                "steps": steps,
+                "rawResizeRequests": steps.count,
+            ])
+            captureWrapState()
+            if timedOut { break }
+        }
+    default:
+        let probes = stopProbes()
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "scenario": request.scenario,
+            "status": "error",
+            "error": "unexpected scenario \(request.scenario)",
+            "peakPhysBytes": probes.peak,
+        ], status: 1)
+    }
+
+    let probes = stopProbes()
+    if timedOut {
+        write([
+            "schemaVersion": 1,
+            "codeSHA": request.codeSHA,
+            "fixtureSHA256": document.contentID.bytes
+                .map { String(format: "%02x", $0) }.joined(),
+            "scenario": request.scenario,
+            "requestedWrap": request.wrapOn,
+            "status": "timeout",
+            "error": "layout or draw did not settle within the 10s budget",
+            "samplePeriodMs": 25,
+            "peakPhysBytes": probes.peak,
+        ], status: 1)
+    }
+
+    func summarize(_ values: [Double]) -> [String: Double] {
+        let sorted = values.sorted()
+        func percentile(_ p: Double) -> Double {
+            let rank = Int(ceil(p / 100 * Double(sorted.count))) - 1
+            return sorted[min(max(rank, 0), sorted.count - 1)]
+        }
+        return [
+            "p50": percentile(50),
+            "p95": percentile(95),
+            "max": sorted.last ?? 0,
+        ]
+    }
+
+    let measured = samples.filter { !($0["warmup"] as? Bool ?? true) }
+    var summary: [String: Any] = [:]
+    switch request.scenario {
+    case "initial":
+        let firstFrame = measured.compactMap {
+            $0["firstFrameMs"] as? Double
+        }
+        let settled = measured.compactMap { $0["settledMs"] as? Double }
+        if !firstFrame.isEmpty { summary["firstFrameMs"] = summarize(firstFrame) }
+        if !settled.isEmpty { summary["settledMs"] = summarize(settled) }
+    case "toggle":
+        let firstFrame = measured.compactMap {
+            $0["toggleFirstFrameMs"] as? Double
+        }
+        let settled = measured.compactMap { $0["toggleSettledMs"] as? Double }
+        if !firstFrame.isEmpty {
+            summary["toggleFirstFrameMs"] = summarize(firstFrame)
+        }
+        if !settled.isEmpty { summary["toggleSettledMs"] = summarize(settled) }
+        // Design-budget shape (§7.4.2): action → stable = first frame plus
+        // the settle quiet period, paired per sample.
+        let actionToSettled = measured.compactMap { sample -> Double? in
+            guard let first = sample["toggleFirstFrameMs"] as? Double,
+                  let quiet = sample["toggleSettledMs"] as? Double
+            else { return nil }
+            return first + quiet
+        }
+        if !actionToSettled.isEmpty {
+            summary["toggleActionToSettledMs"] = summarize(actionToSettled)
+        }
+    case "resize":
+        let stepMs = measured.flatMap { sample in
+            (sample["steps"] as? [[String: Any]])?.compactMap {
+                $0["stepMs"] as? Double
+            } ?? []
+        }
+        if !stepMs.isEmpty { summary["resizeStepMs"] = summarize(stepMs) }
+    default:
+        break
+    }
+
+    let storage = reader.view.textStorage
+    let resolvedFont: NSFont? = storage.flatMap { storage in
+        guard storage.length > 0 else { return nil }
+        return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    }
+    let viewport = scrollView.contentView.bounds.size
+    let windowSize = window.contentView?.bounds.size ?? .zero
+    let wrapState = measuredWrapState ?? (
+        widthTracking: reader.view.textContainer?.widthTracksTextView == true,
+        horizontalScroller: scrollView.hasHorizontalScroller,
+        horizontallyResizable: reader.view.isHorizontallyResizable
+    )
+    let lineHeight = reader.view.textLayoutManager?
+        .textLayoutFragment(for: .zero)?.layoutFragmentFrame.height ?? 0
+    let lineStarts = document.lineTable.lineStarts
+    var maxLineUTF8Bytes = 0
+    for index in lineStarts.indices.dropLast() {
+        let length = Int(lineStarts[index + 1] - lineStarts[index])
+        maxLineUTF8Bytes = max(maxLineUTF8Bytes, length)
+    }
+
+    var object: [String: Any] = [
+        "schemaVersion": 1,
+        "codeSHA": request.codeSHA,
+        "fixtureSHA256": document.contentID.bytes
+            .map { String(format: "%02x", $0) }.joined(),
+        "scenario": request.scenario,
+        "requestedWrap": request.wrapOn,
+        "samplePeriodMs": 25,
+        "warmupCount": request.warmupCount,
+        "sampleCount": measured.count,
+        "perfConfig": [
+            "wrapLines": wrapState.widthTracking,
+            "widthTracksTextView": wrapState.widthTracking,
+            "horizontalScroller": wrapState.horizontalScroller,
+            "resolvedFontName": resolvedFont?.fontName ?? "",
+            "resolvedFontSizePt": resolvedFont?.pointSize ?? 0,
+            "windowPt": [windowSize.width, windowSize.height],
+            "viewportPt": [viewport.width, viewport.height],
+            "lineNumbers": reader.foldPerformanceEffectiveSettings.lineNumbers,
+            "theme": "SI Classic",
+            "gutterThicknessPt": reader.rulerThickness,
+            "renderedFoldCount": reader.foldPerformanceCounts.rendered,
+            "scrollerStyle": NSScroller.preferredScrollerStyle == .legacy
+                ? "legacy" : "overlay",
+            "scrollViewScrollerStyle": scrollView.scrollerStyle == .legacy
+                ? "legacy" : "overlay",
+            "scrollViewAutohidesScrollers": scrollView.autohidesScrollers,
+            "backingScale": window.backingScaleFactor,
+            "lineHeightPt": lineHeight,
+            "logicalLineCount": lineStarts.count,
+            "maxLineUTF8Bytes": maxLineUTF8Bytes,
+            "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+            "machineModel": sysctlString("hw.model") ?? "",
+        ],
+        "observed": [
+            "reflowCount": reader.projectionInstallCount,
+            "drawPassCount": reader.backgroundDrawCount,
+            // Filled in by later slices; null marks "not applicable on this
+            // build" rather than a zero measurement.
+            "paragraphUpdateCount": NSNull(),
+            "restorePassCount": NSNull(),
+            "anchorErrorPt": NSNull(),
+            "mergedResizeRequests": NSNull(),
+            "rawResizeRequests": samples.reduce(0) {
+                $0 + ($1["rawResizeRequests"] as? Int ?? 0)
+            },
+            "longestMainThreadStallMs": probes.longestStallMs,
+        ],
+        "samples": samples,
+        "summary": summary,
+        "status": "ok",
+        "peakPhysBytes": probes.peak,
+    ]
+
+    // Independent configuration validation for wrap scenarios (§7.4.1): the
+    // observed layout must match the request, not echo it.
+    let configurationIsExact = wrapState.widthTracking == request.wrapOn
+        && wrapState.horizontalScroller == !request.wrapOn
+        && wrapState.horizontallyResizable == !request.wrapOn
+        && abs(viewport.width - 1200) < 0.01
+        && abs(viewport.height - 760) < 0.01
+        && abs(windowSize.width - 1440) < 0.01
+        && abs(windowSize.height - 900) < 0.01
+        && resolvedFont != nil
+        && abs((resolvedFont?.pointSize ?? 0) - 13) < 0.01
+        && reader.foldPerformanceEffectiveSettings.lineNumbers
+        && reader.foldPerformanceEffectiveSettings.theme == .siClassic
+    if !configurationIsExact {
+        object["status"] = "error"
+        object["error"] = "effective wrap configuration does not match request"
+    }
+    withExtendedLifetime((reader, window, scrollView, drawBitmap)) {}
+    write(object, status: configurationIsExact ? 0 : 1)
+}
+
+private func sysctlString(_ name: String) -> String? {
+    var length = 0
+    guard sysctlbyname(name, nil, &length, nil, 0) == 0, length > 0
+    else { return nil }
+    var buffer = [CChar](repeating: 0, count: length)
+    guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+    else { return nil }
+    return String(cString: buffer)
 }
 
 private func physicalFootprintBytes() -> UInt64? {

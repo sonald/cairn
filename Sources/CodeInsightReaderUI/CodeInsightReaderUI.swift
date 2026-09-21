@@ -516,6 +516,11 @@ public final class ReaderTextView {
     private var navigationLandingLine: Int?
     private var navigationMarkerGeneration = 0
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
+    /// Wrap performance probes (§7.4.2): full projection commits into the
+    /// backing storage, and real background draw passes observed by the
+    /// renderer. Both only count; they never gate rendering.
+    package private(set) var projectionInstallCount = 0
+    package private(set) var backgroundDrawCount = 0
     public private(set) var currentLineNumber: Int?
     public private(set) var occurrenceCount = 0
     public private(set) var primarySelectionRange: NSRange?
@@ -575,6 +580,7 @@ public final class ReaderTextView {
         }
         textView.backgroundHandler = { [weak self, weak textView] rect in
             guard let self, let textView else { return }
+            self.backgroundDrawCount += 1
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
         }
@@ -837,15 +843,7 @@ public final class ReaderTextView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
         installRenderingValidator(in: layoutManager)
-        if let contentStorage = view.textContentStorage {
-            contentStorage.performEditingTransaction {
-                backingTextStorage.beginEditing()
-                backingTextStorage.setAttributedString(projection.attributed)
-                backingTextStorage.endEditing()
-            }
-        } else {
-            backingTextStorage.setAttributedString(projection.attributed)
-        }
+        installProjectedText(projection.attributed)
         if renderingCoordinator.hasRenderingAttributes {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
@@ -885,7 +883,7 @@ public final class ReaderTextView {
         visibleCurrentLineNumbers = []
         visibleDeclarationMarkerLines = []
         renderingCoordinator.clear()
-        backingTextStorage.setAttributedString(NSAttributedString(string: ""))
+        installProjectedText(NSAttributedString(string: ""))
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -1467,15 +1465,7 @@ public final class ReaderTextView {
         )
         refreshOccurrenceRendering(in: document)
         layoutManager.renderingAttributesValidator = nil
-        if let contentStorage = view.textContentStorage {
-            contentStorage.performEditingTransaction {
-                backingTextStorage.beginEditing()
-                backingTextStorage.setAttributedString(projection.attributed)
-                backingTextStorage.endEditing()
-            }
-        } else {
-            backingTextStorage.setAttributedString(projection.attributed)
-        }
+        installProjectedText(projection.attributed)
         installRenderingValidator(in: layoutManager)
         restoreSelectionAnchor(selectionAnchor)
         restoreViewportAnchor(viewportAnchor, in: document)
@@ -1488,6 +1478,22 @@ public final class ReaderTextView {
         validateVisibleRenderingAttributes(in: layoutManager)
         view.needsDisplay = true
         return true
+    }
+
+    /// Installs a freshly projected attributed string into the backing
+    /// storage inside one editing transaction. Every wrap reflow goes through
+    /// this seam so the perf probe can count projection commits (§7.4.2).
+    private func installProjectedText(_ attributed: NSAttributedString) {
+        projectionInstallCount += 1
+        if let contentStorage = view.textContentStorage {
+            contentStorage.performEditingTransaction {
+                backingTextStorage.beginEditing()
+                backingTextStorage.setAttributedString(attributed)
+                backingTextStorage.endEditing()
+            }
+        } else {
+            backingTextStorage.setAttributedString(attributed)
+        }
     }
 
     private func sourceAnchor(
@@ -1668,7 +1674,7 @@ public final class ReaderTextView {
         ruler?.needsDisplay = true
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
-        backingTextStorage.setAttributedString(projection.attributed)
+        installProjectedText(projection.attributed)
         installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
@@ -1716,7 +1722,7 @@ public final class ReaderTextView {
         )
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
         layoutManager.renderingAttributesValidator = nil
-        backingTextStorage.setAttributedString(projection.attributed)
+        installProjectedText(projection.attributed)
         installRenderingValidator(in: layoutManager)
         if let viewportRange {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)

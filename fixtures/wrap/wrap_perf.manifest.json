@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "seed": "reader-wrap-v2",
+  "fixtures": [
+    {
+      "minBytes": 2097152,
+      "name": "f1-ordinary.rs",
+      "kind": "ordinary",
+      "sha256": "4e1a72b2859b974c2f46d9584509376b9c1af80d4d4ec1954747a10f9ac673a7",
+      "byteCount": 3109590,
+      "lineCount": 30000,
+      "maxLineUTF8Bytes": 3659
+    },
+    {
+      "minMegaLineBytes": 524288,
+      "name": "f2-mega-line.rs",
+      "kind": "mega-line",
+      "sha256": "500dddbe775bbf27081cd6eaaf08a7f3af68f7c9c5402b382cb6d284aaa174f5",
+      "byteCount": 993116,
+      "lineCount": 211,
+      "maxLineUTF8Bytes": 983058
+    },
+    {
+      "minBytes": 1048576,
+      "name": "f3-no-whitespace.rs",
+      "kind": "no-whitespace",
+      "sha256": "ef2d0cba720276bf8561ec452169292e1e9a98a5adffae202dde88537b83e179",
+      "byteCount": 1835039,
+      "lineCount": 1,
+      "maxLineUTF8Bytes": 1835038
+    },
+    {
+      "name": "f4-combined.rs",
+      "kind": "combined",
+      "sha256": "65eb841eacf968292f5481d9f66b7f4875d52ba5cd18acb9432dadf89ff95858",
+      "byteCount": 965,
+      "lineCount": 23,
+      "maxLineUTF8Bytes": 143
+    },
+    {
+      "cards": 31,
+      "name": "f5-reading-set.txt",
+      "kind": "reading-set",
+      "sha256": "65a32d1741869465b522eb8aa5fcca3c42efd8e30b4acd89abb8375114477a46",
+      "byteCount": 144603,
+      "lineCount": 666,
+      "maxLineUTF8Bytes": 2036
+    }
+  ]
+}

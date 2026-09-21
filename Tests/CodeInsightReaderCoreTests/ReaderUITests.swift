@@ -411,6 +411,222 @@ func wrapSettingReversesEveryTextKitAndScrollerProperty() {
     withExtendedLifetime(window) {}
 }
 
+/// S0 coordinate-convention probe (reader-wrap design §3.4/D2.1): the visual
+/// row rect must be composed as fragment origin + typographic bounds +
+/// `textContainerOrigin`, and that composition has to agree with TextKit's
+/// own `firstRect` geometry for the same character. Anchoring at every visual
+/// row start also validates that `NSTextLineFragment.characterRange` is a
+/// fragment-local offset that must be combined with the fragment's position.
+@MainActor
+@Test
+func wrapFirstVisualRowGeometryConventionsHoldInRealTextView() throws {
+    let longBody = Array(repeating: "value += compute(value);", count: 24)
+        .joined(separator: " ")
+    let source = "fn one() {}\nfn wrapped() { \(longBody) }\nfn three() {}\n"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted.spans,
+        outlineFacets: highlighted.outlineFacets
+    )
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    var wrappedSettings = ReaderSettings()
+    wrappedSettings.wrapLines = true
+    reader.apply(settings: wrappedSettings)
+    reader.display(document: document)
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+
+    let manager = try #require(reader.view.textLayoutManager)
+    let content = try #require(manager.textContentManager)
+
+    // (a) With the plain container configuration the container origin is the
+    // inset itself, so a conversion that adds textContainerOrigin must not
+    // add textContainerInset on top (no double-inset composition).
+    let inset = reader.view.textContainerInset
+    #expect(reader.view.textContainerOrigin.x == inset.width)
+    #expect(reader.view.textContainerOrigin.y == inset.height)
+    let containerOrigin = reader.view.textContainerOrigin
+
+    // (b) Cross-check the composed row rect against firstRect for the first
+    // character of every visual row, including wrapped continuation rows.
+    let textLength = (reader.view.string as NSString).length
+    var checkedRows = 0
+    var continuationRows = 0
+    manager.enumerateTextLayoutFragments(
+        from: content.documentRange.location,
+        options: [.ensuresLayout]
+    ) { fragment in
+        guard let firstRow = fragment.textLineFragments.first else { return true }
+        let fragmentStart = content.offset(
+            from: content.documentRange.location,
+            to: fragment.rangeInElement.location
+        )
+        guard fragmentStart != NSNotFound else { return true }
+        continuationRows += fragment.textLineFragments.count - 1
+        for (rowIndex, row) in fragment.textLineFragments.enumerated() {
+            let rowStart = fragmentStart + row.characterRange.location
+            guard rowStart >= 0, rowStart < textLength else { continue }
+            let screenRect = reader.view.firstRect(
+                forCharacterRange: NSRange(location: rowStart, length: 1),
+                actualRange: nil
+            )
+            guard !screenRect.isEmpty else { continue }
+            let viewRect = reader.view.convert(
+                window.convertFromScreen(screenRect),
+                from: nil
+            )
+            let bounds = row.typographicBounds
+            let computedX = fragment.layoutFragmentFrame.minX
+                + bounds.minX + containerOrigin.x
+            let computedY = fragment.layoutFragmentFrame.minY
+                + bounds.minY + containerOrigin.y
+            #expect(
+                abs(computedX - viewRect.minX) < 0.5,
+                "row \(rowIndex) of fragment at \(fragmentStart): composed x \(computedX) vs firstRect x \(viewRect.minX)"
+            )
+            #expect(
+                abs(computedY - viewRect.minY) < 0.5,
+                "row \(rowIndex) of fragment at \(fragmentStart): composed y \(computedY) vs firstRect y \(viewRect.minY)"
+            )
+            checkedRows += 1
+        }
+        return true
+    }
+    #expect(checkedRows >= 4)
+    #expect(continuationRows >= 2)
+    withExtendedLifetime(window) {}
+}
+
+/// S0 resize-timing probe (reader-wrap design D3.7): the only notifications
+/// AppKit posts around a programmatic width change (`boundsDidChange` on the
+/// clip view, `frameDidChange` on the text view) already observe the new
+/// width. There is no pre-change callback, which is the documented premise
+/// for capturing the old stable state before the frame actually changes.
+@MainActor
+@Test
+func wrapResizeCallbacksOnlyObserveNewWidth() throws {
+    _ = NSApplication.shared
+    let longBody = Array(repeating: "value += compute(value);", count: 24)
+        .joined(separator: " ")
+    let source = "fn one() {}\nfn wrapped() { \(longBody) }\nfn three() {}\n"
+    let file = URL(fileURLWithPath: "/wrap-resize-callbacks.rs")
+    let document = try DocumentLoader(source: { _ in Array(source.utf8) })
+        .load(file: file).document
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    var wrappedSettings = ReaderSettings()
+    wrappedSettings.wrapLines = true
+    reader.apply(settings: wrappedSettings)
+    reader.display(document: document)
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+
+    let clipView = scrollView.contentView
+    let oldClipWidth = clipView.bounds.width
+    let oldReaderWidth = reader.view.frame.width
+    // NSView.postsBoundsChangedNotifications defaults to false; the reader's
+    // own viewport observer opts the clip view in explicitly, so the probe
+    // must do the same.
+    clipView.postsBoundsChangedNotifications = true
+    reader.view.postsFrameChangedNotifications = true
+    // The observer closures are @Sendable; observations are recorded through
+    // an unchecked box and view reads hop through assumeIsolated, which is
+    // honest here because queue: nil delivers synchronously on the main
+    // thread, the same thread performing the resize.
+    final class ObservationBox: @unchecked Sendable {
+        var observations: [(event: String, width: CGFloat)] = []
+    }
+    let box = ObservationBox()
+    let center = NotificationCenter.default
+    var observers: [NSObjectProtocol] = []
+    observers.append(center.addObserver(
+        forName: NSView.boundsDidChangeNotification,
+        object: clipView,
+        queue: nil
+    ) { _ in
+        MainActor.assumeIsolated {
+            box.observations.append(("clipBounds", clipView.bounds.width))
+        }
+    })
+    observers.append(center.addObserver(
+        forName: NSView.frameDidChangeNotification,
+        object: reader.view,
+        queue: nil
+    ) { _ in
+        MainActor.assumeIsolated {
+            box.observations.append(("readerFrame", reader.view.frame.width))
+        }
+    })
+    defer { observers.forEach(center.removeObserver) }
+
+    window.setContentSize(NSSize(width: 360, height: 180))
+    window.displayIfNeeded()
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    window.displayIfNeeded()
+    let newClipWidth = clipView.bounds.width
+    let newReaderWidth = reader.view.frame.width
+    let observations = box.observations
+
+    #expect(newClipWidth < oldClipWidth)
+    #expect(abs(newReaderWidth - oldReaderWidth) > 0.5)
+    // Observed timing facts that motivate D3.7's pre-change capture hook:
+    // (1) the clip view posts NO bounds notifications for a resize at all —
+    //     boundsDidChange is a scroll signal, so the reader's existing
+    //     viewport observer cannot see width changes;
+    // (2) the only resize notification is the text view's frameDidChange,
+    //     delivered strictly after the fact, possibly through intermediate
+    //     widths (autoresize then ruler re-tiling).
+    let clipObservations = observations.filter { $0.event == "clipBounds" }
+    let frameObservations = observations.filter { $0.event == "readerFrame" }
+    #expect(clipObservations.isEmpty)
+    #expect(!frameObservations.isEmpty)
+    #expect(frameObservations.allSatisfy {
+        abs($0.width - oldReaderWidth) > 0.5
+    })
+    #expect(frameObservations.last.map {
+        abs($0.width - newReaderWidth) < 0.5
+    } == true)
+    print(
+        "WRAP_RESIZE_TIMING observations="
+            + observations.map { "\($0.event)=\($0.width)" }.joined(separator: ",")
+    )
+
+    // Sanity check that the clip-view observer is wired: scrolling must
+    // deliver a bounds notification, so the empty resize observation above is
+    // a property of resize, not a broken probe.
+    let documentHeight = reader.view.frame.height
+    if documentHeight > clipView.bounds.height + 8 {
+        clipView.scroll(to: NSPoint(x: 0, y: 8))
+        scrollView.reflectScrolledClipView(clipView)
+        let scrollObservations = box.observations.filter { $0.event == "clipBounds" }
+        #expect(!scrollObservations.isEmpty)
+    }
+    withExtendedLifetime(window) {}
+}
+
 @MainActor
 @Test
 func revealResetsHorizontalScrollAfterNavigation() throws {
