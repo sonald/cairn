@@ -17,6 +17,8 @@ CodeInsight is a native, read-only code reader for macOS, released as **Cairn**.
 
 This is not an editor. Cairn does not save files, run builds, or modify your working tree; it makes evidence and uncertainty in the reading workflow explicit.
 
+![Cairn reading Python source with Files, Outline, Callers, and Context panels](site/assets/reader.png)
+
 ## Features
 
 - **Native read-only Reader**: file tree, outline, Context Window, relations panel, folding, and navigation history built with AppKit/Swift.

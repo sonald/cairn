@@ -1,6 +1,6 @@
 # Cairn homepage
 
-Static HTML and CSS; no build step or runtime dependencies. The screenshot is a real Cairn capture from `docs/reviews/evidence/2026-09-11-product-polish/final/20260914/reader-final.png`.
+Static HTML and CSS; no build step or runtime dependencies. The screenshot is stored at `site/assets/reader.png`.
 
 ## Preview
 
