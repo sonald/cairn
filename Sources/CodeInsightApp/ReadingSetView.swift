@@ -469,13 +469,15 @@ private final class ReadingSetExcerptView: NSView {
     func apply(settings: ReaderSettings) {
         self.settings = settings
         let theme = ReaderTheme(settings: settings)
+        if signature == nil || self.theme.selection != theme.selection {
+            codeView.textColor = theme.foregroundColor
+        }
         self.theme = theme
         layer?.backgroundColor = theme.chromeColor.cgColor
         layer?.borderColor = theme.chromeDividerColor.cgColor
         roleLabel.textColor = theme.accentColor
         symbolLabel.textColor = theme.foregroundColor
         pathLabel.textColor = theme.chromeSecondaryColor
-        codeView.textColor = theme.foregroundColor
         resolvedFont = ReaderFontResolver.shared.resolve(theme: theme)
         lineNumbers.font = .monospacedDigitSystemFont(
             ofSize: theme.fontSize,
@@ -578,17 +580,24 @@ private final class ReadingSetExcerptView: NSView {
         codeView.textContainer?.widthTracksTextView = settings.wrapLines
         codeView.frame.size.width = available
         codeView.textContainer?.containerSize = NSSize(width: settings.wrapLines ? available : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.lineHeightMultiple = CGFloat(settings.lineHeightMultiple)
-        paragraph.lineBreakMode = .byWordWrapping
         guard let storage = codeView.textStorage else { return }
+        let previousSignature = signature
+        signature = nil
         content.performEditingTransaction {
             storage.beginEditing()
             let range = NSRange(location: 0, length: storage.length)
-            storage.removeAttribute(.ligature, range: range)
-            storage.removeAttribute(.kern, range: range)
-            storage.addAttributes(resolvedFont.attributes, range: range)
-            storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
+            if previousSignature?.font != nextSignature.font {
+                paragraphLayout.reset()
+                storage.removeAttribute(.ligature, range: range)
+                storage.removeAttribute(.kern, range: range)
+                storage.addAttributes(resolvedFont.attributes, range: range)
+            }
+            if previousSignature?.lineHeight != nextSignature.lineHeight {
+                let paragraph = NSMutableParagraphStyle()
+                paragraph.lineHeightMultiple = CGFloat(settings.lineHeightMultiple)
+                paragraph.lineBreakMode = .byWordWrapping
+                storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
+            }
             paragraphLayout.apply(to: storage, wrap: settings.wrapLines,
                 width: available - 2 * (codeView.textContainer?.lineFragmentPadding ?? 0), font: font)
             storage.endEditing()
