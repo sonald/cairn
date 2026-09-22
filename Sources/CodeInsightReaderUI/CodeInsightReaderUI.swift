@@ -612,9 +612,9 @@ public final class ReaderTextView {
             // user interaction ends a pure-reflow sequence (D3.5).
             invalidateReflowSequence()
             updateCurrentLine(byteOffset: byteOffset)
-            if let primarySelectionRange,
-               view.selectedRange() != primarySelectionRange
-            {
+            // A native gesture can select the same symbol range as activation.
+            // It still needs the native selection background and anchor semantics.
+            if primarySelectionRange != nil {
                 self.primarySelectionRange = nil
                 view.selectedTextAttributes = nativeSelectedTextAttributes
                 if let document = displayedDocument,
@@ -4356,7 +4356,20 @@ private final class ClickTextView: NSTextView {
     override func mouseDown(with event: NSEvent) {
         let index = characterIndex(for: event)
         super.mouseDown(with: event)
-        clickHandler?(index, event.modifierFlags.intersection(.deviceIndependentFlagsMask))
+        let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        let selection = selectedRange()
+        let selectedAttachment = selectedRanges.count == 1 && selection.length == 1
+            && (selection.location == index || selection.location == index - 1)
+            && selection.location < (textStorage?.length ?? 0)
+            && textStorage?.attribute(.attachment, at: selection.location, effectiveRange: nil) != nil
+        // Native drag/Shift-click/word selection owns its range and affinity.
+        // Activating a token here would replace it and can also trigger navigation.
+        if !modifiers.contains(.command), !selectedAttachment,
+           selectedRanges.contains(where: { $0.rangeValue.length > 0 }) {
+            selectionHandler?(selection.location)
+            return
+        }
+        clickHandler?(index, modifiers)
     }
 
     override func writeSelection(

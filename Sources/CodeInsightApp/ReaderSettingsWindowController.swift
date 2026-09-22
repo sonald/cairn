@@ -389,11 +389,17 @@ private struct ReaderSettingsView: View {
         // Reading the revision makes diagnostics refresh even when settings are unchanged.
         let _ = fontEnvironmentRevision
         let resolved = ReaderFontResolver.shared.resolve(theme: ReaderTheme(settings: settings))
+        let displayNames = Dictionary(uniqueKeysWithValues: fontNames.map {
+            ($0, NSFont(name: $0, size: 13)?.displayName ?? $0)
+        })
+        let duplicateLabels = Set(Dictionary(grouping: displayNames.values, by: { $0 })
+            .filter { $0.value.count > 1 }.keys)
         return Section {
             Picker(localized("settings.codeFont"), selection: $settings.codeFont) {
                 Text(localized("settings.codeFont.system")).tag(CodeFontSelection.systemMonospaced)
                 ForEach(fontNames, id: \.self) { name in
-                    Text(NSFont(name: name, size: 13)?.displayName ?? name)
+                    let label = displayNames[name] ?? name
+                    Text(duplicateLabels.contains(label) ? name : label)
                         .tag(CodeFontSelection.postScriptName(name))
                 }
                 if case .postScriptName(let name) = settings.codeFont, !fontNames.contains(name) {
@@ -429,8 +435,11 @@ private struct ReaderSettingsView: View {
         fontNames = (NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? [])
             .filter { NSFont(name: $0, size: 13) != nil }
             .sorted { lhs, rhs in
-                (NSFont(name: lhs, size: 13)?.displayName ?? lhs)
-                    .localizedStandardCompare(NSFont(name: rhs, size: 13)?.displayName ?? rhs) == .orderedAscending
+                let order = (NSFont(name: lhs, size: 13)?.displayName ?? lhs)
+                    .localizedStandardCompare(NSFont(name: rhs, size: 13)?.displayName ?? rhs)
+                return order == .orderedSame
+                    ? lhs.localizedStandardCompare(rhs) == .orderedAscending
+                    : order == .orderedAscending
             }
         fontEnvironmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
     }

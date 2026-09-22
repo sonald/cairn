@@ -344,3 +344,52 @@ func ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() throws {
     #expect(reader.sourceText(forDisplaySelection: selection) == "const")
     #expect(reader.view.string == source)
 }
+
+@MainActor @Test
+func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() throws {
+    let source = "let value = left !== right;\n"
+    let (reader, window) = ligatureReader(source)
+    defer { window.close() }
+    settleLigatureLayout(reader)
+    window.makeFirstResponder(reader.view)
+    let selection = (source as NSString).range(of: "!==")
+    let startRect = try #require(ReaderViewportGeometry.characterRect(
+        displayLocation: selection.location, in: reader.view))
+    let endRect = try #require(ReaderViewportGeometry.characterRect(
+        displayLocation: NSMaxRange(selection), in: reader.view))
+    let start = reader.view.convert(NSPoint(x: startRect.minX + 0.1, y: startRect.midY), to: nil)
+    let end = reader.view.convert(NSPoint(x: endRect.minX + 0.1, y: endRect.midY), to: nil)
+    var clicks = 0
+    reader.onClick = { _, _ in clicks += 1 }
+    func event(_ type: NSEvent.EventType, at point: NSPoint, number: Int, clickCount: Int = 1) throws -> NSEvent {
+        try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+            timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+            context: nil, eventNumber: number, clickCount: clickCount, pressure: type == .leftMouseUp ? 0 : 1))
+    }
+    // Feed AppKit's tracking loop actual drag/up events; mouseDown itself must
+    // preserve the selection produced by super, not a programmatically seeded range.
+    NSApp.postEvent(try event(.leftMouseUp, at: end, number: 3), atStart: true)
+    NSApp.postEvent(try event(.leftMouseDragged, at: end, number: 2), atStart: true)
+    reader.view.mouseDown(with: try event(.leftMouseDown, at: start, number: 1))
+    #expect(reader.view.selectedRange() == selection)
+    #expect(reader.sourceText(forDisplaySelection: reader.view.selectedRange()) == "!==")
+    #expect(clicks == 0)
+    reader.view.moveLeftAndModifySelection(nil)
+    #expect(reader.view.selectedRange() == NSRange(location: selection.location, length: 2))
+
+    // Selecting the exact active symbol must also restore a visible native
+    // selection, even though its range equals the previous primary occurrence.
+    let symbol = (source as NSString).range(of: "value")
+    _ = reader.activate(atByteOffset: UInt32(symbol.location))
+    #expect(reader.primarySelectionRange == symbol)
+    let symbolRect = try #require(ReaderViewportGeometry.characterRect(
+        displayLocation: symbol.location + 1, in: reader.view))
+    let symbolPoint = reader.view.convert(NSPoint(x: symbolRect.midX, y: symbolRect.midY), to: nil)
+    NSApp.postEvent(try event(.leftMouseUp, at: symbolPoint, number: 5, clickCount: 2), atStart: true)
+    reader.view.mouseDown(with: try event(.leftMouseDown, at: symbolPoint, number: 4, clickCount: 2))
+    #expect(reader.view.selectedRange() == symbol)
+    #expect(reader.primarySelectionRange == nil)
+    let selectedBackground = try #require(reader.view.selectedTextAttributes[.backgroundColor] as? NSColor)
+    #expect(selectedBackground.alphaComponent > 0)
+    #expect(clicks == 0)
+}

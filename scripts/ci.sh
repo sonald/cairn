@@ -24,6 +24,8 @@ swift build ${swift_options[@]+"${swift_options[@]}"}
 swift_test_log=.build/ci-swift-test.log
 isolated_test_log=.build/ci-swift-test-isolated.log
 panel_test_log=.build/ci-swift-test-panels.log
+mouse_test_log=.build/ci-swift-test-mouse.log
+mouse_test=CodeInsightReaderUITests.nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick
 swift_test_summary_regex='^✔ Test run with [1-9][0-9]* tests?( in [0-9]+ suites)? passed after '
 bookmark_test_one='CodeInsightAppTests.bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote'
 bookmark_test_two='CodeInsightAppTests.bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus'
@@ -72,13 +74,16 @@ run_swift_test_batch() {
 
 run_swift_test_batch "$swift_test_log" "$expected_main_test_count" \
     --skip "$bookmark_test_one" --skip "$bookmark_test_two" \
-    --skip "$panel_test_one" --skip "$panel_test_two"
+    --skip "$panel_test_one" --skip "$panel_test_two" --skip "$mouse_test"
 run_swift_test_batch "$isolated_test_log" "$expected_isolated_test_count" \
     --filter "$bookmark_test_one|$bookmark_test_two"
 run_swift_test_batch "$panel_test_log" "$expected_panel_test_count" \
     --filter "$panel_test_one|$panel_test_two"
-total_swift_test_count=$((expected_main_test_count + expected_isolated_test_count + expected_panel_test_count))
-echo "PASS: swift test total=$total_swift_test_count (main=$expected_main_test_count isolated=$expected_isolated_test_count panels=$expected_panel_test_count)"
+# Native mouse tracking also needs its own AppKit process: a combined run
+# can exit before the summary. Its isolated batch must still report completion.
+run_swift_test_batch "$mouse_test_log" 1 --filter "$mouse_test"
+total_swift_test_count=$((expected_main_test_count + expected_isolated_test_count + expected_panel_test_count + 1))
+echo "PASS: swift test total=$total_swift_test_count (main=$expected_main_test_count isolated=$expected_isolated_test_count panels=$expected_panel_test_count mouse=1)"
 
 if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
     Sources/CodeInsightReaderUI/ \

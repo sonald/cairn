@@ -40,4 +40,31 @@ func readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() async 
     #expect(preview.string.contains("!= !== -> => <= >= ::"))
     #expect(preview.textStorage?.attribute(.ligature, at: 0, effectiveRange: nil) == nil)
     #expect(controller.currentSettings.codeFont == .postScriptName("Cairn-Unavailable-Fixture-Font"))
+
+    // Variable-font faces can share a displayName. The actual native picker
+    // must still distinguish the selected PostScript identities.
+    let available = (NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? [])
+        .filter { NSFont(name: $0, size: 13) != nil }
+    let groups = Dictionary(grouping: available) { NSFont(name: $0, size: 13)?.displayName ?? $0 }
+    let names = groups.values.first(where: { $0.count > 1 })?.sorted().prefix(2)
+        ?? ["Menlo-Regular", "Menlo-Bold"].prefix(2)
+    var labels: [String] = []
+    for name in names {
+        settings.codeFont = .postScriptName(name)
+        controller.update(settings: settings)
+        try await Task.sleep(for: .milliseconds(100))
+        let picker = try #require(controller.selfTestReaderAccessibilityElements.first {
+            $0.accessibilityIdentifier?() == "codeFont"
+        })
+        let value: Any? = picker.accessibilityValue?()
+        let label = try #require(value as? String)
+        let displayName = NSFont(name: name, size: 13)?.displayName ?? name
+        let expected = (groups[displayName]?.count ?? 0) > 1 ? name : displayName
+        #expect(label == expected)
+        #expect(controller.currentSettings.codeFont == .postScriptName(name))
+        labels.append(label)
+    }
+    #expect(Set(labels).count == 2)
+    #expect(commits.isEmpty)
+
 }
