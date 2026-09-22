@@ -52,6 +52,15 @@ func readerFontResolverDerivesSameFamilyBeforeApplyingFeatures() throws {
     #expect(resolved.featureRequests["calt"] == 1)
     #expect(settings.contains { ($0[kCTFontOpenTypeFeatureTag as String] as? String) == "liga"
         && ($0[kCTFontOpenTypeFeatureValue as String] as? Int) == 1 })
+    let italic = try #require(NSFont(name: "Menlo-Italic", size: 13))
+    let derivedItalic = ReaderFontResolver().resolve(
+        selection: .postScriptName(italic.fontName), mode: .enabled,
+        size: 16, weight: .semibold
+    )
+    #expect(derivedItalic.font.familyName == italic.familyName)
+    #expect(derivedItalic.font.fontDescriptor.symbolicTraits.contains(.italic))
+    #expect(derivedItalic.key.weight > 0)
+    #expect(derivedItalic.featureRequests["calt"] == 1)
 }
 
 @MainActor @Test

@@ -116,8 +116,23 @@ package final class ReaderFontResolver {
                     attributes.removeValue(forKey: .visibleName)
                     attributes[.family] = family
                     var traits = attributes[.traits] as? [NSFontDescriptor.TraitKey: Any] ?? [:]
+                    // Named-face descriptors often contain only name and size.
+                    // Preserve actual slant/width when deriving a new weight.
+                    let actualTraits = CTFontCopyTraits(selected) as NSDictionary
+                    traits[.symbolic] = selected.fontDescriptor.symbolicTraits.rawValue
+                        & ~NSFontDescriptor.SymbolicTraits.bold.rawValue
+                    traits[.slant] = actualTraits[kCTFontSlantTrait]
+                    traits[.width] = actualTraits[kCTFontWidthTrait]
                     traits[.weight] = weight.rawValue
                     attributes[.traits] = traits
+                    var variations = CTFontCopyVariation(selected) as? [NSNumber: NSNumber] ?? [:]
+                    // Keep other axes, but let the requested weight choose wght.
+                    variations.removeValue(forKey: NSNumber(value: 0x77676874))
+                    if variations.isEmpty {
+                        attributes.removeValue(forKey: .variation)
+                    } else {
+                        attributes[.variation] = variations
+                    }
                     if let derived = NSFont(descriptor: NSFontDescriptor(fontAttributes: attributes), size: size),
                        derived.familyName == family {
                         base = derived
