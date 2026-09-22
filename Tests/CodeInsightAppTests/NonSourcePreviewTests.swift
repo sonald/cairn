@@ -380,3 +380,114 @@ func markdownPreviewPreservesListMarkersNestingAndInlineStyles() throws {
     #expect(state.selectable == true)
     #expect(state.editable == false)
 }
+
+@MainActor
+@Test
+func plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let contents = (0..<120).map { "row \($0) " + String(repeating: "wide 🧭 text ", count: 30) }
+        .joined(separator: "\n")
+    let file = try nonSourcePreviewFile(root: root, name: "notes.txt", bytes: Array(contents.utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
+    var settings = ReaderSettings()
+    settings.wrapLines = false
+    controller.apply(settings: settings)
+    controller.display(file, languageMode: nil)
+    controller.view.layoutSubtreeIfNeeded()
+    let text = try #require(nonSourcePreviewTextView(in: controller.view, label: "Plain text preview"))
+    let scroll = try #require(text.enclosingScrollView)
+    let layout = try #require(text.layoutManager)
+    let container = try #require(text.textContainer)
+    #expect(scroll.hasHorizontalScroller)
+    #expect(text.frame.width > scroll.contentSize.width)
+    // The requested starts bisect the compass emoji's UTF-16 surrogate pair.
+    // NSTextView expands them to composed-character boundaries before reflow.
+    let requested = [NSValue(range: NSRange(location: 12, length: 30)),
+                     NSValue(range: NSRange(location: 90, length: 17))]
+    let selected = requested.map {
+        NSValue(range: (contents as NSString).rangeOfComposedCharacterSequences(for: $0.rangeValue))
+    }
+    text.setSelectedRanges(requested, affinity: .upstream, stillSelecting: false)
+    #expect(text.selectedRanges == selected)
+    #expect(text.selectedRanges.count == 2)
+    scroll.contentView.scroll(to: NSPoint(x: 80, y: 400))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    let oldOrigin = scroll.contentView.bounds.origin
+    let glyph = layout.glyphIndex(for: NSPoint(
+        x: max(0, oldOrigin.x - text.textContainerOrigin.x),
+        y: max(0, oldOrigin.y - text.textContainerOrigin.y)
+    ), in: container)
+    let character = layout.characterIndexForGlyph(at: glyph)
+    let oldOffset = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY
+        + text.textContainerOrigin.y - oldOrigin.y
+    let font = try #require(text.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont)
+
+    settings.wrapLines = true
+    controller.apply(settings: settings)
+    #expect(!scroll.hasHorizontalScroller)
+    #expect(!text.isHorizontallyResizable)
+    #expect(text.selectedRanges == selected)
+    #expect(text.selectionAffinity == .upstream)
+    #expect(scroll.contentView.bounds.minX == 0)
+    let newGlyph = layout.glyphIndexForCharacter(at: character)
+    let newOffset = layout.lineFragmentRect(forGlyphAt: newGlyph, effectiveRange: nil).minY
+        + text.textContainerOrigin.y - scroll.contentView.bounds.minY
+    #expect(abs(newOffset - oldOffset) < 2)
+    #expect((text.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont) == font)
+    #expect(text.frame.width == scroll.contentSize.width)
+
+    settings.wrapLines = false
+    controller.apply(settings: settings)
+    #expect(text.selectedRanges == selected)
+    #expect(abs(scroll.contentView.bounds.minX - oldOrigin.x) < 2)
+    controller.display(nil)
+    controller.display(file, languageMode: nil)
+    let reopened = try #require(nonSourcePreviewTextView(in: controller.view, label: "Plain text preview"))
+    #expect(reopened.enclosingScrollView?.hasHorizontalScroller == true)
+    #expect(reopened.isHorizontallyResizable)
+    settings.wrapLines = true
+    controller.apply(settings: settings)
+    controller.display(nil)
+    controller.display(file, languageMode: nil)
+    let wrappedReopened = try #require(nonSourcePreviewTextView(in: controller.view, label: "Plain text preview"))
+    #expect(wrappedReopened.enclosingScrollView?.hasHorizontalScroller == false)
+    #expect(wrappedReopened.textContainer?.widthTracksTextView == true)
+}
+
+@MainActor
+@Test
+func markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let file = try nonSourcePreviewFile(root: root, name: "README.md", bytes: Array("# Heading\n\n- first item\n  - nested item\n\nA paragraph.\n".utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
+    controller.display(file, languageMode: nil)
+    controller.view.layoutSubtreeIfNeeded()
+    let text = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview"))
+    let before = try #require(text.textStorage?.copy() as? NSAttributedString)
+    var settings = ReaderSettings()
+    for wrap in [false, true, false] {
+        settings.wrapLines = wrap
+        controller.apply(settings: settings)
+        #expect(text.textContainer?.widthTracksTextView == true)
+        #expect(!text.isHorizontallyResizable)
+        #expect(text.enclosingScrollView?.hasHorizontalScroller == false)
+        before.enumerateAttribute(.paragraphStyle, in: NSRange(location: 0, length: before.length)) { value, range, _ in
+            let after = text.textStorage?.attribute(.paragraphStyle, at: range.location, effectiveRange: nil)
+            #expect((value as? NSParagraphStyle) == (after as? NSParagraphStyle))
+        }
+    }
+}
+
+@MainActor
+private func nonSourcePreviewTextView(in view: NSView, label: String) -> NSTextView? {
+    if let text = view as? NSTextView, text.accessibilityLabel() == label { return text }
+    return view.subviews.lazy.compactMap { nonSourcePreviewTextView(in: $0, label: label) }.first
+}

@@ -247,3 +247,101 @@ private func prototypeReadingSetExcerpts() -> [ReadingSetExcerpt] {
 private func readingSetTestViews(in view: NSView) -> [NSView] {
     [view] + view.subviews.flatMap(readingSetTestViews(in:))
 }
+
+@MainActor
+@Test
+func readingSetWrapUsesActualRowsAndOneHeightConstraint() async throws {
+    _ = NSApplication.shared
+    let view = ReadingSetView()
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 460),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = view
+    defer { window.orderOut(nil) }
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    view.apply(settings: settings)
+    view.display(title: "Wrap", excerpts: wrapReadingSetExcerpts())
+    await settleReadingSet(window)
+    #expect(view.selfTestTextViews.allSatisfy { $0.textLayoutManager != nil })
+    #expect(view.selfTestCodeGeometry[0].0 == "99999\n100000\n\n100001\n100002\n100003")
+    #expect(view.selfTestGutterLabels[0] == ["99999", "100000", "100001", "100002", "100003"])
+    let heights = view.selfTestCardFrames.map(\.height)
+    #expect(view.selfTestTextViews.allSatisfy { $0.textContainer?.widthTracksTextView == true })
+    for state in view.selfTestLayoutState {
+        #expect(state.heightConstraints == 1)
+        #expect(state.contentBottom <= state.documentHeight)
+    }
+    let counts = view.selfTestLayoutState.map(\.measurements)
+    view.apply(settings: settings)
+    await settleReadingSet(window)
+    #expect(view.selfTestLayoutState.map(\.measurements) == counts)
+    for style in [NSScroller.Style.legacy, .overlay] {
+        view.selfTestCodeScrollViews.forEach { $0.scrollerStyle = style }
+        settings.wrapLines = false
+        view.apply(settings: settings)
+        await settleReadingSet(window)
+        #expect(zip(view.selfTestCardFrames, heights).allSatisfy { $0.height < $1 })
+        for state in view.selfTestLayoutState {
+        #expect(state.heightConstraints == 1)
+        #expect(state.contentBottom <= state.documentHeight)
+    }
+        settings.wrapLines = true
+        view.apply(settings: settings)
+        window.setContentSize(NSSize(width: 440, height: 460))
+        await settleReadingSet(window)
+        #expect(zip(view.selfTestCardFrames, view.selfTestCardFrames.dropFirst()).allSatisfy { $0.maxY <= $1.minY })
+    }
+}
+
+@MainActor
+@Test
+func readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() async throws {
+    _ = NSApplication.shared
+    let view = ReadingSetView()
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 340),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.contentView = view
+    defer { window.orderOut(nil) }
+    view.display(title: "Anchor", excerpts: wrapReadingSetExcerpts())
+    await settleReadingSet(window)
+    let text = view.selfTestTextViews[2]
+    let selections = [NSValue(range: NSRange(location: 4, length: 18)), NSValue(range: NSRange(location: 36, length: 12))]
+    text.setSelectedRanges(selections, affinity: .upstream, stillSelecting: false)
+    view.restoreScrollOffset(Double(view.selfTestCardFrames[2].minY + 45))
+    await settleReadingSet(window)
+    let before = try #require(view.selfTestViewportAnchor)
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    settings.fontSize = 18
+    view.apply(settings: settings)
+    await settleReadingSet(window)
+    let after = try #require(view.selfTestViewportAnchor)
+    #expect(before.card == 2 && after.card == before.card)
+    #expect(after.location == before.location)
+    #expect(abs(after.offset - before.offset) <= 2)
+    #expect(text.selectedRanges == selections)
+    #expect(text.selectionAffinity == .upstream)
+}
+
+@MainActor
+private func settleReadingSet(_ window: NSWindow) async {
+    for _ in 0..<5 {
+        window.contentView?.layoutSubtreeIfNeeded()
+        try? await Task.sleep(for: .milliseconds(10))
+        window.displayIfNeeded()
+    }
+}
+
+private func wrapReadingSetExcerpts() -> [ReadingSetExcerpt] {
+    let original = prototypeReadingSetExcerpts()[0]
+    let source = "first\n" + String(repeating: "long 👩🏽‍💻 中文 fragment ", count: 100) + "\n…\n\nlast\n"
+    let bytes = Array(source.utf8)
+    return (0..<5).map { _ in
+        ReadingSetExcerpt(role: original.role, symbol: original.symbol, path: original.path,
+                          line: 99999, column: 1, firstLine: 99999,
+                          byteRange: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count)),
+                          sourceText: source, contentID: .sha256(of: bytes), revision: nil,
+                          capturedAt: original.capturedAt, sourceKind: original.sourceKind,
+                          inspector: original.inspector, caveat: original.caveat)
+    }
+}

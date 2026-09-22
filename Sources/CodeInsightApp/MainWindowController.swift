@@ -5083,6 +5083,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var displayedReadingSetKey: String?
     private var previewView: NSView?
     private var previewKind: String?
+    private enum TextPreviewKind { case plainText, markdown }
+    private var textPreviewKind: TextPreviewKind?
+    private var previewWrapLines = ReaderSettings().wrapLines
+    private var previewUnwrappedX: CGFloat = 0
     private var previewRenderedText: String?
     private var previewLinkCount = 0
     private var previewAccessibilityLabel: String?
@@ -5949,6 +5953,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     func apply(settings: ReaderSettings) {
         loadViewIfNeeded()
+        let previewWrapChanged = previewWrapLines != settings.wrapLines
+        previewWrapLines = settings.wrapLines
         readerTheme = ReaderTheme(settings: settings)
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)
@@ -5956,6 +5962,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         if let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
             previewTextView.backgroundColor = readerTheme.backgroundColor
             previewTextView.textColor = readerTheme.foregroundColor
+            if textPreviewKind == .plainText, previewWrapChanged,
+               let previewScrollView = previewView as? NSScrollView {
+                configurePlainTextPreview(previewTextView, in: previewScrollView)
+            }
         }
         if let pdfView = previewView as? PDFView {
             pdfView.backgroundColor = readerTheme.backgroundColor
@@ -6791,6 +6801,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewView?.removeFromSuperview()
         previewView = nil
         previewKind = nil
+        textPreviewKind = nil
+        previewUnwrappedX = 0
         previewRenderedText = nil
         previewLinkCount = 0
         previewAccessibilityLabel = nil
@@ -6912,7 +6924,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             let attributed = markdownPreviewAttributedString(markdown)
             displayPreviewText(
                 attributed,
-                kind: "Markdown",
+                kind: .markdown,
                 accessibilityLabel: "Markdown preview"
             )
             return
@@ -6923,7 +6935,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
         displayPreviewText(
             NSAttributedString(string: string),
-            kind: "Plain text",
+            kind: .plainText,
             accessibilityLabel: "Plain text preview"
         )
     }
@@ -7072,7 +7084,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     private func displayPreviewText(
         _ attributed: NSAttributedString,
-        kind: String,
+        kind: TextPreviewKind,
         accessibilityLabel: String
     ) {
         let styled = NSMutableAttributedString(attributedString: attributed)
@@ -7125,11 +7137,76 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 if value != nil { linkCount += 1 }
             }
         }
-        previewKind = kind
+        textPreviewKind = kind
+        previewKind = kind == .plainText ? "Plain text" : "Markdown"
         previewRenderedText = textView.string
         previewLinkCount = linkCount
         previewAccessibilityLabel = accessibilityLabel
         installPreview(scrollView)
+        view.layoutSubtreeIfNeeded()
+        if kind == .plainText {
+            configurePlainTextPreview(textView, in: scrollView)
+        }
+    }
+
+    private func configurePlainTextPreview(_ textView: NSTextView, in scrollView: NSScrollView) {
+        guard let container = textView.textContainer,
+              let layout = textView.layoutManager else { return }
+        let selection = textView.selectedRanges
+        let affinity = textView.selectionAffinity
+        let oldOrigin = scrollView.contentView.bounds.origin
+        let wasUnwrapped = textView.isHorizontallyResizable
+        if wasUnwrapped { previewUnwrappedX = oldOrigin.x }
+
+        // Keep a local UTF-16 character at the same vertical viewport offset.
+        // This preview uses TextKit 1; source/fold projection state does not apply.
+        layout.ensureLayout(for: container)
+        let point = NSPoint(
+            x: max(0, oldOrigin.x - textView.textContainerOrigin.x),
+            y: max(0, oldOrigin.y - textView.textContainerOrigin.y)
+        )
+        let glyph = layout.glyphIndex(for: point, in: container)
+        let character = glyph < layout.numberOfGlyphs
+            ? layout.characterIndexForGlyph(at: glyph) : nil
+        let anchorY = character.map { _ in
+            layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY
+                + textView.textContainerOrigin.y
+        }
+
+        scrollView.hasHorizontalScroller = !previewWrapLines
+        scrollView.tile()
+        let viewport = scrollView.contentSize
+        textView.isHorizontallyResizable = !previewWrapLines
+        textView.autoresizingMask = previewWrapLines ? [.width] : []
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        container.widthTracksTextView = previewWrapLines
+        textView.setFrameSize(NSSize(width: viewport.width, height: textView.frame.height))
+        container.containerSize = NSSize(
+            width: previewWrapLines
+                ? max(1, viewport.width - 2 * textView.textContainerInset.width)
+                : .greatestFiniteMagnitude,
+            height: .greatestFiniteMagnitude
+        )
+        layout.ensureLayout(for: container)
+        let used = layout.usedRect(for: container)
+        textView.setFrameSize(NSSize(
+            width: previewWrapLines ? viewport.width
+                : max(viewport.width, ceil(used.maxX) + 2 * textView.textContainerInset.width),
+            height: max(viewport.height, ceil(used.maxY) + 2 * textView.textContainerInset.height)
+        ))
+        textView.setSelectedRanges(selection, affinity: affinity, stillSelecting: false)
+        var y = oldOrigin.y
+        if let character, let anchorY {
+            let newGlyph = layout.glyphIndexForCharacter(at: character)
+            y += layout.lineFragmentRect(forGlyphAt: newGlyph, effectiveRange: nil).minY
+                + textView.textContainerOrigin.y - anchorY
+        }
+        let restored = NSPoint(
+            x: previewWrapLines ? 0 : min(previewUnwrappedX, max(0, textView.frame.width - viewport.width)),
+            y: min(max(0, y), max(0, textView.frame.height - viewport.height))
+        )
+        scrollView.contentView.scroll(to: restored)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
     }
 
     private func displayPreviewHTML(_ html: String, file: URL) {

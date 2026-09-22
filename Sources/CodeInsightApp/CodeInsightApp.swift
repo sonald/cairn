@@ -13672,20 +13672,6 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         Darwin.exit(status)
     }
 
-    // Reading Set cards gain wrap support in S2b; until then this scenario is
-    // an explicit `unsupported`, never a fabricated baseline (§7.4.3).
-    if request.scenario == "reading-set" {
-        write([
-            "schemaVersion": 1,
-            "codeSHA": request.codeSHA,
-            "scenario": "reading-set",
-            "requestedWrap": request.wrapOn,
-            "status": "unsupported",
-            "reason": "Reading Set wrap reflow lands in S2b; "
-                + "no wrap-on layout exists on this baseline",
-        ], status: 0)
-    }
-
     var fixtureBytes: [UInt8] = []
     do {
         fixtureBytes = Array(try Data(
@@ -13896,6 +13882,171 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             }
         }
         return nil
+    }
+
+    if request.scenario == "reading-set" {
+        // F5 is a bundle of frozen excerpts, not a source file. Preserve the
+        // omission marker literally, as the production excerpt model does.
+        let chunks = String(decoding: fixtureBytes, as: UTF8.self)
+            .components(separatedBy: "### card ").dropFirst()
+        let capturedAt = Date(timeIntervalSince1970: 0)
+        let excerpts = chunks.enumerated().compactMap { index, chunk -> ReadingSetExcerpt? in
+            guard let newline = chunk.firstIndex(of: "\n") else { return nil }
+            let source = String(chunk[chunk.index(after: newline)...])
+            let bytes = Array(source.utf8)
+            let symbol = "F5 card \(index)"
+            let inspector = ReadingSetExcerpt.FrozenInspectorDisplay(
+                nodeTitle: symbol, badge: .verified, why: "F5 fixture",
+                sourceBody: "Frozen source", verificationTitle: "VERIFICATION",
+                verificationBody: "Fixture", correctionBody: "",
+                availabilityBody: "Captured", environmentBody: "Performance fixture",
+                auditRows: [], accessibilityValue: symbol, capturedAt: capturedAt,
+                formerCandidateAvailable: false
+            )
+            return ReadingSetExcerpt(
+                role: "DEFINITION", symbol: symbol, path: "f5.rs", line: 1,
+                column: 1, firstLine: 1,
+                byteRange: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count)),
+                sourceText: source, contentID: .sha256(of: bytes), revision: nil,
+                capturedAt: capturedAt, sourceKind: .worktreeCaptured,
+                inspector: inspector, caveat: nil
+            )
+        }
+        guard excerpts.count == 31, excerpts.last?.sourceText.contains("\n…\n") == true else {
+            _ = stopProbes()
+            write(["status": "error", "error": "F5 requires 30 cards and one omission card"], status: 1)
+        }
+        scrollView.removeFromSuperview()
+        let readingSet = ReadingSetView(frame: NSRect(x: 100, y: 60, width: 1200, height: 760))
+        readingSet.translatesAutoresizingMaskIntoConstraints = true
+        host.addSubview(readingSet)
+        func applyWrap(_ enabled: Bool) {
+            var settings = baseSettings
+            settings.wrapLines = enabled
+            readingSet.apply(settings: settings)
+        }
+        applyWrap(!request.wrapOn)
+        readingSet.display(title: "F5", excerpts: excerpts)
+        let codeViews = readingSet.selfTestCodeViews
+        func geometryValid(wrap: Bool) -> Bool {
+            guard codeViews.count == 31, !readingSet.selfTestLayoutPending else { return false }
+            let validText = codeViews.allSatisfy { view in
+                guard view.textLayoutManager != nil, let container = view.textContainer else { return false }
+                return container.widthTracksTextView == wrap
+                    && view.isHorizontallyResizable == !wrap
+                    && view.string.utf16.count > 0
+            }
+            return validText
+                && readingSet.selfTestCodeScrollViews.allSatisfy { $0.hasHorizontalScroller == !wrap }
+                && readingSet.selfTestLayoutState.allSatisfy {
+                    $0.heightConstraints == 1 && $0.contentBottom > 0
+                        && $0.contentBottom <= $0.documentHeight + 0.5
+                }
+        }
+        // cacheDisplay invokes the real AppKit drawing callbacks offscreen.
+        // Stability includes every card, outer scroll position, and measurement
+        // count; elapsed time always starts BEFORE the settings action.
+        func settle(since started: ContinuousClock.Instant, wrap: Bool) -> (first: Double, settled: Double)? {
+            let deadline = Date(timeIntervalSinceNow: 10)
+            let baselineDraws = readingSet.selfTestDrawCount
+            var firstFrame: Double?
+            var previous: [CGFloat] = []
+            var stable = 0
+            while Date() < deadline {
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+                host.layoutSubtreeIfNeeded()
+                readingSet.cacheDisplay(in: readingSet.bounds, to: drawBitmap)
+                guard readingSet.selfTestDrawCount > baselineDraws, geometryValid(wrap: wrap) else { stable = 0; continue }
+                if firstFrame == nil { firstFrame = milliseconds(since: started) }
+                let signature = readingSet.selfTestCardFrames.flatMap {
+                    [$0.minY, $0.width, $0.height]
+                } + [CGFloat(readingSet.scrollOffset), CGFloat(readingSet.selfTestMeasurementCount)]
+                stable = signature == previous ? stable + 1 : 0
+                previous = signature
+                if stable >= 3, let firstFrame {
+                    return (firstFrame, milliseconds(since: started))
+                }
+            }
+            return nil
+        }
+        var samples: [[String: Any]] = []
+        var failure: String?
+        var lastAnchorError: CGFloat = 0
+        if settle(since: .now, wrap: !request.wrapOn) == nil {
+            failure = "initial Reading Set layout timed out"
+        }
+        // Anchor a middle card, so the test exercises outer restoration rather
+        // than trivially preserving zero. Keep a nonempty selection in every card.
+        let anchorIndex = 12
+        let anchorOffset: CGFloat = 8
+        if failure == nil {
+            readingSet.restoreScrollOffset(Double(readingSet.selfTestCardFrames[anchorIndex].minY + anchorOffset))
+            for view in codeViews { view.setSelectedRange(NSRange(location: 3, length: 8)) }
+            _ = settle(since: .now, wrap: !request.wrapOn)
+            resetStallProbe()
+            for cycle in 0..<(request.warmupCount + request.sampleCount) {
+                let countBefore = readingSet.selfTestMeasurementCount
+                let started = ContinuousClock.now
+                applyWrap(request.wrapOn)
+                guard let timing = settle(since: started, wrap: request.wrapOn) else {
+                    failure = "Reading Set toggle layout or drawing timed out"; break
+                }
+                let frames = readingSet.selfTestCardFrames
+                lastAnchorError = abs(CGFloat(readingSet.scrollOffset) - frames[anchorIndex].minY - anchorOffset)
+                let selectionOK = codeViews.allSatisfy { $0.selectedRange() == NSRange(location: 3, length: 8) }
+                let measureCount = readingSet.selfTestMeasurementCount - countBefore
+                let heightOK = zip(frames, frames.dropFirst()).allSatisfy { $1.minY >= $0.maxY }
+                samples.append([
+                    "cycle": cycle, "warmup": cycle < request.warmupCount,
+                    "toggleFirstFrameMs": timing.first, "toggleSettledMs": timing.settled,
+                    "cardMeasureCount": measureCount, "anchorErrorPt": lastAnchorError,
+                    "selectionPreserved": selectionOK, "cardHeightsValid": heightOK,
+                    "effectiveWrap": codeViews.allSatisfy { $0.textContainer?.widthTracksTextView == true },
+                    "textContainerWidthsPt": codeViews.map { $0.textContainer?.size.width ?? 0 },
+                ])
+                if !selectionOK || !heightOK || lastAnchorError > 1 || measureCount != 31 {
+                    failure = "selection, anchor, card height or single-measure invariant failed"; break
+                }
+                applyWrap(!request.wrapOn)
+                guard settle(since: .now, wrap: !request.wrapOn) != nil else {
+                    failure = "Reading Set return toggle timed out"; break
+                }
+            }
+        }
+        let probes = stopProbes()
+        let measured = samples.filter { !($0["warmup"] as? Bool ?? true) }
+        func summary(_ key: String) -> [String: Double] {
+            let values = measured.compactMap { $0[key] as? Double }.sorted()
+            guard !values.isEmpty else { return [:] }
+            return ["p50": values[Int(ceil(Double(values.count) * 0.5)) - 1],
+                    "p95": values[Int(ceil(Double(values.count) * 0.95)) - 1], "max": values.last!]
+        }
+        let font = codeViews.first?.font
+        var object: [String: Any] = [
+            "schemaVersion": 2, "codeSHA": request.codeSHA,
+            "fixtureSHA256": ContentID.sha256(of: fixtureBytes).bytes.map { String(format: "%02x", $0) }.joined(),
+            "scenario": request.scenario, "requestedWrap": request.wrapOn,
+            "status": failure == nil ? "ok" : "error", "samplePeriodMs": 25,
+            "warmupCount": request.warmupCount, "sampleCount": measured.count,
+            "peakPhysBytes": probes.peak, "samples": samples,
+            "summary": ["toggleFirstFrameMs": summary("toggleFirstFrameMs"), "toggleSettledMs": summary("toggleSettledMs")],
+            "perfConfig": ["cardCount": readingSet.selfTestCardCount,
+                           "measuredWrapLines": samples.last?["effectiveWrap"] ?? NSNull(),
+                           "cardScrollerStyles": readingSet.selfTestCodeScrollViews.map { $0.scrollerStyle == .legacy ? "legacy" : "overlay" },
+                           "textContainerWidthsPt": samples.last?["textContainerWidthsPt"] ?? [],
+                           "lineHeightMultiple": baseSettings.lineHeightMultiple,
+                           "resolvedFontName": font?.fontName ?? "", "resolvedFontSizePt": font?.pointSize ?? 0,
+                           "windowPt": [host.bounds.width, host.bounds.height],
+                           "viewportPt": [readingSet.bounds.width, readingSet.bounds.height],
+                           "backingScale": window.backingScaleFactor, "lineNumbers": true,
+                           "theme": "SI Classic", "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
+                           "machineModel": sysctlString("hw.model") ?? ""],
+            "observed": ["cardMeasureCount": readingSet.selfTestMeasurementCount,
+                         "drawPassCount": readingSet.selfTestDrawCount,
+                         "anchorErrorPt": lastAnchorError, "longestMainThreadStallMs": probes.longestStallMs],
+        ]
+        if let failure { object["error"] = failure }
+        write(object, status: failure == nil ? 0 : 1)
     }
 
     let loader = DocumentLoader(

@@ -26,9 +26,21 @@ final class ReadingSetView: NSView {
     )
     private var cards: [ReadingSetExcerptView] = []
     private var theme = ReaderTheme(settings: ReaderSettings())
+    private var settings = ReaderSettings()
+    private var layoutPending = false
+    private var updatingLayout = false
+    private var lastWidth: CGFloat = -1
+    private var anchor: (card: Int, location: Int?, offset: CGFloat, bottom: Bool)?
+    nonisolated(unsafe) private var scrollEventMonitor: Any?
     nonisolated(unsafe) private var scrollObserver: NSObjectProtocol?
 
     override var isFlipped: Bool { true }
+    private(set) var selfTestDrawCount = 0
+
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        selfTestDrawCount += 1
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -77,6 +89,12 @@ final class ReadingSetView: NSView {
             }
         }
         scrollView.contentView.postsBoundsChangedNotifications = true
+        scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown, .keyDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                if event.window === self?.window { self?.anchor = nil }
+            }
+            return event
+        }
         apply(settings: ReaderSettings())
     }
 
@@ -85,6 +103,7 @@ final class ReadingSetView: NSView {
     }
 
     deinit {
+        if let scrollEventMonitor { NSEvent.removeMonitor(scrollEventMonitor) }
         if let scrollObserver {
             NotificationCenter.default.removeObserver(scrollObserver)
         }
@@ -100,6 +119,7 @@ final class ReadingSetView: NSView {
         expandAvailability: [Bool]? = nil,
         skippedReasons: [String] = []
     ) {
+        anchor = nil
         titleLabel.stringValue = "Reading Set · \(title)"
         var subtitle = "\(excerpts.count) excerpts · frozen at capture · tab lifetime"
         if !skippedReasons.isEmpty {
@@ -139,11 +159,12 @@ final class ReadingSetView: NSView {
                     self?.onViewEvidence?(index)
                 }
             }
-            card.display(excerpt, theme: theme)
+            card.display(excerpt, settings: settings)
             content.addArrangedSubview(card)
             card.widthAnchor.constraint(equalTo: content.widthAnchor).isActive = true
             return card
         }
+        requestLayout()
         emptyLabel.isHidden = !excerpts.isEmpty
         setAccessibilityLabel("Reading Set \(title)")
         let skippedValue = skippedReasons.isEmpty
@@ -155,18 +176,115 @@ final class ReadingSetView: NSView {
     }
 
     func apply(settings: ReaderSettings) {
+        captureAnchor()
+        self.settings = settings
         theme = ReaderTheme(settings: settings)
         layer?.backgroundColor = theme.backgroundColor.cgColor
         titleLabel.textColor = theme.foregroundColor
         subtitleLabel.textColor = theme.chromeSecondaryColor
         emptyLabel.textColor = theme.chromeSecondaryColor
-        cards.forEach { $0.apply(theme: theme) }
+        cards.forEach { $0.apply(settings: settings) }
+        requestLayout()
     }
 
     func restoreScrollOffset(_ offset: Double?) {
         guard let offset else { return }
+        anchor = nil
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, offset)))
         scrollView.reflectScrolledClipView(scrollView.contentView)
+    }
+
+    override var isHidden: Bool {
+        didSet {
+            if isHidden { anchor = nil }
+            else { requestLayout() }
+        }
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        if newSize.width != frame.width { captureAnchor() }
+        super.setFrameSize(newSize)
+    }
+
+    override func layout() {
+        super.layout()
+        let width = scrollView.contentView.bounds.width
+        if width != lastWidth && !updatingLayout {
+            captureAnchor()
+            requestLayout()
+        }
+    }
+
+    private func captureAnchor() {
+        guard anchor == nil, !updatingLayout, !isHidden, cards.contains(where: { $0.measurements > 0 }) else { return }
+        anchor = viewportAnchor()
+    }
+
+    private func viewportAnchor() -> (card: Int, location: Int?, offset: CGFloat, bottom: Bool)? {
+        let top = scrollView.contentView.bounds.minY
+        guard let index = cards.firstIndex(where: { $0.convert($0.bounds, to: documentView).maxY > top }) else { return nil }
+        let card = cards[index]
+        let point = card.convert(NSPoint(x: 0, y: top), from: documentView)
+        if let row = card.row(at: point.y) {
+            let y = card.convert(NSPoint(x: 0, y: row.y), to: documentView).y
+            return (index, row.location, y - top, false)
+        }
+        let bottom = point.y > card.codeView.convert(card.codeView.bounds, to: card).maxY
+        let reference = NSPoint(x: 0, y: bottom ? card.bounds.height : 0)
+        return (index, nil, card.convert(reference, to: documentView).y - top, bottom)
+    }
+
+    private func requestLayout() {
+        guard !layoutPending else { return }
+        layoutPending = true
+        DispatchQueue.main.async { [weak self] in self?.selfTestFlushLayout() }
+    }
+
+    func selfTestFlushLayout() {
+        guard layoutPending, !updatingLayout else { return }
+        layoutPending = false
+        guard bounds.width > 0 else { return }
+        updatingLayout = true
+        layoutSubtreeIfNeeded()
+        scrollView.tile()
+        lastWidth = scrollView.contentView.bounds.width
+        for card in cards { card.measure() }
+        layoutSubtreeIfNeeded()
+        if let saved = anchor, cards.indices.contains(saved.card), !isHidden {
+            let card = cards[saved.card]
+            let localY = saved.location.flatMap { card.y(for: $0) } ?? (saved.bottom ? card.bounds.height : 0)
+            let y = card.convert(NSPoint(x: 0, y: localY), to: documentView).y - saved.offset
+            let maxY = max(0, documentView.bounds.height - scrollView.contentView.bounds.height)
+            scrollView.contentView.scroll(to: NSPoint(x: 0, y: min(max(0, y), maxY)))
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        updatingLayout = false
+        if scrollView.contentView.bounds.width != lastWidth { requestLayout() }
+        needsDisplay = true
+    }
+
+    var selfTestGutterLabels: [[String]] { cards.map { $0.gutterLabels } }
+    var selfTestCodeViews: [NSTextView] { cards.map(\.codeView) }
+    var selfTestTextViews: [NSTextView] { selfTestCodeViews }
+    var selfTestCodeScrollViews: [NSScrollView] { cards.map(\.codeScroll) }
+    var selfTestScrollView: NSScrollView { scrollView }
+    var selfTestMeasurementCount: Int { cards.reduce(0) { $0 + $1.measurements } }
+    var selfTestLayoutPending: Bool { layoutPending }
+    var selfTestViewportAnchor: (card: Int, location: Int?, offset: CGFloat)? {
+        guard let saved = anchor ?? viewportAnchor(), cards.indices.contains(saved.card) else { return nil }
+        let card = cards[saved.card]
+        let localY = saved.location.flatMap { card.y(for: $0) } ?? (saved.bottom ? card.bounds.height : 0)
+        let y = card.convert(NSPoint(x: 0, y: localY), to: documentView).y
+        return (saved.card, saved.location, y - scrollView.contentView.bounds.minY)
+    }
+    var selfTestLayoutState: [(measurements: Int, heightConstraints: Int, contentBottom: CGFloat, documentHeight: CGFloat)] {
+        // The scroll view also owns constraints for its scroller/clip children.
+        cards.map { card in
+            (card.measurements, card.codeScroll.constraints.filter {
+                $0.firstItem === card.codeScroll && $0.firstAttribute == .height
+                    && $0.relation == .equal && $0.secondItem == nil && $0.isActive
+            }.count, card.textBottom + 10, card.codeDocument.bounds.height)
+        }
     }
 
     var scrollOffset: Double {
@@ -203,6 +321,8 @@ private final class ReadingSetExcerptView: NSView {
     var onExpand: (() -> Void)?
     var onViewEvidence: (() -> Void)?
 
+    override var isFlipped: Bool { true }
+
     private let index: Int
     private let header = NSStackView()
     private let roleLabel = NSTextField(labelWithString: "")
@@ -211,10 +331,10 @@ private final class ReadingSetExcerptView: NSView {
     private let badge = ReadingSetChipView()
     private let caveat = ReadingSetChipView()
     private let provenance = ReadingSetChipView()
-    private let codeScroll = NSScrollView()
-    private let codeDocument = ReadingSetDocumentView()
-    private let lineNumbers = NSTextField(labelWithString: "")
-    private let codeView = NSTextView()
+    let codeScroll = NSScrollView()
+    let codeDocument = ReadingSetDocumentView()
+    private let lineNumbers = ReadingSetGutterView()
+    let codeView = NSTextView(usingTextLayoutManager: true)
     private let openButton = NSButton()
     private let expandButton = NSButton()
     private let evidenceButton = NSButton()
@@ -222,7 +342,14 @@ private final class ReadingSetExcerptView: NSView {
     private var excerpt: ReadingSetExcerpt?
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var codeHeight: CGFloat = 40
-    private var codeWidth: CGFloat = 1
+    private var settings = ReaderSettings()
+    private var signature: [CGFloat] = []
+    private var rows: [(range: NSRange, rect: NSRect)] = []
+    private var sourceLabels: [(offset: Int, label: String)] = []
+    private var unwrappedX: CGFloat = 0
+    private var codeScrollHeightConstraint: NSLayoutConstraint!
+    private(set) var measurements = 0
+    private(set) var textBottom: CGFloat = 0
 
     init(index: Int) {
         self.index = index
@@ -248,9 +375,6 @@ private final class ReadingSetExcerptView: NSView {
         codeScroll.autohidesScrollers = true
         codeScroll.drawsBackground = false
         codeScroll.borderType = .noBorder
-        lineNumbers.alignment = .right
-        lineNumbers.maximumNumberOfLines = 0
-        lineNumbers.lineBreakMode = .byClipping
         codeView.isEditable = false
         codeView.isSelectable = true
         codeView.isRichText = false
@@ -288,6 +412,8 @@ private final class ReadingSetExcerptView: NSView {
             header.heightAnchor.constraint(equalToConstant: 34),
             actions.heightAnchor.constraint(equalToConstant: 32),
         ])
+        codeScrollHeightConstraint = codeScroll.heightAnchor.constraint(equalToConstant: 40)
+        codeScrollHeightConstraint.isActive = true
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
     }
@@ -296,32 +422,21 @@ private final class ReadingSetExcerptView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    func display(_ excerpt: ReadingSetExcerpt, theme: ReaderTheme) {
+    func display(_ excerpt: ReadingSetExcerpt, settings: ReaderSettings) {
         self.excerpt = excerpt
         roleLabel.stringValue = excerpt.role.uppercased()
         symbolLabel.stringValue = excerpt.symbol
         pathLabel.stringValue = "\(excerpt.path):\(excerpt.line)"
         codeView.string = excerpt.sourceText
-        let font = NSFont.monospacedSystemFont(
-            ofSize: theme.fontSize,
-            weight: .regular
-        )
-        let sourceLines = excerpt.sourceText.split(
-            separator: "\n",
-            omittingEmptySubsequences: false
-        ).map(String.init)
         var nextLine = excerpt.firstLine
-        lineNumbers.stringValue = sourceLines.map { sourceLine in
-            guard sourceLine != "…" else { return "" }
+        var offset = 0
+        sourceLabels = excerpt.sourceText.components(separatedBy: "\n").map { line in
+            defer { offset += line.utf16.count + 1 }
+            guard line != "…" && line != "…\r" else { return (offset, "") }
             defer { nextLine &+= 1 }
-            return String(nextLine)
-        }.joined(separator: "\n")
-        let lineHeight = font.boundingRectForFont.height
-        codeHeight = ceil(lineHeight * CGFloat(max(1, sourceLines.count))) + 20
-        codeWidth = ceil(sourceLines.map {
-            ($0 as NSString).size(withAttributes: [.font: font]).width
-        }.max() ?? 1) + 24
-        codeScroll.heightAnchor.constraint(equalToConstant: codeHeight).isActive = true
+            return (offset, String(nextLine))
+        }
+        signature = []
         openButton.isHidden = excerpt.sourceKind == .dependencyCaptured
         openButton.isEnabled = onOpen != nil
         expandButton.isEnabled = onExpand != nil
@@ -332,10 +447,12 @@ private final class ReadingSetExcerptView: NSView {
         setAccessibilityValue(
             "\(excerpt.inspector.badge.rawValue), \(provenanceText(excerpt))"
         )
-        apply(theme: theme)
+        apply(settings: settings)
     }
 
-    func apply(theme: ReaderTheme) {
+    func apply(settings: ReaderSettings) {
+        self.settings = settings
+        let theme = ReaderTheme(settings: settings)
         self.theme = theme
         layer?.backgroundColor = theme.chromeColor.cgColor
         layer?.borderColor = theme.chromeDividerColor.cgColor
@@ -343,15 +460,14 @@ private final class ReadingSetExcerptView: NSView {
         symbolLabel.textColor = theme.foregroundColor
         pathLabel.textColor = theme.chromeSecondaryColor
         codeView.textColor = theme.foregroundColor
-        codeView.font = .monospacedSystemFont(
-            ofSize: theme.fontSize,
-            weight: .regular
-        )
+        let font = NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+        if codeView.font != font { codeView.font = font }
         lineNumbers.font = .monospacedDigitSystemFont(
             ofSize: theme.fontSize,
             weight: .regular
         )
         lineNumbers.textColor = theme.chromeTertiaryColor
+        lineNumbers.needsDisplay = true
         guard let excerpt else { return }
         switch excerpt.inspector.badge {
         case .verified:
@@ -416,33 +532,82 @@ private final class ReadingSetExcerptView: NSView {
     @objc private func expand(_ sender: Any?) { onExpand?() }
     @objc private func evidence(_ sender: Any?) { onViewEvidence?() }
 
-    override func layout() {
-        super.layout()
-        let gutterWidth: CGFloat = 42
-        let innerHeight = max(1, codeHeight - 20)
-        let documentWidth = max(
-            codeScroll.contentSize.width,
-            gutterWidth + 12 + codeWidth
-        )
-        codeDocument.frame = NSRect(
-            x: 0,
-            y: 0,
-            width: documentWidth,
-            height: codeHeight
-        )
-        lineNumbers.frame = NSRect(
-            x: 0,
-            y: 10,
-            width: gutterWidth,
-            height: innerHeight
-        )
-        codeView.frame = NSRect(
-            x: gutterWidth + 12,
-            y: 10,
-            width: codeWidth,
-            height: innerHeight
-        )
+    func measure() {
+        guard bounds.width > 0, let manager = codeView.textLayoutManager,
+              let content = manager.textContentManager else { return }
+        let font = NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+        let gutterWidth = ceil(sourceLabels.map { ($0.label as NSString).size(withAttributes: [.font: lineNumbers.font]).width }.max() ?? 0) + 8
+        let nextSignature: [CGFloat] = [bounds.width, settings.wrapLines ? 1 : 0, CGFloat(theme.fontSize),
+                                         CGFloat(settings.lineHeightMultiple), gutterWidth,
+                                         CGFloat(codeScroll.scrollerStyle.rawValue)]
+        guard nextSignature != signature else { return }
+        signature = nextSignature
+        measurements += 1
+        let selected = codeView.selectedRanges
+        let affinity = codeView.selectionAffinity
+        if codeScroll.hasHorizontalScroller {
+            unwrappedX = codeScroll.contentView.bounds.minX
+        }
+        codeScroll.hasHorizontalScroller = !settings.wrapLines
+        codeScroll.tile()
+        let available = max(1, codeScroll.contentSize.width - gutterWidth - 12)
+        codeView.isHorizontallyResizable = !settings.wrapLines
+        codeView.autoresizingMask = settings.wrapLines ? [.width] : []
+        codeView.textContainer?.widthTracksTextView = settings.wrapLines
+        codeView.frame.size.width = available
+        codeView.textContainer?.containerSize = NSSize(width: settings.wrapLines ? available : CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineHeightMultiple = CGFloat(settings.lineHeightMultiple)
+        paragraph.lineBreakMode = .byWordWrapping
+        codeView.textStorage?.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: codeView.string.utf16.count))
+        manager.invalidateLayout(for: content.documentRange)
+        manager.ensureLayout(for: content.documentRange)
+        rows = []
+        var usedWidth: CGFloat = 0
+        textBottom = 0
+        manager.enumerateTextLayoutFragments(from: content.documentRange.location, options: [.ensuresLayout, .ensuresExtraLineFragment]) { fragment in
+            let start = content.offset(from: content.documentRange.location, to: fragment.rangeInElement.location)
+            for line in fragment.textLineFragments {
+                let rect = line.typographicBounds.offsetBy(dx: fragment.layoutFragmentFrame.minX, dy: fragment.layoutFragmentFrame.minY)
+                self.rows.append((NSRange(location: start + line.characterRange.location, length: line.characterRange.length), rect))
+                usedWidth = max(usedWidth, rect.maxX)
+                self.textBottom = max(self.textBottom, rect.maxY)
+            }
+            return true
+        }
+        let textHeight = max(ceil(textBottom), ceil(font.ascender - font.descender))
+        let textWidth = settings.wrapLines ? available : max(available, ceil(usedWidth) + 2 * (codeView.textContainer?.lineFragmentPadding ?? 5))
+        codeView.frame = NSRect(x: gutterWidth + 12, y: 10, width: textWidth, height: textHeight)
+        codeDocument.frame = NSRect(x: 0, y: 0, width: max(codeScroll.contentSize.width, gutterWidth + 12 + textWidth), height: textHeight + 20)
+        lineNumbers.frame = NSRect(x: 0, y: 10, width: gutterWidth, height: textHeight)
+        lineNumbers.labels = sourceLabels.compactMap { source in
+            guard !source.label.isEmpty, let row = rows.first(where: { $0.range.location == source.offset }) else { return nil }
+            return (source.label, row.rect)
+        }
+        lineNumbers.needsDisplay = true
+        codeScroll.tile()
+        let scrollerHeight = max(0, codeScroll.bounds.height - codeScroll.contentSize.height)
+        codeHeight = textHeight + 20 + scrollerHeight
+        codeScrollHeightConstraint.constant = codeHeight
+        codeView.setSelectedRanges(selected, affinity: affinity, stillSelecting: false)
+        let x = settings.wrapLines ? 0 : min(unwrappedX, max(0, codeDocument.bounds.width - codeScroll.contentSize.width))
+        codeScroll.contentView.scroll(to: NSPoint(x: x, y: 0))
+        codeScroll.reflectScrolledClipView(codeScroll.contentView)
     }
+
+    func row(at y: CGFloat) -> (location: Int, y: CGFloat)? {
+        let local = codeView.convert(NSPoint(x: 0, y: y), from: self).y
+        guard local >= 0, local <= codeView.bounds.height,
+              let row = rows.first(where: { $0.rect.maxY > local }) else { return nil }
+        return (row.range.location, codeView.convert(NSPoint(x: 0, y: row.rect.minY), to: self).y)
+    }
+
+    func y(for location: Int) -> CGFloat? {
+        guard let row = rows.first(where: { NSLocationInRange(location, $0.range) || ($0.range.length == 0 && $0.range.location == location) }) else { return nil }
+        return codeView.convert(NSPoint(x: 0, y: row.rect.minY), to: self).y
+    }
+
+    var gutterLabels: [String] { lineNumbers.labels.map(\.0) }
 
     var selfTestCodeState: (String, Bool, Bool) {
         (codeView.string, codeView.isSelectable, codeView.isEditable)
@@ -450,7 +615,7 @@ private final class ReadingSetExcerptView: NSView {
 
     var selfTestCodeGeometry: (String, Bool, Bool) {
         (
-            lineNumbers.stringValue,
+            sourceLabels.map(\.label).joined(separator: "\n"),
             codeView.textContainer?.widthTracksTextView == false,
             codeScroll.hasHorizontalScroller
         )
@@ -459,6 +624,22 @@ private final class ReadingSetExcerptView: NSView {
     var selfTestActionState: [(String, Bool, Bool)] {
         [openButton, expandButton, evidenceButton].map {
             ($0.title, $0.isHidden, $0.isEnabled)
+        }
+    }
+}
+
+@MainActor
+private final class ReadingSetGutterView: NSView {
+    var labels: [(String, NSRect)] = []
+    var font = NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .regular)
+    var textColor = NSColor.secondaryLabelColor
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        super.draw(dirtyRect)
+        for (label, row) in labels where row.intersects(dirtyRect) {
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: textColor]
+            let size = (label as NSString).size(withAttributes: attributes)
+            (label as NSString).draw(at: NSPoint(x: bounds.width - size.width - 4, y: row.minY + (row.height - size.height) / 2), withAttributes: attributes)
         }
     }
 }

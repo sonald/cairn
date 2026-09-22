@@ -1,0 +1,46 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() started.
+✔ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() passed after 0.789 seconds.
+◇ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() started.
+2026-09-22 16:59:52.834 swiftpm-testing-helper[99551:17749344] Error received in message reply handler: Connection invalid
+2026-09-22 16:59:52.834 swiftpm-testing-helper[99551:17749348] Connection Invalid error for service com.apple.hiservices-xpcservice.
+✔ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() passed after 0.099 seconds.
+◇ Suite PaletteTests started.
+◇ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() started.
+✔ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() passed after 0.014 seconds.
+✔ Suite PaletteTests passed after 0.014 seconds.
+◇ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() started.
+✔ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() passed after 0.056 seconds.
+◇ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() started.
+✔ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() passed after 0.037 seconds.
+◇ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() started.
+✔ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() passed after 0.035 seconds.
+◇ Test readingSetScrollPublishesItsNumericCheckpointOffset() started.
+✔ Test readingSetScrollPublishesItsNumericCheckpointOffset() passed after 0.097 seconds.
+◇ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() started.
+✔ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() passed after 0.497 seconds.
+◇ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() started.
+✔ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() passed after 0.268 seconds.
+✔ Test run with 9 tests in 1 suite passed after 1.896 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() started.
+✔ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() passed after 0.006 seconds.
+◇ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() started.
+✔ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() passed after 0.027 seconds.
+◇ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() started.
+✔ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() passed after 0.124 seconds.
+◇ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() started.
+✔ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() passed after 0.004 seconds.
+◇ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() started.
+✔ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() passed after 0.001 seconds.
+◇ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() started.
+✔ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() passed after 0.001 seconds.
+◇ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() started.
+✔ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() passed after 0.001 seconds.
+◇ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() started.
+✔ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() passed after 0.001 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.165 seconds.

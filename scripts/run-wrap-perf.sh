@@ -13,8 +13,8 @@
 #
 # Fixtures live in fixtures/wrap/ (scripts/gen-wrap-fixtures.sh --verify).
 # F2/F3 are extreme fixtures reported separately (§7.4.3); they run a reduced
-# sample count by default. The reading-set scenario is probed once per wrap
-# state and must report status "unsupported" until S2b lands its layout.
+# sample count by default. Reading Set uses the ordinary 5 warmups / 30 samples
+# in each direction; historical unsupported baselines remain unchanged.
 
 set -euo pipefail
 
@@ -100,18 +100,9 @@ for fixture in $fixtures; do
     done
 done
 
-# Reading Set: one probe per wrap state; "unsupported" is the honest baseline
-# status until S2b, and any other status here is a failure of the contract.
+# Reading Set: real card layout and drawing, with both toggle directions.
 for wrap in on off; do
-    if run_one f5 "$wrap" reading-set 1 1; then
-        status="$(jq -r '.status' "$out_dir/f5-reading-set-wrap-${wrap}.json")"
-        if [[ "$status" != "unsupported" ]]; then
-            echo "FAIL: reading-set probe reported '$status' (expected unsupported before S2b)" >&2
-            failures=$((failures + 1))
-        fi
-    else
-        failures=$((failures + 1))
-    fi
+    run_one f5 "$wrap" reading-set "$warmup_default" "$samples_default" || failures=$((failures + 1))
 done
 
 # ---------- summary table ----------
@@ -199,12 +190,15 @@ if [[ "$enforce_budgets" == true ]]; then
     check_budget f2-toggle-wrap-off.json '.summary.toggleSettledMs.p95' 1500 "F2 toggle-off settled"
     check_budget f3-toggle-wrap-on.json  '.summary.toggleSettledMs.p95' 1500 "F3 toggle-on settled"
     check_budget f3-toggle-wrap-off.json '.summary.toggleSettledMs.p95' 1500 "F3 toggle-off settled"
-    # F5 becomes measurable in S2b; its budget is 250ms once supported.
-    if jq -e '.status == "unsupported"' "$out_dir/f5-reading-set-wrap-on.json" >/dev/null 2>&1; then
-        echo "BUDGET-SKIP: F5 reading-set unsupported (expected until S2b)" >&2
-    else
-        check_budget f5-reading-set-wrap-on.json '.summary.toggleSettledMs.p95' 250 "F5 reading-set settled"
-    fi
+    for wrap in on off; do
+        file="$out_dir/f5-reading-set-wrap-${wrap}.json"
+        if ! jq -e '.status == "ok" and .sampleCount >= 30 and .warmupCount >= 5 and (.summary.toggleSettledMs.p95 | type == "number")' "$file" >/dev/null 2>&1; then
+            echo "BUDGET-FAIL: F5 $wrap requires successful measured layout, 5 warmups and 30 samples" >&2
+            budget_failures=$((budget_failures + 1))
+        else
+            check_budget "f5-reading-set-wrap-${wrap}.json" '.summary.toggleSettledMs.p95' 250 "F5 reading-set $wrap action-to-settled"
+        fi
+    done
     # Memory and relative-toggle gates need a same-configuration baseline run.
     if [[ -n "$baseline_dir" && -d "$baseline_dir" ]]; then
         for config in f1-toggle-wrap-on f1-toggle-wrap-off f1-resize-wrap-on; do
