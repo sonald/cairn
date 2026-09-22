@@ -11469,6 +11469,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         commitReaderSettings(settings)
     }
 
+    /// View → Wrap Lines, ⌥Z (reader-wrap design D1.1, decision C1). Wrap is
+    /// an application-level reading preference: the action works regardless
+    /// of which window is key and never routes through a project target.
+    @objc private func toggleWrapLines(_ sender: Any?) {
+        var settings = readerSettings
+        settings.wrapLines.toggle()
+        commitReaderSettings(settings)
+    }
+
     private func commitReaderSettings(_ settings: ReaderSettings) {
         readerSettings = settings
         applyApplicationAppearance()
@@ -11546,6 +11555,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         case #selector(focusCurrentScope(_:)):
             menuItem.state = target?.isFocusMode == true ? .on : .off
             return target?.canFocusCurrentScope == true
+        case #selector(toggleWrapLines(_:)):
+            // Application-level setting (D1.1/E1): stays available when the
+            // Settings window or the welcome window is key, with no project
+            // command target; the checkmark reads the same global value the
+            // Settings form and the reader surfaces use.
+            menuItem.state = readerSettings.wrapLines ? .on : .off
+            return true
         case #selector(increaseReaderFontSize(_:)):
             return readerSettings.fontSize < ReaderSettings.fontSizeRange.upperBound
         case #selector(decreaseReaderFontSize(_:)):
@@ -11573,7 +11589,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
     }
 
-    private func makeMainMenu() -> NSMenu {
+    /// Internal for the menu wiring tests: the wrap command must stay
+    /// reachable and checkable without any project window (D1.1).
+    func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
 
         let appItem = NSMenuItem()
@@ -11991,6 +12009,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         decreaseFontItem.keyEquivalentModifierMask = .command
         decreaseFontItem.target = self
         viewMenu.addItem(decreaseFontItem)
+        let wrapLinesItem = NSMenuItem(
+            title: "Wrap Lines",
+            action: #selector(toggleWrapLines(_:)),
+            keyEquivalent: "z"
+        )
+        // ⌥Z (decision C1), grouped with the global reader settings.
+        wrapLinesItem.keyEquivalentModifierMask = .option
+        wrapLinesItem.target = self
+        viewMenu.addItem(wrapLinesItem)
         viewMenu.addItem(.separator())
         let trailItem = NSMenuItem(
             title: "Show Reading Trail",
@@ -13939,13 +13966,19 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     var measuredWrapState: (
         widthTracking: Bool,
         horizontalScroller: Bool,
-        horizontallyResizable: Bool
+        horizontallyResizable: Bool,
+        viewportSize: NSSize
     )?
     func captureWrapState() {
+        // The machine's legacy scroll-bar preference can be re-delivered
+        // mid-run (long fixtures), resetting scrollers styled before it;
+        // re-pin per cycle so the measured geometry stays overlay-stable.
+        scrollView.scrollerStyle = .overlay
         measuredWrapState = (
             widthTracking: reader.view.textContainer?.widthTracksTextView == true,
             horizontalScroller: scrollView.hasHorizontalScroller,
-            horizontallyResizable: reader.view.isHorizontallyResizable
+            horizontallyResizable: reader.view.isHorizontallyResizable,
+            viewportSize: scrollView.contentView.bounds.size
         )
     }
     let measurementStart = {
@@ -14169,7 +14202,8 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     let wrapState = measuredWrapState ?? (
         widthTracking: reader.view.textContainer?.widthTracksTextView == true,
         horizontalScroller: scrollView.hasHorizontalScroller,
-        horizontallyResizable: reader.view.isHorizontallyResizable
+        horizontallyResizable: reader.view.isHorizontallyResizable,
+        viewportSize: scrollView.contentView.bounds.size
     )
     let lineHeight = reader.view.textLayoutManager?
         .textLayoutFragment(for: .zero)?.layoutFragmentFrame.height ?? 0
@@ -14197,7 +14231,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             "resolvedFontName": resolvedFont?.fontName ?? "",
             "resolvedFontSizePt": resolvedFont?.pointSize ?? 0,
             "windowPt": [windowSize.width, windowSize.height],
-            "viewportPt": [viewport.width, viewport.height],
+            "viewportPt": [wrapState.viewportSize.width, wrapState.viewportSize.height],
             "lineNumbers": reader.foldPerformanceEffectiveSettings.lineNumbers,
             "theme": "SI Classic",
             "gutterThicknessPt": reader.rulerThickness,
@@ -14217,15 +14251,15 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         "observed": [
             "reflowCount": reader.projectionInstallCount,
             "drawPassCount": reader.backgroundDrawCount,
-            // Filled in by later slices; null marks "not applicable on this
-            // build" rather than a zero measurement.
+            // paragraphUpdateCount lands with S3; null marks "not applicable
+            // on this build" rather than a zero measurement.
             "paragraphUpdateCount": NSNull(),
-            "restorePassCount": NSNull(),
-            "anchorErrorPt": NSNull(),
-            "mergedResizeRequests": NSNull(),
+            "restorePassCount": reader.viewportRestorePassCount,
+            "anchorErrorPt": reader.lastViewportAnchorErrorPt ?? NSNull(),
+            "mergedResizeRequests": reader.mergedWidthReflowCount,
             "rawResizeRequests": samples.reduce(0) {
                 $0 + ($1["rawResizeRequests"] as? Int ?? 0)
-            },
+            } + reader.widthReflowNotificationCount,
             "longestMainThreadStallMs": probes.longestStallMs,
         ],
         "samples": samples,
@@ -14239,8 +14273,8 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     let configurationIsExact = wrapState.widthTracking == request.wrapOn
         && wrapState.horizontalScroller == !request.wrapOn
         && wrapState.horizontallyResizable == !request.wrapOn
-        && abs(viewport.width - 1200) < 0.01
-        && abs(viewport.height - 760) < 0.01
+        && abs(wrapState.viewportSize.width - 1200) < 0.01
+        && abs(wrapState.viewportSize.height - 760) < 0.01
         && abs(windowSize.width - 1440) < 0.01
         && abs(windowSize.height - 900) < 0.01
         && resolvedFont != nil

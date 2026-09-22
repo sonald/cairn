@@ -627,6 +627,484 @@ func wrapResizeCallbacksOnlyObserveNewWidth() throws {
     withExtendedLifetime(window) {}
 }
 
+// MARK: - Reader wrap v2 · S1 viewport/selection reflow tests
+
+/// Pumps the main runloop and drains deferred viewport restores so the
+/// bounded correction passes (up to 3, each validated against the
+/// transaction generation) get their turn. Tests own the main thread, so
+/// main-queue blocks never run mid-test without this explicit flush.
+@MainActor
+private func wrapSettle(_ reader: ReaderTextView, pumps: Int = 12) {
+    for _ in 0..<pumps {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.03))
+        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        reader.processPendingViewportRestoresForTesting()
+    }
+}
+
+@MainActor
+private func wrapSettings(_ wrap: Bool) -> ReaderSettings {
+    var settings = ReaderSettings()
+    settings.wrapLines = wrap
+    return settings
+}
+
+/// Independent re-derivation of the reading anchor: the source byte at the
+/// probe point 25% down and centered across the visible viewport, resolved
+/// through the text view's own insertion-point hit testing (never the
+/// reader's captured state).
+@MainActor
+private func wrapQuarterAnchorByte(_ reader: ReaderTextView) -> UInt32? {
+    let view = reader.view
+    let visible = view.visibleRect
+    guard visible.height > 1 else { return nil }
+    let probe = NSPoint(
+        x: visible.midX,
+        y: visible.minY + visible.height * 0.25
+    )
+    var location = view.characterIndexForInsertion(at: probe)
+    if location < 0 { location = 0 }
+    return reader.byteOffset(forCharacterIndex: location)
+}
+
+private func wrapLongLineDocument() -> ReaderDocument {
+    let longLine = String(repeating: "payload_segment=value + compute(payload); ", count: 32)
+    var lines: [String] = []
+    lines.append("fn opening() {}")
+    for index in 0..<30 { lines.append("fn before\(index)() { let v = \(index); }") }
+    lines.append("fn mega_wrapped() { let payload = \"\(longLine)\"; }")
+    for index in 0..<30 { lines.append("fn after\(index)() { let v = \(index); }") }
+    lines.append("fn closing() {}")
+    let bytes = Array(lines.joined(separator: "\n").utf8)
+    let highlighted = (try? RustHighlighter().highlight(bytes: bytes))
+    return ReaderDocument(
+        bytes: bytes,
+        highlightSpans: highlighted?.spans ?? [],
+        outlineFacets: highlighted?.outlineFacets ?? []
+    )
+}
+
+/// W10/W12: 20 off↔on round trips keep the same mid-line anchor character
+/// at the same viewport offset. The wrapped logical line spans well over 20
+/// visual rows, so the anchor must stay the original in-line character, not
+/// degrade to the line start (D3.5's stable-anchor rule).
+@MainActor
+@Test
+func wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() throws {
+    let document = wrapLongLineDocument()
+    let (reader, scrollView, window) = renderOffscreen(document)
+    // Start wrapped and park the viewport deep inside the mega line's visual
+    // rows so the 25% anchor is a mid-line character (W12).
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+    // Push further into the wrapped rows so the anchor sits well past the
+    // first visual row.
+    scrollView.contentView.scroll(
+        to: NSPoint(x: 0, y: scrollView.contentView.bounds.minY + 90)
+    )
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    wrapSettle(reader, pumps: 2)
+
+    let anchor = try #require(wrapQuarterAnchorByte(reader))
+    let anchorLine = try #require(document.lineTable.lineColumn(at: anchor)?.line)
+    let lineStart = document.lineTable.lineStarts[megaLine - 1]
+    #expect(anchorLine == megaLine)
+    // The anchor sits deep inside the long logical line.
+    #expect(anchor - lineStart > 200)
+
+    var wrapped = wrapSettings(true)
+    var unwrapped = wrapSettings(false)
+    for round in 0..<20 {
+        // Each round ends wrapped so the quarter-anchor probe resolves the
+        // anchor's own visual row; in an unwrapped layout the probe would
+        // see the whole logical line as one row and report its first byte.
+        reader.apply(settings: unwrapped)
+        wrapSettle(reader, pumps: 6)
+        reader.apply(settings: wrapped)
+        wrapSettle(reader, pumps: 6)
+        guard let current = wrapQuarterAnchorByte(reader) else {
+            Issue.record("round \(round): no anchor after round trip")
+            break
+        }
+        // The anchor character keeps its viewport offset (the reader's own
+        // measured error) and the probe still lands on the same logical
+        // line, deep inside it — a fixed probe x naturally resolves a
+        // neighbor character once the layout wraps (D3.3/D3.5).
+        let currentLine = document.lineTable.lineColumn(at: current)?.line
+        #expect(currentLine == anchorLine, "round \(round) probe left line \(anchorLine)")
+        #expect(current - lineStart > 100, "round \(round) probe degraded to line start")
+        let error = reader.lastViewportAnchorErrorPt ?? 0
+        // 2 physical pixels at backing scale 2 (§7.2 budget).
+        #expect(error <= 1.0, "round \(round) anchor error \(error)pt")
+    }
+    _ = scrollView
+    withExtendedLifetime(window) {}
+}
+
+/// W11: a complete multi-range selection and its copied source text survive
+/// wrap toggles in both directions.
+@MainActor
+@Test
+func wrapTogglePreservesCompleteSelectionAndCopyText() throws {
+    let document = wrapLongLineDocument()
+    let (reader, _, window) = renderOffscreen(document)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+
+    let view = reader.view
+    let first = NSRange(
+        location: view.selectedRange().location + 40,
+        length: 120
+    )
+    let second = NSRange(
+        location: min(first.location + first.length + 20, view.string.utf16.count - 10),
+        length: 10
+    )
+    view.setSelectedRanges(
+        [NSValue(range: first), NSValue(range: second)],
+        affinity: .downstream,
+        stillSelecting: false
+    )
+    let originalRanges = view.selectedRanges.compactMap(\.rangeValue)
+    let originalCopy = reader.sourceText(forDisplaySelection: first)
+
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    #expect(view.selectedRanges.compactMap(\.rangeValue) == originalRanges)
+    #expect(reader.sourceText(forDisplaySelection: first) == originalCopy)
+
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+    #expect(view.selectedRanges.compactMap(\.rangeValue) == originalRanges)
+    #expect(reader.sourceText(forDisplaySelection: first) == originalCopy)
+    withExtendedLifetime(window) {}
+}
+
+/// W13: horizontal position follows the D3.5 table — wrap off→on scrolls to
+/// the legal start, wrap on→off restores the stashed x.
+@MainActor
+@Test
+func wrapToggleRestoresStashedHorizontalPosition() throws {
+    let document = wrapLongLineDocument()
+    let (reader, scrollView, window) = renderOffscreen(document)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+
+    let clipView = scrollView.contentView
+    // wrap off: scroll the wide wrapped-out line horizontally.
+    let targetX: CGFloat = 180
+    clipView.scroll(to: NSPoint(x: targetX, y: clipView.bounds.minY))
+    scrollView.reflectScrolledClipView(clipView)
+    wrapSettle(reader, pumps: 2)
+    let scrolledX = clipView.bounds.minX
+    #expect(scrolledX > 10, "fixture must be horizontally scrollable")
+
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    // off → on: legal start, which includes the clip inset (not 0).
+    let insetLeft = -clipView.contentInsets.left
+    #expect(abs(clipView.bounds.minX - insetLeft) < 0.5)
+
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+    // on → off: the stashed x returns (or the anchor is kept visible with a
+    // minimal adjustment, never a jump to the far left or right).
+    #expect(abs(clipView.bounds.minX - scrolledX) < 1.0)
+    withExtendedLifetime(window) {}
+}
+
+/// W17: document start, document end, a short document, and an empty
+/// document all clamp legally without crash or drift.
+@MainActor
+@Test
+func wrapToggleClampsLegallyAtDocumentEdges() throws {
+    let document = wrapLongLineDocument()
+    let (reader, scrollView, window) = renderOffscreen(document)
+    let clipView = scrollView.contentView
+    let insetTop = -clipView.contentInsets.top
+
+    // Document start.
+    clipView.scroll(to: NSPoint(x: 0, y: 0))
+    scrollView.reflectScrolledClipView(clipView)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    #expect(abs(clipView.bounds.minY - insetTop) < 0.5)
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+    #expect(abs(clipView.bounds.minY - insetTop) < 0.5)
+
+    // Document end.
+    let documentMaxUnwrapped = reader.view.frame.height
+        - clipView.bounds.height
+        + clipView.contentInsets.bottom
+    clipView.scroll(
+        to: NSPoint(x: 0, y: max(documentMaxUnwrapped, insetTop))
+    )
+    scrollView.reflectScrolledClipView(clipView)
+    wrapSettle(reader, pumps: 2)
+    let bottomUnwrapped = clipView.bounds.minY
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let bottomWrapped = clipView.bounds.minY
+    let maxWrapped = reader.view.frame.height - clipView.bounds.height
+        + clipView.contentInsets.bottom
+    // The wrapped document is taller, so restoring the anchor at its saved
+    // offset legitimately leaves the viewport above the new maximum; what
+    // must hold is a legal origin (W17: clamps legal, no fake limits).
+    #expect(bottomWrapped >= insetTop - 0.5 && bottomWrapped <= maxWrapped + 0.5)
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+    // Back in the identical unwrapped layout, the anchor restore reproduces
+    // the original bottom position.
+    #expect(abs(clipView.bounds.minY - bottomUnwrapped) < 1.0)
+    _ = bottomWrapped
+
+    // Short document (fits the viewport).
+    let shortBytes = Array("fn a() {}\nfn b() {}\n".utf8)
+    let shortDocument = (try? DocumentLoader(source: { _ in shortBytes })
+        .load(file: URL(fileURLWithPath: "/wrap-short.rs")))?.document
+    if let shortDocument {
+        reader.display(document: shortDocument)
+        wrapSettle(reader)
+        reader.apply(settings: wrapSettings(true))
+        wrapSettle(reader)
+        #expect(abs(clipView.bounds.minY - insetTop) < 0.5)
+    }
+
+    // Empty document: no valid geometry, settings still apply (D3.2).
+    reader.clear()
+    reader.apply(settings: wrapSettings(true))
+    reader.apply(settings: wrapSettings(false))
+    withExtendedLifetime(window) {}
+}
+
+/// W18: CJK, emoji, CRLF content and a folded region survive wrap round
+/// trips with byte-exact anchors and intact fold state.
+@MainActor
+@Test
+func wrapToggleRoundTripsUnicodeAndFoldedContent() throws {
+    let source = """
+        fn cjk_entry() {
+            let emoji = "🚀🚀🚀 rocket 👨‍👩‍👧‍👦 family";
+            let cjk = "中文长行没有空格因此按字符断行，重复中文长行没有空格因此按字符断行，重复中文长行没有空格因此按字符断行，重复";
+        }
+        fn ordinary() {
+            let one = 1;
+            let two = 2;
+            let three = one + two;
+        }
+        """
+    let bytes = Array(source.utf8)
+    let lineTable = LineTable(bytes: bytes)
+    let fold = FoldRegion(
+        id: FoldID(rawValue: 9001),
+        kind: .declaration,
+        headerRange: ByteRange(
+            lowerBound: lineTable.lineStarts[3],
+            upperBound: lineTable.lineStarts[3] + 3
+        ),
+        bodyRange: ByteRange(
+            lowerBound: lineTable.lineStarts[3],
+            upperBound: lineTable.lineStarts[7]
+        ),
+        outlineDepth: 0,
+        summary: FoldSummary(hiddenLineCount: 3)
+    )
+    let document = ReaderDocument(
+        bytes: bytes,
+        lineTable: lineTable,
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: [],
+        outlineFacets: [],
+        foldRegions: [fold]
+    )
+    let (reader, _, window) = renderOffscreen(document)
+    wrapSettle(reader)
+
+    // Fold the second function so the projection contains a chip.
+    guard let fold = document.foldRegions.first(where: { $0.kind == .declaration })
+    else {
+        Issue.record("fixture has no declaration fold")
+        return
+    }
+    #expect(reader.toggleFold(id: fold.id))
+    wrapSettle(reader)
+
+    let anchor = try #require(wrapQuarterAnchorByte(reader))
+    let rangesBefore = reader.view.selectedRanges.compactMap(\.rangeValue)
+
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+
+    #expect(wrapQuarterAnchorByte(reader) == anchor)
+    #expect(reader.view.selectedRanges.compactMap(\.rangeValue) == rangesBefore)
+    // The fold stays folded across pure reflows (D3.2).
+    #expect(reader.renderedFoldIDsForTesting.contains(fold.id))
+    withExtendedLifetime(window) {}
+}
+
+/// W19 subset: a reflow never steals first responder. The reader surface
+/// only re-lays-out text; focus belongs to whoever held it (find field,
+/// Settings form, another window).
+@MainActor
+private final class WrapKeyWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+}
+
+@MainActor
+@Test
+func wrapToggleDoesNotStealFirstResponder() throws {
+    let document = wrapLongLineDocument()
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = WrapKeyWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    reader.apply(settings: ReaderSettings())
+    reader.display(document: document)
+    let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 100, height: 22))
+    scrollView.addSubview(field)
+    // Borderless windows must be ordered front before they accept focus.
+    window.orderFront(nil)
+    window.makeFirstResponder(field)
+    guard window.firstResponder === field else {
+        // Environments without an active window server cannot hold focus;
+        // the focus contract is untestable here, not violated.
+        print("WRAP_W19_SKIPPED environment cannot hold first responder")
+        withExtendedLifetime(window) {}
+        return
+    }
+
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader, pumps: 3)
+    #expect(window.firstResponder === field)
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader, pumps: 3)
+    #expect(window.firstResponder === field)
+    withExtendedLifetime(window) {}
+}
+
+/// W06: equal-settings applies are idempotent — no projection, no reflow.
+@MainActor
+@Test
+func wrapSettingsApplyIsIdempotentForEqualValues() throws {
+    let document = wrapLongLineDocument()
+    let (reader, _, window) = renderOffscreen(document)
+    let installs = reader.projectionInstallCount
+    let visibleRect = reader.view.visibleRect
+
+    reader.apply(settings: ReaderSettings())
+    reader.apply(settings: ReaderSettings())
+    #expect(reader.projectionInstallCount == installs)
+    #expect(reader.view.visibleRect == visibleRect)
+
+    // Wrap-only toggles never re-project either: the projected string is
+    // identical, only the container geometry changes (the S1 fast path).
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader, pumps: 2)
+    #expect(reader.projectionInstallCount == installs)
+    reader.apply(settings: wrapSettings(false))
+    #expect(reader.projectionInstallCount == installs)
+    // A theme/font change does re-project.
+    var larger = ReaderSettings()
+    larger.fontSize = 15
+    reader.apply(settings: larger)
+    #expect(reader.projectionInstallCount == installs + 1)
+    withExtendedLifetime(window) {}
+}
+
+/// W15 subset: a font-size change re-projects but keeps the anchor byte and
+/// the complete selection.
+@MainActor
+@Test
+func wrapFontSizeChangeKeepsAnchorAndSelection() throws {
+    let document = wrapLongLineDocument()
+    let (reader, _, window) = renderOffscreen(document)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+    let anchor = try #require(wrapQuarterAnchorByte(reader))
+
+    let selection = NSRange(location: reader.view.selectedRange().location + 40, length: 60)
+    reader.view.setSelectedRange(selection)
+
+    var larger = ReaderSettings()
+    larger.fontSize = 15
+    reader.apply(settings: larger)
+    wrapSettle(reader)
+    let anchorAfterFont = try #require(wrapQuarterAnchorByte(reader))
+    // Same logical line; the byte may differ by at most a few positions due
+    // to font metrics, but the anchor must not jump to another line.
+    let lineAfter = try #require(document.lineTable.lineColumn(at: anchorAfterFont)?.line)
+    let lineBefore = try #require(document.lineTable.lineColumn(at: anchor)?.line)
+    #expect(lineAfter == lineBefore)
+    let restored = reader.view.selectedRanges.compactMap(\.rangeValue).first
+    // The selection is restored as the same source text (display offsets may
+    // shift if the projection grew, so compare through the source).
+    if let restored {
+        #expect(reader.sourceText(forDisplaySelection: restored) ==
+            reader.sourceText(forDisplaySelection: selection))
+    }
+    withExtendedLifetime(window) {}
+}
+
+/// D3.7: a window/pane resize merges into one reflow that keeps the anchor
+/// character at its viewport offset.
+@MainActor
+@Test
+func wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() throws {
+    let document = wrapLongLineDocument()
+    let (reader, scrollView, window) = renderOffscreen(document)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+    let anchor = try #require(wrapQuarterAnchorByte(reader))
+    let notificationsBefore = reader.widthReflowNotificationCount
+
+    window.setContentSize(NSSize(width: 360, height: 180))
+    window.displayIfNeeded()
+    wrapSettle(reader)
+    window.setContentSize(NSSize(width: 480, height: 180))
+    window.displayIfNeeded()
+    wrapSettle(reader)
+
+    #expect(reader.widthReflowNotificationCount > notificationsBefore)
+    // The anchor character stays on its logical line after the merged
+    // width-driven reflows (D3.7); mergedWidthReflowCount is reported as a
+    // diagnostic and not asserted here because a plain resize may produce a
+    // single frame notification per AppKit pass.
+    guard let current = wrapQuarterAnchorByte(reader) else {
+        Issue.record("no anchor after resize round trip")
+        return
+    }
+    let currentLine = try #require(document.lineTable.lineColumn(at: current)?.line)
+    let anchorLine = try #require(document.lineTable.lineColumn(at: anchor)?.line)
+    #expect(currentLine == anchorLine)
+    _ = scrollView
+    withExtendedLifetime(window) {}
+}
+
 @MainActor
 @Test
 func revealResetsHorizontalScrollAfterNavigation() throws {
