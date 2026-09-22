@@ -94,3 +94,35 @@ func wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() throws {
     )
     #expect(delegate.validateMenuItem(wrapItem))
 }
+
+@MainActor
+@Test
+func wrapKeyEquivalentWorksWithSettingsTextFocusWithoutStealingUndo() throws {
+    let delegate = AppDelegate(startedAt: .now)
+    let defaults = UserDefaults.standard
+    let original = defaults.object(forKey: "reader.wrapLines")
+    defer {
+        if let original { defaults.set(original, forKey: "reader.wrapLines") }
+        else { defaults.removeObject(forKey: "reader.wrapLines") }
+        delegate.settingsWindowController?.close()
+    }
+    delegate.showSettings(nil)
+    let window = try #require(delegate.settingsWindowController?.window)
+    let text = NSTextView(frame: NSRect(x: 0, y: 0, width: 100, height: 30))
+    window.contentView?.addSubview(text)
+    #expect(window.makeFirstResponder(text))
+    let initial = try #require(delegate.settingsWindowController?.currentSettings.wrapLines)
+    func event(_ modifiers: NSEvent.ModifierFlags, repeatKey: Bool = false) throws -> NSEvent {
+        try #require(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
+            timestamp: 0, windowNumber: window.windowNumber, context: nil,
+            characters: "Ω", charactersIgnoringModifiers: "z", isARepeat: repeatKey, keyCode: 6))
+    }
+    #expect(delegate.handleWrapKeyEquivalent(try event(.option)))
+    #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
+    #expect(delegate.handleWrapKeyEquivalent(try event(.option, repeatKey: true)))
+    #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
+    #expect(!delegate.handleWrapKeyEquivalent(try event(.command)))
+    #expect(!delegate.handleWrapKeyEquivalent(try event([.option, .shift])))
+    #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
+    #expect(window.firstResponder === text)
+}

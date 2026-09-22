@@ -700,6 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// touches real user data (§11).
     private let windowSessionURL: URL?
     private var readerSettings = ReaderSettings(defaults: .standard)
+    nonisolated(unsafe) private var wrapKeyMonitor: Any?
     // Window collection and routing state (all MainActor, §4.1).
     private var projectWindows: [MainWindowController] = []
     /// Most-recently-active project window, recency-ordered (last = most
@@ -798,12 +799,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
+        if wrapKeyMonitor == nil {
+            wrapKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                let handled = MainActor.assumeIsolated {
+                    self?.handleWrapKeyEquivalent(event) == true
+                }
+                return handled ? nil : event
+            }
+        }
         // Menus and shared storage exist before the first open request can
         // arrive; no project is opened here (§5.2).
         if NSApplication.shared.mainMenu == nil {
             NSApplication.shared.mainMenu = makeMainMenu()
         }
         applyApplicationAppearance()
+    }
+
+    deinit {
+        if let wrapKeyMonitor { NSEvent.removeMonitor(wrapKeyMonitor) }
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -11476,6 +11489,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         var settings = readerSettings
         settings.wrapLines.toggle()
         commitReaderSettings(settings)
+    }
+
+    // Option-only key equivalents can be consumed by NSTextView's text input
+    // before reaching the menu. Handle this application preference once,
+    // before responder dispatch, including while Settings owns the key window.
+    func handleWrapKeyEquivalent(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown,
+              event.modifierFlags.intersection([.command, .option, .control, .shift]) == .option,
+              event.charactersIgnoringModifiers?.lowercased() == "z" else { return false }
+        if !event.isARepeat { toggleWrapLines(nil) }
+        return true
     }
 
     private func commitReaderSettings(_ settings: ReaderSettings) {

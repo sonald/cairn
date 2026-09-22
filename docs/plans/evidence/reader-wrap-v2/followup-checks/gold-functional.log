@@ -1,0 +1,53 @@
+corpus root: /Users/siancao/.cache/cairn-corpora
+  ok  tokio: be8ee45, 720 .rs files
+  ok  ripgrep: 4649aa9, 98 .rs files
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+Building for debugging...
+[Computing dependencies]
+[1 / 57] TreeSitterKit
+[1 / 53]
+Build complete! (0.64秒)
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1790069112.325078 pid=9886 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1790069112.49387 pid=9887 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+PASS  unsupported CLI language exits non-zero
+
+--- tokio gold ---
+{
+  "def5Top5Passed" : 3,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 8,
+  "defTop1Total" : 8,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 17,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  tokio gold
+
+--- ripgrep gold ---
+{
+  "def5Top5Passed" : 2,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 5,
+  "defTop1Total" : 6,
+  "failures" : [
+
+  ],
+  "knownFailures" : 3,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 16,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  ripgrep gold
+
+All gold gates passed.
