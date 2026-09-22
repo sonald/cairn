@@ -5,7 +5,7 @@ import CodeInsightAppModel
 final class EmptyStateView: NSView {
     private let titleLabel = NSTextField(labelWithString: "Cairn")
     private let taglineLabel = NSTextField(
-        labelWithString: "Read code without touching it."
+        labelWithString: localized("welcome.tagline")
     )
     private let reasonLabel = NSTextField(
         wrappingLabelWithString: ""
@@ -61,21 +61,21 @@ final class EmptyStateView: NSView {
         )
         reasonLabel.widthAnchor.constraint(lessThanOrEqualToConstant: 460)
             .isActive = true
-        reasonLabel.setAccessibilityLabel("Open failure reason")
+        reasonLabel.setAccessibilityLabel(localized("welcome.openFailure"))
 
         openButton.bezelStyle = .rounded
         openButton.target = self
         openButton.action = #selector(openOrRetry(_:))
-        openButton.setAccessibilityLabel("Open Project")
+        openButton.setAccessibilityLabel(localized("welcome.open"))
 
         chooseFolderButton.bezelStyle = .rounded
-        chooseFolderButton.title = "Open Another Folder…"
+        chooseFolderButton.title = localized("welcome.otherFolder")
         chooseFolderButton.target = self
         chooseFolderButton.action = #selector(chooseFolder(_:))
-        chooseFolderButton.setAccessibilityLabel("Open Another Folder")
+        chooseFolderButton.setAccessibilityLabel(localized("welcome.otherFolderAX"))
         chooseFolderButton.isHidden = true
 
-        let dropHint = NSTextField(labelWithString: "or drop a folder here")
+        let dropHint = NSTextField(labelWithString: localized("welcome.dropHint"))
         dropHint.font = .systemFont(ofSize: 11)
         dropHint.textColor = .secondaryLabelColor
         dropHint.alignment = .center
@@ -133,8 +133,8 @@ final class EmptyStateView: NSView {
         reason: String?
     ) {
         isFailure = failed
-        titleLabel.stringValue = failed ? "Couldn't open this folder." : "Cairn"
-        openButton.title = failed ? "Try Again" : "Open Project…  ⌘O"
+        titleLabel.stringValue = failed ? localized("welcome.failed") : "Cairn"
+        openButton.title = failed ? localized("welcome.retry") : localized("welcome.openShortcut")
         openButton.keyEquivalent = "\r"
         openButton.keyEquivalentModifierMask = []
         let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -243,7 +243,7 @@ final class EmptyStateView: NSView {
         recentStack.isHidden = recentPaths.isEmpty
         guard !recentPaths.isEmpty else { return }
 
-        let heading = NSTextField(labelWithString: "RECENT")
+        let heading = NSTextField(labelWithString: localized("welcome.recent"))
         heading.font = .systemFont(ofSize: 11, weight: .semibold)
         heading.textColor = .secondaryLabelColor
         recentStack.addArrangedSubview(heading)
@@ -261,7 +261,7 @@ final class EmptyStateView: NSView {
             button.alignment = .left
             button.attributedTitle = Self.recentTitle(path: path)
             button.toolTip = path
-            button.setAccessibilityLabel("Open \(URL(fileURLWithPath: path).lastPathComponent)")
+            button.setAccessibilityLabel(localizedFormat("welcome.openRecent", URL(fileURLWithPath: path).lastPathComponent))
             recentStack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: recentStack.widthAnchor).isActive = true
             button.heightAnchor.constraint(equalToConstant: 42).isActive = true

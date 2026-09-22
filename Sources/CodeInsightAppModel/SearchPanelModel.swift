@@ -43,7 +43,7 @@ public final class SearchPanelModel {
 
     public private(set) var query = ""
     public private(set) var groups: [Group] = []
-    public private(set) var placeholder = "Open a project to search."
+    public private(set) var placeholder = localized("model.search.open")
     public private(set) var isSearching = false
     public private(set) var totalMatches = 0
     public private(set) var fileCount = 0
@@ -159,20 +159,20 @@ public final class SearchPanelModel {
         } else {
             switch projectState {
             case .empty:
-                placeholder = "Open a project to search."
+                placeholder = localized("model.search.open")
                 return
             case .indexing:
-                placeholder = "Indexing project…"
+                placeholder = localized("model.search.indexing")
                 return
             case .failed:
-                placeholder = "Project indexing failed."
+                placeholder = localized("model.search.failed")
                 return
             case let .ready(session, context):
                 sessions = [(session, context)]
             }
         }
         guard !query.isEmpty else {
-            placeholder = "Enter a search query."
+            placeholder = localized("model.search.query")
             return
         }
         placeholder = ""
@@ -207,14 +207,14 @@ public final class SearchPanelModel {
                 }
                 guard requestID == currentRequestID else { return }
                 isSearching = false
-                if totalMatches == 0 { placeholder = "No matches." }
+                if totalMatches == 0 { placeholder = localized("model.search.empty") }
             } catch is CancellationError {
                 return
             } catch {
                 guard let self, requestID == currentRequestID else { return }
                 clearResults()
                 isSearching = false
-                placeholder = "Search failed."
+                placeholder = localized("model.search.error")
             }
         }
     }
@@ -267,7 +267,7 @@ public final class SearchPanelModel {
         fileCount = matchedPathIDs.count
         isTruncated = isTruncated || batch.completeness == .truncated
         displayTruncationMessage = totalMatches > Self.displayLimit
-            ? "Showing first \(Self.displayLimit) of \(totalMatches) matches (truncated)"
+            ? localizedFormat("model.search.truncated", Self.displayLimit, totalMatches)
             : nil
         reconcileSelection(
             preserving: selectedMatch,

@@ -292,6 +292,10 @@ package enum SessionCodec {
         guard (1...3).contains(envelope.schemaVersion) else {
             throw DecodeError.unsupportedSchemaVersion(envelope.schemaVersion)
         }
+        // Validate stored fields before language selection can replace the outer copy.
+        for excerpt in envelope.tabs.flatMap({ $0.excerpts ?? [] }) {
+            try validate(excerpt.inspector.rawDisplay)
+        }
         let snapshot = try envelope.snapshot()
         try validate(
             snapshot,
@@ -526,6 +530,12 @@ package enum SessionCodec {
         ] + display.auditRows.flatMap { [$0.label, $0.value] }
         guard strings.reduce(0, { $0 + byteCount($1) }) <= 16_384
         else { throw CodecError.invalid }
+        if let localizedDisplays = display.localizedDisplays {
+            guard Set(localizedDisplays.keys).isSubset(of: ["en", "zh-Hans"]),
+                  localizedDisplays.values.allSatisfy({ $0.localizedDisplays == nil })
+            else { throw CodecError.invalid }
+            for variant in localizedDisplays.values { try validate(variant) }
+        }
     }
 
     private static func validateContentID(_ contentID: ContentID?) throws {
@@ -716,8 +726,11 @@ package enum SessionCodec {
                         from: edge.from,
                         to: edge.to,
                         cause: edge.cause,
-                        frozenInspectorDisplay: edge.frozenInspectorDisplay?
-                            .display,
+                        frozenInspectorDisplay: edge.frozenInspectorDisplay.flatMap { inspector in
+                            let stored = inspector.rawDisplay
+                            guard (try? validate(stored)) != nil else { return nil }
+                            return stored.display()
+                        },
                         readingSetRole: edge.readingSetRole
                     )
                 },
@@ -936,6 +949,7 @@ package enum SessionCodec {
     }
 
     private struct InspectorDTO: Codable {
+        let localizedDisplays: [String: InspectorDTO]?
         let nodeTitle: String
         let badge: Badge
         let why: String
@@ -957,6 +971,7 @@ package enum SessionCodec {
         }
 
         init(_ display: ReadingSetExcerpt.FrozenInspectorDisplay) {
+            localizedDisplays = display.localizedDisplays?.mapValues(InspectorDTO.init)
             nodeTitle = display.nodeTitle
             badge = switch display.badge {
             case .verified: .verified
@@ -976,13 +991,15 @@ package enum SessionCodec {
             formerCandidateAvailable = display.formerCandidateAvailable
         }
 
-        var display: ReadingSetExcerpt.FrozenInspectorDisplay {
+        var display: ReadingSetExcerpt.FrozenInspectorDisplay { rawDisplay.display() }
+
+        var rawDisplay: ReadingSetExcerpt.FrozenInspectorDisplay {
             let restoredBadge: ReadingSetExcerpt.FrozenInspectorDisplay.Badge = switch badge {
             case .verified: .verified
             case .inferred: .inferred
             case .unresolved: .unresolved
             }
-            return ReadingSetExcerpt.FrozenInspectorDisplay(
+            var restored = ReadingSetExcerpt.FrozenInspectorDisplay(
                 nodeTitle: nodeTitle,
                 badge: restoredBadge,
                 why: why,
@@ -997,6 +1014,8 @@ package enum SessionCodec {
                 capturedAt: capturedAt,
                 formerCandidateAvailable: formerCandidateAvailable
             )
+            restored.localizedDisplays = localizedDisplays?.mapValues(\.rawDisplay)
+            return restored
         }
     }
 

@@ -31,12 +31,9 @@ func wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() throws {
     #expect(delegate.projectCommandTarget() == nil)
 
     let menu = delegate.makeMainMenu()
-    // Top-level items carry their submenu's title (the app's own self-tests
-    // resolve the View menu through the submenu list, not item(withTitle:)).
-    let viewMenu = try #require(
-        menu.items.compactMap(\.submenu).first { $0.title == "View" }
-    )
-    let item = try #require(viewMenu.item(withTitle: "Wrap Lines"))
+    // The command identity is independent of the displayed menu language.
+    let item = try #require(menu.items.compactMap(\.submenu)
+        .flatMap(\.items).first { $0.action == NSSelectorFromString("toggleWrapLines:") })
     // Decision C1: ⌥Z, not ⌘Z (which belongs to undo).
     #expect(item.keyEquivalent == "z")
     #expect(item.keyEquivalentModifierMask == .option)

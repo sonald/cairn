@@ -29,39 +29,53 @@ package func makeInspectorDisplay(
     revision: String?,
     contentID: ContentID,
     capturedAt: Date,
-    atCapture: Bool = true
+    atCapture: Bool = true,
+    language: String? = nil
 ) -> ReadingSetExcerpt.FrozenInspectorDisplay? {
+    if language == nil && atCapture {
+        let displays = Dictionary(uniqueKeysWithValues: ["en", "zh-Hans"].compactMap { (language: String) in
+            makeInspectorDisplay(
+                node: node, context: context, correctedTitles: correctedTitles,
+                readiness: readiness, sourceKind: sourceKind, revision: revision,
+                contentID: contentID, capturedAt: capturedAt, atCapture: atCapture,
+                language: language
+            ).map { (language, $0) }
+        })
+        guard var display = displays[modelDisplayLanguage] ?? displays["en"] else { return nil }
+        display.localizedDisplays = displays
+        return display
+    }
     guard let explanation = node.explanation else { return nil }
     let clauses = narrativeClauses(for: explanation, context: context)
     let sourceClauses = clauses.filter(inspectorIsSourceClause)
     let verificationClauses = clauses.filter { !inspectorIsSourceClause($0) }
-    let sourceText = sourceClauses.map(renderEnglish).joined(separator: " ")
-    let verificationText = verificationClauses.map(renderEnglish)
+    let sourceText = sourceClauses.map { renderLocalized($0, language: language) }.joined(separator: " ")
+    let verificationText = verificationClauses.map { renderLocalized($0, language: language) }
         .joined(separator: " ")
     let why = (sourceClauses.first ?? verificationClauses.first)
-        .map(renderEnglish) ?? "No resolution explanation was captured."
-    let badge: ReadingSetExcerpt.FrozenInspectorDisplay.Badge = switch node.badge {
-    case "Verified": .verified
-    case "Unresolved": .unresolved
+        .map { renderLocalized($0, language: language) } ?? localized("model.inspector.noExplanation", language: language)
+    let badge: ReadingSetExcerpt.FrozenInspectorDisplay.Badge = switch node.certainty {
+    case .exact: .verified
+    case .unresolved: .unresolved
     default: .inferred
     }
     let provenance = switch sourceKind {
     case .projectCommit:
-        revision.map { "project commit \($0)" } ?? "project captured"
-    case .worktreeCaptured: "worktree captured"
-    case .dependencyCaptured: "dependency captured"
+        revision.map { localizedFormat("model.inspector.projectCommit", language: language, $0) } ?? localized("model.inspector.projectCaptured", language: language)
+    case .worktreeCaptured: localized("model.inspector.worktreeCaptured", language: language)
+    case .dependencyCaptured: localized("model.inspector.dependencyCaptured", language: language)
     }
     let availability = switch (readiness, atCapture) {
-    case (.preparing, true): "Exact provider was preparing at capture."
-    case (.preparing, false): "Preparing exact provider…"
-    case (.ready, true): "Exact provider was ready at capture."
-    case (.ready, false): "Exact provider is ready."
+    case (.preparing, true): localized("model.inspector.preparingCaptured", language: language)
+    case (.preparing, false): localized("model.inspector.preparing", language: language)
+    case (.ready, true): localized("model.inspector.readyCaptured", language: language)
+    case (.ready, false): localized("model.inspector.ready", language: language)
     case (.unavailable(let reason), true):
-        "Exact provider was unavailable at capture: \(reason)"
+        localizedFormat("model.inspector.unavailableCaptured", language: language, frozenReadinessReason(reason, language: language))
     case (.unavailable(let reason), false):
-        "Exact provider unavailable: \(reason)"
-    case (.off(let reason), true): "Exact provider was off at capture: \(reason)"
-    case (.off(let reason), false): "Exact provider is off: \(reason)"
+        localizedFormat("model.inspector.unavailable", language: language, frozenReadinessReason(reason, language: language))
+    case (.off(let reason), true): localizedFormat("model.inspector.offCaptured", language: language, frozenReadinessReason(reason, language: language))
+    case (.off(let reason), false): localizedFormat("model.inspector.off", language: language, frozenReadinessReason(reason, language: language))
     }
     let environment = inspectorEnvironment(
         explanation.primaryTrace,
@@ -69,16 +83,22 @@ package func makeInspectorDisplay(
     ).map { value in
         let limitations = value.limitations
             .sorted { $0.rawValue < $1.rawValue }
-            .map(\.displayName)
+            .map { limitation in
+                switch limitation {
+                case .buildScriptsDisabled: localized("model.limitation.buildScripts", language: language)
+                case .procMacrosDisabled: localized("model.limitation.procMacros", language: language)
+                case .dependenciesUnavailableOffline: localized("model.limitation.offline", language: language)
+                }
+            }
         let trust = switch value.trustMode {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
+        case .safe: localized("model.inspector.safe", language: language)
+        case .trusted: localized("model.inspector.trusted", language: language)
         }
         return ([trust] + limitations).joined(separator: " · ")
     }
     let environmentBody = if atCapture {
-        environment.map { "\($0) at capture." }
-            ?? "No exact analysis environment was recorded at capture."
+        environment.map { localizedFormat("model.inspector.environmentCaptured", language: language, $0) }
+            ?? localized("model.inspector.noEnvironment", language: language)
     } else {
         environment ?? ""
     }
@@ -87,8 +107,7 @@ package func makeInspectorDisplay(
     }.joined()
     let captured = ISO8601DateFormatter().string(from: capturedAt)
     let correction = correctedTitles.isEmpty ? "" :
-        "This target replaced earlier source candidates: "
-            + correctedTitles.joined(separator: ", ") + "."
+        localizedFormat("model.inspector.replaced", language: language, correctedTitles.joined(separator: ", "))
     return ReadingSetExcerpt.FrozenInspectorDisplay(
         nodeTitle: node.title,
         badge: badge,
@@ -97,20 +116,20 @@ package func makeInspectorDisplay(
         verificationTitle: verificationClauses.contains {
             if case .conflict = $0 { return true }
             return false
-        } ? "VERIFICATION CONFLICT" : "VERIFICATION",
+        } ? localized("model.inspector.conflict", language: language) : localized("model.inspector.verification", language: language),
         verificationBody: verificationText,
         correctionBody: correction,
         availabilityBody: availability,
         environmentBody: environmentBody,
         auditRows: [
-            .init(label: "Source", value: provenance),
-            .init(label: "Content", value: contentPrefix),
-            .init(label: "Captured at", value: captured),
+            .init(label: localized("model.inspector.source", language: language), value: provenance),
+            .init(label: localized("model.inspector.content", language: language), value: contentPrefix),
+            .init(label: localized("model.inspector.capturedAt", language: language), value: captured),
         ],
-        accessibilityValue: ([node.badge, why] + clauses.map(renderEnglish))
+        accessibilityValue: ([localized("model.relation." + badge.rawValue.lowercased(), language: language), why] + clauses.map { renderLocalized($0, language: language) })
             .compactMap { $0 }.joined(separator: ", "),
         capturedAt: capturedAt,
-        formerCandidateAvailable: node.modifiers.contains("Conflict/Corrected")
+        formerCandidateAvailable: node.isCorrectedCandidate
     )
 }
 
@@ -219,7 +238,7 @@ package func makeReadingSetExcerpt(
         capturedAt: inspector.capturedAt,
         sourceKind: sourceKind,
         inspector: inspector,
-        caveat: inspector.badge == .inferred ? "name match only" : nil,
+        caveat: inspector.badge == .inferred ? "Name-only match" : nil,
         partialLine: frozen.partialLine
     )
 }
@@ -460,10 +479,29 @@ package struct ReadingSetExcerpt: Sendable {
     }
 
     package struct FrozenInspectorDisplay: Sendable {
+        // Leaves contain only frozen text; selecting a language retains both snapshots.
+        package var localizedDisplays: [String: FrozenInspectorDisplay]? = nil
+
+        package func display(language: String = modelDisplayLanguage) -> Self {
+            guard let localizedDisplays,
+                  var selected = localizedDisplays[language] ?? localizedDisplays["en"]
+            else { return self }
+            selected.localizedDisplays = localizedDisplays
+            return selected
+        }
+
         package enum Badge: String, Sendable {
             case verified = "VERIFIED"
             case inferred = "INFERRED"
             case unresolved = "UNRESOLVED"
+
+            package var displayText: String {
+                switch self {
+                case .verified: localized("model.relation.verified")
+                case .inferred: localized("model.relation.inferred")
+                case .unresolved: localized("model.relation.unresolved")
+                }
+            }
         }
 
         package struct AuditRow: Sendable {
@@ -570,4 +608,43 @@ package struct ReadingSetExcerpt: Sendable {
         self.caveat = caveat
         self.partialLine = partialLine
     }
+}
+
+package func readingSetDisplayText(_ stored: String) -> String {
+    let keys = [
+        "model.app.noEvidence", "model.app.noContentID", "model.app.languageUnsupported",
+        "model.app.invalidPath", "model.app.revisionUnavailable", "model.app.worktreeUnavailable",
+        "model.app.sourceUnreadable", "model.app.sourceChanged", "model.app.languageUnavailable",
+        "model.app.excerptFailed", "model.app.nodeUnavailable", "model.app.trailTarget",
+    ]
+    if stored == "Name-only match" || stored == "name match only" { return localized("model.inspector.nameOnly") }
+    for key in keys where stored == localized(key, language: "en") {
+        return localized(key)
+    }
+    return stored
+}
+
+private func frozenReadinessReason(_ reason: String, language: String?) -> String {
+    // Only application-owned fixed reasons are translated; tool diagnostics stay verbatim.
+    let keys = [
+        "model.exact.noProject", "model.exact.pyrightMissing", "model.exact.typescriptMissing",
+        "model.exact.rustMissing", "model.exact.terminating", "model.exact.revoking",
+        "model.exact.maintenance", "model.exact.sandboxMissing", "model.exact.closed",
+        "model.exact.revoked", "model.exact.cacheCleared",
+    ]
+    for key in keys where ["en", "zh-Hans"].contains(where: {
+        localized(key, language: $0) == reason
+    }) {
+        return localized(key, language: language)
+    }
+    for key in ["model.exact.safeDisabled", "model.exact.restartExhausted", "model.exact.restartFailed", "model.exact.unsupportedLanguage"] {
+        for sourceLanguage in ["en", "zh-Hans"] {
+            let parts = localized(key, language: sourceLanguage).components(separatedBy: "%@")
+            guard parts.count == 2, reason.hasPrefix(parts[0]), reason.hasSuffix(parts[1]),
+                  reason.count >= parts[0].count + parts[1].count else { continue }
+            let detail = String(reason.dropFirst(parts[0].count).dropLast(parts[1].count))
+            return localizedFormat(key, language: language, detail)
+        }
+    }
+    return reason
 }

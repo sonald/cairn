@@ -4,6 +4,8 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+python3 scripts/check-localizations.py
+
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$PWD/.build/clang-module-cache}"
 export SWIFTPM_MODULECACHE_OVERRIDE="${SWIFTPM_MODULECACHE_OVERRIDE:-$PWD/.build/swift-module-cache}"
 
@@ -31,7 +33,7 @@ panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPr
 # each finish in their own SwiftPM process. Mixing the rebuild pair with a later
 # async inspector test can exit 0 before the Swift Testing summary. Never accept
 # that exit code alone. Every test must report completion exactly once.
-expected_main_test_count=1003
+expected_main_test_count=1005
 expected_isolated_test_count=2
 expected_panel_test_count=2
 

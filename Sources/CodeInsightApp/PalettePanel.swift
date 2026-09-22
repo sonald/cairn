@@ -320,16 +320,16 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
         modeLabel.font = .monospacedSystemFont(ofSize: 11, weight: .medium)
         modeLabel.alignment = .center
-        modeLabel.setAccessibilityLabel("Palette shortcut")
+        modeLabel.setAccessibilityLabel(localized("panel.palette.shortcut"))
         modeLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        input.placeholderString = "Open file…"
+        input.placeholderString = localized("panel.palette.open")
         input.font = .monospacedSystemFont(ofSize: 13, weight: .regular)
         input.isBordered = false
         input.drawsBackground = false
         input.focusRingType = .none
         input.delegate = self
-        input.setAccessibilityLabel("Quick Open")
+        input.setAccessibilityLabel(localized("panel.palette.quickOpen"))
         input.translatesAutoresizingMaskIntoConstraints = false
 
         let separator = NSBox()
@@ -350,7 +350,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         tableView.usesAutomaticRowHeights = false
         tableView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         tableView.intercellSpacing = .zero
-        tableView.setAccessibilityLabel("Palette results")
+        tableView.setAccessibilityLabel(localized("panel.palette.results"))
 
         scrollView.documentView = tableView
         scrollView.borderType = .noBorder
@@ -365,7 +365,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
         emptyLabel.font = .systemFont(ofSize: 12)
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        emptyLabel.setAccessibilityLabel("Palette status")
+        emptyLabel.setAccessibilityLabel(localized("panel.palette.status"))
 
         hintLabel.font = .systemFont(ofSize: 10.5)
         hintLabel.lineBreakMode = .byTruncatingTail
@@ -373,7 +373,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         footerLabel.font = .systemFont(ofSize: 10.5)
         footerLabel.alignment = .right
         footerLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        footerLabel.setAccessibilityLabel("Palette result limit")
+        footerLabel.setAccessibilityLabel(localized("panel.palette.limit"))
         footerLabel.translatesAutoresizingMaskIntoConstraints = false
 
         for view in [modeLabel, input, separator, scrollView, emptyLabel, hintLabel, footerLabel] {
@@ -454,15 +454,15 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         case .line: "⌘L"
         }
         input.placeholderString = switch parsed.mode {
-        case .file: "Open file…"
-        case .command: "Run command…"
-        case .currentSymbol: "Find file symbol…"
-        case .projectSymbol: "Find project symbol…"
-        case .line: "Go to line…"
+        case .file: localized("panel.palette.open")
+        case .command: localized("panel.palette.command")
+        case .currentSymbol: localized("panel.palette.fileSymbol")
+        case .projectSymbol: localized("panel.palette.projectSymbol")
+        case .line: localized("panel.palette.line")
         }
         hintLabel.stringValue = lockedMode == nil
-            ? "> Commands   @ File symbols   # Project symbols   : Line"
-            : "↑↓ Select   ↩ Open   Esc Close"
+            ? localized("panel.palette.hint")
+            : localized("panel.palette.navigation")
         switch parsed.mode {
         case .file:
             symbolModel.reset()
@@ -470,11 +470,11 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 query: parsed.query,
                 tree: appModel.fileTree,
                 tabs: appModel.tabStrip.tabs.compactMap(\.fileURL)
-            ), emptyMessage: appModel.fileTree == nil ? "No project open" : "No files found")
+            ), emptyMessage: appModel.fileTree == nil ? localized("panel.palette.noProject") : localized("panel.palette.noFiles"))
         case .command:
             symbolModel.reset()
             install(Self.filterCommandRows(capturedCommands, query: parsed.query),
-                    emptyMessage: "No commands found")
+                    emptyMessage: localized("panel.palette.noCommands"))
         case .currentSymbol:
             symbolModel.reset()
             guard let document = appModel.tabStrip.activeDocument,
@@ -488,12 +488,12 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 document: document,
                 file: file
             ), emptyMessage: parsed.query.isEmpty
-                ? "Type a symbol name"
-                : "No symbols found")
+                ? localized("panel.palette.enterSymbol")
+                : localized("panel.palette.noSymbols"))
         case .projectSymbol:
             guard !parsed.query.isEmpty else {
                 symbolModel.reset()
-                install([], emptyMessage: "Type a project symbol")
+                install([], emptyMessage: localized("panel.palette.enterProjectSymbol"))
                 return
             }
             let sessions = appModel.querySessions
@@ -531,8 +531,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private var fileModeUnavailableMessage: String {
         guard let tab = appModel.tabStrip.activeTab,
               tab.fileURL == nil
-        else { return "No active file" }
-        return "Reading Set has no active file"
+        else { return localized("panel.palette.noFile") }
+        return localized("panel.palette.readingSetNoFile")
     }
 
     private func installProjectSymbolRows() {
@@ -556,7 +556,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             if case let .placeholder(message) = row { return message }
             return nil
         }.first
-        install(candidates, emptyMessage: placeholder ?? "No project symbols found")
+        install(candidates, emptyMessage: placeholder ?? localized("panel.palette.noProjectSymbols"))
     }
 
     private func install(_ candidates: [Row], emptyMessage: String) {
@@ -569,7 +569,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         emptyLabel.isHidden = !rows.isEmpty
         scrollView.isHidden = rows.isEmpty
         footerLabel.stringValue = total > Self.resultLimit
-            ? "\(total - Self.resultLimit) more results"
+            ? localizedFormat("panel.palette.more", Int64(total - Self.resultLimit))
             : ""
         footerLabel.isHidden = footerLabel.stringValue.isEmpty
         selectedIndex = previousIdentity.flatMap { identity in
@@ -797,7 +797,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             let line = document.lineTable.lineColumn(at: facet.nameRange.lowerBound)?.line
             return Row(
                 title: facet.name,
-                detail: "\(facet.kind.rawValue) · line \(line ?? 1)",
+                detail: localizedFormat("panel.palette.symbolLine", localized("panel.symbol.kind." + facet.kind.rawValue), Int64(line ?? 1)),
                 shortcut: "",
                 identity: "current:\(facet.kind.rawValue):\(facet.nameRange.lowerBound)",
                 payload: .location(file, facet.nameRange.lowerBound, expectedContentID: nil)
@@ -810,17 +810,17 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         document: ReaderDocument,
         file: URL
     ) -> (rows: [Row], message: String) {
-        guard !query.isEmpty else { return ([], "Type a line number") }
+        guard !query.isEmpty else { return ([], localized("panel.palette.enterLine")) }
         guard let requested = Int(query), requested > 0 else {
-            return ([], "Enter a positive line number")
+            return ([], localized("panel.palette.positiveLine"))
         }
         let last = document.lineTable.lineStarts.count
         let line = min(requested, last)
         let detail = requested > last
-            ? "Line \(requested) is past the end · using \(last)"
-            : "Line \(line)"
+            ? localizedFormat("panel.palette.pastEnd", Int64(requested), Int64(last))
+            : localizedFormat("panel.palette.lineNumber", Int64(line))
         return ([Row(
-            title: "Go to line \(line)",
+            title: localizedFormat("panel.palette.goToLine", Int64(line)),
             detail: detail,
             shortcut: "↩",
             identity: "line:\(line)",

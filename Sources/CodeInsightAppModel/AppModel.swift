@@ -33,11 +33,11 @@ public struct SnapshotCoverage: Equatable, Sendable {
 
     public func statusText(for phase: SnapshotPhase?) -> String? {
         guard let phase, phase != .fullReady else { return nil }
-        let files = "Files \(filesIndexed)/\(filesTotal)"
+        let files = localizedFormat("model.app.files", filesIndexed, filesTotal)
         guard let importsResolved else {
             return files
         }
-        return "\(files) · Imports resolved \(importsResolved)"
+        return localizedFormat("model.app.imports", files, importsResolved)
     }
 }
 
@@ -981,15 +981,13 @@ public final class AppModel {
     ) -> String {
         switch problem {
         case .corruptFile:
-            "Saved reading session was unreadable; it can record a new one"
+            localized("model.app.corruptSession")
         case .readFailed:
-            "Saved reading session could not be read; it is kept untouched. Retry opening the project"
+            localized("model.app.unreadableSession")
         case .unsupportedSchemaVersion(let version):
-            "Saved reading session needs a newer Cairn (schema \(version)); "
-                + "it is kept untouched"
+            localizedFormat("model.app.newerSession", version)
         case .projectUnavailable:
-            "Saved reading session belongs to a project that is not "
-                + "available right now"
+            localized("model.app.projectUnavailable")
         }
     }
 
@@ -1047,7 +1045,7 @@ public final class AppModel {
             )
         } catch {
             sessionSaveNotice =
-                "Reading session not saved: \(Self.failureSummary(error))"
+                localizedFormat("model.app.sessionSaveFailed", Self.failureSummary(error))
             throw error
         }
     }
@@ -1694,16 +1692,16 @@ public final class AppModel {
            selected != nil
         {
             notices.append(
-                "saved active tab unavailable; activated the first restored tab"
+                localized("model.app.activeTab")
             )
         }
         if revisionUnavailable {
-            notices.append("saved revision unavailable; restored against current worktree")
+            notices.append(localized("model.app.revisionFallback"))
         }
         if let selected {
             for (anchor, fallback) in [
-                ("selection", selected.selectionFallback),
-                ("scroll", selected.scrollFallback),
+                (localized("model.app.selection"), selected.selectionFallback),
+                (localized("model.app.scroll"), selected.scrollFallback),
             ] {
                 if let fallback,
                    let notice = Self.replayNotice(
@@ -2180,8 +2178,8 @@ public final class AppModel {
         isRefreshingIndex = false
         let reason = error.map(Self.failureSummary)
         indexRefreshNotice = reason.map {
-            "Index refresh failed — previous index restored (\($0))"
-        } ?? "Index refresh failed — previous index restored"
+            localizedFormat("model.app.refreshDetail", $0)
+        } ?? localized("model.app.refreshFailed")
         pendingReplay = nil
         guard let restore = refreshRestoreState else { return }
         refreshRestoreState = nil
@@ -2384,7 +2382,7 @@ public final class AppModel {
     }
 
     package func markStaleIndexContent() {
-        staleIndexNotice = "File changed since indexing"
+        staleIndexNotice = localized("model.app.fileChanged")
     }
 
     /// Verifies that the bytes the Reader would load for `file` still match
@@ -2622,7 +2620,7 @@ public final class AppModel {
             bookmarkModel.beginAttempt(
                 for: record,
                 workspaceGeneration: generation,
-                message: "Bookmark belongs to a different project or snapshot."
+                message: localized("model.app.bookmarkMismatch")
             )
             return
         }
@@ -2651,7 +2649,7 @@ public final class AppModel {
             bookmarkModel.beginAttempt(
                 for: record,
                 workspaceGeneration: generation,
-                message: "Bookmark captured source is unavailable."
+                message: localized("model.app.bookmarkUnavailable")
             )
             return
         }
@@ -2661,7 +2659,7 @@ public final class AppModel {
                 bookmarkModel.beginAttempt(
                     for: record,
                     workspaceGeneration: generation,
-                    message: "Bookmark captured source does not match its content."
+                    message: localized("model.app.bookmarkContentMismatch")
                 )
                 return
             }
@@ -2669,7 +2667,7 @@ public final class AppModel {
             bookmarkModel.beginAttempt(
                 for: record,
                 workspaceGeneration: generation,
-                message: "Bookmark file is absent."
+                message: localized("model.app.bookmarkFileAbsent")
             )
             return
         }
@@ -2690,7 +2688,7 @@ public final class AppModel {
             bookmarkModel.beginAttempt(
                 for: record,
                 workspaceGeneration: workspaceGeneration,
-                message: "Bookmark snapshot capture failed."
+                message: localized("model.app.bookmarkCaptureFailed")
             )
             return
         }
@@ -2726,7 +2724,7 @@ public final class AppModel {
                 return nil
             } catch {
                 return switch record.snapshot {
-                case .worktree: "Bookmark snapshot capture failed."
+                case .worktree: localized("model.app.bookmarkCaptureFailed")
                 case .commit: BookmarkStatus.revisionUnavailable.attemptMessage
                 }
             }
@@ -2743,7 +2741,7 @@ public final class AppModel {
             if case let .commit(fullOID) = record.snapshot {
                 guard let commit = snapshot as? CommitSnapshot,
                       commit.commitOID.hex == fullOID
-                else { return "Bookmark snapshot capture failed." }
+                else { return localized("model.app.bookmarkCaptureFailed") }
             }
             let files = snapshot.listFiles().filter {
                 switch $0.fileMode {
@@ -2790,7 +2788,7 @@ public final class AppModel {
             } catch is CancellationError {
                 return nil
             } catch {
-                return "Bookmark snapshot preparation failed."
+                return localized("model.app.bookmarkPrepareFailed")
             }
             guard self.canPublishWorkspaceResult(
                       generation: workspaceGeneration,
@@ -2806,7 +2804,7 @@ public final class AppModel {
                       languages: languages,
                       snapshotID: snapshot.snapshotID
                   )
-            else { return "Bookmark snapshot install failed." }
+            else { return localized("model.app.bookmarkInstallFailed") }
             let active = cached.values
                 .first(where: { Self.sessionCoverage(for: $0).filesTotal > 0 })
                 ?? cached.values.first!
@@ -2997,7 +2995,7 @@ public final class AppModel {
         skippedReasons: [String]
     ) {
         guard let selectedNode = readingTrail.nodes[selectedNodeID] else {
-            return ("Trail", [], ["selected node is unavailable"])
+            return (localized("model.app.trail"), [], [localized("model.app.nodeUnavailable")])
         }
         var cursor = selectedNodeID
         var edges: [TrailEdge] = []
@@ -3015,13 +3013,13 @@ public final class AppModel {
         var skippedReasons: [String] = []
         for edge in edges {
             guard let inspector = edge.frozenInspectorDisplay else {
-                skippedReasons.append("no frozen evidence")
+                skippedReasons.append(localized("model.app.noEvidence", language: "en"))
                 continue
             }
             guard let node = readingTrail.nodes[edge.to],
                   let contentID = node.jump.contentID
             else {
-                skippedReasons.append("missing content identity")
+                skippedReasons.append(localized("model.app.noContentID", language: "en"))
                 continue
             }
             let jump = node.jump
@@ -3030,7 +3028,7 @@ public final class AppModel {
             if exactLocationIsInDependency(jump.path) {
                 sourceKind = .dependencyCaptured
                 guard languageMode(for: URL(fileURLWithPath: jump.path)) != nil else {
-                    skippedReasons.append("recorded source language is unsupported")
+                    skippedReasons.append(localized("model.app.languageUnsupported", language: "en"))
                     continue
                 }
                 bytes = (try? Data(
@@ -3043,7 +3041,7 @@ public final class AppModel {
                       !jump.path.hasPrefix("/"),
                       !jump.path.split(separator: "/").contains("..")
                 else {
-                    skippedReasons.append("recorded project path is invalid")
+                    skippedReasons.append(localized("model.app.invalidPath", language: "en"))
                     continue
                 }
                 let snapshot: CommitSnapshot
@@ -3056,7 +3054,7 @@ public final class AppModel {
                     commitSnapshots[revision] = loaded
                     snapshot = loaded
                 } else {
-                    skippedReasons.append("recorded revision is unavailable")
+                    skippedReasons.append(localized("model.app.revisionUnavailable", language: "en"))
                     continue
                 }
                 bytes = try? snapshot.readBytes(path: jump.path)
@@ -3065,32 +3063,32 @@ public final class AppModel {
                 guard currentRevision == nil,
                       jump.snapshotID == currentSnapshotID
                 else {
-                    skippedReasons.append("recorded worktree snapshot is unavailable")
+                    skippedReasons.append(localized("model.app.worktreeUnavailable", language: "en"))
                     continue
                 }
                 bytes = capturedProjectSource(at: jump.path)?.bytes
             }
             guard let bytes else {
-                skippedReasons.append("recorded source is unreadable")
+                skippedReasons.append(localized("model.app.sourceUnreadable", language: "en"))
                 continue
             }
             guard ContentID.sha256(of: bytes) == contentID else {
-                skippedReasons.append("recorded source content changed")
+                skippedReasons.append(localized("model.app.sourceChanged", language: "en"))
                 continue
             }
             guard let root = projectRoot else {
-                skippedReasons.append("project language is unavailable")
+                skippedReasons.append(localized("model.app.languageUnavailable", language: "en"))
                 continue
             }
             let file = exactLocationIsInDependency(jump.path)
                 ? URL(fileURLWithPath: jump.path)
                 : root.appendingPathComponent(jump.path)
             guard let languageMode = languageMode(for: file) else {
-                skippedReasons.append("recorded source language is unsupported")
+                skippedReasons.append(localized("model.app.languageUnsupported", language: "en"))
                 continue
             }
             guard let excerpt = makeReadingSetExcerpt(
-                role: edge.readingSetRole ?? "TRAIL TARGET",
+                role: edge.readingSetRole ?? localized("model.app.trailTarget", language: "en"),
                 symbol: jump.symbolAnchor ?? inspector.nodeTitle,
                 path: jump.path,
                 targetByte: jump.byteOffset,
@@ -3101,7 +3099,7 @@ public final class AppModel {
                 sourceKind: sourceKind,
                 inspector: inspector
             ) else {
-                skippedReasons.append("recorded excerpt could not be frozen")
+                skippedReasons.append(localized("model.app.excerptFailed", language: "en"))
                 continue
             }
             excerpts.append(excerpt)
@@ -3980,7 +3978,7 @@ public final class AppModel {
             }
             guard let destination = snapshotDestinations[targetSnapshotID] else {
                 pendingHistoryNavigation = nil
-                replayNotice = "that saved version is unavailable; the current view was kept"
+                replayNotice = localized("model.app.versionUnavailable")
                 return
             }
             switch destination {
@@ -4098,7 +4096,7 @@ public final class AppModel {
                       navigationGeneration == replayNavigationGeneration
                 else { return }
                 pendingHistoryNavigation = nil
-                replayNotice = "that destination or saved version is unavailable; the current view was kept"
+                replayNotice = localized("model.app.destinationVersionUnavailable")
             }
         }
     }
@@ -4144,7 +4142,7 @@ public final class AppModel {
                       navigationGeneration == replayNavigationGeneration
                 else { return }
                 pendingHistoryNavigation = nil
-                replayNotice = "that destination is unavailable; the current view was kept"
+                replayNotice = localized("model.app.destinationUnavailable")
                 return
             }
             guard let self,
@@ -4262,19 +4260,19 @@ public final class AppModel {
     ) -> String? {
         var parts: [String] = []
         if replayedAgainstCurrentWorktree {
-            parts.append("replayed against current worktree")
+            parts.append(localized("model.app.currentWorktree"))
         }
         switch fallback {
         case .exact:
             break
         case .byteUnverified:
-            parts.append("restored by unverified byte offset")
+            parts.append(localized("model.app.byteOffset"))
         case .line:
-            parts.append("restored by line and column")
+            parts.append(localized("model.app.lineColumn"))
         case .symbol:
-            parts.append("restored by unique symbol anchor")
+            parts.append(localized("model.app.symbolAnchor"))
         case .fileHead:
-            parts.append("restored at file head")
+            parts.append(localized("model.app.fileHead"))
         }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
@@ -4311,7 +4309,7 @@ private func validateProductSupport(_ language: LanguageID) throws {
     case .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
-                "CodeInsight app does not support \(String(describing: language))",
+                localizedFormat("model.app.unsupportedLanguage", String(describing: language)),
         ])
     }
 }

@@ -18,7 +18,7 @@ final class SearchPanel: NSWindowController,
     private let outlineView = NSOutlineView()
     private let scrollView = NSScrollView()
     private let placeholderLabel = NSTextField(labelWithString: "")
-    private let statusLabel = NSTextField(labelWithString: "0 matches in 0 files")
+    private let statusLabel = NSTextField(labelWithString: "")
     private let truncatedLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
     private let onOpen: (URL, UInt32, ContentID?) -> Void
@@ -38,7 +38,7 @@ final class SearchPanel: NSWindowController,
             backing: .buffered,
             defer: false
         )
-        panel.title = "Find in Project"
+        panel.title = localized("panel.search.title")
         panel.titleVisibility = .hidden
         panel.minSize = NSSize(width: 480, height: 320)
         panel.titlebarAppearsTransparent = true
@@ -288,7 +288,7 @@ final class SearchPanel: NSWindowController,
         guard let match = item as? SearchPanelModel.Match else { return nil }
         let cell = reusableCell(identifier: "SearchMatch", in: outlineView)
         cell.textField?.attributedStringValue = styledMatch(match)
-        cell.toolTip = "Line \(match.value.line): \(match.value.lineText)"
+        cell.toolTip = localizedFormat("panel.search.line", Int64(match.value.line), match.value.lineText)
         return cell
     }
 
@@ -350,8 +350,8 @@ final class SearchPanel: NSWindowController,
     }
 
     private func configureView() {
-        input.placeholderString = "Find in project…"
-        input.setAccessibilityLabel("Find in project")
+        input.placeholderString = localized("panel.search.placeholder")
+        input.setAccessibilityLabel(localized("panel.search.input"))
         input.delegate = self
         input.font = .systemFont(ofSize: 15)
         input.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -359,13 +359,13 @@ final class SearchPanel: NSWindowController,
         configureToggle(
             caseButton,
             title: "Aa",
-            accessibilityLabel: "Case sensitive",
+            accessibilityLabel: localized("panel.search.case"),
             action: #selector(caseSensitivityChanged(_:))
         )
         configureToggle(
             regexButton,
             title: ".*",
-            accessibilityLabel: "Regular expression",
+            accessibilityLabel: localized("panel.search.regex"),
             action: #selector(regexChanged(_:))
         )
         let header = NSStackView(views: [input, caseButton, regexButton])
@@ -388,7 +388,7 @@ final class SearchPanel: NSWindowController,
         outlineView.indentationPerLevel = 14
         outlineView.rowSizeStyle = .custom
         outlineView.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        outlineView.setAccessibilityLabel("Project search results")
+        outlineView.setAccessibilityLabel(localized("panel.search.results"))
         outlineView.intercellSpacing = .zero
 
         scrollView.documentView = outlineView
@@ -406,13 +406,13 @@ final class SearchPanel: NSWindowController,
         placeholderLabel.alignment = .center
         placeholderLabel.maximumNumberOfLines = 3
         placeholderLabel.lineBreakMode = .byWordWrapping
-        placeholderLabel.setAccessibilityLabel("Project search status")
+        placeholderLabel.setAccessibilityLabel(localized("panel.search.status"))
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
         statusLabel.textColor = .secondaryLabelColor
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        truncatedLabel.stringValue = "Results truncated"
+        truncatedLabel.stringValue = localized("panel.search.truncated")
         truncatedLabel.textColor = .systemOrange
         truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -535,8 +535,7 @@ final class SearchPanel: NSWindowController,
     private func render() {
         caseButton.state = panelModel.isCaseSensitive ? .on : .off
         regexButton.state = panelModel.isRegex ? .on : .off
-        statusLabel.stringValue = "\(panelModel.totalMatches) matches in "
-            + "\(panelModel.fileCount) files"
+        statusLabel.stringValue = localizedFormat("panel.search.summary", localizedFormat("panel.search.matches", Int64(panelModel.totalMatches)), localizedFormat("panel.search.files", Int64(panelModel.fileCount)))
         truncatedLabel.isHidden = !panelModel.isTruncated
         placeholderLabel.stringValue = panelModel.placeholder
         placeholderLabel.isHidden = panelModel.placeholder.isEmpty

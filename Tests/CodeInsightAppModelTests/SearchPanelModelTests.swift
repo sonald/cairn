@@ -145,7 +145,7 @@ func searchPanelCapsDisplayedMatchesAndReportsTrueTotal() async throws {
     #expect(model.totalMatches == 5_001)
     #expect(
         model.displayTruncationMessage
-            == "Showing first 2000 of 5001 matches (truncated)"
+            == "Showing first 2,000 of 5,001 matches (truncated)"
     )
     #expect(model.displayedMatchCount + 1 == SearchPanelModel.displayLimit + 1)
     print(
@@ -228,7 +228,7 @@ func searchPanelTruncatesAboveDisplayLimit() async throws {
     #expect(displayedMatches(in: model) == SearchPanelModel.displayLimit)
     #expect(
         model.displayTruncationMessage
-            == "Showing first 2000 of 2001 matches (truncated)"
+            == "Showing first 2,000 of 2,001 matches (truncated)"
     )
 }
 

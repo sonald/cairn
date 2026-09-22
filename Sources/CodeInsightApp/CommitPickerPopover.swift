@@ -44,7 +44,7 @@ final class CommitPickerPopover: NSViewController,
     }
 
     override func loadView() {
-        input.placeholderString = "Search commits"
+        input.placeholderString = localized("panel.commit.search")
         input.delegate = self
         input.font = .systemFont(ofSize: 14)
         input.translatesAutoresizingMaskIntoConstraints = false
@@ -255,13 +255,13 @@ final class CommitPickerPopover: NSViewController,
         }
 
         if picker.isLoading {
-            statusLabel.stringValue = "Loading history…"
+            statusLabel.stringValue = localized("panel.commit.loading")
         } else if picker.errorMessage != nil {
-            statusLabel.stringValue = "Commit history unavailable."
+            statusLabel.stringValue = localized("panel.commit.unavailable")
         } else if !picker.query.isEmpty && picker.filteredCommits.isEmpty {
-            statusLabel.stringValue = "No matching commits."
+            statusLabel.stringValue = localized("panel.commit.empty")
         } else {
-            statusLabel.stringValue = "\(picker.filteredCommits.count) commits"
+            statusLabel.stringValue = localizedFormat("panel.commit.count", Int64(picker.filteredCommits.count))
         }
     }
 
@@ -281,9 +281,9 @@ final class CommitPickerPopover: NSViewController,
     }
 
     private func worktreeCell() -> NSView {
-        let title = NSTextField(labelWithString: "Working Tree")
+        let title = NSTextField(labelWithString: localized("panel.commit.worktree"))
         title.font = .systemFont(ofSize: 13, weight: .semibold)
-        let detail = NSTextField(labelWithString: "Current files on disk")
+        let detail = NSTextField(labelWithString: localized("panel.commit.onDisk"))
         detail.font = .systemFont(ofSize: 11)
         detail.textColor = .secondaryLabelColor
         let labels = NSStackView(views: [title, detail])
@@ -322,7 +322,7 @@ final class CommitPickerPopover: NSViewController,
         let badges = commit.branchNames.map {
             badge("⎇ \($0)", color: .systemBlue)
         } + commit.tagNames.map {
-            badge("tag \($0)", color: .systemPurple)
+            badge(localizedFormat("panel.commit.tag", $0), color: .systemPurple)
         }
         let bottom = NSStackView(views: [metadata] + badges)
         bottom.orientation = .horizontal
@@ -344,7 +344,7 @@ final class CommitPickerPopover: NSViewController,
     private func rowCell(checkmarked: Bool, content: NSView) -> NSView {
         let check = NSImageView(image: NSImage(
             systemSymbolName: checkmarked ? "checkmark" : "circle",
-            accessibilityDescription: checkmarked ? "Current version" : nil
+            accessibilityDescription: checkmarked ? localized("panel.commit.current") : nil
         ) ?? NSImage())
         check.contentTintColor = checkmarked ? .controlAccentColor : .clear
         check.translatesAutoresizingMaskIntoConstraints = false

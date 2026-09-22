@@ -18,7 +18,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let crossesSnapshot: Bool
     }
 
-    private let titleLabel = NSTextField(labelWithString: "Reading Trail")
+    private let titleLabel = NSTextField(labelWithString: localized("trail.title"))
     private let breadcrumb = NSStackView()
     private let branchButton = NSButton(title: "⑂", target: nil, action: nil)
     private let divider = NSView()
@@ -28,12 +28,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     private let detailStack = NSStackView()
     private let detailText = NSTextField(wrappingLabelWithString: "")
     private let restoreButton = NSButton(
-        title: "Restore this node",
+        title: localized("trail.restore"),
         target: nil,
         action: nil
     )
     private let readingSetButton = NSButton(
-        title: "Freeze Path as Reading Set",
+        title: localized("trail.freeze"),
         target: nil,
         action: nil
     )
@@ -50,7 +50,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         wantsLayer = true
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Reading Trail")
+        setAccessibilityLabel(localized("trail.title"))
 
         titleLabel.font = .systemFont(ofSize: 10, weight: .bold)
         titleLabel.setContentHuggingPriority(.required, for: .horizontal)
@@ -61,8 +61,8 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         breadcrumb.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         branchButton.bezelStyle = .accessoryBarAction
         branchButton.font = .systemFont(ofSize: 11, weight: .semibold)
-        branchButton.toolTip = "Show the semantic trail and its branches (⌥⌘T)"
-        branchButton.setAccessibilityLabel("Show Reading Trail branches")
+        branchButton.toolTip = localized("trail.branchesHelp")
+        branchButton.setAccessibilityLabel(localized("trail.branchesAX"))
         branchButton.target = self
         branchButton.action = #selector(showTrail(_:))
         branchButton.setContentHuggingPriority(.required, for: .horizontal)
@@ -147,7 +147,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             if index == 0 { return displayName(node) }
             let cause = incomingEdge(to: id, in: trail).map {
                 causeText($0.cause)
-            } ?? "navigate"
+            } ?? localized("trail.navigate")
             return "\(cause) → \(displayName(node))"
         }.filter { !$0.isEmpty }.joined(separator: " · ")
     }
@@ -225,7 +225,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         cell.display(
             title: displayName(node),
             gutter: gutter(for: rows[row]),
-            cause: incoming.map { causeText($0.cause) } ?? "root",
+            cause: incoming.map { causeText($0.cause) } ?? localized("trail.root"),
             snapshot: snapshotText(node.jump),
             badge: incoming.flatMap(badgeText),
             isCurrent: node.id == trail.activeNodeID,
@@ -283,7 +283,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         tableView.selectionHighlightStyle = .regular
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.setAccessibilityLabel("Reading Trail graph")
+        tableView.setAccessibilityLabel(localized("trail.graph"))
         let tableScroll = NSScrollView()
         tableScroll.documentView = tableView
         tableScroll.hasVerticalScroller = true
@@ -291,7 +291,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         tableScroll.drawsBackground = false
         tableScroll.translatesAutoresizingMaskIntoConstraints = false
 
-        let leftHeader = trailHeader(title: "READING TRAIL", detail: "PROJECT HISTORY")
+        let leftHeader = trailHeader(title: localized("trail.heading"), detail: localized("trail.historyHeading"))
         let left = NSView()
         left.translatesAutoresizingMaskIntoConstraints = false
         left.addSubview(leftHeader)
@@ -306,15 +306,15 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         detailText.font = .systemFont(ofSize: 12)
         detailText.maximumNumberOfLines = 0
         detailText.isSelectable = true
-        detailText.setAccessibilityLabel("Trail node details")
+        detailText.setAccessibilityLabel(localized("trail.detailAX"))
         restoreButton.bezelStyle = .rounded
         restoreButton.target = self
         restoreButton.action = #selector(restore(_:))
-        restoreButton.setAccessibilityLabel("Restore this trail node")
+        restoreButton.setAccessibilityLabel(localized("trail.restoreAX"))
         readingSetButton.bezelStyle = .rounded
         readingSetButton.target = self
         readingSetButton.action = #selector(openReadingSet(_:))
-        readingSetButton.setAccessibilityLabel("Freeze Path as Reading Set")
+        readingSetButton.setAccessibilityLabel(localized("trail.freeze"))
         detailStack.addArrangedSubview(detailText)
         detailStack.addArrangedSubview(readingSetButton)
         detailStack.addArrangedSubview(restoreButton)
@@ -325,7 +325,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         detailScroll.autohidesScrollers = true
         detailScroll.drawsBackground = false
         detailScroll.translatesAutoresizingMaskIntoConstraints = false
-        let rightHeader = trailHeader(title: "TRAIL NODE", detail: "AUDIT")
+        let rightHeader = trailHeader(title: localized("trail.nodeHeading"), detail: localized("trail.auditHeading"))
         let right = NSView()
         right.translatesAutoresizingMaskIntoConstraints = false
         right.addSubview(rightHeader)
@@ -402,7 +402,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         if titles.isEmpty {
             let empty = NSTextField(
                 labelWithString:
-                    "Follow symbols to build a trail · restored across sessions"
+                    localized("trail.hint")
             )
             empty.font = .systemFont(ofSize: 11)
             empty.textColor = theme.chromeTertiaryColor
@@ -432,12 +432,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             }
         }
         branchButton.title = branchCount > 0
-            ? "Branches · \(branchCount)"
-            : "Trail Details"
+            ? localizedFormat("trail.branches", Int64(branchCount))
+            : localized("trail.details")
         branchButton.isEnabled = !(trail?.nodes.isEmpty ?? true)
         setAccessibilityValue(
             breadcrumbText.isEmpty
-                ? "Follow symbols to build a trail · restored across sessions"
+                ? localized("trail.hint")
                 : breadcrumbText
         )
     }
@@ -457,7 +457,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     private func renderDetail() {
         guard let trail, let selectedID, let node = trail.nodes[selectedID]
         else {
-            detailText.stringValue = "Select a trail node to inspect its route and evidence."
+            detailText.stringValue = localized("trail.select")
             restoreButton.isEnabled = false
             readingSetButton.isEnabled = false
             return
@@ -474,32 +474,31 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             displayName(node),
             locationText(node.jump),
             "",
-            "SNAPSHOT",
+            localized("trail.snapshot"),
             snapshotText(node.jump),
             "",
-            "NAVIGATED VIA",
-            incoming.map { causeText($0.cause) } ?? "session root",
+            localized("trail.via"),
+            incoming.map { causeText($0.cause) } ?? localized("trail.sessionRoot"),
             "",
-            "EXPLANATION",
+            localized("trail.explanation"),
             isRestoredEvidence
-                ? "Evidence at navigation · frozen in an earlier session"
-                : "Evidence at navigation · frozen snapshot",
-            observed.map(explanationText) ?? "No relation explanation was attached.",
+                ? localized("trail.previousEvidence")
+                : localized("trail.frozenEvidence"),
+            observed.map(explanationText) ?? localized("trail.noExplanation"),
             "",
-            "Current evidence",
-            current.map(explanationText) ?? "No newer explanation is available.",
+            localized("trail.currentEvidence"),
+            current.map(explanationText) ?? localized("trail.noNewEvidence"),
         ]
         if isRestoredEvidence {
             sections += [
                 "",
-                "Only that session's display snapshot was kept; "
-                    + "re-query the relation for current evidence.",
+                localized("trail.snapshotOnly"),
             ]
         }
         if let observed, let current,
            explanationText(observed) != explanationText(current)
         {
-            sections += ["", "Evidence changed after navigation; the frozen snapshot remains unchanged."]
+            sections += ["", localized("trail.changed")]
         }
         detailText.stringValue = sections.joined(separator: "\n")
         restoreButton.isEnabled = true
@@ -592,21 +591,21 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     }
 
     private func snapshotText(_ jump: JumpRecord) -> String {
-        if let revision = jump.revision { return "commit \(revision.prefix(7))" }
+        if let revision = jump.revision { return localizedFormat("trail.commit", String(revision.prefix(7))) }
         if let snapshot = jump.snapshotID {
-            return "worktree \(snapshot.rawValue.uuidString.prefix(7).lowercased())"
+            return localizedFormat("trail.worktreeID", snapshot.rawValue.uuidString.prefix(7).lowercased())
         }
-        return "worktree"
+        return localized("trail.worktree")
     }
 
     private func causeText(_ cause: NavigationCause) -> String {
         switch cause {
-        case .fileSelection: "open"
-        case .outline: "outline"
-        case .relation: "relation"
-        case .search: "search"
-        case .historyReplay: "history"
-        case .tabActivation: "tab"
+        case .fileSelection: localized("trail.open")
+        case .outline: localized("trail.outline")
+        case .relation: localized("trail.relation")
+        case .search: localized("trail.search")
+        case .historyReplay: localized("trail.history")
+        case .tabActivation: localized("trail.tab")
         }
     }
 
@@ -628,36 +627,36 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
     ) -> String {
         switch explanation.trace {
         case .verificationOnly(let verification):
-            return "Verified · \(verification.attribution.provider) returned this target."
+            return localizedFormat("trail.verifiedExplanation", verification.attribution.provider)
         case .corroborated(let candidate, let verification):
-            return "Verified · source \(evidenceText(candidate)) · \(verification.attribution.provider) corroborated it."
+            return localizedFormat("trail.corroboratedExplanation", evidenceText(candidate), verification.attribution.provider)
         case .candidateOnly(let candidate):
-            return "Inferred · source \(evidenceText(candidate)) · \(completenessText(candidate.completeness))."
+            return localizedFormat("trail.inferredExplanation", evidenceText(candidate), completenessText(candidate.completeness))
         case .conflict(let candidate, _):
-            return "Inferred · source \(evidenceText(candidate)) · provider returned a different target."
+            return localizedFormat("trail.conflictExplanation", evidenceText(candidate))
         }
     }
 
     private func evidenceText(_ candidate: CandidateObservation) -> String {
         let values = candidate.evidence.map {
             switch $0 {
-            case .lexicalBinding: "lexical binding"
-            case .uniqueImport: "unique import"
-            case .sameFile: "same file"
-            case .nameOnly: "name only"
-            case .methodNameOnly: "method name only"
-            case .receiverType: "receiver type"
+            case .lexicalBinding: localized("trail.lexical")
+            case .uniqueImport: localized("trail.uniqueImport")
+            case .sameFile: localized("trail.sameFile")
+            case .nameOnly: localized("trail.nameOnly")
+            case .methodNameOnly: localized("trail.methodNameOnly")
+            case .receiverType: localized("trail.receiver")
             }
         }
-        return values.isEmpty ? "candidate" : values.joined(separator: ", ")
+        return values.isEmpty ? localized("trail.candidate") : values.joined(separator: ", ")
     }
 
     private func completenessText(_ completeness: Completeness) -> String {
         switch completeness {
-        case .complete: "candidate generation complete"
-        case .partial: "candidate generation partial"
-        case .truncated: "candidate generation truncated"
-        case .unknown: "candidate completeness unknown"
+        case .complete: localized("trail.complete")
+        case .partial: localized("trail.partial")
+        case .truncated: localized("trail.truncated")
+        case .unknown: localized("trail.unknown")
         }
     }
 
@@ -739,14 +738,14 @@ private final class ReadingTrailCellView: NSTableCellView {
         crossesSnapshot: Bool,
         theme: ReaderTheme
     ) {
-        snapshotBoundary.stringValue = crossesSnapshot ? "┄ snapshot boundary ┄" : ""
+        snapshotBoundary.stringValue = crossesSnapshot ? localized("trail.boundary") : ""
         snapshotBoundary.isHidden = !crossesSnapshot
         snapshotBoundary.textColor = theme.chromeTertiaryColor
         gutter.stringValue = gutterText
         gutter.textColor = isCurrent ? theme.accentColor : theme.chromeTertiaryColor
         titleLabel.stringValue = title
         titleLabel.textColor = theme.foregroundColor
-        currentLabel.stringValue = isCurrent ? "● CURRENT" : ""
+        currentLabel.stringValue = isCurrent ? localized("trail.current") : ""
         currentLabel.textColor = theme.accentColor
         causeChip.display(
             cause,
@@ -780,8 +779,15 @@ private final class ReadingTrailCellView: NSTableCellView {
             false
         )
         }
+        let displayBadge = badgeText.map { value in
+            switch value {
+            case "Verified": localized("trail.verified")
+            case "Unresolved": localized("trail.unresolved")
+            default: localized("trail.inferred")
+            }
+        }
         badge.display(
-            badgeText,
+            displayBadge,
             foreground: badgeColors.0,
             background: badgeColors.1,
             border: badgeColors.2,
@@ -789,7 +795,7 @@ private final class ReadingTrailCellView: NSTableCellView {
         )
         setAccessibilityLabel(title)
         setAccessibilityValue(
-            [cause, snapshot, badgeText, isCurrent ? "Current" : nil]
+            [cause, snapshot, displayBadge, isCurrent ? localized("trail.currentAX") : nil]
                 .compactMap { $0 }.joined(separator: ", ")
         )
     }

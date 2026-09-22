@@ -437,7 +437,7 @@ public final class ContextWindowModel {
             if resolution.certainty == .unresolved,
                resolution.target.localKind == .importBinding
             {
-                text = "Import target could not be resolved."
+                text = localized("model.context.importError")
             } else if let contentID = contentID(
                 at: resolution.target.pathID,
                 in: session
@@ -637,7 +637,7 @@ public final class ContextWindowModel {
         origin: ExactOrigin,
         language: LanguageID
     ) -> Candidate {
-        let label = "Exact·direct"
+        let label = localized("model.context.exactDirect")
         return Candidate(
             symbol: candidate.symbol,
             path: candidate.path,
@@ -690,7 +690,7 @@ public final class ContextWindowModel {
               )
         else { return nil }
         let facet = index.symbols[symbolIndex]
-        let label = "Exact·direct"
+        let label = localized("model.context.exactDirect")
         return Candidate(
             symbol: SymbolOccurrenceID(
                 snapshotID: session.snapshotID,
@@ -737,10 +737,10 @@ public final class ContextWindowModel {
         let targetRange = document.outlineFacets.first {
             $0.nameRange.contains(offset) || $0.nameRange.lowerBound == offset
         }?.range ?? ByteRange(lowerBound: offset, upperBound: offset)
-        let label = "External · in dependency"
+        let label = localized("model.context.external")
         let dependency = dependencyCrateName(path) ?? path
         let exact = exactBadge(
-            "Exact·direct",
+            localized("model.context.exactDirect"),
             attribution: attribution,
             origin: origin,
             language: language
@@ -779,34 +779,34 @@ public final class ContextWindowModel {
         language: LanguageID
     ) -> String {
         let trust = switch attribution.environment.trustMode {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
+        case .safe: localized("model.context.safe")
+        case .trusted: localized("model.context.trusted")
         }
         let source = switch origin {
         case .worktree:
             ""
         case .materialized(let commitOID):
-            " · @\(commitOID.prefix(7)) (materialized)"
+            localizedFormat("model.context.materialized", String(commitOID.prefix(7)))
         }
         let featureDetail: String? = if language == .python {
             nil
         } else {
             switch attribution.featureSelection {
-            case .defaultFeatures: "default"
-            case .allFeatures: "all"
-            case .noDefaultFeatures: "no-default"
+            case .defaultFeatures: localized("model.context.default")
+            case .allFeatures: localized("model.context.all")
+            case .noDefaultFeatures: localized("model.context.noDefault")
             }
         }
         let featureSuffix = featureDetail.map {
-            " · features: \($0)"
+            localizedFormat("model.context.features", $0)
         } ?? ""
         let limitations = attribution.environment.limitations
             .sorted { $0.rawValue < $1.rawValue }
-            .map(\.displayName)
+            .map(localizedLimitation)
             .joined(separator: "; ")
         let environment = limitations.isEmpty
-            ? "no known limitations"
-            : "limitations: \(limitations)"
+            ? localized("model.context.unlimited")
+            : localizedFormat("model.context.limitations", limitations)
         return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source)\(featureSuffix)"
     }
 
@@ -945,13 +945,13 @@ public final class ContextWindowModel {
 
     private func bindingLabel(_ kind: BindingKind) -> String {
         switch kind {
-        case .param: "param"
-        case .letBinding: "letBinding"
-        case .importBinding: "importBinding"
-        case .assignment: "assignment"
-        case .patternBinding: "patternBinding"
-        case .globalDecl: "globalDecl"
-        case .nonlocalDecl: "nonlocalDecl"
+        case .param: localized("model.binding.param")
+        case .letBinding: localized("model.binding.letBinding")
+        case .importBinding: localized("model.binding.importBinding")
+        case .assignment: localized("model.binding.assignment")
+        case .patternBinding: localized("model.binding.patternBinding")
+        case .globalDecl: localized("model.binding.globalDecl")
+        case .nonlocalDecl: localized("model.binding.nonlocalDecl")
         }
     }
 }
@@ -994,22 +994,30 @@ private func loadReaderDocument(
 
 func resolutionCertaintyLabel(_ certainty: Certainty) -> String {
     switch certainty {
-    case .unresolved: "Unresolved"
-    case .possible: "Possible"
-    case .probable: "Probable"
-    case .strong: "Strong"
-    case .exact: "Exact"
+    case .unresolved: localized("model.context.unresolved")
+    case .possible: localized("model.context.possible")
+    case .probable: localized("model.context.probable")
+    case .strong: localized("model.context.strong")
+    case .exact: localized("model.context.exact")
     }
 }
 
 func resolutionDispatchLabel(_ dispatch: DispatchKind) -> String {
     switch dispatch {
-    case .direct: "direct"
-    case .virtualDispatch: "virtual"
-    case .traitDispatch: "trait"
-    case .interfaceDispatch: "interface"
-    case .callback: "callback"
-    case .dynamicDispatch: "dynamic"
-    case .macroGenerated: "macroGenerated"
+    case .direct: localized("model.context.direct")
+    case .virtualDispatch: localized("model.context.virtual")
+    case .traitDispatch: localized("model.context.trait")
+    case .interfaceDispatch: localized("model.context.interface")
+    case .callback: localized("model.context.callback")
+    case .dynamicDispatch: localized("model.context.dynamic")
+    case .macroGenerated: localized("model.context.macro")
+    }
+}
+
+package func localizedLimitation(_ limitation: ExactAnalysisLimitation) -> String {
+    switch limitation {
+    case .buildScriptsDisabled: localized("model.limitation.buildScripts")
+    case .procMacrosDisabled: localized("model.limitation.procMacros")
+    case .dependenciesUnavailableOffline: localized("model.limitation.offline")
     }
 }

@@ -1,0 +1,13 @@
+/* Cairn user interface. Key prefixes identify the owning screen or model.
+   Translate complete messages; preserve format argument types and command glyphs.
+   Interpolated source symbols, paths, revisions and tool diagnostics stay verbatim.
+   Count-dependent messages live in Localizable.stringsdict, including zero/one/other.
+   Persisted reading-set role/reason identifiers are localized only when displayed. */
+"reader.bookmark.line" = "第 %lld 行：%@";
+"reader.bookmarks" = "书签：%@";
+"reader.collapsed.members" = "%@，包含%@";
+"reader.diff" = "差异";
+"reader.height.full" = "完整";
+"reader.height.overview" = "概览";
+"reader.height.structure" = "结构";
+"reader.tests" = "⋯ 测试 · %@ · %@";

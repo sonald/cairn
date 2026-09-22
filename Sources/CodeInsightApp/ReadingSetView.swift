@@ -22,7 +22,7 @@ final class ReadingSetView: NSView {
     private let subtitleLabel = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(
         wrappingLabelWithString:
-            "No excerpts could be frozen. Review the skipped reasons above."
+            localized("readingSet.empty")
     )
     private var cards: [ReadingSetExcerptView] = []
     private var theme = ReaderTheme(settings: ReaderSettings())
@@ -120,8 +120,8 @@ final class ReadingSetView: NSView {
         skippedReasons: [String] = []
     ) {
         anchor = nil
-        titleLabel.stringValue = "Reading Set · \(title)"
-        var subtitle = "\(excerpts.count) excerpts · frozen at capture · tab lifetime"
+        titleLabel.stringValue = localizedFormat("readingSet.title", title)
+        var subtitle = localizedFormat("readingSet.count", Int64(excerpts.count))
         if !skippedReasons.isEmpty {
             var order: [String] = []
             var counts: [String: Int] = [:]
@@ -131,9 +131,10 @@ final class ReadingSetView: NSView {
             }
             let reasons = order.map { reason in
                 let count = counts[reason, default: 0]
-                return count == 1 ? reason : "\(reason) ×\(count)"
+                let text = localizedReadingSetText(reason)
+                return count == 1 ? text : "\(text) ×\(count)"
             }.joined(separator: "; ")
-            subtitle += " · skipped \(skippedReasons.count) · \(reasons)"
+            subtitle += localizedFormat("readingSet.skipped", Int64(skippedReasons.count), reasons)
         }
         subtitleLabel.stringValue = subtitle
         cards.forEach {
@@ -166,12 +167,12 @@ final class ReadingSetView: NSView {
         }
         requestLayout()
         emptyLabel.isHidden = !excerpts.isEmpty
-        setAccessibilityLabel("Reading Set \(title)")
+        setAccessibilityLabel(localizedFormat("readingSet.titleAX", title))
         let skippedValue = skippedReasons.isEmpty
             ? ""
-            : ", skipped \(skippedReasons.count)"
+            : localizedFormat("readingSet.skippedAX", Int64(skippedReasons.count))
         setAccessibilityValue(
-            "\(excerpts.count) frozen excerpts\(skippedValue)"
+            localizedFormat("readingSet.countAX", Int64(excerpts.count), skippedValue)
         )
     }
 
@@ -389,12 +390,12 @@ private final class ReadingSetExcerptView: NSView {
             width: CGFloat.greatestFiniteMagnitude,
             height: CGFloat.greatestFiniteMagnitude
         )
-        codeView.setAccessibilityLabel("Frozen source excerpt")
+        codeView.setAccessibilityLabel(localized("readingSet.source"))
         codeDocument.addSubview(lineNumbers)
         codeDocument.addSubview(codeView)
-        configure(openButton, title: "Open File", action: #selector(open(_:)))
-        configure(expandButton, title: "Expand Context", action: #selector(expand(_:)))
-        configure(evidenceButton, title: "View Evidence", action: #selector(evidence(_:)))
+        configure(openButton, title: localized("readingSet.open"), action: #selector(open(_:)))
+        configure(expandButton, title: localized("readingSet.expand"), action: #selector(expand(_:)))
+        configure(evidenceButton, title: localized("readingSet.evidence"), action: #selector(evidence(_:)))
         actions.orientation = .horizontal
         actions.alignment = .centerY
         actions.spacing = 12
@@ -426,7 +427,7 @@ private final class ReadingSetExcerptView: NSView {
     func display(_ excerpt: ReadingSetExcerpt, settings: ReaderSettings) {
         paragraphLayout.reset()
         self.excerpt = excerpt
-        roleLabel.stringValue = excerpt.role.uppercased()
+        roleLabel.stringValue = localizedReadingSetText(excerpt.role).uppercased()
         symbolLabel.stringValue = excerpt.symbol
         pathLabel.stringValue = "\(excerpt.path):\(excerpt.line)"
         codeView.string = excerpt.sourceText
@@ -444,10 +445,10 @@ private final class ReadingSetExcerptView: NSView {
         expandButton.isEnabled = onExpand != nil
         evidenceButton.isEnabled = onViewEvidence != nil
         setAccessibilityLabel(
-            "\(excerpt.role), \(excerpt.symbol), \(excerpt.path) line \(excerpt.line)"
+            localizedFormat("readingSet.excerptAX", localizedReadingSetText(excerpt.role), excerpt.symbol, excerpt.path, Int64(excerpt.line))
         )
         setAccessibilityValue(
-            "\(excerpt.inspector.badge.rawValue), \(provenanceText(excerpt))"
+            "\(localized("readingSet." + excerpt.inspector.badge.rawValue.lowercased())), \(provenanceText(excerpt))"
         )
         apply(settings: settings)
     }
@@ -474,28 +475,28 @@ private final class ReadingSetExcerptView: NSView {
         switch excerpt.inspector.badge {
         case .verified:
             badge.display(
-                "VERIFIED",
+                localized("readingSet.verified"),
                 foreground: theme.verifiedColor,
                 background: theme.verifiedBackgroundColor,
                 border: theme.verifiedBackgroundColor
             )
         case .inferred:
             badge.display(
-                "INFERRED",
+                localized("readingSet.inferred"),
                 foreground: theme.inferredColor,
                 background: theme.inferredBackgroundColor,
                 border: theme.inferredBackgroundColor
             )
         case .unresolved:
             badge.display(
-                "UNRESOLVED",
+                localized("readingSet.unresolved"),
                 foreground: theme.unresolvedColor,
                 background: .clear,
                 border: theme.unresolvedBorderColor
             )
         }
         caveat.display(
-            excerpt.caveat,
+            excerpt.caveat.map(localizedReadingSetText),
             foreground: theme.warningColor,
             background: .clear,
             border: theme.warningColor
@@ -516,9 +517,9 @@ private final class ReadingSetExcerptView: NSView {
     private func provenanceText(_ excerpt: ReadingSetExcerpt) -> String {
         switch excerpt.sourceKind {
         case .projectCommit:
-            "project · \(excerpt.revision.map { String($0.prefix(7)) } ?? "captured")"
-        case .worktreeCaptured: "worktree · captured"
-        case .dependencyCaptured: "dependency · captured"
+            localizedFormat("readingSet.project", excerpt.revision.map { String($0.prefix(7)) } ?? localized("readingSet.captured"))
+        case .worktreeCaptured: localized("readingSet.worktree")
+        case .dependencyCaptured: localized("readingSet.dependency")
         }
     }
 

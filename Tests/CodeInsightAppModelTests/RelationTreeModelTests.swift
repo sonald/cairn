@@ -534,7 +534,7 @@ func relationTreeCompleteReferenceCountsStayWithinEachSource() async throws {
 
     #expect(mixed.verifiedStatus == nil)
     #expect(mixed.verifiedRowCount == 2)
-    #expect(mixed.possibleTitle == "Show 1 possible matches")
+    #expect(mixed.possibleTitle == "Show 1 possible match")
     #expect(mixed.possibleRowCount == 1)
 }
 
@@ -1302,8 +1302,7 @@ func relationTreeExactMoveFromPossibleGroupToTopLevelDoesNotRetainStaleGroupRow(
     ) {
         exact.isPending
             && model.root?.children?.contains {
-                $0.kind == .group
-                    && $0.title.hasPrefix("Show ")
+                $0.candidateGroup == .possible
                     && $0.children?.contains { $0.title == "B" } == true
             } == true
     })
@@ -1390,7 +1389,7 @@ func relationTreePreservesCorrectedGroupChildIdentityAfterGroupMigration()
     #expect(definitionCalls == 1)
     #expect(model.root?.children?.contains { parent in
         parent.kind == .group
-            && parent.title.hasPrefix("Show corrected candidates")
+            && parent.candidateGroup == .corrected
             && parent.children?.contains { $0 === publishedB } == true
     } == true)
     #expect(publishedB.badge == "Inferred")
@@ -2297,24 +2296,28 @@ func relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles()
         relationTreeFinishedLoading(model.root)
     })
     let candidates = try relationPossibleRows(in: model.root)
+    let translatedGroup = try #require(model.root?.children?.first { $0.candidateGroup == .possible })
+    translatedGroup.title = "可能的匹配（任意译文）"
     model.validatePossible(candidates)
     #expect(await testWaitUntil("three-way reconciliation published") {
         relationDirectRows(in: model.root).contains { $0.title == "same" }
             && model.root?.children?.contains {
                 $0.kind == .group
-                    && $0.title == "Show corrected candidates (1)"
+                    && $0.title == "Show corrected candidate (1)"
             } == true
     })
 
     let direct = relationDirectRows(in: model.root)
     let possible = try relationPossibleRows(in: model.root)
     let corrected = try #require(model.root?.children?.first {
-        $0.kind == .group && $0.title == "Show corrected candidates (1)"
+        $0.kind == .group && $0.title == "Show corrected candidate (1)"
     }?.children)
     let reconciliation = try #require(
         relationFirstReconciliation(in: model)
     )
     #expect(definitionRequests == 1)
+    #expect(model.root?.children?.first { $0.candidateGroup == .possible } === translatedGroup)
+    #expect(translatedGroup.children?.count == 1)
     #expect(direct.map(\.title) == ["same"])
     #expect(direct.first?.badge == "Verified")
     #expect(direct.first?.explanation?.reconciliationRefs.count == 3)
@@ -2322,6 +2325,7 @@ func relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles()
     #expect(possible.first?.badge == "Inferred")
     #expect(corrected.map(\.title) == ["different"])
     #expect(corrected.first?.modifiers.contains("Conflict/Corrected") == true)
+    #expect(corrected.first?.correctedModifier == localized("model.relation.corrected"))
     #expect(reconciliation.roles.count == 3)
     #expect(reconciliation.roles.contains {
         if case .corroborated(candidateIndex: 0, targetIndex: 0) = $0 {
@@ -2421,7 +2425,7 @@ func relationTreeEmptyDefinitionIsNeutralForEveryCandidate() async throws {
     #expect(definitionRequests == 1)
     #expect(possible.map(\.badge) == ["Inferred", "Inferred"])
     #expect(model.root?.children?.contains {
-        $0.title.hasPrefix("Show corrected candidates")
+        $0.candidateGroup == .corrected
     } == false)
     #expect(roles.count == 2)
     #expect(roles.allSatisfy {
@@ -2483,14 +2487,14 @@ func relationTreeShowsEveryDistinctProviderTargetForAConflict() async throws {
     #expect(await testWaitUntil("provider targets and corrected group published") {
         relationDirectRows(in: model.root).count == 2
             && model.root?.children?.contains {
-                $0.title == "Show corrected candidates (1)"
+                $0.title == "Show corrected candidate (1)"
             } == true
     })
 
     #expect(definitionRequests == 1)
     #expect(Set(relationDirectRows(in: model.root).map(\.title)) == ["a", "b"])
     #expect(model.root?.children?.first {
-        $0.title == "Show corrected candidates (1)"
+        $0.title == "Show corrected candidate (1)"
     }?.children?.map(\.title) == ["c"])
     let roles = try #require(
         relationFirstReconciliation(in: model)
@@ -3631,7 +3635,7 @@ func m10NarrativeKeepsBothCompletenessLevelsIndependent() throws {
         }
         return false
     })
-    #expect(partial.map(renderEnglish) != complete.map(renderEnglish))
+    #expect(partial.map(renderLocalized) != complete.map(renderLocalized))
 }
 
 @Test
@@ -3705,9 +3709,9 @@ func m10NarrativeDistinguishesConflictNonCorroborationAndInconclusive()
         if case .inconclusive = $0 { true } else { false }
     })
     #expect(Set([
-        conflict.map(renderEnglish).last,
-        notCorroborated.map(renderEnglish).last,
-        inconclusive.map(renderEnglish).last,
+        conflict.map(renderLocalized).last,
+        notCorroborated.map(renderLocalized).last,
+        inconclusive.map(renderLocalized).last,
     ].compactMap { $0 }).count == 3)
 }
 
@@ -3739,10 +3743,10 @@ func m10NarrativeEnglishSnapshotKeepsNameOnlyCompletenessCaveat() throws {
         )
     )
 
-    #expect(clauses.map(renderEnglish) == [
+    #expect(clauses.map(renderLocalized) == [
         "Matched by method name only.",
         "Candidate generation was complete.",
-        "The source relation result set was truncated after 500 of about 1900 results.",
+        "The source relation result set was truncated after 500 of about 1,900 results.",
         "Exact verification is in progress.",
     ])
 }
@@ -4429,7 +4433,7 @@ private func relationPossibleRows(
     in parent: RelationTreeModel.Node?
 ) throws -> [RelationTreeModel.Node] {
     try #require(parent?.children?.first {
-        $0.kind == .group && $0.title.hasPrefix("Show ")
+        $0.candidateGroup == .possible
     }?.children)
 }
 
@@ -4462,10 +4466,7 @@ private func relationVerifiedStatusTitle(
     in parent: RelationTreeModel.Node?
 ) -> String? {
     parent?.children?.first {
-        $0.kind == .truncated
-            && ($0.title.hasPrefix("Verified ")
-                || $0.title.hasPrefix("No verified ")
-                || $0.title.hasPrefix("Analysis limited:"))
+        $0.isVerificationStatus
     }?.title
 }
 
@@ -4551,7 +4552,7 @@ private func relationProjectReferenceStatus(
         direction: .references
     )?.value
     let possible = model.root?.children?.first {
-        $0.kind == .group && $0.title.hasPrefix("Show ")
+        $0.candidateGroup == .possible
     }
     return (
         relationVerifiedStatusTitle(in: model.root),
@@ -4559,10 +4560,7 @@ private func relationProjectReferenceStatus(
         possible?.title,
         possible?.children?.count ?? 0,
         model.root?.children?.first {
-            $0.kind == .truncated
-                && !$0.title.hasPrefix("Verified ")
-                && !$0.title.hasPrefix("No verified ")
-                && !$0.title.hasPrefix("Analysis limited:")
+            $0.kind == .truncated && !$0.isVerificationStatus
         }?.title
     )
 }
@@ -4773,4 +4771,64 @@ private func exactTestEnvironment(
     limitations: Set<ExactAnalysisLimitation> = []
 ) -> ExactAnalysisEnvironment {
     ExactAnalysisEnvironment(trustMode: trustMode, limitations: limitations)
+}
+
+@MainActor
+@Test
+func relationGroupsKeepIdentityWhenDisplayTitlesChange() async throws {
+    let fixture = try RelationFixture()
+    defer { fixture.remove() }
+    let exact = RelationAsyncGate()
+    let edges = [UInt32(9), UInt32(20)].map { offset in
+        RelationTreeModel.LoadedEdge(
+            title: "candidate-\(offset)", certainty: .possible,
+            dispatch: .direct, symbol: nil, path: "main.rs",
+            byteOffset: offset, line: 1, evidence: []
+        )
+    }
+    let model = RelationTreeModel(
+        loader: { _, _, _, _ in .init(edges: edges, isTruncated: true) },
+        exactRelationsResolver: { _, _, _, _, _, _ in
+            await exact.wait()
+            return .relations([
+                .init(name: "verified", location: relationExactLocation(
+                    file: "main.rs", offset: 9
+                ), item: nil, callSites: []),
+            ], origin: .worktree, attribution: relationExactAttribution())
+        }
+    )
+    model.updateProjectState(.ready(fixture.session, fixture.context))
+    let load = model.setRoot(target: .engine(fixture.a), direction: .references)
+    try #require(await testWaitUntil("candidate group published before exact result") {
+        exact.isPending && model.root?.children?.contains {
+            $0.candidateGroup == .possible
+        } == true
+    })
+    let group = try #require(model.root?.children?.first { $0.candidateGroup == .possible })
+    let remainingRow = try #require(group.children?.first { $0.target?.byteOffset == 20 })
+    group.title = "显示两个候选（任意译文）"
+    await model.expand(group)
+    exact.release()
+    await load?.value
+    let finalGroups = model.root?.children?.filter { $0.candidateGroup == .possible } ?? []
+    #expect(finalGroups.count == 1)
+    #expect(finalGroups.first === group)
+    #expect(group.children?.count == 1)
+    #expect(group.children?.first === remainingRow)
+    #expect(group.title == localizedFormat("model.relation.possible", 1))
+    #expect(group.isExpandable)
+    #expect(relationDirectRows(in: model.root).filter { $0.certainty == .exact }.count == 1)
+    #expect(model.hasTruncatedResults)
+    let verified = try #require(relationDirectRows(in: model.root).first { $0.certainty == .exact })
+    let context = try #require(model.relationQueryContexts.values.first)
+    let frozen = try #require(makeInspectorDisplay(
+        node: verified, context: context, correctedTitles: [], readiness: .ready,
+        sourceKind: .worktreeCaptured, revision: nil,
+        contentID: .sha256(of: []), capturedAt: Date(timeIntervalSince1970: 1)
+    ))
+    #expect(frozen.localizedDisplays?.count == 2)
+    #expect(frozen.display(language: "en").availabilityBody == "Exact provider was ready at capture.")
+    #expect(frozen.display(language: "zh-Hans").availabilityBody == "捕获时精确分析服务已就绪。")
+    #expect(frozen.display(language: "en").verificationBody != frozen.display(language: "zh-Hans").verificationBody)
+    #expect(frozen.display(language: "en").nodeTitle == frozen.display(language: "zh-Hans").nodeTitle)
 }

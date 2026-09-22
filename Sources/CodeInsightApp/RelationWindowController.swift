@@ -22,7 +22,7 @@ final class RelationWindowController: NSViewController,
 
     private let model: RelationTreeModel
     private let directionControl = NSSegmentedControl(
-        labels: ["Callers", "Calls", "Implements", "References"],
+        labels: [localized("relation.callers"), localized("relation.calls"), localized("relation.implements"), localized("relation.references")],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -38,7 +38,7 @@ final class RelationWindowController: NSViewController,
     private let readingSetButton = NSButton()
     private let placeholderLabel = NSTextField(
         labelWithString:
-            "Right-click a symbol → Show Callers / Calls / Implements / References"
+            localized("relation.hint")
     )
     private var currentTarget: ReferenceTarget?
     private var currentDocument: ReaderDocument?
@@ -131,7 +131,7 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestReferenceGroupTitle: String? {
-        if let row = selfTestGroupRow(titlePrefix: "References"),
+        if let row = selfTestGroupRow(titlePrefix: localized("relation.references")),
            let node = outlineView.item(atRow: row) as? RelationTreeModel.Node
         {
             return node.title
@@ -140,11 +140,11 @@ final class RelationWindowController: NSViewController,
     }
 
     var selfTestReferenceGroupFrame: NSRect {
-        let group = selfTestGroupFrame(titlePrefix: "References")
+        let group = selfTestGroupFrame(titlePrefix: localized("relation.references"))
         if group != .zero { return group }
         let disclosure = selfTestPossibleDisclosureFrame
         if disclosure != .zero { return disclosure }
-        return selfTestVisibleEdgeFrames(inGroup: "References").first ?? .zero
+        return selfTestVisibleEdgeFrames(inGroup: localized("relation.references")).first ?? .zero
     }
 
     var selfTestDirectionSegmentFrames: [NSRect] {
@@ -177,7 +177,7 @@ final class RelationWindowController: NSViewController,
         guard frames.count == 4 else { return false }
         let frame = frames[3]
         return directionControl.segmentCount == 4
-            && directionControl.label(forSegment: 3) == "References"
+            && directionControl.label(forSegment: 3) == localized("relation.references")
             && directionControl.selfTestIsVisibleInWindow
             && frame.width > 0
             && frame.height > 0
@@ -197,8 +197,7 @@ final class RelationWindowController: NSViewController,
 
     var selfTestExternalGroupTitle: String? {
         selfTestVisibleEdgeNodes(inGroup: "").first {
-            $0.subtitle?.hasPrefix("Unresolved") == true
-                || $0.subtitle?.hasPrefix("External · in dependency") == true
+            $0.certainty == .unresolved
         }?.subtitle
     }
 
@@ -309,7 +308,7 @@ final class RelationWindowController: NSViewController,
     var selfTestCorrectedDisclosureDisplayText: [String] {
         guard let item = model.root?.children?.first(where: {
             $0.kind == .group
-                && $0.title.hasPrefix("Show corrected candidates")
+                && $0.candidateGroup == .corrected
         }) else { return [] }
         let row = outlineView.row(forItem: item)
         return (outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
@@ -466,7 +465,7 @@ final class RelationWindowController: NSViewController,
     func selfTestExpandCorrectedCandidates() -> Bool {
         guard let group = model.root?.children?.first(where: {
             $0.kind == .group
-                && $0.title.hasPrefix("Show corrected candidates")
+                && $0.candidateGroup == .corrected
         }) else { return false }
         outlineView.expandItem(group)
         return outlineView.isItemExpanded(group)
@@ -475,7 +474,7 @@ final class RelationWindowController: NSViewController,
     func selfTestSelectCorrectedCandidate(titled title: String) -> Bool {
         guard let group = model.root?.children?.first(where: {
             $0.kind == .group
-                && $0.title.hasPrefix("Show corrected candidates")
+                && $0.candidateGroup == .corrected
         }), let node = group.children?.first(where: { $0.title == title })
         else { return false }
         outlineView.expandItem(group)
@@ -557,8 +556,7 @@ final class RelationWindowController: NSViewController,
         guard isViewLoaded else { return nil }
         return model.root?.children?.first {
             $0.kind == .group
-                && $0.title.hasPrefix("Show ")
-                && !$0.title.hasPrefix("Show corrected candidates")
+                && $0.candidateGroup == .possible
         }
     }
 
@@ -620,11 +618,11 @@ final class RelationWindowController: NSViewController,
                   node.kind == .edge
             else { return nil }
             return switch titlePrefix {
-            case "Exact": node.badge == "Verified" ? node : nil
+            case "Exact": node.certainty == .exact ? node : nil
             case "Strong":
-                node.badge == "Inferred"
+                node.certainty != .exact && node.certainty != .unresolved
                     && directRows.contains(ObjectIdentifier(node)) ? node : nil
-            case "References":
+            case "References", localized("relation.references"):
                 model.direction == .references ? node : nil
             case "Possible", "Probable":
                 possibleRows.contains(ObjectIdentifier(node)) ? node : nil
@@ -754,33 +752,33 @@ final class RelationWindowController: NSViewController,
 
         inspectButton.image = NSImage(
             systemSymbolName: "info.circle",
-            accessibilityDescription: "Show Resolution Inspector"
+            accessibilityDescription: localized("relation.inspector.show")
         )
-        inspectButton.title = "Inspector"
+        inspectButton.title = localized("relation.inspector")
         inspectButton.imagePosition = .imageLeading
         inspectButton.font = .systemFont(ofSize: 12, weight: .semibold)
         inspectButton.bezelStyle = .accessoryBarAction
         inspectButton.isBordered = true
-        inspectButton.toolTip = "Show Resolution Inspector (⌘I)"
-        inspectButton.setAccessibilityLabel("Show Resolution Inspector")
+        inspectButton.toolTip = localized("relation.inspector.shortcut")
+        inspectButton.setAccessibilityLabel(localized("relation.inspector.show"))
         inspectButton.target = self
         inspectButton.action = #selector(inspectSelection(_:))
         inspectButton.isEnabled = false
         inspectButton.translatesAutoresizingMaskIntoConstraints = false
 
-        readingSetButton.title = "Freeze Results"
+        readingSetButton.title = localized("relation.freeze")
         readingSetButton.image = NSImage(
             systemSymbolName: "text.badge.plus",
-            accessibilityDescription: "Freeze Results as Reading Set"
+            accessibilityDescription: localized("relation.freeze.title")
         )
         readingSetButton.imagePosition = .imageLeading
         readingSetButton.font = .systemFont(ofSize: 12, weight: .semibold)
         readingSetButton.bezelStyle = .accessoryBarAction
         readingSetButton.toolTip =
-            "Freeze up to 50 published locations as a Reading Set"
-        readingSetButton.setAccessibilityLabel("Freeze Results as Reading Set")
+            localized("relation.freeze.hint")
+        readingSetButton.setAccessibilityLabel(localized("relation.freeze.title"))
         readingSetButton.toolTip =
-            "Freeze the currently published source and evidence snapshots as a Reading Set tab"
+            localized("relation.freeze.help")
         readingSetButton.target = self
         readingSetButton.action = #selector(openAsReadingSet(_:))
         readingSetButton.isEnabled = false
@@ -790,8 +788,8 @@ final class RelationWindowController: NSViewController,
         contentSplit.dividerStyle = .thin
         contentSplit.delegate = self
         contentSplit.arrangesAllSubviews = false
-        contentSplit.setAccessibilityLabel("Relation list and Resolution Inspector")
-        contentSplit.toolTip = "Drag the divider to resize the relation list and inspector"
+        contentSplit.setAccessibilityLabel(localized("relation.split"))
+        contentSplit.toolTip = localized("relation.split.hint")
         contentSplit.wantsLayer = true
         contentSplit.layer?.backgroundColor = theme.chromeDividerColor.cgColor
         contentSplit.translatesAutoresizingMaskIntoConstraints = false
@@ -1068,7 +1066,7 @@ final class RelationWindowController: NSViewController,
             return
         }
         inspectButton.isEnabled = node.explanation != nil
-        if node.modifiers.contains("Conflict/Corrected") { return }
+        if node.isCorrectedCandidate { return }
         model.select(node)
         guard node.representsLocation, node.target != nil else { return }
         onOpen?(node)
@@ -1100,7 +1098,7 @@ final class RelationWindowController: NSViewController,
         guard let node = notification.userInfo?["NSObject"]
                 as? RelationTreeModel.Node,
               node.kind == .group,
-              node.title.hasPrefix("Show ")
+              node.candidateGroup != nil
         else { return }
         validateVisiblePossibleRows()
     }
@@ -1109,7 +1107,7 @@ final class RelationWindowController: NSViewController,
         guard let node = notification.userInfo?["NSObject"]
                 as? RelationTreeModel.Node,
               node.kind == .group,
-              node.title.hasPrefix("Show ")
+              node.candidateGroup != nil
         else { return }
         model.cancelPossibleValidation()
     }
@@ -1165,7 +1163,7 @@ final class RelationWindowController: NSViewController,
               node.kind == .edge,
               node.target != nil
         else { return }
-        if node.modifiers.contains("Conflict/Corrected") {
+        if node.isCorrectedCandidate {
             showInspector(for: node)
             return
         }
@@ -1306,7 +1304,7 @@ final class RelationWindowController: NSViewController,
 
     private func openInspectedFormerCandidate() {
         switch inspectorMode {
-        case .live(let node) where node.modifiers.contains("Conflict/Corrected"):
+        case .live(let node) where node.isCorrectedCandidate:
             onOpen?(node)
         case .frozen(_, let action): action?()
         default: break
@@ -1326,7 +1324,7 @@ final class RelationWindowController: NSViewController,
         guard !reconciliationIDs.isEmpty else { return [] }
         return (model.root?.children ?? []).filter {
             $0.kind == .group
-                && $0.title.hasPrefix("Show corrected candidates")
+                && $0.candidateGroup == .corrected
         }.flatMap { $0.children ?? [] }.filter { candidate in
             guard case .conflict(_, let reference) =
                     candidate.explanation?.primaryTrace
@@ -1408,7 +1406,7 @@ final class RelationWindowController: NSViewController,
             excerpts.append(excerpt)
         }
         onOpenReadingSet?(
-            model.root?.title ?? "Relations",
+            model.root?.title ?? localized("relation.title"),
             excerpts,
             skippedReasons
         )
@@ -1434,7 +1432,7 @@ final class RelationWindowController: NSViewController,
         if node.kind == .root { return "DEFINITION" }
         return switch model.direction {
         case .callers:
-            node.badge == "Verified" ? "VERIFIED CALLER" : "INFERRED CALLER"
+            node.certainty == .exact ? "VERIFIED CALLER" : "INFERRED CALLER"
         case .calls: "CALL"
         case .implementations: "IMPLEMENTATION"
         case .references: "REFERENCE"
@@ -1448,23 +1446,19 @@ final class RelationWindowController: NSViewController,
         fitOutlineWidthToVisibleRect()
         if let root = model.root {
             outlineView.expandItem(root)
-            let directionWord = switch model.direction {
-            case .callers: "callers"
-            case .calls: "calls"
-            case .implementations: "implementations"
-            case .references: "references"
+            placeholderLabel.stringValue = switch model.direction {
+            case .callers: localized("relation.empty.callers")
+            case .calls: localized("relation.empty.calls")
+            case .implementations: localized("relation.empty.implementations")
+            case .references: localized("relation.empty.references")
             }
-            placeholderLabel.stringValue =
-                "No \(directionWord) found. The analysis index has no entries"
-                + " for this symbol, or this relation isn't supported for it."
             let showsPlaceholder = root.kind == .root
                 && (root.children?.isEmpty == true
                     || (!root.isExpandable && root.children == nil))
             placeholderLabel.isHidden = !showsPlaceholder
             scrollView.isHidden = showsPlaceholder
         } else {
-            placeholderLabel.stringValue = "Right-click a symbol"
-                + " → Show Callers / Calls / Implements / References"
+            placeholderLabel.stringValue = localized("relation.hint")
             placeholderLabel.isHidden = false
             scrollView.isHidden = true
         }
@@ -1503,7 +1497,7 @@ final class RelationWindowController: NSViewController,
     private func expandLoadedGroups(under node: RelationTreeModel.Node) {
         outlineView.expandItem(node)
         for child in node.children ?? []
-            where child.kind == .group && !child.title.hasPrefix("Show ")
+            where child.kind == .group && child.candidateGroup == nil
         {
             outlineView.expandItem(child)
         }
@@ -1672,7 +1666,7 @@ private final class ResolutionInspectorView: NSView {
     var onOpenFormerCandidate: (() -> Void)?
 
     private let header = NSView()
-    private let headerTitle = NSTextField(labelWithString: "Resolution Inspector")
+    private let headerTitle = NSTextField(labelWithString: localized("relation.inspector.title"))
     private let captureChip = RelationChipView()
     private let closeButton = NSButton()
     private let scrollView = NSScrollView()
@@ -1681,29 +1675,29 @@ private final class ResolutionInspectorView: NSView {
     private let nodeTitle = NSTextField(labelWithString: "")
     private let badge = RelationChipView()
     private let why = NSTextField(wrappingLabelWithString: "")
-    private let sourceTitle = NSTextField(labelWithString: "SOURCE")
+    private let sourceTitle = NSTextField(labelWithString: localized("relation.inspector.source"))
     private let sourceBody = NSTextField(wrappingLabelWithString: "")
     private let sourceSection = NSStackView()
-    private let verificationTitle = NSTextField(labelWithString: "VERIFICATION")
+    private let verificationTitle = NSTextField(labelWithString: localized("relation.inspector.verification"))
     private let verificationBody = NSTextField(wrappingLabelWithString: "")
     private let verificationSection = NSStackView()
-    private let correctionTitle = NSTextField(labelWithString: "CORRECTED CANDIDATES")
+    private let correctionTitle = NSTextField(labelWithString: localized("relation.inspector.corrected"))
     private let correctionBody = NSTextField(wrappingLabelWithString: "")
     private let correctionSection = NSStackView()
     private let availabilityTitle = NSTextField(
-        labelWithString: "VERIFICATION AVAILABILITY"
+        labelWithString: localized("relation.inspector.availability")
     )
     private let availabilityBody = NSTextField(wrappingLabelWithString: "")
     private let availabilitySection = NSStackView()
     private let environmentTitle = NSTextField(
-        labelWithString: "ANALYSIS ENVIRONMENT"
+        labelWithString: localized("relation.inspector.environment")
     )
     private let environmentBody = NSTextField(wrappingLabelWithString: "")
     private let environmentSection = NSStackView()
-    private let auditButton = NSButton(title: "Show full audit", target: nil, action: nil)
+    private let auditButton = NSButton(title: localized("relation.audit.show"), target: nil, action: nil)
     private let auditStack = NSStackView()
     private let formerCandidateButton = NSButton(
-        title: "Open former candidate",
+        title: localized("relation.former.open"),
         target: nil,
         action: nil
     )
@@ -1717,12 +1711,12 @@ private final class ResolutionInspectorView: NSView {
         headerTitle.translatesAutoresizingMaskIntoConstraints = false
         closeButton.image = NSImage(
             systemSymbolName: "xmark",
-            accessibilityDescription: "Close Resolution Inspector"
+            accessibilityDescription: localized("relation.inspector.close")
         )
         closeButton.isBordered = false
         closeButton.bezelStyle = .accessoryBarAction
-        closeButton.toolTip = "Close Resolution Inspector"
-        closeButton.setAccessibilityLabel("Close Resolution Inspector")
+        closeButton.toolTip = localized("relation.inspector.close")
+        closeButton.setAccessibilityLabel(localized("relation.inspector.close"))
         closeButton.target = self
         closeButton.action = #selector(closeInspector(_:))
         closeButton.translatesAutoresizingMaskIntoConstraints = false
@@ -1781,12 +1775,12 @@ private final class ResolutionInspectorView: NSView {
         auditButton.font = .systemFont(ofSize: 12, weight: .medium)
         auditButton.target = self
         auditButton.action = #selector(toggleAudit(_:))
-        auditButton.setAccessibilityLabel("Show full resolution audit")
+        auditButton.setAccessibilityLabel(localized("relation.audit.accessibility"))
         formerCandidateButton.bezelStyle = .inline
         formerCandidateButton.font = .systemFont(ofSize: 12, weight: .medium)
         formerCandidateButton.target = self
         formerCandidateButton.action = #selector(openFormerCandidate(_:))
-        formerCandidateButton.setAccessibilityLabel("Open former candidate")
+        formerCandidateButton.setAccessibilityLabel(localized("relation.former.open"))
         auditStack.orientation = .vertical
         auditStack.alignment = .leading
         auditStack.spacing = 5
@@ -1839,7 +1833,7 @@ private final class ResolutionInspectorView: NSView {
             auditStack.widthAnchor.constraint(equalTo: content.widthAnchor),
         ])
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Resolution Inspector")
+        setAccessibilityLabel(localized("relation.inspector.title"))
     }
 
     required init?(coder: NSCoder) {
@@ -1953,7 +1947,7 @@ private final class ResolutionInspectorView: NSView {
     ) {
         if atCapture {
             captureChip.display(
-                "AT CAPTURE",
+                localized("relation.capture"),
                 foreground: theme.chromeSecondaryColor,
                 background: .clear,
                 border: theme.chromeTertiaryColor,
@@ -1967,21 +1961,21 @@ private final class ResolutionInspectorView: NSView {
         switch display.badge {
         case .verified:
             badge.display(
-                display.badge.rawValue,
+                display.badge.displayText,
                 foreground: theme.verifiedColor,
                 background: theme.verifiedBackgroundColor,
                 border: theme.verifiedBackgroundColor
             )
         case .inferred:
             badge.display(
-                display.badge.rawValue,
+                display.badge.displayText,
                 foreground: theme.inferredColor,
                 background: theme.inferredBackgroundColor,
                 border: theme.inferredBackgroundColor
             )
         case .unresolved:
             badge.display(
-                display.badge.rawValue,
+                display.badge.displayText,
                 foreground: theme.unresolvedColor,
                 background: .clear,
                 border: theme.unresolvedBorderColor
@@ -2002,15 +1996,15 @@ private final class ResolutionInspectorView: NSView {
         formerCandidateButton.isEnabled = display.formerCandidateAvailable
             && canOpenFormerCandidate
         auditStack.isHidden = true
-        auditButton.title = "Show full audit"
+        auditButton.title = localized("relation.audit.show")
         rebuildAudit(
             display.auditRows.map { ($0.label, $0.value) },
             theme: theme
         )
         setAccessibilityLabel(
             atCapture
-                ? "Resolution Inspector for \(display.nodeTitle), at capture"
-                : "Resolution Inspector for \(display.nodeTitle)"
+                ? localizedFormat("relation.inspector.node.capture", display.nodeTitle)
+                : localizedFormat("relation.inspector.node", display.nodeTitle)
         )
         setAccessibilityValue(display.accessibilityValue)
         apply(theme: theme)
@@ -2025,7 +2019,7 @@ private final class ResolutionInspectorView: NSView {
     @objc private func toggleAudit(_ sender: Any?) {
         auditStack.isHidden.toggle()
         auditButton.title = auditStack.isHidden
-            ? "Show full audit" : "Hide full audit"
+            ? localized("relation.audit.show") : localized("relation.audit.hide")
         auditButton.setAccessibilityLabel(auditButton.title)
         styleButton(auditButton, color: theme.accentColor)
     }
@@ -2208,18 +2202,18 @@ private final class RelationCellView: NSTableCellView {
         countPill.layer?.backgroundColor = theme.chipBackgroundColor.cgColor
         badgeLabel.stringValue = node.badge ?? ""
         badgePill.isHidden = node.badge == nil
-        badgeLabel.toolTip = switch node.badge {
-        case "Verified": "Verified by exact provider"
-        case "Inferred": "Inferred from source structure"
-        case "Unresolved": "Unresolved source target"
+        badgeLabel.toolTip = switch node.certainty {
+        case .exact: localized("relation.badge.verified.hint")
+        case .strong, .probable, .possible: localized("relation.badge.inferred.hint")
+        case .unresolved: localized("relation.badge.unresolved.hint")
         default: nil
         }
-        switch node.badge {
-        case "Verified":
+        switch node.certainty {
+        case .exact:
             badgeLabel.textColor = theme.verifiedColor
             badgePill.layer?.backgroundColor = theme.verifiedBackgroundColor.cgColor
             badgePill.layer?.borderWidth = 0
-        case "Unresolved":
+        case .unresolved:
             badgeLabel.textColor = theme.unresolvedColor
             badgePill.layer?.backgroundColor = NSColor.clear.cgColor
             badgePill.layer?.borderColor = theme.unresolvedBorderColor.cgColor
@@ -2240,19 +2234,18 @@ private final class RelationCellView: NSTableCellView {
             locationLabel.toolTip = location(of: node)
             locationLabel.isHidden = locationLabel.stringValue.isEmpty
         case .group:
-            if node.title.hasPrefix("Show corrected candidates") {
-                titleLabel.stringValue = "Show corrected candidates"
+            if node.candidateGroup == .corrected {
+                titleLabel.stringValue = localized("relation.corrected.show")
                 titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
                 titleLabel.textColor = theme.warningColor
                 countLabel.stringValue = "\(node.children?.count ?? 0)"
                 countLabel.font = .systemFont(ofSize: 10, weight: .semibold)
                 countPill.isHidden = false
-            } else if node.title.hasPrefix("Show ") {
-                titleLabel.stringValue = "Show possible matches"
+            } else if node.candidateGroup != nil {
+                titleLabel.stringValue = localized("relation.possible.show")
                 titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
                 titleLabel.textColor = theme.accentColor
-                countLabel.stringValue = node.title.split(separator: " ")
-                    .dropFirst().first.map(String.init) ?? ""
+                countLabel.stringValue = (node.children?.count ?? 0).formatted()
                 countLabel.font = .systemFont(ofSize: 10, weight: .semibold)
                 countPill.isHidden = countLabel.stringValue.isEmpty
             } else {
@@ -2270,11 +2263,9 @@ private final class RelationCellView: NSTableCellView {
             dispatchLabel.stringValue = node.dispatchLabel ?? ""
             dispatchLabel.font = .monospacedSystemFont(ofSize: 9.5, weight: .medium)
             dispatchChip.isHidden = dispatchLabel.stringValue.isEmpty
-            let scope = node.modifiers.first { $0 == "dependency" }
-            let caveat = node.modifiers.first { $0 == "name match only" }
-            let corrected = node.modifiers.first {
-                $0 == "Conflict/Corrected" || $0.hasPrefix("corrected ")
-            }
+            let scope = node.dependencyModifier
+            let caveat = node.nameOnlyModifier
+            let corrected = node.correctedModifier
             scopeChip.display(
                 scope,
                 foreground: theme.chromeSecondaryColor,

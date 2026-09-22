@@ -3,11 +3,11 @@ import CodeInsightExact
 import Foundation
 import Testing
 
-@Test func provenanceBadgeStyleTracksCertaintyText() {
-    #expect(provenanceBadgeStyle(for: "Exact · lsp") == .exact)
-    #expect(provenanceBadgeStyle(for: "Strong · direct") == .strong)
-    #expect(provenanceBadgeStyle(for: "Possible · method") == .possible)
-    #expect(provenanceBadgeStyle(for: "External") == .fallback)
+@Test func provenanceBadgeStyleTracksCertaintyWithoutDisplayText() {
+    #expect(provenanceBadgeStyle(for: .exact) == .exact)
+    #expect(provenanceBadgeStyle(for: .strong) == .strong)
+    #expect(provenanceBadgeStyle(for: .possible) == .possible)
+    #expect(provenanceBadgeStyle(for: .unresolved) == .fallback)
 }
 
 @Test

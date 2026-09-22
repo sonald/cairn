@@ -32,7 +32,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
         $0.accessibilityRole?() == .slider
     }
     #expect(initialSliders.count == 1)
-    #expect(initialSliders.first?.accessibilityLabel?() == "Line height")
+    #expect(initialSliders.first?.accessibilityLabel?() == CodeInsightApp.localized("settings.lineHeight"))
     #expect(controller.selfTestReaderToggleCount == 2)
     let lineHeight = try #require(initialSliders.first)
     #expect(lineHeight.accessibilityPerformIncrement?() == true)
@@ -43,11 +43,11 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.2))
     let sliders = controller.selfTestReaderAccessibilityElements.filter {
         $0.accessibilityRole?() == .slider
-            && $0.accessibilityLabel?() != "Line height"
+            && $0.accessibilityLabel?() != CodeInsightApp.localized("settings.lineHeight")
     }
     #expect(Set(sliders.compactMap { $0.accessibilityLabel?() }) == [
-        "Parameter use opacity", "Gutter marker opacity",
-        "Function and type weight", "Constant and module weight",
+        CodeInsightApp.localized("settings.parameterOpacity"), CodeInsightApp.localized("settings.gutterOpacity"),
+        CodeInsightApp.localized("settings.functionWeight"), CodeInsightApp.localized("settings.constantWeight"),
     ])
     for slider in sliders {
         let value: Any? = slider.accessibilityValue?()
@@ -103,7 +103,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     let contentView = try #require(controller.window?.contentView)
     let preview = try #require(readerSettingsDescendants(contentView)
         .compactMap { $0 as? NSTextView }
-        .first { $0.accessibilityLabel() == "Reader settings preview" })
+        .first { $0.accessibilityLabel() == CodeInsightApp.localized("settings.preview.accessibility") })
     try expectReaderPreviewIsVisibleAndColored(preview, settings: updatedSettings)
 
     var changed = ReaderSettings(fontSize: 17)

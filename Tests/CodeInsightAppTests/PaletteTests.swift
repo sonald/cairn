@@ -201,7 +201,7 @@ struct PaletteTests {
         let folding = NSMenu(title: "Folding")
         let overview = NSMenuItem(
             title: "Overview",
-            action: #selector(PaletteCommandTarget.perform(_:)),
+            action: #selector(PaletteCommandTarget.executeCommand(_:)),
             keyEquivalent: "2"
         )
         overview.keyEquivalentModifierMask = [.command, .option]
@@ -209,7 +209,7 @@ struct PaletteTests {
         folding.addItem(overview)
         let hidden = NSMenuItem(
             title: "Hidden Backup",
-            action: #selector(PaletteCommandTarget.perform(_:)),
+            action: #selector(PaletteCommandTarget.executeCommand(_:)),
             keyEquivalent: ""
         )
         hidden.target = target
@@ -244,6 +244,23 @@ struct PaletteTests {
         #expect(!rows.contains { $0.title.contains("Hidden Backup") })
         #expect(!rows.contains { $0.title.contains("No Action") })
         #expect(!rows.contains { $0.title.hasSuffix("Cut") })
+
+        // Display language must not affect command lookup or its action target.
+        view.title = "视图"
+        foldingItem.title = "折叠"
+        overview.title = "概览"
+        let translated = PalettePanel.filterCommandRows(
+            PalettePanel.commandRows(in: root), query: "概览"
+        )
+        #expect(translated.count == 1)
+        guard case let .command(item) = translated.first?.payload else {
+            Issue.record("expected translated command")
+            return
+        }
+        #expect(item === overview)
+        let didSend = app.sendAction(item.action!, to: item.target, from: item)
+        #expect(didSend)
+        #expect(target.invocationCount == 1)
     }
 
     @Test
@@ -525,7 +542,7 @@ final class PaletteCommandTarget: NSObject, NSMenuItemValidation {
         self.expected = expected
     }
 
-    @objc dynamic func perform(_ sender: Any?) {
+    @objc dynamic func executeCommand(_ sender: Any?) {
         invocationCount += 1
     }
 
@@ -549,7 +566,7 @@ final class PaletteRecentMenuDelegate: NSObject, NSMenuDelegate {
         guard menu.item(withTitle: "Recent Project") == nil else { return }
         let item = NSMenuItem(
             title: "Recent Project",
-            action: #selector(PaletteCommandTarget.perform(_:)),
+            action: #selector(PaletteCommandTarget.executeCommand(_:)),
             keyEquivalent: ""
         )
         item.target = target

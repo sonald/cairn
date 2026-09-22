@@ -1084,7 +1084,7 @@ func exactCoordinatorReportsMissingPythonProviderWithoutSessions() async throws 
     )
     let coordinator = ExactCoordinator(
         providerFactory: { _, _ in
-            throw ExactError.unavailable("pyright-langserver is not installed")
+            throw ExactError.unavailable("未安装 pyright-langserver")
         },
         snapshotFactory: ExactSnapshotFactoryState(files: [
             "main.py": "def target():\n    pass\n\ntarget()\n",
@@ -1113,7 +1113,7 @@ func exactCoordinatorReportsMissingPythonProviderWithoutSessions() async throws 
         Issue.record("missing provider did not fail")
         return
     }
-    #expect(reason.contains("pyright"))
+    #expect(reason == "未安装 pyright-langserver")
 }
 
 @MainActor

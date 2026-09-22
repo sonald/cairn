@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>model.narrative.completeResults</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The source relation result set was complete with %lld result.</string>
+			<key>other</key>
+			<string>The source relation result set was complete with %lld results.</string>
+		</dict>
+	</dict>
+	<key>model.narrative.partialResults</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The source relation result set was partial with %lld result returned.</string>
+			<key>other</key>
+			<string>The source relation result set was partial with %lld results returned.</string>
+		</dict>
+	</dict>
+	<key>model.narrative.truncatedResults</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The source relation result set was truncated after %lld result.</string>
+			<key>other</key>
+			<string>The source relation result set was truncated after %lld results.</string>
+		</dict>
+	</dict>
+	<key>model.narrative.unknownResults</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>The source relation result set completeness is unknown; %lld result was returned.</string>
+			<key>other</key>
+			<string>The source relation result set completeness is unknown; %lld results were returned.</string>
+		</dict>
+	</dict>
+	<key>model.relation.callSites</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld call site</string>
+			<key>other</key>
+			<string>%lld call sites</string>
+		</dict>
+	</dict>
+	<key>model.relation.correctedCandidates</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show corrected candidate (%lld)</string>
+			<key>other</key>
+			<string>Show corrected candidates (%lld)</string>
+		</dict>
+	</dict>
+	<key>model.relation.partialReferences</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>%lld verified reference · partial</string>
+			<key>other</key>
+			<string>%lld verified references · partial</string>
+		</dict>
+	</dict>
+	<key>model.relation.possible</key>
+	<dict>
+		<key>NSStringLocalizedFormatKey</key>
+		<string>%1$#@count@</string>
+		<key>count</key>
+		<dict>
+			<key>NSStringFormatSpecTypeKey</key>
+			<string>NSStringPluralRuleType</string>
+			<key>NSStringFormatValueTypeKey</key>
+			<string>lld</string>
+			<key>one</key>
+			<string>Show %lld possible match</string>
+			<key>other</key>
+			<string>Show %lld possible matches</string>
+		</dict>
+	</dict>
+</dict>
+</plist>

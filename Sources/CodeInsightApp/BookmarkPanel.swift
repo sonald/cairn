@@ -12,12 +12,12 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     private let statsLabel = NSTextField(labelWithString: "")
     private let emptyLabel = NSTextField(wrappingLabelWithString: "")
     private let errorLabel = NSTextField(wrappingLabelWithString: "")
-    private let exportButton = NSButton(title: "Export Raw Copy…", target: nil, action: nil)
+    private let exportButton = NSButton(title: localized("panel.bookmark.rawExport"), target: nil, action: nil)
     private let tableView = NSTableView()
     private let noteView = NSTextView()
-    private let noteLabel = NSTextField(labelWithString: "Select a bookmark to edit its note")
-    private let copyButton = NSButton(title: "Copy as Markdown", target: nil, action: nil)
-    private let markdownExportButton = NSButton(title: "Export Markdown…", target: nil, action: nil)
+    private let noteLabel = NSTextField(labelWithString: localized("panel.bookmark.selectNote"))
+    private let copyButton = NSButton(title: localized("panel.bookmark.copyMarkdown"), target: nil, action: nil)
+    private let markdownExportButton = NSButton(title: localized("panel.bookmark.exportMarkdown"), target: nil, action: nil)
     private var rows: [BookmarkRecord] = []
     private var selectedID: UUID?
     private var lastCopiedMarkdown = ""
@@ -36,7 +36,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             backing: .buffered,
             defer: false
         )
-        panel.title = "Bookmarks"
+        panel.title = localized("panel.bookmark.title")
         panel.isFloatingPanel = true
         panel.hidesOnDeactivate = false
         panel.contentMinSize = NSSize(width: 560, height: 460)
@@ -86,25 +86,25 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             projectPath: $0,
             status: appModel.bookmarkStatus(for:)
         ) } ?? [:]
-        statsLabel.stringValue = "\(rows.count) \(rows.count == 1 ? "bookmark" : "bookmarks")" + counts.keys.sorted {
+        statsLabel.stringValue = localizedFormat("panel.bookmark.count", Int64(rows.count)) + counts.keys.sorted {
             $0.displayText < $1.displayText
         }.map { " · \($0.displayText): \(counts[$0] ?? 0)" }.joined()
         statsLabel.toolTip = statsLabel.stringValue
         let hasError = appModel.bookmarkModel.storageError != nil
         errorLabel.stringValue = hasError
-            ? "Bookmarks could not be read. The original file is unchanged."
+            ? localized("panel.bookmark.readFailure")
             : ""
         errorLabel.isHidden = !hasError
         exportButton.isHidden = !hasError
         exportButton.isEnabled = appModel.bookmarkModel.rescueBytes != nil
         emptyLabel.stringValue = if hasError {
-            "Bookmarks are unavailable"
+            localized("panel.bookmark.unavailable")
         } else if root == nil {
-            "Open a project to see its bookmarks"
+            localized("panel.bookmark.openProject")
         } else if !searchField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            "No bookmarks found\nTry a different filter."
+            localized("panel.bookmark.filteredEmpty")
         } else {
-            "No bookmarks yet\nUse Toggle Bookmark (⇧⌘M) while reading a file."
+            localized("panel.bookmark.empty")
         }
         emptyLabel.isHidden = !rows.isEmpty
         tableView.reloadData()
@@ -201,17 +201,17 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     @discardableResult
     func selfTestPressOpen(id: UUID) -> Bool {
-        selfTestPress(title: "Open", id: id)
+        selfTestPress(title: localized("panel.bookmark.open"), id: id)
     }
 
     @discardableResult
     func selfTestPressOpenLine(id: UUID) -> Bool {
-        selfTestPress(title: "Open line", id: id)
+        selfTestPress(title: localized("panel.bookmark.openLine"), id: id)
     }
 
     @discardableResult
     func selfTestPressReanchor(id: UUID) -> Bool {
-        selfTestPress(title: "Re-anchor", id: id)
+        selfTestPress(title: localized("panel.bookmark.reanchor"), id: id)
     }
 
     func selfTestRowToolTip(id: UUID) -> String? {
@@ -310,17 +310,17 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         note.lineBreakMode = .byTruncatingTail
         note.toolTip = record.note
         note.isHidden = record.note.isEmpty
-        let open = button("Open", action: #selector(openBookmark(_:)), record: record)
-        let delete = button("Delete", action: #selector(deleteBookmark(_:)), record: record)
+        let open = button(localized("panel.bookmark.open"), action: #selector(openBookmark(_:)), record: record)
+        let delete = button(localized("panel.bookmark.delete"), action: #selector(deleteBookmark(_:)), record: record)
         let actions = NSStackView(views: [open, delete])
         actions.orientation = .horizontal
         actions.spacing = 4
         if appModel.bookmarkStatus(for: record) == .drifted {
             actions.addArrangedSubview(button(
-                "Open line", action: #selector(openDriftedLine(_:)), record: record
+                localized("panel.bookmark.openLine"), action: #selector(openDriftedLine(_:)), record: record
             ))
             actions.addArrangedSubview(button(
-                "Re-anchor", action: #selector(reanchorBookmark(_:)), record: record
+                localized("panel.bookmark.reanchor"), action: #selector(reanchorBookmark(_:)), record: record
             ))
         }
         let stack = NSStackView(views: [title, detail, note])
@@ -361,7 +361,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         selectedID = record.id
         noteView.string = record.note
         noteView.isEditable = true
-        noteLabel.stringValue = "Note"
+        noteLabel.stringValue = localized("panel.bookmark.note")
     }
 
     @objc private func openBookmark(_ sender: NSButton) {
@@ -389,10 +389,10 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         }
         guard !record.note.isEmpty else { delete(); return }
         let alert = NSAlert()
-        alert.messageText = "Delete bookmark?"
-        alert.informativeText = "Its note will be removed."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("panel.bookmark.confirmDelete")
+        alert.informativeText = localized("panel.bookmark.deleteNote")
+        alert.addButton(withTitle: localized("panel.bookmark.delete"))
+        alert.addButton(withTitle: localized("panel.bookmark.cancel"))
         if let window {
             alert.beginSheetModal(for: window) { response in
                 if response == .alertFirstButtonReturn { delete() }
@@ -462,9 +462,9 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     private func configureView() {
         guard let content = window?.contentView else { return }
         content.wantsLayer = true
-        searchField.placeholderString = "Filter bookmarks"
+        searchField.placeholderString = localized("panel.bookmark.filter")
         searchField.delegate = self
-        searchField.setAccessibilityLabel("Filter bookmarks")
+        searchField.setAccessibilityLabel(localized("panel.bookmark.filter"))
         statsLabel.font = .systemFont(ofSize: 11)
         statsLabel.textColor = .secondaryLabelColor
         statsLabel.lineBreakMode = .byTruncatingTail
@@ -474,10 +474,10 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
         errorLabel.textColor = .systemRed
-        errorLabel.setAccessibilityLabel("Bookmark storage error")
+        errorLabel.setAccessibilityLabel(localized("panel.bookmark.storageError"))
         exportButton.target = self
         exportButton.action = #selector(exportRawCopy(_:))
-        exportButton.setAccessibilityLabel("Export Raw Copy…")
+        exportButton.setAccessibilityLabel(localized("panel.bookmark.rawExport"))
         noteView.delegate = self
         noteView.isRichText = false
         noteView.isEditable = false
@@ -486,17 +486,17 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         noteView.isHorizontallyResizable = false
         noteView.autoresizingMask = [.width]
         noteView.textContainer?.widthTracksTextView = true
-        noteView.setAccessibilityLabel("Bookmark note")
+        noteView.setAccessibilityLabel(localized("panel.bookmark.noteAX"))
         noteLabel.font = .systemFont(ofSize: 11)
         noteLabel.textColor = .secondaryLabelColor
         noteLabel.translatesAutoresizingMaskIntoConstraints = false
         copyButton.target = self
         copyButton.action = #selector(copyMarkdown(_:))
-        copyButton.setAccessibilityLabel("Copy as Markdown")
+        copyButton.setAccessibilityLabel(localized("panel.bookmark.copyMarkdown"))
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         markdownExportButton.target = self
         markdownExportButton.action = #selector(exportMarkdown(_:))
-        markdownExportButton.setAccessibilityLabel("Export Markdown…")
+        markdownExportButton.setAccessibilityLabel(localized("panel.bookmark.exportMarkdown"))
         markdownExportButton.translatesAutoresizingMaskIntoConstraints = false
         let column = NSTableColumn(identifier: .init("bookmark"))
         column.resizingMask = .autoresizingMask
@@ -507,7 +507,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         tableView.headerView = nil
         tableView.dataSource = self
         tableView.delegate = self
-        tableView.setAccessibilityLabel("Bookmarks")
+        tableView.setAccessibilityLabel(localized("panel.bookmark.title"))
         let scroll = NSScrollView()
         scroll.documentView = tableView
         scroll.hasVerticalScroller = true
@@ -570,7 +570,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         let button = NSButton(title: title, target: self, action: action)
         button.bezelStyle = .inline
         button.identifier = .init(record.id.uuidString)
-        button.setAccessibilityLabel("\(title) bookmark")
+        button.setAccessibilityLabel(localizedFormat("panel.bookmark.actionAX", title))
         return button
     }
 
@@ -585,8 +585,8 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     private func snapshotText(_ record: BookmarkRecord) -> String {
         switch record.snapshot {
-        case .worktree: "Worktree"
-        case let .commit(fullOID): "Saved at \(fullOID.prefix(8))"
+        case .worktree: localized("panel.bookmark.worktree")
+        case let .commit(fullOID): localizedFormat("panel.bookmark.saved", String(fullOID.prefix(8)))
         }
     }
 
@@ -614,6 +614,6 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         selectedID = nil
         noteView.string = ""
         noteView.isEditable = false
-        noteLabel.stringValue = "Select a bookmark to edit its note"
+        noteLabel.stringValue = localized("panel.bookmark.selectNote")
     }
 }

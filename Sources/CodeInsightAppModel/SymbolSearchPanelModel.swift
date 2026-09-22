@@ -106,7 +106,7 @@ public final class SymbolSearchPanelModel {
 
         switch projectState {
         case .indexing:
-            rows = [.placeholder("Indexing symbols…")]
+            rows = [.placeholder(localized("model.search.symbols"))]
             selectedIndex = nil
         case let .ready(session, context):
             guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {

@@ -14,11 +14,13 @@ enum ProvenanceBadgeStyle: Equatable {
     case fallback
 }
 
-func provenanceBadgeStyle(for text: String) -> ProvenanceBadgeStyle {
-    if text.contains("Exact") { return .exact }
-    if text.contains("Strong") { return .strong }
-    if text.contains("Possible") { return .possible }
-    return .fallback
+func provenanceBadgeStyle(for certainty: Certainty?) -> ProvenanceBadgeStyle {
+    switch certainty {
+    case .exact: .exact
+    case .strong: .strong
+    case .possible: .possible
+    default: .fallback
+    }
 }
 
 @MainActor
@@ -54,13 +56,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
     private let refreshIndexButton = NSButton()
-    private let exactLabel = NSTextField(labelWithString: "Exact: off (Safe)")
+    private let exactLabel = NSTextField(labelWithString: localized("main.exact.off.safe"))
     private let exactInfoButton = NSButton()
     private let exactStatusPopover = NSPopover()
-    private let contextButton = NSButton(title: "Context", target: nil, action: nil)
+    private let contextButton = NSButton(title: localized("main.context"), target: nil, action: nil)
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
-    private let truncatedLabel = NSTextField(labelWithString: "Results truncated")
+    private let truncatedLabel = NSTextField(labelWithString: localized("main.results.truncated"))
     private var focusNotice: String?
     // A unique identifier per controller keeps AppKit's toolbar-family
     // synchronization from mutating sibling toolbars (closed windows from
@@ -269,15 +271,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
         indexLabel.font = .systemFont(ofSize: 12)
         indexLabel.textColor = .secondaryLabelColor
-        indexLabel.setAccessibilityLabel("Index status")
+        indexLabel.setAccessibilityLabel(localized("main.index.status"))
         indexLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         refreshIndexButton.bezelStyle = .rounded
         refreshIndexButton.font = .systemFont(ofSize: 12)
         refreshIndexButton.controlSize = .small
-        refreshIndexButton.title = "Refresh Index"
-        refreshIndexButton.toolTip = "Recapture the working tree as a new index generation"
+        refreshIndexButton.title = localized("main.refresh.index")
+        refreshIndexButton.toolTip = localized("main.recapture.the.working.tree.as.a.new.index.generation")
         refreshIndexButton.isHidden = true
-        refreshIndexButton.setAccessibilityLabel("Refresh Index")
+        refreshIndexButton.setAccessibilityLabel(localized("main.refresh.index"))
         truncatedLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         truncatedLabel.textColor = .systemOrange
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -286,7 +288,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         truncatedLabel.alignment = .center
         truncatedLabel.wantsLayer = true
         truncatedLabel.layer?.cornerRadius = 4
-        truncatedLabel.setAccessibilityLabel("Query completeness")
+        truncatedLabel.setAccessibilityLabel(localized("main.query.completeness"))
         NSLayoutConstraint.activate([
             truncatedLabel.widthAnchor.constraint(
                 equalToConstant: truncatedLabel.intrinsicContentSize.width + 12
@@ -299,19 +301,19 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             .defaultLow,
             for: .horizontal
         )
-        exactLabel.setAccessibilityLabel("Exact provider status")
-        exactInfoButton.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: "Analysis status details")
+        exactLabel.setAccessibilityLabel(localized("main.exact.provider.status"))
+        exactInfoButton.image = NSImage(systemSymbolName: "info.circle", accessibilityDescription: localized("main.analysis.status.details"))
         exactInfoButton.isBordered = false
         exactInfoButton.action = #selector(showExactStatusDetails(_:))
-        exactInfoButton.toolTip = "Analysis status and available features"
-        exactInfoButton.setAccessibilityLabel("Analysis status details")
+        exactInfoButton.toolTip = localized("main.analysis.status.and.available.features")
+        exactInfoButton.setAccessibilityLabel(localized("main.analysis.status.details"))
         contextButton.isBordered = false
         contextButton.font = .systemFont(ofSize: 11)
         contextButton.image = NSImage(systemSymbolName: "rectangle.bottomthird.inset.filled", accessibilityDescription: nil)
         contextButton.imagePosition = .imageLeading
         contextButton.action = #selector(toggleContext(_:))
-        contextButton.toolTip = "Show or hide the definition context"
-        contextButton.setAccessibilityLabel("Show definition context")
+        contextButton.toolTip = localized("main.show.or.hide.the.definition.context")
+        contextButton.setAccessibilityLabel(localized("main.show.definition.context"))
 
         let statusStack = NSStackView()
         statusStack.setViews([contextButton, indexLabel, refreshIndexButton], in: .leading)
@@ -849,13 +851,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard model.projectRoot != nil else { return }
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Clear This Project’s Reading Session?"
-        alert.informativeText = "All open tabs close, including any Reading "
-            + "Sets they contain, and the saved reading position, tabs, and "
-            + "reading trail are discarded. Files, bookmarks, and settings "
-            + "are not touched."
-        alert.addButton(withTitle: "Clear Reading Session")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("main.clear.this.project.s.reading.session")
+        alert.informativeText = localized("main.clear.session.detail")
+        alert.addButton(withTitle: localized("main.clear.reading.session"))
+        alert.addButton(withTitle: localized("main.cancel"))
         guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn,
@@ -1783,7 +1782,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             || model.contextWindow.mode == .pinned
         let visible = contextVisibilityOverride ?? (panelPreset != .focus && hasContext)
         contextItem.isCollapsed = !visible
-        contextButton.setAccessibilityLabel(visible ? "Hide definition context" : "Show definition context")
+        contextButton.setAccessibilityLabel(visible ? localized("main.hide.definition.context") : localized("main.show.definition.context"))
         contextButton.contentTintColor = visible ? .controlAccentColor : .secondaryLabelColor
     }
 
@@ -1794,8 +1793,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let controller = NSViewController()
         let detail = NSTextView(frame: NSRect(x: 0, y: 0, width: 328, height: 300))
         detail.string = exactLabel.stringValue + "\n\n"
-            + (exactLabel.toolTip ?? "Provider information is not available yet.")
-            + "\n\nLimited analysis can omit dependency results. Restart Analysis retries the current provider without changing repository trust."
+            + (exactLabel.toolTip ?? localized("main.provider.information.is.not.available.yet"))
+            + "\n\n" + localized("main.limited.analysis.detail")
         detail.isEditable = false
         detail.isSelectable = true
         detail.font = .systemFont(ofSize: 12)
@@ -1807,7 +1806,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         scroll.hasVerticalScroller = true
         scroll.documentView = detail
         controller.view = NSView()
-        let restart = NSButton(title: "Restart Analysis", target: self, action: #selector(restartExactAnalysis(_:)))
+        let restart = NSButton(title: localized("main.restart.analysis"), target: self, action: #selector(restartExactAnalysis(_:)))
         restart.bezelStyle = .rounded
         restart.isEnabled = model.snapshotPhase == .fullReady
             && model.exactCoordinator.readiness != .preparing
@@ -2025,16 +2024,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 guard let window else { return true }
                 let alert = NSAlert()
                 alert.alertStyle = .warning
-                alert.messageText = "Reading Session Not Saved"
+                alert.messageText = localized("main.reading.session.not.saved")
                 alert.informativeText =
-                    "The reading session for "
-                    + (projectURL?.lastPathComponent ?? "this project")
-                    + " could not be saved: "
-                    + Self.sessionSaveFailureSummary(error)
-                    + " The previous file on disk is kept."
-                alert.addButton(withTitle: "Retry Save")
-                alert.addButton(withTitle: "Close Without Saving")
-                alert.addButton(withTitle: "Cancel")
+                    localizedFormat("main.session.save.failure", projectURL?.lastPathComponent ?? localized("main.this.project"), Self.sessionSaveFailureSummary(error))
+                alert.addButton(withTitle: localized("main.retry.save"))
+                alert.addButton(withTitle: localized("main.close.without.saving"))
+                alert.addButton(withTitle: localized("main.cancel"))
                 switch alert.runModal() {
                 case .alertFirstButtonReturn:
                     continue
@@ -2495,27 +2490,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let item = NSToolbarItem(itemIdentifier: itemIdentifier)
         switch itemIdentifier {
         case Self.backItemIdentifier:
-            item.label = "Back"
+            item.label = localized("main.back")
             item.image = NSImage(
                 systemSymbolName: "chevron.backward",
-                accessibilityDescription: "Back"
+                accessibilityDescription: localized("main.back")
             )
             item.target = self
             item.action = #selector(goBack(_:))
             item.isNavigational = true
             item.visibilityPriority = .high
         case Self.forwardItemIdentifier:
-            item.label = "Forward"
+            item.label = localized("main.forward")
             item.image = NSImage(
                 systemSymbolName: "chevron.forward",
-                accessibilityDescription: "Forward"
+                accessibilityDescription: localized("main.forward")
             )
             item.target = self
             item.action = #selector(goForward(_:))
             item.isNavigational = true
             item.visibilityPriority = .high
         case Self.projectItemIdentifier:
-            item.label = "Project"
+            item.label = localized("main.project")
             item.view = projectLabel
             item.visibilityPriority = .low
             projectLabel.font = .systemFont(ofSize: 13, weight: .semibold)
@@ -2527,7 +2522,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 keyEquivalent: ""
             )
         case Self.commitItemIdentifier:
-            item.label = "Version"
+            item.label = localized("main.version")
             item.view = commitButton
             item.visibilityPriority = .low
             commitButton.target = self
@@ -2536,7 +2531,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             commitButton.font = .systemFont(ofSize: 12, weight: .semibold)
             commitButton.cell?.lineBreakMode = .byTruncatingTail
             commitButton.frame.size = NSSize(width: 260, height: 28)
-            commitButton.setAccessibilityLabel("Current version")
+            commitButton.setAccessibilityLabel(localized("main.current.version"))
             let menuItem = NSMenuItem(
                 title: commitButton.title,
                 action: #selector(showCommitPickerFromMenu(_:)),
@@ -2545,15 +2540,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.symbolsItemIdentifier:
-            item.label = "Symbols"
+            item.label = localized("main.symbols")
             item.view = symbolsButton
             // §3.2: Symbols stays visible at 900pt with long project names;
             // project/version/profile chrome overflows first.
             item.visibilityPriority = .high
-            symbolsButton.title = "Symbols  ⌘T"
+            symbolsButton.title = localized("main.symbols.t")
             symbolsButton.image = NSImage(
                 systemSymbolName: "magnifyingglass",
-                accessibilityDescription: "Symbols"
+                accessibilityDescription: localized("main.symbols")
             )
             symbolsButton.imagePosition = .imageLeading
             symbolsButton.bezelStyle = .rounded
@@ -2561,9 +2556,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             symbolsButton.target = self
             symbolsButton.action = #selector(showSymbolSearchFromToolbar(_:))
             symbolsButton.frame.size = NSSize(width: 120, height: 28)
-            symbolsButton.setAccessibilityLabel("Open Symbol Search")
+            symbolsButton.setAccessibilityLabel(localized("main.open.symbol.search"))
             let menuItem = NSMenuItem(
-                title: "Symbols",
+                title: localized("main.symbols"),
                 action: #selector(showSymbolSearchFromToolbar(_:)),
                 keyEquivalent: "t"
             )
@@ -2571,21 +2566,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.settingsItemIdentifier:
-            item.label = "Settings"
+            item.label = localized("main.settings")
             item.view = settingsButton
             item.visibilityPriority = .low
             settingsButton.title = ""
             settingsButton.image = NSImage(
                 systemSymbolName: "gearshape",
-                accessibilityDescription: "Settings"
+                accessibilityDescription: localized("main.settings")
             )
             settingsButton.bezelStyle = .texturedRounded
             settingsButton.target = self
             settingsButton.action = #selector(showSettingsFromToolbar(_:))
             settingsButton.frame.size = NSSize(width: 32, height: 28)
-            settingsButton.setAccessibilityLabel("Settings")
+            settingsButton.setAccessibilityLabel(localized("main.settings"))
             let menuItem = NSMenuItem(
-                title: "Settings…",
+                title: localized("main.settings.menu"),
                 action: #selector(showSettingsFromToolbar(_:)),
                 keyEquivalent: ","
             )
@@ -2593,7 +2588,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.profileItemIdentifier:
-            item.label = "Profile"
+            item.label = localized("main.profile")
             item.view = profileButton
             item.visibilityPriority = .standard
             profileButton.bezelStyle = .rounded
@@ -2605,7 +2600,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             profileButton.cell?.wraps = false
             profileButton.target = self
             profileButton.action = #selector(showProfileMenu(_:))
-            profileButton.setAccessibilityLabel("Analysis profile")
+            profileButton.setAccessibilityLabel(localized("main.analysis.profile"))
             item.menuFormRepresentation = profileMenuItem()
         default:
             return nil
@@ -2841,8 +2836,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               let trustMode = model.exactCoordinator.trustMode
         else { return nil }
         let trust = switch trustMode {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
+        case .safe: localized("main.safe")
+        case .trusted: localized("main.trusted")
         }
         let base = "\(Self.displayName(for: profile.language))"
             + " · \(profile.projectUnitName)"
@@ -2867,9 +2862,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         for featureSelection: FeatureSelection
     ) -> String {
         switch featureSelection {
-        case .defaultFeatures: "default"
-        case .allFeatures: "all"
-        case .noDefaultFeatures: "no-default"
+        case .defaultFeatures: localized("main.features.default.short")
+        case .allFeatures: localized("main.features.all.short")
+        case .noDefaultFeatures: localized("main.features.no.default.short")
         }
     }
 
@@ -2911,23 +2906,21 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func makeProfileMenu() -> NSMenu {
-        let menu = NSMenu(title: "Profile")
+        let menu = NSMenu(title: localized("main.profile"))
         guard let profile = model.activeAnalysisProfileDisplay,
               let trustMode = model.exactCoordinator.trustMode
         else { return menu }
         let trust = switch trustMode {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
+        case .safe: localized("main.safe")
+        case .trusted: localized("main.trusted")
         }
-        let edition = profile.edition.map { "edition \($0)" }
-            ?? "edition unknown"
+        let edition = profile.edition.map { localizedFormat("main.edition", String(describing: $0)) }
+            ?? localized("main.edition.unknown")
         let currentTitle: String
         if profile.language == .rust {
-            currentTitle = "Current unit: \(profile.projectUnitName)"
-                + " · features: \(Self.displayName(for: profile.featureSelection))"
-                + " · \(edition) · \(trust)"
+            currentTitle = localizedFormat("main.current.rust.unit", profile.projectUnitName, Self.displayName(for: profile.featureSelection), edition, trust)
         } else {
-            currentTitle = "Current unit: \(profile.projectUnitName) · \(trust)"
+            currentTitle = localizedFormat("main.current.unit", profile.projectUnitName, trust)
         }
         let current = NSMenuItem(
             title: currentTitle,
@@ -2940,9 +2933,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menu.addItem(.separator())
             for featureSelection in model.availableFeatureSelections {
                 let title = switch featureSelection {
-                case .defaultFeatures: "Default features"
-                case .allFeatures: "All features"
-                case .noDefaultFeatures: "No default features"
+                case .defaultFeatures: localized("main.default.features")
+                case .allFeatures: localized("main.all.features")
+                case .noDefaultFeatures: localized("main.no.default.features")
                 }
                 let feature = NSMenuItem(
                     title: title,
@@ -2960,7 +2953,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         menu.addItem(.separator())
         let trustItem = NSMenuItem(
-            title: "Trust This Repository…",
+            title: localized("main.trust.this.repository"),
             action: NSSelectorFromString("trustThisRepository:"),
             keyEquivalent: ""
         )
@@ -2969,7 +2962,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if profile.language == .rust {
             menu.addItem(.separator())
             let explanation = NSMenuItem(
-                title: "Switch features here; the current unit is detected",
+                title: localized("main.switch.features.here.the.current.unit.is.detected"),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -3042,15 +3035,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 onRetry: retry
             )
         case .indexing:
-            readerController.removeEmptyState(placeholder: "Indexing project…")
+            readerController.removeEmptyState(placeholder: localized("main.indexing.project"))
         case .ready:
-            readerController.removeEmptyState(placeholder: "Select a file to read · ⌘P to open")
+            readerController.removeEmptyState(placeholder: localized("main.select.a.file.to.read.p.to.open"))
         }
     }
 
     private var compareVersionTitle: String {
         guard let revision = model.compare.rightRevision else {
-            return "Choose comparison version…"
+            return localized("main.choose.comparison.version")
         }
         let commit = model.commitPicker.commits.first {
             $0.fullSHA == revision || $0.shortSHA == revision
@@ -3065,8 +3058,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let environment = coordinator.analysisEnvironment
         let activeTrust = environment?.trustMode ?? coordinator.trustMode
         let trust: String? = switch activeTrust {
-        case .safe: "Safe"
-        case .trusted: "Trusted"
+        case .safe: localized("main.safe")
+        case .trusted: localized("main.trusted")
         case nil: nil
         }
         let trustSuffix = trust.map { " · \($0)" } ?? ""
@@ -3076,54 +3069,54 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         switch coordinator.readiness {
         case .ready:
             if environment?.limitations.contains(.dependenciesUnavailableOffline) == true {
-                status = "Exact: deps unavailable (offline)\(trustSuffix)"
+                status = localizedFormat("main.exact.deps.unavailable.offline", trustSuffix)
                 color = .systemOrange
             } else if environment?.limitations.isEmpty == false {
-                status = "Exact: ready\(trustSuffix) (limited)"
+                status = localizedFormat("main.exact.ready.limited", trustSuffix)
                 color = .systemBlue
             } else if environment != nil {
-                status = "Exact: ready\(trustSuffix)"
+                status = localizedFormat("main.exact.ready", trustSuffix)
                 color = .systemGreen
             } else {
-                status = "Exact: ready\(trustSuffix) (environment unknown)"
+                status = localizedFormat("main.exact.ready.environment.unknown", trustSuffix)
                 color = .systemBlue
             }
             statusDetail = nil
         case .preparing:
-            status = "Exact: preparing\(trustSuffix)"
+            status = localizedFormat("main.exact.preparing", trustSuffix)
             color = .secondaryLabelColor
             statusDetail = nil
         case .unavailable(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
-                ? "Exact: unavailable (sandbox)"
-                : "Exact: unavailable"
+                ? localized("main.exact.unavailable.sandbox")
+                : localized("main.exact.unavailable")
             color = .systemRed
             statusDetail = reason
         case .off(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
-                ? "Exact: unavailable (sandbox)"
-                : "Exact: off (Safe)"
+                ? localized("main.exact.unavailable.sandbox")
+                : localized("main.exact.off.safe")
             color = .systemOrange
             statusDetail = reason
         }
         let limitations = environment?.limitations
             .sorted { $0.rawValue < $1.rawValue }
-            .map(\.displayName)
+            .map(localizedLimitation)
             .joined(separator: "; ")
         let limitationMeaning = limitations.map {
-            $0.isEmpty ? "none known." : $0
-        } ?? "not available yet."
+            $0.isEmpty ? localized("main.none.known") : $0
+        } ?? localized("main.not.available.yet")
         let detail: String?
         if let attribution = coordinator.attribution {
             var lines = [
-                "Provider: \(attribution.provider)",
-                "Tool version: \(attribution.toolVersion)",
-                "Trust: \(trust ?? "Unknown")",
-                "Limitations: \(limitationMeaning)",
+                localizedFormat("main.provider", attribution.provider),
+                localizedFormat("main.tool.version", attribution.toolVersion),
+                localizedFormat("main.trust", trust ?? localized("main.unknown")),
+                localizedFormat("main.limitations", limitationMeaning),
             ]
             if model.activeAnalysisProfileDisplay?.language != .python {
                 lines.append(
-                    "Features: \(Self.displayName(for: attribution.featureSelection))"
+                    localizedFormat("main.features", Self.displayName(for: attribution.featureSelection))
                 )
             }
             if let statusDetail { lines.append(statusDetail) }
@@ -3140,7 +3133,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard model.snapshotPhase == nil,
               case .indexing = model.projectState
         else { return nil }
-        return "Indexing \(model.fileTree?.fileCount ?? 0) files…"
+        return localizedFormat("main.indexing.files", Int64(model.fileTree?.fileCount ?? 0))
     }
 
     private func renderStatusBar() {
@@ -3154,9 +3147,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
         let indexStatus = [
             focusNotice,
-            model.isRestoringSession ? "Restoring reading session…" : nil,
+            model.isRestoringSession ? localized("main.restoring.reading.session") : nil,
             initialIndexStatus,
-            model.isRefreshingIndex ? "Refreshing index…" : nil,
+            model.isRefreshingIndex ? localized("main.refreshing.index") : nil,
             model.indexRefreshNotice,
             coverageStatus,
             model.replayNotice,
@@ -3204,9 +3197,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func renderCommitButton() {
         guard let revision = model.currentRevision else {
             commitButton.title = switch model.commitPicker.currentBranchName {
-            case "detached": "⎇ detached"
-            case let branch?: "⎇ \(branch) · Working Tree"
-            case nil: "Working Tree"
+            case "detached": localized("main.detached")
+            case let branch?: localizedFormat("main.branch.working.tree", branch)
+            case nil: localized("main.working.tree")
             }
             commitButton.bezelColor = nil
             commitButton.contentTintColor = .controlTextColor
@@ -3346,10 +3339,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func confirmBookmarkDeletion(id: UUID) {
         let alert = NSAlert()
-        alert.messageText = "Delete bookmark?"
-        alert.informativeText = "Its note will be removed."
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("main.delete.bookmark")
+        alert.informativeText = localized("main.its.note.will.be.removed")
+        alert.addButton(withTitle: localized("main.delete"))
+        alert.addButton(withTitle: localized("main.cancel"))
         guard let window else { return }
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn,
@@ -3779,10 +3772,10 @@ final class SidebarViewController: NSViewController,
     private let fileScrollView = NSScrollView()
     private let symbolScrollView = NSScrollView()
     private let filePlaceholder = NSStackView()
-    private let filePlaceholderLabel = NSTextField(labelWithString: "No project open")
+    private let filePlaceholderLabel = NSTextField(labelWithString: localized("main.no.project.open"))
     private let filePlaceholderButton = NSButton()
     private let fileLoadingIndicator = NSProgressIndicator()
-    private let outlinePlaceholder = NSTextField(labelWithString: "No file open")
+    private let outlinePlaceholder = NSTextField(labelWithString: localized("main.no.file.open"))
     private let outlineModel = OutlinePanelModel()
     private var tree: FileTreeModel?
     private var facetRows: [NSNumber] = []
@@ -3880,8 +3873,7 @@ final class SidebarViewController: NSViewController,
     var selfTestFileContextMenuHasOpenInNewTab: Bool {
         loadViewIfNeeded()
         return fileOutlineView.menu?.items.contains {
-            $0.title == "Open in New Tab"
-                && $0.action == #selector(openFileInNewTab(_:))
+            $0.action == #selector(openFileInNewTab(_:))
         } == true
     }
     var selfTestOutlinePlaceholderText: String? {
@@ -3999,23 +3991,23 @@ final class SidebarViewController: NSViewController,
         symbolOutlineView.target = self
         symbolOutlineView.action = #selector(openOutlineRow(_:))
 
-        let fileMenu = NSMenu(title: "Open File")
+        let fileMenu = NSMenu(title: localized("main.open.file"))
         let openLeft = NSMenuItem(
-            title: "Open in Left Reader",
+            title: localized("main.open.in.left.reader"),
             action: #selector(openFileInLeftReader(_:)),
             keyEquivalent: ""
         )
         openLeft.target = self
         fileMenu.addItem(openLeft)
         let openInNewTab = NSMenuItem(
-            title: "Open in New Tab",
+            title: localized("main.open.in.new.tab"),
             action: #selector(openFileInNewTab(_:)),
             keyEquivalent: ""
         )
         openInNewTab.target = self
         fileMenu.addItem(openInNewTab)
         let openRight = NSMenuItem(
-            title: "Open in Right Reader (Compare)",
+            title: localized("main.open.in.right.reader.compare"),
             action: #selector(openFileInRightReader(_:)),
             keyEquivalent: ""
         )
@@ -4030,13 +4022,13 @@ final class SidebarViewController: NSViewController,
         // explicit divider fraction and section buttons below.
         splitView.delegate = self
         splitView.addArrangedSubview(pane(
-            title: "Files",
+            title: localized("main.files"),
             outlineView: fileOutlineView,
             scrollView: fileScrollView,
             placeholder: filePlaceholder
         ))
         splitView.addArrangedSubview(pane(
-            title: "Outline",
+            title: localized("main.outline"),
             outlineView: symbolOutlineView,
             scrollView: symbolScrollView,
             placeholder: outlinePlaceholder
@@ -4106,10 +4098,10 @@ final class SidebarViewController: NSViewController,
             surface.body.isHidden = collapsed
             surface.toggle.image = NSImage(systemSymbolName: collapsed ? "chevron.right" : "chevron.down",
                                            accessibilityDescription: nil)
-            let action = "\(collapsed ? "Expand" : "Collapse") \(surface.label.stringValue)"
+            let action = localizedFormat(collapsed ? "main.expand.section" : "main.collapse.section", surface.label.stringValue)
             surface.toggle.toolTip = action
             surface.toggle.setAccessibilityLabel(action)
-            surface.toggle.setAccessibilityValue(collapsed ? "Collapsed" : "Expanded")
+            surface.toggle.setAccessibilityValue(collapsed ? localized("main.collapsed") : localized("main.expanded"))
         }
         guard !outlineSurfaceHidden, setInitialDivider else { return }
         let available = splitView.bounds.height - splitView.dividerThickness
@@ -4483,7 +4475,7 @@ final class SidebarViewController: NSViewController,
         outlineView.usesAlternatingRowBackgroundColors = false
         outlineView.style = .plain
         outlineView.indentationPerLevel = 13
-        outlineView.setAccessibilityLabel(title == "File" ? "Files" : "Outline")
+        outlineView.setAccessibilityLabel(outlineView === fileOutlineView ? localized("main.files") : localized("main.outline"))
     }
 
     private func pane(
@@ -4535,8 +4527,8 @@ final class SidebarViewController: NSViewController,
         collapse.isBordered = false
         collapse.controlSize = .small
         collapse.contentTintColor = theme.chromeSecondaryColor
-        collapse.toolTip = "Collapse all \(title.lowercased())"
-        collapse.setAccessibilityLabel("Collapse all \(title.lowercased())")
+        collapse.toolTip = localizedFormat("main.collapse.all", title.lowercased())
+        collapse.setAccessibilityLabel(localizedFormat("main.collapse.all", title.lowercased()))
         collapse.translatesAutoresizingMaskIntoConstraints = false
         header.addSubview(collapse)
         pane.addSubview(divider)
@@ -4591,7 +4583,7 @@ final class SidebarViewController: NSViewController,
         filePlaceholderLabel.font = .systemFont(ofSize: 11)
         filePlaceholderLabel.textColor = .secondaryLabelColor
         filePlaceholderLabel.alignment = .center
-        filePlaceholderButton.title = "Open Project…"
+        filePlaceholderButton.title = localized("main.open.project")
         filePlaceholderButton.font = .systemFont(ofSize: 11)
         filePlaceholderButton.isBordered = false
         filePlaceholderButton.contentTintColor = .linkColor
@@ -4617,12 +4609,12 @@ final class SidebarViewController: NSViewController,
         filePlaceholder.isHidden = !showsPlaceholder
         fileScrollView.isHidden = showsPlaceholder
         if isIndexing {
-            filePlaceholderLabel.stringValue = "Loading files…"
+            filePlaceholderLabel.stringValue = localized("main.loading.files")
             filePlaceholderButton.isHidden = true
             fileLoadingIndicator.isHidden = false
             fileLoadingIndicator.startAnimation(nil)
         } else {
-            filePlaceholderLabel.stringValue = "No project open"
+            filePlaceholderLabel.stringValue = localized("main.no.project.open")
             filePlaceholderButton.isHidden = false
             fileLoadingIndicator.stopAnimation(nil)
             fileLoadingIndicator.isHidden = true
@@ -4631,8 +4623,8 @@ final class SidebarViewController: NSViewController,
 
     private func updateOutlinePlaceholder() {
         outlinePlaceholder.stringValue = hasSelectedFile
-            ? "No symbols in this file"
-            : "No file open"
+            ? localized("main.no.symbols.in.this.file")
+            : localized("main.no.file.open")
         let showsPlaceholder = !hasSelectedFile || facetRows.isEmpty
         outlinePlaceholder.isHidden = !showsPlaceholder
         symbolScrollView.isHidden = showsPlaceholder
@@ -4711,19 +4703,19 @@ final class SidebarViewController: NSViewController,
         detail.textColor = theme.chromeSecondaryColor
         detail.isHidden = facet.detail.isEmpty
         let kind = switch facet.kind {
-        case .fn: "Function"
-        case .method: "Method"
-        case .struct: "Struct"
-        case .class: "Class"
-        case .enum: "Enum"
-        case .trait: "Trait"
-        case .impl: "Implementation"
-        case .mod: "Module"
-        case .const: "Constant"
-        case .static: "Static"
-        case .typeAlias: "Type alias"
-        case .field: "Field"
-        case .enumMember: "Enum case"
+        case .fn: localized("main.function")
+        case .method: localized("main.method")
+        case .struct: localized("main.struct")
+        case .class: localized("main.class")
+        case .enum: localized("main.enum")
+        case .trait: localized("main.trait")
+        case .impl: localized("main.implementation")
+        case .mod: localized("main.module")
+        case .const: localized("main.constant")
+        case .static: localized("main.static")
+        case .typeAlias: localized("main.type.alias")
+        case .field: localized("main.field")
+        case .enumMember: localized("main.enum.case")
         }
         cell.toolTip = [kind, facet.name, facet.detail].filter { !$0.isEmpty }.joined(separator: " ")
         image.setAccessibilityElement(false)
@@ -4786,7 +4778,7 @@ final class SidebarViewController: NSViewController,
         }
         return NSImage(
             systemSymbolName: symbol,
-            accessibilityDescription: node.isDirectory ? "Folder" : "File"
+            accessibilityDescription: node.isDirectory ? localized("main.folder") : localized("main.file")
         )
     }
 
@@ -4816,7 +4808,7 @@ private final class TabStripView: NSView {
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setAccessibilityRole(.tabGroup)
-        setAccessibilityLabel("Open files")
+        setAccessibilityLabel(localized("main.open.files"))
         scrollView.drawsBackground = false
         scrollView.hasHorizontalScroller = false
         scrollView.borderType = .noBorder
@@ -4905,13 +4897,13 @@ private final class TabStripView: NSView {
             button.toolTip = tab.fileURL?.path ?? tab.title
             button.setAccessibilityRole(.radioButton)
             button.setAccessibilityValue(active ? 1 : 0)
-            button.setAccessibilityLabel(title + (tab.isPreview ? ", Preview" : ""))
+            button.setAccessibilityLabel(localizedFormat("main.tab.title", title, tab.isPreview ? localized("main.preview.suffix") : ""))
             let help = (tab.fileURL?.path ?? tab.title)
-                + (tab.isPreview ? ". Preview tab; choose Keep Open to retain it." : "")
+                + (tab.isPreview ? localized("main.preview.tip") : "")
             button.setAccessibilityHelp(help)
             let menu = NSMenu(title: title)
             menu.autoenablesItems = false
-            let keepOpen = NSMenuItem(title: "Keep Open", action: #selector(keepTabOpen(_:)), keyEquivalent: "")
+            let keepOpen = NSMenuItem(title: localized("main.keep.open"), action: #selector(keepTabOpen(_:)), keyEquivalent: "")
             keepOpen.target = self
             keepOpen.tag = index
             keepOpen.isEnabled = tab.isPreview
@@ -4923,8 +4915,8 @@ private final class TabStripView: NSView {
             close.isBordered = false
             close.controlSize = .small
             close.contentTintColor = theme.chromeSecondaryColor
-            close.setAccessibilityLabel("Close " + title)
-            close.toolTip = "Close " + tab.title
+            close.setAccessibilityLabel(localizedFormat("main.close.tab", title))
+            close.toolTip = localizedFormat("main.close.tab", tab.title)
             let row = NSStackView(views: [button, close])
             row.orientation = .horizontal
             row.alignment = .centerY
@@ -4978,20 +4970,18 @@ private final class ReadingHeightControl: NSSegmentedControl {
         for (index, width) in segmentWidths.enumerated() {
             setWidth(width, forSegment: index)
         }
-        setAccessibilityLabel("Reading height")
-        toolTip = "Reading height (⌥⌘0/1/2)"
+        setAccessibilityLabel(localized("main.reading.height"))
+        toolTip = localized("main.reading.height.0.1.2")
         setToolTip(
-            "Full shows the whole file; Structure folds function bodies; "
-                + "Overview keeps only signatures and top-level items",
+            localized("main.height.full.help"),
             forSegment: ReadingHeightLevel.full.rawValue
         )
         setToolTip(
-            "Structure folds function bodies and keeps signatures visible",
+            localized("main.structure.folds.function.bodies.and.keeps.signatures.visible"),
             forSegment: ReadingHeightLevel.structure.rawValue
         )
         setToolTip(
-            "Overview keeps only signatures and top-level items; "
-                + "folded bodies stay hidden",
+            localized("main.height.overview.help"),
             forSegment: ReadingHeightLevel.overview.rawValue
         )
     }
@@ -5219,7 +5209,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             pathControl.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             pathControl.target = self
             pathControl.action = #selector(revealBreadcrumb(_:))
-            pathControl.setAccessibilityLabel("File path")
+            pathControl.setAccessibilityLabel(localized("main.file.path"))
             pathControl.isHidden = true
             configureScopeHeader()
             configureFindBar()
@@ -5264,36 +5254,36 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             self?.onSelectionChange?(byteOffset)
         }
 
-        let relationMenu = NSMenu(title: "Relations")
+        let relationMenu = NSMenu(title: localized("main.relations"))
         relationMenu.autoenablesItems = false
         relationMenu.addItem(NSMenuItem(
-            title: "Show Callers",
+            title: localized("main.show.callers"),
             action: #selector(showCallers(_:)),
             keyEquivalent: ""
         ))
         relationMenu.addItem(NSMenuItem(
-            title: "Show Calls",
+            title: localized("main.show.calls"),
             action: #selector(showCalls(_:)),
             keyEquivalent: ""
         ))
         relationMenu.addItem(NSMenuItem(
-            title: "Show Implementations",
+            title: localized("main.show.implementations"),
             action: #selector(showImplementations(_:)),
             keyEquivalent: ""
         ))
         relationMenu.addItem(NSMenuItem(
-            title: "Show References",
+            title: localized("main.show.references"),
             action: #selector(showReferences(_:)),
             keyEquivalent: ""
         ))
         relationMenu.addItem(.separator())
         relationMenu.addItem(NSMenuItem(
-            title: "Copy path:line",
+            title: localized("main.copy.path.line"),
             action: #selector(copyPathLine(_:)),
             keyEquivalent: ""
         ))
         relationMenu.addItem(NSMenuItem(
-            title: "Reveal in Finder",
+            title: localized("main.reveal.in.finder"),
             action: #selector(revealInFinder(_:)),
             keyEquivalent: ""
         ))
@@ -5376,7 +5366,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             readerHeaderDivider.heightAnchor.constraint(equalToConstant: 1),
         ])
         readerHeader.setAccessibilityElement(false)
-        fileNameLabel.setAccessibilityLabel("Current file")
+        fileNameLabel.setAccessibilityLabel(localized("main.current.file"))
         applyReaderHeaderTheme(ReaderSettings())
     }
 
@@ -5422,7 +5412,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             scopeHeaderDivider.heightAnchor.constraint(equalToConstant: 1),
         ])
         scopeHeader.setAccessibilityElement(true)
-        scopeHeader.setAccessibilityLabel("Current scope")
+        scopeHeader.setAccessibilityLabel(localized("main.current.scope"))
         applyScopeHeaderTheme()
     }
 
@@ -5464,8 +5454,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             button.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             button.contentTintColor = readerTheme.foregroundColor
             button.tag = Int(facet.nameRange.lowerBound)
-            button.toolTip = "Go to \(facet.name)"
-            button.setAccessibilityLabel("Go to \(facet.name)")
+            button.toolTip = localizedFormat("main.go.to", facet.name)
+            button.setAccessibilityLabel(localizedFormat("main.go.to", facet.name))
             scopeHeaderContent.addArrangedSubview(button)
         }
         let location = "\(file.lastPathComponent):\(line)"
@@ -5479,13 +5469,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }.joined(separator: ", ")
         scopeHeader.setAccessibilityElement(false)
         scopeHeader.setAccessibilityLabel(
-            "Current scope: \(scopes), \(file.lastPathComponent) line \(line)"
+            localizedFormat("main.scope.description", scopes, file.lastPathComponent, Int64(line))
         )
     }
 
     private func hideScopeHeader() {
         scopeHeader.isHidden = true
-        scopeHeader.setAccessibilityLabel("Current scope")
+        scopeHeader.setAccessibilityLabel(localized("main.current.scope"))
     }
 
     @objc private func openScope(_ sender: NSButton) {
@@ -5523,9 +5513,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     private static func scopeKindTitle(_ kind: OutlineKind) -> String {
         switch kind {
-        case .method: "fn"
-        case .typeAlias: "type"
-        default: kind.rawValue
+        case .fn: localized("main.scope.kind.fn")
+        case .method: localized("main.scope.kind.method")
+        case .struct: localized("main.scope.kind.struct")
+        case .class: localized("main.scope.kind.class")
+        case .enum: localized("main.scope.kind.enum")
+        case .trait: localized("main.scope.kind.trait")
+        case .impl: localized("main.scope.kind.impl")
+        case .mod: localized("main.scope.kind.mod")
+        case .const: localized("main.scope.kind.const")
+        case .static: localized("main.scope.kind.static")
+        case .typeAlias: localized("main.scope.kind.typeAlias")
+        case .field: localized("main.scope.kind.field")
+        case .enumMember: localized("main.scope.kind.enumMember")
         }
     }
 
@@ -5540,31 +5540,31 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         findBar.wantsLayer = true
         findBar.translatesAutoresizingMaskIntoConstraints = false
         findBar.isHidden = true
-        findField.placeholderString = "Find in file"
+        findField.placeholderString = localized("main.find.in.file")
         findField.sendsSearchStringImmediately = true
         findField.sendsWholeSearchString = false
         findField.delegate = self
-        findField.setAccessibilityLabel("Find in file")
+        findField.setAccessibilityLabel(localized("main.find.in.file"))
 
         findCaseButton.title = "Aa"
         findCaseButton.setButtonType(.toggle)
         findCaseButton.bezelStyle = .texturedRounded
         findCaseButton.target = self
         findCaseButton.action = #selector(toggleFindCase(_:))
-        findCaseButton.toolTip = "Match case"
-        findCaseButton.setAccessibilityLabel("Match case")
+        findCaseButton.toolTip = localized("main.match.case")
+        findCaseButton.setAccessibilityLabel(localized("main.match.case"))
 
         findPreviousButton.title = "↑"
         findPreviousButton.bezelStyle = .inline
         findPreviousButton.target = self
         findPreviousButton.action = #selector(findPrevious(_:))
-        findPreviousButton.setAccessibilityLabel("Previous match")
+        findPreviousButton.setAccessibilityLabel(localized("main.previous.match"))
 
         findNextButton.title = "↓"
         findNextButton.bezelStyle = .inline
         findNextButton.target = self
         findNextButton.action = #selector(findNext(_:))
-        findNextButton.setAccessibilityLabel("Next match")
+        findNextButton.setAccessibilityLabel(localized("main.next.match"))
 
         findStatusLabel.font = .systemFont(ofSize: 11)
         findStatusLabel.alignment = .right
@@ -5572,13 +5572,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             .defaultHigh,
             for: .horizontal
         )
-        findStatusLabel.setAccessibilityLabel("Find result")
+        findStatusLabel.setAccessibilityLabel(localized("main.find.result"))
 
         findCloseButton.title = "×"
         findCloseButton.bezelStyle = .inline
         findCloseButton.target = self
         findCloseButton.action = #selector(closeFind(_:))
-        findCloseButton.setAccessibilityLabel("Close find bar")
+        findCloseButton.setAccessibilityLabel(localized("main.close.find.bar"))
 
         findField.setContentHuggingPriority(.defaultLow, for: .horizontal)
         findField.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
@@ -5856,11 +5856,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     }
 
     private func compareContainer(readerView: NSView) -> NSView {
-        compareVersionButton.title = "Choose comparison version…"
+        compareVersionButton.title = localized("main.choose.comparison.version")
         compareVersionButton.bezelStyle = .rounded
         compareVersionButton.target = self
         compareVersionButton.action = #selector(chooseCompareVersion(_:))
-        compareVersionButton.setAccessibilityLabel("Comparison version")
+        compareVersionButton.setAccessibilityLabel(localized("main.comparison.version"))
         compareVersionButton.lineBreakMode = .byTruncatingMiddle
         compareVersionButton.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -5868,20 +5868,20 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previousHunkButton.bezelStyle = .inline
         previousHunkButton.target = self
         previousHunkButton.action = #selector(previousDiffHunk(_:))
-        previousHunkButton.setAccessibilityLabel("Previous diff hunk")
+        previousHunkButton.setAccessibilityLabel(localized("main.previous.diff.hunk"))
         nextHunkButton.title = "↓"
         nextHunkButton.bezelStyle = .inline
         nextHunkButton.target = self
         nextHunkButton.action = #selector(nextDiffHunk(_:))
-        nextHunkButton.setAccessibilityLabel("Next diff hunk")
+        nextHunkButton.setAccessibilityLabel(localized("main.next.diff.hunk"))
 
         let closeButton = NSButton()
         closeButton.image = NSImage(systemSymbolName: "xmark", accessibilityDescription: nil)
         closeButton.isBordered = false
         closeButton.target = self
         closeButton.action = #selector(closeComparison(_:))
-        closeButton.toolTip = "Close Comparison (⌃⌘W)"
-        closeButton.setAccessibilityLabel("Close Comparison")
+        closeButton.toolTip = localized("main.close.comparison.w")
+        closeButton.setAccessibilityLabel(localized("main.close.comparison"))
         let spacer = NSView()
         let controls = NSStackView(views: [
             compareVersionButton, spacer, previousHunkButton, nextHunkButton, closeButton,
@@ -5959,10 +5959,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     private static func title(_ kind: DiffCore.FunctionChange.Kind) -> String {
         switch kind {
-        case .added: "Added"
-        case .removed: "Removed"
-        case .signatureChanged: "Signature"
-        case .bodyChanged: "Body"
+        case .added: localized("main.added")
+        case .removed: localized("main.removed")
+        case .signatureChanged: localized("main.signature")
+        case .bodyChanged: localized("main.body")
         }
     }
 
@@ -6284,7 +6284,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         }
         guard !query.contains("\n"), !query.contains("\r") else {
             textView.setFindMatches([], selectedIndex: nil)
-            findStatusLabel.stringValue = "Line breaks are not supported"
+            findStatusLabel.stringValue = localized("main.line.breaks.are.not.supported")
             findPreviousButton.isEnabled = false
             findNextButton.isEnabled = false
             return
@@ -6297,7 +6297,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let caseSensitive = findCaseButton.state == .on
         let selectedRange = textView.selectedFindMatchRange
         let scanDelay = findScanDelayForTesting
-        findStatusLabel.stringValue = "Searching…"
+        findStatusLabel.stringValue = localized("main.searching")
         findPreviousButton.isEnabled = false
         findNextButton.isEnabled = false
         findTask = Task { [weak self] in
@@ -6345,7 +6345,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 return
             } catch {
                 guard requestID == self.findRequestID else { return }
-                self.findStatusLabel.stringValue = "Search failed"
+                self.findStatusLabel.stringValue = localized("main.search.failed")
             }
         }
     }
@@ -6374,11 +6374,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         findPreviousButton.isEnabled = count > 0
         findNextButton.isEnabled = count > 0
         guard count > 0, let selected = textView.selectedFindMatchIndex else {
-            findStatusLabel.stringValue = "0 matches"
+            findStatusLabel.stringValue = localized("main.0.matches")
             return
         }
         findStatusLabel.stringValue = "\(selected + 1) / \(count)"
-            + (findWrapped ? " · wrapped" : "")
+            + (findWrapped ? localized("main.wrapped") : "")
     }
     var isFocusMode: Bool { textView.isFocusMode }
     var canFocusCurrentScope: Bool { displayedDocument != nil }
@@ -6410,7 +6410,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             forCharacterIndex: textView.view.selectedRange().location
         ), textView.focusCurrentScope(at: byteOffset)
         else {
-            onFocusNotice?("No enclosing scope to focus")
+            onFocusNotice?(localized("main.no.enclosing.scope.to.focus"))
             return false
         }
         return true
@@ -6512,11 +6512,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previousHunkButton.isEnabled = hunkCount > 0
         nextHunkButton.isEnabled = hunkCount > 0
         previousHunkButton.toolTip = hunkCount == 0
-            ? "No diff hunks"
-            : "Previous hunk"
+            ? localized("main.no.diff.hunks")
+            : localized("main.previous.hunk")
         nextHunkButton.toolTip = hunkCount == 0
-            ? "No diff hunks"
-            : "Next hunk"
+            ? localized("main.no.diff.hunks")
+            : localized("main.next.hunk")
         if let selectedHunkIndex {
             nextHunkButton.title = "↓ \(selectedHunkIndex + 1)/\(hunkCount)"
         } else {
@@ -6528,13 +6528,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             $0.removeFromSuperview()
         }
         let status = errorMessage
-            ?? (truncated ? "Large diff — side-by-side only" : nil)
+            ?? (truncated ? localized("main.large.diff.side.by.side.only") : nil)
         if let status {
             let label = NSTextField(labelWithString: status)
             label.textColor = .secondaryLabelColor
             functionSummaryStack.addArrangedSubview(label)
         } else if functionChanges.isEmpty {
-            let label = NSTextField(labelWithString: "No function changes")
+            let label = NSTextField(labelWithString: localized("main.no.function.changes"))
             label.textColor = .secondaryLabelColor
             functionSummaryStack.addArrangedSubview(label)
         } else {
@@ -6790,7 +6790,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readingHeightControl.isHidden = true
         readingHeightControl.isEnabled = false
         readingHeightShortcutLabel.isHidden = true
-        fileNameLabel.stringValue = "Reading Set · \(title)"
+        fileNameLabel.stringValue = localizedFormat("main.reading.set", title)
         readingSetView.display(
             title: title,
             excerpts: excerpts,
@@ -6876,14 +6876,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 bytes = Array(try Data(contentsOf: file, options: .mappedIfSafe))
             }
         } catch {
-            displayPreviewError("Could not open \(file.lastPathComponent)")
+            displayPreviewError(localizedFormat("main.open.failure", file.lastPathComponent))
             return
         }
 
         let extensionName = file.pathExtension.lowercased()
         if extensionName == "pdf" {
             guard let document = PDFDocument(data: Data(bytes)) else {
-                displayPreviewError("Could not open PDF")
+                displayPreviewError(localized("main.could.not.open.pdf"))
                 return
             }
             let pdfView = PDFView()
@@ -6892,9 +6892,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             pdfView.displayMode = .singlePageContinuous
             pdfView.displaysPageBreaks = true
             pdfView.backgroundColor = readerTheme.backgroundColor
-            pdfView.setAccessibilityLabel("PDF preview")
+            pdfView.setAccessibilityLabel(localized("main.pdf.preview"))
             previewKind = "PDF"
-            previewAccessibilityLabel = "PDF preview"
+            previewAccessibilityLabel = localized("main.pdf.preview")
             previewPDFPageCount = document.pageCount
             installPreview(pdfView)
             return
@@ -6915,16 +6915,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 .defaultLow,
                 for: .vertical
             )
-            imageView.setAccessibilityLabel("Image preview")
+            imageView.setAccessibilityLabel(localized("main.image.preview"))
             previewKind = "Image"
-            previewAccessibilityLabel = "Image preview"
+            previewAccessibilityLabel = localized("main.image.preview")
             previewImageSize = image.size
             installPreview(imageView)
             return
         }
 
         guard let string = String(bytes: bytes, encoding: .utf8) else {
-            displayPreviewError("Unsupported binary")
+            displayPreviewError(localized("main.unsupported.binary"))
             return
         }
         if extensionName == "md" || extensionName == "markdown" {
@@ -6933,14 +6933,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 options: .init(),
                 baseURL: file
             ) else {
-                displayPreviewError("Unsupported binary")
+                displayPreviewError(localized("main.unsupported.binary"))
                 return
             }
             let attributed = markdownPreviewAttributedString(markdown)
             displayPreviewText(
                 attributed,
                 kind: .markdown,
-                accessibilityLabel: "Markdown preview"
+                accessibilityLabel: localized("main.markdown.preview")
             )
             return
         }
@@ -6951,7 +6951,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         displayPreviewText(
             NSAttributedString(string: string),
             kind: .plainText,
-            accessibilityLabel: "Plain text preview"
+            accessibilityLabel: localized("main.plain.text.preview")
         )
     }
 
@@ -7242,9 +7242,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = self
         webView.underPageBackgroundColor = readerTheme.backgroundColor
-        webView.setAccessibilityLabel("HTML preview")
+        webView.setAccessibilityLabel(localized("main.html.preview"))
         previewKind = "HTML"
-        previewAccessibilityLabel = "HTML preview"
+        previewAccessibilityLabel = localized("main.html.preview")
         previewHTMLJavaScriptEnabled = configuration
             .defaultWebpagePreferences.allowsContentJavaScript
         previewHTMLDataStorePersistent = false
@@ -7291,10 +7291,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let errorLabel = NSTextField(labelWithString: message)
         errorLabel.alignment = .center
         errorLabel.textColor = readerTheme.chromeSecondaryColor
-        errorLabel.setAccessibilityLabel("\(message) preview")
+        errorLabel.setAccessibilityLabel(localizedFormat("main.preview.failure", message))
         previewKind = "Error"
         previewRenderedText = message
-        previewAccessibilityLabel = "\(message) preview"
+        previewAccessibilityLabel = localizedFormat("main.preview.failure", message)
         installPreview(errorLabel)
     }
 
@@ -7383,7 +7383,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             findStatusLabel.stringValue = ""
             displayedDocument = nil
             clearPreview()
-            label.stringValue = "Select a file to read · ⌘P to open"
+            label.stringValue = localized("main.select.a.file.to.read.p.to.open")
             label.isHidden = false
             textView.clear()
             hideScopeHeader()
@@ -7452,16 +7452,16 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                                 )
                             }
                             if wasFocused && !self.textView.isFocusMode {
-                                self.onFocusNotice?("Focus ended: no enclosing scope")
+                                self.onFocusNotice?(localized("main.focus.ended.no.enclosing.scope"))
                             }
                             self.onOutlineChange?(document.outlineFacets)
                         case .failure:
                             self.pendingFocusNavigationOffset = nil
                             if self.textView.isFocusMode {
                                 _ = self.textView.exitFocusMode()
-                                self.onFocusNotice?("Focus ended: syntax unavailable")
+                                self.onFocusNotice?(localized("main.focus.ended.syntax.unavailable"))
                             }
-                            self.label.stringValue = "Syntax highlighting failed"
+                            self.label.stringValue = localized("main.syntax.highlighting.failed")
                             self.label.isHidden = false
                             self.hideScopeHeader()
                         }
@@ -7475,7 +7475,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             }
             displayedDocument = nil
             onDocumentChange?(file, nil)
-            label.stringValue = "Could not open \(file.lastPathComponent)"
+            label.stringValue = localizedFormat("main.open.failure", file.lastPathComponent)
             label.isHidden = false
             textView.clear()
             hideScopeHeader()
@@ -7499,7 +7499,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             if syntaxLoadPending {
                 pendingFocusNavigationOffset = byteOffset
             } else if !textView.followFocusForExplicitNavigation(to: byteOffset) {
-                onFocusNotice?("Focus ended: no enclosing scope")
+                onFocusNotice?(localized("main.focus.ended.no.enclosing.scope"))
             }
         }
         textView.reveal(byteOffset: byteOffset)
@@ -7646,7 +7646,7 @@ final class ContextWindowViewController: NSViewController {
 
     private let model: ContextWindowModel
     private let modeControl = NSSegmentedControl(
-        labels: ["Follow", "Pin"],
+        labels: [localized("main.follow"), localized("main.pin")],
         trackingMode: .selectOne,
         target: nil,
         action: nil
@@ -7659,7 +7659,7 @@ final class ContextWindowViewController: NSViewController {
     private let candidateBadge = NSView()
     private let placeholderLabel = NSTextField(
         labelWithString:
-            "Click a symbol to see its definition here. ⌘-click jumps to it."
+            localized("main.click.a.symbol.to.see.its.definition.here.click.jumps.to.it")
     )
     private let scrollView = NSScrollView()
     private let miniReader = ReaderTextView()
@@ -7925,7 +7925,7 @@ final class ContextWindowViewController: NSViewController {
             // version, trust, limitations, commit, and features move to the
             // tooltip and accessibility value instead of widening the pane.
             candidateLabel.stringValue = Self.shortProvenanceLabel(
-                fullProvenance
+                candidate.provenanceBadge, bindingKind: candidate.bindingKind
             )
             candidateLabel.toolTip = fullProvenance
             candidateLabel.setAccessibilityLabel(fullProvenance)
@@ -7965,16 +7965,12 @@ final class ContextWindowViewController: NSViewController {
     /// status (Exact/Strong/Possible/…) and the binding kind; provider, tool
     /// version, trust, limitations, commit, and features move to the
     /// tooltip. Unresolved and other states keep their distinguishing word.
-    static func shortProvenanceLabel(_ full: String) -> String {
+    static func shortProvenanceLabel(_ full: String, bindingKind: String?) -> String {
         let parts = full.components(separatedBy: " · ")
         guard let status = parts.first, !status.isEmpty else {
             return String(full.prefix(40))
         }
-        let bindingKinds: Set<String> = [
-            "param", "letBinding", "importBinding", "assignment",
-            "patternBinding", "globalDecl", "nonlocalDecl",
-        ]
-        if let bindingKind = parts.last, bindingKinds.contains(bindingKind) {
+        if let bindingKind {
             return "\(status) · \(bindingKind)"
         }
         return status
@@ -7982,7 +7978,8 @@ final class ContextWindowViewController: NSViewController {
 
     private func applyBadgeStyle() {
         let colors: (background: NSColor, foreground: NSColor) =
-            switch provenanceBadgeStyle(for: candidateLabel.stringValue) {            case .exact:
+            switch provenanceBadgeStyle(for: model.selectedCandidate?.certainty) {
+            case .exact:
                 (.systemGreen.withAlphaComponent(0.12), .systemGreen)
             case .strong:
                 (.systemBlue.withAlphaComponent(0.12), .systemBlue)

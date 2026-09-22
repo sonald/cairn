@@ -133,22 +133,22 @@ package enum BookmarkStatus: Hashable, Sendable {
     package var attemptMessage: String? {
         switch self {
         case .exactContent: nil
-        case .drifted: "Bookmark content has drifted."
-        case .revisionUnavailable: "Bookmark revision is unavailable."
-        case .fileAbsent: "Bookmark file is absent."
-        case .offsetInvalid: "Bookmark offset is invalid."
+        case .drifted: localized("model.bookmark.driftMessage")
+        case .revisionUnavailable: localized("model.bookmark.revisionMessage")
+        case .fileAbsent: localized("model.bookmark.absentMessage")
+        case .offsetInvalid: localized("model.bookmark.offsetMessage")
         case .notEvaluated: nil
         }
     }
 
     package var displayText: String {
         switch self {
-        case .exactContent: "Exact content"
-        case .drifted: "Drifted"
-        case .revisionUnavailable: "Revision unavailable"
-        case .fileAbsent: "File absent"
-        case .offsetInvalid: "Offset invalid"
-        case .notEvaluated: "Not evaluated"
+        case .exactContent: localized("model.bookmark.exact")
+        case .drifted: localized("model.bookmark.drift")
+        case .revisionUnavailable: localized("model.bookmark.revision")
+        case .fileAbsent: localized("model.bookmark.absent")
+        case .offsetInvalid: localized("model.bookmark.offset")
+        case .notEvaluated: localized("model.bookmark.unevaluated")
         }
     }
 
@@ -200,14 +200,14 @@ package enum BookmarkEligibility: Equatable, Sendable {
 
         package var accessibilityHelp: String {
             switch self {
-            case .empty: "Bookmarks require a current project file in the primary reader."
-            case .readingSet: "Reading Sets cannot be bookmarked."
-            case .dependency: "Dependency files cannot be bookmarked."
-            case .comparison: "Compare views cannot be bookmarked."
-            case .miniReader: "Mini readers cannot be bookmarked."
-            case .readerNotReady: "The primary reader is not ready to bookmark this file."
-            case .noSelection: "Choose a source position before creating a bookmark."
-            case .capturedSourceMismatch: "The displayed file is no longer the captured snapshot."
+            case .empty: localized("model.bookmark.empty")
+            case .readingSet: localized("model.bookmark.readingSet")
+            case .dependency: localized("model.bookmark.dependency")
+            case .comparison: localized("model.bookmark.compare")
+            case .miniReader: localized("model.bookmark.mini")
+            case .readerNotReady: localized("model.bookmark.notReady")
+            case .noSelection: localized("model.bookmark.selection")
+            case .capturedSourceMismatch: localized("model.bookmark.mismatch")
             }
         }
     }
@@ -344,13 +344,13 @@ package final class BookmarkModel {
         filteredRecords(projectPath: projectPath).map { record in
             var lines = [
                 "## \(markdownEscape(title(for: record)))",
-                "- Path: \(markdownEscape(record.path))",
-                "- Snapshot: \(markdownEscape(snapshotText(record)))",
-                "- Line: \(record.line)",
-                "- Status: \(status(record).displayText)",
+                localizedFormat("model.bookmark.export.path", markdownEscape(record.path)),
+                localizedFormat("model.bookmark.export.snapshot", markdownEscape(snapshotText(record))),
+                localizedFormat("model.bookmark.export.line", record.line),
+                localizedFormat("model.bookmark.export.status", status(record).displayText),
             ]
             if !record.note.isEmpty {
-                lines.append("### Note")
+                lines.append(localized("model.bookmark.export.note"))
                 lines.append(markdownEscape(record.note))
             }
             return lines.joined(separator: "\n")
@@ -359,8 +359,8 @@ package final class BookmarkModel {
 
     private func snapshotText(_ record: BookmarkRecord) -> String {
         switch record.snapshot {
-        case .worktree: "Worktree"
-        case let .commit(fullOID): "Saved at \(fullOID)"
+        case .worktree: localized("model.bookmark.worktree")
+        case let .commit(fullOID): localizedFormat("model.bookmark.saved", fullOID)
         }
     }
 

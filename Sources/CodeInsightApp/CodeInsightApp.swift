@@ -911,15 +911,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let proceed = finalizeQuitSaves { controller, error in
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Reading Session Not Saved"
+            alert.messageText = localized("app.save.failed")
             alert.informativeText =
-                "The reading session for "
-                + (controller.projectURL?.lastPathComponent ?? "a project")
-                + " could not be saved: \(String(describing: error))"
-                + " The previous file on disk is kept."
-            alert.addButton(withTitle: "Retry Save")
-            alert.addButton(withTitle: "Quit Without Saving")
-            alert.addButton(withTitle: "Cancel Quit")
+                localizedFormat("app.save.failureDetail",
+                    controller.projectURL?.lastPathComponent ?? localized("app.save.project"),
+                    String(describing: error))
+            alert.addButton(withTitle: localized("app.save.retry"))
+            alert.addButton(withTitle: localized("app.save.quit"))
+            alert.addButton(withTitle: localized("app.save.cancel"))
             switch alert.runModal() {
             case .alertFirstButtonReturn:
                 return .retry
@@ -4613,10 +4612,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let fuzzyReferenceRowCount = fuzzyReferenceNodes.count
         let possibleReferenceDisclosure = model.relationTree.root?.children?
             .first {
-                $0.kind == .group && $0.title.hasPrefix("Show ")
+                $0.kind == .group && $0.candidateGroup == .possible
             }
         let possibleReferenceCountHonest = possibleReferenceDisclosure.map {
-            $0.title == "Show \($0.children?.count ?? 0) possible matches"
+            let count = $0.children?.count ?? 0
+            return $0.title == "Show \(count) possible \(count == 1 ? "match" : "matches")"
         } ?? true
         let noCertaintyNamedReferenceGroups =
             model.relationTree.root?.children?.allSatisfy {
@@ -5206,7 +5206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                         && model.relationTree.root?.title == "dependency_call"
                         && windowController
                             .selfTestPossibleRelationDisclosureTitle
-                            == "Show 1 possible matches"
+                            == "Show 1 possible match"
                 }
             )
             let firstBatchUsedNodeReload =
@@ -5227,7 +5227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 defaultDefinitionPromotionRequests == 0
             let possibleRowRetained =
                 windowController.selfTestPossibleRelationDisclosureTitle
-                    == "Show 1 possible matches"
+                    == "Show 1 possible match"
             let possibleExpanded =
                 windowController.selfTestExpandPossibleRelations()
             let onDemandDefinitionValidation = waitUntil(
@@ -10583,7 +10583,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Open"
+        panel.prompt = localized("app.open.action")
         if panel.runModal() == .OK, let root = panel.url {
             enqueueOpenRequest(
                 root: root,
@@ -10614,7 +10614,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             panel.canChooseDirectories = true
             panel.canChooseFiles = false
             panel.allowsMultipleSelection = false
-            panel.prompt = "Open"
+            panel.prompt = localized("app.open.action")
             guard panel.runModal() == .OK, let panelRoot = panel.url else {
                 return
             }
@@ -10710,7 +10710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         guard url.isFileURL else {
             return .failure(OpenIdentityFailure(
                 path: url.path.isEmpty ? url.absoluteString : url.path,
-                reason: "not a local folder"
+                reason: localized("app.open.notLocal")
             ))
         }
         // Resolve symlinks first so aliases point at the real directory.
@@ -10722,7 +10722,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         ), isDirectory.boolValue else {
             return .failure(OpenIdentityFailure(
                 path: url.path,
-                reason: "does not exist or is not a folder"
+                reason: localized("app.open.notFolder")
             ))
         }
         return .success(resolved)
@@ -10732,7 +10732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let path: String
         let reason: String
 
-        var message: String { "\(path) \(reason)" }
+        var message: String { localizedFormat("app.open.failureDetail", path, reason) }
     }
 
     private func processOpenRequest(_ url: URL) async {
@@ -10753,7 +10753,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     ) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Cannot Open Project"
+        alert.messageText = localized("app.open.failed")
         alert.informativeText = message
         // The error surfaces in the window that started the request; a
         // missing one falls back to the most recent project window rather
@@ -10999,11 +10999,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     private func makeLanguageSelectionAlert(for root: URL) -> LanguageSelectionAlert {
         let alert = LanguageSelectionAlert()
-        alert.messageText = "Choose Languages"
+        alert.messageText = localized("app.open.languages")
         alert.informativeText =
-            "Choose 1 to 3 languages for \(root.lastPathComponent)."
-        alert.addButton(withTitle: "Open")
-        alert.addButton(withTitle: "Cancel")
+            localizedFormat("app.open.languageDetail", root.lastPathComponent)
+        alert.addButton(withTitle: localized("app.open.action"))
+        alert.addButton(withTitle: localized("app.cancel"))
         let stack = NSStackView()
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -11068,7 +11068,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             .applicationName: "Cairn",
             .applicationVersion: version,
             .credits: NSAttributedString(
-                string: "A read-only code reader for macOS."
+                string: localized("app.about.description")
             ),
         ])
     }
@@ -11083,7 +11083,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let paths = recentProjectsStore.paths
         if paths.isEmpty {
             let emptyItem = NSMenuItem(
-                title: "No Recent Projects",
+                title: localized("app.recent.empty"),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -11105,7 +11105,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
         menu.addItem(.separator())
         let clearItem = NSMenuItem(
-            title: "Clear Menu",
+            title: localized("app.recent.clear"),
             action: #selector(clearRecentProjects(_:)),
             keyEquivalent: ""
         )
@@ -11127,7 +11127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     await self?.revokeRepositoryTrustAppLevel(repositoryURL)
                 },
                 onClearCache: { [weak self] in
-                    await self?.clearMaterializedCacheAppLevel() ?? .failed("application unavailable")
+                    await self?.clearMaterializedCacheAppLevel() ?? .failed(localized("app.unavailable"))
                 }
             ) { [weak self] settings in
                 guard let self else { return }
@@ -11194,7 +11194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return .cleared
         } catch {
             return .failed(
-                "Cache could not be cleared: \(String(describing: error))"
+                localizedFormat("app.cache.failed", String(describing: error))
             )
         }
     }
@@ -11218,11 +11218,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let targetModel = controller.model
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = "Trust This Repository?"
-        alert.informativeText = "This will allow this repository's build scripts "
-            + "and proc macros to execute. Network access remains disabled."
-        alert.addButton(withTitle: "Trust")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("app.trust.title")
+        alert.informativeText = localized("app.trust.detail")
+        alert.addButton(withTitle: localized("app.trust.action"))
+        alert.addButton(withTitle: localized("app.cancel"))
         alert.beginSheetModal(for: window) { [weak self] response in
             guard response == .alertFirstButtonReturn, !controller.isClosing else { return }
             Task { @MainActor in
@@ -11621,7 +11620,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "Cairn")
         let aboutItem = NSMenuItem(
-            title: "About Cairn",
+            title: localized("app.menu.about.cairn"),
             action: #selector(showAbout(_:)),
             keyEquivalent: ""
         )
@@ -11629,7 +11628,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appMenu.addItem(aboutItem)
         appMenu.addItem(.separator())
         let settingsItem = NSMenuItem(
-            title: "Settings…",
+            title: localized("app.menu.settings"),
             action: #selector(showSettings(_:)),
             keyEquivalent: ","
         )
@@ -11637,7 +11636,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appMenu.addItem(settingsItem)
         appMenu.addItem(.separator())
         let quitItem = NSMenuItem(
-            title: "Quit Cairn",
+            title: localized("app.menu.quit.cairn"),
             action: #selector(NSApplication.terminate(_:)),
             keyEquivalent: "q"
         )
@@ -11647,54 +11646,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         mainMenu.addItem(appItem)
 
         let fileItem = NSMenuItem()
-        let fileMenu = NSMenu(title: "File")
+        let fileMenu = NSMenu(title: localized("app.menu.file"))
         let openItem = NSMenuItem(
-            title: "Open Project…",
+            title: localized("app.menu.open.project"),
             action: #selector(openProject(_:)),
             keyEquivalent: "o"
         )
         openItem.target = self
         fileMenu.addItem(openItem)
         let newWindowItem = NSMenuItem(
-            title: "New Window",
+            title: localized("app.menu.new.window"),
             action: #selector(newWindow(_:)),
             keyEquivalent: "n"
         )
         newWindowItem.target = self
         fileMenu.addItem(newWindowItem)
         let openPythonItem = NSMenuItem(
-            title: "Open Python Project…",
+            title: localized("app.menu.open.python.project"),
             action: #selector(openPythonProject(_:)),
             keyEquivalent: ""
         )
         openPythonItem.target = self
         fileMenu.addItem(openPythonItem)
         let openTypeScriptItem = NSMenuItem(
-            title: "Open TypeScript Project…",
+            title: localized("app.menu.open.typescript.project"),
             action: #selector(openTypeScriptProject(_:)),
             keyEquivalent: ""
         )
         openTypeScriptItem.target = self
         fileMenu.addItem(openTypeScriptItem)
         let quickOpenItem = NSMenuItem(
-            title: "Quick Open…",
+            title: localized("app.menu.quick.open"),
             action: #selector(quickOpen(_:)),
             keyEquivalent: "p"
         )
         quickOpenItem.target = self
         fileMenu.addItem(quickOpenItem)
         let recentItem = NSMenuItem(
-            title: "Open Recent",
+            title: localized("app.menu.open.recent"),
             action: nil,
             keyEquivalent: ""
         )
-        let recentMenu = NSMenu(title: "Open Recent")
+        let recentMenu = NSMenu(title: localized("app.menu.open.recent"))
         recentMenu.delegate = self
         rebuildOpenRecentMenu(recentMenu)
         recentItem.submenu = recentMenu
         fileMenu.addItem(recentItem)
         let openInNewTabItem = NSMenuItem(
-            title: "Open in New Tab",
+            title: localized("app.menu.open.in.new.tab"),
             action: #selector(openSelectedFileInNewTab(_:)),
             keyEquivalent: "\r"
         )
@@ -11702,14 +11701,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         openInNewTabItem.target = self
         fileMenu.addItem(openInNewTabItem)
         let closeTabItem = NSMenuItem(
-            title: "Close Tab",
+            title: localized("app.menu.close.tab"),
             action: #selector(closeActiveTab(_:)),
             keyEquivalent: "w"
         )
         closeTabItem.target = self
         fileMenu.addItem(closeTabItem)
         let closeWindowItem = NSMenuItem(
-            title: "Close Window",
+            title: localized("app.menu.close.window"),
             action: #selector(closeProjectWindow(_:)),
             keyEquivalent: "w"
         )
@@ -11717,7 +11716,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         closeWindowItem.target = self
         fileMenu.addItem(closeWindowItem)
         let clearSessionItem = NSMenuItem(
-            title: "Clear Reading Session…",
+            title: localized("app.menu.clear.reading.session"),
             action: #selector(clearReadingSession(_:)),
             keyEquivalent: ""
         )
@@ -11725,7 +11724,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         fileMenu.addItem(clearSessionItem)
         fileMenu.addItem(.separator())
         let refreshIndexItem = NSMenuItem(
-            title: "Refresh Index",
+            title: localized("app.menu.refresh.index"),
             action: #selector(refreshProjectIndex(_:)),
             keyEquivalent: "r"
         )
@@ -11733,7 +11732,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         fileMenu.addItem(refreshIndexItem)
         fileMenu.addItem(.separator())
         let trustItem = NSMenuItem(
-            title: "Trust This Repository…",
+            title: localized("app.menu.trust.this.repository"),
             action: #selector(trustThisRepository(_:)),
             keyEquivalent: ""
         )
@@ -11747,25 +11746,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         // Actions target nil so the responder chain (reader text view, search
         // field) handles them.
         let editItem = NSMenuItem()
-        let editMenu = NSMenu(title: "Edit")
+        let editMenu = NSMenu(title: localized("app.menu.edit"))
         editMenu.addItem(NSMenuItem(
-            title: "Cut",
+            title: localized("app.menu.cut"),
             action: #selector(NSText.cut(_:)),
             keyEquivalent: "x"
         ))
         editMenu.addItem(NSMenuItem(
-            title: "Copy",
+            title: localized("app.menu.copy"),
             action: #selector(NSText.copy(_:)),
             keyEquivalent: "c"
         ))
         editMenu.addItem(NSMenuItem(
-            title: "Paste",
+            title: localized("app.menu.paste"),
             action: #selector(NSText.paste(_:)),
             keyEquivalent: "v"
         ))
         editMenu.addItem(.separator())
         editMenu.addItem(NSMenuItem(
-            title: "Select All",
+            title: localized("app.menu.select.all"),
             action: #selector(NSText.selectAll(_:)),
             keyEquivalent: "a"
         ))
@@ -11773,23 +11772,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         mainMenu.addItem(editItem)
 
         let findItem = NSMenuItem()
-        let findMenu = NSMenu(title: "Find")
+        let findMenu = NSMenu(title: localized("app.menu.find"))
         let findInFileItem = NSMenuItem(
-            title: "Find in File…",
+            title: localized("app.menu.find.in.file"),
             action: #selector(findInFile(_:)),
             keyEquivalent: "f"
         )
         findInFileItem.target = self
         findMenu.addItem(findInFileItem)
         let findNextItem = NSMenuItem(
-            title: "Find Next",
+            title: localized("app.menu.find.next"),
             action: #selector(findNext(_:)),
             keyEquivalent: "g"
         )
         findNextItem.target = self
         findMenu.addItem(findNextItem)
         let findPreviousItem = NSMenuItem(
-            title: "Find Previous",
+            title: localized("app.menu.find.previous"),
             action: #selector(findPrevious(_:)),
             keyEquivalent: "g"
         )
@@ -11798,7 +11797,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         findMenu.addItem(findPreviousItem)
         findMenu.addItem(.separator())
         let findInProjectItem = NSMenuItem(
-            title: "Find in Project…",
+            title: localized("app.menu.find.in.project"),
             action: #selector(findInProject(_:)),
             keyEquivalent: "f"
         )
@@ -11809,9 +11808,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         mainMenu.addItem(findItem)
 
         let goItem = NSMenuItem()
-        let goMenu = NSMenu(title: "Go")
+        let goMenu = NSMenu(title: localized("app.menu.go"))
         let commandPaletteItem = NSMenuItem(
-            title: "Command Palette…",
+            title: localized("app.menu.command.palette"),
             action: #selector(openCommandPalette(_:)),
             keyEquivalent: "p"
         )
@@ -11819,14 +11818,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         commandPaletteItem.target = self
         goMenu.addItem(commandPaletteItem)
         let symbolItem = NSMenuItem(
-            title: "Open Symbol…",
+            title: localized("app.menu.open.symbol"),
             action: #selector(openSymbol(_:)),
             keyEquivalent: "t"
         )
         symbolItem.target = self
         goMenu.addItem(symbolItem)
         let lineItem = NSMenuItem(
-            title: "Go to Line…",
+            title: localized("app.menu.go.to.line"),
             action: #selector(goToLine(_:)),
             keyEquivalent: "l"
         )
@@ -11834,7 +11833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         goMenu.addItem(lineItem)
         goMenu.addItem(.separator())
         let backItem = NSMenuItem(
-            title: "Back",
+            title: localized("app.menu.back"),
             action: #selector(goBack(_:)),
             keyEquivalent: "\u{F702}"
         )
@@ -11842,7 +11841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         backItem.target = self
         goMenu.addItem(backItem)
         let forwardItem = NSMenuItem(
-            title: "Forward",
+            title: localized("app.menu.forward"),
             action: #selector(goForward(_:)),
             keyEquivalent: "\u{F703}"
         )
@@ -11850,7 +11849,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         forwardItem.target = self
         goMenu.addItem(forwardItem)
         let alternateBackItem = NSMenuItem(
-            title: "Back",
+            title: localized("app.menu.back"),
             action: #selector(goBack(_:)),
             keyEquivalent: "["
         )
@@ -11860,7 +11859,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         alternateBackItem.allowsKeyEquivalentWhenHidden = true
         goMenu.addItem(alternateBackItem)
         let alternateForwardItem = NSMenuItem(
-            title: "Forward",
+            title: localized("app.menu.forward"),
             action: #selector(goForward(_:)),
             keyEquivalent: "]"
         )
@@ -11870,7 +11869,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         alternateForwardItem.allowsKeyEquivalentWhenHidden = true
         goMenu.addItem(alternateForwardItem)
         let previousTabItem = NSMenuItem(
-            title: "Previous Tab",
+            title: localized("app.menu.previous.tab"),
             action: #selector(selectPreviousTab(_:)),
             keyEquivalent: "["
         )
@@ -11878,7 +11877,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         previousTabItem.target = self
         goMenu.addItem(previousTabItem)
         let nextTabItem = NSMenuItem(
-            title: "Next Tab",
+            title: localized("app.menu.next.tab"),
             action: #selector(selectNextTab(_:)),
             keyEquivalent: "]"
         )
@@ -11887,7 +11886,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         goMenu.addItem(nextTabItem)
         goMenu.addItem(.separator())
         let previousCandidate = NSMenuItem(
-            title: "Previous Context Candidate",
+            title: localized("app.menu.previous.context.candidate"),
             action: #selector(previousContextCandidate(_:)),
             keyEquivalent: "\u{F702}"
         )
@@ -11895,7 +11894,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         previousCandidate.target = self
         goMenu.addItem(previousCandidate)
         let nextCandidate = NSMenuItem(
-            title: "Next Context Candidate",
+            title: localized("app.menu.next.context.candidate"),
             action: #selector(nextContextCandidate(_:)),
             keyEquivalent: "\u{F703}"
         )
@@ -11904,7 +11903,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         goMenu.addItem(nextCandidate)
         goMenu.addItem(.separator())
         let previousHunk = NSMenuItem(
-            title: "Previous Diff Hunk",
+            title: localized("app.menu.previous.diff.hunk"),
             action: #selector(previousDiffHunk(_:)),
             keyEquivalent: "\u{F700}"
         )
@@ -11912,7 +11911,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         previousHunk.target = self
         goMenu.addItem(previousHunk)
         let nextHunk = NSMenuItem(
-            title: "Next Diff Hunk",
+            title: localized("app.menu.next.diff.hunk"),
             action: #selector(nextDiffHunk(_:)),
             keyEquivalent: "\u{F701}"
         )
@@ -11923,14 +11922,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         mainMenu.addItem(goItem)
 
         let viewItem = NSMenuItem()
-        let viewMenu = NSMenu(title: "View")
-        let presetItem = NSMenuItem(title: "Preset", action: nil, keyEquivalent: "")
-        let presetMenu = NSMenu(title: "Preset")
+        let viewMenu = NSMenu(title: localized("app.menu.view"))
+        let presetItem = NSMenuItem(title: localized("app.menu.preset"), action: nil, keyEquivalent: "")
+        let presetMenu = NSMenu(title: localized("app.menu.preset"))
         let presets: [(PanelPresetModel, String, String)] = [
-            (.reading, "Reading", "1"),
-            (.relations, "Relations", "2"),
-            (.compare, "Compare", "3"),
-            (.focus, "Focus", "4"),
+            (.reading, localized("app.menu.reading"), "1"),
+            (.relations, localized("app.menu.relations"), "2"),
+            (.compare, localized("app.menu.compare"), "3"),
+            (.focus, localized("app.menu.focus"), "4"),
         ]
         for (preset, title, key) in presets {
             let item = NSMenuItem(
@@ -11946,7 +11945,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
         let closeComparisonItem = NSMenuItem(
-            title: "Close Comparison",
+            title: localized("app.menu.close.comparison"),
             action: #selector(closeComparison(_:)),
             keyEquivalent: "w"
         )
@@ -11955,13 +11954,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         viewMenu.addItem(closeComparisonItem)
         viewMenu.addItem(.separator())
         let foldingItem = NSMenuItem(
-            title: "Folding",
+            title: localized("app.menu.folding"),
             action: nil,
             keyEquivalent: ""
         )
-        let foldingMenu = NSMenu(title: "Folding")
+        let foldingMenu = NSMenu(title: localized("app.menu.folding"))
         let toggleFoldItem = NSMenuItem(
-            title: "Toggle Fold",
+            title: localized("app.menu.toggle.fold"),
             action: #selector(toggleFold(_:)),
             keyEquivalent: "["
         )
@@ -11971,9 +11970,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         toggleFoldItem.target = self
         foldingMenu.addItem(toggleFoldItem)
         let levels: [(String, Selector, String)] = [
-            ("Full", #selector(useFullReadingHeight(_:)), "0"),
-            ("Structure", #selector(useStructureReadingHeight(_:)), "1"),
-            ("Overview", #selector(useOverviewReadingHeight(_:)), "2"),
+            (localized("app.menu.full"), #selector(useFullReadingHeight(_:)), "0"),
+            (localized("app.menu.structure"), #selector(useStructureReadingHeight(_:)), "1"),
+            (localized("app.menu.overview"), #selector(useOverviewReadingHeight(_:)), "2"),
         ]
         for (title, action, key) in levels {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
@@ -11983,7 +11982,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
         foldingMenu.addItem(.separator())
         let focusItem = NSMenuItem(
-            title: "Focus Current Scope",
+            title: localized("app.menu.focus.current.scope"),
             action: #selector(focusCurrentScope(_:)),
             keyEquivalent: "f"
         )
@@ -11994,7 +11993,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
         let toggleBookmarkItem = NSMenuItem(
-            title: "Toggle Bookmark",
+            title: localized("app.menu.toggle.bookmark"),
             action: #selector(toggleBookmark(_:)),
             keyEquivalent: "m"
         )
@@ -12002,7 +12001,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         toggleBookmarkItem.target = self
         viewMenu.addItem(toggleBookmarkItem)
         let showBookmarksItem = NSMenuItem(
-            title: "Show Bookmarks",
+            title: localized("app.menu.show.bookmarks"),
             action: #selector(showBookmarks(_:)),
             keyEquivalent: "b"
         )
@@ -12010,7 +12009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         showBookmarksItem.target = self
         viewMenu.addItem(showBookmarksItem)
         let closeBookmarksItem = NSMenuItem(
-            title: "Hide Bookmarks",
+            title: localized("app.menu.hide.bookmarks"),
             action: #selector(closeBookmarks(_:)),
             keyEquivalent: ""
         )
@@ -12018,7 +12017,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         viewMenu.addItem(closeBookmarksItem)
         viewMenu.addItem(.separator())
         let increaseFontItem = NSMenuItem(
-            title: "Increase Font Size",
+            title: localized("app.menu.increase.font.size"),
             action: #selector(increaseReaderFontSize(_:)),
             keyEquivalent: "+"
         )
@@ -12026,7 +12025,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         increaseFontItem.target = self
         viewMenu.addItem(increaseFontItem)
         let decreaseFontItem = NSMenuItem(
-            title: "Decrease Font Size",
+            title: localized("app.menu.decrease.font.size"),
             action: #selector(decreaseReaderFontSize(_:)),
             keyEquivalent: "-"
         )
@@ -12034,7 +12033,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         decreaseFontItem.target = self
         viewMenu.addItem(decreaseFontItem)
         let wrapLinesItem = NSMenuItem(
-            title: "Wrap Lines",
+            title: localized("app.menu.wrap.lines"),
             action: #selector(toggleWrapLines(_:)),
             keyEquivalent: "z"
         )
@@ -12044,7 +12043,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         viewMenu.addItem(wrapLinesItem)
         viewMenu.addItem(.separator())
         let trailItem = NSMenuItem(
-            title: "Show Reading Trail",
+            title: localized("app.menu.show.reading.trail"),
             action: #selector(showReadingTrail(_:)),
             keyEquivalent: "t"
         )
@@ -12055,9 +12054,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         mainMenu.addItem(viewItem)
 
         let relationsItem = NSMenuItem()
-        let relationsMenu = NSMenu(title: "Relations")
+        let relationsMenu = NSMenu(title: localized("app.menu.relations"))
         let toggleItem = NSMenuItem(
-            title: "Show/Hide Relations",
+            title: localized("app.menu.show.hide.relations"),
             action: #selector(toggleRelations(_:)),
             keyEquivalent: "r"
         )
@@ -12066,7 +12065,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         relationsMenu.addItem(toggleItem)
         relationsMenu.addItem(.separator())
         let callersItem = NSMenuItem(
-            title: "Show Callers",
+            title: localized("app.menu.show.callers"),
             action: #selector(showCallers(_:)),
             keyEquivalent: "h"
         )
@@ -12074,14 +12073,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         callersItem.target = self
         relationsMenu.addItem(callersItem)
         let callsItem = NSMenuItem(
-            title: "Show Calls",
+            title: localized("app.menu.show.calls"),
             action: #selector(showCalls(_:)),
             keyEquivalent: ""
         )
         callsItem.target = self
         relationsMenu.addItem(callsItem)
         let implementationsItem = NSMenuItem(
-            title: "Show Implementations",
+            title: localized("app.menu.show.implementations"),
             action: #selector(showImplementations(_:)),
             keyEquivalent: ""
         )
@@ -12089,7 +12088,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         relationsMenu.addItem(implementationsItem)
         relationsMenu.addItem(.separator())
         let inspectorItem = NSMenuItem(
-            title: "Show Resolution Inspector",
+            title: localized("app.menu.show.resolution.inspector"),
             action: #selector(showResolutionInspector(_:)),
             keyEquivalent: "i"
         )
@@ -12112,7 +12111,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     private func makeWindowMenu() -> NSMenu {
-        let windowMenu = NSMenu(title: "Window")
+        let windowMenu = NSMenu(title: localized("app.menu.window"))
         windowMenu.autoenablesItems = true
         return windowMenu
     }

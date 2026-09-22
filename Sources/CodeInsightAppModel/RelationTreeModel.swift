@@ -36,8 +36,33 @@ public final class RelationTreeModel {
             case error
         }
 
+        package enum CandidateGroup: Hashable { case possible, corrected }
+
+        package var candidateGroup: CandidateGroup?
+        package var isVerificationStatus = false
+        package var isUpstreamTruncation = false
+        package var certainty: Certainty? { loadedEdge?.certainty }
+        package var isCorrectedCandidate: Bool { loadedEdge?.isCorrectedCandidate == true }
+
+        package var dependencyModifier: String? {
+            modifiers.first { $0 == localized("model.relation.dependency") }
+        }
+        package var nameOnlyModifier: String? {
+            modifiers.first { $0 == localized("model.relation.nameOnly") }
+        }
+        package var correctedModifier: String? {
+            let count = loadedEdge?.explanation?.reconciliationRefs.filter {
+                if case .correctedCandidate = $0.role { return true }
+                return false
+            }.count ?? 0
+            return modifiers.first {
+                $0 == localized("model.relation.corrected")
+                    || $0 == localizedFormat("model.relation.correctedCount", count)
+            }
+        }
+
         public let kind: Kind
-        public fileprivate(set) var title: String
+        public internal(set) var title: String
         public fileprivate(set) var subtitle: String?
         public fileprivate(set) var badge: String?
         public fileprivate(set) var dispatchLabel: String?
@@ -297,7 +322,7 @@ public final class RelationTreeModel {
         case .indexing:
             session = nil
             context = nil
-            root = Node(kind: .loading, title: "Index building…")
+            root = Node(kind: .loading, title: localized("model.relation.indexing"))
         case .empty, .failed:
             session = nil
             context = nil
@@ -347,7 +372,7 @@ public final class RelationTreeModel {
             let node = Node(
                 kind: .root,
                 title: title,
-                subtitle: binding.kind == .param ? "Parameter" : "Local",
+                subtitle: binding.kind == .param ? localized("model.relation.parameter") : localized("model.relation.local"),
                 target: (path, binding.declarationRange.lowerBound),
                 line: coordinate.line,
                 children: [],
@@ -414,7 +439,7 @@ public final class RelationTreeModel {
         under parent: Node,
         document: ReaderDocument
     ) -> [Node] {
-        let label = bindingKind == .param ? "Parameter reference" : "Local reference"
+        let label = bindingKind == .param ? localized("model.relation.parameterReference") : localized("model.relation.localReference")
         let rows = references.prefix(500).compactMap { range -> Node? in
             guard let coordinate = document.lineTable.lineColumn(at: range.lowerBound)
             else { return nil }
@@ -423,7 +448,7 @@ public final class RelationTreeModel {
                 title: "\(URL(fileURLWithPath: path).lastPathComponent):"
                     + "\(coordinate.line):\(coordinate.column)",
                 subtitle: label,
-                badge: "Inferred",
+                badge: localized("model.relation.inferred"),
                 target: (path, range.lowerBound),
                 line: coordinate.line,
                 children: [],
@@ -437,7 +462,7 @@ public final class RelationTreeModel {
         return rows + [
             Node(
                 kind: .truncated,
-                title: "Showing first 500 of \(references.count) references",
+                title: localizedFormat("model.relation.referencesTruncated", references.count),
                 parent: parent
             ),
         ]
@@ -521,7 +546,7 @@ public final class RelationTreeModel {
             combined += promoted.edges.dropFirst(rows.count)
             let wasTruncated = container.children?.contains {
                 $0.kind == .truncated
-                    && $0.title == "Results truncated upstream"
+                    && $0.isUpstreamTruncation
             } == true
             let children = makeChildren(
                 from: LoadResult(
@@ -621,7 +646,7 @@ public final class RelationTreeModel {
         let currentRequestID = requestID
         let currentGeneration = generation
         node.loadRequestID = currentRequestID
-        node.children = [Node(kind: .loading, title: "Loading…", parent: node)]
+        node.children = [Node(kind: .loading, title: localized("model.relation.loading"), parent: node)]
 
         let loader = self.loader
         let exactRelationsResolver = self.exactRelationsResolver
@@ -781,13 +806,11 @@ public final class RelationTreeModel {
                         children.removeAll {
                             ($0.kind == .group && $0.children?.isEmpty == true)
                                 || ($0.kind == .truncated
-                                    && ($0.title.hasPrefix("Verified ")
-                                        || $0.title.hasPrefix("No verified ")
-                                        || $0.title.hasPrefix("Analysis limited:")))
+                                    && $0.isVerificationStatus)
                         }
                         children.append(Node(
                             kind: .loading,
-                            title: "Loading…",
+                            title: localized("model.relation.loading"),
                             parent: node
                         ))
                     }
@@ -812,7 +835,7 @@ public final class RelationTreeModel {
                 node.children = [
                     Node(
                         kind: .error,
-                        title: "Could not load relations.",
+                        title: localized("model.relation.error"),
                         parent: node
                     ),
                 ] + evidenceNodes(node.evidence, parent: node)
@@ -1271,11 +1294,12 @@ public final class RelationTreeModel {
         if !possible.isEmpty {
             let group = Node(
                 kind: .group,
-                title: "Show \(possible.count) possible matches",
+                title: localizedFormat("model.relation.possible", possible.count),
                 children: [],
                 isExpandable: true,
                 parent: parent
             )
+            group.candidateGroup = .possible
             group.children = makeRows(
                 possible,
                 under: group,
@@ -1286,11 +1310,12 @@ public final class RelationTreeModel {
         if !corrected.isEmpty {
             let group = Node(
                 kind: .group,
-                title: "Show corrected candidates (\(corrected.count))",
+                title: localizedFormat("model.relation.correctedCandidates", corrected.count),
                 children: [],
                 isExpandable: true,
                 parent: parent
             )
+            group.candidateGroup = .corrected
             group.children = makeRows(
                 corrected,
                 under: group,
@@ -1304,23 +1329,23 @@ public final class RelationTreeModel {
                direction: direction
            )
         {
-            children.append(Node(kind: .truncated, title: title, parent: parent))
+            let status = Node(kind: .truncated, title: title, parent: parent)
+            status.isVerificationStatus = true
+            children.append(status)
         }
         if loaded.isTruncated || loaded.edges.count > 500 {
             let title = if direction == .references {
                 loaded.isTruncated
-                    ? "\(loaded.edges.count) verified references · partial"
-                    : "Showing first 500 of \(loaded.edges.count) references"
+                    ? localizedFormat("model.relation.partialReferences", loaded.edges.count)
+                    : localizedFormat("model.relation.referencesTruncated", loaded.edges.count)
             } else {
                 loaded.edges.count > 500
-                    ? "Showing first 500 of \(loaded.edges.count) relations"
-                    : "Results truncated upstream"
+                    ? localizedFormat("model.relation.relationsTruncated", loaded.edges.count)
+                    : localized("model.relation.truncated")
             }
-            children.append(Node(
-                kind: .truncated,
-                title: title,
-                parent: parent
-            ))
+            let truncation = Node(kind: .truncated, title: title, parent: parent)
+            truncation.isUpstreamTruncation = loaded.isTruncated
+            children.append(truncation)
         }
         children += evidenceNodes(parent.evidence, parent: parent)
         return children
@@ -1334,34 +1359,34 @@ public final class RelationTreeModel {
             if !environment.limitations.isEmpty {
                 let limitations = environment.limitations
                     .sorted { $0.rawValue < $1.rawValue }
-                    .map(\.displayName)
+                    .map(localizedLimitation)
                     .joined(separator: "; ")
-                return "Analysis limited: \(limitations)"
+                return localizedFormat("model.relation.limited", limitations)
             }
             return switch direction {
-            case .callers: "No verified callers"
-            case .calls: "No verified calls"
-            case .implementations: "No verified implementations"
-            case .references: "No verified references"
+            case .callers: localized("model.relation.noCallers")
+            case .calls: localized("model.relation.noCalls")
+            case .implementations: localized("model.relation.noImplementations")
+            case .references: localized("model.relation.noReferences")
             }
         }
         return switch (state, direction) {
         case (.unsupported, .callers), (.unsupported, .calls):
-            "Verified unavailable: server does not support call hierarchy"
+            localized("model.relation.unsupportedCalls")
         case (.notApplicable, .callers), (.notApplicable, .calls):
-            "Verified unavailable here: not a callable symbol"
+            localized("model.relation.notCallable")
         case (.unsupported, .implementations):
-            "Verified unavailable: server does not support implementations"
+            localized("model.relation.unsupportedImplementations")
         case (.notApplicable, .implementations):
-            "Verified unavailable here: implementations not applicable"
+            localized("model.relation.notImplementable")
         case (.unsupported, .references):
-            "Verified unavailable: server does not support references"
+            localized("model.relation.unsupportedReferences")
         case (.notApplicable, .references):
-            "Verified unavailable here: references not applicable"
+            localized("model.relation.notReferenceable")
         case (.legacy, .references):
-            "Verified unavailable: no exact provider session"
+            localized("model.relation.noProvider")
         case (.legacy, _):
-            "Verified unavailable: no exact provider session"
+            localized("model.relation.noProvider")
         case (.queried, _):
             nil
         }
@@ -1394,7 +1419,7 @@ public final class RelationTreeModel {
 
         var currentRows: [CycleKey: Node] = [:]
         var currentTopLevelKeys: Set<CycleKey> = []
-        var currentGroupRowKeys: [String: Set<CycleKey>] = [:]
+        var currentGroupRowKeys: [Node.CandidateGroup?: Set<CycleKey>] = [:]
         for child in children {
             if child.kind == .edge, let key = child.cycleKey {
                 currentRows[key] = child
@@ -1404,7 +1429,7 @@ public final class RelationTreeModel {
                 for row in child.children ?? [] where row.kind == .edge {
                     if let key = row.cycleKey {
                         currentRows[key] = row
-                        currentGroupRowKeys[Self.stableGroupName(child.title), default: []]
+                        currentGroupRowKeys[child.candidateGroup, default: []]
                             .insert(key)
                     }
                 }
@@ -1424,7 +1449,7 @@ public final class RelationTreeModel {
                 result.append(item)
                 continue
             }
-            let previousGroup = Self.stableGroupName(item.title)
+            let previousGroup = item.candidateGroup
             item.children = item.children?.compactMap { previous in
                 guard let key = previous.cycleKey,
                       let current = currentRows[key],
@@ -1435,10 +1460,10 @@ public final class RelationTreeModel {
                 return previous
             }
             item.isExpandable = item.children?.isEmpty == false
-            if item.title.hasPrefix("Show corrected candidates") {
-                item.title = "Show corrected candidates (\(item.children?.count ?? 0))"
-            } else if item.title.hasPrefix("Show ") {
-                item.title = "Show \(item.children?.count ?? 0) possible matches"
+            if item.candidateGroup == .corrected {
+                item.title = localizedFormat("model.relation.correctedCandidates", item.children?.count ?? 0)
+            } else if item.candidateGroup == .possible {
+                item.title = localizedFormat("model.relation.possible", item.children?.count ?? 0)
             }
             if item.children?.isEmpty == false { result.append(item) }
         }
@@ -1477,16 +1502,16 @@ public final class RelationTreeModel {
                 guard child.children?.isEmpty == false else { continue }
                 if let existing = result.first(where: {
                     $0.kind == .group
-                        && Self.stableGroupName($0.title)
-                            == Self.stableGroupName(child.title)
+                        && $0.candidateGroup
+                            == child.candidateGroup
                 }) {
                     existing.children?.append(contentsOf: child.children ?? [])
                     existing.children?.forEach { $0.parent = existing }
-                    if existing.title.hasPrefix("Show corrected candidates") {
-                        existing.title = "Show corrected candidates (\(existing.children?.count ?? 0))"
-                    } else if existing.title.hasPrefix("Show ") {
+                    if existing.candidateGroup == .corrected {
+                        existing.title = localizedFormat("model.relation.correctedCandidates", existing.children?.count ?? 0)
+                    } else if existing.candidateGroup == .possible {
                         existing.title =
-                            "Show \(existing.children?.count ?? 0) possible matches"
+                            localizedFormat("model.relation.possible", existing.children?.count ?? 0)
                     }
                 } else {
                     result.append(child)
@@ -1501,7 +1526,7 @@ public final class RelationTreeModel {
         if !isFinalBatch {
             result.append(Node(
                 kind: .loading,
-                title: "Loading…",
+                title: localized("model.relation.loading"),
                 parent: previousPublished[0].parent
             ))
         }
@@ -1531,7 +1556,7 @@ public final class RelationTreeModel {
         )
         let previousGroups = Dictionary(
             previous.filter { $0.kind == .group }.map {
-                (Self.stableGroupName($0.title), $0)
+                ($0.candidateGroup, $0)
             },
             uniquingKeysWith: { first, _ in first }
         )
@@ -1544,7 +1569,7 @@ public final class RelationTreeModel {
                 return old
             }
             guard child.kind == .group else { return child }
-            let group = previousGroups[Self.stableGroupName(child.title)] ?? child
+            let group = previousGroups[child.candidateGroup] ?? child
             group.title = child.title
             group.isExpandable = child.isExpandable
             group.parent = parent
@@ -1591,11 +1616,6 @@ public final class RelationTreeModel {
         }
     }
 
-    private nonisolated static func stableGroupName(_ title: String) -> String {
-        if title.hasPrefix("Show corrected candidates") { return "Corrected" }
-        return title.hasPrefix("Show ") ? "Possible" : title
-    }
-
     private func makeRows(
         _ edges: [LoadedEdge],
         under parent: Node,
@@ -1614,15 +1634,15 @@ public final class RelationTreeModel {
                 byteOffset: edge.identityTarget?.byteOffset ?? edge.byteOffset
             )
             let badge: String? = switch edge.certainty {
-            case .exact: "Verified"
-            case .unresolved: "Unresolved"
-            case .strong, .probable, .possible: "Inferred"
+            case .exact: localized("model.relation.verified")
+            case .unresolved: localized("model.relation.unresolved")
+            case .strong, .probable, .possible: localized("model.relation.inferred")
             }
             let dispatchLabel = edge.certainty == .unresolved ? nil
                 : resolutionDispatchLabel(edge.dispatch)
             var modifiers: [String] = []
             if edge.certainty == .unresolved, edge.exactOrigin != nil {
-                modifiers.append("External · in dependency (exact provider)")
+                modifiers.append(localized("model.relation.external"))
             }
             if direction == .calls,
                edge.certainty == .probable || edge.certainty == .possible,
@@ -1632,29 +1652,28 @@ public final class RelationTreeModel {
                    return false
                })
             {
-                modifiers.append("name match only")
+                modifiers.append(localized("model.relation.nameOnly"))
             }
             if edge.exactOrigin != nil,
                (edge.identityTarget?.file ?? edge.path).hasPrefix("/")
             {
-                modifiers.append("dependency")
+                modifiers.append(localized("model.relation.dependency"))
             }
             if case .corroborated = edge.explanation?.primaryTrace {
-                modifiers.append("heuristic also matched")
+                modifiers.append(localized("model.relation.heuristic"))
             }
             let correctedCount = edge.explanation?.reconciliationRefs.filter {
                 if case .correctedCandidate = $0.role { return true }
                 return false
             }.count ?? 0
             if edge.certainty == .exact, correctedCount > 0 {
-                modifiers.append("corrected \(correctedCount)")
+                modifiers.append(localizedFormat("model.relation.correctedCount", correctedCount))
             }
             if edge.isCorrectedCandidate {
-                modifiers.append("Conflict/Corrected")
+                modifiers.append(localized("model.relation.corrected"))
             }
             if !edge.callSites.isEmpty {
-                modifiers.append("\(edge.callSites.count) call "
-                    + (edge.callSites.count == 1 ? "site" : "sites"))
+                modifiers.append(localizedFormat("model.relation.callSites", edge.callSites.count))
             }
             let subtitle = ([dispatchLabel] + modifiers).compactMap { $0 }
                 .joined(separator: " · ")
@@ -2198,12 +2217,12 @@ public final class RelationTreeModel {
         _ evidence: ResolutionEvidence
     ) -> String {
         switch evidence {
-        case .sameFile: "same file"
-        case .uniqueImport: "via import"
-        case .lexicalBinding: "lexical binding"
-        case .nameOnly: "name match"
-        case .methodNameOnly: "method name match"
-        case .receiverType: "receiver type"
+        case .sameFile: localized("model.relation.sameFile")
+        case .uniqueImport: localized("model.relation.import")
+        case .lexicalBinding: localized("model.relation.lexical")
+        case .nameOnly: localized("model.relation.nameMatch")
+        case .methodNameOnly: localized("model.relation.methodMatch")
+        case .receiverType: localized("model.relation.receiverType")
         }
     }
 

@@ -1967,7 +1967,7 @@ func findKeepsHiddenMatchesInTheLogicalCountAndRevealsTheirFoldChain() throws {
     #expect(reader.occurrenceCount == 1)
     #expect(
         reader.foldExposureTextForTesting(regions.container.id)
-            == " · 1 matches"
+            == " · 1 match"
     )
     #expect(reader.revealFindMatch(at: 0))
     #expect(!reader.logicalFoldIDsForTesting.contains(regions.container.id))

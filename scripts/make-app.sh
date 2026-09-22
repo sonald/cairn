@@ -113,6 +113,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$SOURCE_BINARY" "$APP/Contents/MacOS/codeinsight-app"
 chmod 755 "$APP/Contents/MacOS/codeinsight-app"
 cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
+# SwiftPM resources must travel with the app, before signing it.
+for target in CodeInsightApp CodeInsightAppModel CodeInsightReaderUI; do
+    resource_bundle="$BIN_DIR/CodeInsight_${target}.bundle"
+    test -d "$resource_bundle"
+    cp -R "$resource_bundle" "$APP/Contents/Resources/"
+done
 
 bundle_homebrew_dylibs() {
     local main_binary="$1"
@@ -158,6 +164,10 @@ cat > "$APP/Contents/Info.plist" <<EOF
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array><string>en</string><string>zh-Hans</string></array>
     <key>CFBundleName</key>
     <string>Cairn</string>
     <key>CFBundleDisplayName</key>

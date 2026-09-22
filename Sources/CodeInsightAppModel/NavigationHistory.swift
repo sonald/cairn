@@ -252,81 +252,84 @@ public func narrativeClauses(
     return clauses
 }
 
-public func renderEnglish(_ clause: NarrativeClause) -> String {
+public func renderLocalized(_ clause: NarrativeClause) -> String {
+    renderLocalized(clause, language: nil)
+}
+
+package func renderLocalized(_ clause: NarrativeClause, language: String?) -> String {
     switch clause {
     case .sourceEvidence(let evidence):
         return evidence.map { item in
             switch item {
-            case .lexicalBinding: "Matched a lexical binding."
-            case .uniqueImport: "Matched an import binding with no competing source match."
-            case .sameFile: "Matched a declaration in the same file."
-            case .nameOnly: "Matched by name only."
-            case .methodNameOnly: "Matched by method name only."
-            case .receiverType: "Receiver type narrowed the candidate."
+            case .lexicalBinding: localized("model.narrative.lexical", language: language)
+            case .uniqueImport: localized("model.narrative.import", language: language)
+            case .sameFile: localized("model.narrative.sameFile", language: language)
+            case .nameOnly: localized("model.narrative.name", language: language)
+            case .methodNameOnly: localized("model.narrative.method", language: language)
+            case .receiverType: localized("model.narrative.receiver", language: language)
             }
         }.joined(separator: " ")
     case .candidateCompleteness(let completeness):
-        return "Candidate generation was \(completenessEnglish(completeness))."
+        return localizedFormat("model.narrative.completeness", language: language, completenessLabel(completeness, language: language))
     case .candidateRelationSet(let observation):
         let count = observation.returnedCount
-        let noun = count == 1 ? "result" : "results"
         switch observation.completeness {
         case .complete:
-            return "The source relation result set was complete with \(count) \(noun)."
+            return localizedFormat("model.narrative.completeResults", language: language, count)
         case .partial:
-            return "The source relation result set was partial with \(count) \(noun) returned."
+            return localizedFormat("model.narrative.partialResults", language: language, count)
         case .truncated:
             if let total = observation.totalCount {
-                return "The source relation result set was truncated after \(count) of about \(total) results."
+                return localizedFormat("model.narrative.truncatedTotal", language: language, count, total)
             }
-            return "The source relation result set was truncated after \(count) \(noun)."
+            return localizedFormat("model.narrative.truncatedResults", language: language, count)
         case .unknown:
-            return "The source relation result set completeness is unknown; \(count) \(noun) were returned."
+            return localizedFormat("model.narrative.unknownResults", language: language, count)
         }
     case .verified(let origin):
-        return "The exact provider returned this target from \(originEnglish(origin))."
+        return localizedFormat("model.narrative.verified", language: language, originLabel(origin, language: language))
     case .corroborated:
-        return "The source candidate and exact provider target were corroborated."
+        return localized("model.narrative.corroborated", language: language)
     case .exactNotStarted:
-        return "Exact verification was not attempted."
+        return localized("model.narrative.notStarted", language: language)
     case .exactPending:
-        return "Exact verification is in progress."
+        return localized("model.narrative.pending", language: language)
     case .notCorroborated(let exhaustiveness, let origin):
-        return "The \(exhaustivenessEnglish(exhaustiveness)) \(originEnglish(origin)) relation query did not corroborate this candidate; absence is not established."
+        return localizedFormat("model.narrative.notCorroborated", language: language, exhaustivenessLabel(exhaustiveness, language: language), originLabel(origin, language: language))
     case .exactUnsupported:
-        return "The provider does not support this exact relation query."
+        return localized("model.narrative.unsupported", language: language)
     case .exactNotApplicable:
-        return "The exact relation query does not apply to this root."
+        return localized("model.narrative.notApplicable", language: language)
     case .conflict:
-        return "The exact provider returned a different target; this earlier candidate remains in the correction trail."
+        return localized("model.narrative.conflict", language: language)
     case .inconclusive:
-        return "The source candidate and exact provider target could not be compared reliably."
+        return localized("model.narrative.inconclusive", language: language)
     }
 }
 
-private func completenessEnglish(_ completeness: Completeness) -> String {
+private func completenessLabel(_ completeness: Completeness, language: String?) -> String {
     switch completeness {
-    case .complete: "complete"
-    case .partial: "partial"
-    case .truncated: "truncated"
-    case .unknown: "of unknown completeness"
+    case .complete: localized("model.narrative.complete", language: language)
+    case .partial: localized("model.narrative.partial", language: language)
+    case .truncated: localized("model.narrative.truncated", language: language)
+    case .unknown: localized("model.narrative.unknown", language: language)
     }
 }
 
-private func exhaustivenessEnglish(
-    _ exhaustiveness: QueryExhaustiveness
+private func exhaustivenessLabel(
+    _ exhaustiveness: QueryExhaustiveness, language: String?
 ) -> String {
     switch exhaustiveness {
-    case .guaranteed: "exhaustive"
-    case .bestEffort: "best-effort"
-    case .unknown: "unknown-exhaustiveness"
+    case .guaranteed: localized("model.narrative.exhaustive", language: language)
+    case .bestEffort: localized("model.narrative.bestEffort", language: language)
+    case .unknown: localized("model.narrative.unknownExhaustiveness", language: language)
     }
 }
 
-private func originEnglish(_ origin: ExactOrigin) -> String {
+private func originLabel(_ origin: ExactOrigin, language: String?) -> String {
     switch origin {
-    case .worktree: "worktree"
-    case .materialized(let commitOID): "materialized commit \(commitOID)"
+    case .worktree: localized("model.narrative.worktree", language: language)
+    case .materialized(let commitOID): localizedFormat("model.narrative.materialized", language: language, commitOID)
     }
 }
 

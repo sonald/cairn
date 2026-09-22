@@ -52,10 +52,10 @@ func relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() t
         .first { $0.isVertical && $0.subviews.count == 2 })
     let close = try #require(inspectorGeometryViews(in: controller.view)
         .compactMap { $0 as? NSButton }
-        .first { $0.accessibilityLabel() == "Close Resolution Inspector" })
+        .first { $0.accessibilityLabel() == CodeInsightApp.localized("relation.inspector.close") })
 
     #expect(controller.selfTestInspectorIsFrozen)
-    #expect(controller.selfTestInspectorText.contains("AT CAPTURE"))
+    #expect(controller.selfTestInspectorText.contains(CodeInsightApp.localized("relation.capture")))
     #expect(controller.selfTestInspectorText.contains(display.sourceBody))
     let capturedText = controller.selfTestInspectorText
 

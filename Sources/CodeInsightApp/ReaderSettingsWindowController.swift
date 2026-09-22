@@ -37,7 +37,7 @@ enum MaterializedCacheClearOutcome: Equatable {
 
     var message: String? {
         switch self {
-        case .cleared: "Materialized cache cleared."
+        case .cleared: localized("settings.cache.cleared")
         case .failed(let reason): reason
         }
     }
@@ -75,7 +75,7 @@ final class ReaderSettingsWindowController: NSWindowController {
             )
         )
         let window = NSWindow(contentViewController: hostingController)
-        window.title = "Settings"
+        window.title = localized("settings.title")
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         super.init(window: window)
@@ -148,7 +148,7 @@ final class ReaderSettingsWindowController: NSWindowController {
         let elements = selfTestReaderAccessibilityElements
         let visualSliders = elements.filter {
             $0.accessibilityRole?() == .slider
-                && $0.accessibilityLabel?() != "Line height"
+                && $0.accessibilityLabel?() != localized("settings.lineHeight")
         }
         let controlRoles: Set<NSAccessibility.Role> = [
             .slider, .button, .checkBox, .radioButton, .popUpButton, .incrementor, .textField,
@@ -196,8 +196,14 @@ final class ReaderSettingsWindowController: NSWindowController {
 
     @discardableResult
     func selfTestPressReaderControl(_ label: String) -> Bool {
-        selfTestReaderAccessibilityElements.filter {
-            $0.accessibilityLabel?() == label || $0.accessibilityTitle?() == label
+        let identifier = switch label {
+        case "Advanced typography": "advancedTypography"
+        case "Restore Reader Defaults": "restoreReaderDefaults"
+        default: label
+        }
+        return selfTestReaderAccessibilityElements.filter {
+            $0.accessibilityIdentifier?() == identifier
+                || $0.accessibilityLabel?() == label || $0.accessibilityTitle?() == label
         }.contains { $0.accessibilityPerformPress?() ?? false }
     }
 }
@@ -214,7 +220,7 @@ private struct SettingsView: View {
     var body: some View {
         TabView {
             ReaderSettingsView(settings: settings, onChange: onChange)
-                .tabItem { Label("Reader", systemImage: "textformat") }
+                .tabItem { Label(localized("settings.reader"), systemImage: "textformat") }
             VStack(spacing: 12) {
                 TrustSettingsView(
                     trustModel: trustModel,
@@ -222,33 +228,33 @@ private struct SettingsView: View {
                 )
                 Divider()
                 HStack {
-                    Text(cacheMessage ?? "Historical Exact snapshots use a 2 GB cache.")
+                    Text(cacheMessage ?? localized("settings.cache.description"))
                         .foregroundStyle(.secondary)
                     Spacer()
-                    Button("Clear Materialized Cache") {
+                    Button(localized("settings.cache.clear")) {
                         confirmsCacheClear = true
                     }
                     .confirmationDialog(
-                        "Clear Materialized Cache?",
+                        localized("settings.cache.confirm"),
                         isPresented: $confirmsCacheClear,
                         titleVisibility: .visible
                     ) {
-                        Button("Clear", role: .destructive) {
+                        Button(localized("settings.clear"), role: .destructive) {
                             Task {
                                 // App-level clear: stops every project's
                                 // Exact work before deleting (§8.4).
                                 cacheMessage = await onClearCache().message
                             }
                         }
-                        Button("Cancel", role: .cancel) {}
+                        Button(localized("settings.cancel"), role: .cancel) {}
                     } message: {
                         Text(
-                            "Deletes all historical Exact snapshots. They will be rebuilt on demand."
+                            localized("settings.cache.warning")
                         )
                     }
                 }
             }
-            .tabItem { Label("Exact", systemImage: "checkmark.shield") }
+            .tabItem { Label(localized("settings.exact"), systemImage: "checkmark.shield") }
         }
         .padding()
         .frame(width: 600, height: 620)
@@ -274,61 +280,62 @@ private struct ReaderSettingsView: View {
         VStack(spacing: 12) {
             ScrollViewReader { proxy in
                 Form {
-                    Picker("Theme", selection: $settings.theme) {
+                    Picker(localized("settings.theme"), selection: $settings.theme) {
                         ForEach(ReaderSettings.Theme.allCases, id: \.self) { theme in
-                            Text(theme.rawValue).tag(theme)
+                            Text(localized("settings.theme.\(theme.rawValue)")).tag(theme)
                         }
                     }
                     Stepper(
-                        "Font size: \(settings.fontSize, specifier: "%.0f") pt",
+                        localizedFormat("settings.fontSize", settings.fontSize),
                         value: $settings.fontSize,
                         in: ReaderSettings.fontSizeRange,
                         step: 1
                     )
                     valueControl(
-                        "Line height",
+                        localized("settings.lineHeight"),
                         value: $settings.lineHeightMultiple,
                         range: ReaderSettings.lineHeightRange,
                         step: 0.05
                     )
-                    Toggle("Wrap lines", isOn: $settings.wrapLines)
-                    Toggle("Show line numbers", isOn: $settings.lineNumbers)
+                    Toggle(localized("settings.wrap"), isOn: $settings.wrapLines)
+                    Toggle(localized("settings.lineNumbers"), isOn: $settings.lineNumbers)
 
-                    DisclosureGroup("Advanced typography", isExpanded: $showsAdvancedTypography) {
+                    DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {
                         Stepper(
-                            "Function and type size: +\(settings.functionNameDelta, specifier: "%.0f") pt",
+                            localizedFormat("settings.functionSize", settings.functionNameDelta),
                             value: $settings.functionNameDelta,
                             in: ReaderSettings.functionNameDeltaRange,
                             step: 1
                         )
                         valueControl(
-                            "Parameter use opacity",
+                            localized("settings.parameterOpacity"),
                             value: $settings.parameterReferenceAlpha,
                             range: ReaderSettings.parameterReferenceAlphaRange,
                             step: 0.01
                         )
                         valueControl(
-                            "Gutter marker opacity",
+                            localized("settings.gutterOpacity"),
                             value: $settings.declarationMarkerAlpha,
                             range: ReaderSettings.declarationMarkerAlphaRange,
                             step: 0.01
                         )
                         valueControl(
-                            "Function and type weight",
+                            localized("settings.functionWeight"),
                             value: $settings.functionDeclarationFontWeight,
                             range: ReaderSettings.functionDeclarationFontWeightRange,
                             step: 0.05
                         )
                         valueControl(
-                            "Constant and module weight",
+                            localized("settings.constantWeight"),
                             value: $settings.declarationEmphasisFontWeight,
                             range: ReaderSettings.declarationEmphasisFontWeightRange,
                             step: 0.05
                         )
-                        Toggle("Syntax formatting", isOn: $settings.syntaxFormatting)
-                        Toggle("Proportional comment font", isOn: $settings.humanistComments)
+                        Toggle(localized("settings.syntax"), isOn: $settings.syntaxFormatting)
+                        Toggle(localized("settings.comments"), isOn: $settings.humanistComments)
                     }
-                    .accessibilityLabel("Advanced typography")
+                    .accessibilityIdentifier("advancedTypography")
+                    .accessibilityLabel(localized("settings.advanced"))
                     .accessibilityAction { showsAdvancedTypography.toggle() }
                     .id("advancedTypography")
                 }
@@ -339,9 +346,9 @@ private struct ReaderSettingsView: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 HStack {
-                    Text("Preview").font(.headline)
+                    Text(localized("settings.preview")).font(.headline)
                     Spacer()
-                    Text("Rust · updates as you change settings")
+                    Text(localized("settings.preview.hint"))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -351,7 +358,8 @@ private struct ReaderSettingsView: View {
             }
             HStack {
                 Spacer()
-                Button("Restore Reader Defaults") { settings = ReaderSettings() }
+                Button(localized("settings.restore")) { settings = ReaderSettings() }
+                    .accessibilityIdentifier("restoreReaderDefaults")
                     .disabled(settings == ReaderSettings())
             }
         }
@@ -427,7 +435,7 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
         hasHorizontalScroller = true
         autohidesScrollers = true
         documentView = reader.view
-        reader.view.setAccessibilityLabel("Reader settings preview")
+        reader.view.setAccessibilityLabel(localized("settings.preview.accessibility"))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
@@ -483,9 +491,9 @@ struct TrustSettingsView: View {
                     Image(systemName: "checkmark.shield")
                         .font(.system(size: 28))
                         .foregroundStyle(.secondary)
-                    Text("No Trusted Repositories")
+                    Text(localized("settings.trust.empty"))
                         .font(.headline)
-                    Text("Repositories you trust will appear here.")
+                    Text(localized("settings.trust.hint"))
                         .foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -502,18 +510,18 @@ struct TrustSettingsView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("Revoke") {
+                        Button(localized("settings.trust.revoke")) {
                             confirmRevokeRepository = repository
                         }
                         .confirmationDialog(
-                            "Revoke Trust?",
+                            localized("settings.trust.confirm"),
                             isPresented: Binding(
                                 get: { confirmRevokeRepository == repository },
                                 set: { if !$0 { confirmRevokeRepository = nil } }
                             ),
                             titleVisibility: .visible
                         ) {
-                            Button("Revoke", role: .destructive) {
+                            Button(localized("settings.trust.revoke"), role: .destructive) {
                                 Task {
                                     await onRevoke(URL(
                                         fileURLWithPath: repository.path,
@@ -521,10 +529,10 @@ struct TrustSettingsView: View {
                                     ))
                                 }
                             }
-                            Button("Cancel", role: .cancel) {}
+                            Button(localized("settings.cancel"), role: .cancel) {}
                         } message: {
                             Text(
-                                "Exact analysis will stop trusting \(repository.path)."
+                                localizedFormat("settings.trust.warning", repository.path)
                             )
                         }
                     }

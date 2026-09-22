@@ -53,9 +53,9 @@ struct RelationUXTests {
         fixture.controller.onOpenReadingSet = { captured = ($0, $1, $2) }
         let button = fixture.controller.selfTestReadingSetButtonState
 
-        #expect(button.0 == "Freeze Results")
+        #expect(button.0 == CodeInsightApp.localized("relation.freeze"))
         #expect(button.1)
-        #expect(button.2 == "Freeze Results as Reading Set")
+        #expect(button.2 == CodeInsightApp.localized("relation.freeze.title"))
         fixture.controller.selfTestOpenAsReadingSet()
         let result = try #require(captured)
         #expect(result.0 == "subject")
@@ -73,7 +73,7 @@ struct RelationUXTests {
         let display = try #require(result.1.first?.inspector)
         fixture.controller.showFrozenInspector(display)
         #expect(fixture.controller.selfTestInspectorIsFrozen)
-        #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
+        #expect(fixture.controller.selfTestInspectorText.contains(CodeInsightApp.localized("relation.capture")))
         #expect(fixture.controller.selfTestInspectorText.contains(display.nodeTitle))
         #expect(fixture.controller.selfTestInspectorText.contains(display.availabilityBody))
         #expect(fixture.controller.selfTestInspectorText.contains(display.environmentBody))
@@ -81,7 +81,7 @@ struct RelationUXTests {
             $0.localizedCaseInsensitiveContains("snapshot")
         })
         #expect(fixture.controller.selfTestInspectorAccessibility.0
-            == "Resolution Inspector for \(display.nodeTitle), at capture")
+            == CodeInsightApp.localizedFormat("relation.inspector.node.capture", display.nodeTitle))
 
         fixture.model.updateProjectState(.empty)
         await pumpRunLoop()
@@ -89,7 +89,7 @@ struct RelationUXTests {
         // not leave its inspector visible in the next project's window.
         #expect(!fixture.controller.selfTestInspectorIsFrozen)
         #expect(!fixture.controller.selfTestInspectorVisible)
-        #expect(fixture.controller.selfTestInspectorText.contains("AT CAPTURE"))
+        #expect(fixture.controller.selfTestInspectorText.contains(CodeInsightApp.localized("relation.capture")))
     }
 
     @MainActor
@@ -111,7 +111,7 @@ struct RelationUXTests {
             "first", "second", "possible2",
         ])
         #expect(result.2 == Array(
-            repeating: "display cap (50 excerpts)",
+            repeating: CodeInsightApp.localized("relation.skip.cap"),
             count: 5
         ))
     }
@@ -132,7 +132,7 @@ struct RelationUXTests {
         #expect(result.1.isEmpty)
         #expect(!result.2.isEmpty)
         #expect(result.2.allSatisfy {
-            $0 == "recorded source is unreadable"
+            $0 == CodeInsightApp.localized("relation.skip.source")
         })
     }
 
@@ -159,7 +159,7 @@ struct RelationUXTests {
         #expect(accessibility.value.contains("heuristic also matched"))
         #expect(
             fixture.controller.selfTestBadgeToolTip(titled: title)
-                == "Verified by exact provider"
+                == CodeInsightApp.localized("relation.badge.verified.hint")
         )
         #expect(accessibility.role != NSAccessibility.Role.textField.rawValue)
         #expect(accessibility.valueSettable == false)
@@ -190,17 +190,17 @@ struct RelationUXTests {
         let text = fixture.controller.selfTestInspectorText
         let accessibility = fixture.controller.selfTestInspectorAccessibility
         #expect(fixture.controller.selfTestInspectorVisible)
-        #expect(fixture.controller.selfTestInspectorButtonTitle == "Inspector")
+        #expect(fixture.controller.selfTestInspectorButtonTitle == CodeInsightApp.localized("relation.inspector"))
         #expect(opens == 0)
-        #expect(text.contains("SOURCE"))
+        #expect(text.contains(CodeInsightApp.localized("relation.inspector.source")))
         #expect(text.contains("VERIFICATION"))
-        #expect(text.contains("VERIFICATION AVAILABILITY"))
+        #expect(text.contains(CodeInsightApp.localized("relation.inspector.availability")))
         #expect(text.contains { $0.contains("Candidate generation was complete") })
         #expect(text.contains { $0.contains("The exact provider returned this target") })
         #expect(text.contains { $0.contains("Safe") })
         #expect(!fixture.controller.selfTestInspectorAuditVisible)
-        #expect(text.contains("Show full audit"))
-        #expect(accessibility.0 == "Resolution Inspector for first")
+        #expect(text.contains(CodeInsightApp.localized("relation.audit.show")))
+        #expect(accessibility.0 == CodeInsightApp.localizedFormat("relation.inspector.node", "first"))
         #expect(accessibility.1.contains("Verified"))
         #expect(accessibility.2 == NSAccessibility.Role.group.rawValue)
         #expect(accessibility.3 == false)
@@ -232,7 +232,7 @@ struct RelationUXTests {
 
         fixture.controller.selfTestToggleInspectorAudit()
         #expect(fixture.controller.selfTestInspectorAuditVisible)
-        #expect(fixture.controller.selfTestInspectorText.contains("Hide full audit"))
+        #expect(fixture.controller.selfTestInspectorText.contains(CodeInsightApp.localized("relation.audit.hide")))
         #expect(fixture.controller.selfTestInspectorText.contains("Source"))
         #expect(fixture.controller.selfTestInspectorText.contains("Content"))
         #expect(fixture.controller.selfTestInspectorText.contains("Captured at"))
@@ -269,10 +269,10 @@ struct RelationUXTests {
             "corrected candidates are published"
         ) {
             fixture.controller.selfTestCorrectedDisclosureDisplayText
-                == ["Show corrected candidates", "2"]
+                == [CodeInsightApp.localized("relation.corrected.show"), "2"]
         })
         #expect((fixture.model.root?.children ?? []).filter {
-            $0.kind == .group && $0.title.hasPrefix("Show ")
+            $0.kind == .group && $0.candidateGroup != nil
         }.count <= 2)
         var opens: [String] = []
         fixture.controller.onOpen = { opens.append($0.title) }
@@ -284,7 +284,7 @@ struct RelationUXTests {
             "VERIFICATION CONFLICT"
         ))
         #expect(fixture.controller.selfTestInspectorText.contains(
-            "Open former candidate"
+            CodeInsightApp.localized("relation.former.open")
         ))
         fixture.controller.selfTestOpenSelection()
         #expect(opens.isEmpty)
@@ -292,7 +292,7 @@ struct RelationUXTests {
         #expect(opens == ["first"])
 
         let provider = try #require(fixture.model.root?.children?.first {
-            $0.kind == .edge && $0.badge == "Verified"
+            $0.kind == .edge && $0.certainty == .exact
         })
         #expect(provider.modifiers.contains("corrected 2"))
         #expect(fixture.controller.selfTestClickBadge(titled: provider.title))
@@ -401,7 +401,7 @@ struct RelationUXTests {
         )
         #expect(
             fixture.controller.selfTestPossibleDisclosureDisplayText
-                == ["Show possible matches", "2"]
+                == [CodeInsightApp.localized("relation.possible.show"), "2"]
         )
         #expect(
             fixture.controller.selfTestVisibleEdgeTitles(inGroup: "Possible")
@@ -463,17 +463,17 @@ struct RelationUXTests {
         #expect(fixture.controller.selfTestExpandPossibleMatches())
         for _ in 0..<100 {
             if fixture.controller.selfTestCorrectedDisclosureDisplayText
-                == ["Show corrected candidates", "2"]
+                == [CodeInsightApp.localized("relation.corrected.show"), "2"]
             {
                 break
             }
             try? await Task.sleep(for: .milliseconds(10))
         }
         #expect(fixture.controller.selfTestCorrectedDisclosureDisplayText
-            == ["Show corrected candidates", "2"])
+            == [CodeInsightApp.localized("relation.corrected.show"), "2"])
         #expect(fixture.controller.selfTestPossibleDisclosureTitle == nil)
         #expect(relationEdges(in: fixture.model.root).filter {
-            $0.badge == "Verified"
+            $0.certainty == .exact
         }.count == 1)
     }
 
@@ -1013,7 +1013,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
     fixture.model.openReadingSet(
         title: "frozen target",
         excerpts: [],
-        skippedReasons: ["recorded source is unreadable"]
+        skippedReasons: [CodeInsightApp.localized("relation.skip.source")]
     )
     fixture.model.tabStrip.updateActiveReadingSetScroll(37)
     try fixture.model.writeSessionCheckpoint(panelPreset: .reading)
@@ -1029,7 +1029,7 @@ func sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() async throw
     }
     #expect(readingSet?.title == "frozen target")
     #expect(readingSet?.scrollOffset == 37)
-    #expect(readingSet?.skippedReasons == ["recorded source is unreadable"])
+    #expect(readingSet?.skippedReasons == [CodeInsightApp.localized("relation.skip.source")])
 
     fixture.controller.closeActiveTab()
     snapshot = try SessionCodec.decode(
@@ -1753,7 +1753,7 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
         try #require(relationTestViews(in: view).compactMap {
             $0 as? NSButton
         }.first {
-            $0.accessibilityLabel() == "Show Reading Trail branches"
+            $0.accessibilityLabel() == CodeInsightApp.localized("trail.branchesAX")
         })
     }
 
@@ -1784,7 +1784,7 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
     _ = trail.recordNavigation(from: root, to: b, cause: .relation)
     view.display(trail: trail, store: store)
     #expect(view.branchCount == 1)
-    #expect(try button().title == "Branches · 1")
+    #expect(try button().title == CodeInsightApp.localizedFormat("trail.branches", Int64(1)))
 
     trail.restore(aID)
     _ = trail.recordNavigation(from: a, to: c, cause: .relation)
@@ -1792,7 +1792,7 @@ func semanticTrailCopyExplainsSessionScopeAndBranchCounts() throws {
     _ = trail.recordNavigation(from: a, to: d, cause: .relation)
     view.display(trail: trail, store: store)
     #expect(view.branchCount == 2)
-    #expect(try button().title == "Branches · 2")
+    #expect(try button().title == CodeInsightApp.localizedFormat("trail.branches", Int64(2)))
     #expect(try button().toolTip
         == "Show the semantic trail and its branches (⌥⌘T)")
 }

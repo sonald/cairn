@@ -63,6 +63,7 @@ let libgit2LinkerSettings: [LinkerSetting] = libgit2Mode == "brew"
 
 let package = Package(
     name: "CodeInsight",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v14),
     ],
@@ -206,7 +207,8 @@ let package = Package(
                 "CodeInsightExact",
                 "CodeInsightGit",
                 "CodeInsightReaderCore",
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         .target(
             name: "CodeInsightReaderCore",
@@ -223,7 +225,8 @@ let package = Package(
         ),
         .target(
             name: "CodeInsightReaderUI",
-            dependencies: ["CodeInsightCore", "CodeInsightReaderCore"]
+            dependencies: ["CodeInsightCore", "CodeInsightReaderCore"],
+            resources: [.process("Resources")]
         ),
         .executableTarget(
             name: "CodeInsightApp",
@@ -235,7 +238,8 @@ let package = Package(
                 "CodeInsightGit",
                 "CodeInsightReaderCore",
                 "CodeInsightReaderUI",
-            ]
+            ],
+            resources: [.process("Resources")]
         ),
         .testTarget(
             name: "TreeSitterKitTests",

@@ -203,7 +203,7 @@ public final class ExactCoordinator {
         let active: Active
     }
 
-    public private(set) var readiness: Readiness = .off("no project")
+    public private(set) var readiness: Readiness = .off(localized("model.exact.noProject"))
     public private(set) var analysisEnvironment: ExactAnalysisEnvironment?
     public private(set) var trustMode: TrustMode?
     public private(set) var trustedRepositories: [TrustedRepository] = []
@@ -232,14 +232,24 @@ public final class ExactCoordinator {
     @ObservationIgnored private var closeTask: Task<Void, Never>?
 
     public init(
-        providerFactory: @escaping ProviderFactory = { projectURL, language in
+        providerFactory: ProviderFactory? = nil,
+        snapshotFactory: SnapshotFactory? = nil,
+        sandboxAvailable: @escaping @Sendable () -> Bool = {
+            FileManager.default.isExecutableFile(
+                atPath: "/usr/bin/sandbox-exec"
+            )
+        },
+        trustRegistry: TrustRegistry = TrustRegistry(),
+        materializer: Materializer = Materializer()
+    ) {
+        self.providerFactory = providerFactory ?? { projectURL, language in
             switch language {
             case .python:
                 guard let executable = PyrightProvider.findExecutable(
                     projectURL: projectURL
                 ) else {
                     throw ExactError.unavailable(
-                        "pyright-langserver is not installed"
+                        localized("model.exact.pyrightMissing")
                     )
                 }
                 return try PyrightProvider(
@@ -261,7 +271,7 @@ public final class ExactCoordinator {
                         )
                 else {
                     throw ExactError.unavailable(
-                        "typescript-language-server is not installed"
+                        localized("model.exact.typescriptMissing")
                     )
                 }
                 let tsserver = TypeScriptLanguageServerProvider
@@ -279,7 +289,7 @@ public final class ExactCoordinator {
                     .map(URL.init(fileURLWithPath:))
                 guard let tsserver else {
                     throw ExactError.unavailable(
-                        "typescript-language-server is not installed"
+                        localized("model.exact.typescriptMissing")
                     )
                 }
                 return try TypeScriptLanguageServerProvider(
@@ -291,28 +301,17 @@ public final class ExactCoordinator {
             case .javascript:
                 throw CocoaError(.featureUnsupported, userInfo: [
                     NSLocalizedFailureReasonErrorKey:
-                        "Exact analysis does not support "
-                            + String(describing: language),
+                        localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
                 ])
             }
             guard let executable = RustAnalyzerProvider.findExecutable() else {
-                throw ExactError.unavailable("rust-analyzer is not installed")
+                throw ExactError.unavailable(localized("model.exact.rustMissing"))
             }
             return try RustAnalyzerProvider(
                 projectURL: projectURL,
                 executableURL: executable
             )
-        },
-        snapshotFactory: SnapshotFactory? = nil,
-        sandboxAvailable: @escaping @Sendable () -> Bool = {
-            FileManager.default.isExecutableFile(
-                atPath: "/usr/bin/sandbox-exec"
-            )
-        },
-        trustRegistry: TrustRegistry = TrustRegistry(),
-        materializer: Materializer = Materializer()
-    ) {
-        self.providerFactory = providerFactory
+        }
         self.snapshotFactory = snapshotFactory
         self.sandboxAvailable = sandboxAvailable
         self.trustRegistry = trustRegistry
@@ -395,7 +394,7 @@ public final class ExactCoordinator {
         // cancelled prepare and the prior close chain finish in the
         // background with a completion handle nobody loses (§7.1).
         oldSession?.close()
-        readiness = .off("application terminating")
+        readiness = .off(localized("model.exact.terminating"))
         analysisEnvironment = nil
         trustMode = nil
         if previousClose != nil || previousPrepare != nil || oldMaterialized != nil {
@@ -499,12 +498,12 @@ public final class ExactCoordinator {
         guard !suspendedPrepares.contains(Self.canonicalRepositoryPath(root))
         else {
             invalidate(generation: generation)
-            readiness = .off("trust revoking")
+            readiness = .off(localized("model.exact.revoking"))
             return
         }
         guard !materializer.isUnderMaintenance else {
             invalidate(generation: generation)
-            readiness = .off("cache maintenance")
+            readiness = .off(localized("model.exact.maintenance"))
             return
         }
         let language = analysisProfile.language
@@ -536,7 +535,7 @@ public final class ExactCoordinator {
             self.trustedRepositories = trustedRepositories
             self.trustMode = trustMode
             guard trustMode != .safe || sandboxAvailable() else {
-                self.readiness = .off("Safe exact disabled: sandbox-exec unavailable")
+                self.readiness = .off(localized("model.exact.sandboxMissing"))
                 self.prepareTask = nil
                 return
             }
@@ -675,7 +674,7 @@ public final class ExactCoordinator {
                 case .unavailable(let reason):
                     self.readiness = .unavailable(reason)
                 case .closed:
-                    self.readiness = .unavailable("exact session closed during prepare")
+                    self.readiness = .unavailable(localized("model.exact.closed"))
                 case .preparing, .ready:
                     self.readiness = .ready
                 }
@@ -686,8 +685,8 @@ public final class ExactCoordinator {
                       self.expectedGeneration == generation
                 else { return }
                 self.readiness = trustMode == .safe && isSandboxUnavailable(error)
-                    ? .off("Safe exact disabled: \(error)")
-                    : .unavailable(String(describing: error))
+                    ? .off(localizedFormat("model.exact.safeDisabled", exactFailureReason(error)))
+                    : .unavailable(exactFailureReason(error))
             }
             if self.epoch == currentEpoch {
                 self.prepareTask = nil
@@ -758,7 +757,7 @@ public final class ExactCoordinator {
         let stoppedGeneration = expectedGeneration
         invalidate(generation: stoppedGeneration)
         await closeTask?.value
-        readiness = .off("trust revoked")
+        readiness = .off(localized("model.exact.revoked"))
     }
 
     nonisolated private static func canonicalRepositoryPath(
@@ -773,7 +772,7 @@ public final class ExactCoordinator {
         let stoppedGeneration = expectedGeneration
         invalidate(generation: stoppedGeneration)
         await closeTask?.value
-        readiness = .off("materialized cache cleared")
+        readiness = .off(localized("model.exact.cacheCleared"))
     }
 
     public func clearMaterializedCache() async throws {
@@ -787,7 +786,7 @@ public final class ExactCoordinator {
         let oldMaterialized = active?.materializedRoot
         active = nil
         oldSession?.cancel()
-        readiness = .off("materialized cache cleared")
+        readiness = .off(localized("model.exact.cacheCleared"))
         analysisEnvironment = nil
         trustMode = nil
         let materializer = materializer
@@ -865,7 +864,7 @@ public final class ExactCoordinator {
             if case .unavailable(let reason) = current.session.readiness {
                 readiness = .unavailable(reason)
             }
-            return .unavailable(String(describing: error))
+            return .unavailable(exactFailureReason(error))
         }
     }
 
@@ -980,14 +979,14 @@ public final class ExactCoordinator {
                     return batch?.isCurrent == false ? .cancelled : nil
                 }
                 readiness = .unavailable(
-                    "exact helper restart exhausted: \(error)"
+                    localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
                 )
-                return .unavailable("exact helper restart exhausted: \(error)")
+                return .unavailable(localizedFormat("model.exact.restartExhausted", exactFailureReason(error)))
             }
         } catch {
             guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
-            readiness = .unavailable("exact helper restart failed: \(error)")
-            return .unavailable("exact helper restart failed: \(error)")
+            readiness = .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
+            return .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
         }
     }
 
@@ -1167,13 +1166,13 @@ public final class ExactCoordinator {
                     return nil
                 }
                 readiness = .unavailable(
-                    "exact helper restart exhausted: \(error)"
+                    localizedFormat("model.exact.restartExhausted", exactFailureReason(error))
                 )
                 return nil
             }
         } catch {
             guard batch?.isCurrent != false, isCurrent(previous) else { return nil }
-            readiness = .unavailable("exact helper restart failed: \(error)")
+            readiness = .unavailable(localizedFormat("model.exact.restartFailed", exactFailureReason(error)))
             return nil
         }
     }
@@ -1413,7 +1412,7 @@ private func validateExactLanguage(_ language: LanguageID) throws {
     case .javascript:
         throw CocoaError(.featureUnsupported, userInfo: [
             NSLocalizedFailureReasonErrorKey:
-                "Exact analysis does not support \(String(describing: language))",
+                localizedFormat("model.exact.unsupportedLanguage", String(describing: language)),
         ])
     }
 }
@@ -1499,4 +1498,9 @@ private func validateProfile(
             "exact profile does not match analysis profile"
         )
     }
+}
+
+private func exactFailureReason(_ error: Error) -> String {
+    if case ExactError.unavailable(let detail) = error { return detail }
+    return String(describing: error)
 }

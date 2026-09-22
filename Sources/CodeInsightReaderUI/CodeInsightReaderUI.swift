@@ -448,9 +448,9 @@ package enum ReadingHeightLevel: Int, CaseIterable, Sendable {
 
     package var title: String {
         switch self {
-        case .full: "Full"
-        case .structure: "Structure"
-        case .overview: "Overview"
+        case .full: localized("reader.height.full")
+        case .structure: localized("reader.height.structure")
+        case .overview: localized("reader.height.overview")
         }
     }
 }
@@ -790,7 +790,7 @@ public final class ReaderTextView {
             let attachmentFitsLine = (providerView?.bounds.height ?? .infinity)
                 <= max(lineHeight, 22)
             let axReadable = providerView?.accessibilityLabel()?
-                .contains("Collapsed, hides") == true
+                .contains(localizedFormat("reader.collapsed.lines", Int64(inner.summary.hiddenLineCount))) == true
             let providerYieldsHitTesting = providerView.map {
                 $0.hitTest(NSPoint(x: $0.bounds.midX, y: $0.bounds.midY)) == nil
             } ?? false
@@ -3094,9 +3094,9 @@ public final class ReaderTextView {
     private var bookmarkAccessibilityLabel: String {
         let markers = visibleBookmarkMarkers()
         guard !markers.isEmpty else { return "" }
-        return "Bookmarks: " + markers.keys.sorted().map { line in
-            "line \(line): \(markers[line, default: []].joined(separator: ", "))"
-        }.joined(separator: "; ")
+        return localizedFormat("reader.bookmarks", markers.keys.sorted().map { line in
+            localizedFormat("reader.bookmark.line", Int64(line), markers[line, default: []].joined(separator: ", "))
+        }.joined(separator: "; "))
     }
 
     private func updateBookmarkAccessibilityLabel() {
@@ -3889,17 +3889,17 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
 
     nonisolated var visualExposureText: String {
         if matchCount > 999 { return " · 999" }
-        if matchCount > 0 { return " · \(matchCount) matches" }
+        if matchCount > 0 { return " · " + localizedFormat("reader.matches", Int64(matchCount)) }
         if occurrenceCount > 999 { return " · 999" }
-        if occurrenceCount > 0 { return " · \(occurrenceCount) occurrences" }
-        return hasDiff ? " · diff" : ""
+        if occurrenceCount > 0 { return " · " + localizedFormat("reader.occurrences", Int64(occurrenceCount)) }
+        return hasDiff ? " · " + localized("reader.diff") : ""
     }
 
     nonisolated var accessibilityExposureText: String {
         var values: [String] = []
-        if matchCount > 0 { values.append("\(matchCount) matches") }
-        if occurrenceCount > 0 { values.append("\(occurrenceCount) occurrences") }
-        if hasDiff { values.append("diff") }
+        if matchCount > 0 { values.append(localizedFormat("reader.matches", Int64(matchCount))) }
+        if occurrenceCount > 0 { values.append(localizedFormat("reader.occurrences", Int64(occurrenceCount))) }
+        if hasDiff { values.append(localized("reader.diff")) }
         return values.isEmpty ? "" : ", " + values.joined(separator: ", ")
     }
 
@@ -3966,34 +3966,34 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         case .declaration:
             return joined(
                 summary.leadingText,
-                "\(summary.hiddenLineCount) lines"
+                localizedFormat("reader.lines", Int64(summary.hiddenLineCount))
             )
         case .container:
             let members = orderedMembers(summary.memberCounts)
-            return "⋯ " + (members + ["\(summary.hiddenLineCount) lines"])
+            return "⋯ " + (members + [localizedFormat("reader.lines", Int64(summary.hiddenLineCount))])
                 .joined(separator: " · ")
         case .imports:
-            return "⋯ \(summary.itemCount ?? 0) imports"
+            return localizedFormat("reader.imports", Int64(summary.itemCount ?? 0))
         case .comment:
-            return "⋯ \(summary.hiddenLineCount) comment lines"
+            return localizedFormat("reader.comments", Int64(summary.hiddenLineCount))
         case .attributes:
-            return "⋯ \(summary.itemCount ?? 0) attributes"
+            return localizedFormat("reader.attributes", Int64(summary.itemCount ?? 0))
         case .cfgTest:
             let functionCount = (summary.memberCounts[.fn] ?? 0)
                 + (summary.memberCounts[.method] ?? 0)
-            return "⋯ tests · \(functionCount) fn · \(summary.hiddenLineCount) lines"
+            return localizedFormat("reader.tests", localizedFormat("reader.member.fn", Int64(functionCount)), localizedFormat("reader.lines", Int64(summary.hiddenLineCount)))
         case .block:
             if let itemCount = summary.itemCount {
-                return "⋯ \(itemCount) arms"
+                return localizedFormat("reader.arms", Int64(itemCount))
             }
-            return "⋯ \(summary.hiddenLineCount) lines"
+            return "⋯ " + localizedFormat("reader.lines", Int64(summary.hiddenLineCount))
         }
     }
 
     private static func accessibilityText(for region: FoldRegion) -> String {
         let members = orderedMembers(region.summary.memberCounts)
-        let memberText = members.isEmpty ? "" : ", contains " + members.joined(separator: ", ")
-        return "Collapsed, hides \(region.summary.hiddenLineCount) lines\(memberText)"
+        let hidden = localizedFormat("reader.collapsed.lines", Int64(region.summary.hiddenLineCount))
+        return members.isEmpty ? hidden : localizedFormat("reader.collapsed.members", hidden, members.joined(separator: ", "))
     }
 
     private static func joined(_ leading: String?, _ trailing: String) -> String {
@@ -4014,7 +4014,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         ]
         return order.compactMap { kind in
             guard let count = counts[kind], count > 0 else { return nil }
-            return "\(count) \(kind.rawValue)"
+            return localizedFormat("reader.member.\(kind.rawValue)", Int64(count))
         }
     }
 }

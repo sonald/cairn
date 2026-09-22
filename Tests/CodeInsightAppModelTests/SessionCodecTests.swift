@@ -362,6 +362,74 @@ func sessionCodecRoundTripsTaggedTabsAndEveryFrozenInspectorField() throws {
         == excerpt.inspector.accessibilityValue)
     #expect(restored.inspector.capturedAt == capturedAt)
     #expect(restored.inspector.formerCandidateAvailable)
+
+    // New captures retain both languages even when saved from a Chinese view.
+    let clause = NarrativeClause.exactPending
+    let english = renderLocalized(clause, language: "en")
+    let chinese = renderLocalized(clause, language: "zh-Hans")
+    #expect(english == "Exact verification is in progress.")
+    #expect(chinese == "正在进行精确验证。")
+    var captured = excerpt.inspector
+    captured.localizedDisplays = [
+        "en": sessionExcerpt(displayBody: english).inspector,
+        "zh-Hans": sessionExcerpt(displayBody: chinese).inspector,
+    ]
+    func snapshotWithInspector(_ inspector: ReadingSetExcerpt.FrozenInspectorDisplay) -> SessionCodec.Snapshot {
+        SessionCodec.Snapshot(
+            projectRoot: "/tmp/project", language: .rust, revision: nil,
+            activeTabOrdinal: 0, panelPreset: "relations",
+            tabs: [.readingSet(.init(title: "trace", excerpts: [
+                sessionExcerpt(inspectorOverride: inspector),
+            ], scrollOffset: 0, skippedReasons: []))]
+        )
+    }
+    var bilingual = snapshotWithInspector(captured.display(language: "zh-Hans"))
+    for _ in 0..<2 {
+        let encoded = try SessionCodec.encode(bilingual, maximumTabCount: 10, dependencyAllowed: { _ in false })
+        bilingual = try SessionCodec.decode(encoded, maximumTabCount: 10, dependencyAllowed: { _ in false })
+        guard case .readingSet(let tab) = bilingual.tabs[0] else {
+            Issue.record("bilingual frozen tab changed kind")
+            return
+        }
+        let frozen = try #require(tab.excerpts.first)
+        #expect(frozen.sourceText == excerpt.sourceText)
+        #expect(frozen.contentID == excerpt.contentID)
+        #expect(frozen.inspector.display(language: "en").sourceBody == english)
+        #expect(frozen.inspector.display(language: "zh-Hans").sourceBody == chinese)
+        #expect(frozen.inspector.display(language: "fr").sourceBody == english)
+        #expect(frozen.inspector.localizedDisplays?.count == 2)
+    }
+    // A valid localized leaf must not hide invalid fields in the stored outer copy.
+    let bilingualData = try SessionCodec.encode(bilingual, maximumTabCount: 10, dependencyAllowed: { _ in false })
+    for field in ["sourceBody", "auditRows"] {
+        var object = try #require(JSONSerialization.jsonObject(with: bilingualData) as? [String: Any])
+        var tabs = try #require(object["tabs"] as? [[String: Any]])
+        var excerpts = try #require(tabs[0]["excerpts"] as? [[String: Any]])
+        var inspector = try #require(excerpts[0]["inspector"] as? [String: Any])
+        #expect(inspector["localizedDisplays"] != nil)
+        inspector[field] = field == "sourceBody"
+            ? String(repeating: "x", count: 16_385) as Any
+            : Array(repeating: ["label": "x", "value": "y"], count: 33) as Any
+        excerpts[0]["inspector"] = inspector
+        tabs[0]["excerpts"] = excerpts
+        object["tabs"] = tabs
+        let malformed = try JSONSerialization.data(withJSONObject: object)
+        #expect(throws: (any Error).self) {
+            try SessionCodec.decode(malformed, maximumTabCount: 10, dependencyAllowed: { _ in false })
+        }
+    }
+    #expect(readingSetDisplayText("name match only") == readingSetDisplayText("Name-only match"))
+    #expect(readingSetDisplayText("TRAIL TARGET") == localized("model.app.trailTarget"))
+    var nested = captured
+    nested.localizedDisplays = ["en": captured]
+    #expect(throws: (any Error).self) {
+        try SessionCodec.encode(snapshotWithInspector(nested), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    }
+    var oversized = captured
+    oversized.localizedDisplays = ["en": sessionExcerpt(displayBody: String(repeating: "x", count: 16_385)).inspector]
+    #expect(throws: (any Error).self) {
+        try SessionCodec.encode(snapshotWithInspector(oversized), maximumTabCount: 10, dependencyAllowed: { _ in false })
+    }
 }
 
 @Test
@@ -599,7 +667,8 @@ private func sessionExcerpt(
     sourceKind: ReadingSetExcerpt.SourceKind = .worktreeCaptured,
     capturedAt: Date = Date(timeIntervalSince1970: 1_786_270_000.125),
     auditRowCount: Int = 3,
-    displayBody: String = "src/lib.rs:1"
+    displayBody: String = "src/lib.rs:1",
+    inspectorOverride: ReadingSetExcerpt.FrozenInspectorDisplay? = nil
 ) -> ReadingSetExcerpt {
     let contentID = ContentID.sha256(of: Array(sourceText.utf8))
     let auditRows: [ReadingSetExcerpt.FrozenInspectorDisplay.AuditRow] =
@@ -645,7 +714,7 @@ private func sessionExcerpt(
         revision: sourceKind == .projectCommit ? "abc123" : nil,
         capturedAt: capturedAt,
         sourceKind: sourceKind,
-        inspector: inspector,
+        inspector: inspectorOverride ?? inspector,
         caveat: "name match only",
         partialLine: true
     )
