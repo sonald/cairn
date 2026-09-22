@@ -3193,3 +3193,25 @@ func wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() thro
     }
     withExtendedLifetime(window) {}
 }
+
+@MainActor
+@Test
+func wrapTrailingEmptyRowRemainsALegalViewportAnchor() throws {
+    for source in [String(repeating: "long_unbroken_text", count: 4096) + "\n", "first\u{2028}second\n"] {
+        let bytes = Array(source.utf8)
+        let document = ReaderDocument(bytes: bytes, lineTable: LineTable(bytes: bytes),
+            byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [], outlineFacets: [])
+        let (reader, _, window) = renderOffscreen(document)
+        reader.apply(settings: wrapSettings(true))
+        wrapSettle(reader)
+        reader.apply(settings: wrapSettings(false))
+        wrapSettle(reader)
+        let manager = try #require(reader.view.textLayoutManager)
+        let fragment = try #require(manager.textLayoutFragment(for: .zero))
+        #expect(fragment.textLineFragments.filter { $0.characterRange.length > 0 }.count == (source.contains("\u{2028}") ? 2 : 1))
+        #expect(fragment.textLineFragments.last?.characterRange.length == 0)
+        let error = try #require(reader.lastViewportAnchorErrorPt)
+        #expect(error <= 1)
+        withExtendedLifetime(window) {}
+    }
+}

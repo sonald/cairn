@@ -60,6 +60,21 @@ struct ReaderViewportState {
 /// Helpers for anchoring to a concrete character inside the visible layout.
 @MainActor
 enum ReaderViewportGeometry {
+    static func fragment(
+        containingDisplayLocation location: Int, in textView: NSTextView
+    ) -> NSTextLayoutFragment? {
+        guard let manager = textView.textLayoutManager,
+              let content = manager.textContentManager,
+              let position = content.location(content.documentRange.location, offsetBy: location)
+        else { return nil }
+        if let fragment = manager.textLayoutFragment(for: position) { return fragment }
+        // End-of-document has no containing character. Its extra empty row
+        // belongs to the preceding fragment, not to a new text element.
+        guard location > 0, location == textView.textStorage?.length,
+              let previous = content.location(position, offsetBy: -1) else { return nil }
+        return manager.textLayoutFragment(for: previous)
+    }
+
     /// Rect of a single character's text segment in text view coordinates,
     /// via TextKit 2 segment enumeration. `firstRect(forCharacterRange:)`
     /// returns empty rects on wide unwrapped rows, so every geometry path
@@ -159,11 +174,7 @@ enum ReaderViewportGeometry {
         guard let manager = textView.textLayoutManager,
               let content = manager.textContentManager
         else { return nil }
-        guard let textLocation = content.location(
-            content.documentRange.location,
-            offsetBy: location
-        ) else { return nil }
-        guard let fragment = manager.textLayoutFragment(for: textLocation)
+        guard let fragment = fragment(containingDisplayLocation: location, in: textView)
         else { return nil }
         let containerOrigin = textView.textContainerOrigin
         // Local offset of the character inside the fragment.

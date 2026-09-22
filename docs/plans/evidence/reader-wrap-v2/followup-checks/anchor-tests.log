@@ -1,0 +1,27 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() started.
+✔ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() passed after 9.872 seconds.
+◇ Test wrapTogglePreservesCompleteSelectionAndCopyText() started.
+✔ Test wrapTogglePreservesCompleteSelectionAndCopyText() passed after 1.378 seconds.
+◇ Test wrapToggleRestoresStashedHorizontalPosition() started.
+✔ Test wrapToggleRestoresStashedHorizontalPosition() passed after 1.391 seconds.
+◇ Test wrapToggleClampsLegallyAtDocumentEdges() started.
+✔ Test wrapToggleClampsLegallyAtDocumentEdges() passed after 2.727 seconds.
+◇ Test wrapToggleRoundTripsUnicodeAndFoldedContent() started.
+✔ Test wrapToggleRoundTripsUnicodeAndFoldedContent() passed after 1.717 seconds.
+◇ Test wrapToggleDoesNotStealFirstResponder() started.
+WRAP_W19_SKIPPED environment cannot hold first responder
+✔ Test wrapToggleDoesNotStealFirstResponder() passed after 0.083 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.764 seconds.
+◇ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() started.
+✔ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() passed after 1.720 seconds.
+◇ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() started.
+✔ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() passed after 1.694 seconds.
+◇ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() started.
+✔ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() passed after 1.700 seconds.
+◇ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() started.
+✔ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() passed after 1.733 seconds.
+✔ Test run with 11 tests in 0 suites passed after 25.785 seconds.

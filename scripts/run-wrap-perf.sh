@@ -12,9 +12,8 @@
 #   bash scripts/run-wrap-perf.sh --enforce-budgets --baseline-dir DIR   # candidate gates (§7.4.4)
 #
 # Fixtures live in fixtures/wrap/ (scripts/gen-wrap-fixtures.sh --verify).
-# F2/F3 are extreme fixtures reported separately (§7.4.3); they run a reduced
-# sample count by default. Reading Set uses the ordinary 5 warmups / 30 samples
-# in each direction; historical unsupported baselines remain unchanged.
+# Every fixture uses 5 warmups / 30 samples by default (§7.4.3).
+# Historical baselines, including unsupported Reading Set, remain unchanged.
 
 set -euo pipefail
 
@@ -22,8 +21,6 @@ out_dir=".build/wrap-perf"
 binary=""
 warmup_default=5
 samples_default=30
-extreme_samples=10
-extreme_warmup=2
 fixtures="f1 f2 f3 f4"
 scenarios="initial toggle resize"
 enforce_budgets=false
@@ -89,13 +86,9 @@ run_one() {
 
 failures=0
 for fixture in $fixtures; do
-    case "$fixture" in
-        f2|f3) warmup="$extreme_warmup"; samples="$extreme_samples" ;;
-        *) warmup="$warmup_default"; samples="$samples_default" ;;
-    esac
     for scenario in $scenarios; do
         for wrap in on off; do
-            run_one "$fixture" "$wrap" "$scenario" "$warmup" "$samples" || failures=$((failures + 1))
+            run_one "$fixture" "$wrap" "$scenario" "$warmup_default" "$samples_default" || failures=$((failures + 1))
         done
     done
 done

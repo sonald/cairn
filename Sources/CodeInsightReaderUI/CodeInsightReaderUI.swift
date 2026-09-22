@@ -1880,10 +1880,9 @@ public final class ReaderTextView {
     /// Anchor row geometry validated against the CURRENT container state.
     /// After a wrap toggle, TextKit can keep serving fragments from the
     /// previous layout until its next pass; restoring against them moves
-    /// the viewport with old coordinates (D3.6). An unwrapped paragraph
-    /// always holds exactly one visual row per fragment, so a multi-row
-    /// fragment under `wrapLines == false` is stale; a wrapped row never
-    /// exceeds the finite container width. Unbreakable single rows wider
+    /// the viewport with old coordinates (D3.6). Unwrapped paragraphs may
+    /// have explicit hard breaks and an extra empty row, but no soft breaks.
+    /// Unbreakable single rows wider
     /// than the container (fixture F3) are legitimate and accepted.
     private func freshAnchorRowRect(
         containingDisplayLocation location: Int
@@ -1891,16 +1890,21 @@ public final class ReaderTextView {
         guard let rowRect = ReaderViewportGeometry.rowRect(
             containingDisplayLocation: location,
             in: view
-        ), let manager = view.textLayoutManager,
-            let content = manager.textContentManager,
-            let textLocation = content.location(
-                content.documentRange.location,
-                offsetBy: location
-            ),
-            let fragment = manager.textLayoutFragment(for: textLocation)
+        ), let fragment = ReaderViewportGeometry.fragment(
+            containingDisplayLocation: location, in: view
+        )
         else { return nil }
-        if !wrapLines, fragment.textLineFragments.count > 1 {
-            return nil
+        // Empty extra rows and explicit Unicode line separators remain legal
+        // unwrapped. Only soft line breaks indicate stale wrapped geometry.
+        if !wrapLines {
+            let rows = fragment.textLineFragments.filter { $0.characterRange.length > 0 }
+            for row in rows.dropLast() {
+                let string = row.attributedString.string as NSString
+                let end = NSMaxRange(row.characterRange)
+                guard end > 0, end <= string.length,
+                      let scalar = UnicodeScalar(string.character(at: end - 1)),
+                      CharacterSet.newlines.contains(scalar) else { return nil }
+            }
         }
         return rowRect
     }
@@ -1931,12 +1935,8 @@ public final class ReaderTextView {
         // path: it never expands folds, records history, or shows find
         // indicators (D3.3).
         view.textLayoutManager?.textViewportLayoutController.layoutViewport()
-        var rowRect = freshAnchorRowRect(containingDisplayLocation: location)
-        if rowRect == nil {
-            view.scrollRangeToVisible(NSRange(location: location, length: 0))
-            rowRect = freshAnchorRowRect(containingDisplayLocation: location)
-        }
-        guard let rowRect = rowRect, !rowRect.isEmpty else {
+        guard let rowRect = freshAnchorRowRect(containingDisplayLocation: location),
+              rowRect.height > 0 else {
             // Stale or unavailable geometry (container flips leave the old
             // fragments until AppKit relayouts): skip the synchronous
             // placement and let the bounded correction passes take over
@@ -1944,7 +1944,7 @@ public final class ReaderTextView {
             return nil
         }
         var characterRect = rowRect
-        if let segment = ReaderViewportGeometry.characterRect(
+        if !wrapLines, rowRect.width > 0, let segment = ReaderViewportGeometry.characterRect(
             displayLocation: location,
             in: view
         ) {
@@ -2093,8 +2093,17 @@ public final class ReaderTextView {
         }
         let clipView = scrollView.contentView
         let desiredOriginY = rowRect.minY - state.offsetFromViewportTop
-        guard abs(desiredOriginY - clipView.bounds.minY) > 0.5 else { return }
         isRestoringViewport = true
+        let oldX = clipView.bounds.minX
+        let characterRect = !wrapLines && rowRect.width > 0
+            ? (ReaderViewportGeometry.characterRect(displayLocation: location, in: view) ?? rowRect)
+            : rowRect
+        restoreHorizontalPosition(from: state, anchorGeometry: (rowRect, characterRect))
+        guard abs(desiredOriginY - clipView.bounds.minY) > 0.5 else {
+            if abs(oldX - clipView.bounds.minX) > 0.5 { viewportRestorePassCount += 1 }
+            isRestoringViewport = false
+            return
+        }
         let clamped = clampVerticalScrollOrigin(desiredOriginY, clipView: clipView)
         clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: clamped))
         scrollView.reflectScrolledClipView(clipView)

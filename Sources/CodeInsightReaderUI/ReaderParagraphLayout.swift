@@ -30,6 +30,7 @@ package final class ReaderParagraphLayout {
         sourceLineAt: ((Int) -> String?)? = nil
     ) -> Int {
         guard !wrap || (width.isFinite && width > 0), text.length > 0 else { return 0 }
+        let string = text.string as NSString
         if !wrap {
             var updates = 0
             text.beginEditing()
@@ -41,11 +42,14 @@ package final class ReaderParagraphLayout {
                 style.headIndent = 0
                 style.firstLineHeadIndent = 0
                 text.addAttribute(.paragraphStyle, value: style, range: range)
-                updates += 1
+                var offset = range.location
+                while offset < NSMaxRange(range) {
+                    updates += 1
+                    offset = NSMaxRange(string.paragraphRange(for: NSRange(location: offset, length: 0)))
+                }
             }
             return updates
         }
-        let string = text.string as NSString
         let space = (" " as NSString).size(withAttributes: [.font: font]).width
         var offset = 0
         var updates = 0

@@ -1,0 +1,95 @@
+Analysis of sampling codeinsight-app (pid 11229) every 1 millisecond
+Process:         codeinsight-app [11229]
+Path:            /Users/USER/*/codeinsight-app
+Load Address:    0x100468000
+Identifier:      codeinsight-app
+Version:         0
+Code Type:       ARM64
+Platform:        macOS
+Parent Process:  zsh [11228]
+Target Type:     live task
+
+Date/Time:       2026-09-22 17:29:01.700 +0800
+Launch Time:     2026-09-22 17:28:59.635 +0800
+OS Version:      macOS 27.0 (26A428)
+Report Version:  7
+Analysis Tool:   /usr/bin/sample
+
+Physical footprint:         696.0M
+Physical footprint (peak):  696.0M
+Idle exit:                  untracked
+----
+
+Call graph:
+    1282 Thread_17822670   DispatchQueue_1: com.apple.main-thread  (serial)
+    + 1282 start  (in dyld) + 6688  [0x197553e80]
+    +   1282 main  (in codeinsight-app) + 12  [0x1005937c8]  CodeInsightApp.swift:0
+    +     1282 specialized static CodeInsightApplication.main()  (in codeinsight-app) + 23920  [0x1005b0f60]  CodeInsightApp.swift:273
+    +       1282 runWrapPerformance(_:)  (in codeinsight-app) + 15616  [0x100487d74]  CodeInsightApp.swift:14191
+    +         1282 ReaderTextView.apply(settings:)  (in codeinsight-app) + 1468  [0x1009716f4]  CodeInsightReaderUI.swift:2420
+    +           1282 specialized ReaderTextView.placeViewportAnchor(from:in:)  (in codeinsight-app) + 252  [0x10099c004]  CodeInsightReaderUI.swift:1936
+    +             1282 -[NSTextView(NSPrivate) _scrollRangeToVisible:forceCenter:]  (in AppKit) + 352  [0x19c14c074]
+    +               1282 -[NSTextView(NSPrivate) _scrollTextRangeToVisible:centered:forceCenter:verticalOffset:upstream:]  (in AppKit) + 672  [0x19c91a404]
+    +                 1282 __NSTextViewScrollContainerViewToTextRange  (in AppKit) + 116  [0x19c91a4c4]
+    +                   1282 -[NSTextView(NSPrivate) _boundingRectForTextRange:upstream:]  (in AppKit) + 304  [0x19c91a018]
+    +                     1282 -[NSTextLayoutManager enumerateTextSegmentsInRange:type:options:usingBlock:]  (in UIFoundation) + 100  [0x19d634428]
+    +                       1282 -[NSTextLayoutManager _enumerateTextSegmentAndCategoryInRange:type:options:allowsZeroWidthExtensions:usingBlock:]  (in UIFoundation) + 616  [0x19d632c2c]
+    +                         1282 -[NSTextLayoutManager enumerateTextLayoutFragmentsInTextRange:options:usingBlock:]  (in UIFoundation) + 180  [0x19d631e98]
+    +                           1282 -[NSTextLayoutManager enumerateTextLayoutFragmentsFromLocation:options:usingBlock:]  (in UIFoundation) + 1204  [0x19d6308d4]
+    +                             1282 -[NSTextContentStorage enumerateTextElementsFromLocation:options:usingBlock:]  (in UIFoundation) + 4216  [0x19d63e748]
+    +                               1282 __83-[NSTextLayoutManager enumerateTextLayoutFragmentsFromLocation:options:usingBlock:]_block_invoke  (in UIFoundation) + 1048  [0x19d630fec]
+    +                                 1282 -[__NSSingleObjectArrayI enumerateObjectsWithOptions:usingBlock:]  (in CoreFoundation) + 96  [0x1979f3af0]
+    +                                   1282 __NSARRAY_IS_CALLING_OUT_TO_A_BLOCK__  (in CoreFoundation) + 24  [0x1979dddec]
+    +                                     1282 __83-[NSTextLayoutManager enumerateTextLayoutFragmentsFromLocation:options:usingBlock:]_block_invoke.199  (in UIFoundation) + 928  [0x19d63169c]
+    +                                       1282 __82-[NSTextLayoutManager enumerateTextLayoutFragmentsInTextRange:options:usingBlock:]_block_invoke  (in UIFoundation) + 168  [0x19d631f58]
+    +                                         1282 __113-[NSTextLayoutManager _enumerateTextSegmentAndCategoryInRange:type:options:allowsZeroWidthExtensions:usingBlock:]_block_invoke.232  (in UIFoundation) + 1080  [0x19d6340e4]
+    +                                           1282 __113-[NSTextLayoutManager _enumerateTextSegmentAndCategoryInRange:type:options:allowsZeroWidthExtensions:usingBlock:]_block_invoke  (in UIFoundation) + 1276  [0x19d633590]
+    +                                             650 -[NSTextLineFragment enumerateTextSegmentBoundsInTextRange:dataSourceLocationsOnly:usingBlock:]  (in UIFoundation) + 916  [0x19d6753c4]
+    +                                             ! 649 __113-[NSTextLayoutManager _enumerateTextSegmentAndCategoryInRange:type:options:allowsZeroWidthExtensions:usingBlock:]_block_invoke_3  (in UIFoundation) + 832  [0x19d633ae0]
+    +                                             ! : 647 -[__NSTextSelectionLineFragmentInfo offsetForLocation:]  (in UIFoundation) + 32  [0x19d6b0d88]
+    +                                             ! : | 647 -[__NSTextSelectionLineFragmentInfo _cache]  (in UIFoundation) + 44  [0x19d6b060c]
+    +                                             ! : |   646 -[__NSTextSelectionLineFragmentInfo _fetchCaretOffsets]  (in UIFoundation) + 260  [0x19d6af960]
+    +                                             ! : |   + 646 -[NSTextLayoutManager enumerateCaretOffsetsInLineFragmentAtLocation:usingBlock:]  (in UIFoundation) + 264  [0x19d638548]
+    +                                             ! : |   +   646 -[NSTextLineFragment enumerateCaretOffsetsWithTextSelectionDataSource:baseLocation:usingBlock:]  (in UIFoundation) + 240  [0x19d674cf0]
+    +                                             ! : |   +     646 CTLineEnumerateCaretOffsets  (in CoreText) + 112  [0x19aa55558]
+    +                                             ! : |   +       646 TLine::EnumerateCaretOffsets(std::function<void (double, long, bool, bool*)>) const  (in CoreText) + 140  [0x19aa58400]
+    +                                             ! : |   +         643 std::function<void (double, long, bool, bool*)>::operator()(double, long, bool, bool*) const  (in CoreText) + 80  [0x19aa59684]
+    +                                             ! : |   +         ! 401 __95-[NSTextLineFragment enumerateCaretOffsetsWithTextSelectionDataSource:baseLocation:usingBlock:]_block_invoke  (in UIFoundation) + 144  [0x19d674ee4]
+    +                                             ! : |   +         ! : 203 -[NSTextParagraph locationForCharacterIndex:dataSourceLocationsOnly:actualRange:]  (in UIFoundation) + 144  [0x19d68fb1c]
+    +                                             ! : |   +         ! : | 147 -[NSTextContentStorage locationFromLocation:withOffset:]  (in UIFoundation) + 252  [0x19d63fe38]
+    +                                             ! : |   +         ! : | + 40 -[NSCountableTextLocation initWithIndex:]  (in UIFoundation) + 120  [0x19d6d55f8]
+    +                                             ! : |   +         ! : | + ! 35 -[NSConcreteHashTable getItem:]  (in Foundation) + 60  [0x1990999d4]
+    +                                             ! : |   +         ! : | + ! : 17 hashProbe  (in Foundation) + 324  [0x199099b4c]
+    +                                             ! : |   +         ! : | + ! : | 10 objc_loadWeak  (in libobjc.A.dylib) + 24  [0x1974ad9fc]
+    +                                             ! : |   +         ! : | + ! : | + 7 objc_loadWeakRetained  (in libobjc.A.dylib) + 172  [0x1974adacc]
+    +                                             ! : |   +         ! : | + ! : | + ! 7 weak_entry_for_referent  (in libobjc.A.dylib) + 128,92  [0x1974db974,0x1974db950]
+    +                                             ! : |   +         ! : | + ! : | + 3 objc_loadWeakRetained  (in libobjc.A.dylib) + 96,36  [0x1974ada80,0x1974ada44]
+    +                                             ! : |   +         ! : | + ! : | 3 objc_autorelease  (in libobjc.A.dylib) + 232  [0x1974acaf8]
+    +                                             ! : |   +         ! : | + ! : | + 3 AutoreleasePoolPage::add(objc_object*)  (in libobjc.A.dylib) + 200  [0x1974dcaa8]
+    +                                             ! : |   +         ! : | + ! : | 2 startReadARCWeakAutoreleasingWithSentinelAt  (in Foundation) + 0,36  [0x19924cf18,0x19924cf3c]
+    +                                             ! : |   +         ! : | + ! : | 1 objc_autorelease  (in libobjc.A.dylib) + 280  [0x1974acb28]
+    +                                             ! : |   +         ! : | + ! : | 1 objc_loadWeakRetained  (in libobjc.A.dylib) + 524  [0x1974adc2c]
+    +                                             ! : |   +         ! : | + ! : 7 hashProbe  (in Foundation) + 356  [0x199099b6c]
+    +                                             ! : |   +         ! : | + ! : | 2 -[NSCountableTextLocation isEqual:]  (in UIFoundation) + 56  [0x19d6d5850]
+    +                                             ! : |   +         ! : | + ! : | + 2 objc_opt_isKindOfClass  (in libobjc.A.dylib) + 0,32  [0x1974bb9ec,0x1974bba0c]
+    +                                             ! : |   +         ! : | + ! : | 2 -[NSCountableTextLocation isEqual:]  (in UIFoundation) + 36,56  [0x19d6d583c,0x19d6d5850]
+    +                                             ! : |   +         ! : | + ! : | 2 objc_msgSend  (in libobjcMsgSend.dylib) + 0  [0x19f09c800]
+    +                                             ! : |   +         ! : | + ! : | 1 -[NSCountableTextLocation isEqual:]  (in UIFoundation) + 44  [0x19d6d5844]
+    +                                             ! : |   +         ! : | + ! : |   1 objc_opt_class  (in libobjc.A.dylib) + 28  [0x1974ba910]
+    +                                             ! : |   +         ! : | + ! : 6 hashProbe  (in Foundation) + 360,116,...  [0x199099b70,0x199099a7c,...]
+    +                                             ! : |   +         ! : | + ! : 2 hashProbe  (in Foundation) + 88  [0x199099a60]
+    +                                             ! : |   +         ! : | + ! : | 1 -[NSCountableTextLocation hash]  (in UIFoundation) + 0  [0x19d6d5674]
+    +                                             ! : |   +         ! : | + ! : | 1 objc_msgSend  (in libobjcMsgSend.dylib) + 0  [0x19f09c800]
+    +                                             ! : |   +         ! : | + ! : 1 ???  (in <unknown binary>)  [0x19f17e250]
+    +                                             ! : |   +         ! : | + ! : 1 ???  (in <unknown binary>)  [0x19f17e258]
+    +                                             ! : |   +         ! : | + ! : 1 hashProbe  (in Foundation) + 376  [0x199099b80]
+    +                                             ! : |   +         ! : | + ! :   1 finishReadARCWeakAutoreleasingAt  (in Foundation) + 0  [0x19924cf40]
+    +                                             ! : |   +         ! : | + ! 2 -[NSConcreteHashTable getItem:]  (in Foundation) + 28,96  [0x1990999b4,0x1990999f8]
+    +                                             ! : |   +         ! : | + ! 2 objc_msgSend  (in libobjcMsgSend.dylib) + 0,56  [0x19f09c800,0x19f09c838]
+    +                                             ! : |   +         ! : | + ! 1 hashProbe  (in Foundation) + 560  [0x199099c38]
+    +                                             ! : |   +         ! : | + 35 -[NSCountableTextLocation initWithIndex:]  (in UIFoundation) + 192  [0x19d6d5640]
+    +                                             ! : |   +         ! : | + ! 26 -[NSConcreteHashTable addObject:]  (in Foundation) + 96  [0x199099cbc]
+    +                                             ! : |   +         ! : | + ! : 19 objc_storeWeak  (in libobjc.A.dylib) + 468  [0x1974ad378]
+    +                                             ! : |   +         ! : | + ! : | 9 weak_register_no_lock  (in libobjc.A.dylib) + 172  [0x1974ad4a0]
+    +                                             ! : |   +         ! : | + ! : | + 9 weak_entry_for_referent  (in libobjc.A.dylib) + 80,124,...  [0x1974db944,0x1974db970,...]
+    +                                             ! : |   +         ! : | + ! : | 9 weak_register_no_lock  (in libobjc.A.dylib) + 268  [0x1974ad500]
