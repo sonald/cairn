@@ -120,7 +120,10 @@ func commitLogReadsHeadFirstWithBranchLabels() throws {
     #expect(head.fullSHA == expectedSHA)
     #expect(head.shortSHA == String(expectedSHA.prefix(7)))
     #expect(head.summary == expectedSummary)
-    #expect(head.branchNames.contains("main"))
+    let expectedBranches = try repositoryGit(
+        "for-each-ref", "--points-at=HEAD", "--format=%(refname:short)", "refs/heads/"
+    ).split(separator: "\n").map(String.init)
+    #expect(head.branchNames.sorted() == expectedBranches.sorted())
 }
 
 @Test
