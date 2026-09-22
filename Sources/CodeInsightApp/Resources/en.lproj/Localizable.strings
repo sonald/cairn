@@ -530,3 +530,14 @@
 "main.scope.kind.typeAlias" = "type";
 "main.scope.kind.field" = "field";
 "main.scope.kind.enumMember" = "enumMember";
+
+"settings.codeFont" = "Code Font";
+"settings.codeFont.system" = "System Monospaced";
+"settings.codeFont.actual" = "Current font: %@";
+"settings.codeFont.missing" = "Requested font %@ is unavailable. Using the system font.";
+"settings.codeFont.refresh" = "Refresh Fonts";
+"settings.codeLigatures" = "Programming Ligatures";
+"settings.codeLigatures.fontDefault" = "Font Default";
+"settings.codeLigatures.enabled" = "On";
+"settings.codeLigatures.disabled" = "Off";
+"settings.codeLigatures.unverified" = "Ligature shapes depend on the font. Fonts are unverified unless listed in the compatibility notes; check the preview.";

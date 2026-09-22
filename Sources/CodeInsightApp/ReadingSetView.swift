@@ -27,6 +27,7 @@ final class ReadingSetView: NSView {
     private var cards: [ReadingSetExcerptView] = []
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var settings = ReaderSettings()
+    private var fontEnvironmentRevision: UInt64?
     private var layoutPending = false
     private var updatingLayout = false
     private var lastWidth: CGFloat = -1
@@ -177,7 +178,10 @@ final class ReadingSetView: NSView {
     }
 
     func apply(settings: ReaderSettings) {
+        let revision = ReaderFontResolver.shared.fontEnvironmentRevision
+        guard self.settings != settings || fontEnvironmentRevision != revision else { return }
         captureAnchor()
+        fontEnvironmentRevision = revision
         self.settings = settings
         theme = ReaderTheme(settings: settings)
         layer?.backgroundColor = theme.backgroundColor.cgColor
@@ -344,7 +348,16 @@ private final class ReadingSetExcerptView: NSView {
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var codeHeight: CGFloat = 40
     private var settings = ReaderSettings()
-    private var signature: [CGFloat] = []
+    private struct ExcerptLayoutKey: Equatable {
+        let width: CGFloat
+        let wrap: Bool
+        let font: ResolvedFontKey
+        let lineHeight: Double
+        let gutterWidth: CGFloat
+        let scrollerStyle: NSScroller.Style
+    }
+    private var signature: ExcerptLayoutKey?
+    private var resolvedFont: ResolvedCodeFont?
     private var rows: [(range: NSRange, rect: NSRect)] = []
     private var sourceLabels: [(offset: Int, label: String)] = []
     private var unwrappedX: CGFloat = 0
@@ -439,7 +452,7 @@ private final class ReadingSetExcerptView: NSView {
             defer { nextLine &+= 1 }
             return (offset, String(nextLine))
         }
-        signature = []
+        signature = nil
         openButton.isHidden = excerpt.sourceKind == .dependencyCaptured
         openButton.isEnabled = onOpen != nil
         expandButton.isEnabled = onExpand != nil
@@ -463,8 +476,7 @@ private final class ReadingSetExcerptView: NSView {
         symbolLabel.textColor = theme.foregroundColor
         pathLabel.textColor = theme.chromeSecondaryColor
         codeView.textColor = theme.foregroundColor
-        let font = NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
-        if codeView.font != font { codeView.font = font }
+        resolvedFont = ReaderFontResolver.shared.resolve(theme: theme)
         lineNumbers.font = .monospacedDigitSystemFont(
             ofSize: theme.fontSize,
             weight: .regular
@@ -538,16 +550,23 @@ private final class ReadingSetExcerptView: NSView {
     func measure() {
         guard bounds.width > 0, let manager = codeView.textLayoutManager,
               let content = manager.textContentManager else { return }
-        let font = NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+        guard let resolvedFont else { return }
+        let font = resolvedFont.font
         let gutterWidth = ceil(sourceLabels.map { ($0.label as NSString).size(withAttributes: [.font: lineNumbers.font]).width }.max() ?? 0) + 8
-        let nextSignature: [CGFloat] = [bounds.width, settings.wrapLines ? 1 : 0, CGFloat(theme.fontSize),
-                                         CGFloat(settings.lineHeightMultiple), gutterWidth,
-                                         CGFloat(codeScroll.scrollerStyle.rawValue)]
+        let nextSignature = ExcerptLayoutKey(
+            width: bounds.width, wrap: settings.wrapLines, font: resolvedFont.key,
+            lineHeight: settings.lineHeightMultiple, gutterWidth: gutterWidth,
+            scrollerStyle: codeScroll.scrollerStyle
+        )
         guard nextSignature != signature else { return }
-        signature = nextSignature
         measurements += 1
         let selected = codeView.selectedRanges
         let affinity = codeView.selectionAffinity
+        defer {
+            if codeView.selectedRanges != selected || codeView.selectionAffinity != affinity {
+                codeView.setSelectedRanges(selected, affinity: affinity, stillSelecting: false)
+            }
+        }
         if codeScroll.hasHorizontalScroller {
             unwrappedX = codeScroll.contentView.bounds.minX
         }
@@ -562,10 +581,17 @@ private final class ReadingSetExcerptView: NSView {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = CGFloat(settings.lineHeightMultiple)
         paragraph.lineBreakMode = .byWordWrapping
-        codeView.textStorage?.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: codeView.string.utf16.count))
-        if let storage = codeView.textStorage {
+        guard let storage = codeView.textStorage else { return }
+        content.performEditingTransaction {
+            storage.beginEditing()
+            let range = NSRange(location: 0, length: storage.length)
+            storage.removeAttribute(.ligature, range: range)
+            storage.removeAttribute(.kern, range: range)
+            storage.addAttributes(resolvedFont.attributes, range: range)
+            storage.addAttribute(.paragraphStyle, value: paragraph, range: range)
             paragraphLayout.apply(to: storage, wrap: settings.wrapLines,
                 width: available - 2 * (codeView.textContainer?.lineFragmentPadding ?? 0), font: font)
+            storage.endEditing()
         }
         manager.invalidateLayout(for: content.documentRange)
         manager.ensureLayout(for: content.documentRange)
@@ -582,6 +608,8 @@ private final class ReadingSetExcerptView: NSView {
             }
             return true
         }
+        guard textBottom.isFinite, usedWidth.isFinite,
+              codeView.string.isEmpty || (!rows.isEmpty && textBottom > 0) else { return }
         let textHeight = max(ceil(textBottom), ceil(font.ascender - font.descender))
         let textWidth = settings.wrapLines ? available : max(available, ceil(usedWidth) + 2 * (codeView.textContainer?.lineFragmentPadding ?? 5))
         codeView.frame = NSRect(x: gutterWidth + 12, y: 10, width: textWidth, height: textHeight)
@@ -596,7 +624,7 @@ private final class ReadingSetExcerptView: NSView {
         let scrollerHeight = max(0, codeScroll.bounds.height - codeScroll.contentSize.height)
         codeHeight = textHeight + 20 + scrollerHeight
         codeScrollHeightConstraint.constant = codeHeight
-        codeView.setSelectedRanges(selected, affinity: affinity, stillSelecting: false)
+        signature = nextSignature
         let x = settings.wrapLines ? 0 : min(unwrappedX, max(0, codeDocument.bounds.width - codeScroll.contentSize.width))
         codeScroll.contentView.scroll(to: NSPoint(x: x, y: 0))
         codeScroll.reflectScrolledClipView(codeScroll.contentView)

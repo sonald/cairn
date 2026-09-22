@@ -33,6 +33,7 @@ package final class ReaderFontResolver {
     package static let shared = ReaderFontResolver()
     package let cacheLimit = 128
     package private(set) var fontEnvironmentRevision: UInt64 = 0
+    package private(set) var fontResolutionMilliseconds = 0.0
     package private(set) var fontResolutionCount = 0
     package private(set) var fontCacheHitCount = 0
     package var cacheCount: Int { cache.count }
@@ -90,6 +91,12 @@ package final class ReaderFontResolver {
         if let result = cache[request] {
             fontCacheHitCount += 1
             return result
+        }
+        let started = ContinuousClock.now
+        defer {
+            let duration = started.duration(to: .now).components
+            fontResolutionMilliseconds += Double(duration.seconds) * 1000
+                + Double(duration.attoseconds) / 1e15
         }
         fontResolutionCount += 1
 

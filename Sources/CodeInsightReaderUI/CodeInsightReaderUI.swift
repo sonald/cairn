@@ -524,6 +524,7 @@ public final class ReaderTextView {
     /// Wrap performance probes (§7.4.2): full projection commits into the
     /// backing storage, and real background draw passes observed by the
     /// renderer. Both only count; they never gate rendering.
+    package private(set) var typographyAttributeUpdateMilliseconds = 0.0
     package private(set) var typographyAttributeUpdateCount = 0
     package private(set) var projectionInstallCount = 0
     private let paragraphLayout = ReaderParagraphLayout()
@@ -3650,6 +3651,12 @@ public final class ReaderTextView {
 
     /// Change typography without replacing source text, the map, or fold attachments.
     private func updateTypography(document: ReaderDocument, map: DisplayMap) {
+        let started = ContinuousClock.now
+        defer {
+            let duration = started.duration(to: .now).components
+            typographyAttributeUpdateMilliseconds += Double(duration.seconds) * 1000
+                + Double(duration.attoseconds) / 1e15
+        }
         let attributes = baseAttributes
         let ranges = map.visibleSourceRanges(forDisplay: NSRange(
             location: 0, length: backingTextStorage.length

@@ -6,6 +6,7 @@ import CodeInsightExact
 import CodeInsightGit
 import CodeInsightReaderCore
 import CodeInsightReaderUI
+import CoreText
 import Darwin
 import os
 import PDFKit
@@ -76,6 +77,8 @@ private struct WrapPerformanceRequest {
     let codeSHA: String
     let warmupCount: Int
     let sampleCount: Int
+    let fontPostScriptName: String?
+    let ligatureMode: CodeLigatureMode
 }
 
 /// Argument surface for the soft-wrap performance mode (§7.4.1):
@@ -106,7 +109,9 @@ private func wrapPerformanceArguments(
     }
     let warmup = value(after: "--warmup").flatMap(Int.init) ?? 5
     let samples = value(after: "--samples").flatMap(Int.init) ?? 30
-    guard warmup >= 0, samples >= 1, samples <= 200 else { return nil }
+    guard warmup >= 0, samples >= 1, samples <= 200,
+          let ligatureMode = CodeLigatureMode(rawValue: value(after: "--ligature-mode") ?? "fontDefault")
+    else { return nil }
     return WrapPerformanceRequest(
         fixture: URL(
             fileURLWithPath: arguments[fixtureIndex + 1]
@@ -118,7 +123,9 @@ private func wrapPerformanceArguments(
         ).standardizedFileURL,
         codeSHA: value(after: "--code-sha") ?? "unknown",
         warmupCount: warmup,
-        sampleCount: samples
+        sampleCount: samples,
+        fontPostScriptName: value(after: "--font-postscript"),
+        ligatureMode: ligatureMode
     )
 }
 
@@ -171,6 +178,10 @@ private struct CodeInsightApplication {
     static func main() {
         let startedAt = ContinuousClock.now
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.contains("--self-test-ligatures") {
+            _ = NSApplication.shared
+            runLigatureSelfTest(arguments: arguments)
+        }
         let foldPerformanceRequested = arguments.contains("--fold-perf-mode")
         let foldPerformance = foldPerformanceArguments(arguments)
         if foldPerformanceRequested, foldPerformance == nil {
@@ -187,15 +198,8 @@ private struct CodeInsightApplication {
             ? wrapPerformanceArguments(arguments)
             : nil
         if wrapPerformanceRequested, wrapPerformance == nil {
-            FileHandle.standardError.write(Data(
-                (
-                    "usage: codeinsight-app --self-test-wrap --fixture <path> "
-                        + "--wrap <on|off> "
-                        + "--scenario <initial|toggle|resize|reading-set> "
-                        + "--output <json> [--code-sha <sha>] "
-                        + "[--warmup N] [--samples N]\n"
-                ).utf8
-            ))
+            let usage = "usage: codeinsight-app --self-test-wrap --fixture <path> --wrap <on|off> --scenario <initial|toggle|resize|reading-set> --output <json> [--code-sha <sha>] [--warmup N] [--samples N] [--font-postscript NAME] [--ligature-mode fontDefault|enabled|disabled]\n"
+            FileHandle.standardError.write(Data(usage.utf8))
             Darwin.exit(2)
         }
         let relationTimingRequested =
@@ -742,6 +746,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         self.windowSessionURL = windowSessionURL
         self.sharedTrustRegistry = sharedTrustRegistry
         self.sharedMaterializer = sharedMaterializer
+        super.init()
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(readerFontEnvironmentChanged),
+            name: .readerFontEnvironmentDidChange, object: ReaderFontResolver.shared)
+        NotificationCenter.default.addObserver(self,
+            selector: #selector(installedFontsChanged),
+            name: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil)
+    }
+
+    @objc nonisolated private func installedFontsChanged(_ notification: Notification) {
+        // Core Text can post on its registration thread; UI work stays on main.
+        Task { @MainActor in ReaderFontResolver.shared.refresh() }
+    }
+
+    @objc private func readerFontEnvironmentChanged(_ notification: Notification) {
+        for controller in projectWindows { controller.applyReaderSettings(readerSettings) }
+        settingsWindowController?.update(settings: readerSettings)
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        ReaderFontResolver.shared.refreshIfNeeded()
     }
 
     /// Normal application entry point; tests override storage locations only.
@@ -816,6 +841,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     deinit {
+        NotificationCenter.default.removeObserver(self)
         if let wrapKeyMonitor { NSEvent.removeMonitor(wrapKeyMonitor) }
     }
 
@@ -13770,6 +13796,13 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     baseSettings.fontSize = 13
     baseSettings.lineNumbers = true
     baseSettings.theme = .siClassic
+    if let name = request.fontPostScriptName {
+        guard NSFont(name: name, size: 13) != nil else {
+            write(["status": "blocked", "error": "Requested font unavailable: \(name)"], status: 2)
+        }
+        baseSettings.codeFont = .postScriptName(name)
+    }
+    baseSettings.codeLigatures = request.ligatureMode
 
     let window = NSWindow(
         contentRect: NSRect(x: 0, y: 0, width: 1440, height: 900),
@@ -14054,6 +14087,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             "peakPhysBytes": probes.peak, "samples": samples,
             "summary": ["toggleFirstFrameMs": summary("toggleFirstFrameMs"), "toggleSettledMs": summary("toggleSettledMs")],
             "perfConfig": ["cardCount": readingSet.selfTestCardCount,
+                           "ligatureMode": request.ligatureMode.rawValue,
                            "measuredWrapLines": samples.last?["effectiveWrap"] ?? NSNull(),
                            "cardScrollerStyles": readingSet.selfTestCodeScrollViews.map { $0.scrollerStyle == .legacy ? "legacy" : "overlay" },
                            "textContainerWidthsPt": samples.last?["textContainerWidthsPt"] ?? [],
@@ -14392,6 +14426,8 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             "wrapLines": wrapState.widthTracking,
             "widthTracksTextView": wrapState.widthTracking,
             "horizontalScroller": wrapState.horizontalScroller,
+            "ligatureMode": request.ligatureMode.rawValue,
+            "requestedFont": request.fontPostScriptName ?? "systemMonospaced",
             "resolvedFontName": resolvedFont?.fontName ?? "",
             "resolvedFontSizePt": resolvedFont?.pointSize ?? 0,
             "windowPt": [windowSize.width, windowSize.height],

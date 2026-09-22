@@ -115,6 +115,11 @@ final class ReaderSettingsWindowController: NSWindowController {
         fatalError("init(coder:) has not been implemented")
     }
 
+    override func showWindow(_ sender: Any?) {
+        ReaderFontResolver.shared.refreshIfNeeded()
+        super.showWindow(sender)
+    }
+
     func update(settings: ReaderSettings) {
         currentSettings = settings
         hostingController.rootView = SettingsView(
@@ -265,6 +270,8 @@ private struct ReaderSettingsView: View {
     let suppliedSettings: ReaderSettings
     @State private var settings: ReaderSettings
     @State private var showsAdvancedTypography = false
+    @State private var fontNames: [String] = []
+    @State private var fontEnvironmentRevision: UInt64 = 0
     let onChange: @MainActor (ReaderSettings) -> Void
 
     init(
@@ -299,6 +306,7 @@ private struct ReaderSettingsView: View {
                     )
                     Toggle(localized("settings.wrap"), isOn: $settings.wrapLines)
                     Toggle(localized("settings.lineNumbers"), isOn: $settings.lineNumbers)
+                    fontControls
 
                     DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {
                         Stepper(
@@ -352,7 +360,7 @@ private struct ReaderSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ReaderSettingsPreview(settings: settings)
+                ReaderSettingsPreview(settings: settings, fontEnvironmentRevision: fontEnvironmentRevision)
                     .frame(height: 180)
                     .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
             }
@@ -364,10 +372,67 @@ private struct ReaderSettingsView: View {
             }
         }
         .padding(12)
+        .onAppear {
+            ReaderFontResolver.shared.refreshIfNeeded()
+            updateFontList()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .readerFontEnvironmentDidChange)) { _ in
+            updateFontList()
+        }
         .onChange(of: suppliedSettings) { _, value in settings = value }
         .onChange(of: settings) { _, value in
-            onChange(value)
+            if value != suppliedSettings { onChange(value) }
         }
+    }
+
+    private var fontControls: some View {
+        // Reading the revision makes diagnostics refresh even when settings are unchanged.
+        let _ = fontEnvironmentRevision
+        let resolved = ReaderFontResolver.shared.resolve(theme: ReaderTheme(settings: settings))
+        return Section {
+            Picker(localized("settings.codeFont"), selection: $settings.codeFont) {
+                Text(localized("settings.codeFont.system")).tag(CodeFontSelection.systemMonospaced)
+                ForEach(fontNames, id: \.self) { name in
+                    Text(NSFont(name: name, size: 13)?.displayName ?? name)
+                        .tag(CodeFontSelection.postScriptName(name))
+                }
+                if case .postScriptName(let name) = settings.codeFont, !fontNames.contains(name) {
+                    Text(name).tag(CodeFontSelection.postScriptName(name))
+                }
+            }
+            .accessibilityIdentifier("codeFont")
+            .accessibilityLabel(localized("settings.codeFont"))
+            Picker(localized("settings.codeLigatures"), selection: $settings.codeLigatures) {
+                ForEach(CodeLigatureMode.allCases, id: \.self) { mode in
+                    Text(localized("settings.codeLigatures.\(mode.rawValue)")).tag(mode)
+                }
+            }
+            .accessibilityIdentifier("codeLigatures")
+            .accessibilityLabel(localized("settings.codeLigatures"))
+            Text(localizedFormat("settings.codeFont.actual", resolved.actualPostScriptName))
+                .font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("resolvedCodeFont")
+            if resolved.fallbackReason != nil, let requested = resolved.requestedPostScriptName {
+                Text(localizedFormat("settings.codeFont.missing", requested))
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text(localized("settings.codeLigatures.unverified"))
+                .font(.caption).foregroundStyle(.secondary)
+            Button(localized("settings.codeFont.refresh")) {
+                ReaderFontResolver.shared.refresh()
+            }
+            .accessibilityIdentifier("refreshCodeFonts")
+        }
+    }
+
+    private func updateFontList() {
+        fontNames = (NSFontManager.shared.availableFontNames(with: .fixedPitchFontMask) ?? [])
+            .filter { NSFont(name: $0, size: 13) != nil }
+            .sorted { lhs, rhs in
+                (NSFont(name: lhs, size: 13)?.displayName ?? lhs)
+                    .localizedStandardCompare(NSFont(name: rhs, size: 13)?.displayName ?? rhs) == .orderedAscending
+            }
+        fontEnvironmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
     }
 
     private func valueControl(
@@ -396,15 +461,16 @@ private struct ReaderSettingsView: View {
 
 private struct ReaderSettingsPreview: NSViewRepresentable {
     let settings: ReaderSettings
+    let fontEnvironmentRevision: UInt64
     private static let document: ReaderDocument = {
         let plain = ReaderDocument(bytes: Array("""
-            // A small cache for names returned by the service.
+            // Operators: != !== -> => <= >= :: .. ... ===
             const MAX_VISITS: usize = 3;
             struct NameCache { names: Vec<String> }
 
             fn greet(name: &str, count: usize) -> String {
                 let message = format!("Hello, {} — welcome back to your reading workspace", name);
-                println!("{} visits: {}", count, message);
+                if count != MAX_VISITS && count <= 3 { println!("{} != !== -> => <= >= :: .. ... ===", message); }
                 message
             }
             """.utf8))

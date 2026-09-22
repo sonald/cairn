@@ -530,3 +530,14 @@
 "main.scope.kind.typeAlias" = "类型别名";
 "main.scope.kind.field" = "字段";
 "main.scope.kind.enumMember" = "枚举成员";
+
+"settings.codeFont" = "代码字体";
+"settings.codeFont.system" = "系统等宽字体";
+"settings.codeFont.actual" = "当前字体：%@";
+"settings.codeFont.missing" = "请求的字体 %@ 不可用，当前使用系统字体。";
+"settings.codeFont.refresh" = "刷新字体";
+"settings.codeLigatures" = "编程连字";
+"settings.codeLigatures.fontDefault" = "跟随字体默认";
+"settings.codeLigatures.enabled" = "开启";
+"settings.codeLigatures.disabled" = "关闭";
+"settings.codeLigatures.unverified" = "连接形态取决于字体。兼容性说明未列出的字体尚未验证，请查看预览。";
