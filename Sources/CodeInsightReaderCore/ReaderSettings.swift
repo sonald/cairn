@@ -1,5 +1,48 @@
 import Foundation
 
+public enum CodeFontSelection: Hashable, Sendable {
+    case systemMonospaced
+    case postScriptName(String)
+
+    fileprivate var validated: Self {
+        if case let .postScriptName(name) = self,
+           name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return .systemMonospaced
+        }
+        return self
+    }
+}
+
+public enum CodeLigatureMode: String, CaseIterable, Sendable {
+    case fontDefault
+    case enabled
+    case disabled
+}
+
+public struct ReaderTypographyKey: Hashable, Sendable {
+    public let codeFont: CodeFontSelection
+    public let codeLigatures: CodeLigatureMode
+    public let fontSize: Double
+    public let functionNameDelta: Double
+    public let functionDeclarationFontWeight: Double
+    public let declarationEmphasisFontWeight: Double
+    public let lineHeightMultiple: Double
+    public let syntaxFormatting: Bool
+    public let humanistComments: Bool
+
+    public init(settings: ReaderSettings) {
+        codeFont = settings.codeFont
+        codeLigatures = settings.codeLigatures
+        fontSize = settings.fontSize
+        functionNameDelta = settings.functionNameDelta
+        functionDeclarationFontWeight = settings.functionDeclarationFontWeight
+        declarationEmphasisFontWeight = settings.declarationEmphasisFontWeight
+        lineHeightMultiple = settings.lineHeightMultiple
+        syntaxFormatting = settings.syntaxFormatting
+        humanistComments = settings.humanistComments
+    }
+}
+
 public struct ReaderSettings: Equatable, Sendable {
     public enum Theme: String, CaseIterable, Sendable {
         case auto = "Auto"
@@ -57,6 +100,10 @@ public struct ReaderSettings: Equatable, Sendable {
             )
         }
     }
+    public var codeFont: CodeFontSelection {
+        didSet { codeFont = codeFont.validated }
+    }
+    public var codeLigatures: CodeLigatureMode
     public var theme: Theme
     public var syntaxFormatting: Bool
     public var humanistComments: Bool
@@ -74,7 +121,9 @@ public struct ReaderSettings: Equatable, Sendable {
         theme: Theme = .auto,
         syntaxFormatting: Bool = true,
         humanistComments: Bool = false,
-        lineNumbers: Bool = true
+        lineNumbers: Bool = true,
+        codeFont: CodeFontSelection = .systemMonospaced,
+        codeLigatures: CodeLigatureMode = .fontDefault
     ) {
         self.lineHeightMultiple = lineHeightMultiple.clamped(to: Self.lineHeightRange)
         self.fontSize = fontSize.clamped(to: Self.fontSizeRange)
@@ -93,6 +142,8 @@ public struct ReaderSettings: Equatable, Sendable {
         self.declarationEmphasisFontWeight = declarationEmphasisFontWeight.clamped(
             to: Self.declarationEmphasisFontWeightRange
         )
+        self.codeFont = codeFont.validated
+        self.codeLigatures = codeLigatures
         self.theme = theme
         self.syntaxFormatting = syntaxFormatting
         self.humanistComments = humanistComments
@@ -138,7 +189,12 @@ public struct ReaderSettings: Equatable, Sendable {
                 ?? false,
             lineNumbers: (defaults.object(forKey: Keys.lineNumbers) as? NSNumber)?
                 .boolValue
-                ?? true
+                ?? true,
+            codeFont: (defaults.object(forKey: Keys.codeFontKind) as? String) == "postScriptName"
+                ? .postScriptName((defaults.object(forKey: Keys.codeFontPostScriptName) as? String) ?? "")
+                : .systemMonospaced,
+            codeLigatures: (defaults.object(forKey: Keys.codeLigatures) as? String)
+                .flatMap(CodeLigatureMode.init(rawValue:)) ?? .fontDefault
         )
         wrapLines = (defaults.object(forKey: Keys.wrapLines) as? NSNumber)?
             .boolValue
@@ -157,7 +213,9 @@ public struct ReaderSettings: Equatable, Sendable {
             theme: theme,
             syntaxFormatting: syntaxFormatting,
             humanistComments: humanistComments,
-            lineNumbers: lineNumbers
+            lineNumbers: lineNumbers,
+            codeFont: codeFont,
+            codeLigatures: codeLigatures
         )
         validated.wrapLines = wrapLines
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
@@ -179,6 +237,15 @@ public struct ReaderSettings: Equatable, Sendable {
             validated.declarationEmphasisFontWeight,
             forKey: Keys.declarationEmphasisFontWeight
         )
+        switch validated.codeFont {
+        case .systemMonospaced:
+            defaults.set("systemMonospaced", forKey: Keys.codeFontKind)
+            defaults.removeObject(forKey: Keys.codeFontPostScriptName)
+        case let .postScriptName(name):
+            defaults.set("postScriptName", forKey: Keys.codeFontKind)
+            defaults.set(name, forKey: Keys.codeFontPostScriptName)
+        }
+        defaults.set(validated.codeLigatures.rawValue, forKey: Keys.codeLigatures)
         defaults.set(validated.theme.rawValue, forKey: Keys.theme)
         defaults.set(validated.syntaxFormatting, forKey: Keys.syntaxFormatting)
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
@@ -187,6 +254,9 @@ public struct ReaderSettings: Equatable, Sendable {
     }
 
     private enum Keys {
+        static let codeFontKind = "reader.codeFont.kind"
+        static let codeFontPostScriptName = "reader.codeFont.postScriptName"
+        static let codeLigatures = "reader.codeLigatures"
         static let lineHeightMultiple = "reader.lineHeightMultiple"
         static let fontSize = "reader.fontSize"
         static let functionNameDelta = "reader.functionNameDelta"
@@ -205,6 +275,8 @@ public struct ReaderSettings: Equatable, Sendable {
 }
 
 public struct ReaderTheme: Equatable, Sendable {
+    public let codeFont: CodeFontSelection
+    public let codeLigatures: CodeLigatureMode
     public let selection: ReaderSettings.Theme
     public let lineHeightMultiple: Double
     public let fontSize: Double
@@ -217,6 +289,8 @@ public struct ReaderTheme: Equatable, Sendable {
     public let humanistComments: Bool
 
     public init(settings: ReaderSettings) {
+        codeFont = settings.codeFont
+        codeLigatures = settings.codeLigatures
         selection = settings.theme
         lineHeightMultiple = settings.lineHeightMultiple
         fontSize = settings.fontSize
