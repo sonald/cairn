@@ -57,6 +57,7 @@ func runLigatureSelfTest(arguments: [String]) -> Never {
     settings.fontSize = 13
     settings.wrapLines = true
     settings.humanistComments = false
+    let initialRenderStarted = ContinuousClock.now
     let reader = ReaderTextView(settings: settings)
     let window = NSWindow(contentRect: NSRect(x: 120, y: 100, width: 1200, height: 760), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
     window.isReleasedWhenClosed = false
@@ -168,6 +169,7 @@ func runLigatureSelfTest(arguments: [String]) -> Never {
     }
     timer.setEventHandler(handler: heartbeat)
     timer.resume()
+    let coldReaderSetupAndFirstFrameMs = elapsed(initialRenderStarted)
     var checks: [String: Bool] = [:]
     var details: [[String: Any]] = []
     let displayed = reader.view.string
@@ -426,6 +428,7 @@ func runLigatureSelfTest(arguments: [String]) -> Never {
            "actualFragmentEffectiveFeatures": actualFragmentFont().map(effectiveFeatures) ?? [],
            "sourceBytes": bytes.count, "utf16Units": source.utf16.count, "backingScaleFactor": window.backingScaleFactor,
            "samples": sampleCount, "warmup": warmup, "checks": checks, "selectionCases": details, "directionalSelectionCases": directionalSelections,
+           "coldReaderSetupAndFirstCorrectFrameMs": coldReaderSetupAndFirstFrameMs,
            "applyMs": applyTimes, "typographyTransactionMs": typographyTimes,
            "fontResolutionMs": resolutionTimes,
            "fontResolutionCount": ReaderFontResolver.shared.fontResolutionCount,
@@ -446,7 +449,7 @@ func runLigatureSelfTest(arguments: [String]) -> Never {
            "typographyAttributeUpdates": reader.typographyAttributeUpdateCount - attributeBaseline,
            "fontCacheCount": ReaderFontResolver.shared.cacheCount, "fontCacheLimit": ReaderFontResolver.shared.cacheLimit,
            "fontCacheHits": ReaderFontResolver.shared.fontCacheHitCount, "screenshot": screenshot.path,
-           "largeFileViewportDegraded": document.lineTable.lineStarts.count > 8000])
+           "largeFileViewportDegraded": reader.lastViewportRestoreWasLimited])
     if arguments.contains("--interactive") {
         window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

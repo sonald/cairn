@@ -309,3 +309,29 @@ func ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() throws {
         }
     }
 }
+
+
+@MainActor @Test
+func ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() throws {
+    let source = "const WALL: &str = \"" + String(repeating: "wall", count: 20_000) + " !=\";\n"
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    let (reader, window) = ligatureReader(source, settings: settings)
+    defer { window.close() }
+    settleLigatureLayout(reader)
+    let selection = (source as NSString).range(of: "const")
+    reader.view.setSelectedRanges([NSValue(range: selection)], affinity: .upstream, stillSelecting: false)
+    let restores = reader.viewportRestorePassCount
+    let installs = reader.projectionInstallCount
+    settings.wrapLines = false
+    settings.codeLigatures = .disabled
+    reader.apply(settings: settings)
+    settleLigatureLayout(reader)
+    #expect(reader.lastViewportRestoreWasLimited)
+    #expect(reader.lastViewportAnchorErrorPt == nil)
+    #expect(reader.viewportRestorePassCount == restores)
+    #expect(reader.projectionInstallCount == installs)
+    #expect(reader.view.selectedRange() == selection)
+    #expect(reader.sourceText(forDisplaySelection: selection) == "const")
+    #expect(reader.view.string == source)
+}

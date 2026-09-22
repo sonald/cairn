@@ -14453,6 +14453,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             "drawPassCount": reader.backgroundDrawCount,
             "paragraphUpdateCount": reader.paragraphUpdateCount,
             "restorePassCount": reader.viewportRestorePassCount,
+            "viewportRestoreLimited": reader.lastViewportRestoreWasLimited,
             "anchorErrorPt": reader.lastViewportAnchorErrorPt ?? NSNull(),
             "mergedResizeRequests": reader.mergedWidthReflowCount,
             "rawResizeRequests": samples.reduce(0) {

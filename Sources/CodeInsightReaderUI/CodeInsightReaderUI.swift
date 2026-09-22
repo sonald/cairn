@@ -535,6 +535,7 @@ public final class ReaderTextView {
     /// actually executed, and the anchor offset error of the last restore.
     package private(set) var viewportRestorePassCount = 0
     package private(set) var lastViewportAnchorErrorPt: CGFloat?
+    package private(set) var lastViewportRestoreWasLimited = false
     /// Width-reflow diagnostics (§7.4.2): total frame notifications seen and
     /// how many were merged into an already-pending reflow.
     package private(set) var widthReflowNotificationCount = 0
@@ -1668,8 +1669,26 @@ public final class ReaderTextView {
     /// large keep their selection and settings and let the natural layout
     /// lifecycle own the viewport instead (§8.1: never jump to the top as a
     /// fallback — simply do not fight the lazy layout).
-    private var supportsSynchronousViewportRestore: Bool {
-        (displayedDocument?.lineTable.lineStarts.count ?? 0) <= 8_000
+    private func supportsSynchronousViewportRestore(for state: ReaderViewportState) -> Bool {
+        guard let document = displayedDocument else { return false }
+        guard document.lineTable.lineStarts.count <= 8_000 else { return false }
+        let byte: UInt32
+        switch state.anchor {
+        case .source(let offset): byte = offset
+        case .documentStart: byte = 0
+        case .documentEnd: byte = UInt32(clamping: document.bytes.count)
+        case .foldPlaceholder(let id):
+            guard let fold = document.foldRegions.first(where: { $0.id == id }) else { return false }
+            byte = fold.bodyRange.lowerBound
+        }
+        guard let line = document.lineTable.lineColumn(at: byte)?.line else { return true }
+        let index = Int(line) - 1
+        let starts = document.lineTable.lineStarts
+        guard starts.indices.contains(index) else { return false }
+        let end = starts.indices.contains(index + 1) ? Int(starts[index + 1]) : document.bytes.count
+        // Core Text caret offsets scan a whole shaped line (1.7s at 1.8MB).
+        // ponytail: cap synchronous precision at 64KiB; async restore if needed.
+        return end - Int(starts[index]) <= 64 * 1024
     }
 
     /// Ends the current pure-reflow sequence: the next reflow picks a fresh
@@ -1851,6 +1870,12 @@ public final class ReaderTextView {
               state.projectionRevision == projectionRevision
         else { return }
         restoreSelection(from: state)
+        lastViewportRestoreWasLimited = !supportsSynchronousViewportRestore(for: state)
+        if lastViewportRestoreWasLimited {
+            lastViewportAnchorErrorPt = nil
+            restoreHorizontalPosition(from: state, anchorGeometry: nil)
+            return
+        }
         let anchorGeometry = placeViewportAnchor(from: state, in: document)
         restoreHorizontalPosition(from: state, anchorGeometry: anchorGeometry)
     }
@@ -1961,7 +1986,7 @@ public final class ReaderTextView {
         // path: it never expands folds, records history, or shows find
         // indicators (D3.3).
         view.textLayoutManager?.textViewportLayoutController.layoutViewport()
-        if supportsSynchronousViewportRestore,
+        if supportsSynchronousViewportRestore(for: state),
            freshAnchorRowRect(containingDisplayLocation: location) == nil,
            let manager = view.textLayoutManager,
            let content = manager.textContentManager {
@@ -2070,7 +2095,7 @@ public final class ReaderTextView {
         remaining: Int,
         staleAttempts: Int = 0
     ) {
-        guard remaining > 0 else { return }
+        guard remaining > 0, supportsSynchronousViewportRestore(for: state) else { return }
         pendingViewportCorrection = (
             state: state,
             generation: generation,
@@ -2221,7 +2246,7 @@ public final class ReaderTextView {
         widthReflowCapturedState = nil
         guard viewportStateGeneration == generation else { return }
         isRestoringViewport = true
-        if let captured, supportsSynchronousViewportRestore {
+        if let captured {
             restoreViewportState(captured)
             scheduleViewportCorrections(
                 for: captured,
@@ -2483,15 +2508,12 @@ public final class ReaderTextView {
 
         if let captured {
             pendingReflowState = captured
-            restoreSelection(from: captured)
-            if supportsSynchronousViewportRestore {
-                restoreViewportState(captured)
-                scheduleViewportCorrections(
-                    for: captured,
-                    generation: generation,
-                    remaining: 3
-                )
-            }
+            restoreViewportState(captured)
+            scheduleViewportCorrections(
+                for: captured,
+                generation: generation,
+                remaining: 3
+            )
         }
         if captured == nil,
            view.selectedRanges != selectedRanges || view.selectionAffinity != selectionAffinity {
