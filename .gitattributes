@@ -1,3 +1,6 @@
 # Wrap performance fixtures are SHA-256 pinned (fixtures/wrap/wrap_perf.manifest.json):
 # f4 intentionally mixes LF and CRLF, so EOL conversion must never touch them.
 fixtures/wrap/** -text
+
+# Ligature fixtures include a byte-pinned CRLF sample.
+fixtures/ligatures/*.rs -text
