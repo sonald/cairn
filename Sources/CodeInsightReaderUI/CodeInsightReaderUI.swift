@@ -3680,19 +3680,14 @@ public final class ReaderTextView {
                 + Double(duration.attoseconds) / 1e15
         }
         let attributes = baseAttributes
-        let ranges = map.visibleSourceRanges(forDisplay: NSRange(
-            location: 0, length: backingTextStorage.length
-        )) ?? []
+        let range = NSRange(location: 0, length: backingTextStorage.length)
         let update = {
             self.backingTextStorage.beginEditing()
-            for source in ranges {
-                guard let projected = map.project(byteRange: source) else { continue }
-                for range in projected.visible {
-                    self.backingTextStorage.removeAttribute(.ligature, range: range)
-                    self.backingTextStorage.removeAttribute(.kern, range: range)
-                    self.backingTextStorage.addAttributes(attributes, range: range)
-                }
-            }
+            // Match initial projection attributes, including fold placeholders.
+            // Merging leaves attachments, links and other owners' keys intact.
+            self.backingTextStorage.removeAttribute(.ligature, range: range)
+            self.backingTextStorage.removeAttribute(.kern, range: range)
+            self.backingTextStorage.addAttributes(attributes, range: range)
             Self.applyTypography(document.highlightSpans, map: map,
                 to: self.backingTextStorage, theme: self.theme)
             self.paragraphLayout.reset()

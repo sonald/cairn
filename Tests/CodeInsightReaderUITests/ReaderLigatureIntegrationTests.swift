@@ -222,8 +222,10 @@ func ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() throws {
     let expected = (source as NSString).substring(with: NSRange(
         location: sourceStart, length: sourceEnd - sourceStart))
     let installs = reader.projectionInstallCount
-    for mode in CodeLigatureMode.allCases {
-        reader.apply(settings: ReaderSettings(fontSize: 17, codeLigatures: mode))
+    for mode in [CodeLigatureMode.enabled, .disabled, .fontDefault] {
+        let settings = ReaderSettings(lineHeightMultiple: 1.7, fontSize: 17,
+            codeFont: .postScriptName("Menlo-Regular"), codeLigatures: mode)
+        reader.apply(settings: settings)
         settleLigatureLayout(reader)
         #expect(reader.view.string == (display as String))
         #expect(reader.projectionInstallCount == installs)
@@ -232,6 +234,13 @@ func ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() throws {
         #expect(reader.sourceText(forDisplaySelection: selection) == expected)
         #expect((storage.attribute(.attachment, at: placeholder.location,
             effectiveRange: nil) as? NSTextAttachment) === attachment)
+        let resolved = ReaderFontResolver.shared.resolve(theme: ReaderTheme(settings: settings))
+        #expect(storage.attribute(.font, at: placeholder.location, effectiveRange: nil) as? NSFont == resolved.font)
+        #expect(storage.attribute(.ligature, at: placeholder.location, effectiveRange: nil) as? Int
+            == resolved.attributes[.ligature] as? Int)
+        let paragraph = try #require(storage.attribute(.paragraphStyle, at: placeholder.location,
+            effectiveRange: nil) as? NSParagraphStyle)
+        #expect(abs(paragraph.lineHeightMultiple - settings.lineHeightMultiple) < 0.001)
     }
 }
 
