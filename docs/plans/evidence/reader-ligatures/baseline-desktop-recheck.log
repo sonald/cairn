@@ -1,0 +1,12 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test projectSearchPanelFitsVisibleOwnerAndLeavesAnUnclippedEmptyState() started.
+✔ Test projectSearchPanelFitsVisibleOwnerAndLeavesAnUnclippedEmptyState() passed after 0.210 seconds.
+◇ Test closedWindowIgnoresLateTrustSheetConfirmation() started.
+✔ Test closedWindowIgnoresLateTrustSheetConfirmation() passed after 0.898 seconds.
+◇ Test closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+◇ Test case passing 1 argument deletingBookmark → false to closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+◇ Test case passing 1 argument deletingBookmark → true to closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+✔ Test closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) with 2 test cases passed after 1.871 seconds.
+✔ Test run with 3 tests in 0 suites passed after 2.981 seconds.

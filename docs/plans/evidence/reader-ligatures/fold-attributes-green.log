@@ -1,0 +1,24 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[2 / 4] CodeInsightReaderUI
+[8 / 10] CodeInsightReaderUI
+[14 / 16] codeinsight-app-product
+[17 / 19] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[19 / 19] codeinsight-app-product
+[25 / 37] CodeInsightReaderUITests-product
+[31 / 40] CodeInsightApp
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[37 / 38] CodeInsightAppTests-product
+Build complete! (6.42秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() started.
+✔ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() passed after 0.117 seconds.
+◇ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() started.
+✔ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() passed after 1.284 seconds.
+◇ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() started.
+✔ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() passed after 4.310 seconds.
+✔ Test run with 3 tests in 0 suites passed after 5.712 seconds.

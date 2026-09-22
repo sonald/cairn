@@ -1,0 +1,807 @@
+{
+  "actualFragmentEffectiveFeatures" : [
+    {
+      "CTFeatureOpenTypeTag" : "calt",
+      "CTFeatureOpenTypeValue" : 0,
+      "CTFeatureSelectorIdentifier" : 1,
+      "CTFeatureTypeIdentifier" : 36
+    }
+  ],
+  "actualFragmentFont" : "JetBrainsMono-Regular",
+  "applyMs" : [
+    2.7190829999999999,
+    2.865459,
+    2.847458,
+    2.9524170000000001,
+    2.8901669999999999,
+    2.717041,
+    3.6553330000000002,
+    3.0355409999999998,
+    2.9597500000000001,
+    2.7190829999999999,
+    3.1912090000000002,
+    2.9624999999999999,
+    2.3600829999999999,
+    2.397583,
+    2.7669999999999999,
+    2.489541,
+    2.2545000000000002,
+    2.5871249999999999,
+    2.3537919999999999,
+    2.2290000000000001,
+    2.310416,
+    2.1942499999999998,
+    2.519333,
+    2.6175419999999998,
+    2.7274590000000001,
+    2.7117089999999999,
+    2.7451249999999998,
+    2.8330839999999999,
+    2.5772499999999998,
+    2.9353750000000001
+  ],
+  "backingScaleFactor" : 2,
+  "build" : "release",
+  "checks" : {
+    "boundedFontCache" : true,
+    "closedReaderReleased" : true,
+    "closedTextViewReleased" : true,
+    "directionalSelection:forward:disabled->fontDefault" : true,
+    "directionalSelection:forward:enabled->disabled" : true,
+    "directionalSelection:forward:fontDefault->enabled" : true,
+    "directionalSelection:reverse:disabled->fontDefault" : true,
+    "directionalSelection:reverse:enabled->disabled" : true,
+    "directionalSelection:reverse:fontDefault->enabled" : true,
+    "find:!=" : true,
+    "find:!==" : true,
+    "find:👩🏽‍💻" : true,
+    "find:é" : true,
+    "idempotentApply" : true,
+    "keyboardCopy:!=" : true,
+    "keyboardCopy:!==" : true,
+    "keyboardCopy:👩🏽‍💻" : true,
+    "keyboardCopy:é" : true,
+    "nativeGeometry:!=" : true,
+    "nativeGeometry:!==" : true,
+    "nativeGeometry:👩🏽‍💻" : true,
+    "nativeGeometry:é" : true,
+    "projectionReuse" : true,
+    "projectionReuseAfterStress" : true,
+    "selectionPreserved" : true,
+    "sourceAndDisplayEqual" : true,
+    "sourceUnchangedAfterStress" : true,
+    "sourceUnchangedAfterSwitches" : true
+  },
+  "closedWindowCount" : 10,
+  "closedWindowTypographySwitchCount" : 100,
+  "coldReaderSetupAndFirstCorrectFrameMs" : 99.862667000000002,
+  "directionalSelectionCases" : [
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    }
+  ],
+  "effectiveFeatures" : [
+    {
+      "CTFeatureOpenTypeTag" : "calt",
+      "CTFeatureOpenTypeValue" : 0,
+      "CTFeatureSelectorIdentifier" : 1,
+      "CTFeatureTypeIdentifier" : 36
+    }
+  ],
+  "firstCorrectFrameMs" : [
+    9.016,
+    9.4482090000000003,
+    9.1094170000000005,
+    9.6767500000000002,
+    9.2905829999999998,
+    9.2309579999999993,
+    10.50475,
+    9.5511660000000003,
+    9.2547910000000009,
+    9.5897500000000004,
+    9.6541669999999993,
+    9.908417,
+    8.9238330000000001,
+    8.9632079999999998,
+    9.6216670000000004,
+    9.3481660000000009,
+    8.8755839999999999,
+    9.156542,
+    9.4703750000000007,
+    9.0695409999999992,
+    8.3370409999999993,
+    8.6009589999999996,
+    8.8508750000000003,
+    8.9528339999999993,
+    9.2297919999999998,
+    8.8132090000000005,
+    8.9905419999999996,
+    8.9417919999999995,
+    9.110792,
+    9.609375
+  ],
+  "firstCorrectFrameP95Ms" : 9.908417,
+  "fixture" : "fixtures\/ligatures\/operators.rs",
+  "fixtureSHA256" : "39bdbf4ca7391062f1930f4dce5fc3073ebfbef782de5ac9f58e8a2eea64d57c",
+  "fontCacheCount" : 6,
+  "fontCacheHits" : 817,
+  "fontCacheLimit" : 128,
+  "fontPath" : "\/Users\/siancao\/Library\/Fonts\/JetBrainsMono-Regular.ttf",
+  "fontResolutionCount" : 6,
+  "fontResolutionCumulativeMs" : 4.8585840000000005,
+  "fontResolutionMs" : [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fontSHA256" : "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1",
+  "fontVersion" : "Version 2.305; ttfautohint (v1.8.4.7-5d5b)",
+  "largeFileViewportDegraded" : false,
+  "mainThreadHeartbeatMaxDelayMs" : 184.02775,
+  "maxSourceLineBytes" : 87,
+  "mode" : "disabled",
+  "N03" : true,
+  "N03RegularFixtureBudgetApplies" : false,
+  "N04" : true,
+  "N04ScrollableFixtureBudgetApplies" : false,
+  "os" : "Version 27.0 (Build 26A428)",
+  "peakPhysicalBytes" : 101450976,
+  "physicalBytesAfterStress" : 98436296,
+  "physicalBytesBeforeStress" : 84116656,
+  "projectionInstallDelta" : 0,
+  "quietPhysicalBytes50ms" : [
+    98436296,
+    98436296,
+    98436296,
+    98469064,
+    98567368,
+    98567368,
+    98567368,
+    98567368,
+    98567368,
+    98567368
+  ],
+  "releaseDeadlineMs" : 2000,
+  "releaseSamples" : [
+    {
+      "elapsedMs" : 11.206958,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 21.809208000000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 32.319167,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 42.532541999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 53.254666999999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 63.934583000000003,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 74.208207999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 84.893625,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 96.104375000000005,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 107.978083,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 118.28658299999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 129.15241700000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 139.89949999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 150.91954200000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 161.65199999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 171.80033299999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 183.05250000000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 193.41954200000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 203.625708,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 214.00987499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 224.855208,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 235.96437499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 246.11820800000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 258.00816700000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 268.26383299999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 279.500542,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 291.219042,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 301.45262500000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 311.63570800000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 321.84295800000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 333.01266700000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 343.603542,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 353.97108300000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 365.30112500000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 376.06412499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 387.33029199999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 8
+    },
+    {
+      "elapsedMs" : 397.67720800000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 7
+    },
+    {
+      "elapsedMs" : 410.097917,
+      "readersAlive" : 0,
+      "textViewsAlive" : 6
+    },
+    {
+      "elapsedMs" : 421.83187500000003,
+      "readersAlive" : 0,
+      "textViewsAlive" : 6
+    },
+    {
+      "elapsedMs" : 432.25845800000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 5
+    },
+    {
+      "elapsedMs" : 442.493292,
+      "readersAlive" : 0,
+      "textViewsAlive" : 5
+    },
+    {
+      "elapsedMs" : 469.83416699999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 4
+    },
+    {
+      "elapsedMs" : 480.633667,
+      "readersAlive" : 0,
+      "textViewsAlive" : 2
+    },
+    {
+      "elapsedMs" : 492.638958,
+      "readersAlive" : 0,
+      "textViewsAlive" : 1
+    },
+    {
+      "elapsedMs" : 503.21658300000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 0
+    }
+  ],
+  "renderBitmapPixels" : [
+    2324,
+    1508
+  ],
+  "renderBitmapPoints" : [
+    1162,
+    754
+  ],
+  "renderPixelScale" : 2,
+  "requestedFeatures" : {
+    "calt" : 0,
+    "clig" : 0,
+    "dlig" : 0,
+    "hlig" : 0,
+    "liga" : 0
+  },
+  "requestedFont" : "JetBrainsMono-Regular",
+  "samples" : 30,
+  "schemaVersion" : 1,
+  "scope" : "Reader native offscreen rendering and keyboard\/find\/copy; mouse and other surfaces require separate acceptance",
+  "screenshot" : "\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/docs\/plans\/evidence\/reader-ligatures\/native\/JetBrainsMono-Regular-operators-disabled.png",
+  "scrollFrameMeasurement" : "synchronous native cacheDisplay wall time at fixed 2x density, not display vsync intervals",
+  "scrollFrameMs" : {
+    "disabled" : [
+      1.894417,
+      1.8428340000000001,
+      1.6979580000000001,
+      1.6554580000000001,
+      1.480375,
+      1.7362919999999999,
+      1.5780000000000001,
+      1.483959,
+      1.510958,
+      1.3765000000000001,
+      1.4655419999999999,
+      1.5730409999999999,
+      1.427875,
+      1.272125,
+      1.235833,
+      1.213541,
+      1.4461660000000001,
+      1.500375,
+      1.3942920000000001,
+      1.2630410000000001,
+      1.3695409999999999,
+      1.232,
+      1.163958,
+      1.3607499999999999,
+      1.1167499999999999,
+      1.248208,
+      1.460833,
+      1.2919160000000001,
+      1.1654580000000001,
+      1.471333
+    ],
+    "enabled" : [
+      1.056916,
+      1.0674999999999999,
+      1.060708,
+      1.2397910000000001,
+      1.1650419999999999,
+      1.11025,
+      1.0620419999999999,
+      1.162042,
+      1.2220420000000001,
+      1.067666,
+      1.0642499999999999,
+      1.088042,
+      1.158083,
+      1.0902499999999999,
+      1.266208,
+      1.212958,
+      1.14025,
+      1.0860000000000001,
+      1.153292,
+      1.1613329999999999,
+      1.064792,
+      1.072916,
+      1.055833,
+      1.0757909999999999,
+      1.2195,
+      1.2521249999999999,
+      1.1350420000000001,
+      1.0934170000000001,
+      1.1088750000000001,
+      1.1120410000000001
+    ]
+  },
+  "scrollOffP95Ms" : 1.8428340000000001,
+  "scrollOnP95Ms" : 1.2521249999999999,
+  "selectionCases" : [
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 27,
+      "textKitSegments" : [
+        [
+          210.60000000000008,
+          0,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "!="
+    },
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 42,
+      "textKitSegments" : [
+        [
+          327.60000000000025,
+          0,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "!=="
+    },
+    {
+      "copied" : "👩🏽‍💻",
+      "expected" : "👩🏽‍💻",
+      "selectedLength" : 7,
+      "selectedLocation" : 169,
+      "textKitSegments" : [
+        [
+          137.19999999999999,
+          66.300000000000011,
+          17,
+          22.100000000000001
+        ]
+      ],
+      "token" : "👩🏽‍💻"
+    },
+    {
+      "copied" : "é",
+      "expected" : "é",
+      "selectedLength" : 2,
+      "selectedLocation" : 187,
+      "textKitSegments" : [
+        [
+          245.2000000000001,
+          66.300000000000011,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "é"
+    }
+  ],
+  "settledMs" : [
+    40.947833000000003,
+    43.568792000000002,
+    40.677624999999999,
+    40.956833000000003,
+    42.607999999999997,
+    67.127875000000003,
+    46.821041000000001,
+    43.730125000000001,
+    42.236790999999997,
+    41.612791000000001,
+    41.151041999999997,
+    42.117041999999998,
+    42.041375000000002,
+    39.902082999999998,
+    43.2395,
+    41.539375,
+    40.865291999999997,
+    40.549624999999999,
+    41.481749999999998,
+    39.715665999999999,
+    40.734457999999997,
+    39.091459,
+    40.178750000000001,
+    41.793416999999998,
+    41.731833999999999,
+    42.175375000000003,
+    41.410209000000002,
+    41.121375,
+    42.929667000000002,
+    43.744666000000002
+  ],
+  "settledP95Ms" : 46.821041000000001,
+  "sourceBytes" : 366,
+  "sourceLineCount" : 9,
+  "status" : "passed",
+  "stressPhysicalBytesEvery10" : [
+    82822320,
+    85034160,
+    85951664,
+    88229040,
+    89179312,
+    91325616,
+    92226736,
+    94536904,
+    95388872,
+    97617096
+  ],
+  "typographyAttributeUpdates" : 142,
+  "typographyTransactionMs" : [
+    0.25970899999999997,
+    0.27058399999999994,
+    0.29854199999999986,
+    0.25687499999999996,
+    0.30750000000000011,
+    0.23254199999999958,
+    0.35562499999999986,
+    0.29587499999999967,
+    0.28908299999999976,
+    0.24083400000000044,
+    0.29450000000000021,
+    0.26700000000000035,
+    0.26412499999999994,
+    0.21341599999999961,
+    0.31475000000000009,
+    0.32658399999999954,
+    0.24108299999999971,
+    0.23449999999999971,
+    0.24612500000000015,
+    0.21704199999999929,
+    0.24012500000000081,
+    0.20666699999999949,
+    0.26012500000000038,
+    0.24220799999999976,
+    0.28116699999999994,
+    0.26204099999999997,
+    0.2943750000000005,
+    0.41320900000000016,
+    0.2797079999999994,
+    0.22974999999999923
+  ],
+  "utf16Units" : 349,
+  "warmup" : 5
+}

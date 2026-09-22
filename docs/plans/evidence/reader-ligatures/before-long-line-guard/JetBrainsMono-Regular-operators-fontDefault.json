@@ -1,0 +1,802 @@
+{
+  "actualFragmentEffectiveFeatures" : [
+
+  ],
+  "actualFragmentFont" : "JetBrainsMono-Regular",
+  "applyMs" : [
+    2.8058329999999998,
+    2.7590840000000001,
+    2.710833,
+    2.6293340000000001,
+    2.6597499999999998,
+    2.8065000000000002,
+    2.8087080000000002,
+    2.8801670000000001,
+    2.9406249999999998,
+    2.994167,
+    3.1812079999999998,
+    3.0256669999999999,
+    2.5328339999999998,
+    2.4027080000000001,
+    2.7425419999999998,
+    2.3669159999999998,
+    2.2635000000000001,
+    2.4337499999999999,
+    2.4725830000000002,
+    2.3467910000000001,
+    2.223417,
+    2.322333,
+    2.6494580000000001,
+    2.4184580000000002,
+    2.7301250000000001,
+    2.5216660000000002,
+    2.8275420000000002,
+    2.5771250000000001,
+    2.587958,
+    2.6547079999999998
+  ],
+  "backingScaleFactor" : 2,
+  "build" : "release",
+  "checks" : {
+    "boundedFontCache" : true,
+    "closedReaderReleased" : true,
+    "closedTextViewReleased" : true,
+    "directionalSelection:forward:disabled->fontDefault" : true,
+    "directionalSelection:forward:enabled->disabled" : true,
+    "directionalSelection:forward:fontDefault->enabled" : true,
+    "directionalSelection:reverse:disabled->fontDefault" : true,
+    "directionalSelection:reverse:enabled->disabled" : true,
+    "directionalSelection:reverse:fontDefault->enabled" : true,
+    "find:!=" : true,
+    "find:!==" : true,
+    "find:👩🏽‍💻" : true,
+    "find:é" : true,
+    "idempotentApply" : true,
+    "keyboardCopy:!=" : true,
+    "keyboardCopy:!==" : true,
+    "keyboardCopy:👩🏽‍💻" : true,
+    "keyboardCopy:é" : true,
+    "nativeGeometry:!=" : true,
+    "nativeGeometry:!==" : true,
+    "nativeGeometry:👩🏽‍💻" : true,
+    "nativeGeometry:é" : true,
+    "projectionReuse" : true,
+    "projectionReuseAfterStress" : true,
+    "selectionPreserved" : true,
+    "sourceAndDisplayEqual" : true,
+    "sourceUnchangedAfterStress" : true,
+    "sourceUnchangedAfterSwitches" : true
+  },
+  "closedWindowCount" : 10,
+  "closedWindowTypographySwitchCount" : 100,
+  "directionalSelectionCases" : [
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    }
+  ],
+  "effectiveFeatures" : [
+
+  ],
+  "firstCorrectFrameMs" : [
+    10.705042000000001,
+    11.21475,
+    9.1469579999999997,
+    9.1751670000000001,
+    9.2027909999999995,
+    9.5155419999999999,
+    9.123583,
+    9.3443749999999994,
+    10.61425,
+    9.6707090000000004,
+    9.499708,
+    10.093709,
+    9.1168750000000003,
+    10.1715,
+    9.1881249999999994,
+    10.84925,
+    9.6624999999999996,
+    10.72625,
+    8.6374580000000005,
+    9.1919579999999996,
+    8.905958,
+    8.7239170000000001,
+    8.7477079999999994,
+    10.402749999999999,
+    9.1294579999999996,
+    9.9782080000000004,
+    8.9260420000000007,
+    9.4744170000000008,
+    10.600375,
+    9.3406249999999993
+  ],
+  "firstCorrectFrameP95Ms" : 10.84925,
+  "fixture" : "fixtures\/ligatures\/operators.rs",
+  "fixtureSHA256" : "39bdbf4ca7391062f1930f4dce5fc3073ebfbef782de5ac9f58e8a2eea64d57c",
+  "fontCacheCount" : 6,
+  "fontCacheHits" : 820,
+  "fontCacheLimit" : 128,
+  "fontPath" : "\/Users\/siancao\/Library\/Fonts\/JetBrainsMono-Regular.ttf",
+  "fontResolutionCount" : 6,
+  "fontResolutionCumulativeMs" : 5.1695820000000001,
+  "fontResolutionMs" : [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fontSHA256" : "e6fd0d7e91550b3ed2b735d4312474362c4716edc4fc0577a0f61ed782d5aed1",
+  "fontVersion" : "Version 2.305; ttfautohint (v1.8.4.7-5d5b)",
+  "largeFileViewportDegraded" : false,
+  "mainThreadHeartbeatMaxDelayMs" : 208.21170799999999,
+  "maxSourceLineBytes" : 87,
+  "mode" : "fontDefault",
+  "N03" : true,
+  "N03RegularFixtureBudgetApplies" : false,
+  "N04" : true,
+  "N04ScrollableFixtureBudgetApplies" : false,
+  "os" : "Version 27.0 (Build 26A428)",
+  "peakPhysicalBytes" : 101074144,
+  "physicalBytesAfterStress" : 98321632,
+  "physicalBytesBeforeStress" : 85443760,
+  "projectionInstallDelta" : 0,
+  "quietPhysicalBytes50ms" : [
+    98321632,
+    98321632,
+    98321632,
+    98403552,
+    98436320,
+    98469088,
+    98469088,
+    98469088,
+    98469088,
+    98469088
+  ],
+  "releaseDeadlineMs" : 2000,
+  "releaseSamples" : [
+    {
+      "elapsedMs" : 10.761291999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 21.278082999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 31.734542000000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 42.617624999999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 52.946041999999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 63.081249999999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 73.567207999999994,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 84.264624999999995,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 94.891041999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 105.781667,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 117.15620800000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 127.22075,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 137.978667,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 148.54958300000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 158.825917,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 168.99395799999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 179.84483299999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 191.09,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 201.88787500000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 213.00037499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 223.906375,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 234.370417,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 244.81941699999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 255.59383299999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 266.78241700000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 277.77079199999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 287.897583,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 298.67479200000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 309.27175,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 319.61258299999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 330.181083,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 340.61979200000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 350.93566700000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 362.60575,
+      "readersAlive" : 0,
+      "textViewsAlive" : 8
+    },
+    {
+      "elapsedMs" : 373.36570799999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 8
+    },
+    {
+      "elapsedMs" : 384.815292,
+      "readersAlive" : 0,
+      "textViewsAlive" : 7
+    },
+    {
+      "elapsedMs" : 396.06429200000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 7
+    },
+    {
+      "elapsedMs" : 406.58516700000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 6
+    },
+    {
+      "elapsedMs" : 417.59625,
+      "readersAlive" : 0,
+      "textViewsAlive" : 6
+    },
+    {
+      "elapsedMs" : 428.06104199999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 5
+    },
+    {
+      "elapsedMs" : 440.20433300000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 4
+    },
+    {
+      "elapsedMs" : 450.92174999999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 4
+    },
+    {
+      "elapsedMs" : 461.67370799999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 3
+    },
+    {
+      "elapsedMs" : 472.034042,
+      "readersAlive" : 0,
+      "textViewsAlive" : 2
+    },
+    {
+      "elapsedMs" : 482.24120799999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 2
+    },
+    {
+      "elapsedMs" : 512.40662499999996,
+      "readersAlive" : 0,
+      "textViewsAlive" : 1
+    },
+    {
+      "elapsedMs" : 522.60249999999996,
+      "readersAlive" : 0,
+      "textViewsAlive" : 0
+    }
+  ],
+  "renderBitmapPixels" : [
+    2324,
+    1508
+  ],
+  "renderBitmapPoints" : [
+    1162,
+    754
+  ],
+  "renderPixelScale" : 2,
+  "requestedFeatures" : {
+
+  },
+  "requestedFont" : "JetBrainsMono-Regular",
+  "samples" : 30,
+  "schemaVersion" : 1,
+  "scope" : "Reader native offscreen rendering and keyboard\/find\/copy; mouse and other surfaces require separate acceptance",
+  "screenshot" : "\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/docs\/plans\/evidence\/reader-ligatures\/native\/JetBrainsMono-Regular-operators-fontDefault.png",
+  "scrollFrameMeasurement" : "synchronous native cacheDisplay wall time at fixed 2x density, not display vsync intervals",
+  "scrollFrameMs" : {
+    "disabled" : [
+      1.480459,
+      1.4702500000000001,
+      1.3566659999999999,
+      1.4213750000000001,
+      1.482917,
+      1.330792,
+      1.2764169999999999,
+      1.3028329999999999,
+      1.478208,
+      1.4222090000000001,
+      1.251125,
+      1.26075,
+      1.584417,
+      1.5735840000000001,
+      1.374458,
+      1.217959,
+      1.1787920000000001,
+      1.379583,
+      1.25675,
+      1.402166,
+      1.2504999999999999,
+      1.4019999999999999,
+      1.2382089999999999,
+      1.352292,
+      1.2837909999999999,
+      1.252667,
+      1.238583,
+      1.506834,
+      1.353167,
+      1.476791
+    ],
+    "enabled" : [
+      1.5942080000000001,
+      1.676042,
+      1.4132499999999999,
+      1.3790830000000001,
+      1.962958,
+      1.411958,
+      1.2310000000000001,
+      1.1465829999999999,
+      1.1421250000000001,
+      1.23275,
+      1.589,
+      1.3734580000000001,
+      1.3256250000000001,
+      1.407667,
+      1.221125,
+      1.2050000000000001,
+      1.4021669999999999,
+      1.5044999999999999,
+      1.4459169999999999,
+      1.3520000000000001,
+      1.177208,
+      1.146666,
+      1.52325,
+      1.6693750000000001,
+      1.314667,
+      1.1810830000000001,
+      1.2274579999999999,
+      1.4025000000000001,
+      1.483209,
+      1.5803339999999999
+    ]
+  },
+  "scrollOffP95Ms" : 1.5735840000000001,
+  "scrollOnP95Ms" : 1.676042,
+  "selectionCases" : [
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 27,
+      "textKitSegments" : [
+        [
+          210.60000000000008,
+          0,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "!="
+    },
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 42,
+      "textKitSegments" : [
+        [
+          327.60000000000025,
+          0,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "!=="
+    },
+    {
+      "copied" : "👩🏽‍💻",
+      "expected" : "👩🏽‍💻",
+      "selectedLength" : 7,
+      "selectedLocation" : 169,
+      "textKitSegments" : [
+        [
+          137.19999999999999,
+          66.300000000000011,
+          17,
+          22.100000000000001
+        ]
+      ],
+      "token" : "👩🏽‍💻"
+    },
+    {
+      "copied" : "é",
+      "expected" : "é",
+      "selectedLength" : 2,
+      "selectedLocation" : 187,
+      "textKitSegments" : [
+        [
+          245.2000000000001,
+          66.300000000000011,
+          7.8000000000000114,
+          22.100000000000001
+        ]
+      ],
+      "token" : "é"
+    }
+  ],
+  "settledMs" : [
+    41.243957999999999,
+    41.712667000000003,
+    41.359208000000002,
+    41.495167000000002,
+    41.022750000000002,
+    43.596375000000002,
+    40.445374999999999,
+    55.565125000000002,
+    44.600667000000001,
+    42.640500000000003,
+    41.547541000000002,
+    42.149541999999997,
+    40.836292,
+    41.684750000000001,
+    41.116374999999998,
+    42.364583000000003,
+    39.676667000000002,
+    42.554166000000002,
+    38.947042000000003,
+    40.118541,
+    40.326542000000003,
+    39.014125,
+    41.049791999999997,
+    41.264457999999998,
+    41.95825,
+    42.655625000000001,
+    40.771917000000002,
+    40.954957999999998,
+    43.073915999999997,
+    40.704208000000001
+  ],
+  "settledP95Ms" : 44.600667000000001,
+  "sourceBytes" : 366,
+  "sourceLineCount" : 9,
+  "status" : "passed",
+  "stressPhysicalBytesEvery10" : [
+    82838704,
+    85034160,
+    85918896,
+    88163504,
+    89064624,
+    89998512,
+    92177584,
+    93095112,
+    95339720,
+    96158944
+  ],
+  "typographyAttributeUpdates" : 143,
+  "typographyTransactionMs" : [
+    0.24908399999999986,
+    0.25608399999999998,
+    0.28575000000000017,
+    0.24158299999999988,
+    0.3137080000000001,
+    0.25845900000000022,
+    0.2707499999999996,
+    0.27879200000000015,
+    0.30041600000000024,
+    0.26962499999999956,
+    0.32787499999999969,
+    0.27283300000000033,
+    0.24179200000000023,
+    0.22354200000000013,
+    0.26983400000000035,
+    0.23162500000000019,
+    0.23212499999999991,
+    0.23754100000000022,
+    0.28970800000000008,
+    0.21574999999999989,
+    0.23554200000000058,
+    0.20687500000000014,
+    0.2562079999999991,
+    0.2279169999999997,
+    0.26883400000000002,
+    0.24050000000000082,
+    0.30041699999999949,
+    0.24520799999999987,
+    0.2694580000000002,
+    0.24145799999999973
+  ],
+  "utf16Units" : 349,
+  "warmup" : 5
+}

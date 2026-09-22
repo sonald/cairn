@@ -1,0 +1,803 @@
+{
+  "actualFragmentEffectiveFeatures" : [
+
+  ],
+  "actualFragmentFont" : ".AppleSystemUIFontMonospaced-Regular",
+  "applyMs" : [
+    2.2533750000000001,
+    2.5223749999999998,
+    2.4027919999999998,
+    2.5747080000000002,
+    2.8076249999999998,
+    2.281666,
+    2.7878750000000001,
+    2.4409169999999998,
+    2.442625,
+    2.4162080000000001,
+    2.8666659999999999,
+    2.5543749999999998,
+    2.7235420000000001,
+    2.6722090000000001,
+    2.9027080000000001,
+    2.060584,
+    2.2667920000000001,
+    2.2399580000000001,
+    1.9876670000000001,
+    1.9750000000000001,
+    2.0327500000000001,
+    1.894625,
+    1.934042,
+    2.116584,
+    2.129416,
+    2.4721250000000001,
+    2.5529999999999999,
+    2.4634170000000002,
+    2.169416,
+    2.490459
+  ],
+  "backingScaleFactor" : 2,
+  "build" : "release",
+  "checks" : {
+    "boundedFontCache" : true,
+    "closedReaderReleased" : true,
+    "closedTextViewReleased" : true,
+    "directionalSelection:forward:disabled->fontDefault" : true,
+    "directionalSelection:forward:enabled->disabled" : true,
+    "directionalSelection:forward:fontDefault->enabled" : true,
+    "directionalSelection:reverse:disabled->fontDefault" : true,
+    "directionalSelection:reverse:enabled->disabled" : true,
+    "directionalSelection:reverse:fontDefault->enabled" : true,
+    "find:!=" : true,
+    "find:!==" : true,
+    "find:👩🏽‍💻" : true,
+    "find:é" : true,
+    "idempotentApply" : true,
+    "keyboardCopy:!=" : true,
+    "keyboardCopy:!==" : true,
+    "keyboardCopy:👩🏽‍💻" : true,
+    "keyboardCopy:é" : true,
+    "nativeGeometry:!=" : true,
+    "nativeGeometry:!==" : true,
+    "nativeGeometry:👩🏽‍💻" : true,
+    "nativeGeometry:é" : true,
+    "projectionReuse" : true,
+    "projectionReuseAfterStress" : true,
+    "selectionPreserved" : true,
+    "sourceAndDisplayEqual" : true,
+    "sourceUnchangedAfterStress" : true,
+    "sourceUnchangedAfterSwitches" : true
+  },
+  "closedWindowCount" : 10,
+  "closedWindowTypographySwitchCount" : 100,
+  "coldReaderSetupAndFirstCorrectFrameMs" : 76.156334000000001,
+  "directionalSelectionCases" : [
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 1,
+      "affinityBefore" : 1,
+      "after" : [
+        26,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        26,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "forward",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "disabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "enabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "fontDefault",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "disabled",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    },
+    {
+      "affinityAfter" : 0,
+      "affinityBefore" : 0,
+      "after" : [
+        27,
+        1
+      ],
+      "afterMode" : "enabled",
+      "before" : [
+        27,
+        1
+      ],
+      "beforeMode" : "fontDefault",
+      "copiedSource" : "!=",
+      "direction" : "reverse",
+      "expectedExtended" : [
+        26,
+        2
+      ],
+      "extended" : [
+        26,
+        2
+      ],
+      "sourceByteEnd" : 28,
+      "sourceByteStart" : 26
+    }
+  ],
+  "effectiveFeatures" : [
+
+  ],
+  "firstCorrectFrameMs" : [
+    8.7440829999999998,
+    8.6687089999999998,
+    9.2984589999999994,
+    9.1992499999999993,
+    9.3797499999999996,
+    8.9114579999999997,
+    9.5485000000000007,
+    8.8986249999999991,
+    8.8582920000000005,
+    9.4153749999999992,
+    9.5052500000000002,
+    8.9990419999999993,
+    9.2774590000000003,
+    9.2387499999999996,
+    10.1615,
+    9.8369590000000002,
+    9.0535840000000007,
+    8.6385830000000006,
+    8.9513339999999992,
+    8.4800830000000005,
+    8.6270410000000002,
+    8.2377500000000001,
+    7.9523339999999996,
+    8.6410839999999993,
+    8.2420000000000009,
+    9.5638749999999995,
+    8.9038749999999993,
+    8.9714580000000002,
+    9.685791,
+    8.8547499999999992
+  ],
+  "firstCorrectFrameP95Ms" : 9.8369590000000002,
+  "fixture" : "fixtures\/ligatures\/operators.rs",
+  "fixtureSHA256" : "39bdbf4ca7391062f1930f4dce5fc3073ebfbef782de5ac9f58e8a2eea64d57c",
+  "fontCacheCount" : 6,
+  "fontCacheHits" : 820,
+  "fontCacheLimit" : 128,
+  "fontPath" : "unavailable",
+  "fontResolutionCount" : 6,
+  "fontResolutionCumulativeMs" : 0.72537600000000002,
+  "fontResolutionMs" : [
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0
+  ],
+  "fontSHA256" : "unavailable",
+  "fontVersion" : "22.0d3e3",
+  "largeFileViewportDegraded" : false,
+  "mainThreadHeartbeatMaxDelayMs" : 159.767292,
+  "maxSourceLineBytes" : 87,
+  "mode" : "fontDefault",
+  "N03" : true,
+  "N03RegularFixtureBudgetApplies" : false,
+  "N04" : true,
+  "N04ScrollableFixtureBudgetApplies" : false,
+  "os" : "Version 27.0 (Build 26A428)",
+  "peakPhysicalBytes" : 97600664,
+  "physicalBytesAfterStress" : 97453208,
+  "physicalBytesBeforeStress" : 83346560,
+  "projectionInstallDelta" : 0,
+  "quietPhysicalBytes50ms" : [
+    97453208,
+    97453208,
+    97453208,
+    97551512,
+    97600664,
+    97600664,
+    97600664,
+    97600664,
+    97600664,
+    82658456
+  ],
+  "releaseDeadlineMs" : 2000,
+  "releaseSamples" : [
+    {
+      "elapsedMs" : 10.949249999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 21.609165999999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 31.970915999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 42.942582999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 53.233457999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 63.952333000000003,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 74.553708,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 85.157957999999994,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 96.341999999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 106.94583299999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 117.273208,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 128.22616600000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 138.63733300000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 149.2715,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 160.512416,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 172.58362500000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 183.020791,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 193.97975,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 204.349875,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 215.304541,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 226.248041,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 236.65083300000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 247.947125,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 258.46337499999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 268.95529099999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 279.42225000000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 290.363541,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 301.40645799999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 311.606583,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 322.93262499999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 333.56004100000001,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 343.86237499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 354.28674999999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 365.30225000000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 376.04816599999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 10
+    },
+    {
+      "elapsedMs" : 386.59945800000003,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 396.91416600000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 9
+    },
+    {
+      "elapsedMs" : 407.03537499999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 8
+    },
+    {
+      "elapsedMs" : 417.12774999999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 7
+    },
+    {
+      "elapsedMs" : 427.80450000000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 7
+    },
+    {
+      "elapsedMs" : 438.525666,
+      "readersAlive" : 0,
+      "textViewsAlive" : 6
+    },
+    {
+      "elapsedMs" : 449.42145799999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 5
+    },
+    {
+      "elapsedMs" : 460.24004100000002,
+      "readersAlive" : 0,
+      "textViewsAlive" : 4
+    },
+    {
+      "elapsedMs" : 471.30604099999999,
+      "readersAlive" : 0,
+      "textViewsAlive" : 3
+    },
+    {
+      "elapsedMs" : 481.95995799999997,
+      "readersAlive" : 0,
+      "textViewsAlive" : 2
+    },
+    {
+      "elapsedMs" : 492.81041599999998,
+      "readersAlive" : 0,
+      "textViewsAlive" : 1
+    },
+    {
+      "elapsedMs" : 503.23812500000003,
+      "readersAlive" : 0,
+      "textViewsAlive" : 0
+    }
+  ],
+  "renderBitmapPixels" : [
+    2324,
+    1508
+  ],
+  "renderBitmapPoints" : [
+    1162,
+    754
+  ],
+  "renderPixelScale" : 2,
+  "requestedFeatures" : {
+
+  },
+  "requestedFont" : "system",
+  "samples" : 30,
+  "schemaVersion" : 1,
+  "scope" : "Reader native offscreen rendering and keyboard\/find\/copy; mouse and other surfaces require separate acceptance",
+  "screenshot" : "\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/docs\/plans\/evidence\/reader-ligatures\/native\/system-final.png",
+  "scrollFrameMeasurement" : "synchronous native cacheDisplay wall time at fixed 2x density, not display vsync intervals",
+  "scrollFrameMs" : {
+    "disabled" : [
+      1.545166,
+      1.4217919999999999,
+      1.386625,
+      1.6042909999999999,
+      1.5369170000000001,
+      1.48675,
+      1.3666670000000001,
+      1.3200829999999999,
+      1.2518750000000001,
+      1.2625,
+      1.2544580000000001,
+      1.233625,
+      1.5232920000000001,
+      1.2962910000000001,
+      1.2099580000000001,
+      1.2022079999999999,
+      1.1873339999999999,
+      1.161125,
+      1.1657919999999999,
+      1.1650419999999999,
+      1.1589590000000001,
+      1.256375,
+      1.305833,
+      1.2217499999999999,
+      1.245042,
+      1.1823330000000001,
+      1.092125,
+      1.087834,
+      1.0525,
+      1.096959
+    ],
+    "enabled" : [
+      1.206666,
+      1.1946669999999999,
+      1.324875,
+      1.147834,
+      1.0790409999999999,
+      1.055542,
+      1.0112920000000001,
+      1.032667,
+      1.053625,
+      1.0574589999999999,
+      1.0175000000000001,
+      1.218167,
+      1.2012499999999999,
+      1.1980839999999999,
+      1.06175,
+      1.0233749999999999,
+      1.0303340000000001,
+      1.0469999999999999,
+      1.0149170000000001,
+      1.023333,
+      1.025291,
+      1.027083,
+      1.1917089999999999,
+      1.145167,
+      1.178166,
+      1.3057080000000001,
+      1.3845829999999999,
+      1.2218329999999999,
+      1.196375,
+      1.2052499999999999
+    ]
+  },
+  "scrollOffP95Ms" : 1.545166,
+  "scrollOnP95Ms" : 1.324875,
+  "selectionCases" : [
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 27,
+      "textKitSegments" : [
+        [
+          216.9755859375,
+          0,
+          8.0361328125,
+          20.800000000000001
+        ]
+      ],
+      "token" : "!="
+    },
+    {
+      "copied" : "=",
+      "expected" : "=",
+      "selectedLength" : 1,
+      "selectedLocation" : 42,
+      "textKitSegments" : [
+        [
+          337.517578125,
+          0,
+          8.0361328125,
+          20.800000000000001
+        ]
+      ],
+      "token" : "!=="
+    },
+    {
+      "copied" : "👩🏽‍💻",
+      "expected" : "👩🏽‍💻",
+      "selectedLength" : 7,
+      "selectedLocation" : 169,
+      "textKitSegments" : [
+        [
+          137.89873616853112,
+          62.400000000000006,
+          19,
+          20.800000000000001
+        ]
+      ],
+      "token" : "👩🏽‍💻"
+    },
+    {
+      "copied" : "é",
+      "expected" : "é",
+      "selectedLength" : 2,
+      "selectedLocation" : 187,
+      "textKitSegments" : [
+        [
+          249.03593977991244,
+          62.400000000000006,
+          8.0361328125,
+          20.800000000000001
+        ]
+      ],
+      "token" : "é"
+    }
+  ],
+  "settledMs" : [
+    41.306457999999999,
+    41.595500000000001,
+    42.150624999999998,
+    41.732999999999997,
+    41.585000000000001,
+    41.962375000000002,
+    41.544083000000001,
+    42.891542000000001,
+    40.637334000000003,
+    41.840583000000002,
+    42.641416,
+    39.898584,
+    41.931666999999997,
+    43.565874999999998,
+    44.731417,
+    45.619,
+    40.071584000000001,
+    41.551208000000003,
+    42.22775,
+    42.333207999999999,
+    41.316291,
+    40.252625000000002,
+    41.880417000000001,
+    41.974209000000002,
+    41.367666,
+    42.468083,
+    42.182375,
+    40.484957999999999,
+    42.46125,
+    41.931666999999997
+  ],
+  "settledP95Ms" : 44.731417,
+  "sourceBytes" : 366,
+  "sourceLineCount" : 9,
+  "status" : "passed",
+  "stressPhysicalBytesEvery10" : [
+    80888960,
+    82953344,
+    83870872,
+    86213784,
+    88327320,
+    89326744,
+    91407512,
+    92374168,
+    94520472,
+    95323288
+  ],
+  "typographyAttributeUpdates" : 143,
+  "typographyTransactionMs" : [
+    0.27041700000000013,
+    0.26904200000000023,
+    0.23641600000000018,
+    0.27625000000000011,
+    0.49324999999999974,
+    0.24862499999999965,
+    0.31120799999999971,
+    0.28291700000000031,
+    0.2931670000000004,
+    0.28854100000000038,
+    0.29225000000000012,
+    0.32041599999999981,
+    0.3179590000000001,
+    0.28629199999999955,
+    0.31066600000000033,
+    0.23466599999999982,
+    0.26229200000000041,
+    0.23925000000000018,
+    0.23499999999999943,
+    0.21741699999999931,
+    0.21799999999999997,
+    0.21724999999999994,
+    0.22187500000000071,
+    0.23891599999999968,
+    0.24183299999999974,
+    0.26112499999999983,
+    0.27929100000000062,
+    0.25408299999999961,
+    0.26275000000000048,
+    0.25341700000000067
+  ],
+  "utf16Units" : 349,
+  "warmup" : 5
+}

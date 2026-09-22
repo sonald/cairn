@@ -1,0 +1,63 @@
+Building for debugging...
+[Computing dependencies]
+[Starting]
+[1 / 11] PythonExtractorTests-product
+[3 / 13] CodeInsightApp
+[12 / 22] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[20 / 29] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[23 / 24] CodeInsightAppTests-product
+Build complete! (3.20秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() started.
+✔ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() passed after 1.371 seconds.
+✔ Test run with 1 test in 0 suites passed after 1.372 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Suite PaletteTests started.
+◇ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() started.
+✔ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() passed after 0.097 seconds.
+✔ Suite PaletteTests passed after 0.098 seconds.
+◇ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() started.
+✔ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() passed after 1.151 seconds.
+◇ Test appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettings() started.
+✔ Test appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettings() passed after 1.667 seconds.
+◇ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() started.
+✔ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() passed after 0.774 seconds.
+◇ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() started.
+✔ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() passed after 0.101 seconds.
+◇ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() started.
+✔ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() passed after 0.045 seconds.
+◇ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() started.
+✔ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() passed after 0.039 seconds.
+◇ Test readingSetScrollPublishesItsNumericCheckpointOffset() started.
+✔ Test readingSetScrollPublishesItsNumericCheckpointOffset() passed after 0.089 seconds.
+◇ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() started.
+✔ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() passed after 1.820 seconds.
+◇ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() started.
+✔ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() passed after 0.290 seconds.
+✔ Test run with 10 tests in 1 suite passed after 6.079 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() started.
+✔ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() passed after 0.002 seconds.
+◇ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() started.
+✔ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() passed after 0.028 seconds.
+◇ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() started.
+✔ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() passed after 0.117 seconds.
+◇ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() started.
+✔ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() passed after 0.001 seconds.
+◇ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() started.
+✔ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() passed after 0.001 seconds.
+◇ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() started.
+✔ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() passed after 0.001 seconds.
+◇ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() started.
+✔ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() passed after 0.001 seconds.
+◇ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() started.
+✔ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() passed after 0.001 seconds.
+✔ Test run with 8 tests in 0 suites passed after 0.152 seconds.

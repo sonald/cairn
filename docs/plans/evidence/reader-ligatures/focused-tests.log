@@ -1,0 +1,59 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 57] CodeInsightAppModel
+Build complete! (0.75秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerFontResolverRestoresDefaultFeaturesAfterOff() started.
+✔ Test readerFontResolverRestoresDefaultFeaturesAfterOff() passed after 0.009 seconds.
+◇ Test readerFontResolverPreservesUnavailableRequestAndReportsFallback() started.
+✔ Test readerFontResolverPreservesUnavailableRequestAndReportsFallback() passed after 0.004 seconds.
+◇ Test readerFontResolverDerivesSameFamilyBeforeApplyingFeatures() started.
+✔ Test readerFontResolverDerivesSameFamilyBeforeApplyingFeatures() passed after 0.004 seconds.
+◇ Test readerFontResolverBoundsCacheAndInvalidatesUnchangedRequests() started.
+✔ Test readerFontResolverBoundsCacheAndInvalidatesUnchangedRequests() passed after 0.017 seconds.
+◇ Test ligatureChangesReuseProjectionAndPreservePartialSourceSelections() started.
+✔ Test ligatureChangesReuseProjectionAndPreservePartialSourceSelections() passed after 0.119 seconds.
+◇ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() started.
+✔ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() passed after 0.028 seconds.
+◇ Test ligatureChangesPreserveLargeDocumentSelectionAndInvalidateOnFontRefresh() started.
+✔ Test ligatureChangesPreserveLargeDocumentSelectionAndInvalidateOnFontRefresh() passed after 1.465 seconds.
+◇ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() started.
+✔ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() passed after 2.391 seconds.
+◇ Test ligaturePendingRestoreYieldsToUserScroll() started.
+✔ Test ligaturePendingRestoreYieldsToUserScroll() passed after 0.977 seconds.
+◇ Test ligaturePendingRestoreCannotAffectAReplacementDocument() started.
+✔ Test ligaturePendingRestoreCannotAffectAReplacementDocument() passed after 0.662 seconds.
+◇ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() started.
+✔ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() passed after 1.148 seconds.
+◇ Test ligatureGeometryTreatsSurrogatesAndCombiningSequencesAsWholeCharacters() started.
+✔ Test ligatureGeometryTreatsSurrogatesAndCombiningSequencesAsWholeCharacters() passed after 0.929 seconds.
+✔ Test run with 12 tests in 0 suites passed after 7.758 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerLigatureSettingsDefaultAndRoundTrip() started.
+✔ Test readerLigatureSettingsDefaultAndRoundTrip() passed after 0.007 seconds.
+◇ Test readerLigatureSettingsRejectMalformedStoredValues() started.
+✔ Test readerLigatureSettingsRejectMalformedStoredValues() passed after 0.002 seconds.
+◇ Test readerLigatureSettingsNormalizeEmptyRequestsAndRetainMissingFonts() started.
+✔ Test readerLigatureSettingsNormalizeEmptyRequestsAndRetainMissingFonts() passed after 0.001 seconds.
+◇ Test readerLigatureSettingsInvalidateThemeAndTypography() started.
+✔ Test readerLigatureSettingsInvalidateThemeAndTypography() passed after 0.001 seconds.
+◇ Test wrapSettingsApplyIsIdempotentForEqualValues() started.
+✔ Test wrapSettingsApplyIsIdempotentForEqualValues() passed after 0.192 seconds.
+◇ Test wrapFontSizeChangeKeepsAnchorAndSelection() started.
+✔ Test wrapFontSizeChangeKeepsAnchorAndSelection() passed after 0.882 seconds.
+✔ Test run with 6 tests in 0 suites passed after 1.084 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() started.
+✔ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() passed after 1.053 seconds.
+◇ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() started.
+✔ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() passed after 1.438 seconds.
+◇ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() started.
+✔ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() passed after 0.663 seconds.
+✔ Test run with 3 tests in 0 suites passed after 3.156 seconds.

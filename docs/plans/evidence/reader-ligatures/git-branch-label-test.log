@@ -1,0 +1,18 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 1]
+[1 / 23] CodeInsightAppTests-product
+[2 / 8] CodeInsightGitTests-product
+[3 / 12]
+[6 / 12] CodeInsightGitTests-product
+[9 / 13] CodeInsightGitTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightGitTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[11 / 13] CodeInsightGitTests-product
+Build complete! (2.88秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test commitLogReadsHeadFirstWithBranchLabels() started.
+✔ Test commitLogReadsHeadFirstWithBranchLabels() passed after 0.043 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.043 seconds.

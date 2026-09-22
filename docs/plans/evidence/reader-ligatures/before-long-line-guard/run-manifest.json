@@ -1,0 +1,72 @@
+{
+  "implementationCommit": "3cd489f5fa18340a3c7b2ca966aa7f6065b137b0",
+  "binarySHA256": "60efc97b6e151c12773911e727c8b8304bffa376f26c643f12c792a588357748",
+  "build": "release",
+  "pixelScale": 2,
+  "warmup": 5,
+  "samples": 30,
+  "testsRunSeriallyWithoutConcurrentBuilds": true,
+  "environment": "../environment.md",
+  "cases": [
+    {
+      "file": "FiraCodeRoman-Regular-2000.json",
+      "sha256": "8d7b87f84bb0174645279a77b81906c3ec5e310b8ada850499b203e694607f6e",
+      "status": "passed"
+    },
+    {
+      "file": "FiraCodeRoman-Regular-operators-disabled.json",
+      "sha256": "dc057eaecf9601e71ee625893c11279269df075006cd486bfe05c92d03bc2c91",
+      "status": "passed"
+    },
+    {
+      "file": "FiraCodeRoman-Regular-operators-enabled.json",
+      "sha256": "0fc7e3d67a3a9e4404b3fa25ebbf2a39782007175957d87ad8a8221be5c70131",
+      "status": "passed"
+    },
+    {
+      "file": "FiraCodeRoman-Regular-operators-fontDefault.json",
+      "sha256": "f762f6343e6af3dc15c79a65c01e8e99e8f64d4f594bb2b1f328e63790008428",
+      "status": "passed"
+    },
+    {
+      "file": "JetBrainsMono-Regular-2000.json",
+      "sha256": "284532c928290062dd0f07671ff3e0930dad6f2f1f43b388faf8446262685661",
+      "status": "passed"
+    },
+    {
+      "file": "JetBrainsMono-Regular-operators-disabled.json",
+      "sha256": "71c675474f084654a9fc6a34aeb17b937ecb447b0de52732d29aa893dc96758e",
+      "status": "passed"
+    },
+    {
+      "file": "JetBrainsMono-Regular-operators-enabled.json",
+      "sha256": "d3659d5c33488dd30bf9846a0c872a81e6e4241dd2a771f9c337049ef54ba31f",
+      "status": "passed"
+    },
+    {
+      "file": "JetBrainsMono-Regular-operators-fontDefault.json",
+      "sha256": "302e483378223b251c1c5e5055ac90ac42acc2fd0c181e995be8ab17b20b57c6",
+      "status": "passed"
+    },
+    {
+      "file": "fira-crlf-final.json",
+      "sha256": "3bfb43f7e0968569616232e49aa304c254043954ef32443af6ba66dfdf2c4032",
+      "status": "passed"
+    },
+    {
+      "file": "readingset-fira-off.json",
+      "sha256": "6d690e21a0ea9e42d873da23a0626b2bfa8aae628f8dda2ad662d27f8605323b",
+      "status": "ok"
+    },
+    {
+      "file": "readingset-fira-on.json",
+      "sha256": "0c036df9033e8521e484c14ce3a97c9e16235c65fd0f1800b15e3700a22d49c6",
+      "status": "ok"
+    },
+    {
+      "file": "system-final.json",
+      "sha256": "5384e264e912db04b4374f8634921e6035e2b32bff945a506edefaa8042396c9",
+      "status": "passed"
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 37.295000000000002,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 541050128
+  },
+  "fold": {
+    "resolutionMs": 28.062584000000001,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 561431824,
+    "foldLatencyMs": 254.84170900000001
+  },
+  "deltaBytes": 20381696,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf

@@ -1,0 +1,139 @@
+{
+  "afterFrame" : "{{0, 0}, {29292, 624045}}",
+  "beforeFrame" : [
+    560,
+    2457693.5
+  ],
+  "callbackCounts" : {
+    "operations:main=true" : 1,
+    "usageBounds:main=true" : 30009
+  },
+  "callbacks" : [
+    {
+      "mainThread" : true,
+      "name" : "operations",
+      "value" : 0
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 20.800000000000001}, {528, 2457648.6240551169}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 41.600000000000001}, {528, 2457627.8240551166}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 62.400000000000006}, {528, 2457607.0240551168}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 83.200000000000003}, {528, 2457586.2240551165}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 104}, {528, 2457565.4240551167}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 124.8}, {528, 2457544.6240551169}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 1393.5999999999985}, {528, 2456275.8240551166}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 1414.3999999999985}, {528, 2456255.0240551168}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 1414.3999999999985}, {528, 2456213.4240551167}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {136, 20.800000000000001}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {168, 41.600000000000001}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {168, 62.400000000000006}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {360, 83.200000000000003}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {360, 104}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {360, 124.8}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {29272, 145.59999999999999}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {29272, 166.40000000000001}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {29272, 187.20000000000002}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {29272, 208.00000000000003}}"
+    },
+    {
+      "mainThread" : true,
+      "name" : "usageBounds",
+      "value" : "{{5, 0}, {29272, 228.80000000000004}}"
+    }
+  ],
+  "clip" : "{{0, 311959.99999991193}, {560, 400}}",
+  "containsTarget" : true,
+  "defaultViewportDelegate" : "Optional(<main.QueueTextView: 0x102bb3350>\n    Frame = {{0.00, 0.00}, {560.00, 2457693.50}}, Bounds = {{0.00, 0.00}, {560.00, 2457693.50}}\n    Horizontally resizable: NO, Vertically resizable: YES\n    MinSize = {560.00, 394.00}, MaxSize = {179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.00, 179769313486231570814527423731704356798070567525844996598917476803157260780028538760589558632766878171540458953514382464234321326889464182768467546703537516986049910576551282076245490090389328944075868508455133942304583236903222948165808559332123348274797826204144723168738177180919299881250404026184124858368.00}\n)",
+  "draws" : 19,
+  "firstCorrectDrawMs" : 3369.8340654373169,
+  "maxMainPumpMs" : 1549.5119094848633,
+  "operationsAtClose" : 0,
+  "operationsOneSecondAfterClose" : 0,
+  "stableMs" : 3533.0920219421387,
+  "stagesMs" : {
+    "containerChanged" : 1.5180110931396484,
+    "firstRelocate" : 1.522064208984375,
+    "queueAssigned" : 0.0029802322387695312,
+    "resizedAndScrolled" : 1747.2139596939087
+  },
+  "targetLine" : 15000,
+  "usage" : "{{5, 0}, {29272, 624020.800000016}}",
+  "viewportUTF16" : [
+    1554200,
+    1558381
+  ]
+}

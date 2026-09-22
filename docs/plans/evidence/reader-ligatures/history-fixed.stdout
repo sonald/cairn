@@ -1,0 +1,9 @@
+{"canGoBack":false,"canGoForward":false,"historyCount":0,"readerFile":null,"readerHasReadingPosition":false,"snapshotShort":"worktree","step":"openProject","treeSelectedFile":null}
+{"canGoBack":false,"canGoForward":false,"historyCount":0,"readerFile":"lib.rs","readerHasReadingPosition":true,"snapshotShort":"worktree","step":"openA","treeSelectedFile":"lib.rs"}
+{"canGoBack":true,"canGoForward":false,"historyCount":1,"readerFile":"lib.rs","readerHasReadingPosition":true,"snapshotShort":"6e53c63","step":"switchHEAD~1","treeSelectedFile":"lib.rs"}
+{"canGoBack":true,"canGoForward":false,"historyCount":2,"readerFile":"main.rs","readerHasReadingPosition":true,"snapshotShort":"6e53c63","step":"openB","treeSelectedFile":"main.rs"}
+{"canGoBack":true,"canGoForward":true,"historyCount":2,"readerFile":"lib.rs","readerHasReadingPosition":true,"snapshotShort":"6e53c63","step":"back1","treeSelectedFile":"lib.rs"}
+{"canGoBack":false,"canGoForward":true,"historyCount":2,"readerFile":"lib.rs","readerHasReadingPosition":true,"snapshotShort":"worktree","step":"back2","treeSelectedFile":"lib.rs"}
+{"canGoBack":true,"canGoForward":true,"historyCount":2,"readerFile":"lib.rs","readerHasReadingPosition":true,"snapshotShort":"6e53c63","step":"forward1","treeSelectedFile":"lib.rs"}
+{"canGoBack":true,"canGoForward":false,"historyCount":2,"readerFile":"main.rs","readerHasReadingPosition":true,"snapshotShort":"6e53c63","step":"forward2","treeSelectedFile":"main.rs"}
+{"navigationSequence":true,"passed":true,"selectionSynchronized":true,"step":"summary","switchEnteredHistory":true}

@@ -1,0 +1,23 @@
+{
+  "operators.rs": {
+    "sha256": "39bdbf4ca7391062f1930f4dce5fc3073ebfbef782de5ac9f58e8a2eea64d57c",
+    "bytes": 366,
+    "lines": 8,
+    "maxLineBytes": 87,
+    "utf16Units": 349
+  },
+  "regular-2000.rs": {
+    "sha256": "68d9b19b393821be8b989e55b949f9d488ecddd4e485da4bee2b68fb47f9ca20",
+    "bytes": 474000,
+    "lines": 2000,
+    "maxLineBytes": 236,
+    "utf16Units": 448000
+  },
+  "unicode-crlf.rs": {
+    "sha256": "369bc38c89b15a4338e45d27d8328322895dc7eb4d325d4dca957fd9b3a79a37",
+    "bytes": 374,
+    "lines": 8,
+    "maxLineBytes": 87,
+    "utf16Units": 357
+  }
+}

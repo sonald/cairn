@@ -1,0 +1,30 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 3]
+[2 / 4] CodeInsightReaderUI
+[6 / 10]
+[8 / 10] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[14 / 14] codeinsight-app-product
+[18 / 27] codeinsight-app-product
+[19 / 23] CodeInsightReaderUITests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[23 / 24] CodeInsightAppTests-product
+Build complete! (4.31秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() started.
+✔ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() passed after 1.232 seconds.
+◇ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() started.
+✔ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() passed after 3.621 seconds.
+◇ Test ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() started.
+✔ Test ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() passed after 0.747 seconds.
+✔ Test run with 3 tests in 0 suites passed after 5.602 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() started.
+✔ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() passed after 1.836 seconds.
+✔ Test run with 1 test in 0 suites passed after 1.837 seconds.

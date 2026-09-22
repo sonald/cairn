@@ -1,0 +1,13 @@
+Building for debugging...
+[Computing dependencies]
+[Starting]
+[1 / 24] ArgumentParserToolInfo
+Build complete! (0.81秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() started.
+✔ Test bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() passed after 0.174 seconds.
+◇ Test bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() started.
+✔ Test bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() passed after 0.215 seconds.
+✔ Test run with 2 tests in 0 suites passed after 0.390 seconds.
