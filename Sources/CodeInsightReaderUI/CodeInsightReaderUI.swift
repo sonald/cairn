@@ -490,6 +490,8 @@ public final class ReaderTextView {
     private var displayMap: DisplayMap?
     private var displayedDocument: ReaderDocument?
     private var theme: ReaderTheme
+    private var typographyKey: ReaderTypographyKey
+    private var fontEnvironmentRevision: UInt64
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
     private var bookmarkMarkers: [Int: [String]] = [:]
     private var declarationKindsByLine: [Int: OutlineKind] = [:]
@@ -522,6 +524,7 @@ public final class ReaderTextView {
     /// Wrap performance probes (§7.4.2): full projection commits into the
     /// backing storage, and real background draw passes observed by the
     /// renderer. Both only count; they never gate rendering.
+    package private(set) var typographyAttributeUpdateCount = 0
     package private(set) var projectionInstallCount = 0
     private let paragraphLayout = ReaderParagraphLayout()
     private var paragraphWidthUpdatePending = false
@@ -576,6 +579,8 @@ public final class ReaderTextView {
 
     public init(settings: ReaderSettings = ReaderSettings()) {
         theme = ReaderTheme(settings: settings)
+        typographyKey = ReaderTypographyKey(settings: settings)
+        fontEnvironmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
         lineNumbers = settings.lineNumbers
         wrapLines = settings.wrapLines
         let textView = ClickTextView(usingTextLayoutManager: true)
@@ -1856,9 +1861,13 @@ public final class ReaderTextView {
         let ranges = state.selectedRanges.filter {
             $0.location >= 0 && NSMaxRange($0) <= storageLength
         }
-        if !ranges.isEmpty {
+        let restoredRanges = ranges.map { NSValue(range: $0) }
+        // Reassigning an unchanged selection resets AppKit's Shift-extension
+        // anchor, even when affinity is identical (notably reverse selections).
+        if !ranges.isEmpty,
+           view.selectedRanges != restoredRanges || view.selectionAffinity != state.selectionAffinity {
             view.setSelectedRanges(
-                ranges.map { NSValue(range: $0) },
+                restoredRanges,
                 affinity: state.selectionAffinity,
                 stillSelecting: false
             )
@@ -1894,6 +1903,22 @@ public final class ReaderTextView {
             containingDisplayLocation: location, in: view
         )
         else { return nil }
+        // A same-width font change can leave old fragments alive for one pass.
+        // Compare the anchor's own role attributes, not the global body font.
+        if location < backingTextStorage.length,
+           let content = view.textLayoutManager?.textContentManager {
+            let start = content.offset(from: content.documentRange.location,
+                to: fragment.rangeInElement.location)
+            let local = location - start
+            guard let line = fragment.textLineFragments.first(where: {
+                NSLocationInRange(local, $0.characterRange)
+            }), local >= 0, local < line.attributedString.length else { return nil }
+            for key in [NSAttributedString.Key.font, .ligature, .kern] {
+                let laid = line.attributedString.attribute(key, at: local, effectiveRange: nil) as? NSObject
+                let current = backingTextStorage.attribute(key, at: location, effectiveRange: nil) as? NSObject
+                guard laid == current else { return nil }
+            }
+        }
         // Empty extra rows and explicit Unicode line separators remain legal
         // unwrapped. Only soft line breaks indicate stale wrapped geometry.
         if !wrapLines {
@@ -1935,6 +1960,23 @@ public final class ReaderTextView {
         // path: it never expands folds, records history, or shows find
         // indicators (D3.3).
         view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        if supportsSynchronousViewportRestore,
+           freshAnchorRowRect(containingDisplayLocation: location) == nil,
+           let manager = view.textLayoutManager,
+           let content = manager.textContentManager {
+            // A larger font or new wrapping can move the anchor outside the
+            // old viewport. Materialize that character's layout on ordinary
+            // files; viewport-only passes cannot discover its new position.
+            let string = backingTextStorage.string as NSString
+            let query = location < string.length
+                ? string.rangeOfComposedCharacterSequence(at: location)
+                : NSRange(location: location, length: 0)
+            if let start = content.location(content.documentRange.location, offsetBy: query.location),
+               let end = content.location(start, offsetBy: query.length),
+               let range = NSTextRange(location: start, end: end) {
+                manager.ensureLayout(for: range)
+            }
+        }
         guard let rowRect = freshAnchorRowRect(containingDisplayLocation: location),
               rowRect.height > 0 else {
             // Stale or unavailable geometry (container flips leave the old
@@ -2345,11 +2387,19 @@ public final class ReaderTextView {
     public func apply(settings: ReaderSettings) {
         let newTheme = ReaderTheme(settings: settings)
         let themeChanged = newTheme != theme
+        let newTypographyKey = ReaderTypographyKey(settings: settings)
+        let environmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
+        let typographyChanged = newTypographyKey != typographyKey
+            || environmentRevision != fontEnvironmentRevision
+        // Fold chips own UI colors, so preserve their existing theme path.
+        let colorsChanged = newTheme.selection != theme.selection
+            || newTheme.parameterReferenceAlpha != theme.parameterReferenceAlpha
+            || newTheme.declarationMarkerAlpha != theme.declarationMarkerAlpha
         let wrapChanged = settings.wrapLines != wrapLines
         // Idempotent apply (D1.2/W06): equal settings perform no projection
         // and no layout work — unless the reader was mounted into a new
         // scroll view that still needs its gutter configured.
-        let settingsEqual = !themeChanged
+        let settingsEqual = !themeChanged && !typographyChanged
             && settings.lineNumbers == lineNumbers
             && !wrapChanged
         let mountedScrollView = view.enclosingScrollView ?? scrollView
@@ -2360,8 +2410,12 @@ public final class ReaderTextView {
         // The stable snapshot must be captured before configureGutter can
         // reach configureWrapping and trigger layout (D3.6).
         let captured = captureViewportStateForReflow()
+        let selectedRanges = view.selectedRanges
+        let selectionAffinity = view.selectionAffinity
 
         theme = newTheme
+        typographyKey = newTypographyKey
+        fontEnvironmentRevision = environmentRevision
         lineNumbers = settings.lineNumbers
         wrapLines = settings.wrapLines
         foldGutterHoveredID = nil
@@ -2383,7 +2437,10 @@ public final class ReaderTextView {
             return
         }
 
-        if !themeChanged {
+        if typographyChanged && !colorsChanged, let map = displayMap {
+            updateTypography(document: document, map: map)
+            renderingCoordinator.update(document: document, map: map, theme: theme)
+        } else if !themeChanged {
             // Geometry-only change (wrap toggle, line numbers): the projected
             // string and DisplayMap are identical, so rebuilding them would
             // only add latency — configureGutter already installed the new
@@ -2425,6 +2482,7 @@ public final class ReaderTextView {
 
         if let captured {
             pendingReflowState = captured
+            restoreSelection(from: captured)
             if supportsSynchronousViewportRestore {
                 restoreViewportState(captured)
                 scheduleViewportCorrections(
@@ -2433,6 +2491,10 @@ public final class ReaderTextView {
                     remaining: 3
                 )
             }
+        }
+        if captured == nil,
+           view.selectedRanges != selectedRanges || view.selectionAffinity != selectionAffinity {
+            view.setSelectedRanges(selectedRanges, affinity: selectionAffinity, stillSelecting: false)
         }
         isRestoringViewport = false
         // Publish the settled state exactly once (D3.4): one decoration
@@ -3580,14 +3642,40 @@ public final class ReaderTextView {
     private var baseAttributes: [NSAttributedString.Key: Any] {
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineHeightMultiple = theme.lineHeightMultiple
-        return [
-            .font: NSFont.monospacedSystemFont(
-                ofSize: theme.fontSize,
-                weight: .regular
-            ),
-            .foregroundColor: theme.foregroundColor,
-            .paragraphStyle: paragraph,
-        ]
+        var attributes = ReaderFontResolver.shared.resolve(theme: theme).attributes
+        attributes[.foregroundColor] = theme.foregroundColor
+        attributes[.paragraphStyle] = paragraph
+        return attributes
+    }
+
+    /// Change typography without replacing source text, the map, or fold attachments.
+    private func updateTypography(document: ReaderDocument, map: DisplayMap) {
+        let attributes = baseAttributes
+        let ranges = map.visibleSourceRanges(forDisplay: NSRange(
+            location: 0, length: backingTextStorage.length
+        )) ?? []
+        let update = {
+            self.backingTextStorage.beginEditing()
+            for source in ranges {
+                guard let projected = map.project(byteRange: source) else { continue }
+                for range in projected.visible {
+                    self.backingTextStorage.removeAttribute(.ligature, range: range)
+                    self.backingTextStorage.removeAttribute(.kern, range: range)
+                    self.backingTextStorage.addAttributes(attributes, range: range)
+                }
+            }
+            Self.applyTypography(document.highlightSpans, map: map,
+                to: self.backingTextStorage, theme: self.theme)
+            self.paragraphLayout.reset()
+            self.applyParagraphLayout(to: self.backingTextStorage)
+            self.backingTextStorage.endEditing()
+        }
+        if let content = view.textContentStorage {
+            content.performEditingTransaction(update)
+        } else {
+            update()
+        }
+        typographyAttributeUpdateCount += 1
     }
 
     private func applyParagraphLayout(to text: NSMutableAttributedString) {
@@ -3598,7 +3686,7 @@ public final class ReaderTextView {
         paragraphUpdateCount += paragraphLayout.apply(
             to: text, wrap: wrapLines,
             width: container.size.width - 2 * container.lineFragmentPadding,
-            font: NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+            font: ReaderFontResolver.shared.resolve(theme: theme).font
         ) { offset in
             guard let document, let position = map?.sourcePosition(ofDisplay: offset) else { return nil }
             let byte: UInt32
@@ -3627,7 +3715,9 @@ public final class ReaderTextView {
         } else {
             applyParagraphLayout(to: backingTextStorage)
         }
-        view.setSelectedRanges(selection, affinity: affinity, stillSelecting: false)
+        if view.selectedRanges != selection || view.selectionAffinity != affinity {
+            view.setSelectedRanges(selection, affinity: affinity, stillSelecting: false)
+        }
     }
 
     private func configure() {
@@ -3786,32 +3876,28 @@ public final class ReaderTextView {
                 guard safeRange.length > 0 else { continue }
                 switch span.kind {
                 case .functionName, .declarationTitle:
-                    attributed.addAttributes([
-                        .font: NSFont.monospacedSystemFont(
-                            ofSize: theme.functionNameFontSize,
-                            weight: NSFont.Weight(
-                                rawValue: theme.functionDeclarationFontWeight
-                            )
-                        ),
-                        .kern: theme.functionNameFontSize > theme.fontSize ? 0.15 : 0,
-                    ], range: safeRange)
+                    let resolved = ReaderFontResolver.shared.resolve(
+                        theme: theme, size: theme.functionNameFontSize,
+                        weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
+                    )
+                    attributed.addAttributes(resolved.attributes, range: safeRange)
+                    if theme.codeFont == .systemMonospaced && theme.codeLigatures == .fontDefault {
+                        attributed.addAttribute(.kern,
+                            value: theme.functionNameFontSize > theme.fontSize ? 0.15 : 0,
+                            range: safeRange)
+                    } else {
+                        attributed.removeAttribute(.kern, range: safeRange)
+                    }
                 case .declarationEmphasis:
-                    attributed.addAttribute(
-                        .font,
-                        value: NSFont.monospacedSystemFont(
-                            ofSize: theme.fontSize,
-                            weight: NSFont.Weight(
-                                rawValue: theme.declarationEmphasisFontWeight
-                            )
-                        ),
-                        range: safeRange
-                    )
+                    attributed.addAttributes(ReaderFontResolver.shared.resolve(
+                        theme: theme,
+                        weight: NSFont.Weight(rawValue: theme.declarationEmphasisFontWeight)
+                    ).attributes, range: safeRange)
                 case .comment where theme.humanistComments:
-                    attributed.addAttribute(
-                        .font,
-                        value: NSFont.systemFont(ofSize: theme.fontSize),
-                        range: safeRange
-                    )
+                    attributed.addAttribute(.font,
+                        value: NSFont.systemFont(ofSize: theme.fontSize), range: safeRange)
+                    attributed.removeAttribute(.ligature, range: safeRange)
+                    attributed.removeAttribute(.kern, range: safeRange)
                 default:
                     break
                 }

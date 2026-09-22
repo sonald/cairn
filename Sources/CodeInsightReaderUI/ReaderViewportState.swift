@@ -83,15 +83,18 @@ enum ReaderViewportGeometry {
         displayLocation location: Int,
         in textView: NSTextView
     ) -> NSRect? {
+        let string = textView.string as NSString
+        guard location >= 0, location <= string.length else { return nil }
+        // Geometry must not ask TextKit to shape half a surrogate or grapheme.
+        // This does not change the caller's source selection/search range.
+        let query = location < string.length
+            ? string.rangeOfComposedCharacterSequence(at: location)
+            : NSRange(location: location, length: 0)
         guard let manager = textView.textLayoutManager,
               let content = manager.textContentManager,
-              let start = content.location(
-                  content.documentRange.location,
-                  offsetBy: location
-              )
-        else { return nil }
-        let end = content.location(start, offsetBy: 1)
-        guard let range = NSTextRange(location: start, end: end ?? start)
+              let start = content.location(content.documentRange.location, offsetBy: query.location),
+              let end = content.location(start, offsetBy: query.length),
+              let range = NSTextRange(location: start, end: end)
         else { return nil }
         let origin = textView.textContainerOrigin
         var result: NSRect?

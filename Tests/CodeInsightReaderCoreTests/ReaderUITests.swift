@@ -1235,15 +1235,15 @@ func wrapSettingsApplyIsIdempotentForEqualValues() throws {
     #expect(reader.projectionInstallCount == installs)
     reader.apply(settings: wrapSettings(false))
     #expect(reader.projectionInstallCount == installs)
-    // A theme/font change does re-project.
+    // A font-only change updates attributes without rebuilding the source projection.
     var larger = ReaderSettings()
     larger.fontSize = 15
     reader.apply(settings: larger)
-    #expect(reader.projectionInstallCount == installs + 1)
+    #expect(reader.projectionInstallCount == installs)
     withExtendedLifetime(window) {}
 }
 
-/// W15 subset: a font-size change re-projects but keeps the anchor byte and
+/// W15 subset: a font-size change keeps the projection, anchor byte and
 /// the complete selection.
 @MainActor
 @Test
