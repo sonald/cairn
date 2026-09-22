@@ -85,8 +85,8 @@ if [[ -z "$self_test_artifacts" ]]; then
 fi
 
 channel_summary="$(sed -n 's/^summary: //p' "$self_test_log")"
-if [[ "$channel_summary" != "pass=17 fail=0 hang=0" ]]; then
-    echo "FAIL expected 17-channel summary pass=17 fail=0 hang=0 got $channel_summary" >&2
+if [[ "$channel_summary" != "pass=18 fail=0 hang=0" ]]; then
+    echo "FAIL expected 18-channel summary pass=18 fail=0 hang=0 got $channel_summary" >&2
     exit 1
 fi
 

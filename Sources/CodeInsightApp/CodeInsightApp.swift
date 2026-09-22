@@ -2441,7 +2441,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             try? FileManager.default.removeItem(at: root)
             let checks = [
                 "matchRowsCappedAt2000": state?.matchRows == 2_000,
-                "statusContainsTrueTotal": state?.status.contains("2001") == true,
+                "statusContainsTrueTotal": state?.status.contains(localizedFormat("panel.search.matches", Int64(2_001))) == true,
                 "truncationRowExists": state?.truncationRows == 1,
                 "truncationRowVisible": state?.truncationVisible == true,
             ]
@@ -2487,7 +2487,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             guard let state = controller.selfTestProjectSearchOutlineState else {
                 return false
             }
-            return !state.searching && state.status.contains("2001")
+            return !state.searching && state.status.contains(localizedFormat("panel.search.matches", Int64(2_001)))
         }) else {
             finish(
                 state: controller.selfTestProjectSearchOutlineState,
@@ -6788,9 +6788,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let cursor = model.navigationHistory.cursor
         action()
         pumpRunLoop()
-        guard model.navigationHistory.cursor != cursor else { return false }
         guard waitUntil(timeout: 30, condition: {
-            self.model.currentRevision == revision
+            self.model.navigationHistory.cursor != cursor
+                && self.model.currentRevision == revision
                 && self.model.selectedFile == file
                 && self.model.snapshotPhase == .fullReady
         }) else { return false }
