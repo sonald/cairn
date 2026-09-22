@@ -1,0 +1,128 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test foldGutterHoverIdentifiesTheHoveredFoldRow() started.
+✔ Test foldGutterHoverIdentifiesTheHoveredFoldRow() passed after 0.076 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.076 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() started.
+M11_WRAP_PROBE fragments=3 wrappedHeight=270.40000000000003 lineHeight=20.8 line2RulerCount=1
+✔ Test wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() passed after 0.119 seconds.
+◇ Test wrapSettingReversesEveryTextKitAndScrollerProperty() started.
+✔ Test wrapSettingReversesEveryTextKitAndScrollerProperty() passed after 0.014 seconds.
+◇ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() started.
+✔ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() passed after 0.007 seconds.
+◇ Test wrapResizeCallbacksOnlyObserveNewWidth() started.
+WRAP_RESIZE_TIMING observations=readerFrame=360.0,readerFrame=334.0,readerFrame=334.0
+✔ Test wrapResizeCallbacksOnlyObserveNewWidth() passed after 0.010 seconds.
+◇ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() started.
+✔ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() passed after 9.935 seconds.
+◇ Test wrapTogglePreservesCompleteSelectionAndCopyText() started.
+✔ Test wrapTogglePreservesCompleteSelectionAndCopyText() passed after 1.364 seconds.
+◇ Test wrapToggleRestoresStashedHorizontalPosition() started.
+✔ Test wrapToggleRestoresStashedHorizontalPosition() passed after 1.441 seconds.
+◇ Test wrapToggleClampsLegallyAtDocumentEdges() started.
+✔ Test wrapToggleClampsLegallyAtDocumentEdges() passed after 2.695 seconds.
+◇ Test wrapToggleRoundTripsUnicodeAndFoldedContent() started.
+✔ Test wrapToggleRoundTripsUnicodeAndFoldedContent() passed after 1.711 seconds.
+◇ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() started.
+✔ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() passed after 0.484 seconds.
+◇ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() started.
+✔ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() passed after 1.323 seconds.
+◇ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() started.
+✘ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() recorded an issue at ReaderUITests.swift:1104:5: Expectation failed: reader.foldGutterHoveredFoldID == fold.id
+↳ reader.foldGutterHoveredFoldID == fold.id → false
+↳   reader.foldGutterHoveredFoldID → nil
+↳   fold.id → FoldID(rawValue: 4200)
+↳     rawValue → 4200
+✘ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() failed after 0.453 seconds with 1 issue.
+↳ /// W22: fold handle hover and click hit only the first visual row of the
+↳ /// fold header; a wrapped header's continuation rows produce neither.
+◇ Test wrapPrimarySelectionCoversAllVisibleRowSegments() started.
+✔ Test wrapPrimarySelectionCoversAllVisibleRowSegments() passed after 0.498 seconds.
+◇ Test wrapToggleDoesNotStealFirstResponder() started.
+WRAP_W19_SKIPPED environment cannot hold first responder
+✔ Test wrapToggleDoesNotStealFirstResponder() passed after 0.098 seconds.
+◇ Test wrapSettingsApplyIsIdempotentForEqualValues() started.
+✔ Test wrapSettingsApplyIsIdempotentForEqualValues() passed after 0.151 seconds.
+◇ Test wrapFontSizeChangeKeepsAnchorAndSelection() started.
+✔ Test wrapFontSizeChangeKeepsAnchorAndSelection() passed after 0.882 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.759 seconds.
+◇ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() started.
+✔ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() passed after 1.727 seconds.
+◇ Test wrapTabPrefixUsesTheSameExplicitStopsAsTextKit() started.
+✔ Test wrapTabPrefixUsesTheSameExplicitStopsAsTextKit() passed after 0.009 seconds.
+◇ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() started.
+✔ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() passed after 1.692 seconds.
+◇ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() started.
+✔ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() passed after 1.710 seconds.
+◇ Test wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() started.
+✔ Test wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() passed after 0.439 seconds.
+✘ Test run with 22 tests in 0 suites failed after 28.538 seconds with 1 issue.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() started.
+✔ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() passed after 0.120 seconds.
+◇ Test markdownPreviewPreservesListMarkersNestingAndInlineStyles() started.
+✔ Test markdownPreviewPreservesListMarkersNestingAndInlineStyles() passed after 0.034 seconds.
+◇ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() started.
+✔ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() passed after 0.613 seconds.
+◇ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() started.
+✔ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() passed after 0.043 seconds.
+◇ Test plainTextPreviewResizePreservesVisibleCharacterAndSelection() started.
+✔ Test plainTextPreviewResizePreservesVisibleCharacterAndSelection() passed after 0.223 seconds.
+◇ Suite PaletteTests started.
+◇ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() started.
+✔ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() passed after 0.034 seconds.
+✔ Suite PaletteTests passed after 0.034 seconds.
+◇ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() started.
+✔ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() passed after 0.063 seconds.
+◇ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() started.
+✔ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() passed after 0.040 seconds.
+◇ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() started.
+✔ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() passed after 0.037 seconds.
+◇ Test readingSetScrollPublishesItsNumericCheckpointOffset() started.
+✔ Test readingSetScrollPublishesItsNumericCheckpointOffset() passed after 0.083 seconds.
+◇ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() started.
+✔ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() passed after 2.750 seconds.
+◇ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() started.
+✔ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() passed after 0.310 seconds.
+◇ Test markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge() started.
+✔ Test markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge() passed after 0.296 seconds.
+◇ Test wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() started.
+✔ Test wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() passed after 0.142 seconds.
+◇ Test wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() started.
+✔ Test wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() passed after 0.074 seconds.
+✔ Test run with 15 tests in 1 suite passed after 4.870 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() started.
+✔ Test symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() passed after 0.021 seconds.
+◇ Test contextCandidateSelectionWraps() started.
+✔ Test contextCandidateSelectionWraps() passed after 0.015 seconds.
+◇ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() started.
+✔ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() passed after 0.002 seconds.
+◇ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() started.
+✔ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() passed after 0.018 seconds.
+◇ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() started.
+✔ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() passed after 0.115 seconds.
+◇ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() started.
+✔ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() passed after 0.001 seconds.
+◇ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() started.
+✔ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() passed after 0.001 seconds.
+◇ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() started.
+✔ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() passed after 0.001 seconds.
+◇ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() started.
+✔ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() passed after 0.001 seconds.
+◇ Test searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() started.
+✔ Test searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() passed after 0.183 seconds.
+◇ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() started.
+✔ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() passed after 0.001 seconds.
+✔ Test run with 11 tests in 0 suites passed after 0.361 seconds.
+Note: Some test targets reported failures:
+  - CodeInsightReaderCoreTests (Swift Testing)

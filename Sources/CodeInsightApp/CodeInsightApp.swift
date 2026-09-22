@@ -14202,7 +14202,8 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
                 "cycle": cycle,
                 "warmup": cycle < request.warmupCount,
                 "toggleFirstFrameMs": firstFrame,
-                "toggleSettledMs": settled.ms,
+                "toggleSettledMs": milliseconds(since: started),
+                "settleQuietPeriodMs": settled.ms,
                 "settleAdjustments": settled.adjustments,
             ])
             // Untimed half: return to the opposite state for the next cycle.
@@ -14321,17 +14322,6 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
             summary["toggleFirstFrameMs"] = summarize(firstFrame)
         }
         if !settled.isEmpty { summary["toggleSettledMs"] = summarize(settled) }
-        // Design-budget shape (§7.4.2): action → stable = first frame plus
-        // the settle quiet period, paired per sample.
-        let actionToSettled = measured.compactMap { sample -> Double? in
-            guard let first = sample["toggleFirstFrameMs"] as? Double,
-                  let quiet = sample["toggleSettledMs"] as? Double
-            else { return nil }
-            return first + quiet
-        }
-        if !actionToSettled.isEmpty {
-            summary["toggleActionToSettledMs"] = summarize(actionToSettled)
-        }
     case "resize":
         let stepMs = measured.flatMap { sample in
             (sample["steps"] as? [[String: Any]])?.compactMap {
@@ -14366,7 +14356,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     }
 
     var object: [String: Any] = [
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "codeSHA": request.codeSHA,
         "fixtureSHA256": document.contentID.bytes
             .map { String(format: "%02x", $0) }.joined(),
@@ -14402,9 +14392,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         "observed": [
             "reflowCount": reader.projectionInstallCount,
             "drawPassCount": reader.backgroundDrawCount,
-            // paragraphUpdateCount lands with S3; null marks "not applicable
-            // on this build" rather than a zero measurement.
-            "paragraphUpdateCount": NSNull(),
+            "paragraphUpdateCount": reader.paragraphUpdateCount,
             "restorePassCount": reader.viewportRestorePassCount,
             "anchorErrorPt": reader.lastViewportAnchorErrorPt ?? NSNull(),
             "mergedResizeRequests": reader.mergedWidthReflowCount,

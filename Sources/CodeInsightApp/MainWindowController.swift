@@ -5015,6 +5015,21 @@ private final class ReadingHeightControl: NSSegmentedControl {
 
 }
 
+/// Intercepts the native autoresize before TextKit discards the old line geometry.
+@MainActor
+private final class PlainTextPreviewView: NSTextView {
+    var onWidthChange: ((CGFloat) -> Void)?
+    var isReflowing = false
+
+    override func setFrameSize(_ newSize: NSSize) {
+        if !isReflowing, newSize.width != frame.width, let onWidthChange {
+            onWidthChange(newSize.width)
+        } else {
+            super.setFrameSize(newSize)
+        }
+    }
+}
+
 @MainActor
 final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     NSTextViewDelegate, WKNavigationDelegate
@@ -7108,7 +7123,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 )
             }
         }
-        let textView = NSTextView()
+        let textView = kind == .plainText ? PlainTextPreviewView() : NSTextView()
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = true
@@ -7146,12 +7161,21 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         view.layoutSubtreeIfNeeded()
         if kind == .plainText {
             configurePlainTextPreview(textView, in: scrollView)
+            (textView as? PlainTextPreviewView)?.onWidthChange = { [weak self, weak textView, weak scrollView] width in
+                guard let self, let textView, let scrollView else { return }
+                self.configurePlainTextPreview(textView, in: scrollView, width: width)
+            }
         }
     }
 
-    private func configurePlainTextPreview(_ textView: NSTextView, in scrollView: NSScrollView) {
+    private func configurePlainTextPreview(
+        _ textView: NSTextView, in scrollView: NSScrollView, width: CGFloat? = nil
+    ) {
         guard let container = textView.textContainer,
               let layout = textView.layoutManager else { return }
+        let plainTextView = textView as? PlainTextPreviewView
+        plainTextView?.isReflowing = true
+        defer { plainTextView?.isReflowing = false }
         let selection = textView.selectedRanges
         let affinity = textView.selectionAffinity
         let oldOrigin = scrollView.contentView.bounds.origin
@@ -7175,7 +7199,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
         scrollView.hasHorizontalScroller = !previewWrapLines
         scrollView.tile()
-        let viewport = scrollView.contentSize
+        var viewport = scrollView.contentSize
+        if let width { viewport.width = width }
         textView.isHorizontallyResizable = !previewWrapLines
         textView.autoresizingMask = previewWrapLines ? [.width] : []
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)

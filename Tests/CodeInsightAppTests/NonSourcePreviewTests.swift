@@ -491,3 +491,55 @@ private func nonSourcePreviewTextView(in view: NSView, label: String) -> NSTextV
     if let text = view as? NSTextView, text.accessibilityLabel() == label { return text }
     return view.subviews.lazy.compactMap { nonSourcePreviewTextView(in: $0, label: label) }.first
 }
+
+@MainActor
+@Test
+func plainTextPreviewResizePreservesVisibleCharacterAndSelection() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let contents = (0..<120).map { "row \($0) " + String(repeating: "wide 🧭 text ", count: 30) }
+        .joined(separator: "\n")
+    let file = try nonSourcePreviewFile(root: root, name: "resize.txt", bytes: Array(contents.utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 640, height: 480)
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    controller.apply(settings: settings)
+    controller.display(file, languageMode: nil)
+    controller.view.layoutSubtreeIfNeeded()
+    let text = try #require(nonSourcePreviewTextView(in: controller.view, label: "Plain text preview"))
+    let scroll = try #require(text.enclosingScrollView)
+    let layout = try #require(text.layoutManager)
+    let container = try #require(text.textContainer)
+    let selected = [NSValue(range: NSRange(location: 0, length: 5)),
+                    NSValue(range: NSRange(location: 6, length: 4))]
+    text.setSelectedRanges(selected, affinity: .upstream, stillSelecting: false)
+    #expect(text.selectedRanges == selected)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 1800))
+    scroll.reflectScrolledClipView(scroll.contentView)
+
+    for width: CGFloat in [420, 800] {
+        layout.ensureLayout(for: container)
+        let origin = scroll.contentView.bounds.origin
+        let glyph = layout.glyphIndex(for: NSPoint(
+            x: 0, y: origin.y - text.textContainerOrigin.y
+        ), in: container)
+        let character = layout.characterIndexForGlyph(at: glyph)
+        let oldOffset = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY
+            + text.textContainerOrigin.y - origin.y
+        let oldWidth = text.frame.width
+        controller.view.setFrameSize(NSSize(width: width, height: 480))
+        controller.view.layoutSubtreeIfNeeded()
+        layout.ensureLayout(for: container)
+        #expect(text.frame.width != oldWidth)
+        #expect(abs(text.frame.width - scroll.contentSize.width) < 1)
+        let newGlyph = layout.glyphIndexForCharacter(at: character)
+        let newOffset = layout.lineFragmentRect(forGlyphAt: newGlyph, effectiveRange: nil).minY
+            + text.textContainerOrigin.y - scroll.contentView.bounds.minY
+        #expect(abs(newOffset - oldOffset) < 2)
+        #expect(text.selectedRanges == selected)
+        #expect(text.selectionAffinity == .upstream)
+    }
+}

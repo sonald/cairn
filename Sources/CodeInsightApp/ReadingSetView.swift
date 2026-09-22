@@ -348,6 +348,7 @@ private final class ReadingSetExcerptView: NSView {
     private var sourceLabels: [(offset: Int, label: String)] = []
     private var unwrappedX: CGFloat = 0
     private var codeScrollHeightConstraint: NSLayoutConstraint!
+    private let paragraphLayout = ReaderParagraphLayout()
     private(set) var measurements = 0
     private(set) var textBottom: CGFloat = 0
 
@@ -423,6 +424,7 @@ private final class ReadingSetExcerptView: NSView {
     }
 
     func display(_ excerpt: ReadingSetExcerpt, settings: ReaderSettings) {
+        paragraphLayout.reset()
         self.excerpt = excerpt
         roleLabel.stringValue = excerpt.role.uppercased()
         symbolLabel.stringValue = excerpt.symbol
@@ -560,6 +562,10 @@ private final class ReadingSetExcerptView: NSView {
         paragraph.lineHeightMultiple = CGFloat(settings.lineHeightMultiple)
         paragraph.lineBreakMode = .byWordWrapping
         codeView.textStorage?.addAttributes([.font: font, .paragraphStyle: paragraph], range: NSRange(location: 0, length: codeView.string.utf16.count))
+        if let storage = codeView.textStorage {
+            paragraphLayout.apply(to: storage, wrap: settings.wrapLines,
+                width: available - 2 * (codeView.textContainer?.lineFragmentPadding ?? 0), font: font)
+        }
         manager.invalidateLayout(for: content.documentRange)
         manager.ensureLayout(for: content.documentRange)
         rows = []

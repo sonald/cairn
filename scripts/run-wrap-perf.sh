@@ -140,6 +140,19 @@ jq -r '.rows[] | [.name, .status,
 
 if [[ "$enforce_budgets" == true ]]; then
     budget_failures=0
+    baseline_metric() {
+        # Schema 1 stored only the post-first-frame quiet period as settled.
+        # Reconstruct paired action-to-stable samples; never compare that
+        # quiet period directly with schema 2's complete action duration.
+        if [[ "$2" == '.summary.toggleSettledMs.p95' ]] && \
+            jq -e '.schemaVersion == 1' "$1" >/dev/null 2>&1; then
+            jq -r '[.samples[] | select(.warmup == false) |
+                (.toggleFirstFrameMs + .toggleSettledMs)] | sort |
+                if length == 0 then empty else .[(length * 0.95 | ceil) - 1] end' "$1"
+        else
+            jq -r "$2 // empty" "$1"
+        fi
+    }
     check_budget() {
         # check_budget <file> <path-expression> <budget> <label>
         local file="$out_dir/$1" value
@@ -168,7 +181,7 @@ if [[ "$enforce_budgets" == true ]]; then
             return
         fi
         if [[ -n "$baseline_dir" && -f "$baseline_dir/$1" ]]; then
-            base_value="$(jq -r "$2 // empty" "$baseline_dir/$1" 2>/dev/null || true)"
+            base_value="$(baseline_metric "$baseline_dir/$1" "$2" 2>/dev/null || true)"
             # Run-to-run noise margin: a candidate within 1.25x baseline + 5
             # of an already-over-budget baseline is the same pre-existing
             # cost, not a new regression (§7.4.4: record, never claim pass).
@@ -181,8 +194,8 @@ if [[ "$enforce_budgets" == true ]]; then
         budget_failures=$((budget_failures + 1))
     }
     # Ordinary file budgets.
-    check_budget f1-toggle-wrap-on.json  '.summary.toggleSettledMs.p95'  250 "F1 toggle-on settled"
-    check_budget f1-toggle-wrap-off.json '.summary.toggleSettledMs.p95'  250 "F1 toggle-off settled"
+    check_budget_aware f1-toggle-wrap-on.json  '.summary.toggleSettledMs.p95'  250 "F1 toggle-on action-to-settled"
+    check_budget_aware f1-toggle-wrap-off.json '.summary.toggleSettledMs.p95'  250 "F1 toggle-off action-to-settled"
     check_budget_aware f1-resize-wrap-on.json  '.summary.resizeStepMs.p95'      33 "F1 resize-on step"
     check_budget_aware f1-resize-wrap-on.json  '.observed.longestMainThreadStallMs' 100 "F1 resize-on stall"
     # Extreme fixtures are reported separately and never averaged into F1.
@@ -218,7 +231,7 @@ if [[ "$enforce_budgets" == true ]]; then
         # Relative toggle budget: candidate must not regress past
         # max(baseP95 * 1.5, baseP95 + 15ms) even when under 250ms (§7.4.4).
         for config in f1-toggle-wrap-on f1-toggle-wrap-off; do
-            base_p95="$(jq -r '.summary.toggleSettledMs.p95 // empty' "$baseline_dir/$config.json" 2>/dev/null || true)"
+            base_p95="$(baseline_metric "$baseline_dir/$config.json" '.summary.toggleSettledMs.p95' 2>/dev/null || true)"
             cand_p95="$(jq -r '.summary.toggleSettledMs.p95 // empty' "$out_dir/$config.json" 2>/dev/null || true)"
             if [[ -n "$base_p95" && -n "$cand_p95" ]]; then
                 if awk -v c="$cand_p95" -v b="$base_p95" 'BEGIN { limit = (b * 1.5 > b + 15) ? b * 1.5 : b + 15; exit !(c <= limit) }'; then

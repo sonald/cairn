@@ -1,0 +1,23 @@
+Main batch outside AppTests (sandbox run):
+✔ Test run with 18 tests in 0 suites passed after 0.015 seconds.
+✔ Test run with 8 tests in 0 suites passed after 2.840 seconds.
+✔ Test run with 30 tests in 0 suites passed after 3.188 seconds.
+✔ Test run with 11 tests in 0 suites passed after 0.007 seconds.
+✔ Test run with 18 tests in 0 suites passed after 1.042 seconds.
+✔ Test run with 139 tests in 0 suites passed after 175.293 seconds.
+✔ Test run with 19 tests in 0 suites passed after 7.506 seconds.
+✔ Test run with 100 tests in 0 suites passed after 8.944 seconds.
+✔ Test run with 125 tests in 0 suites passed after 6.649 seconds.
+✔ Test run with 16 tests in 0 suites passed after 0.028 seconds.
+✔ Test run with 382 tests in 0 suites passed after 25.908 seconds.
+AppTests and isolated batches (desktop run):
+PASS: batch total=135 (.build/ci-swift-test.log)
+PASS: batch total=2 (.build/ci-swift-test-isolated.log)
+PASS: batch total=2 (.build/ci-swift-test-panels.log)
+PASS: swift test total=139 (main=135 isolated=2 panels=2)
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+SELF_TEST_FINISH timestamp=1790068776.593514 pid=6914 channel=exact exit=0
+SELF_TEST_FINISH timestamp=1790068832.204073 pid=8098 channel=diff exit=0
+SELF_TEST_FINISH timestamp=1790068868.041288 pid=8237 channel=reading exit=0
+SELF_TEST_FINISH timestamp=1790068868.2067208 pid=8380 channel=projector exit=0
+SELF_TEST_FINISH timestamp=1790068868.359991 pid=8381 channel=fold exit=0

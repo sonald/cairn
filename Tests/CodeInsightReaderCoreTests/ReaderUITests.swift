@@ -1100,6 +1100,14 @@ func wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() throws {
     #expect(reader.foldGutterHoveredFoldID == nil)
     reader.clickFoldHandle(at: missPoint, in: ruler, modifiers: [])
     #expect(!reader.renderedFoldIDsForTesting.contains(fold.id))
+    scrollView.contentView.scroll(to: .zero)
+    wrapSettle(reader)
+    ruler.cacheDisplay(in: ruler.bounds, to: rulerRep)
+    let currentRow = try #require(reader.lastRulerFirstRowRectsForTesting[1])
+    reader.setFoldGutterHoverForTesting(rulerPoint(y: currentRow.midY))
+    #expect(reader.foldGutterHoveredFoldID == fold.id)
+    reader.apply(settings: wrapSettings(false))
+    #expect(reader.foldGutterHoveredFoldID == nil)
     _ = scrollView
     withExtendedLifetime(window) {}
 }
@@ -3018,4 +3026,170 @@ private func visualSnapshotData(
         String(format: "%.17g", Double(emphasisFont.pointSize)),
     ]
     return Data(fields.joined(separator: "\u{1f}").utf8)
+}
+
+// Reader wrap v2 W30-W34: inspect real continuation geometry, not just styles.
+@MainActor
+@Test
+func wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() throws {
+    for count in [0, 4, 24, 40] {
+        let source = String(repeating: " ", count: count)
+            + String(repeating: "value ", count: 70) + "\n"
+        let bytes = Array(source.utf8)
+        let document = ReaderDocument(bytes: bytes, lineTable: LineTable(bytes: bytes),
+            byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [], outlineFacets: [])
+        let (reader, _, window) = renderOffscreen(document)
+        var settings = wrapSettings(true)
+        settings.syntaxFormatting = false
+        reader.apply(settings: settings)
+        wrapSettle(reader)
+        let manager = try #require(reader.view.textLayoutManager)
+        let fragment = try #require(manager.textLayoutFragment(for: .zero))
+        #expect(fragment.textLineFragments.count > 1)
+        let font = NSFont.monospacedSystemFont(ofSize: settings.fontSize, weight: .regular)
+        let space = (" " as NSString).size(withAttributes: [.font: font]).width
+        let width = try #require(reader.view.textContainer).size.width
+        let expected = min(CGFloat(count) * space, 24 * space, width * 0.25)
+        let style = try #require(reader.view.textStorage?.attribute(
+            .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        #expect(abs(style.headIndent - expected) < 0.1)
+        #expect(abs(fragment.textLineFragments[1].typographicBounds.minX - expected) < 1)
+        #expect(abs(style.lineHeightMultiple - settings.lineHeightMultiple) < 0.001)
+        settings.wrapLines = false
+        reader.apply(settings: settings)
+        let off = try #require(reader.view.textStorage?.attribute(
+            .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        #expect(off.headIndent == 0)
+        withExtendedLifetime(window) {}
+    }
+}
+
+@MainActor
+@Test
+func wrapTabPrefixUsesTheSameExplicitStopsAsTextKit() throws {
+    let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+    let style = NSMutableParagraphStyle()
+    style.tabStops = [NSTextTab(textAlignment: .left, location: 37),
+                      NSTextTab(textAlignment: .left, location: 83)]
+    style.defaultTabInterval = 41
+    style.lineHeightMultiple = 1.4
+    let text = NSMutableAttributedString(string: " \t \t" + String(repeating: "word ", count: 70),
+        attributes: [.font: font, .paragraphStyle: style])
+    let paragraphs = ReaderParagraphLayout()
+    paragraphs.apply(to: text, wrap: true, width: 500, font: font)
+    let result = try #require(text.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+    #expect(abs(result.headIndent - 83) < 1)
+    #expect(result.tabStops == style.tabStops)
+    #expect(result.defaultTabInterval == 41)
+    let content = NSTextContentStorage()
+    let manager = NSTextLayoutManager()
+    content.addTextLayoutManager(manager)
+    manager.textContainer = NSTextContainer(size: NSSize(width: 500, height: 10000))
+    manager.textContainer?.lineFragmentPadding = 0
+    content.textStorage?.setAttributedString(text)
+    manager.ensureLayout(for: content.documentRange)
+    let fragment = try #require(manager.textLayoutFragment(for: .zero))
+    #expect(fragment.textLineFragments.count > 1)
+    #expect(abs(fragment.textLineFragments[1].typographicBounds.minX - 83) < 1)
+    #expect(paragraphs.apply(to: text, wrap: true, width: 500, font: font) == 0)
+}
+
+@MainActor
+@Test
+func wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() throws {
+    let bytes = Array((String(repeating: " ", count: 40) + String(repeating: "word ", count: 150)).utf8)
+    let document = ReaderDocument(bytes: bytes, lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [], outlineFacets: [])
+    let (reader, scroll, window) = renderOffscreen(document)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let projections = reader.projectionInstallCount
+    for width: CGFloat in [800, 320, 800] {
+        scroll.setFrameSize(NSSize(width: width, height: 180))
+        scroll.tile()
+        wrapSettle(reader)
+        let container = try #require(reader.view.textContainer)
+        let style = try #require(reader.view.textStorage?.attribute(
+            .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        let space = (" " as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)]).width
+        #expect(abs(style.headIndent - min(24 * space, 0.25 * container.size.width)) < 1)
+    }
+    #expect(reader.projectionInstallCount == projections)
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() throws {
+    let source = "    fn indented(" + String(repeating: "argument: usize, ", count: 20)
+        + ") {\n        let first = 1;\n        let second = 2;\n        let third = 3;\n    }\n"
+    let bytes = Array(source.utf8)
+    let lines = LineTable(bytes: bytes)
+    let fold = FoldRegion(id: FoldID(rawValue: 4567), kind: .declaration,
+        headerRange: ByteRange(lowerBound: 0, upperBound: lines.lineStarts[1]),
+        bodyRange: ByteRange(lowerBound: lines.lineStarts[1] - 2, upperBound: UInt32(bytes.count - 1)),
+        outlineDepth: 0, summary: FoldSummary(hiddenLineCount: 4))
+    let document = ReaderDocument(bytes: bytes, lineTable: lines,
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [], outlineFacets: [], foldRegions: [fold])
+    let (reader, _, window) = renderOffscreen(document)
+    var settings = wrapSettings(true)
+    settings.syntaxFormatting = false
+    reader.apply(settings: settings)
+    for operation in 0..<4 {
+        switch operation {
+        case 0: reader.updateSyntax(document: document)
+        case 1: #expect(reader.toggleFold(id: fold.id))
+        case 2: #expect(reader.toggleFold(id: fold.id))
+        default:
+            settings.fontSize = 18
+            settings.humanistComments = true
+            reader.apply(settings: settings)
+        }
+        wrapSettle(reader)
+        let style = try #require(reader.view.textStorage?.attribute(
+            .paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle)
+        let space = (" " as NSString).size(withAttributes: [.font: NSFont.monospacedSystemFont(ofSize: settings.fontSize, weight: .regular)]).width
+        #expect(abs(style.headIndent - 4 * space) < 1)
+        #expect(abs(style.lineHeightMultiple - settings.lineHeightMultiple) < 0.001)
+        if operation == 1 {
+            let placeholder = (reader.view.string as NSString).range(of: "\u{FFFC}")
+            #expect(placeholder.location != NSNotFound)
+            let rect = try #require(ReaderViewportGeometry.characterRect(displayLocation: placeholder.location, in: reader.view))
+            #expect(rect.minY > reader.view.textContainerOrigin.y + 20)
+        }
+    }
+    withExtendedLifetime(window) {}
+}
+
+@MainActor
+@Test
+func wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() throws {
+    let comment = "    // " + String(repeating: "human readable comment ", count: 30) + "\n"
+    let source = comment + "    fn declaration(" + String(repeating: "argument: usize, ", count: 25) + ") {}\n"
+    let bytes = Array(source.utf8)
+    let nameStart = UInt32(comment.utf8.count + 7)
+    let document = ReaderDocument(bytes: bytes, lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [
+            HighlightSpan(range: ByteRange(lowerBound: 4, upperBound: UInt32(comment.utf8.count - 1)), kind: .comment),
+            HighlightSpan(range: ByteRange(lowerBound: nameStart, upperBound: nameStart + 11), kind: .functionName)
+        ], outlineFacets: [])
+    let (reader, _, window) = renderOffscreen(document)
+    var settings = wrapSettings(true)
+    settings.syntaxFormatting = true
+    settings.humanistComments = true
+    settings.functionNameDelta = 4
+    settings.lineHeightMultiple = 1.7
+    reader.apply(settings: settings)
+    wrapSettle(reader)
+    let storage = try #require(reader.view.textStorage)
+    let commentFont = try #require(storage.attribute(.font, at: 4, effectiveRange: nil) as? NSFont)
+    let declarationFont = try #require(storage.attribute(.font, at: Int(nameStart), effectiveRange: nil) as? NSFont)
+    #expect(commentFont == NSFont.systemFont(ofSize: settings.fontSize))
+    #expect(abs(declarationFont.pointSize - settings.fontSize - settings.functionNameDelta) < 0.001)
+    for offset in [0, comment.utf16.count] {
+        let style = try #require(storage.attribute(.paragraphStyle, at: offset, effectiveRange: nil) as? NSParagraphStyle)
+        #expect(style.headIndent > 0)
+        #expect(abs(style.lineHeightMultiple - 1.7) < 0.001)
+    }
+    withExtendedLifetime(window) {}
 }

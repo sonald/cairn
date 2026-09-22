@@ -291,6 +291,17 @@ func readingSetWrapUsesActualRowsAndOneHeightConstraint() async throws {
         await settleReadingSet(window)
         #expect(zip(view.selfTestCardFrames, view.selfTestCardFrames.dropFirst()).allSatisfy { $0.maxY <= $1.minY })
     }
+    for _ in 0..<100 {
+        settings.wrapLines.toggle()
+        view.apply(settings: settings)
+        view.selfTestFlushLayout()
+    }
+    await settleReadingSet(window)
+    #expect(view.selfTestLayoutState.allSatisfy { $0.heightConstraints == 1 })
+    let finalCount = view.selfTestMeasurementCount
+    view.apply(settings: settings)
+    await settleReadingSet(window)
+    #expect(view.selfTestMeasurementCount == finalCount)
 }
 
 @MainActor

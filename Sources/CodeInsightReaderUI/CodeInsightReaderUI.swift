@@ -523,6 +523,9 @@ public final class ReaderTextView {
     /// backing storage, and real background draw passes observed by the
     /// renderer. Both only count; they never gate rendering.
     package private(set) var projectionInstallCount = 0
+    private let paragraphLayout = ReaderParagraphLayout()
+    private var paragraphWidthUpdatePending = false
+    package private(set) var paragraphUpdateCount = 0
     package private(set) var backgroundDrawCount = 0
     /// Viewport restore diagnostics (§7.4.2): post-restore correction passes
     /// actually executed, and the anchor offset error of the last restore.
@@ -634,6 +637,7 @@ public final class ReaderTextView {
             guard let self,
                   let layoutManager = self.view.textLayoutManager
             else { return }
+            self.foldGutterHoveredID = nil
             // Scrolls issued by a reflow restore are programmatic and each
             // one must not re-run viewport validation: right after a
             // container-width change that validation costs a full layout
@@ -841,6 +845,7 @@ public final class ReaderTextView {
     }
 
     private func display(document: ReaderDocument, fileURL: URL?) {
+        paragraphLayout.reset()
         let scope = FoldScopeKey(
             file: (fileURL ?? URL(fileURLWithPath: "/__codeinsight_memory__"))
                 .standardizedFileURL,
@@ -920,6 +925,7 @@ public final class ReaderTextView {
     }
 
     public func clear() {
+        paragraphLayout.reset()
         if let focusState {
             readingHeightLevel = focusState.readingHeightLevel
             foldOverridesByScope = focusState.foldOverridesByScope
@@ -1564,6 +1570,10 @@ public final class ReaderTextView {
     /// this seam so the perf probe can count projection commits (§7.4.2).
     private func installProjectedText(_ attributed: NSAttributedString) {
         projectionInstallCount += 1
+        let attributed = (attributed as? NSMutableAttributedString)
+            ?? NSMutableAttributedString(attributedString: attributed)
+        // Fresh projections already have the unwrapped base paragraph style.
+        if wrapLines { applyParagraphLayout(to: attributed) }
         if let contentStorage = view.textContentStorage {
             contentStorage.performEditingTransaction {
                 backingTextStorage.beginEditing()
@@ -2047,10 +2057,7 @@ public final class ReaderTextView {
     /// mid-test.
     package func processPendingViewportRestoresForTesting() {
         processPendingViewportCorrection()
-        if let generation = pendingWidthReflowGeneration {
-            pendingWidthReflowGeneration = nil
-            performWidthReflow(generation: generation)
-        }
+        processPendingWidthReflow()
     }
 
     private func performViewportCorrection(
@@ -2113,6 +2120,7 @@ public final class ReaderTextView {
     /// several frame changes per resize; only the first captures, while the
     /// geometry is still the old stable one.
     private func captureStateForWidthChange() {
+        foldGutterHoveredID = nil
         guard wrapLines,
               !isRestoringViewport,
               widthReflowCapturedState == nil
@@ -2126,8 +2134,9 @@ public final class ReaderTextView {
         widthReflowNotificationCount += 1
         guard wrapLines,
               !isRestoringViewport,
-              widthReflowCapturedState != nil
+              displayedDocument != nil
         else { return }
+        paragraphWidthUpdatePending = true
         if hasScheduledWidthReflow {
             mergedWidthReflowCount += 1
             return
@@ -2141,6 +2150,14 @@ public final class ReaderTextView {
     }
 
     package func processPendingWidthReflow() {
+        // Scrolling cancels position restoration, but cannot cancel the
+        // paragraph values required by the current container width.
+        if paragraphWidthUpdatePending {
+            paragraphWidthUpdatePending = false
+            isRestoringViewport = true
+            updateParagraphLayout()
+            isRestoringViewport = false
+        }
         guard let generation = pendingWidthReflowGeneration else { return }
         pendingWidthReflowGeneration = nil
         performWidthReflow(generation: generation)
@@ -2150,9 +2167,9 @@ public final class ReaderTextView {
         hasScheduledWidthReflow = false
         let captured = widthReflowCapturedState
         widthReflowCapturedState = nil
-        guard viewportStateGeneration == generation, let captured else { return }
+        guard viewportStateGeneration == generation else { return }
         isRestoringViewport = true
-        if supportsSynchronousViewportRestore {
+        if let captured, supportsSynchronousViewportRestore {
             restoreViewportState(captured)
             scheduleViewportCorrections(
                 for: captured,
@@ -2338,6 +2355,7 @@ public final class ReaderTextView {
         theme = newTheme
         lineNumbers = settings.lineNumbers
         wrapLines = settings.wrapLines
+        foldGutterHoveredID = nil
         applyThemeColors()
 
         viewportStateGeneration += 1
@@ -2361,6 +2379,7 @@ public final class ReaderTextView {
             // string and DisplayMap are identical, so rebuilding them would
             // only add latency — configureGutter already installed the new
             // container geometry that re-flows the text.
+            updateParagraphLayout()
         } else {
             guard let projection = Self.project(
                 document: document,
@@ -3560,6 +3579,46 @@ public final class ReaderTextView {
             .foregroundColor: theme.foregroundColor,
             .paragraphStyle: paragraph,
         ]
+    }
+
+    private func applyParagraphLayout(to text: NSMutableAttributedString) {
+        guard let container = view.textContainer else { return }
+        let document = displayedDocument
+        let map = displayMap
+        let folds = Dictionary(uniqueKeysWithValues: (document?.foldRegions ?? []).map { ($0.id, $0.headerRange.lowerBound) })
+        paragraphUpdateCount += paragraphLayout.apply(
+            to: text, wrap: wrapLines,
+            width: container.size.width - 2 * container.lineFragmentPadding,
+            font: NSFont.monospacedSystemFont(ofSize: theme.fontSize, weight: .regular)
+        ) { offset in
+            guard let document, let position = map?.sourcePosition(ofDisplay: offset) else { return nil }
+            let byte: UInt32
+            switch position {
+            case .source(let source): byte = source
+            case .placeholder(let id):
+                guard let header = folds[id] else { return nil }
+                byte = header
+            }
+            guard let line = document.lineTable.lineColumn(at: byte)?.line else { return nil }
+            let start = Int(document.lineTable.lineStarts[Int(line) - 1])
+            var end = start
+            while end < document.bytes.count,
+                  document.bytes[end] == 32 || document.bytes[end] == 9 { end += 1 }
+            let prefix = String(decoding: document.bytes[start..<end], as: UTF8.self)
+            let hasBody = end < document.bytes.count && document.bytes[end] != 10 && document.bytes[end] != 13
+            return prefix + (hasBody ? "x" : "")
+        }
+    }
+
+    private func updateParagraphLayout() {
+        let selection = view.selectedRanges
+        let affinity = view.selectionAffinity
+        if let content = view.textContentStorage {
+            content.performEditingTransaction { applyParagraphLayout(to: backingTextStorage) }
+        } else {
+            applyParagraphLayout(to: backingTextStorage)
+        }
+        view.setSelectedRanges(selection, affinity: affinity, stillSelecting: false)
     }
 
     private func configure() {
