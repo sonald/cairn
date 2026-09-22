@@ -1,0 +1,2204 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 29] ArgumentParser
+Build complete! (0.83秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test extractsFunctionsClassesMethodsAndArrowVariables() started.
+✔ Test extractsFunctionsClassesMethodsAndArrowVariables() passed after 0.001 seconds.
+◇ Test topLevelClosureVariablesHaveSignatureAndBodyFingerprints() started.
+✔ Test topLevelClosureVariablesHaveSignatureAndBodyFingerprints() passed after 0.001 seconds.
+◇ Test variableClosureFingerprintsSeparateSignatureFromBody() started.
+✔ Test variableClosureFingerprintsSeparateSignatureFromBody() passed after 0.001 seconds.
+◇ Test recordsDirectMethodAndNewCallsInInnermostRegion() started.
+✔ Test recordsDirectMethodAndNewCallsInInnermostRegion() passed after 0.001 seconds.
+◇ Test newExpressionOnlyRecordsIdentifierConstructorDirectly() started.
+✔ Test newExpressionOnlyRecordsIdentifierConstructorDirectly() passed after 0.001 seconds.
+◇ Test recordsModuleFunctionAndBlockScopesSimpleBindingsAndShadowing() started.
+✔ Test recordsModuleFunctionAndBlockScopesSimpleBindingsAndShadowing() passed after 0.001 seconds.
+◇ Test onlyExportedNamedDeclarationsBecomeExportRecords() started.
+✔ Test onlyExportedNamedDeclarationsBecomeExportRecords() passed after 0.001 seconds.
+◇ Test nestedDeclarationsKeepScopesAndRegionsButSkipFacets() started.
+✔ Test nestedDeclarationsKeepScopesAndRegionsButSkipFacets() passed after 0.001 seconds.
+◇ Test nestedClassMethodsDoNotGainFacetNorOuterParent() started.
+✔ Test nestedClassMethodsDoNotGainFacetNorOuterParent() passed after 0.001 seconds.
+◇ Test identifierRangesIncludeParameterAndJSXValueRefsButExcludeTypePropertyAndTagTokens() started.
+✔ Test identifierRangesIncludeParameterAndJSXValueRefsButExcludeTypePropertyAndTagTokens() passed after 0.001 seconds.
+◇ Test identifierRangesIncludeSelfClosingJSXValueRefsButNotTagTokens() started.
+✔ Test identifierRangesIncludeSelfClosingJSXValueRefsButNotTagTokens() passed after 0.001 seconds.
+◇ Test importsExportsReexportAndDefaultNamespaceHonesty() started.
+✔ Test importsExportsReexportAndDefaultNamespaceHonesty() passed after 0.001 seconds.
+◇ Test exportStatementWithMultipleDeclaratorsEmitsEachExportedName() started.
+✔ Test exportStatementWithMultipleDeclaratorsEmitsEachExportedName() passed after 0.001 seconds.
+◇ Test tsxSourceHasErrorInTsModeButNotTsxMode() started.
+✔ Test tsxSourceHasErrorInTsModeButNotTsxMode() passed after 0.001 seconds.
+◇ Test wrongModeVariantBomAndInvalidUTF8FailBeforeParse() started.
+✔ Test wrongModeVariantBomAndInvalidUTF8FailBeforeParse() passed after 0.001 seconds.
+◇ Test parserObserverIsZeroCalledForPreParseRejections() started.
+✔ Test parserObserverIsZeroCalledForPreParseRejections() passed after 0.001 seconds.
+◇ Test syntaxErrorNodesAreReported() started.
+✔ Test syntaxErrorNodesAreReported() passed after 0.001 seconds.
+◇ Test fixedFixtureDumpIsStable() started.
+✔ Test fixedFixtureDumpIsStable() passed after 0.001 seconds.
+✔ Test run with 18 tests in 0 suites passed after 0.007 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test m6ReferenceFixtureHasRequiredResolvedLocalDensity() started.
+M6_REFERENCE_FIXTURE parseMS=409.022 bindings=20000 references=35000
+✔ Test m6ReferenceFixtureHasRequiredResolvedLocalDensity() passed after 2.579 seconds.
+◇ Test parsesRustSource() started.
+✔ Test parsesRustSource() passed after 0.001 seconds.
+◇ Test returnsTreeForInvalidRustSource() started.
+✔ Test returnsTreeForInvalidRustSource() passed after 0.001 seconds.
+◇ Test findsPythonFunctionNamedFields() started.
+✔ Test findsPythonFunctionNamedFields() passed after 0.001 seconds.
+◇ Test returnsTreeForInvalidPythonSource() started.
+✔ Test returnsTreeForInvalidPythonSource() passed after 0.001 seconds.
+◇ Test exposesFrozenTypeScriptAndTsxParsers() started.
+✔ Test exposesFrozenTypeScriptAndTsxParsers() passed after 0.001 seconds.
+◇ Test findsTypeScriptFunctionNamedFields() started.
+✔ Test findsTypeScriptFunctionNamedFields() passed after 0.001 seconds.
+◇ Test parsesTypeScriptJsxAndRejectsItWithTypeScriptGrammar() started.
+✔ Test parsesTypeScriptJsxAndRejectsItWithTypeScriptGrammar() passed after 0.001 seconds.
+✔ Test run with 8 tests in 0 suites passed after 2.581 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/alias_cross_file_negative/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/closure_capture/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/empty_and_tiny/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/file_mod/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/impl_relations/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/inline_mod/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/let_shadowing/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/macro_call_unresolved/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/macro_wrapped_items/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/match_bindings/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/pub_use_reexport/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/receiver_type/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/reexport_chain/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/reexport_cycle/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/same_content_multi_path/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/shadowed_import/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/super_chain/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/syntax_error_recovery/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/trait_method_call/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/type_reference_resolution/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/use_alias/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/use_click_navigation/ to semanticFixture(_:) started.
+◇ Test case passing 1 argument fixture → file:///Users/siancao/work/ai/vibecoding/codeinsight/Tests/RustExtractorTests/Fixtures/use_glob/ to semanticFixture(_:) started.
+✔ Test semanticFixture(_:) with 23 test cases passed after 0.042 seconds.
+◇ Test localReferenceWalkUsesTheExistingTreeAndSkipsMacroReparse() started.
+✔ Test localReferenceWalkUsesTheExistingTreeAndSkipsMacroReparse() passed after 0.001 seconds.
+◇ Test m6FixtureLocalReferenceIndexMetrics() started.
+M6_LOCAL_REFERENCE_INDEX parseMS=400.841 buildMS=2585.558 baselineMB=48.923 afterMB=52.313 deltaMB=3.391 bindings=20000 references=35000 tokens=55000
+✔ Test m6FixtureLocalReferenceIndexMetrics() passed after 2.998 seconds.
+◇ Test languageExtractorExistentialMatchesRustExtractionContracts() started.
+✔ Test languageExtractorExistentialMatchesRustExtractionContracts() passed after 0.001 seconds.
+◇ Test preservesShadowedBindingsInSourceOrder() started.
+✔ Test preservesShadowedBindingsInSourceOrder() passed after 0.001 seconds.
+◇ Test bindsEveryIdentifierInDestructuredPatterns() started.
+✔ Test bindsEveryIdentifierInDestructuredPatterns() passed after 0.001 seconds.
+◇ Test extractsClosureParametersAndRegion() started.
+✔ Test extractsClosureParametersAndRegion() passed after 0.001 seconds.
+◇ Test nestsInlineModuleScopesAndFacets() started.
+✔ Test nestsInlineModuleScopesAndFacets() passed after 0.001 seconds.
+◇ Test associatesImplMethodFacetAndRegion() started.
+✔ Test associatesImplMethodFacetAndRegion() passed after 0.001 seconds.
+◇ Test extractsReceiverTypeHintsWithoutGuessingGenericsOrTraitObjects() started.
+✔ Test extractsReceiverTypeHintsWithoutGuessingGenericsOrTraitObjects() passed after 0.001 seconds.
+◇ Test extractsImplRelationsWithGenericScopedAndInherentTypes() started.
+✔ Test extractsImplRelationsWithGenericScopedAndInherentTypes() passed after 0.001 seconds.
+◇ Test bindsMatchPatternsInArmScope() started.
+✔ Test bindsMatchPatternsInArmScope() passed after 0.001 seconds.
+◇ Test associatesStructFieldsWithStructFacet() started.
+✔ Test associatesStructFieldsWithStructFacet() passed after 0.001 seconds.
+◇ Test syntaxErrorsStillYieldParsedDeclarations() started.
+✔ Test syntaxErrorsStillYieldParsedDeclarations() passed after 0.001 seconds.
+◇ Test skipsMacroDefinitionAndInvocationSubtrees() started.
+✔ Test skipsMacroDefinitionAndInvocationSubtrees() passed after 0.001 seconds.
+◇ Test extractsBracedMacroItemsAtOriginalByteRanges() started.
+✔ Test extractsBracedMacroItemsAtOriginalByteRanges() passed after 0.001 seconds.
+◇ Test reparsesOnlyItemShapedMacroBodiesAndKeepsTheMacroCall() started.
+✔ Test reparsesOnlyItemShapedMacroBodiesAndKeepsTheMacroCall() passed after 0.001 seconds.
+◇ Test limitsNestedMacroItemReparsingToThreeBodies() started.
+✔ Test limitsNestedMacroItemReparsingToThreeBodies() passed after 0.001 seconds.
+◇ Test extractsAliasedUseAndExternCrate() started.
+✔ Test extractsAliasedUseAndExternCrate() passed after 0.001 seconds.
+◇ Test expandsGroupedNestedAndSelfImports() started.
+✔ Test expandsGroupedNestedAndSelfImports() passed after 0.001 seconds.
+◇ Test extractsGlobWithoutNames() started.
+✔ Test extractsGlobWithoutNames() passed after 0.001 seconds.
+◇ Test linksPublicUseToExport() started.
+✔ Test linksPublicUseToExport() passed after 0.001 seconds.
+◇ Test assignsUseInFunctionBodyToFunctionScope() started.
+✔ Test assignsUseInFunctionBodyToFunctionScope() passed after 0.001 seconds.
+◇ Test extractsQualifiedAndMethodCalls() started.
+✔ Test extractsQualifiedAndMethodCalls() passed after 0.001 seconds.
+◇ Test stripsTurbofishBeforeClassifyingCalls() started.
+✔ Test stripsTurbofishBeforeClassifyingCalls() passed after 0.001 seconds.
+◇ Test assignsCallsToInnermostExecutableRegion() started.
+✔ Test assignsCallsToInnermostExecutableRegion() passed after 0.001 seconds.
+◇ Test syntaxErrorsPreserveEarlierCallsAndImports() started.
+✔ Test syntaxErrorsPreserveEarlierCallsAndImports() passed after 0.001 seconds.
+◇ Test createsControlFlowPatternScopes() started.
+✔ Test createsControlFlowPatternScopes() passed after 0.001 seconds.
+◇ Test coversRequiredDeclarationKindsAndConstantRegions() started.
+✔ Test coversRequiredDeclarationKindsAndConstantRegions() passed after 0.001 seconds.
+◇ Test extractsEmptyRustContent() started.
+✔ Test extractsEmptyRustContent() passed after 0.001 seconds.
+✔ Test run with 30 tests in 0 suites passed after 3.050 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test extractsBasicFunctionFacetAndScope() started.
+✔ Test extractsBasicFunctionFacetAndScope() passed after 0.001 seconds.
+◇ Test extractsDecoratedAsyncNestedClassAndLambdaFieldwise() started.
+✔ Test extractsDecoratedAsyncNestedClassAndLambdaFieldwise() passed after 0.001 seconds.
+◇ Test coversParameterDefaultMethodAndOuterLexicalParent() started.
+✔ Test coversParameterDefaultMethodAndOuterLexicalParent() passed after 0.001 seconds.
+◇ Test assignmentBindingActivatesAfterRHSAndShadowsInNestedScope() started.
+✔ Test assignmentBindingActivatesAfterRHSAndShadowsInNestedScope() passed after 0.001 seconds.
+◇ Test recordsDirectMethodAndInnerComputedCalls() started.
+✔ Test recordsDirectMethodAndInnerComputedCalls() passed after 0.001 seconds.
+◇ Test importsAbsoluteRelativeAliasAndWildcardOnce() started.
+✔ Test importsAbsoluteRelativeAliasAndWildcardOnce() passed after 0.001 seconds.
+◇ Test unicodeRangesExcludeStringsAndComments() started.
+✔ Test unicodeRangesExcludeStringsAndComments() passed after 0.001 seconds.
+◇ Test syntaxErrorKeepsPartialIndex() started.
+✔ Test syntaxErrorKeepsPartialIndex() passed after 0.001 seconds.
+◇ Test twoExtractionsAreStableAndKeyIsPassthrough() started.
+✔ Test twoExtractionsAreStableAndKeyIsPassthrough() passed after 0.001 seconds.
+◇ Test wrongModeAndVariantFail() started.
+✔ Test wrongModeAndVariantFail() passed after 0.001 seconds.
+◇ Test basicPackageFixtureCoversFileExtractionAndPythonFeatures() started.
+✔ Test basicPackageFixtureCoversFileExtractionAndPythonFeatures() passed after 0.001 seconds.
+✔ Test run with 11 tests in 0 suites passed after 0.006 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerFontResolverRestoresDefaultFeaturesAfterOff() started.
+✔ Test readerFontResolverRestoresDefaultFeaturesAfterOff() passed after 0.010 seconds.
+◇ Test readerFontResolverPreservesUnavailableRequestAndReportsFallback() started.
+✔ Test readerFontResolverPreservesUnavailableRequestAndReportsFallback() passed after 0.004 seconds.
+◇ Test readerFontResolverDerivesSameFamilyBeforeApplyingFeatures() started.
+✔ Test readerFontResolverDerivesSameFamilyBeforeApplyingFeatures() passed after 0.008 seconds.
+◇ Test readerFontResolverBoundsCacheAndInvalidatesUnchangedRequests() started.
+✔ Test readerFontResolverBoundsCacheAndInvalidatesUnchangedRequests() passed after 0.018 seconds.
+◇ Test ligatureChangesReuseProjectionAndPreservePartialSourceSelections() started.
+✔ Test ligatureChangesReuseProjectionAndPreservePartialSourceSelections() passed after 0.113 seconds.
+◇ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() started.
+✔ Test ligatureTypographyClearsOverridesAndKeepsHumanistCommentsIndependent() passed after 0.029 seconds.
+◇ Test ligatureChangesPreserveLargeDocumentSelectionAndInvalidateOnFontRefresh() started.
+✔ Test ligatureChangesPreserveLargeDocumentSelectionAndInvalidateOnFontRefresh() passed after 1.573 seconds.
+◇ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() started.
+✔ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() passed after 2.306 seconds.
+◇ Test ligaturePendingRestoreYieldsToUserScroll() started.
+✔ Test ligaturePendingRestoreYieldsToUserScroll() passed after 0.947 seconds.
+◇ Test ligaturePendingRestoreCannotAffectAReplacementDocument() started.
+✔ Test ligaturePendingRestoreCannotAffectAReplacementDocument() passed after 0.627 seconds.
+◇ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() started.
+✔ Test ligatureReflowsPreserveFoldAttachmentAndSourceCopyAcrossIt() passed after 1.131 seconds.
+◇ Test ligatureGeometryTreatsSurrogatesAndCombiningSequencesAsWholeCharacters() started.
+✔ Test ligatureGeometryTreatsSurrogatesAndCombiningSequencesAsWholeCharacters() passed after 0.911 seconds.
+◇ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() started.
+✔ Test ligatureModeAndFontChangesPreserveNativeShiftExtensionDirection() passed after 3.623 seconds.
+◇ Test ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() started.
+✔ Test ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() passed after 0.729 seconds.
+◇ Test gutterReservesOneWidthBeforeTheFirstGlyph() started.
+GUTTER_GEOMETRY style=0 size=10.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=0 size=10.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=0 size=13.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=0 size=13.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=0 size=24.0 numbers=true gutter=(0.0, 0.0, 59.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(69.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=0 size=24.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=1 size=10.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=1 size=10.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=1 size=13.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=1 size=13.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=1 size=24.0 numbers=true gutter=(0.0, 0.0, 59.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(69.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=1 size=24.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+✔ Test gutterReservesOneWidthBeforeTheFirstGlyph() passed after 0.053 seconds.
+◇ Test rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() started.
+✔ Test rulerShowsLineNumbersWithoutBleedingAboveTheScrollView() passed after 0.799 seconds.
+◇ Test readerThemeColorResolvesFromDetachedExecutor() started.
+✔ Test readerThemeColorResolvesFromDetachedExecutor() passed after 0.001 seconds.
+◇ Test displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() started.
+✔ Test displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() passed after 0.001 seconds.
+◇ Test identityDisplayMapMatchesEveryExistingCoordinateFamily() started.
+✔ Test identityDisplayMapMatchesEveryExistingCoordinateFamily() passed after 0.001 seconds.
+◇ Test structAndTraitDeclarationNamesUsePrimaryTypography() started.
+✔ Test structAndTraitDeclarationNamesUsePrimaryTypography() passed after 0.001 seconds.
+◇ Test callsAndFieldsKeepBaseMetricsWhenDeclarationEmphasisIsLarge() started.
+✔ Test callsAndFieldsKeepBaseMetricsWhenDeclarationEmphasisIsLarge() passed after 0.001 seconds.
+◇ Test humanistCommentsKeepASCIIFiguresMonospaced() started.
+✔ Test humanistCommentsKeepASCIIFiguresMonospaced() passed after 0.001 seconds.
+◇ Test secondaryDeclarationsKeepConfiguredWeightWithoutScaling() started.
+✔ Test secondaryDeclarationsKeepConfiguredWeightWithoutScaling() passed after 0.001 seconds.
+◇ Test disabledSyntaxFormattingLeavesOnlyTheBaseFontMetrics() started.
+✔ Test disabledSyntaxFormattingLeavesOnlyTheBaseFontMetrics() passed after 0.001 seconds.
+◇ Test clearThenApplySettingsKeepsStorageEmpty() started.
+✔ Test clearThenApplySettingsKeepsStorageEmpty() passed after 0.001 seconds.
+◇ Test bookmarkMarkersAggregateLabelsProjectFoldedLinesAndClearWithDocument() started.
+✔ Test bookmarkMarkersAggregateLabelsProjectFoldedLinesAndClearWithDocument() passed after 0.003 seconds.
+◇ Test bookmarkMarkersDoNotCreateAGutterWhenLineNumbersAreDisabled() started.
+✔ Test bookmarkMarkersDoNotCreateAGutterWhenLineNumbersAreDisabled() passed after 0.001 seconds.
+◇ Test everyThemeAppliesTypographyWithinStorageBounds() started.
+✔ Test everyThemeAppliesTypographyWithinStorageBounds() passed after 0.004 seconds.
+◇ Test gutterRepaintsItsBackgroundWhenThemeChanges() started.
+✔ Test gutterRepaintsItsBackgroundWhenThemeChanges() passed after 0.001 seconds.
+◇ Test foldGutterHoverIdentifiesTheHoveredFoldRow() started.
+✔ Test foldGutterHoverIdentifiesTheHoveredFoldRow() passed after 0.003 seconds.
+◇ Test mismatchedStorageSkipsTypography() started.
+✔ Test mismatchedStorageSkipsTypography() passed after 0.001 seconds.
+◇ Test activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() started.
+✔ Test activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() passed after 0.001 seconds.
+✔ Test run with 32 tests in 0 suites passed after 12.914 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test byteAndUTF16OffsetsRoundTripAcrossCJKAndEmoji() started.
+✔ Test byteAndUTF16OffsetsRoundTripAcrossCJKAndEmoji() passed after 0.001 seconds.
+◇ Test byteRangeBecomesExpectedNSRange() started.
+✔ Test byteRangeBecomesExpectedNSRange() passed after 0.001 seconds.
+◇ Test explicitRustDiffMatchesConvenience() started.
+✔ Test explicitRustDiffMatchesConvenience() passed after 0.001 seconds.
+◇ Test javascriptAndBadTypeScriptVariantFailBeforeParsing() started.
+✔ Test javascriptAndBadTypeScriptVariantFailBeforeParsing() passed after 0.001 seconds.
+◇ Test badTypeScriptVariantFailsBeforeComparisonOrParsing() started.
+✔ Test badTypeScriptVariantFailsBeforeComparisonOrParsing() passed after 0.001 seconds.
+◇ Test typeScriptLineDiffAndBadVariantGate() started.
+✔ Test typeScriptLineDiffAndBadVariantGate() passed after 0.001 seconds.
+◇ Test typeScriptFunctionDiffUsesDotSeparatedClassMethodChain() started.
+✔ Test typeScriptFunctionDiffUsesDotSeparatedClassMethodChain() passed after 0.001 seconds.
+◇ Test typeScriptArrowComponentAndTsxJsxBodyChangesAreDetected() started.
+✔ Test typeScriptArrowComponentAndTsxJsxBodyChangesAreDetected() passed after 0.001 seconds.
+◇ Test pythonLineDiffAndFunctionChangesUsePythonFacts() started.
+✔ Test pythonLineDiffAndFunctionChangesUsePythonFacts() passed after 0.001 seconds.
+◇ Test pythonFunctionChangeNamesUseDotsForClassAndNestedFunctions() started.
+✔ Test pythonFunctionChangeNamesUseDotsForClassAndNestedFunctions() passed after 0.001 seconds.
+◇ Test pythonLineDiffStillTruncatesAtLineBudget() started.
+✔ Test pythonLineDiffStillTruncatesAtLineBudget() passed after 0.008 seconds.
+◇ Test lineDiffMarksAddedRemovedAndChangedLines() started.
+✔ Test lineDiffMarksAddedRemovedAndChangedLines() passed after 0.001 seconds.
+◇ Test lineDiffHandlesEmptyFiles() started.
+✔ Test lineDiffHandlesEmptyFiles() passed after 0.001 seconds.
+◇ Test lineDiffPreservesCRLFAndUnterminatedEOFBytes() started.
+✔ Test lineDiffPreservesCRLFAndUnterminatedEOFBytes() passed after 0.001 seconds.
+◇ Test lineDiffHandlesAGiantLine() started.
+✔ Test lineDiffHandlesAGiantLine() passed after 0.246 seconds.
+◇ Test lineDiffTruncatesAboveChangeOrLineBudget() started.
+✔ Test lineDiffTruncatesAboveChangeOrLineBudget() passed after 0.075 seconds.
+◇ Test functionSummaryReportsSignatureBodyAddedAndRemoved() started.
+✔ Test functionSummaryReportsSignatureBodyAddedAndRemoved() passed after 0.001 seconds.
+◇ Test functionSummaryTreatsRenameAsRemovedAndAdded() started.
+✔ Test functionSummaryTreatsRenameAsRemovedAndAdded() passed after 0.001 seconds.
+◇ Test pythonReaderRolesPreserveCallsPropertiesBindingsAndAtomicStrings() started.
+✔ Test pythonReaderRolesPreserveCallsPropertiesBindingsAndAtomicStrings() passed after 0.001 seconds.
+◇ Test typeScriptReaderRolesIncludeEnumFieldsAndSignatures() started.
+✔ Test typeScriptReaderRolesIncludeEnumFieldsAndSignatures() passed after 0.001 seconds.
+◇ Test typeScriptTemplateSubstitutionsKeepNestedStructureAndDisjointRoles() started.
+✔ Test typeScriptTemplateSubstitutionsKeepNestedStructureAndDisjointRoles() passed after 0.001 seconds.
+◇ Test typeScriptReaderCallsRemainDistinctFromShadowedBindingsInTsx() started.
+✔ Test typeScriptReaderCallsRemainDistinctFromShadowedBindingsInTsx() passed after 0.001 seconds.
+◇ Test explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() started.
+✔ Test explicitRustDocumentLoadMatchesConvenienceAndCarriesMode() passed after 0.001 seconds.
+◇ Test javascriptAndInvalidTypeScriptVariantFailBeforeParsing() started.
+✔ Test javascriptAndInvalidTypeScriptVariantFailBeforeParsing() passed after 0.001 seconds.
+◇ Test typeScriptReaderUsesOneParseForBothHighlightAndOutline() started.
+✔ Test typeScriptReaderUsesOneParseForBothHighlightAndOutline() passed after 0.001 seconds.
+◇ Test unsupportedAsyncSyntaxModeFailsBeforeHighlighting() started.
+✔ Test unsupportedAsyncSyntaxModeFailsBeforeHighlighting() passed after 0.001 seconds.
+◇ Test typeScriptDocumentReadsTsAndTsxModes() started.
+✔ Test typeScriptDocumentReadsTsAndTsxModes() passed after 0.001 seconds.
+◇ Test typeScriptReaderFoldsBlockDeclarationsAndLaminarRegions() started.
+✔ Test typeScriptReaderFoldsBlockDeclarationsAndLaminarRegions() passed after 0.001 seconds.
+◇ Test typeScriptReaderLocalReferencesActivateAfterDeclarationAndShadowScopes() started.
+✔ Test typeScriptReaderLocalReferencesActivateAfterDeclarationAndShadowScopes() passed after 0.001 seconds.
+◇ Test typeScriptReaderNestedParameterScopesDoNotLeakAcrossFunctions() started.
+✔ Test typeScriptReaderNestedParameterScopesDoNotLeakAcrossFunctions() passed after 0.001 seconds.
+◇ Test typeScriptReaderSiblingScopesGetDistinctStableIDs() started.
+✔ Test typeScriptReaderSiblingScopesGetDistinctStableIDs() passed after 0.001 seconds.
+◇ Test typeScriptReaderExcludesPropertyAndTypeReferences() started.
+✔ Test typeScriptReaderExcludesPropertyAndTypeReferences() passed after 0.001 seconds.
+◇ Test typeScriptReaderFoldCandidatesAreStableAcrossRuns() started.
+✔ Test typeScriptReaderFoldCandidatesAreStableAcrossRuns() passed after 0.001 seconds.
+◇ Test typeScriptReaderTsxParseAndSingleLineArrowFolds() started.
+✔ Test typeScriptReaderTsxParseAndSingleLineArrowFolds() passed after 0.001 seconds.
+◇ Test typeScriptLargeDocumentLoadsPlainThenDetachedSyntax() started.
+✔ Test typeScriptLargeDocumentLoadsPlainThenDetachedSyntax() passed after 18.219 seconds.
+◇ Test typeScriptByteErrorsRejectWithoutParserObserver() started.
+✔ Test typeScriptByteErrorsRejectWithoutParserObserver() passed after 0.001 seconds.
+◇ Test pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() started.
+✔ Test pythonReaderUsesOneParseForSpansOutlineFoldAndLocalRefs() passed after 0.001 seconds.
+◇ Test pythonReaderLocalReferencesScopeAndRhsActivation() started.
+✔ Test pythonReaderLocalReferencesScopeAndRhsActivation() passed after 0.001 seconds.
+◇ Test pythonReaderFoldsCommentsAndImportsInsideFunctionBodies() started.
+✔ Test pythonReaderFoldsCommentsAndImportsInsideFunctionBodies() passed after 0.001 seconds.
+◇ Test pythonReaderSpansAndOutlineIncludeBasicSyntax() started.
+✔ Test pythonReaderSpansAndOutlineIncludeBasicSyntax() passed after 0.001 seconds.
+◇ Test identifierOccurrencesUseTheDocumentLanguageMode() started.
+✔ Test identifierOccurrencesUseTheDocumentLanguageMode() passed after 0.001 seconds.
+◇ Test rustReaderRolesAndOutlineDescribeMembersWithoutGuessingReferences() started.
+✔ Test rustReaderRolesAndOutlineDescribeMembersWithoutGuessingReferences() passed after 0.001 seconds.
+◇ Test rustHighlighterProducesStableSpans() started.
+✔ Test rustHighlighterProducesStableSpans() passed after 0.001 seconds.
+◇ Test identifierOccurrencesMatchWholeTokensAndSkipCommentsStringsAndKeywords() started.
+✔ Test identifierOccurrencesMatchWholeTokensAndSkipCommentsStringsAndKeywords() passed after 0.001 seconds.
+◇ Test localReferenceIndexFindsKnownParameterAndLocalUses() started.
+✔ Test localReferenceIndexFindsKnownParameterAndLocalUses() passed after 0.001 seconds.
+◇ Test localReferenceIndexSeparatesNestedShadowing() started.
+✔ Test localReferenceIndexSeparatesNestedShadowing() passed after 0.001 seconds.
+◇ Test localReferenceIndexSeparatesSiblingScopes() started.
+✔ Test localReferenceIndexSeparatesSiblingScopes() passed after 0.001 seconds.
+◇ Test localReferenceIndexExcludesTokensBeforeAndAtDeclaration() started.
+✔ Test localReferenceIndexExcludesTokensBeforeAndAtDeclaration() passed after 0.001 seconds.
+◇ Test localReferenceIndexDistinguishesShadowedParameterFromLocal() started.
+✔ Test localReferenceIndexDistinguishesShadowedParameterFromLocal() passed after 0.001 seconds.
+◇ Test rustHighlighterBuildsMacroPartialLocalIndexWithOneParse() started.
+✔ Test rustHighlighterBuildsMacroPartialLocalIndexWithOneParse() passed after 0.001 seconds.
+◇ Test rustHighlighterProducesOutlineSnapshot() started.
+✔ Test rustHighlighterProducesOutlineSnapshot() passed after 0.001 seconds.
+◇ Test foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() started.
+✔ Test foldExtractionCoversSevenKindsAndSyntaxNodeBoundaries() passed after 0.001 seconds.
+◇ Test foldExtractionRejectsEmptyAndSingleNodeRunsAndBracelessClosures() started.
+✔ Test foldExtractionRejectsEmptyAndSingleNodeRunsAndBracelessClosures() passed after 0.001 seconds.
+◇ Test foldResolverIsOrderIndependentAndHonorsConflictWinners() started.
+✔ Test foldResolverIsOrderIndependentAndHonorsConflictWinners() passed after 0.001 seconds.
+◇ Test foldResolverDeduplicatesTruthAndRejectsContradictorySummaries() started.
+CodeInsightReaderCore: rejected contradictory summaries for one fold geometry
+✔ Test foldResolverDeduplicatesTruthAndRejectsContradictorySummaries() passed after 0.001 seconds.
+◇ Test foldTransportSeamKeepsPublicInitializationEmptyAndLoadsBothPaths() started.
+✔ Test foldTransportSeamKeepsPublicInitializationEmptyAndLoadsBothPaths() passed after 0.001 seconds.
+◇ Test highlightWithFoldsUsesTheExistingSingleParse() started.
+✔ Test highlightWithFoldsUsesTheExistingSingleParse() passed after 0.001 seconds.
+◇ Test foldPerformanceFixtureMatchesManifestAndResolutionBudget() started.
+M11_FOLD_RESOLUTION resolutionMS=10005.518917 candidates=8400 accepted=8400
+✔ Test foldPerformanceFixtureMatchesManifestAndResolutionBudget() passed after 19.839 seconds.
+◇ Test commentContentClassifierProtectsFiguresAndAllowsProse() started.
+✔ Test commentContentClassifierProtectsFiguresAndAllowsProse() passed after 0.001 seconds.
+◇ Test rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() started.
+✔ Test rustHighlighterStylesEveryDeclarationWithoutTouchingCalls() passed after 0.001 seconds.
+◇ Test rustHighlighterMatchesFixtureSnapshot() started.
+✔ Test rustHighlighterMatchesFixtureSnapshot() passed after 0.001 seconds.
+◇ Test fileTierUsesLineCountBoundaries() started.
+✔ Test fileTierUsesLineCountBoundaries() passed after 0.001 seconds.
+◇ Test viewportGatingReturnsOnlyBufferedIntersections() started.
+✔ Test viewportGatingReturnsOnlyBufferedIntersections() passed after 0.001 seconds.
+◇ Test viewportGatingHandlesEmptySingleAndBoundaryRanges() started.
+✔ Test viewportGatingHandlesEmptySingleAndBoundaryRanges() passed after 0.001 seconds.
+◇ Test viewportGatingMatchesLinearScanForLargeSortedInput() started.
+✔ Test viewportGatingMatchesLinearScanForLargeSortedInput() passed after 0.175 seconds.
+◇ Test m6FixtureLocalReferencesConvertOnlyViewportTokens() started.
+M6_LOCAL_REFERENCE_VIEWPORT totalReferences=35000 viewportBytes=483 queriedTokens=35 convertedTokens=35
+✔ Test m6FixtureLocalReferencesConvertOnlyViewportTokens() passed after 8.455 seconds.
+◇ Test largeDocumentLoadsPlainTextBeforeDetachedSyntax() started.
+✔ Test largeDocumentLoadsPlainTextBeforeDetachedSyntax() passed after 0.547 seconds.
+◇ Test pythonLargeDocumentLoadsPlainTextThenSyncSyntax() started.
+✔ Test pythonLargeDocumentLoadsPlainTextThenSyncSyntax() passed after 14.274 seconds.
+◇ Test pythonHugeDocumentHighlightProbe() started.
+✔ Test pythonHugeDocumentHighlightProbe() passed after 56.187 seconds.
+◇ Test hugeDocumentDeclarationSpanProbe() started.
+S6 huge span probe: spans=130000 declarations=10000
+✔ Test hugeDocumentDeclarationSpanProbe() passed after 17.366 seconds.
+◇ Test excerptAttachesAdjacentDocCommentsAndMarksOverflow() started.
+✔ Test excerptAttachesAdjacentDocCommentsAndMarksOverflow() passed after 0.001 seconds.
+◇ Test excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() started.
+✔ Test excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() passed after 0.001 seconds.
+◇ Test excerptStopsCleanlyAtFileEnd() started.
+✔ Test excerptStopsCleanlyAtFileEnd() passed after 0.001 seconds.
+◇ Test bindingExcerptUsesDeclarationLinePlusTwoLinesEachSide() started.
+✔ Test bindingExcerptUsesDeclarationLinePlusTwoLinesEachSide() passed after 0.001 seconds.
+◇ Test readerLigatureSettingsDefaultAndRoundTrip() started.
+✔ Test readerLigatureSettingsDefaultAndRoundTrip() passed after 0.009 seconds.
+◇ Test readerLigatureSettingsRejectMalformedStoredValues() started.
+✔ Test readerLigatureSettingsRejectMalformedStoredValues() passed after 0.002 seconds.
+◇ Test readerLigatureSettingsNormalizeEmptyRequestsAndRetainMissingFonts() started.
+✔ Test readerLigatureSettingsNormalizeEmptyRequestsAndRetainMissingFonts() passed after 0.001 seconds.
+◇ Test readerLigatureSettingsInvalidateThemeAndTypography() started.
+✔ Test readerLigatureSettingsInvalidateThemeAndTypography() passed after 0.001 seconds.
+◇ Test readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() started.
+✔ Test readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() passed after 0.001 seconds.
+◇ Test readerVisualSettingsKeepReadableDefaultsAndClampEveryBoundary() started.
+✔ Test readerVisualSettingsKeepReadableDefaultsAndClampEveryBoundary() passed after 0.001 seconds.
+◇ Test readerSettingsPersistRoundTripThroughInjectedUserDefaults() started.
+✔ Test readerSettingsPersistRoundTripThroughInjectedUserDefaults() passed after 0.003 seconds.
+◇ Test readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() started.
+✔ Test readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() passed after 0.001 seconds.
+◇ Test readerThemeProvidesChromeSurfacesForEveryExplicitTheme() started.
+✔ Test readerThemeProvidesChromeSurfacesForEveryExplicitTheme() passed after 0.001 seconds.
+◇ Test readerThemeProvidesDistinctDiffColorsForEveryTheme() started.
+✔ Test readerThemeProvidesDistinctDiffColorsForEveryTheme() passed after 0.001 seconds.
+◇ Test regularDocumentRendersSyntaxColorsOffscreen() started.
+✔ Test regularDocumentRendersSyntaxColorsOffscreen() passed after 0.093 seconds.
+◇ Test scrollingRendersNewlyVisibleSyntaxColors() started.
+✔ Test scrollingRendersNewlyVisibleSyntaxColors() passed after 0.090 seconds.
+◇ Test diffGutterStoresMarkersAndHunkRevealSelectsTheLine() started.
+✔ Test diffGutterStoresMarkersAndHunkRevealSelectsTheLine() passed after 0.025 seconds.
+◇ Test pythonClassOutlineGutterColorAndFoldSummaryAreMapped() started.
+✔ Test pythonClassOutlineGutterColorAndFoldSummaryAreMapped() passed after 0.016 seconds.
+◇ Test typeScriptReaderGenericTransportRendersOutlineFoldAndLocalRefs() started.
+✔ Test typeScriptReaderGenericTransportRendersOutlineFoldAndLocalRefs() passed after 0.013 seconds.
+◇ Test readerInstallsLineNumberRulerByDefault() started.
+✔ Test readerInstallsLineNumberRulerByDefault() passed after 0.002 seconds.
+◇ Test readingGeometryUsesClipWidthWithLegacyScroller() started.
+✔ Test readingGeometryUsesClipWidthWithLegacyScroller() passed after 0.002 seconds.
+◇ Test wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() started.
+M11_WRAP_PROBE fragments=3 wrappedHeight=270.40000000000003 lineHeight=20.8 line2RulerCount=1
+✔ Test wrapProbeKeepsLogicalLineDecorationsUniqueInRealReaderTextView() passed after 0.011 seconds.
+◇ Test wrapSettingReversesEveryTextKitAndScrollerProperty() started.
+✔ Test wrapSettingReversesEveryTextKitAndScrollerProperty() passed after 0.004 seconds.
+◇ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() started.
+✔ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() passed after 0.008 seconds.
+◇ Test wrapResizeCallbacksOnlyObserveNewWidth() started.
+WRAP_RESIZE_TIMING observations=readerFrame=360.0,readerFrame=334.0,readerFrame=334.0
+✔ Test wrapResizeCallbacksOnlyObserveNewWidth() passed after 0.009 seconds.
+◇ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() started.
+✔ Test wrapToggleRoundTripsKeepMidLineAnchorAndViewportOffset() passed after 8.712 seconds.
+◇ Test wrapTogglePreservesCompleteSelectionAndCopyText() started.
+✔ Test wrapTogglePreservesCompleteSelectionAndCopyText() passed after 1.282 seconds.
+◇ Test wrapToggleRestoresStashedHorizontalPosition() started.
+✔ Test wrapToggleRestoresStashedHorizontalPosition() passed after 1.305 seconds.
+◇ Test wrapToggleClampsLegallyAtDocumentEdges() started.
+✔ Test wrapToggleClampsLegallyAtDocumentEdges() passed after 2.560 seconds.
+◇ Test wrapToggleRoundTripsUnicodeAndFoldedContent() started.
+✔ Test wrapToggleRoundTripsUnicodeAndFoldedContent() passed after 1.655 seconds.
+◇ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() started.
+✔ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() passed after 0.464 seconds.
+◇ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() started.
+✔ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() passed after 1.275 seconds.
+◇ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() started.
+✔ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() passed after 0.818 seconds.
+◇ Test wrapPrimarySelectionCoversAllVisibleRowSegments() started.
+✔ Test wrapPrimarySelectionCoversAllVisibleRowSegments() passed after 0.471 seconds.
+◇ Test wrapToggleDoesNotStealFirstResponder() started.
+WRAP_W19_SKIPPED environment cannot hold first responder
+✔ Test wrapToggleDoesNotStealFirstResponder() passed after 0.073 seconds.
+◇ Test wrapSettingsApplyIsIdempotentForEqualValues() started.
+✔ Test wrapSettingsApplyIsIdempotentForEqualValues() passed after 0.157 seconds.
+◇ Test wrapFontSizeChangeKeepsAnchorAndSelection() started.
+✔ Test wrapFontSizeChangeKeepsAnchorAndSelection() passed after 0.821 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.665 seconds.
+◇ Test revealResetsHorizontalScrollAfterNavigation() started.
+✔ Test revealResetsHorizontalScrollAfterNavigation() passed after 0.068 seconds.
+◇ Test foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() started.
+M11_ATTACHMENT_SPIKE providerCreated=true countUpdated=true axLabel=Collapsed, hides 4 lines, 999 matches hitTesting=NSTextView
+✔ Test foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() passed after 0.009 seconds.
+◇ Test copyingASelectAllAcrossFoldsWritesTheCompleteSource() started.
+✔ Test copyingASelectAllAcrossFoldsWritesTheCompleteSource() passed after 0.013 seconds.
+◇ Test copyingAPartialSelectionExpandsTheCrossedFoldToSourceBytes() started.
+✔ Test copyingAPartialSelectionExpandsTheCrossedFoldToSourceBytes() passed after 0.012 seconds.
+◇ Test foldReducerRendersOnlyMaximalRegionsAndScopesOverridesByFileAndContent() started.
+✔ Test foldReducerRendersOnlyMaximalRegionsAndScopesOverridesByFileAndContent() passed after 0.018 seconds.
+◇ Test readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() started.
+✔ Test readingHeightLevelsUseTheSpecifiedKindsAndSkipSmallRegions() passed after 0.014 seconds.
+◇ Test manualFoldsArbitrateInBothDirectionsAndLevelSwitchClearsEveryPair() started.
+✔ Test manualFoldsArbitrateInBothDirectionsAndLevelSwitchClearsEveryPair() passed after 0.036 seconds.
+◇ Test navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() started.
+✔ Test navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() passed after 1.246 seconds.
+◇ Test focusSelectsTheSmallestFacetAtItsHeaderAndClosingBrace() started.
+✔ Test focusSelectsTheSmallestFacetAtItsHeaderAndClosingBrace() passed after 0.024 seconds.
+◇ Test scopeHeaderUsesCompatibleFacetsAtSignaturesClosersAndCfgTest() started.
+✔ Test scopeHeaderUsesCompatibleFacetsAtSignaturesClosersAndCfgTest() passed after 0.003 seconds.
+◇ Test scopeHeaderKeepsOuterAndInnerWhenThreeAssociatedLevelsContainCaret() started.
+✔ Test scopeHeaderKeepsOuterAndInnerWhenThreeAssociatedLevelsContainCaret() passed after 0.001 seconds.
+◇ Test focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() started.
+✔ Test focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() passed after 0.042 seconds.
+◇ Test focusTreatsCfgTestAsAContainerAndNoScopeDoesNotFold() started.
+✔ Test focusTreatsCfgTestAsAContainerAndNoScopeDoesNotFold() passed after 0.015 seconds.
+◇ Test focusFollowsExplicitCrossFileNavigationButNotLiveScroll() started.
+✔ Test focusFollowsExplicitCrossFileNavigationButNotLiveScroll() passed after 0.036 seconds.
+◇ Test focusUsesTheExplicitLandingPointAfterDeferredSyntaxLoads() started.
+✔ Test focusUsesTheExplicitLandingPointAfterDeferredSyntaxLoads() passed after 0.019 seconds.
+◇ Test findKeepsHiddenMatchesInTheLogicalCountAndRevealsTheirFoldChain() started.
+✔ Test findKeepsHiddenMatchesInTheLogicalCountAndRevealsTheirFoldChain() passed after 0.015 seconds.
+◇ Test foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() started.
+✔ Test foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() passed after 0.009 seconds.
+◇ Test foldedCurrentSymbolOccurrencesAreExposedByTheChip() started.
+✔ Test foldedCurrentSymbolOccurrencesAreExposedByTheChip() passed after 0.003 seconds.
+◇ Test optionFoldHandleRecursivelyTogglesSiblingRegions() started.
+✔ Test optionFoldHandleRecursivelyTogglesSiblingRegions() passed after 0.004 seconds.
+◇ Test foldingKeepsRulerWhenLineNumbersAndDiffAreOff() started.
+✔ Test foldingKeepsRulerWhenLineNumbersAndDiffAreOff() passed after 0.006 seconds.
+◇ Test foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() started.
+✔ Test foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() passed after 0.050 seconds.
+◇ Test foldedReferenceScanningDoesNotGrowWithHiddenBody() started.
+✔ Test foldedReferenceScanningDoesNotGrowWithHiddenBody() passed after 0.112 seconds.
+◇ Test lineNumberRulerDrawsOnlyVisibleKnownLinesAndCanBeDisabled() started.
+✔ Test lineNumberRulerDrawsOnlyVisibleKnownLinesAndCanBeDisabled() passed after 0.009 seconds.
+◇ Test clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() started.
+✔ Test clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() passed after 0.006 seconds.
+◇ Test typeScriptIdentifierClickHighlightsLexicalOccurrences() started.
+✔ Test typeScriptIdentifierClickHighlightsLexicalOccurrences() passed after 0.007 seconds.
+◇ Test occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() started.
+✔ Test occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() passed after 0.006 seconds.
+◇ Test semanticLocalAndParamReferencesUseDistinctViewportStyles() started.
+✔ Test semanticLocalAndParamReferencesUseDistinctViewportStyles() passed after 0.006 seconds.
+◇ Test defaultVisualSettingsRenderRestrainedDeclarationsAndParameterRoles() started.
+✔ Test defaultVisualSettingsRenderRestrainedDeclarationsAndParameterRoles() passed after 0.004 seconds.
+◇ Test visualSettingsImmediatelyRedrawAnOpenReader() started.
+✔ Test visualSettingsImmediatelyRedrawAnOpenReader() passed after 0.007 seconds.
+◇ Test m6ReferenceDensityStylesOnlyViewportFragments() started.
+M6_REFERENCE_RENDER totalReferences=35000 backingFontRuns=2001 referenceAttributeRuns=89 referenceStyledFragments=46
+✔ Test m6ReferenceDensityStylesOnlyViewportFragments() passed after 12.586 seconds.
+◇ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() started.
+✔ Test wrapHangingIndentUsesSpaceAndWidthCapsInActualRows() passed after 1.803 seconds.
+◇ Test wrapTabPrefixUsesTheSameExplicitStopsAsTextKit() started.
+✔ Test wrapTabPrefixUsesTheSameExplicitStopsAsTextKit() passed after 0.005 seconds.
+◇ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() started.
+✔ Test wrapHangingIndentRecomputesOnWidthChangesWithoutProjection() passed after 1.671 seconds.
+◇ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() started.
+✔ Test wrapHangingIndentSurvivesSyntaxAndFoldProjectionChanges() passed after 1.622 seconds.
+◇ Test wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() started.
+✔ Test wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() passed after 0.427 seconds.
+◇ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() started.
+✔ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() passed after 1.734 seconds.
+✔ Test run with 144 tests in 0 suites passed after 178.655 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() started.
+✔ Test libgit2SerialExecutorCompletesConcurrentHistoryAndSnapshotCapture() passed after 7.473 seconds.
+◇ Test commitLogReadsHeadFirstWithBranchLabels() started.
+✔ Test commitLogReadsHeadFirstWithBranchLabels() passed after 0.041 seconds.
+◇ Test currentBranchNameReadsTheCheckedOutBranch() started.
+✔ Test currentBranchNameReadsTheCheckedOutBranch() passed after 0.065 seconds.
+◇ Test currentBranchNameReportsDetachedHead() started.
+✔ Test currentBranchNameReportsDetachedHead() passed after 0.062 seconds.
+◇ Test currentBranchNameReturnsNilOutsideARepository() started.
+✔ Test currentBranchNameReturnsNilOutsideARepository() passed after 0.001 seconds.
+◇ Test commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() started.
+✔ Test commitSnapshotsReadTrackedRawBytesAndDistinguishAdjacentCommits() passed after 0.388 seconds.
+◇ Test worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() started.
+✔ Test worktreeSnapshotKeepsCapturedBytesAfterTheFileChanges() passed after 0.019 seconds.
+◇ Test worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() started.
+✔ Test worktreeSnapshotCapturesEveryRegularFileAndSkipsMetadataAndSymlinks() passed after 0.020 seconds.
+◇ Test explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() started.
+✔ Test explicitRustWorktreeSnapshotMatchesTheCompatibilityInitializer() passed after 0.020 seconds.
+◇ Test unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() started.
+✔ Test unionWorktreeSnapshotCapturesSelectedModesAndNestedConfigInventory() passed after 0.024 seconds.
+◇ Test worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() started.
+✔ Test worktreeSnapshotRejectsUnsupportedLanguageArraysBeforeOpeningARepository() passed after 0.001 seconds.
+◇ Test worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() started.
+✔ Test worktreeSingletonInitializerMatchesUnionInitializerForOneLanguage() passed after 0.019 seconds.
+◇ Test commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMarkers() started.
+✔ Test commitSnapshotExposesHistoricalConfigurationInventoryAndExcludesSymlinkMarkers() passed after 0.112 seconds.
+◇ Test unsupportedWorktreeLanguagesFailBeforeOpeningARepository() started.
+✔ Test unsupportedWorktreeLanguagesFailBeforeOpeningARepository() passed after 0.001 seconds.
+◇ Test pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() started.
+✔ Test pythonWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() passed after 0.021 seconds.
+◇ Test commitSnapshotPreservesTreeFileModes() started.
+✔ Test commitSnapshotPreservesTreeFileModes() passed after 0.091 seconds.
+◇ Test commitSnapshotMarksLFSPointersAndReturnsRawBytes() started.
+✔ Test commitSnapshotMarksLFSPointersAndReturnsRawBytes() passed after 0.051 seconds.
+◇ Test trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() started.
+✔ Test trackedIgnoredRustFileAppearsInCommitAndWorktreeSnapshots() passed after 0.063 seconds.
+◇ Test typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() started.
+✔ Test typescriptWorktreeSnapshotCapturesAllRegularFilesAndRootConfigs() passed after 0.022 seconds.
+✔ Test run with 19 tests in 0 suites passed after 8.498 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test exactReferencesCapabilityUsesTheNextUnusedBit() started.
+✔ Test exactReferencesCapabilityUsesTheNextUnusedBit() passed after 0.001 seconds.
+◇ Test pyrightProviderCapabilitiesAreFixedMaximum() started.
+✔ Test pyrightProviderCapabilitiesAreFixedMaximum() passed after 0.001 seconds.
+◇ Test typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions() started.
+✔ Test typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions() passed after 0.010 seconds.
+◇ Test typeScriptProviderFinderFindsExternalStandardDirsAndExcludesProjectLocal() started.
+✔ Test typeScriptProviderFinderFindsExternalStandardDirsAndExcludesProjectLocal() passed after 0.002 seconds.
+◇ Test typeScriptProviderConstructorRejectsProjectLocalToolchainBeforeLaunch() started.
+✔ Test typeScriptProviderConstructorRejectsProjectLocalToolchainBeforeLaunch() passed after 0.001 seconds.
+◇ Test typeScriptProviderConstructorRejectsMissingExternalToolchainFiles() started.
+✔ Test typeScriptProviderConstructorRejectsMissingExternalToolchainFiles() passed after 0.001 seconds.
+◇ Test typeScriptProviderRejectsSymlinksResolvingInsideProject() started.
+✔ Test typeScriptProviderRejectsSymlinksResolvingInsideProject() passed after 0.002 seconds.
+◇ Test typeScriptTsserverURLDerivesFromNestedNodeModulesRoot() started.
+✔ Test typeScriptTsserverURLDerivesFromNestedNodeModulesRoot() passed after 0.001 seconds.
+◇ Test typeScriptSessionUsesTSReactLanguageIDForDidOpen() started.
+✔ Test typeScriptSessionUsesTSReactLanguageIDForDidOpen() passed after 0.001 seconds.
+◇ Test typeScriptSessionRejectsMissingDefinitionCapability() started.
+✔ Test typeScriptSessionRejectsMissingDefinitionCapability() passed after 0.001 seconds.
+◇ Test typeScriptSessionRejectsMissingReferencesCapability() started.
+✔ Test typeScriptSessionRejectsMissingReferencesCapability() passed after 0.001 seconds.
+◇ Test typeScriptSessionRejectsDisallowedTypeScriptPathsBeforeAnyRequest() started.
+✔ Test typeScriptSessionRejectsDisallowedTypeScriptPathsBeforeAnyRequest() passed after 0.001 seconds.
+◇ Test typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() started.
+✔ Test typeScriptSessionRestartsOnceThenExhaustsAndIsUnavailable() passed after 0.106 seconds.
+◇ Test typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() started.
+✔ Test typeScriptBatchCancelAllowsNewRequestAndDoesNotPublishLateResult() passed after 0.015 seconds.
+◇ Test executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath() started.
+✔ Test executablePathScanIncludesStandardAbsoluteDirectoriesOnEmptyPath() passed after 0.001 seconds.
+◇ Test executablePathScanExcludesCanonicalProjectAndAliasDirectories() started.
+✔ Test executablePathScanExcludesCanonicalProjectAndAliasDirectories() passed after 0.001 seconds.
+◇ Test sanitizedChildPathUsesCanonicalDirectories() started.
+✔ Test sanitizedChildPathUsesCanonicalDirectories() passed after 0.001 seconds.
+◇ Test pyrightSessionNegotiatesOnlySupportedCapabilitiesAndKeepsOfflineLimitation() started.
+✔ Test pyrightSessionNegotiatesOnlySupportedCapabilitiesAndKeepsOfflineLimitation() passed after 0.002 seconds.
+◇ Test pyrightDefinitionCompletesWithoutServerStatusNotification() started.
+✔ Test pyrightDefinitionCompletesWithoutServerStatusNotification() passed after 0.001 seconds.
+◇ Test pyrightInterpreterIdentityChangesWithCanonicalPathOrVersion() started.
+✔ Test pyrightInterpreterIdentityChangesWithCanonicalPathOrVersion() passed after 0.950 seconds.
+◇ Test pyrightBaseEnvironmentAlwaysCarriesOfflineLimitationForNoneDiagnostics() started.
+✔ Test pyrightBaseEnvironmentAlwaysCarriesOfflineLimitationForNoneDiagnostics() passed after 0.001 seconds.
+◇ Test pyrightReferencesAndCallHierarchyUseSharedParsers() started.
+✔ Test pyrightReferencesAndCallHierarchyUseSharedParsers() passed after 0.002 seconds.
+◇ Test pyrightIncomingAndOutgoingCallsShareParsers() started.
+✔ Test pyrightIncomingAndOutgoingCallsShareParsers() passed after 0.002 seconds.
+◇ Test pyrightBatchCancelAllowsNewRequest() started.
+✔ Test pyrightBatchCancelAllowsNewRequest() passed after 0.014 seconds.
+◇ Test pyrightExecutableFinderIgnoresProjectAndVenvMarkers() started.
+✔ Test pyrightExecutableFinderIgnoresProjectAndVenvMarkers() passed after 0.004 seconds.
+◇ Test sanitizedChildPathPreventsProjectHelperMarkersFromExecuting() started.
+✔ Test sanitizedChildPathPreventsProjectHelperMarkersFromExecuting() passed after 4.127 seconds.
+◇ Test pyrightProviderRejectsProjectServerEvenWhenExplicit() started.
+✔ Test pyrightProviderRejectsProjectServerEvenWhenExplicit() passed after 0.001 seconds.
+◇ Test pyrightRequireOutsideProjectRejectsCanonicalProjectAndAlias() started.
+✔ Test pyrightRequireOutsideProjectRejectsCanonicalProjectAndAlias() passed after 0.001 seconds.
+◇ Test pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() started.
+✔ Test pyrightSessionRestartsOnceThenExhaustsAndIsUnavailable() passed after 0.107 seconds.
+◇ Test frameDecoderReadsSingleFrame() started.
+✔ Test frameDecoderReadsSingleFrame() passed after 0.001 seconds.
+◇ Test frameDecoderRetainsSplitFrame() started.
+✔ Test frameDecoderRetainsSplitFrame() passed after 0.001 seconds.
+◇ Test frameDecoderReadsCoalescedFrames() started.
+✔ Test frameDecoderReadsCoalescedFrames() passed after 0.001 seconds.
+◇ Test frameDecoderCountsUTF8Bytes() started.
+✔ Test frameDecoderCountsUTF8Bytes() passed after 0.001 seconds.
+◇ Test lspClientReportsClosedWritePipeWithoutTerminatingProcess() started.
+✔ Test lspClientReportsClosedWritePipeWithoutTerminatingProcess() passed after 0.001 seconds.
+◇ Test lspClientStopsStdoutMonitoringAtEOFWhileClientStaysAlive() started.
+✔ Test lspClientStopsStdoutMonitoringAtEOFWhileClientStaysAlive() passed after 0.001 seconds.
+◇ Test lspClientStopsStderrMonitoringAtEOFWithoutClosingTransport() started.
+✔ Test lspClientStopsStderrMonitoringAtEOFWithoutClosingTransport() passed after 0.025 seconds.
+◇ Test lspClientEndsPendingRequestWhenProcessClosesStdoutButStaysAlive() started.
+✔ Test lspClientEndsPendingRequestWhenProcessClosesStdoutButStaysAlive() passed after 0.073 seconds.
+◇ Test lspClientProcessExitUninstallsMonitorsAndCloseStaysIdempotent() started.
+✔ Test lspClientProcessExitUninstallsMonitorsAndCloseStaysIdempotent() passed after 0.008 seconds.
+◇ Test lspClientDeinitUninstallsStreamMonitors() started.
+✔ Test lspClientDeinitUninstallsStreamMonitors() passed after 0.001 seconds.
+◇ Test lspClientCloseRacesBothStreamEOFWithoutHanging() started.
+✔ Test lspClientCloseRacesBothStreamEOFWithoutHanging() passed after 0.081 seconds.
+◇ Test byteAndLSPUTF16PositionsRoundTrip() started.
+✔ Test byteAndLSPUTF16PositionsRoundTrip() passed after 0.001 seconds.
+◇ Test exactProfileKeyHashesCargoFileBytes() started.
+✔ Test exactProfileKeyHashesCargoFileBytes() passed after 0.001 seconds.
+◇ Test exactProfileKeySnapshotReadsNestedConfigurationPrefixes() started.
+✔ Test exactProfileKeySnapshotReadsNestedConfigurationPrefixes() passed after 0.007 seconds.
+◇ Test exactProfileKeySnapshotMissingNestedRustConfigReportsJoinedPath() started.
+✔ Test exactProfileKeySnapshotMissingNestedRustConfigReportsJoinedPath() passed after 0.001 seconds.
+◇ Test exactProfileKeySnapshotRejectsUnsafeProfilePrefixes() started.
+✔ Test exactProfileKeySnapshotRejectsUnsafeProfilePrefixes() passed after 0.001 seconds.
+◇ Test rustAnalyzerMapsFeatureSelectionsToInitializationOptions() started.
+✔ Test rustAnalyzerMapsFeatureSelectionsToInitializationOptions() passed after 0.001 seconds.
+◇ Test dependencyFreeProjectIgnoresGenericOfflineFailure() started.
+✔ Test dependencyFreeProjectIgnoresGenericOfflineFailure() passed after 0.001 seconds.
+◇ Test explicitOfflineDependencyFailureAddsLimitation() started.
+✔ Test explicitOfflineDependencyFailureAddsLimitation() passed after 0.001 seconds.
+◇ Test materializerUsesCommitAndProfileLayoutAndSkipsSpecialFiles() started.
+✔ Test materializerUsesCommitAndProfileLayoutAndSkipsSpecialFiles() passed after 0.174 seconds.
+◇ Test materializerReusesACompleteDirectoryWithoutCopying() started.
+✔ Test materializerReusesACompleteDirectoryWithoutCopying() passed after 0.090 seconds.
+◇ Test materializerEvictsTheLeastRecentlyAccessedDirectory() started.
+✔ Test materializerEvictsTheLeastRecentlyAccessedDirectory() passed after 0.155 seconds.
+◇ Test materializedPathRoundTripsToSnapshotPath() started.
+✔ Test materializedPathRoundTripsToSnapshotPath() passed after 0.001 seconds.
+◇ Test rustAnalyzerUsesEachMaterializedCommitWhenInstalled() started.
+historical-exact HEAD=3:8 HEAD~1=1:8
+✔ Test rustAnalyzerUsesEachMaterializedCommitWhenInstalled() passed after 5.218 seconds.
+◇ Test pipeFakeRunsInitializeDefinitionShutdownLifecycle() started.
+✔ Test pipeFakeRunsInitializeDefinitionShutdownLifecycle() passed after 0.001 seconds.
+◇ Test rustAnalyzerParsesEveryLocationLinkImplementation() started.
+M6_IMPLEMENTATIONS shape=LocationLink[] elapsedMS=0.691
+✔ Test rustAnalyzerParsesEveryLocationLinkImplementation() passed after 0.001 seconds.
+◇ Test rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() started.
+✔ Test rustAnalyzerSessionRestartsOnceThenExhaustsAndIsUnavailable() passed after 0.106 seconds.
+◇ Test rustAnalyzerRestartFactoryFailureBecomesUnavailable() started.
+✔ Test rustAnalyzerRestartFactoryFailureBecomesUnavailable() passed after 0.106 seconds.
+◇ Test rustAnalyzerParsesSingleLocationImplementation() started.
+M6_IMPLEMENTATIONS shape=Location elapsedMS=0.654
+✔ Test rustAnalyzerParsesSingleLocationImplementation() passed after 0.001 seconds.
+◇ Test rustAnalyzerParsesEveryLocationImplementation() started.
+M6_IMPLEMENTATIONS shape=Location[] elapsedMS=0.574
+✔ Test rustAnalyzerParsesEveryLocationImplementation() passed after 0.002 seconds.
+◇ Test rustAnalyzerTreatsNullImplementationAsNoResult() started.
+M6_IMPLEMENTATIONS shape=null elapsedMS=0.311
+✔ Test rustAnalyzerTreatsNullImplementationAsNoResult() passed after 0.001 seconds.
+◇ Test rustAnalyzerRequestsReferencesWithoutTheDeclaration() started.
+✔ Test rustAnalyzerRequestsReferencesWithoutTheDeclaration() passed after 0.001 seconds.
+◇ Test rustAnalyzerNegotiatesReferenceOptionsProvider() started.
+✔ Test rustAnalyzerNegotiatesReferenceOptionsProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerDoesNotNegotiateMissingReferenceProvider() started.
+✔ Test rustAnalyzerDoesNotNegotiateMissingReferenceProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerNegotiatesImplementationBooleanProvider() started.
+✔ Test rustAnalyzerNegotiatesImplementationBooleanProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerNegotiatesImplementationObjectProvider() started.
+✔ Test rustAnalyzerNegotiatesImplementationObjectProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerDoesNotNegotiateMissingImplementationProvider() started.
+✔ Test rustAnalyzerDoesNotNegotiateMissingImplementationProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerDoesNotNegotiateFalseImplementationProvider() started.
+✔ Test rustAnalyzerDoesNotNegotiateFalseImplementationProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerParsesIncomingCallHierarchyRelation() started.
+M6_CALL_HIERARCHY step=incoming elapsedMS=0.858
+✔ Test rustAnalyzerParsesIncomingCallHierarchyRelation() passed after 0.003 seconds.
+◇ Test rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites() started.
+M6_CALL_HIERARCHY step=prepare elapsedMS=0.783
+M6_CALL_HIERARCHY step=outgoing elapsedMS=0.555
+✔ Test rustAnalyzerPreparesEveryItemAndUsesSourceURIForOutgoingCallSites() passed after 0.002 seconds.
+◇ Test rustAnalyzerTreatsEmptyCallHierarchyPrepareAsEmpty() started.
+✔ Test rustAnalyzerTreatsEmptyCallHierarchyPrepareAsEmpty() passed after 0.001 seconds.
+◇ Test rustAnalyzerNegotiatesCallHierarchyBooleanProvider() started.
+✔ Test rustAnalyzerNegotiatesCallHierarchyBooleanProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerNegotiatesCallHierarchyObjectProvider() started.
+✔ Test rustAnalyzerNegotiatesCallHierarchyObjectProvider() passed after 0.001 seconds.
+◇ Test rustAnalyzerDoesNotNegotiateMissingCallHierarchyProvider() started.
+✔ Test rustAnalyzerDoesNotNegotiateMissingCallHierarchyProvider() passed after 0.001 seconds.
+◇ Test lspClientWaitsForServerStatusQuiescent() started.
+✔ Test lspClientWaitsForServerStatusQuiescent() passed after 0.051 seconds.
+◇ Test rustAnalyzerReturnsReadyNullWithoutBlindRetry() started.
+✔ Test rustAnalyzerReturnsReadyNullWithoutBlindRetry() passed after 0.001 seconds.
+◇ Test rustAnalyzerPreservesEveryDefinitionTarget() started.
+✔ Test rustAnalyzerPreservesEveryDefinitionTarget() passed after 0.001 seconds.
+◇ Test rustAnalyzerCancelledReadinessWaitDoesNotSendRequest() started.
+✔ Test rustAnalyzerCancelledReadinessWaitDoesNotSendRequest() passed after 0.060 seconds.
+◇ Test rustAnalyzerContentModifiedRetryDoesNotBlockOperationLock() started.
+retry lock releasedDuringDelay=true requests=3
+✔ Test rustAnalyzerContentModifiedRetryDoesNotBlockOperationLock() passed after 0.013 seconds.
+◇ Test exactRequestBatchCapsProviderBoundaryConcurrency() started.
+batch concurrency limit=4 maxInFlight=4
+✔ Test exactRequestBatchCapsProviderBoundaryConcurrency() passed after 0.001 seconds.
+◇ Test rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue() started.
+cancelled batch provider requests staleQueued=32 staleActual=1 totalAfterCurrent=2
+✔ Test rustAnalyzerCancelledBatchNeverEntersProviderAfterOperationQueue() passed after 0.118 seconds.
+◇ Test pyrightExitReadinessIncludesBoundedDiagnosticTail() started.
+✔ Test pyrightExitReadinessIncludesBoundedDiagnosticTail() passed after 0.215 seconds.
+◇ Test diagnosticObserverFiresForStderrOutsideClientLock() started.
+✔ Test diagnosticObserverFiresForStderrOutsideClientLock() passed after 0.130 seconds.
+◇ Test closeForceKillsAndReapsUnresponsiveProcess() started.
+✔ Test closeForceKillsAndReapsUnresponsiveProcess() passed after 0.232 seconds.
+◇ Test childProcessRegistryRegistersAndUnregistersConcurrently() started.
+process-guard concurrency workers=24 iterations=500 failures=[]
+✔ Test childProcessRegistryRegistersAndUnregistersConcurrently() passed after 0.002 seconds.
+◇ Test crashGuardKillsRegisteredGrandchildAndReraisesAbort() started.
+process-guard control handler=off helperSignal=6 orphanAlive=true
+process-guard fixed handler=on helperSignal=6 orphanAlive=false
+✔ Test crashGuardKillsRegisteredGrandchildAndReraisesAbort() passed after 0.369 seconds.
+◇ Test terminationGuardKillsRegisteredGrandchildAndPreservesDefaultSignal() started.
+process-guard termination signal=15 helperSignal=15 orphanAlive=false
+process-guard termination signal=2 helperSignal=2 orphanAlive=false
+process-guard termination signal=1 helperSignal=1 orphanAlive=false
+✔ Test terminationGuardKillsRegisteredGrandchildAndPreservesDefaultSignal() passed after 0.046 seconds.
+◇ Test reaperKillsRegisteredGrandchildAfterParentSIGKILL() started.
+process-guard uncatchable signal=9 helperSignal=9 orphanAlive=false
+✔ Test reaperKillsRegisteredGrandchildAfterParentSIGKILL() passed after 0.015 seconds.
+◇ Test ciProcessGuardUnregisterKillsOwnedGroupLeaderAndGrandchild() started.
+process-guard owned-pgid cleanup grandchildAliveAfterUnregister=false
+✔ Test ciProcessGuardUnregisterKillsOwnedGroupLeaderAndGrandchild() passed after 0.013 seconds.
+◇ Test pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() started.
+pyright parent-probe regression: pyright 1.1.414 | interpreter=/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/bin/python3.14 Python 3.14.7
+✔ Test pyrightSurvivesParentProbeIntervalsAndFindsDefinitionWhenInstalled() passed after 6.955 seconds.
+◇ Test rustAnalyzerFindsCrossFileDefinitionWhenInstalled() started.
+✔ Test rustAnalyzerFindsCrossFileDefinitionWhenInstalled() passed after 2.397 seconds.
+◇ Test sandboxDeniesProjectWrites() started.
+sandbox-semantics projectWrite=denied status=1
+✔ Test sandboxDeniesProjectWrites() passed after 0.042 seconds.
+◇ Test sandboxAllowsPrivateCacheWrites() started.
+sandbox-semantics cacheWrite=allowed status=0
+✔ Test sandboxAllowsPrivateCacheWrites() passed after 0.045 seconds.
+◇ Test sandboxDeniesNetworkToLocalListener() started.
+sandbox-semantics network=denied status=1
+✔ Test sandboxDeniesNetworkToLocalListener() passed after 0.071 seconds.
+◇ Test trustedSandboxAllowsTargetButStillDeniesNetwork() started.
+sandbox-semantics trustedTarget=allowed network=denied offline=1
+✔ Test trustedSandboxAllowsTargetButStillDeniesNetwork() passed after 0.084 seconds.
+◇ Test sandboxShimSetsCPUAndAddressSpaceLimits() started.
+rlimit cpuSeconds=60 addressSpaceKiB=536870912
+✔ Test sandboxShimSetsCPUAndAddressSpaceLimits() passed after 0.044 seconds.
+◇ Test trustRegistryRoundTrip() started.
+✔ Test trustRegistryRoundTrip() passed after 0.002 seconds.
+◇ Test trustRegistryTreatsCorruptJSONAsEmptyAndRecovers() started.
+✔ Test trustRegistryTreatsCorruptJSONAsEmptyAndRecovers() passed after 0.001 seconds.
+◇ Test trustRegistrySerializesConcurrentWrites() started.
+✔ Test trustRegistrySerializesConcurrentWrites() passed after 0.010 seconds.
+◇ Test rustAnalyzerSafeMarkerControlWhenInstalled() started.
+marker-control safeMarkerAbsent=true safeTargetAbsent=true trustedMarkerPresent=true
+✔ Test rustAnalyzerSafeMarkerControlWhenInstalled() passed after 10.091 seconds.
+◇ Test pyrightSessionCloseForceKillsAndReapsUnresponsiveProcess() started.
+✔ Test pyrightSessionCloseForceKillsAndReapsUnresponsiveProcess() passed after 0.572 seconds.
+✔ Test run with 100 tests in 0 suites passed after 33.035 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test resolvesUniqueRustImportAndFindsCaller() started.
+✔ Test resolvesUniqueRustImportAndFindsCaller() passed after 0.008 seconds.
+◇ Test resolvesNearestShadowedBinding() started.
+✔ Test resolvesNearestShadowedBinding() passed after 0.001 seconds.
+◇ Test tokenRangeLocatesNameWithoutResolvingCandidates() started.
+✔ Test tokenRangeLocatesNameWithoutResolvingCandidates() passed after 0.001 seconds.
+◇ Test qualifiedCallQualifierResolvesItsOwnSymbol() started.
+✔ Test qualifiedCallQualifierResolvesItsOwnSymbol() passed after 0.001 seconds.
+◇ Test methodCallReceiverResolvesMethodsWithoutClaimingStrong() started.
+✔ Test methodCallReceiverResolvesMethodsWithoutClaimingStrong() passed after 0.001 seconds.
+◇ Test qualifiedCallQualifierUsesItsOwnRangeWhenNoSymbolMatches() started.
+✔ Test qualifiedCallQualifierUsesItsOwnRangeWhenNoSymbolMatches() passed after 0.001 seconds.
+◇ Test marksFunctionValueCallAsCallback() started.
+✔ Test marksFunctionValueCallAsCallback() passed after 0.001 seconds.
+◇ Test methodCallsStayPossibleAcrossImpls() started.
+✔ Test methodCallsStayPossibleAcrossImpls() passed after 0.001 seconds.
+◇ Test annotatedReceiverResolvesOnlyItsImplStrongly() started.
+✔ Test annotatedReceiverResolvesOnlyItsImplStrongly() passed after 0.001 seconds.
+◇ Test selfReceiverUsesItsEnclosingImplType() started.
+✔ Test selfReceiverUsesItsEnclosingImplType() passed after 0.001 seconds.
+◇ Test constructedReceiverResolvesItsImplProbably() started.
+✔ Test constructedReceiverResolvesItsImplProbably() passed after 0.001 seconds.
+◇ Test shadowedReceiverUsesTheNearestTypedBinding() started.
+✔ Test shadowedReceiverUsesTheNearestTypedBinding() passed after 0.001 seconds.
+◇ Test traitObjectReceiverStaysPossibleByMethodName() started.
+✔ Test traitObjectReceiverStaysPossibleByMethodName() passed after 0.001 seconds.
+◇ Test annotatedTraitImplReceiverUsesTraitDispatch() started.
+✔ Test annotatedTraitImplReceiverUsesTraitDispatch() passed after 0.001 seconds.
+◇ Test receiverTypedCallersPreserveStrongAndProbableCertainty() started.
+✔ Test receiverTypedCallersPreserveStrongAndProbableCertainty() passed after 0.001 seconds.
+◇ Test outgoingCallsResolveEveryRustCallKind() started.
+✔ Test outgoingCallsResolveEveryRustCallKind() passed after 0.001 seconds.
+◇ Test outgoingCallsIncludeClosuresButExcludeNestedNamedFunctions() started.
+✔ Test outgoingCallsIncludeClosuresButExcludeNestedNamedFunctions() passed after 0.001 seconds.
+◇ Test outgoingCallsFollowConstantInitializerRegionOwnership() started.
+✔ Test outgoingCallsFollowConstantInitializerRegionOwnership() passed after 0.001 seconds.
+◇ Test outgoingCallsTruncateAfterFirst512CallSites() started.
+✔ Test outgoingCallsTruncateAfterFirst512CallSites() passed after 0.048 seconds.
+◇ Test findsTraitImplementationsAndMethodOverrides() started.
+✔ Test findsTraitImplementationsAndMethodOverrides() passed after 0.003 seconds.
+◇ Test deduplicatesContentButKeepsEveryManifestPath() started.
+✔ Test deduplicatesContentButKeepsEveryManifestPath() passed after 0.001 seconds.
+◇ Test indexingIsDeterministicAcrossRuns() started.
+✔ Test indexingIsDeterministicAcrossRuns() passed after 0.004 seconds.
+◇ Test analysisProfileIDIsDeterministicAcrossIndexes() started.
+✔ Test analysisProfileIDIsDeterministicAcrossIndexes() passed after 0.003 seconds.
+◇ Test parallelIndexMatchesSerialIndex() started.
+✔ Test parallelIndexMatchesSerialIndex() passed after 0.003 seconds.
+◇ Test storeAndSnapshotViewPreserveFixtureFieldsAndQueries() started.
+✔ Test storeAndSnapshotViewPreserveFixtureFieldsAndQueries() passed after 0.001 seconds.
+◇ Test engineSessionExposesOnlyTheClassifierSelectedLanguageMode() started.
+✔ Test engineSessionExposesOnlyTheClassifierSelectedLanguageMode() passed after 0.001 seconds.
+◇ Test rejectsWrongSnapshotAcrossEveryQueryAPI() started.
+✔ Test rejectsWrongSnapshotAcrossEveryQueryAPI() passed after 0.001 seconds.
+◇ Test rejectsWrongProfileAcrossEveryQueryAPI() started.
+✔ Test rejectsWrongProfileAcrossEveryQueryAPI() passed after 0.001 seconds.
+◇ Test externalRustImportDoesNotCrash() started.
+✔ Test externalRustImportDoesNotCrash() passed after 0.001 seconds.
+◇ Test indexesProgrammaticallyGeneratedProject() started.
+✔ Test indexesProgrammaticallyGeneratedProject() passed after 0.223 seconds.
+◇ Test evaluatesGoldSetMetricsAndKnownFailures() started.
+✔ Test evaluatesGoldSetMetricsAndKnownFailures() passed after 0.003 seconds.
+◇ Test symbolSearchNormalizesAndUsesEveryRecallRoute() started.
+✔ Test symbolSearchNormalizesAndUsesEveryRecallRoute() passed after 0.001 seconds.
+◇ Test symbolSearchRanksSubsequenceAndWordBoundaries() started.
+✔ Test symbolSearchRanksSubsequenceAndWordBoundaries() passed after 0.001 seconds.
+◇ Test symbolSearchBoostsCurrentFileAndIsDeterministic() started.
+✔ Test symbolSearchBoostsCurrentFileAndIsDeterministic() passed after 0.001 seconds.
+◇ Test pythonResolverResolvesAbsoluteAndRelativeNamedAliasesStrongly() started.
+✔ Test pythonResolverResolvesAbsoluteAndRelativeNamedAliasesStrongly() passed after 0.001 seconds.
+◇ Test pythonResolverUsesSrcOnlyModuleIdentity() started.
+✔ Test pythonResolverUsesSrcOnlyModuleIdentity() passed after 0.001 seconds.
+◇ Test pythonRelativeImportFromPackageInitKeepsCurrentPackage() started.
+✔ Test pythonRelativeImportFromPackageInitKeepsCurrentPackage() passed after 0.001 seconds.
+◇ Test pythonRelativeFromTopLevelModuleStaysUnresolved() started.
+✔ Test pythonRelativeFromTopLevelModuleStaysUnresolved() passed after 0.001 seconds.
+◇ Test pythonResolverRejectsSharedModuleConflictAcrossRootAndSrc() started.
+✔ Test pythonResolverRejectsSharedModuleConflictAcrossRootAndSrc() passed after 0.001 seconds.
+◇ Test pythonResolverLeavesModuleObjectAndNamespaceImportsUnresolved() started.
+✔ Test pythonResolverLeavesModuleObjectAndNamespaceImportsUnresolved() passed after 0.001 seconds.
+◇ Test pythonResolverScoresClassConstructorsStrongAndMethodsPossible() started.
+✔ Test pythonResolverScoresClassConstructorsStrongAndMethodsPossible() passed after 0.001 seconds.
+◇ Test pythonResolverKeepsMethodBoundaryForNestedClassFunctions() started.
+✔ Test pythonResolverKeepsMethodBoundaryForNestedClassFunctions() passed after 0.001 seconds.
+◇ Test rustModuleMapStillSupportsCrateAndSuperAfterPythonBranch() started.
+✔ Test rustModuleMapStillSupportsCrateAndSuperAfterPythonBranch() passed after 0.002 seconds.
+◇ Test typeScriptModuleMapResolvesRelativeManifestSubset() started.
+✔ Test typeScriptModuleMapResolvesRelativeManifestSubset() passed after 0.001 seconds.
+◇ Test typeScriptResolverSupportsExactExtensionlessDirectoryAndTsxTargets() started.
+✔ Test typeScriptResolverSupportsExactExtensionlessDirectoryAndTsxTargets() passed after 0.001 seconds.
+◇ Test typeScriptResolverCoversManifestPathAndUnresolvedMatrix() started.
+✔ Test typeScriptResolverCoversManifestPathAndUnresolvedMatrix() passed after 0.001 seconds.
+◇ Test typeScriptResolverSupportsReexportAndExportVisibility() started.
+✔ Test typeScriptResolverSupportsReexportAndExportVisibility() passed after 0.001 seconds.
+◇ Test typeScriptModuleMapRejectsUnsupportedAndAmbiguousTargets() started.
+✔ Test typeScriptModuleMapRejectsUnsupportedAndAmbiguousTargets() passed after 0.001 seconds.
+◇ Test typeScriptResolverCompositeRemainingContract() started.
+✔ Test typeScriptResolverCompositeRemainingContract() passed after 0.001 seconds.
+◇ Test analysisProfileIDMatchesTheCrossLanguageV1Vector() started.
+✔ Test analysisProfileIDMatchesTheCrossLanguageV1Vector() passed after 0.001 seconds.
+◇ Test pythonProfileDetectorUsesPyrightConfigOverPyprojectAndUvLock() started.
+✔ Test pythonProfileDetectorUsesPyrightConfigOverPyprojectAndUvLock() passed after 0.001 seconds.
+◇ Test pythonProfileDetectorFallsBackToPyprojectAndEmptyUvLock() started.
+✔ Test pythonProfileDetectorFallsBackToPyprojectAndEmptyUvLock() passed after 0.001 seconds.
+◇ Test pythonProfileDetectorConfigDeviationChangesOnlyItsFingerprint() started.
+✔ Test pythonProfileDetectorConfigDeviationChangesOnlyItsFingerprint() passed after 0.001 seconds.
+◇ Test pythonProfileDetectorMissingConfigUsesFixedNonemptySentinel() started.
+✔ Test pythonProfileDetectorMissingConfigUsesFixedNonemptySentinel() passed after 0.001 seconds.
+◇ Test snapshotPythonProfileReadsRootConfigBytesForDeterministicIdentity() started.
+✔ Test snapshotPythonProfileReadsRootConfigBytesForDeterministicIdentity() passed after 0.001 seconds.
+◇ Test snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() started.
+✔ Test snapshotProfileSelectsNestedUnitRootAndReadsConfigUnderThatRoot() passed after 0.001 seconds.
+◇ Test profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() started.
+✔ Test profileRootPrefixRequiresComponentBoundaryAndIndexesFallBackToDot() passed after 0.004 seconds.
+◇ Test snapshotZeroSourceKeepsEmptyProfile() started.
+✔ Test snapshotZeroSourceKeepsEmptyProfile() passed after 0.001 seconds.
+◇ Test unsafeRelativePathsAreRejectedBeforeRootSelection() started.
+✔ Test unsafeRelativePathsAreRejectedBeforeRootSelection() passed after 0.001 seconds.
+◇ Test singleMarkerNotCoveringAllSourceFailsInsteadOfFallingBackToDot() started.
+✔ Test singleMarkerNotCoveringAllSourceFailsInsteadOfFallingBackToDot() passed after 0.001 seconds.
+◇ Test profileDetectorReadsPackageFeaturesEditionAndLockfile() started.
+✔ Test profileDetectorReadsPackageFeaturesEditionAndLockfile() passed after 0.002 seconds.
+◇ Test profileDetectorReadsWorkspaceMemberManifests() started.
+✔ Test profileDetectorReadsWorkspaceMemberManifests() passed after 0.002 seconds.
+◇ Test profileDetectorReadsSelectedWorkspaceMemberEdition() started.
+✔ Test profileDetectorReadsSelectedWorkspaceMemberEdition() passed after 0.002 seconds.
+◇ Test profileDetectorResolvesInheritedWorkspaceEdition() started.
+✔ Test profileDetectorResolvesInheritedWorkspaceEdition() passed after 0.002 seconds.
+◇ Test profileDetectorLeavesMissingWorkspaceEditionUnknown() started.
+✔ Test profileDetectorLeavesMissingWorkspaceEditionUnknown() passed after 0.002 seconds.
+◇ Test malformedCargoManifestFallsBackWithoutInventingFields() started.
+✔ Test malformedCargoManifestFallsBackWithoutInventingFields() passed after 0.001 seconds.
+◇ Test malformedWorkspaceMemberFallsBackWithoutInventingFields() started.
+✔ Test malformedWorkspaceMemberFallsBackWithoutInventingFields() passed after 0.001 seconds.
+◇ Test missingCargoManifestFallsBackToDirectoryName() started.
+✔ Test missingCargoManifestFallsBackToDirectoryName() passed after 0.001 seconds.
+◇ Test snapshotProfileReadsCargoDirectlyWithoutIndexingIt() started.
+✔ Test snapshotProfileReadsCargoDirectlyWithoutIndexingIt() passed after 0.001 seconds.
+◇ Test reprofileSharesContentAndRejectsTheOldContext() started.
+✔ Test reprofileSharesContentAndRejectsTheOldContext() passed after 0.001 seconds.
+◇ Test snapshotTypeScriptProfileMatchesWorktreeFixedVector() started.
+✔ Test snapshotTypeScriptProfileMatchesWorktreeFixedVector() passed after 0.001 seconds.
+◇ Test typescriptProfileChangesOnlyMatchingIdentityAndMissingConfigUsesSentinel() started.
+✔ Test typescriptProfileChangesOnlyMatchingIdentityAndMissingConfigUsesSentinel() passed after 0.002 seconds.
+◇ Test typescriptCommitAndWorktreeProfilesShareRootConfigIdentity() started.
+✔ Test typescriptCommitAndWorktreeProfilesShareRootConfigIdentity() passed after 0.060 seconds.
+◇ Test cacheKeyUsesStableLengthFramedLanguageModeIdentity() started.
+✔ Test cacheKeyUsesStableLengthFramedLanguageModeIdentity() passed after 0.001 seconds.
+◇ Test snapshotIndexerReusesContentAndResolvesEachCommit() started.
+✔ Test snapshotIndexerReusesContentAndResolvesEachCommit() passed after 0.092 seconds.
+◇ Test explicitRustIndexerMatchesEveryCompatibilityPipeline() started.
+✔ Test explicitRustIndexerMatchesEveryCompatibilityPipeline() passed after 0.092 seconds.
+◇ Test moduleMapIgnoresForeignOccurrenceWithActiveContentID() started.
+✔ Test moduleMapIgnoresForeignOccurrenceWithActiveContentID() passed after 0.001 seconds.
+◇ Test unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() started.
+✔ Test unsupportedIndexerLanguageFailsBeforeFilesystemSnapshotOrStoreAccess() passed after 0.001 seconds.
+◇ Test pythonIndexerIndexesFixtureCountsAndProfileAndSearchView() started.
+✔ Test pythonIndexerIndexesFixtureCountsAndProfileAndSearchView() passed after 0.003 seconds.
+◇ Test pythonAndRustSameContentKeysStayIsolated() started.
+✔ Test pythonAndRustSameContentKeysStayIsolated() passed after 0.001 seconds.
+◇ Test typescriptIndexerIndexesTsAndTsxTogether() started.
+✔ Test typescriptIndexerIndexesTsAndTsxTogether() passed after 0.002 seconds.
+◇ Test typescriptPersistentCacheExtractsOnceThenVariantOnlyMisses() started.
+✔ Test typescriptPersistentCacheExtractsOnceThenVariantOnlyMisses() passed after 0.020 seconds.
+◇ Test typescriptVariantOnlyMissExtractsSecondVariantAfterTsCacheHit() started.
+✔ Test typescriptVariantOnlyMissExtractsSecondVariantAfterTsCacheHit() passed after 0.005 seconds.
+◇ Test typescriptSnapshotExtractsWithoutForeignActiveFiles() started.
+✔ Test typescriptSnapshotExtractsWithoutForeignActiveFiles() passed after 0.001 seconds.
+◇ Test typescriptCommitAndWorktreeIndexAreContentEquivalent() started.
+✔ Test typescriptCommitAndWorktreeIndexAreContentEquivalent() passed after 0.056 seconds.
+◇ Test pythonPersistentCacheExtractsOnceThenOnlyVersionMissesPython() started.
+✔ Test pythonPersistentCacheExtractsOnceThenOnlyVersionMissesPython() passed after 0.008 seconds.
+◇ Test indexerRejectsExtractorAndResultIdentityMismatches() started.
+✔ Test indexerRejectsExtractorAndResultIdentityMismatches() passed after 0.001 seconds.
+◇ Test ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() started.
+✔ Test ambiguousIndependentRootsFailBeforeSnapshotReadOrStoreWrite() passed after 0.001 seconds.
+◇ Test perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() started.
+✔ Test perLanguagePrepareSharesOneStoreAndKeepsLanguageAndTsVariantIdentity() passed after 0.010 seconds.
+◇ Test publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutsideSource() started.
+✔ Test publicSingletonIndexKeepsRootProfileWhileStrictOverloadRejectsMarkerOutsideSource() passed after 0.001 seconds.
+◇ Test nestedPythonActiveViewTrimsUnitRootBeforeModuleIdentity() started.
+✔ Test nestedPythonActiveViewTrimsUnitRootBeforeModuleIdentity() passed after 0.001 seconds.
+◇ Test nestedRustCrateAndSuperStayInsideUnitRoot() started.
+✔ Test nestedRustCrateAndSuperStayInsideUnitRoot() passed after 0.001 seconds.
+◇ Test activeViewKeepsUnionManifestButExcludesPathsOutsideManualUnitRoot() started.
+✔ Test activeViewKeepsUnionManifestButExcludesPathsOutsideManualUnitRoot() passed after 0.001 seconds.
+◇ Test snapshotIndexingIsDeterministicForTheSameSequence() started.
+✔ Test snapshotIndexingIsDeterministicForTheSameSequence() passed after 0.089 seconds.
+◇ Test repositoryAdjacentCommitReuseExceedsEightyPercent() started.
+S3 HEAD->HEAD~1 totalFiles=63 reusedCount=63 extractedCount=0 hitRate=100.0% switchMS=433.987
+✔ Test repositoryAdjacentCommitReuseExceedsEightyPercent() passed after 4.868 seconds.
+◇ Test snapshotIndexerCountsLFSPointerWithoutParsingItAsRust() started.
+✔ Test snapshotIndexerCountsLFSPointerWithoutParsingItAsRust() passed after 0.122 seconds.
+◇ Test persistentDraftRoundTripMatchesDirectExtractionFieldForField() started.
+✔ Test persistentDraftRoundTripMatchesDirectExtractionFieldForField() passed after 0.093 seconds.
+◇ Test persistentCacheRemapsAndPersistsCallNamesAcrossFiles() started.
+✔ Test persistentCacheRemapsAndPersistsCallNamesAcrossFiles() passed after 0.007 seconds.
+◇ Test corruptPersistentPayloadSilentlyFallsBackToExtraction() started.
+✔ Test corruptPersistentPayloadSilentlyFallsBackToExtraction() passed after 0.093 seconds.
+◇ Test schemaMismatchRebuildsTheWholeDatabase() started.
+✔ Test schemaMismatchRebuildsTheWholeDatabase() passed after 0.006 seconds.
+◇ Test extractorVersionsCoexistInSchemaTwoCache() started.
+✔ Test extractorVersionsCoexistInSchemaTwoCache() passed after 0.003 seconds.
+◇ Test persistentCacheEvictsLeastRecentlyUsedPayloads() started.
+✔ Test persistentCacheEvictsLeastRecentlyUsedPayloads() passed after 0.002 seconds.
+◇ Test batchInsertMatchesSequentialInsert() started.
+✔ Test batchInsertMatchesSequentialInsert() passed after 0.087 seconds.
+◇ Test s4aRetentionMeasurementMatrix() started.
+S4A-MEASURE A payloadMiB=0 prepareMs=1 retainedKiB=0 entries=20 | A payloadMiB=64 prepareMs=29 retainedKiB=0 entries=20 | A payloadMiB=256 prepareMs=114 retainedKiB=0 entries=20 | B fixedAB20rounds retainedKiB=0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 | C evolving10 retainedBytes=534,548,562,576,590,604,618,632,646,660
+✔ Test s4aRetentionMeasurementMatrix() passed after 0.497 seconds.
+◇ Test s4b2NonSourceBytesDoNotEnterTheSemanticStore() started.
+✔ Test s4b2NonSourceBytesDoNotEnterTheSemanticStore() passed after 0.439 seconds.
+◇ Test snapshotSearchScansDuplicateContentOnceAndProjectsEveryPath() started.
+✔ Test snapshotSearchScansDuplicateContentOnceAndProjectsEveryPath() passed after 0.001 seconds.
+◇ Test snapshotSearchFiltersOccurrencesBeforeDeduplicatingContent() started.
+✔ Test snapshotSearchFiltersOccurrencesBeforeDeduplicatingContent() passed after 0.001 seconds.
+◇ Test pythonSnapshotSearchExcludesIdentifiersInStringsAndComments() started.
+✔ Test pythonSnapshotSearchExcludesIdentifiersInStringsAndComments() passed after 0.001 seconds.
+◇ Test typescriptReferenceSearchUsesTsGrammarAndExcludesSpoofs() started.
+✔ Test typescriptReferenceSearchUsesTsGrammarAndExcludesSpoofs() passed after 0.001 seconds.
+◇ Test typescriptTsxReferenceSearchExcludesJSXTagsButIncludesValueRefs() started.
+✔ Test typescriptTsxReferenceSearchExcludesJSXTagsButIncludesValueRefs() passed after 0.001 seconds.
+◇ Test typescriptContentSearchCoversTsAndTsxActiveView() started.
+✔ Test typescriptContentSearchCoversTsAndTsxActiveView() passed after 0.001 seconds.
+◇ Test snapshotSearchHonorsCaseSensitivityAndRegex() started.
+✔ Test snapshotSearchHonorsCaseSensitivityAndRegex() passed after 0.001 seconds.
+◇ Test snapshotSearchCapsEachFileAtTwoHundredMatches() started.
+✔ Test snapshotSearchCapsEachFileAtTwoHundredMatches() passed after 0.001 seconds.
+◇ Test snapshotSearchCapsAllFilesAtFiveThousandMatches() started.
+✔ Test snapshotSearchCapsAllFilesAtFiveThousandMatches() passed after 0.002 seconds.
+◇ Test snapshotReferenceSearchParsesUniqueContentOnceAndRejectsTokenSpoofs() started.
+✔ Test snapshotReferenceSearchParsesUniqueContentOnceAndRejectsTokenSpoofs() passed after 0.001 seconds.
+◇ Test snapshotReferenceSearchAppliesCapsAfterIdentifierVerification() started.
+✔ Test snapshotReferenceSearchAppliesCapsAfterIdentifierVerification() passed after 0.666 seconds.
+◇ Test snapshotReferenceSearchMarksVerifiedResultCapPartial() started.
+✔ Test snapshotReferenceSearchMarksVerifiedResultCapPartial() passed after 0.002 seconds.
+◇ Test snapshotReferenceSearchMarksTimeoutPartial() started.
+✔ Test snapshotReferenceSearchMarksTimeoutPartial() passed after 0.024 seconds.
+◇ Test snapshotReferenceSearchPublishesCurrentContentWhenDeadlinePassesDuringParse() started.
+✔ Test snapshotReferenceSearchPublishesCurrentContentWhenDeadlinePassesDuringParse() passed after 0.052 seconds.
+◇ Test snapshotReferenceSearchCancellationTerminatesConsumer() started.
+✔ Test snapshotReferenceSearchCancellationTerminatesConsumer() passed after 0.003 seconds.
+◇ Test snapshotRegexSearchMarksOversizeAndInvalidUTF8FilesTruncated() started.
+✔ Test snapshotRegexSearchMarksOversizeAndInvalidUTF8FilesTruncated() passed after 0.006 seconds.
+◇ Test snapshotSearchTimesOutAfterASlowSourceRead() started.
+✔ Test snapshotSearchTimesOutAfterASlowSourceRead() passed after 0.022 seconds.
+◇ Test snapshotSearchCancellationTerminatesConsumer() started.
+✔ Test snapshotSearchCancellationTerminatesConsumer() passed after 0.003 seconds.
+◇ Test snapshotSearchCentersLongLineExcerptOnMatch() started.
+✔ Test snapshotSearchCentersLongLineExcerptOnMatch() passed after 0.001 seconds.
+◇ Test snapshotContentSearchCLIAlignsWithGrepSample() started.
+✔ Test snapshotContentSearchCLIAlignsWithGrepSample() passed after 0.549 seconds.
+✔ Test run with 125 tests in 0 suites passed after 8.388 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test internerIsIdempotentAndTyped() started.
+✔ Test internerIsIdempotentAndTyped() passed after 0.001 seconds.
+◇ Test contentIDUsesSHA256() started.
+✔ Test contentIDUsesSHA256() passed after 0.001 seconds.
+◇ Test languageModeUsesStableIdentityAndOneRustPathClassifier() started.
+✔ Test languageModeUsesStableIdentityAndOneRustPathClassifier() passed after 0.001 seconds.
+◇ Test typescriptClassifierMatchesF1bMatrixAndKeepsTsTsxKeysDistinct() started.
+✔ Test typescriptClassifierMatchesF1bMatrixAndKeepsTsTsxKeysDistinct() passed after 0.001 seconds.
+◇ Test languageArrayClassifierMatchesSelectedLanguageUnionMatrix() started.
+✔ Test languageArrayClassifierMatchesSelectedLanguageUnionMatrix() passed after 0.001 seconds.
+◇ Test languageArrayNormalizationRejectsInvalidDuplicateOrJavaScriptAtBoundary() started.
+✔ Test languageArrayNormalizationRejectsInvalidDuplicateOrJavaScriptAtBoundary() passed after 0.006 seconds.
+◇ Test pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() started.
+✔ Test pythonDeclarationKindsUseFixedTailRawsAndRoundTrip() passed after 0.001 seconds.
+◇ Test cacheKeyIsIsolatedByContentIDAndLanguageMode() started.
+✔ Test cacheKeyIsIsolatedByContentIDAndLanguageMode() passed after 0.001 seconds.
+◇ Test byteRangeUsesHalfOpenBounds() started.
+✔ Test byteRangeUsesHalfOpenBounds() passed after 0.001 seconds.
+◇ Test lineTableHandlesLFAndCRLF() started.
+✔ Test lineTableHandlesLFAndCRLF() passed after 0.001 seconds.
+◇ Test lineTableHandlesEmptyAndUnterminatedFiles() started.
+✔ Test lineTableHandlesEmptyAndUnterminatedFiles() passed after 0.001 seconds.
+◇ Test literalSearchUsesSharedASCIIFoldAndLeftmostNonoverlappingRanges() started.
+✔ Test literalSearchUsesSharedASCIIFoldAndLeftmostNonoverlappingRanges() passed after 0.001 seconds.
+◇ Test literalSearchCancellationThrowsInsteadOfPublishingPartialRanges() started.
+✔ Test literalSearchCancellationThrowsInsteadOfPublishingPartialRanges() passed after 0.019 seconds.
+◇ Test lineTableUsesUTF8ByteColumnsAndRoundTrips() started.
+✔ Test lineTableUsesUTF8ByteColumnsAndRoundTrips() passed after 0.001 seconds.
+◇ Test importFlagsCompose() started.
+✔ Test importFlagsCompose() passed after 0.001 seconds.
+◇ Test publicModelsCompose() started.
+✔ Test publicModelsCompose() passed after 0.001 seconds.
+✔ Test run with 16 tests in 0 suites passed after 0.029 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test localizationResourcesResolveBothLanguagesWithoutChangingMenuCommands() started.
+✔ Test localizationResourcesResolveBothLanguagesWithoutChangingMenuCommands() passed after 0.068 seconds.
+◇ Test recentProjectClickForwardsStoredLanguage() started.
+✔ Test recentProjectClickForwardsStoredLanguage() passed after 0.267 seconds.
+◇ Test bookmarkCommandReportsTheEligibilityReasonOutsideThePrimaryReader() started.
+✔ Test bookmarkCommandReportsTheEligibilityReasonOutsideThePrimaryReader() passed after 1.064 seconds.
+◇ Test readingHeightIsOnlyEnabledForAReadyFile() started.
+✔ Test readingHeightIsOnlyEnabledForAReadyFile() passed after 0.085 seconds.
+◇ Test bookmarkPanelExportsTheOriginalCorruptBytes() started.
+✔ Test bookmarkPanelExportsTheOriginalCorruptBytes() passed after 0.020 seconds.
+◇ Test recentProjectStoresTypeScriptRawValueTwoAndForwards() started.
+✔ Test recentProjectStoresTypeScriptRawValueTwoAndForwards() passed after 0.167 seconds.
+◇ Test recentProjectWithoutLanguageForwardedAsRust() started.
+✔ Test recentProjectWithoutLanguageForwardedAsRust() passed after 0.187 seconds.
+◇ Test oldOpenProjectDelegatesToRustAndKeepsRustLastOpenedLanguage() started.
+✔ Test oldOpenProjectDelegatesToRustAndKeepsRustLastOpenedLanguage() passed after 0.194 seconds.
+◇ Test recentProjectClickForwardsStoredLanguageSet() started.
+✔ Test recentProjectClickForwardsStoredLanguageSet() passed after 0.239 seconds.
+◇ Test retryForwardsCompleteLanguageSet() started.
+✔ Test retryForwardsCompleteLanguageSet() passed after 0.193 seconds.
+◇ Test mixedOpenFailureDoesNotRecordRecentPath() started.
+✔ Test mixedOpenFailureDoesNotRecordRecentPath() passed after 0.316 seconds.
+◇ Test explicitOpenProjectForwardsLanguageAndRecordsPendingAsPython() started.
+✔ Test explicitOpenProjectForwardsLanguageAndRecordsPendingAsPython() passed after 0.171 seconds.
+◇ Test unsupportedJavaScriptExplicitOpenDoesNotFallbackToRust() started.
+✔ Test unsupportedJavaScriptExplicitOpenDoesNotFallbackToRust() passed after 0.167 seconds.
+◇ Test explicitTypeScriptOpenForwardsLanguageAndBeginsIndexing() started.
+✔ Test explicitTypeScriptOpenForwardsLanguageAndBeginsIndexing() passed after 0.173 seconds.
+◇ Test pythonProfileDisplayHidesCargoFeatureAndEdition() started.
+✔ Test pythonProfileDisplayHidesCargoFeatureAndEdition() passed after 0.213 seconds.
+◇ Test typescriptProfileAndFeatureSwitchMatchNonRustRules() started.
+✔ Test typescriptProfileAndFeatureSwitchMatchNonRustRules() passed after 0.240 seconds.
+◇ Test rustProfileTitleKeepsFeatureSelectionSegment() started.
+✔ Test rustProfileTitleKeepsFeatureSelectionSegment() passed after 0.192 seconds.
+◇ Test projectSearchPanelFitsVisibleOwnerAndLeavesAnUnclippedEmptyState() started.
+✔ Test projectSearchPanelFitsVisibleOwnerAndLeavesAnUnclippedEmptyState() passed after 0.084 seconds.
+◇ Test projectSearchQueriesAllWorkspaceSessions() started.
+✔ Test projectSearchQueriesAllWorkspaceSessions() passed after 0.561 seconds.
+◇ Test windowGrowthKeepsSidebarWidthAndGivesSpaceToReader() started.
+✔ Test windowGrowthKeepsSidebarWidthAndGivesSpaceToReader() passed after 0.214 seconds.
+◇ Test bookmarkVisualGateRejectsUniformBitmapsAndAcceptsVisibleChange() started.
+✔ Test bookmarkVisualGateRejectsUniformBitmapsAndAcceptsVisibleChange() passed after 0.026 seconds.
+◇ Test recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() started.
+✔ Test recentOpenWithSavedSnapshotRestoresTabsInsteadOfOpeningFresh() passed after 0.265 seconds.
+◇ Test reopeningTheProjectBeingReadFocusesWithoutResetting() started.
+✔ Test reopeningTheProjectBeingReadFocusesWithoutResetting() passed after 0.268 seconds.
+◇ Test emptyStateFailureShowsReasonAndRecoveryActions() started.
+✔ Test emptyStateFailureShowsReasonAndRecoveryActions() passed after 0.035 seconds.
+◇ Test contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() started.
+✔ Test contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() passed after 0.383 seconds.
+◇ Test toolbarKeepsSymbolsVisibleAheadOfSecondaryChrome() started.
+✔ Test toolbarKeepsSymbolsVisibleAheadOfSecondaryChrome() passed after 0.156 seconds.
+◇ Test emptyWindowRetiresPanelsWithoutAnObjectOfOperation() started.
+✔ Test emptyWindowRetiresPanelsWithoutAnObjectOfOperation() passed after 0.228 seconds.
+◇ Test nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() started.
+✔ Test nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() passed after 0.413 seconds.
+◇ Test languagePreselectionMatchesContentAndStoredPreference() started.
+✔ Test languagePreselectionMatchesContentAndStoredPreference() passed after 2.815 seconds.
+◇ Test recentsRecordOnlyLookupNeverFallsBackToRust() started.
+✔ Test recentsRecordOnlyLookupNeverFallsBackToRust() passed after 0.032 seconds.
+◇ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+◇ Test case passing 1 argument retainedDirectory → false to appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+◇ Test case passing 1 argument retainedDirectory → true to appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) started.
+✔ Test appCacheClearResumesExactAfterSuccessOrFailure(retainedDirectory:) with 2 test cases passed after 1.030 seconds.
+◇ Test existingAppSettingsRefreshesSharedTrustOnEveryOpen() started.
+✔ Test existingAppSettingsRefreshesSharedTrustOnEveryOpen() passed after 1.144 seconds.
+◇ Test globalSettingsDisablesEveryTargetlessProjectMenu() started.
+✔ Test globalSettingsDisablesEveryTargetlessProjectMenu() passed after 0.120 seconds.
+◇ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() started.
+✔ Test appTrustGrantRefreshesExistingSettingsAndOtherWindows() passed after 0.777 seconds.
+◇ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() started.
+✔ Test productionFirstAndLaterWindowsShareBookmarksTrustAndCache() passed after 0.386 seconds.
+◇ Test closedWindowIgnoresLateTrustSheetConfirmation() started.
+✔ Test closedWindowIgnoresLateTrustSheetConfirmation() passed after 0.880 seconds.
+◇ Test cancelledFirstOpenReleasesClaimAndRepeatRequestLoads() started.
+✔ Test cancelledFirstOpenReleasesClaimAndRepeatRequestLoads() passed after 0.286 seconds.
+◇ Test cancelledProjectWindowUsesNextProjectsFrameAutosave() started.
+✔ Test cancelledProjectWindowUsesNextProjectsFrameAutosave() passed after 0.259 seconds.
+◇ Test explicitLanguageChoiceBeatsRecentsAndProbeOnFirstOpen() started.
+✔ Test explicitLanguageChoiceBeatsRecentsAndProbeOnFirstOpen() passed after 0.233 seconds.
+◇ Test closedWindowReleasesClaimOnlyAfterTeardownFinishes() started.
+✔ Test closedWindowReleasesClaimOnlyAfterTeardownFinishes() passed after 0.330 seconds.
+◇ Test closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+◇ Test case passing 1 argument deletingBookmark → false to closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+◇ Test case passing 1 argument deletingBookmark → true to closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) started.
+✔ Test closingWindowWithPendingClearSessionSheetPreservesBothSessions(deletingBookmark:) with 2 test cases passed after 2.045 seconds.
+◇ Test quitSavesRemainingWindowsWhenOneWindowFails() started.
+✔ Test quitSavesRemainingWindowsWhenOneWindowFails() passed after 0.619 seconds.
+◇ Test projectIdentityNormalizesAliasesAndRejectsInvalidTargets() started.
+✔ Test projectIdentityNormalizesAliasesAndRejectsInvalidTargets() passed after 0.002 seconds.
+◇ Test windowClaimAndCloseRetireAWindowFromReuse() started.
+✔ Test windowClaimAndCloseRetireAWindowFromReuse() passed after 0.169 seconds.
+◇ Test menuRoutingResolvesProjectWindowsPanelsAndGlobalWindows() started.
+✔ Test menuRoutingResolvesProjectWindowsPanelsAndGlobalWindows() passed after 0.488 seconds.
+◇ Test nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() started.
+✔ Test nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() passed after 0.123 seconds.
+◇ Test nonSourcePreviewHTMLUsesLockedDownNavigationAndCSP() started.
+✔ Test nonSourcePreviewHTMLUsesLockedDownNavigationAndCSP() passed after 0.179 seconds.
+◇ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() started.
+✔ Test markdownPreviewActivatesItsAttributedLinkThroughReaderCallback() passed after 0.049 seconds.
+◇ Test htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() started.
+✔ Test htmlPreviewSharesSecureInternalLinkDecisionWithDelegate() passed after 0.102 seconds.
+◇ Test nonSourcePreviewPDFImageAndBinaryStatesAreDistinct() started.
+CoreGraphics PDF has logged an error. Set environment variable "CG_PDF_VERBOSE" to learn more.
+✔ Test nonSourcePreviewPDFImageAndBinaryStatesAreDistinct() passed after 0.022 seconds.
+◇ Test markdownPreviewPreservesListMarkersNestingAndInlineStyles() started.
+✔ Test markdownPreviewPreservesListMarkersNestingAndInlineStyles() passed after 0.032 seconds.
+◇ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() started.
+✔ Test plainTextPreviewWrapUpdatesLiveAndOnReopenPreservingSelectionAndAnchor() passed after 0.654 seconds.
+◇ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() started.
+✔ Test markdownPreviewKeepsParagraphLayoutWhenPlainTextWrapChanges() passed after 0.030 seconds.
+◇ Test plainTextPreviewResizePreservesVisibleCharacterAndSelection() started.
+✔ Test plainTextPreviewResizePreservesVisibleCharacterAndSelection() passed after 0.225 seconds.
+◇ Suite PaletteTests started.
+◇ Test dismissRestoresOwnerResponderBeforeOpening() started.
+✔ Test dismissRestoresOwnerResponderBeforeOpening() passed after 0.074 seconds.
+◇ Test parsesAllFiveModesAndTheirQueries() started.
+✔ Test parsesAllFiveModesAndTheirQueries() passed after 0.001 seconds.
+◇ Test fileModeUsesTabsThenStableTreeOrderAndDisambiguatesNames() started.
+✔ Test fileModeUsesTabsThenStableTreeOrderAndDisambiguatesNames() passed after 0.001 seconds.
+◇ Test currentSymbolModeRanksPrefixThenKindNameAndRange() started.
+✔ Test currentSymbolModeRanksPrefixThenKindNameAndRange() passed after 0.001 seconds.
+◇ Test currentSymbolModeOrdersPythonClassInExistingTypeGroup() started.
+✔ Test currentSymbolModeOrdersPythonClassInExistingTypeGroup() passed after 0.001 seconds.
+◇ Test lineModeRejectsInvalidValuesAndClampsPastEnd() started.
+✔ Test lineModeRejectsInvalidValuesAndClampsPastEnd() passed after 0.001 seconds.
+◇ Test commandModeUpdatesDynamicMenusAndSkipsInvalidLeaves() started.
+✔ Test commandModeUpdatesDynamicMenusAndSkipsInvalidLeaves() passed after 0.001 seconds.
+◇ Test paletteCapsResultsPreservesSelectionAndOrdersCommandExecution() started.
+✔ Test paletteCapsResultsPreservesSelectionAndOrdersCommandExecution() passed after 0.033 seconds.
+◇ Test placementTracksOwnerContentAndKeepsAllResultStatesOnScreen() started.
+✔ Test placementTracksOwnerContentAndKeepsAllResultStatesOnScreen() passed after 0.003 seconds.
+◇ Test projectSymbolModeReusesIndexedSymbolResults() started.
+✔ Test projectSymbolModeReusesIndexedSymbolResults() passed after 0.061 seconds.
+◇ Test symbolToolbarLocksProjectSymbolMode() started.
+✔ Test symbolToolbarLocksProjectSymbolMode() passed after 0.025 seconds.
+◇ Test projectSymbolModeForwardsFullWorkspaceSessions() started.
+✔ Test projectSymbolModeForwardsFullWorkspaceSessions() passed after 0.116 seconds.
+◇ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() started.
+✔ Test readingSetDisablesOnlyTheTwoActiveFilePaletteModes() passed after 0.018 seconds.
+✔ Suite PaletteTests passed after 0.337 seconds.
+◇ Test provenanceBadgeStyleTracksCertaintyWithoutDisplayText() started.
+✔ Test provenanceBadgeStyleTracksCertaintyWithoutDisplayText() passed after 0.001 seconds.
+◇ Test inProcessExactProviderReturnsNegotiatedCallRelation() started.
+✔ Test inProcessExactProviderReturnsNegotiatedCallRelation() passed after 0.001 seconds.
+◇ Test inProcessExactProviderDefinitionOnlySubsetReturnsNilForNewCapabilities() started.
+✔ Test inProcessExactProviderDefinitionOnlySubsetReturnsNilForNewCapabilities() passed after 0.001 seconds.
+◇ Test inProcessExactProviderKeepsStaticAndNegotiatedCapabilitiesSeparate() started.
+✔ Test inProcessExactProviderKeepsStaticAndNegotiatedCapabilitiesSeparate() passed after 0.001 seconds.
+◇ Test readerContextMenuRoutesEveryRelationFromTheClickedByteOffset() started.
+✔ Test readerContextMenuRoutesEveryRelationFromTheClickedByteOffset() passed after 0.038 seconds.
+◇ Test readerContextMenuCopiesClickedLineAndRevealsTheDisplayedFile() started.
+✔ Test readerContextMenuCopiesClickedLineAndRevealsTheDisplayedFile() passed after 0.049 seconds.
+◇ Test revealInFinderDisablesWhenTheDisplayedFileNoLongerExists() started.
+✔ Test revealInFinderDisablesWhenTheDisplayedFileNoLongerExists() passed after 0.038 seconds.
+◇ Test pathLineTextUsesProjectRelativeAndDependencyAbsolutePaths() started.
+✔ Test pathLineTextUsesProjectRelativeAndDependencyAbsolutePaths() passed after 0.001 seconds.
+◇ Test readerContextMenuStaysReadOnly() started.
+✔ Test readerContextMenuStaysReadOnly() passed after 0.042 seconds.
+◇ Test readerContextMenuUsesTheDocumentSelectedByTheCurrentTab() started.
+✔ Test readerContextMenuUsesTheDocumentSelectedByTheCurrentTab() passed after 0.062 seconds.
+◇ Suite ReaderFindTests started.
+◇ Test readerFindContracts() started.
+✔ Test readerFindContracts() passed after 0.276 seconds.
+✔ Suite ReaderFindTests passed after 0.276 seconds.
+◇ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() started.
+✔ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() passed after 0.930 seconds.
+◇ Test appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettings() started.
+✔ Test appDelegateFontEnvironmentNotificationAutomaticallyRefreshesReaderAndSettings() passed after 0.984 seconds.
+◇ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() started.
+✔ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() passed after 0.880 seconds.
+◇ Test readerVisualSettingControlsAreVisibleAndDoNotOverlap() started.
+✔ Test readerVisualSettingControlsAreVisibleAndDoNotOverlap() passed after 0.749 seconds.
+◇ Test existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() started.
+SETTINGS_PREVIEW size=13.0 wrap=false theme=Auto origin=(-38.0, 0.0) gap=10.0 keyword/comment pixels=[1724, 1365]
+SETTINGS_PREVIEW size=17.0 wrap=true theme=Dark origin=(-41.0, 0.0) gap=10.0 keyword/comment pixels=[1667, 2723]
+SETTINGS_PREVIEW size=13.0 wrap=false theme=Auto origin=(-38.0, 0.0) gap=10.0 keyword/comment pixels=[1724, 1365]
+✔ Test existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() passed after 1.856 seconds.
+◇ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() started.
+✔ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() passed after 0.613 seconds.
+◇ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() started.
+✔ Test readingSetRendersTheFivePrototypeSegmentsAsAReadOnlyContinuousFlow() passed after 0.086 seconds.
+◇ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() started.
+✔ Test readingSetEmptyStateAndThemesDoNotFallBackToAFileReader() passed after 0.047 seconds.
+◇ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() started.
+✔ Test readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() passed after 0.040 seconds.
+◇ Test readingSetScrollPublishesItsNumericCheckpointOffset() started.
+✔ Test readingSetScrollPublishesItsNumericCheckpointOffset() passed after 0.101 seconds.
+◇ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() started.
+✔ Test readingSetWrapUsesActualRowsAndOneHeightConstraint() passed after 1.942 seconds.
+◇ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() started.
+✔ Test readingSetReflowPreservesThirdCardCharacterAndCompleteSelection() passed after 0.284 seconds.
+◇ Test relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() started.
+✔ Test relationInspectorDividerPreservesGeometryAndFrozenEvidenceAcrossLayouts() passed after 0.097 seconds.
+◇ Test frozenInspectorClosesWhenProjectContextChanges() started.
+✔ Test frozenInspectorClosesWhenProjectContextChanges() passed after 0.050 seconds.
+◇ Suite RelationUXTests started.
+◇ Test relationHeaderLabelsFitAtMinimumPanelWidth() started.
+✔ Test relationHeaderLabelsFitAtMinimumPanelWidth() passed after 0.020 seconds.
+◇ Test mainWindowChromeStaysCompactWhenContentNarrows() started.
+✔ Test mainWindowChromeStaysCompactWhenContentNarrows() passed after 0.138 seconds.
+◇ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() started.
+✔ Test relationsFreezePublishedLocationsIntoAReadingSetInProducerOrder() passed after 0.189 seconds.
+◇ Test relationsReportTheFiftyExcerptCapWithoutReorderingSeeds() started.
+✔ Test relationsReportTheFiftyExcerptCapWithoutReorderingSeeds() passed after 0.482 seconds.
+◇ Test relationsOpenAnEmptyReadingSetWithEverySourceSkipReason() started.
+✔ Test relationsOpenAnEmptyReadingSetWithEverySourceSkipReason() passed after 0.125 seconds.
+◇ Test relationReferenceRowsExposeProvenanceThroughAccessibility() started.
+✔ Test relationReferenceRowsExposeProvenanceThroughAccessibility() passed after 0.103 seconds.
+◇ Test selectingRelationKeepsInspectorClosedUntilRequested() started.
+✔ Test selectingRelationKeepsInspectorClosedUntilRequested() passed after 0.098 seconds.
+◇ Test resolutionInspectorMatchesProgressiveDisclosureAndAX() started.
+✔ Test resolutionInspectorMatchesProgressiveDisclosureAndAX() passed after 0.173 seconds.
+◇ Test correctedCandidateOnlyNavigatesThroughExplicitInspectorAction() started.
+✔ Test correctedCandidateOnlyNavigatesThroughExplicitInspectorAction() passed after 0.134 seconds.
+◇ Test ambiguityTrapInspectorSeparatesCandidateAndResultSetCompleteness() started.
+✔ Test ambiguityTrapInspectorSeparatesCandidateAndResultSetCompleteness() passed after 0.102 seconds.
+◇ Test relationReferenceGeometryReadsDoNotForceLayout() started.
+✔ Test relationReferenceGeometryReadsDoNotForceLayout() passed after 0.192 seconds.
+◇ Test relationPossibleMatchesAreCollapsedThenExpandInPlace() started.
+✔ Test relationPossibleMatchesAreCollapsedThenExpandInPlace() passed after 0.102 seconds.
+◇ Test relationPossibleExpansionStartsExactValidationOnDemand() started.
+✔ Test relationPossibleExpansionStartsExactValidationOnDemand() passed after 0.122 seconds.
+◇ Test relationCorrectedCandidatesUseTheirOwnWarningDisclosure() started.
+✔ Test relationCorrectedCandidatesUseTheirOwnWarningDisclosure() passed after 0.120 seconds.
+◇ Test relationPossibleValidationFollowsTheVisibleViewportInBatches() started.
+possible viewport requests first=32 afterScroll=64
+✔ Test relationPossibleValidationFollowsTheVisibleViewportInBatches() passed after 0.384 seconds.
+◇ Test relationOutlineKeyboardPreservesReferenceConsumptionRules() started.
+✔ Test relationOutlineKeyboardPreservesReferenceConsumptionRules() passed after 0.216 seconds.
+◇ Test relationViewDoesNotPublishRowsFromACancelledReferenceLoad() started.
+✔ Test relationViewDoesNotPublishRowsFromACancelledReferenceLoad() passed after 0.752 seconds.
+◇ Test relationIncrementalPublicationReloadsOnlyTheChangedNode() started.
+✔ Test relationIncrementalPublicationReloadsOnlyTheChangedNode() passed after 0.257 seconds.
+✔ Suite RelationUXTests passed after 3.716 seconds.
+◇ Test siClassicThemesTheWholeWindowChrome() started.
+✔ Test siClassicThemesTheWholeWindowChrome() passed after 0.200 seconds.
+◇ Test relationReferenceSingleClicksNavigateEachLocationOnce() started.
+✔ Test relationReferenceSingleClicksNavigateEachLocationOnce() passed after 0.700 seconds.
+◇ Test mixedProjectUnsupportedLanguageFileUsesPlainPreviewWithoutActiveLanguageFallback() started.
+✔ Test mixedProjectUnsupportedLanguageFileUsesPlainPreviewWithoutActiveLanguageFallback() passed after 0.290 seconds.
+◇ Test mixedProjectReaderDisplaysFourModesWithTsxVariant() started.
+✔ Test mixedProjectReaderDisplaysFourModesWithTsxVariant() passed after 0.315 seconds.
+◇ Test sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() started.
+✔ Test sessionCheckpointCapturesTwoAnchorsAndSynchronizesCloseAndLRU() passed after 0.500 seconds.
+◇ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() started.
+✔ Test sessionRestoreAppliesPanelAndDistinctViewportAndSelectionAnchors() passed after 0.463 seconds.
+◇ Test relationSymbolSingleClicksDoNotNavigate() started.
+✔ Test relationSymbolSingleClicksDoNotNavigate() passed after 0.698 seconds.
+◇ Test rightClickRelationsUsePagedContextCandidateInAllDirections() started.
+✔ Test rightClickRelationsUsePagedContextCandidateInAllDirections() passed after 0.506 seconds.
+◇ Test rightClickRelationReparsesAStaleContextSelection() started.
+✔ Test rightClickRelationReparsesAStaleContextSelection() passed after 0.389 seconds.
+◇ Test pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() started.
+✔ Test pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() passed after 0.454 seconds.
+◇ Test relationReferenceSingleClickNavigatesWhileContextIsPinned() started.
+✔ Test relationReferenceSingleClickNavigatesWhileContextIsPinned() passed after 0.583 seconds.
+◇ Test relationProgrammaticRootDirectionAndReloadChangesDoNotNavigate() started.
+✔ Test relationProgrammaticRootDirectionAndReloadChangesDoNotNavigate() passed after 0.532 seconds.
+◇ Test relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() started.
+✔ Test relationReferenceDoubleClickDoesNotNavigateTwiceAndHistoryReturns() passed after 0.761 seconds.
+◇ Test trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree() started.
+✔ Test trailOpensObservedNavigationAsReadingSetWithoutReadingDriftedWorktree() passed after 0.665 seconds.
+◇ Test semanticTrailKeepsBranchesVisibleAndRestorable() started.
+✔ Test semanticTrailKeepsBranchesVisibleAndRestorable() passed after 0.841 seconds.
+◇ Test semanticTrailShowsSnapshotBoundaryAndNavigationCause() started.
+✔ Test semanticTrailShowsSnapshotBoundaryAndNavigationCause() passed after 0.005 seconds.
+◇ Test semanticTrailCopyExplainsSessionScopeAndBranchCounts() started.
+✔ Test semanticTrailCopyExplainsSessionScopeAndBranchCounts() passed after 0.007 seconds.
+◇ Test trailDetailLabelsEvidenceRestoredFromAnEarlierSession() started.
+✔ Test trailDetailLabelsEvidenceRestoredFromAnEarlierSession() passed after 0.006 seconds.
+◇ Test markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge() started.
+✔ Test markdownPreviewLinkNavigatesProjectHistoryWithoutReadingTrailEdge() passed after 0.287 seconds.
+◇ Test keyboardRelationCommandsFollowTheReaderSelection() started.
+✔ Test keyboardRelationCommandsFollowTheReaderSelection() passed after 0.490 seconds.
+◇ Test pinnedContextDoesNotStealRelationCommandTargets() started.
+✔ Test pinnedContextDoesNotStealRelationCommandTargets() passed after 0.461 seconds.
+◇ Test relationCommandsDisabledOutsideReadableSourceSurfaces() started.
+✔ Test relationCommandsDisabledOutsideReadableSourceSurfaces() passed after 0.340 seconds.
+◇ Test openingRelationsKeepsTheWindowAndReaderReadableAtTheFloor() started.
+✔ Test openingRelationsKeepsTheWindowAndReaderReadableAtTheFloor() passed after 0.663 seconds.
+◇ Test inspectorReplacesTheListInNarrowRightAreaAndRestoresIt() started.
+✔ Test inspectorReplacesTheListInNarrowRightAreaAndRestoresIt() passed after 0.456 seconds.
+◇ Test liveWindowResizeAdaptsRelationsWithoutManualRender() started.
+✔ Test liveWindowResizeAdaptsRelationsWithoutManualRender() passed after 0.579 seconds.
+◇ Test scopeHeaderMatchesPrototypeWithoutMovingTheReader() started.
+✔ Test scopeHeaderMatchesPrototypeWithoutMovingTheReader() passed after 0.101 seconds.
+◇ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() started.
+✔ Test sessionLanguageReopenCapturesPendingTabsBeforeLoadingSnapshot() passed after 0.357 seconds.
+◇ Test sessionReopenRetriesAfterSavedFileBecomesReadable() started.
+✔ Test sessionReopenRetriesAfterSavedFileBecomesReadable() passed after 0.362 seconds.
+◇ Test wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() started.
+✔ Test wrapLinesMenuCommandIsGlobalRoundTripsAndSyncsSettings() passed after 0.175 seconds.
+◇ Test wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() started.
+✔ Test wrapLinesMenuCommandDoesNotEnableOtherProjectCommands() passed after 0.138 seconds.
+◇ Test wrapKeyEquivalentWorksWithSettingsTextFocusWithoutStealingUndo() started.
+✔ Test wrapKeyEquivalentWorksWithSettingsTextFocusWithoutStealingUndo() passed after 0.140 seconds.
+✔ Test run with 141 tests in 3 suites passed after 45.366 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test navigationHistoryTruncatesForwardEntriesAfterNewPush() started.
+✔ Test navigationHistoryTruncatesForwardEntriesAfterNewPush() passed after 0.001 seconds.
+◇ Test navigationHistoryReplacesCurrentRecordWhenBranchingAfterBack() started.
+✔ Test navigationHistoryReplacesCurrentRecordWhenBranchingAfterBack() passed after 0.001 seconds.
+◇ Test navigationHistoryDeduplicatesAdjacentRecords() started.
+✔ Test navigationHistoryDeduplicatesAdjacentRecords() passed after 0.001 seconds.
+◇ Test navigationHistoryEvictsTheOldestRecordAboveTwoHundred() started.
+✔ Test navigationHistoryEvictsTheOldestRecordAboveTwoHundred() passed after 0.011 seconds.
+◇ Test navigationHistoryBackAndForwardDoNotPush() started.
+✔ Test navigationHistoryBackAndForwardDoNotPush() passed after 0.001 seconds.
+◇ Test navigationReplayFallsBackToLineAndColumnAfterFileShrinks() started.
+✔ Test navigationReplayFallsBackToLineAndColumnAfterFileShrinks() passed after 0.044 seconds.
+◇ Test semanticNavigationVerifiesContentIdentityBeforeCommitting() started.
+✔ Test semanticNavigationVerifiesContentIdentityBeforeCommitting() passed after 0.345 seconds.
+◇ Test semanticNavigationChecksDisplayedDocumentWithoutRereading() started.
+✔ Test semanticNavigationChecksDisplayedDocumentWithoutRereading() passed after 0.017 seconds.
+◇ Test semanticNavigationRejectsDeletedInvalidUTF8AndOutOfRangeTargets() started.
+✔ Test semanticNavigationRejectsDeletedInvalidUTF8AndOutOfRangeTargets() passed after 0.961 seconds.
+◇ Test semanticValidationCannotPublishAfterNewerNavigationOrProjectSwitch() started.
+✔ Test semanticValidationCannotPublishAfterNewerNavigationOrProjectSwitch() passed after 0.661 seconds.
+◇ Test semanticNavigationCommitsUnicodeOffsetsAgainstMatchingContent() started.
+✔ Test semanticNavigationCommitsUnicodeOffsetsAgainstMatchingContent() passed after 0.034 seconds.
+◇ Test replayOffsetUsesFiveHonestFallbacksAndRejectsInvalidScalars() started.
+✔ Test replayOffsetUsesFiveHonestFallbacksAndRejectsInvalidScalars() passed after 0.005 seconds.
+◇ Test replayOffsetUsesASymbolOnlyWhenItsDeclarationIsUnique() started.
+✔ Test replayOffsetUsesASymbolOnlyWhenItsDeclarationIsUnique() passed after 0.001 seconds.
+◇ Test replayOffsetReturnsToTheOriginalFunctionWhenCodeMovedAboveIt() started.
+✔ Test replayOffsetReturnsToTheOriginalFunctionWhenCodeMovedAboveIt() passed after 0.002 seconds.
+◇ Test appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() started.
+✔ Test appModelRoutesEveryNavigationAndHistoryReplayThroughOnePipeline() passed after 0.059 seconds.
+◇ Test navigationRequestKeepsCausePolicyAndReplaySemantics() started.
+✔ Test navigationRequestKeepsCausePolicyAndReplaySemantics() passed after 0.032 seconds.
+◇ Test readingTrailBranchesFromRestoredHistoryIdentity() started.
+✔ Test readingTrailBranchesFromRestoredHistoryIdentity() passed after 0.039 seconds.
+◇ Test trailExplanationSnapshotStaysFixedWhileStoreAdvances() started.
+✔ Test trailExplanationSnapshotStaysFixedWhileStoreAdvances() passed after 0.001 seconds.
+◇ Test relationRootResetRetainsTrailMaterializationsWithoutLiveReferences() started.
+✔ Test relationRootResetRetainsTrailMaterializationsWithoutLiveReferences() passed after 0.005 seconds.
+◇ Test outlineFollowArbitrationClearsOnlyOnLiveScroll() started.
+✔ Test outlineFollowArbitrationClearsOnlyOnLiveScroll() passed after 0.001 seconds.
+◇ Test navigationHistoryReplaysAnAbsoluteDependencyPath() started.
+✔ Test navigationHistoryReplaysAnAbsoluteDependencyPath() passed after 0.040 seconds.
+◇ Test projectStateAcceptsLegalTransitions() started.
+✔ Test projectStateAcceptsLegalTransitions() passed after 0.001 seconds.
+◇ Test projectStateRejectsIllegalTransitions() started.
+✔ Test projectStateRejectsIllegalTransitions() passed after 0.001 seconds.
+◇ Test navigationPushesWhileProjectIsIndexing() started.
+✔ Test navigationPushesWhileProjectIsIndexing() passed after 0.001 seconds.
+◇ Test fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() started.
+✔ Test fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() passed after 0.010 seconds.
+◇ Test projectOpenPublishesFileTreeAsynchronously() started.
+✔ Test projectOpenPublishesFileTreeAsynchronously() passed after 0.016 seconds.
+◇ Test unsupportedJavaScriptOpenIsSynchronousAndAtomic() started.
+✔ Test unsupportedJavaScriptOpenIsSynchronousAndAtomic() passed after 0.001 seconds.
+◇ Test realIndexServiceOpensTypeScriptProjectAndPublishesTypeScriptSession() started.
+✔ Test realIndexServiceOpensTypeScriptProjectAndPublishesTypeScriptSession() passed after 0.033 seconds.
+◇ Test realIndexServiceOpensPythonProjectAndPublishesPythonSession() started.
+✔ Test realIndexServiceOpensPythonProjectAndPublishesPythonSession() passed after 0.020 seconds.
+◇ Test pythonProfileLimitsFeatureChoicesAndSwitchingIsNoOp() started.
+✔ Test pythonProfileLimitsFeatureChoicesAndSwitchingIsNoOp() passed after 0.032 seconds.
+◇ Test openingAnotherProjectDiscardsLateSession() started.
+✔ Test openingAnotherProjectDiscardsLateSession() passed after 0.051 seconds.
+◇ Test indexingFailureMovesProjectToFailed() started.
+✔ Test indexingFailureMovesProjectToFailed() passed after 0.016 seconds.
+◇ Test mismatchedSessionLanguageFailsWithoutPublishingSessionState() started.
+✔ Test mismatchedSessionLanguageFailsWithoutPublishingSessionState() passed after 0.029 seconds.
+◇ Test realIndexServiceBuildsFixtureSession() started.
+✔ Test realIndexServiceBuildsFixtureSession() passed after 0.004 seconds.
+◇ Test mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() started.
+✔ Test mixedOpenInstallsNormalizedWorkspaceSessionsAndRoutesByLanguage() passed after 0.053 seconds.
+◇ Test staleRustContextCompletionDoesNotPublishAfterPythonRoute() started.
+✔ Test staleRustContextCompletionDoesNotPublishAfterPythonRoute() passed after 0.085 seconds.
+◇ Test crossLanguageSameNameContextStaysInActivePythonSession() started.
+✔ Test crossLanguageSameNameContextStaysInActivePythonSession() passed after 0.043 seconds.
+◇ Test rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() started.
+✔ Test rustFeatureSwitchReplacesOnlyRustWorkspaceEntry() passed after 0.030 seconds.
+◇ Test restartExactAnalysisRetriesFailedProviderWithoutChangingReadingState() started.
+✔ Test restartExactAnalysisRetriesFailedProviderWithoutChangingReadingState() passed after 0.043 seconds.
+◇ Test sameProfileNavigationDoesNotResetContextOrRelationIdentity() started.
+✔ Test sameProfileNavigationDoesNotResetContextOrRelationIdentity() passed after 0.046 seconds.
+◇ Test projectIndexServiceRejectsJavaScriptBeforeIO() started.
+✔ Test projectIndexServiceRejectsJavaScriptBeforeIO() passed after 0.001 seconds.
+◇ Test projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() started.
+✔ Test projectIndexServiceCapturesAndPreparesMixedSessionsWithSharedIdentity() passed after 0.032 seconds.
+◇ Test singletonCollectionPreparePreservesLegacyRootWithoutUnitDiscovery() started.
+✔ Test singletonCollectionPreparePreservesLegacyRootWithoutUnitDiscovery() passed after 0.020 seconds.
+◇ Test ambiguousAndNonGitFailBeforePersistentCache() started.
+✔ Test ambiguousAndNonGitFailBeforePersistentCache() passed after 0.021 seconds.
+◇ Test preparedSnapshotIdentityMismatchFailsWithoutPartial() started.
+✔ Test preparedSnapshotIdentityMismatchFailsWithoutPartial() passed after 0.018 seconds.
+◇ Test indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets() started.
+✔ Test indexServiceDefaultRequirementsForwardSingletonsAndRejectMixedInvalidSets() passed after 0.001 seconds.
+◇ Test symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() started.
+✔ Test symbolSearchPanelBuildsRowsWrapsSelectionAndOpens() passed after 0.014 seconds.
+◇ Test symbolSearchPathCacheRefreshesForANewSession() started.
+✔ Test symbolSearchPathCacheRefreshesForANewSession() passed after 0.033 seconds.
+◇ Test symbolSearchWorkspaceMergesAllSessionsWithStableOrdering() started.
+✔ Test symbolSearchWorkspaceMergesAllSessionsWithStableOrdering() passed after 0.043 seconds.
+◇ Test symbolSearchWorkspaceKeepsSameNamesAndUsesSharedPathBoost() started.
+✔ Test symbolSearchWorkspaceKeepsSameNamesAndUsesSharedPathBoost() passed after 0.043 seconds.
+◇ Test symbolSearchNewQueryDropsStaleWorkspaceDetachedCompletion() started.
+✔ Test symbolSearchNewQueryDropsStaleWorkspaceDetachedCompletion() passed after 0.072 seconds.
+◇ Test contextWindowDebouncesClicksInsideTheSameToken() started.
+✔ Test contextWindowDebouncesClicksInsideTheSameToken() passed after 0.014 seconds.
+◇ Test contextWindowUpdatesForASecondSymbolInsideTheSameCall() started.
+✔ Test contextWindowUpdatesForASecondSymbolInsideTheSameCall() passed after 0.029 seconds.
+◇ Test contextWindowReusesLoadedTargetDocumentAcrossClicks() started.
+✔ Test contextWindowReusesLoadedTargetDocumentAcrossClicks() passed after 0.001 seconds.
+◇ Test contextWindowRecoversAfterClickOnUnresolvableLocation() started.
+✔ Test contextWindowRecoversAfterClickOnUnresolvableLocation() passed after 0.031 seconds.
+◇ Test contextWindowDiscardsOutOfOrderRequests() started.
+✔ Test contextWindowDiscardsOutOfOrderRequests() passed after 0.038 seconds.
+◇ Test contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration() started.
+✔ Test contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration() passed after 0.042 seconds.
+◇ Test contextWindowDiscardsResultAfterProfileChangeAtSameGeneration() started.
+✔ Test contextWindowDiscardsResultAfterProfileChangeAtSameGeneration() passed after 0.048 seconds.
+◇ Test resolvedContextCandidateRejectsAnOlderProfileGeneration() started.
+✔ Test resolvedContextCandidateRejectsAnOlderProfileGeneration() passed after 0.019 seconds.
+◇ Test pinnedContextIgnoresClickButExplicitJumpStillResolves() started.
+✔ Test pinnedContextIgnoresClickButExplicitJumpStillResolves() passed after 0.004 seconds.
+◇ Test relationSelectionUpdatesContextUnlessPinned() started.
+✔ Test relationSelectionUpdatesContextUnlessPinned() passed after 0.018 seconds.
+◇ Test relationSelectionUpdatesContextOnConsecutiveCallerRows() started.
+✔ Test relationSelectionUpdatesContextOnConsecutiveCallerRows() passed after 0.030 seconds.
+◇ Test relationSelectionUpdatesContextOnConsecutiveCallRows() started.
+✔ Test relationSelectionUpdatesContextOnConsecutiveCallRows() passed after 0.033 seconds.
+◇ Test relationSelectionUpdatesContextOnConsecutiveImplementationRows() started.
+✔ Test relationSelectionUpdatesContextOnConsecutiveImplementationRows() passed after 0.031 seconds.
+◇ Test contextCandidateSelectionWraps() started.
+✔ Test contextCandidateSelectionWraps() passed after 0.016 seconds.
+◇ Test contextPendingTokenResolvesWhenIndexBecomesReady() started.
+✔ Test contextPendingTokenResolvesWhenIndexBecomesReady() passed after 0.014 seconds.
+◇ Test contextWindowResolvesUseAliasFixtureWithPresentationLabel() started.
+✔ Test contextWindowResolvesUseAliasFixtureWithPresentationLabel() passed after 0.016 seconds.
+◇ Test contextWindowPresentsLocalBindingKind() started.
+✔ Test contextWindowPresentsLocalBindingKind() passed after 0.015 seconds.
+◇ Test contextWindowExplainsUnresolvedImport() started.
+✔ Test contextWindowExplainsUnresolvedImport() passed after 0.033 seconds.
+◇ Test openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() started.
+✔ Test openingASecondProjectPublishesOnlyTheSecondForSingleLanguage() passed after 0.239 seconds.
+◇ Test openAndSwitchFailuresSurfaceTheirUnderlyingReasons() started.
+✔ Test openAndSwitchFailuresSurfaceTheirUnderlyingReasons() passed after 0.110 seconds.
+◇ Test projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() started.
+✔ Test projectBoundaryReplacesTheServiceStoreButKeepsOldSessionsUsable() passed after 0.065 seconds.
+◇ Test multiLanguageProjectBoundaryAlsoReplacesTheServiceStore() started.
+✔ Test multiLanguageProjectBoundaryAlsoReplacesTheServiceStore() passed after 0.066 seconds.
+◇ Test sameProjectRevisionsDoNotAccumulateInServiceStore() started.
+✔ Test sameProjectRevisionsDoNotAccumulateInServiceStore() passed after 0.054 seconds.
+◇ Test bookmarkStatusUsesCapturedSourceOnlyForTheMatchingSnapshot() started.
+✔ Test bookmarkStatusUsesCapturedSourceOnlyForTheMatchingSnapshot() passed after 0.001 seconds.
+◇ Test bookmarkModelDefaultsToMemoryAndSessionAppModelUsesSiblingBookmarkStore() started.
+✔ Test bookmarkModelDefaultsToMemoryAndSessionAppModelUsesSiblingBookmarkStore() passed after 0.001 seconds.
+◇ Test bookmarkModelPersistsUUIDBasedToggleAndFilteredRows() started.
+✔ Test bookmarkModelPersistsUUIDBasedToggleAndFilteredRows() passed after 0.001 seconds.
+◇ Test bookmarkNoteWritesEachChangeButOnlyFinalizesTimestamp() started.
+✔ Test bookmarkNoteWritesEachChangeButOnlyFinalizesTimestamp() passed after 0.001 seconds.
+◇ Test bookmarkMarkdownEscapesControlsOmitsEmptyNotesAndKeepsNotEvaluatedHonest() started.
+✔ Test bookmarkMarkdownEscapesControlsOmitsEmptyNotesAndKeepsNotEvaluatedHonest() passed after 0.001 seconds.
+◇ Test bookmarkModelRequiresConfirmationForNotesAndCleansAttemptAfterDelete() started.
+✔ Test bookmarkModelRequiresConfirmationForNotesAndCleansAttemptAfterDelete() passed after 0.013 seconds.
+◇ Test bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation() started.
+✔ Test bookmarkModelReanchorsOnlyWorktreeRecordsAndClampsLineOpenWithoutMutation() passed after 0.015 seconds.
+◇ Test bookmarkModelRetainsLoadRescueAndDirtyMemoryWhenPersistenceFails() started.
+✔ Test bookmarkModelRetainsLoadRescueAndDirtyMemoryWhenPersistenceFails() passed after 0.001 seconds.
+◇ Test bookmarkModelRejectsSemanticStoreFailuresWithoutKeepingInvalidMemory() started.
+✔ Test bookmarkModelRejectsSemanticStoreFailuresWithoutKeepingInvalidMemory() passed after 0.001 seconds.
+◇ Test bookmarkAttemptDropsTheOlderResultAndClearsOnWorkspaceChange() started.
+✔ Test bookmarkAttemptDropsTheOlderResultAndClearsOnWorkspaceChange() passed after 0.013 seconds.
+◇ Test bookmarkAttemptDeletedBeforeCompletionCannotPublish() started.
+✔ Test bookmarkAttemptDeletedBeforeCompletionCannotPublish() passed after 0.058 seconds.
+◇ Test appModelSingleLanguageOpenSynchronizesBookmarkWorkspaceGeneration() started.
+✔ Test appModelSingleLanguageOpenSynchronizesBookmarkWorkspaceGeneration() passed after 0.038 seconds.
+◇ Test persistedCrossSnapshotBookmarkAttemptSurvivesSingleLanguageOpen() started.
+✔ Test persistedCrossSnapshotBookmarkAttemptSurvivesSingleLanguageOpen() passed after 0.055 seconds.
+◇ Test featureSelectionChangeClearsOlderBookmarkAttempt() started.
+✔ Test featureSelectionChangeClearsOlderBookmarkAttempt() passed after 0.144 seconds.
+◇ Test appModelPreflightPublishesOnlyTransientMissingCommitAttempts() started.
+✔ Test appModelPreflightPublishesOnlyTransientMissingCommitAttempts() passed after 0.106 seconds.
+◇ Test appModelExplicitBookmarkLineOpenUsesCapturedWorktreeBytesWithoutReanchoring() started.
+✔ Test appModelExplicitBookmarkLineOpenUsesCapturedWorktreeBytesWithoutReanchoring() passed after 0.023 seconds.
+◇ Test appModelCapturesOnlyTheCurrentReaderDocumentMatchingCapturedSource() started.
+✔ Test appModelCapturesOnlyTheCurrentReaderDocumentMatchingCapturedSource() passed after 0.023 seconds.
+◇ Test appModelBookmarkMarkersExcludeOffsetInvalidRecordsEvenWhenContentMatches() started.
+✔ Test appModelBookmarkMarkersExcludeOffsetInvalidRecordsEvenWhenContentMatches() passed after 0.022 seconds.
+◇ Test appModelRefusesToCaptureAnOffsetInsideAMultibyteScalar() started.
+✔ Test appModelRefusesToCaptureAnOffsetInsideAMultibyteScalar() passed after 0.021 seconds.
+◇ Test appModelCapturesTheResolvedFullCommitOIDRatherThanTheRevisionExpression() started.
+✔ Test appModelCapturesTheResolvedFullCommitOIDRatherThanTheRevisionExpression() passed after 0.066 seconds.
+◇ Test appModelBookmarkEligibilityNamesUnsupportedSurfaces() started.
+✔ Test appModelBookmarkEligibilityNamesUnsupportedSurfaces() passed after 0.021 seconds.
+◇ Test appModelStrictSameSnapshotBookmarkNavigationUsesCapturedBytesExactlyOnce() started.
+✔ Test appModelStrictSameSnapshotBookmarkNavigationUsesCapturedBytesExactlyOnce() passed after 0.036 seconds.
+◇ Test appModelStrictSameCommitBookmarkNavigationUsesCapturedCommitBytes() started.
+✔ Test appModelStrictSameCommitBookmarkNavigationUsesCapturedCommitBytes() passed after 0.069 seconds.
+◇ Test appModelStrictSameSnapshotNonExactAndProjectMismatchOnlyPublishAttempts() started.
+✔ Test appModelStrictSameSnapshotNonExactAndProjectMismatchOnlyPublishAttempts() passed after 0.072 seconds.
+◇ Test appModelStrictCrossSnapshotSecondAttemptWinsWhenFirstPrepareCompletesStale() started.
+✔ Test appModelStrictCrossSnapshotSecondAttemptWinsWhenFirstPrepareCompletesStale() passed after 0.140 seconds.
+◇ Test appModelStrictCrossSnapshotWorktreeMismatchPublishesOnlyDriftedAttempt() started.
+✔ Test appModelStrictCrossSnapshotWorktreeMismatchPublishesOnlyDriftedAttempt() passed after 0.094 seconds.
+◇ Test appModelStrictCrossSnapshotRejectsInvalidCachedPreparedSessionsWithoutMutation() started.
+✔ Test appModelStrictCrossSnapshotRejectsInvalidCachedPreparedSessionsWithoutMutation() passed after 0.090 seconds.
+◇ Test appModelStrictCrossSnapshotCaptureAndPreparationFailuresOnlyPublishAttempts() started.
+✔ Test appModelStrictCrossSnapshotCaptureAndPreparationFailuresOnlyPublishAttempts() passed after 0.199 seconds.
+◇ Test appModelStrictCrossSnapshotFullFailureLeavesCachedExactReadingInstalled() started.
+✔ Test appModelStrictCrossSnapshotFullFailureLeavesCachedExactReadingInstalled() passed after 0.120 seconds.
+◇ Test appModelStrictCrossSnapshotKeepsCachedInstallIndependentFromFullCompletion() started.
+✔ Test appModelStrictCrossSnapshotKeepsCachedInstallIndependentFromFullCompletion() passed after 0.122 seconds.
+◇ Test appModelStrictCrossSnapshotBookmarkStartsWithoutMutatingTheCurrentWorkspace() started.
+✔ Test appModelStrictCrossSnapshotBookmarkStartsWithoutMutatingTheCurrentWorkspace() passed after 0.078 seconds.
+◇ Test bookmarkStoreRoundTripsTheBoundedSchemaWithoutPersistingATitle() started.
+✔ Test bookmarkStoreRoundTripsTheBoundedSchemaWithoutPersistingATitle() passed after 0.001 seconds.
+◇ Test bookmarkStoreRejectsUnreadableSchemasWithoutChangingTheirOriginalBytes() started.
+✔ Test bookmarkStoreRejectsUnreadableSchemasWithoutChangingTheirOriginalBytes() passed after 0.001 seconds.
+◇ Test bookmarkStoreRejectsInvalidSemanticsAndExportsTheOriginalBytes() started.
+✔ Test bookmarkStoreRejectsInvalidSemanticsAndExportsTheOriginalBytes() passed after 0.001 seconds.
+◇ Test bookmarkStoreValidatesIdentityAnchorsAndFieldBoundsBeforeWriting() started.
+✔ Test bookmarkStoreValidatesIdentityAnchorsAndFieldBoundsBeforeWriting() passed after 0.001 seconds.
+◇ Test bookmarkStoreWritesThirtyTwoRecordsAndRejectsLargerFilesWithoutOverwrite() started.
+✔ Test bookmarkStoreWritesThirtyTwoRecordsAndRejectsLargerFilesWithoutOverwrite() passed after 0.002 seconds.
+◇ Test commitPickerMatchesSHAPrefix() started.
+✔ Test commitPickerMatchesSHAPrefix() passed after 0.001 seconds.
+◇ Test commitPickerMatchesSummarySubstring() started.
+✔ Test commitPickerMatchesSummarySubstring() passed after 0.001 seconds.
+◇ Test commitPickerSearchIsCaseInsensitive() started.
+✔ Test commitPickerSearchIsCaseInsensitive() passed after 0.001 seconds.
+◇ Test commitPickerTracksWorktreeAndCommit() started.
+✔ Test commitPickerTracksWorktreeAndCommit() passed after 0.001 seconds.
+◇ Test snapshotCoverageFormatsPartsUntilFullReady() started.
+✔ Test snapshotCoverageFormatsPartsUntilFullReady() passed after 0.001 seconds.
+◇ Test exactCoordinatorAttributionObservationTracksPrepareAndInvalidate() started.
+✔ Test exactCoordinatorAttributionObservationTracksPrepareAndInvalidate() passed after 0.027 seconds.
+◇ Test exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile() started.
+✔ Test exactCoordinatorNestedProfileRootMapsProviderRootAndRejectsOutsideProfile() passed after 0.014 seconds.
+◇ Test exactCoordinatorRejectsInvalidProfileRootBeforeInvalidate() started.
+✔ Test exactCoordinatorRejectsInvalidProfileRootBeforeInvalidate() passed after 0.001 seconds.
+◇ Test exactCoordinatorPreparesNestedProfilesAcrossLanguageNavigation() started.
+✔ Test exactCoordinatorPreparesNestedProfilesAcrossLanguageNavigation() passed after 0.218 seconds.
+◇ Test exactCoordinatorGateOldPrepareBeforeNewProviderPrepare() started.
+✔ Test exactCoordinatorGateOldPrepareBeforeNewProviderPrepare() passed after 0.086 seconds.
+◇ Test exactCoordinatorPublishesTrustBeforeSessionReadyAndClearsOnInvalidate() started.
+✔ Test exactCoordinatorPublishesTrustBeforeSessionReadyAndClearsOnInvalidate() passed after 0.031 seconds.
+◇ Test exactCoordinatorPreparesOpportunistically() started.
+✔ Test exactCoordinatorPreparesOpportunistically() passed after 0.016 seconds.
+◇ Test exactCoordinatorRejectsJavaScriptWithoutChangingState() started.
+✔ Test exactCoordinatorRejectsJavaScriptWithoutChangingState() passed after 0.003 seconds.
+◇ Test exactCoordinatorAcceptsPythonProfileAndUsesWorktreeDefaultSnapshot() started.
+✔ Test exactCoordinatorAcceptsPythonProfileAndUsesWorktreeDefaultSnapshot() passed after 0.077 seconds.
+◇ Test exactCoordinatorRejectsPythonProfileMismatchBeforeProvider() started.
+✔ Test exactCoordinatorRejectsPythonProfileMismatchBeforeProvider() passed after 0.015 seconds.
+◇ Test exactCoordinatorFiltersPythonStubTargets() started.
+✔ Test exactCoordinatorFiltersPythonStubTargets() passed after 0.017 seconds.
+◇ Test exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly() started.
+✔ Test exactCoordinatorAcceptsTypeScriptProfileAndPublishesTSAndTSXOnly() passed after 0.018 seconds.
+◇ Test exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() started.
+✔ Test exactCoordinatorTypeScriptRejectsProfileMismatchBeforeProvider() passed after 0.017 seconds.
+◇ Test exactCoordinatorReportsMissingTypeScriptProvider() started.
+✔ Test exactCoordinatorReportsMissingTypeScriptProvider() passed after 0.015 seconds.
+◇ Test exactTypeScriptProfileTracksConfigPackageAndLockFingerprints() started.
+✔ Test exactTypeScriptProfileTracksConfigPackageAndLockFingerprints() passed after 0.003 seconds.
+◇ Test exactCoordinatorFiltersDeferredTypeScriptTargets() started.
+✔ Test exactCoordinatorFiltersDeferredTypeScriptTargets() passed after 0.013 seconds.
+◇ Test exactCoordinatorReportsPythonImplementationsUnsupported() started.
+✔ Test exactCoordinatorReportsPythonImplementationsUnsupported() passed after 0.014 seconds.
+◇ Test exactCoordinatorReturnsUnsupportedForForeignLanguageRelationTargets() started.
+✔ Test exactCoordinatorReturnsUnsupportedForForeignLanguageRelationTargets() passed after 0.013 seconds.
+◇ Test exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() started.
+✔ Test exactCoordinatorRejectsProviderLanguageMismatchBeforePrepare() passed after 0.015 seconds.
+◇ Test exactCoordinatorAcceptsRustProfileWithDifferentFingerprintRepresentation() started.
+✔ Test exactCoordinatorAcceptsRustProfileWithDifferentFingerprintRepresentation() passed after 0.017 seconds.
+◇ Test exactCoordinatorReportsMissingPythonProviderWithoutSessions() started.
+✔ Test exactCoordinatorReportsMissingPythonProviderWithoutSessions() passed after 0.014 seconds.
+◇ Test exactCoordinatorMarksWorktreeOrigin() started.
+✔ Test exactCoordinatorMarksWorktreeOrigin() passed after 0.015 seconds.
+◇ Test exactCoordinatorRefreshesEnvironmentWithoutAQuery() started.
+✔ Test exactCoordinatorRefreshesEnvironmentWithoutAQuery() passed after 0.029 seconds.
+◇ Test exactCoordinatorRestartsOneCrashThenBecomesUnavailable() started.
+✔ Test exactCoordinatorRestartsOneCrashThenBecomesUnavailable() passed after 0.123 seconds.
+◇ Test exactCoordinatorTurnsOffSafeModeWithoutSandbox() started.
+✔ Test exactCoordinatorTurnsOffSafeModeWithoutSandbox() passed after 0.017 seconds.
+◇ Test exactCoordinatorTrustUIStateFlowsGrantAndRevoke() started.
+✔ Test exactCoordinatorTrustUIStateFlowsGrantAndRevoke() passed after 0.029 seconds.
+◇ Test appModelTrustActionsRebuildExactSessionImmediately() started.
+✔ Test appModelTrustActionsRebuildExactSessionImmediately() passed after 0.048 seconds.
+◇ Test exactOverlaySeparatesTrustModesAndReusesWithinEachMode() started.
+✔ Test exactOverlaySeparatesTrustModesAndReusesWithinEachMode() passed after 0.046 seconds.
+◇ Test appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction() started.
+✔ Test appModelFeatureSwitchReprofilesAndRepreparesExactWithoutExtraction() passed after 0.047 seconds.
+◇ Test appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe() started.
+✔ Test appModelRevokeTrustClearsRegistryClosesTrustedSessionAndPreparesSafe() passed after 0.047 seconds.
+◇ Test exactOverlayReusesVersionProfileAndToolButNotSnapshotID() started.
+✔ Test exactOverlayReusesVersionProfileAndToolButNotSnapshotID() passed after 0.089 seconds.
+◇ Test exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() started.
+✔ Test exactOverlayDoesNotReuseDefinitionsAcrossFeatureSelections() passed after 0.001 seconds.
+◇ Test exactOverlayDoesNotReuseAcrossLanguageProfileOrEnvironment() started.
+✔ Test exactOverlayDoesNotReuseAcrossLanguageProfileOrEnvironment() passed after 0.001 seconds.
+◇ Test exactCoordinatorInvalidatesAnOlderSnapshotResult() started.
+✔ Test exactCoordinatorInvalidatesAnOlderSnapshotResult() passed after 0.029 seconds.
+◇ Test exactCoordinatorMaterializesCommitRootAndMapsResultPath() started.
+✔ Test exactCoordinatorMaterializesCommitRootAndMapsResultPath() passed after 0.118 seconds.
+◇ Test exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath() started.
+✔ Test exactCoordinatorMaterializesNoConfigPythonCommitAndMapsResultPath() passed after 0.104 seconds.
+◇ Test exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() started.
+✔ Test exactCoordinatorMaterializesTypeScriptCommitAndMapsResultPath() passed after 0.093 seconds.
+◇ Test contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() started.
+✔ Test contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() passed after 0.050 seconds.
+◇ Test contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() started.
+✔ Test contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() passed after 0.329 seconds.
+◇ Test contextExactInsertRequiresMatchingTargetBytes() started.
+✔ Test contextExactInsertRequiresMatchingTargetBytes() passed after 0.336 seconds.
+◇ Test contextExactUpgradeSuspendsWhenSourceFileDrifts() started.
+✔ Test contextExactUpgradeSuspendsWhenSourceFileDrifts() passed after 0.318 seconds.
+◇ Test contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() started.
+✔ Test contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() passed after 0.311 seconds.
+◇ Test pythonContextExactBadgeOmitsCargoFeatureDetail() started.
+✔ Test pythonContextExactBadgeOmitsCargoFeatureDetail() passed after 0.033 seconds.
+◇ Test contextExactDependencyTargetProducesAnHonestCardAndExcerpt() started.
+✔ Test contextExactDependencyTargetProducesAnHonestCardAndExcerpt() passed after 0.026 seconds.
+◇ Test contextExactUpgradeRejectsStaleRequestAndGeneration() started.
+✔ Test contextExactUpgradeRejectsStaleRequestAndGeneration() passed after 0.030 seconds.
+◇ Test pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() started.
+✔ Test pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() passed after 0.053 seconds.
+◇ Test dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown() started.
+✔ Test dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown() passed after 0.020 seconds.
+◇ Test sharedBookmarkStoreInterleavesTwoWindowsWithoutLosingUpdates() started.
+✔ Test sharedBookmarkStoreInterleavesTwoWindowsWithoutLosingUpdates() passed after 0.022 seconds.
+◇ Test sharedBookmarkStoreNotifiesBothWindows() started.
+✔ Test sharedBookmarkStoreNotifiesBothWindows() passed after 0.001 seconds.
+◇ Test sharedBookmarkStoreRetainsDirtyTableForRetryAcrossWindows() started.
+✔ Test sharedBookmarkStoreRetainsDirtyTableForRetryAcrossWindows() passed after 0.001 seconds.
+◇ Test materializerReferenceCountProtectsSharedDirectory() started.
+✔ Test materializerReferenceCountProtectsSharedDirectory() passed after 0.107 seconds.
+◇ Test materializerQuotaEvictsOnlyUnreferencedDirectories() started.
+✔ Test materializerQuotaEvictsOnlyUnreferencedDirectories() passed after 0.151 seconds.
+◇ Test sharedTrustRegistryServesTwoCoordinators() started.
+✔ Test sharedTrustRegistryServesTwoCoordinators() passed after 0.001 seconds.
+◇ Test appModelCloseProjectResetsStateAndStopsExact() started.
+✔ Test appModelCloseProjectResetsStateAndStopsExact() passed after 0.196 seconds.
+◇ Test coordinatorShutdownAndWaitReleasesMaterializedDirectory() started.
+✔ Test coordinatorShutdownAndWaitReleasesMaterializedDirectory() passed after 0.089 seconds.
+◇ Test suspendedPrepareIsRefusedUntilTheSuspensionLifts() started.
+✔ Test suspendedPrepareIsRefusedUntilTheSuspensionLifts() passed after 0.088 seconds.
+◇ Test materializerQuotaFailureRollsBackTheNewReference() started.
+✔ Test materializerQuotaFailureRollsBackTheNewReference() passed after 0.100 seconds.
+◇ Test cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() started.
+✔ Test cacheMaintenanceHaltsPreparesAcrossSharedCoordinators() passed after 0.087 seconds.
+◇ Test revocationBlocksNewProvidersAndRestartsCurrentGenerationSafely() started.
+✔ Test revocationBlocksNewProvidersAndRestartsCurrentGenerationSafely() passed after 0.117 seconds.
+◇ Test shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() started.
+✔ Test shutdownWaitsForLatePrepareToCloseAndReleaseItsDirectory() passed after 0.117 seconds.
+◇ Test sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() started.
+✔ Test sharedCacheClearWaitsForBothProvidersAndAllowsRestartAfterMaintenance() passed after 0.130 seconds.
+◇ Test outlinePanelSortsLocatesInnermostAndOpensRows() started.
+✔ Test outlinePanelSortsLocatesInnermostAndOpensRows() passed after 0.001 seconds.
+◇ Test panelPresetsDescribeReadingRelationsCompareAndFocusLayouts() started.
+✔ Test panelPresetsDescribeReadingRelationsCompareAndFocusLayouts() passed after 0.001 seconds.
+◇ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() started.
+✔ Test readingSetCaptureUsesTheExplicitLanguageModeForOutlineFreeze() passed after 0.001 seconds.
+◇ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() started.
+✔ Test readingSetWorktreeActionsUseCapturedGenerationAndPreserveTheSetTab() passed after 0.012 seconds.
+◇ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() started.
+✔ Test readingSetCommitOpenInstallsTheCapturedRevisionInANewFileTab() passed after 0.127 seconds.
+◇ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() started.
+✔ Test readingSetDependencyExpansionRequiresTheCapturedAbsoluteFile() passed after 0.001 seconds.
+◇ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() started.
+✔ Test readingSetCaptureKeepsTargetAtFileEdgesAndWithinFrozenCaps() passed after 0.001 seconds.
+◇ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() started.
+✔ Test readingSetLongFacetExpandsAroundTargetWithoutBreakingLines() passed after 0.001 seconds.
+◇ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() started.
+✔ Test readingSetLongMultibyteLineUsesScalarSafePersistentSlices() passed after 0.001 seconds.
+◇ Test trailReadingSetKeepsFiveObservedEdgesInPathOrderAndSkipsOldWorktree() started.
+✔ Test trailReadingSetKeepsFiveObservedEdgesInPathOrderAndSkipsOldWorktree() passed after 0.021 seconds.
+◇ Test trailReadingSetSkipsExtensionlessDependencyAfterLeavingOriginRoute() started.
+✔ Test trailReadingSetSkipsExtensionlessDependencyAfterLeavingOriginRoute() passed after 0.012 seconds.
+◇ Test readingTrailCommitRouteFrozenAcrossWorktreeAndCommit() started.
+✔ Test readingTrailCommitRouteFrozenAcrossWorktreeAndCommit() passed after 0.076 seconds.
+◇ Test recentProjectsStoreRecordsDeduplicatesMovesToFrontLimitsAndPersists() started.
+✔ Test recentProjectsStoreRecordsDeduplicatesMovesToFrontLimitsAndPersists() passed after 0.004 seconds.
+◇ Test recentProjectsStoreLastSessionProjectSurvivesRecentsClear() started.
+✔ Test recentProjectsStoreLastSessionProjectSurvivesRecentsClear() passed after 0.001 seconds.
+◇ Test recentProjectsStoreTracksLanguageByPathAndOverridesOnReRecord() started.
+✔ Test recentProjectsStoreTracksLanguageByPathAndOverridesOnReRecord() passed after 0.002 seconds.
+◇ Test recentProjectsStoreRecordsAndPrunesLanguageArrays() started.
+✔ Test recentProjectsStoreRecordsAndPrunesLanguageArrays() passed after 0.004 seconds.
+◇ Test recentProjectsStorePrunesLanguageMapWithPathLimitAndClearsBothKeys() started.
+✔ Test recentProjectsStorePrunesLanguageMapWithPathLimitAndClearsBothKeys() passed after 0.004 seconds.
+◇ Test recentProjectsStoreLanguageFallsBackForMissingAndInvalidMapValues() started.
+✔ Test recentProjectsStoreLanguageFallsBackForMissingAndInvalidMapValues() passed after 0.001 seconds.
+◇ Test projectDropAcceptsOneDirectoryAndRejectsAFile() started.
+✔ Test projectDropAcceptsOneDirectoryAndRejectsAFile() passed after 0.001 seconds.
+◇ Test relationTreeShowsSemanticLocalReferencesWithoutTheDeclaration() started.
+✔ Test relationTreeShowsSemanticLocalReferencesWithoutTheDeclaration() passed after 0.001 seconds.
+◇ Test relationTreeLocalReferencesSeparateNestedShadowing() started.
+✔ Test relationTreeLocalReferencesSeparateNestedShadowing() passed after 0.003 seconds.
+◇ Test relationTreeLocalReferencesSeparateSiblingScopes() started.
+✔ Test relationTreeLocalReferencesSeparateSiblingScopes() passed after 0.002 seconds.
+◇ Test relationTreeLocalReferencesExcludeTokensBeforeTheDeclaration() started.
+✔ Test relationTreeLocalReferencesExcludeTokensBeforeTheDeclaration() passed after 0.001 seconds.
+◇ Test relationTreeLocalReferencesDistinguishParameterFromShadowingLocal() started.
+✔ Test relationTreeLocalReferencesDistinguishParameterFromShadowingLocal() passed after 0.002 seconds.
+◇ Test relationTreeEngineReferencesFindCrossFileTypeUses() started.
+✔ Test relationTreeEngineReferencesFindCrossFileTypeUses() passed after 0.003 seconds.
+◇ Test relationTreeConsumesExactReferences() started.
+✔ Test relationTreeConsumesExactReferences() passed after 0.001 seconds.
+◇ Test relationTreeReferenceMergeKeepsAllThreeEvidenceCases() started.
+✔ Test relationTreeReferenceMergeKeepsAllThreeEvidenceCases() passed after 0.001 seconds.
+◇ Test relationTreeFuzzyReferencesExcludeOnlyTheDeclarationRange() started.
+✔ Test relationTreeFuzzyReferencesExcludeOnlyTheDeclarationRange() passed after 0.001 seconds.
+◇ Test relationTreeLocalReferencesDoNotMixSameNamedBindingsAcrossFiles() started.
+✔ Test relationTreeLocalReferencesDoNotMixSameNamedBindingsAcrossFiles() passed after 0.001 seconds.
+◇ Test relationTreeLocalReferencesSeparateDisplayCapFromTrueTotal() started.
+✔ Test relationTreeLocalReferencesSeparateDisplayCapFromTrueTotal() passed after 0.031 seconds.
+◇ Test relationTreeProjectReferenceCountCopyKeepsThreeCompletenessStates() started.
+✔ Test relationTreeProjectReferenceCountCopyKeepsThreeCompletenessStates() passed after 0.016 seconds.
+◇ Test relationTreeCompleteReferenceCountsStayWithinEachSource() started.
+✔ Test relationTreeCompleteReferenceCountsStayWithinEachSource() passed after 0.002 seconds.
+◇ Test relationTreeProjectReferencesReadHistoricalCommitSnapshot() started.
+✔ Test relationTreeProjectReferencesReadHistoricalCommitSnapshot() passed after 0.055 seconds.
+◇ Test relationTreeConsumesExactCallersAsOneLevelRows() started.
+✔ Test relationTreeConsumesExactCallersAsOneLevelRows() passed after 0.029 seconds.
+◇ Test exactCoordinatorRequestsReferencesWithoutTheDeclaration() started.
+✔ Test exactCoordinatorRequestsReferencesWithoutTheDeclaration() passed after 0.017 seconds.
+◇ Test relationTreeExactZeroCopyDistinguishesLimitations() started.
+✔ Test relationTreeExactZeroCopyDistinguishesLimitations() passed after 0.043 seconds.
+◇ Test relationTreeVerifiedBadgesCountExactRowsInAllDirections() started.
+✔ Test relationTreeVerifiedBadgesCountExactRowsInAllDirections() passed after 0.003 seconds.
+◇ Test exactCoordinatorDoesNotCallReferencesWithoutCapability() started.
+✔ Test exactCoordinatorDoesNotCallReferencesWithoutCapability() passed after 0.017 seconds.
+◇ Test exactCoordinatorDiscardsAStaleCallHierarchyResult() started.
+✔ Test exactCoordinatorDiscardsAStaleCallHierarchyResult() passed after 0.025 seconds.
+◇ Test exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare() started.
+✔ Test exactCoordinatorDiscardsCallHierarchyAfterSameGenerationTrustReprepare() passed after 0.045 seconds.
+◇ Test exactCoordinatorDiscardsReferencesAfterProfileSwitch() started.
+✔ Test exactCoordinatorDiscardsReferencesAfterProfileSwitch() passed after 0.038 seconds.
+◇ Test exactCoordinatorDiscardsReferencesAfterSessionReplacement() started.
+✔ Test exactCoordinatorDiscardsReferencesAfterSessionReplacement() passed after 0.043 seconds.
+◇ Test exactCoordinatorDiscardsReferencesAfterSnapshotSwitch() started.
+✔ Test exactCoordinatorDiscardsReferencesAfterSnapshotSwitch() passed after 0.045 seconds.
+◇ Test exactCoordinatorDiscardsReferencesAfterTrustSwitch() started.
+✔ Test exactCoordinatorDiscardsReferencesAfterTrustSwitch() passed after 0.043 seconds.
+◇ Test relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() started.
+✔ Test relationTreeDeduplicatesExactAndHeuristicAndCyclesCallSites() passed after 0.016 seconds.
+◇ Test relationTreeExactMergePreservesPublishedRowOrderAndIdentity() started.
+✔ Test relationTreeExactMergePreservesPublishedRowOrderAndIdentity() passed after 0.026 seconds.
+◇ Test relationTreeExactMoveFromPossibleGroupToTopLevelDoesNotRetainStaleGroupRow() started.
+✔ Test relationTreeExactMoveFromPossibleGroupToTopLevelDoesNotRetainStaleGroupRow() passed after 0.030 seconds.
+◇ Test relationTreePreservesCorrectedGroupChildIdentityAfterGroupMigration() started.
+✔ Test relationTreePreservesCorrectedGroupChildIdentityAfterGroupMigration() passed after 0.026 seconds.
+◇ Test relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections() started.
+✔ Test relationTreeUpgradesRowsInPlaceWithoutCertaintyGroupsInAllDirections() passed after 0.073 seconds.
+◇ Test relationTreeDoesNotExposeExactRelationSublayers() started.
+✔ Test relationTreeDoesNotExposeExactRelationSublayers() passed after 0.018 seconds.
+◇ Test relationTreeUsesFiveDistinctExactEmptyStates() started.
+✔ Test relationTreeUsesFiveDistinctExactEmptyStates() passed after 0.070 seconds.
+◇ Test relationTreePythonImplementationsShowExactUnsupportedState() started.
+✔ Test relationTreePythonImplementationsShowExactUnsupportedState() passed after 0.016 seconds.
+◇ Test relationTreeUsesFourDistinctExactReferenceStates() started.
+✔ Test relationTreeUsesFourDistinctExactReferenceStates() passed after 0.040 seconds.
+◇ Test relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() started.
+✔ Test relationTreeKeepsFuzzyReferencesWhenExactIsUnsupported() passed after 0.017 seconds.
+◇ Test relationTreeShowsExactOnlyImplementations() started.
+✔ Test relationTreeShowsExactOnlyImplementations() passed after 0.015 seconds.
+◇ Test relationTreeUsesBadgesAndOnePossibleDisclosure() started.
+✔ Test relationTreeUsesBadgesAndOnePossibleDisclosure() passed after 0.019 seconds.
+◇ Test relationSurfaceDoesNotExposeProbableText() started.
+✔ Test relationSurfaceDoesNotExposeProbableText() passed after 0.001 seconds.
+◇ Test relationRowsExposeVerifiedAndInferredBadges() started.
+✔ Test relationRowsExposeVerifiedAndInferredBadges() passed after 0.001 seconds.
+◇ Test relationVerifiedBadgeOnlyMarksExactRows() started.
+✔ Test relationVerifiedBadgeOnlyMarksExactRows() passed after 0.001 seconds.
+◇ Test relationPossibleMatchesUseOneCollapsedDisclosure() started.
+✔ Test relationPossibleMatchesUseOneCollapsedDisclosure() passed after 0.001 seconds.
+◇ Test relationTreeLabelsNameOnlyCallsHonestly() started.
+✔ Test relationTreeLabelsNameOnlyCallsHonestly() passed after 0.016 seconds.
+◇ Test relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() started.
+✔ Test relationTreeDefaultLoadDoesNotPromoteIndividualHeuristicEdges() passed after 0.015 seconds.
+◇ Test relationTreeValidatesLargePossibleResultsInBoundedStableBatches() started.
+large possible validation requests=215 batches=7 batchSize=32 firstBatchMs=14.956625
+✔ Test relationTreeValidatesLargePossibleResultsInBoundedStableBatches() passed after 0.103 seconds.
+◇ Test relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles() started.
+✔ Test relationTreeReconcilesOneDefinitionPerCallSiteWithThreeWayRoles() passed after 0.031 seconds.
+◇ Test relationTargetComparisonIsConservative() started.
+✔ Test relationTargetComparisonIsConservative() passed after 0.001 seconds.
+◇ Test relationTreeEmptyDefinitionIsNeutralForEveryCandidate() started.
+✔ Test relationTreeEmptyDefinitionIsNeutralForEveryCandidate() passed after 0.027 seconds.
+◇ Test relationTreeShowsEveryDistinctProviderTargetForAConflict() started.
+✔ Test relationTreeShowsEveryDistinctProviderTargetForAConflict() passed after 0.027 seconds.
+◇ Test relationTreeSwitchStopsQueuedPossibleValidationBeforeProviderEntry() started.
+cancelled possible batch attempts=32 actualAtSwitch=1 actualAfterDrain=1
+✔ Test relationTreeSwitchStopsQueuedPossibleValidationBeforeProviderEntry() passed after 0.099 seconds.
+◇ Test relationRootResetsContextExactUpgradeBatchBeforeExactResolverEnters() started.
+✔ Test relationRootResetsContextExactUpgradeBatchBeforeExactResolverEnters() passed after 0.029 seconds.
+◇ Test relationTreeStartsHeuristicAndRootExactQueriesConcurrently() started.
+✔ Test relationTreeStartsHeuristicAndRootExactQueriesConcurrently() passed after 0.029 seconds.
+◇ Test relationAsyncGateLatchesReleaseBeforeWait() started.
+✔ Test relationAsyncGateLatchesReleaseBeforeWait() passed after 0.001 seconds.
+◇ Test relationTreeLoadReturnsWhenGenerationChangesWithBothQueriesPending() started.
+✔ Test relationTreeLoadReturnsWhenGenerationChangesWithBothQueriesPending() passed after 0.017 seconds.
+◇ Test relationTreeKeepsFastRowsAndReturnsAtTheQueryDeadline() started.
+✔ Test relationTreeKeepsFastRowsAndReturnsAtTheQueryDeadline() passed after 0.053 seconds.
+◇ Test relationTreePublishesHeuristicRowsBeforeRootExactFinishes() started.
+✔ Test relationTreePublishesHeuristicRowsBeforeRootExactFinishes() passed after 0.014 seconds.
+◇ Test relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() started.
+✔ Test relationTreeFreezesExactFirstRowOrderWhenHeuristicArrives() passed after 0.031 seconds.
+◇ Test relationTreeDefaultLoadDoesNotDemoteNameOnlyCallsThroughDefinitions() started.
+✔ Test relationTreeDefaultLoadDoesNotDemoteNameOnlyCallsThroughDefinitions() passed after 0.014 seconds.
+◇ Test dependencyPathDoesNotTriggerDefaultRelationPromotion() started.
+✔ Test dependencyPathDoesNotTriggerDefaultRelationPromotion() passed after 0.019 seconds.
+◇ Test relationTreeShowsExternalCallsAsUnresolved() started.
+✔ Test relationTreeShowsExternalCallsAsUnresolved() passed after 0.015 seconds.
+◇ Test relationTreeOmitsEmptyExternalCallsGroupForSignatureOnlyTrait() started.
+✔ Test relationTreeOmitsEmptyExternalCallsGroupForSignatureOnlyTrait() passed after 0.017 seconds.
+◇ Test selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() started.
+✔ Test selectedRelationSymbolDrivesRootAndUnresolvedFallsBack() passed after 0.051 seconds.
+◇ Test clearingRelationSelectionDoesNotNotifyContext() started.
+✔ Test clearingRelationSelectionDoesNotNotifyContext() passed after 0.016 seconds.
+◇ Test relationTreeShowsAnErrorRowWhenLoadingFails() started.
+✔ Test relationTreeShowsAnErrorRowWhenLoadingFails() passed after 0.015 seconds.
+◇ Test relationTreeShowsIndexBuildingPlaceholder() started.
+✔ Test relationTreeShowsIndexBuildingPlaceholder() passed after 0.001 seconds.
+◇ Test relationTreeCallersStayOneLevelWithoutCycleExpansion() started.
+✔ Test relationTreeCallersStayOneLevelWithoutCycleExpansion() passed after 0.014 seconds.
+◇ Test relationTreeLoadsTraitImplementationsAndMethodOverrides() started.
+✔ Test relationTreeLoadsTraitImplementationsAndMethodOverrides() passed after 0.030 seconds.
+◇ Test relationTreeExpandIsIdempotentWhileLoading() started.
+✔ Test relationTreeExpandIsIdempotentWhileLoading() passed after 0.030 seconds.
+◇ Test relationTreeDiscardsLateResultAfterChangingRoot() started.
+✔ Test relationTreeDiscardsLateResultAfterChangingRoot() passed after 0.028 seconds.
+◇ Test relationTreeSwitchingRootsStopsStaleExactRequestsBeforeProviderEntry() started.
+relation batch requests switches=3 attempts=4 actual=2 maxConcurrent=2
+✔ Test relationTreeSwitchingRootsStopsStaleExactRequestsBeforeProviderEntry() passed after 0.067 seconds.
+◇ Test relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() started.
+✔ Test relationTreeDiscardsStaleProjectReferencesAfterGenerationChange() passed after 0.015 seconds.
+◇ Test relationTreeDiscardsStaleProjectReferencesAfterProfileChangeAtSameGeneration() started.
+✔ Test relationTreeDiscardsStaleProjectReferencesAfterProfileChangeAtSameGeneration() passed after 0.013 seconds.
+◇ Test relationTreeCapsEachExpansionAtFiveHundredEdges() started.
+✔ Test relationTreeCapsEachExpansionAtFiveHundredEdges() passed after 0.014 seconds.
+◇ Test m10AmbiguityTrapKeepsNameOnlyTruncatedCandidateInferred() started.
+✔ Test m10AmbiguityTrapKeepsNameOnlyTruncatedCandidateInferred() passed after 0.017 seconds.
+◇ Test m10NarrativeKeepsBothCompletenessLevelsIndependent() started.
+✔ Test m10NarrativeKeepsBothCompletenessLevelsIndependent() passed after 0.002 seconds.
+◇ Test m10NarrativeDistinguishesConflictNonCorroborationAndInconclusive() started.
+✔ Test m10NarrativeDistinguishesConflictNonCorroborationAndInconclusive() passed after 0.001 seconds.
+◇ Test m10NarrativeEnglishSnapshotKeepsNameOnlyCompletenessCaveat() started.
+✔ Test m10NarrativeEnglishSnapshotKeepsNameOnlyCompletenessCaveat() passed after 0.001 seconds.
+◇ Test relationTreeCapsExactRelationsAndReportsTheirTrueTotal() started.
+✔ Test relationTreeCapsExactRelationsAndReportsTheirTrueTotal() passed after 0.016 seconds.
+◇ Test relationTreeKeepsEvidenceInternalAndSelectsOneLevelRowsByIdentity() started.
+✔ Test relationTreeKeepsEvidenceInternalAndSelectsOneLevelRowsByIdentity() passed after 0.013 seconds.
+◇ Test relationGroupsKeepIdentityWhenDisplayTitlesChange() started.
+✔ Test relationGroupsKeepIdentityWhenDisplayTitlesChange() passed after 0.033 seconds.
+◇ Test searchPanelDebouncesRapidQueries() started.
+✔ Test searchPanelDebouncesRapidQueries() passed after 0.183 seconds.
+◇ Test searchPanelDiscardsLateQueryResults() started.
+✔ Test searchPanelDiscardsLateQueryResults() passed after 0.356 seconds.
+◇ Test searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() started.
+✔ Test searchPanelKeepsSelectedMatchWhenEarlierGroupArrives() passed after 0.209 seconds.
+◇ Test searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() started.
+✔ Test searchPanelKeepsSelectedMatchWhenItsGroupGetsAnEarlierMatch() passed after 0.195 seconds.
+◇ Test searchPanelCapsDisplayedMatchesAndReportsTrueTotal() started.
+M5_SEARCH_CAP {"displayedMatches":2000,"displayedRows":2001,"totalMatches":5001}
+✔ Test searchPanelCapsDisplayedMatchesAndReportsTrueTotal() passed after 0.190 seconds.
+◇ Test searchPanelDoesNotBuildGroupsPastDisplayLimit() started.
+✔ Test searchPanelDoesNotBuildGroupsPastDisplayLimit() passed after 0.199 seconds.
+◇ Test searchPanelDoesNotTruncateBelowDisplayLimit() started.
+✔ Test searchPanelDoesNotTruncateBelowDisplayLimit() passed after 0.191 seconds.
+◇ Test searchPanelDoesNotTruncateAtDisplayLimit() started.
+✔ Test searchPanelDoesNotTruncateAtDisplayLimit() passed after 0.195 seconds.
+◇ Test searchPanelTruncatesAboveDisplayLimit() started.
+✔ Test searchPanelTruncatesAboveDisplayLimit() passed after 0.186 seconds.
+◇ Test searchPanelDistinguishesUpstreamAndDisplayTruncation() started.
+✔ Test searchPanelDistinguishesUpstreamAndDisplayTruncation() passed after 0.365 seconds.
+◇ Test searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() started.
+✔ Test searchPanelKeepsSelectionWithinDisplayedMatchesAtCap() passed after 0.215 seconds.
+◇ Test searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() started.
+✔ Test searchPanelClampsWhenPreservedMatchIsAbsentAfterRebuild() passed after 0.366 seconds.
+◇ Test searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() started.
+✔ Test searchPanelOrdersGroupsWrapsSelectionAndOpensMatch() passed after 0.185 seconds.
+◇ Test searchPanelShowsEmptyAndIndexingPlaceholders() started.
+✔ Test searchPanelShowsEmptyAndIndexingPlaceholders() passed after 0.032 seconds.
+◇ Test searchPanelAggregatesAllWorkspaceSessionsAndSortsPathsStably() started.
+✔ Test searchPanelAggregatesAllWorkspaceSessionsAndSortsPathsStably() passed after 0.209 seconds.
+◇ Test searchPanelWorkspaceDisplayLimitCountsAllSessionsAndWaitsForAllFinals() started.
+✔ Test searchPanelWorkspaceDisplayLimitCountsAllSessionsAndWaitsForAllFinals() passed after 0.212 seconds.
+◇ Test searchPanelWorkspaceAnyStreamErrorFailsOverallSearch() started.
+✔ Test searchPanelWorkspaceAnyStreamErrorFailsOverallSearch() passed after 0.199 seconds.
+◇ Test searchPanelWorkspaceNewQueryDropsAllOldStreams() started.
+✔ Test searchPanelWorkspaceNewQueryDropsAllOldStreams() passed after 0.404 seconds.
+◇ Test searchWorkspaceNewQueryResetsOldResultsAndPlaceholder() started.
+✔ Test searchWorkspaceNewQueryResetsOldResultsAndPlaceholder() passed after 0.351 seconds.
+◇ Test sessionCodecWritesV2LanguageArrayAndDecodesV1Singleton() started.
+✔ Test sessionCodecWritesV2LanguageArrayAndDecodesV1Singleton() passed after 0.001 seconds.
+◇ Test sessionCodecRoundTripsTypeScriptRawValueTwo() started.
+✔ Test sessionCodecRoundTripsTypeScriptRawValueTwo() passed after 0.001 seconds.
+◇ Test sessionCodecRoundTripsCanonicalLanguageArrayWithSortedKeys() started.
+✔ Test sessionCodecRoundTripsCanonicalLanguageArrayWithSortedKeys() passed after 0.001 seconds.
+◇ Test sessionCodecRejectsV2InvalidLanguageArraysAndMixedV1V2Fields() started.
+✔ Test sessionCodecRejectsV2InvalidLanguageArraysAndMixedV1V2Fields() passed after 0.001 seconds.
+◇ Test sessionCodecNeverAddsLanguageOrProfileToTabJSON() started.
+✔ Test sessionCodecNeverAddsLanguageOrProfileToTabJSON() passed after 0.001 seconds.
+◇ Test sessionCodecRoundTripsTaggedTabsAndEveryFrozenInspectorField() started.
+✔ Test sessionCodecRoundTripsTaggedTabsAndEveryFrozenInspectorField() passed after 0.003 seconds.
+◇ Test sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() started.
+✔ Test sessionCodecRejectsUnknownVersionsCountsSizesAndProjectPathEscape() passed after 0.001 seconds.
+◇ Test sessionCodecAppliesDependencyPredicateToFileTabsButKeepsFrozenExcerpts() started.
+✔ Test sessionCodecAppliesDependencyPredicateToFileTabsButKeepsFrozenExcerpts() passed after 0.001 seconds.
+◇ Test sessionCodecRoundTripsNavigationHistoryAndTrail() started.
+✔ Test sessionCodecRoundTripsNavigationHistoryAndTrail() passed after 0.001 seconds.
+◇ Test sessionCodecSanitizesInvalidTrailEdgesAndHistoryReferences() started.
+✔ Test sessionCodecSanitizesInvalidTrailEdgesAndHistoryReferences() passed after 0.001 seconds.
+◇ Test sessionCodecClampsHistoryCursorAndCapsTrailNodes() started.
+✔ Test sessionCodecClampsHistoryCursorAndCapsTrailNodes() passed after 0.016 seconds.
+◇ Test sessionCodecClampsExtremeCursorBeforeTrimmingHistory() started.
+✔ Test sessionCodecClampsExtremeCursorBeforeTrimmingHistory() passed after 0.001 seconds.
+◇ Test sessionCodecRoundTripsPreviewFlagAndActivationRank() started.
+✔ Test sessionCodecRoundTripsPreviewFlagAndActivationRank() passed after 0.001 seconds.
+◇ Test sessionCodecDecodesV2WithoutPreviewOrRankAsPinnedInSavedOrder() started.
+✔ Test sessionCodecDecodesV2WithoutPreviewOrRankAsPinnedInSavedOrder() passed after 0.001 seconds.
+◇ Test unsupportedSavedJavaScriptDoesNotMutateProjectState() started.
+✔ Test unsupportedSavedJavaScriptDoesNotMutateProjectState() passed after 0.001 seconds.
+◇ Test savedPythonSessionRestoresWithPythonLanguageAndTree() started.
+✔ Test savedPythonSessionRestoresWithPythonLanguageAndTree() passed after 0.003 seconds.
+◇ Test savedReadmeSessionRestoresAsActiveNonSourceTabWithoutDocument() started.
+✔ Test savedReadmeSessionRestoresAsActiveNonSourceTabWithoutDocument() passed after 0.003 seconds.
+◇ Test savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() started.
+✔ Test savedTypeScriptSessionRestoresWithTypeScriptLanguageAndTsTsxTree() passed after 0.003 seconds.
+◇ Test sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() started.
+✔ Test sessionRestoreMapsOldOrdinalsAndResolvesBothPathKindsAndAnchors() passed after 0.003 seconds.
+◇ Test sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() started.
+✔ Test sessionRestoreFallsBackToFirstSuccessfulEntryWhenSavedActiveIsMissing() passed after 0.002 seconds.
+◇ Test sessionLoadProblemsAreClassifiedAndPreserveOrQuarantineData() started.
+✔ Test sessionLoadProblemsAreClassifiedAndPreserveOrQuarantineData() passed after 0.003 seconds.
+◇ Test missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() started.
+✔ Test missingSavedRevisionRestoresTabsAgainstTheCurrentWorktree() passed after 0.002 seconds.
+◇ Test openingAnotherProjectCancelsTheOlderAutomaticRestore() started.
+✔ Test openingAnotherProjectCancelsTheOlderAutomaticRestore() passed after 0.029 seconds.
+◇ Test mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() started.
+✔ Test mixedFullReadyCheckpointSavesLanguagesRevisionAndActiveCrossLanguageTabs() passed after 0.300 seconds.
+◇ Test mixedRestoreOpensFullSetAndRestoresEachTabByMode() started.
+✔ Test mixedRestoreOpensFullSetAndRestoresEachTabByMode() passed after 0.026 seconds.
+◇ Test mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() started.
+✔ Test mixedRestoreSkipsOnlyExtensionlessDependencyAndKeepsOtherTabs() passed after 0.024 seconds.
+◇ Test midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() started.
+✔ Test midRestoreCheckpointWriteLeavesLastValidSnapshotIntact() passed after 2.141 seconds.
+◇ Test syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() started.
+✔ Test syncSaveDuringBlockedRestoreIndexingKeepsDiskSnapshotIntact() passed after 0.014 seconds.
+◇ Test sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() started.
+✔ Test sessionCheckpointWriteFailureSurfacesNoticeAndSuccessClearsIt() passed after 0.017 seconds.
+◇ Test continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() started.
+✔ Test continuouslyRescheduledCheckpointCommitsWithinDirtyDeadline() passed after 3.025 seconds.
+◇ Test perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() started.
+✔ Test perProjectSnapshotsRestoreIndependentlyAcrossProjectSwitches() passed after 0.049 seconds.
+◇ Test legacyV1SessionMigratesToPerProjectStoreOnce() started.
+✔ Test legacyV1SessionMigratesToPerProjectStoreOnce() passed after 0.010 seconds.
+◇ Test futureVersionPerProjectSnapshotIsPreservedAndNotOverwritten() started.
+✔ Test futureVersionPerProjectSnapshotIsPreservedAndNotOverwritten() passed after 0.019 seconds.
+◇ Test clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() started.
+✔ Test clearingTheCurrentProjectSessionDropsStateAndWritesEmptySnapshot() passed after 0.020 seconds.
+◇ Test sessionRestoreReinstatesPreviewFlagAndLRUEvictionOrder() started.
+✔ Test sessionRestoreReinstatesPreviewFlagAndLRUEvictionOrder() passed after 0.004 seconds.
+◇ Test sessionRestoreReportsWhenTheSavedActiveTabIsUnavailable() started.
+✔ Test sessionRestoreReportsWhenTheSavedActiveTabIsUnavailable() passed after 0.003 seconds.
+◇ Test sessionCheckpointPersistsAndRestoresNavigationHistoryAndTrail() started.
+✔ Test sessionCheckpointPersistsAndRestoresNavigationHistoryAndTrail() passed after 0.021 seconds.
+◇ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() started.
+✔ Test failedReplayLeavesHistoryCursorAndActiveTrailUnchanged() passed after 0.198 seconds.
+◇ Test sessionRestoreOldTaskCannotReleaseNewTaskProtection() started.
+✔ Test sessionRestoreOldTaskCannotReleaseNewTaskProtection() passed after 0.037 seconds.
+◇ Test sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() started.
+✔ Test sessionRestoreCancelledTaskPreservesSnapshotUntilNextOpen() passed after 0.032 seconds.
+◇ Test sessionReadFailurePreservesFileAndCanRetry() started.
+✔ Test sessionReadFailurePreservesFileAndCanRetry() passed after 0.019 seconds.
+◇ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() started.
+✔ Test sessionOfflineLegacySurvivesOtherProjectAndMigratesOnReturn() passed after 0.019 seconds.
+◇ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+◇ Test case passing 1 argument futureSchema → false to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+◇ Test case passing 1 argument futureSchema → true to sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) started.
+✔ Test sessionUnreadableLegacyCannotBeShadowedByFreshCheckpoint(futureSchema:) with 2 test cases passed after 0.047 seconds.
+◇ Test snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() started.
+✔ Test snapshotSwitchPublishesFirstPaintCachedAndFullInOrder() passed after 0.054 seconds.
+◇ Test mixedWorkspaceOpenCapturesOnceAndInstallsSharedSessions() started.
+✔ Test mixedWorkspaceOpenCapturesOnceAndInstallsSharedSessions() passed after 0.027 seconds.
+◇ Test mixedOpenDoesNotPublishUntilAllFullSessionsComplete() started.
+✔ Test mixedOpenDoesNotPublishUntilAllFullSessionsComplete() passed after 0.036 seconds.
+◇ Test mixedCommitToWorktreeKeepsLanguagesSnapshotAndRoute() started.
+✔ Test mixedCommitToWorktreeKeepsLanguagesSnapshotAndRoute() passed after 0.050 seconds.
+◇ Test mixedZeroSourceRevisionRetainsEmptyTypeScriptSession() started.
+✔ Test mixedZeroSourceRevisionRetainsEmptyTypeScriptSession() passed after 0.041 seconds.
+◇ Test staleMixedOpenCompletionIsDiscarded() started.
+✔ Test staleMixedOpenCompletionIsDiscarded() passed after 0.048 seconds.
+◇ Test wrongLanguageMixedFullFailsAndClearsSessions() started.
+✔ Test wrongLanguageMixedFullFailsAndClearsSessions() passed after 0.021 seconds.
+◇ Test mixedOpenDoesNotExposeSessionsBeforeCachedArrayIsReady() started.
+✔ Test mixedOpenDoesNotExposeSessionsBeforeCachedArrayIsReady() passed after 0.033 seconds.
+◇ Test pythonSnapshotFirstPaintKeepsForeignFilesVisibleAndSnapshotReadable() started.
+✔ Test pythonSnapshotFirstPaintKeepsForeignFilesVisibleAndSnapshotReadable() passed after 0.025 seconds.
+◇ Test snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() started.
+✔ Test snapshotFullSessionLanguageMismatchFailsBeforeFullPublication() passed after 0.042 seconds.
+◇ Test delayedSessionCheckpointNeverMixesSnapshotGenerations() started.
+✔ Test delayedSessionCheckpointNeverMixesSnapshotGenerations() passed after 0.415 seconds.
+◇ Test sessionRestoreInstallsRevisionBeforeActivatingFrozenReadingSet() started.
+✔ Test sessionRestoreInstallsRevisionBeforeActivatingFrozenReadingSet() passed after 0.073 seconds.
+◇ Test restoredTrailNodeReplaysByItsSavedRevisionAndWorktreeRecordSwitchesBack() started.
+✔ Test restoredTrailNodeReplaysByItsSavedRevisionAndWorktreeRecordSwitchesBack() passed after 0.090 seconds.
+◇ Test replayingAnUnavailableSavedRevisionKeepsTheCurrentView() started.
+✔ Test replayingAnUnavailableSavedRevisionKeepsTheCurrentView() passed after 0.034 seconds.
+◇ Test switchingAgainCancelsAndDiscardsTheOlderSnapshot() started.
+✔ Test switchingAgainCancelsAndDiscardsTheOlderSnapshot() passed after 0.041 seconds.
+◇ Test snapshotSwitchInvalidatesAnOlderContextRequest() started.
+✔ Test snapshotSwitchInvalidatesAnOlderContextRequest() passed after 0.026 seconds.
+◇ Test commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() started.
+✔ Test commitDocumentSourceReadsBlobWhileWorktreeReadsDisk() passed after 0.095 seconds.
+◇ Test passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() started.
+✔ Test passiveHistoryReplayRestoresCurrentSnapshotNonSourceFile() passed after 0.028 seconds.
+◇ Test appModelResolvesAgainstTheSelectedCommitSession() started.
+✔ Test appModelResolvesAgainstTheSelectedCommitSession() passed after 0.110 seconds.
+◇ Test snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() started.
+✔ Test snapshotSwitchAndFileOpenHaveBrowserHistorySemantics() passed after 0.111 seconds.
+◇ Test oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() started.
+✔ Test oldWorktreeReplayUsesCurrentWorktreeAndSaysSo() passed after 0.043 seconds.
+◇ Test snapshotSwitchDoesNotPushWithoutASelectedFile() started.
+✔ Test snapshotSwitchDoesNotPushWithoutASelectedFile() passed after 0.027 seconds.
+◇ Test snapshotSwitchClearsASelectionMissingFromTheTarget() started.
+✔ Test snapshotSwitchClearsASelectionMissingFromTheTarget() passed after 0.022 seconds.
+◇ Test crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() started.
+✔ Test crossSnapshotReplayFallsBackToLineAndColumnAfterFileShrinks() passed after 0.044 seconds.
+◇ Test crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() started.
+✔ Test crossSnapshotReplayFallsBackToSymbolAnchorWhenCoordinatesAreInvalid() passed after 0.039 seconds.
+◇ Test sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() started.
+✔ Test sameSnapshotReplayDoesNotStartAnotherSnapshotSwitch() passed after 0.029 seconds.
+◇ Test compareModelUsesTheExplicitModeForDiffAndFunctionChanges() started.
+✔ Test compareModelUsesTheExplicitModeForDiffAndFunctionChanges() passed after 0.011 seconds.
+◇ Test compareModelDoesNotPublishAnOlderModeCompletion() started.
+✔ Test compareModelDoesNotPublishAnOlderModeCompletion() passed after 0.071 seconds.
+◇ Test mixedCompareUsesSelectedFileModeAndDiscardsStaleDiffAfterLanguageRoute() started.
+✔ Test mixedCompareUsesSelectedFileModeAndDiscardsStaleDiffAfterLanguageRoute() passed after 0.026 seconds.
+◇ Test switchingMainSnapshotClearsAndReleasesCompareSnapshot() started.
+✔ Test switchingMainSnapshotClearsAndReleasesCompareSnapshot() passed after 0.012 seconds.
+◇ Test refreshIndexRepublishesDriftedWorktreeAndClearsStaleState() started.
+✔ Test refreshIndexRepublishesDriftedWorktreeAndClearsStaleState() passed after 0.106 seconds.
+◇ Test refreshIndexPreservesTabsTrailHistoryAndBookmarks() started.
+✔ Test refreshIndexPreservesTabsTrailHistoryAndBookmarks() passed after 0.096 seconds.
+◇ Test refreshIndexFailureRestoresThePreviousIndexAndAllowsRetry() started.
+✔ Test refreshIndexFailureRestoresThePreviousIndexAndAllowsRetry() passed after 0.080 seconds.
+◇ Test refreshInProgressSuppressesSessionCheckpoints() started.
+✔ Test refreshInProgressSuppressesSessionCheckpoints() passed after 0.750 seconds.
+◇ Test refreshIndexWorksForPlainNonGitDirectories() started.
+✔ Test refreshIndexWorksForPlainNonGitDirectories() passed after 0.033 seconds.
+◇ Test refreshYieldsToAProjectSwitchMidFlight() started.
+✔ Test refreshYieldsToAProjectSwitchMidFlight() passed after 0.131 seconds.
+◇ Test openingASecondProjectCancelsTheInFlightMultiLanguageOpen() started.
+✔ Test openingASecondProjectCancelsTheInFlightMultiLanguageOpen() passed after 0.122 seconds.
+◇ Test singleLanguageOpenSharesTheWorkspaceResetBoundaries() started.
+✔ Test singleLanguageOpenSharesTheWorkspaceResetBoundaries() passed after 0.018 seconds.
+◇ Test restoredHistoryLoadsFileOnlyPresentInCommit() started.
+✔ Test restoredHistoryLoadsFileOnlyPresentInCommit() passed after 0.098 seconds.
+◇ Test historyReadFailureKeepsCursorVersionAndViewport(crossVersion:) started.
+◇ Test case passing 1 argument crossVersion → false to historyReadFailureKeepsCursorVersionAndViewport(crossVersion:) started.
+◇ Test case passing 1 argument crossVersion → true to historyReadFailureKeepsCursorVersionAndViewport(crossVersion:) started.
+✔ Test historyReadFailureKeepsCursorVersionAndViewport(crossVersion:) with 2 test cases passed after 0.179 seconds.
+◇ Test tabStripFocusesDuplicatesAndPreservesAnchors() started.
+✔ Test tabStripFocusesDuplicatesAndPreservesAnchors() passed after 0.001 seconds.
+◇ Test tabStripEvictsTheLeastRecentlyUsedTabAtItsLimit() started.
+✔ Test tabStripEvictsTheLeastRecentlyUsedTabAtItsLimit() passed after 0.001 seconds.
+◇ Test restoredTabBatchReinstatesPreviewFlagsAndLRUEvictionOrder() started.
+✔ Test restoredTabBatchReinstatesPreviewFlagsAndLRUEvictionOrder() passed after 0.001 seconds.
+◇ Test restoredTabBatchOutsideABatchInstallsNothing() started.
+✔ Test restoredTabBatchOutsideABatchInstallsNothing() passed after 0.001 seconds.
+◇ Test switchingTabsReleasesTheInactiveReaderDocument() started.
+✔ Test switchingTabsReleasesTheInactiveReaderDocument() passed after 0.001 seconds.
+◇ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() started.
+✔ Test readingSetsShareFileTabLifecycleWithoutPretendingToBeFiles() passed after 0.001 seconds.
+◇ Test appModelClearsFileOnlyStateForAReadingSetAndRestoresItForAFile() started.
+✔ Test appModelClearsFileOnlyStateForAReadingSetAndRestoresItForAFile() passed after 0.001 seconds.
+✔ Test run with 383 tests in 0 suites passed after 25.990 seconds.

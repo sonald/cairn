@@ -20,6 +20,10 @@
 
 基线沙盒曾因屏幕/弹窗权限产生 4 个 issue，同一产物在桌面权限下全部复核通过。另修复了 Git 测试硬编码工作仓库分支为 main 的问题，改为与实际 Git refs 比较；详见[环境](evidence/reader-ligatures/environment.md)。
 
+## 桌面续验与修复
+
+解锁后的真实操作覆盖Settings三态、键盘菜单、Reading Set拖选及重排、Context、对比、新窗口和纯文本预览。发现并修复字体菜单重名与主Reader鼠标拖选被点击处理清空两项问题，提交 `9eca0f9`。**修复后完整CI再次通过，共1,032项（main1,027 + bookmark2 + panel2 + mouse1），应用自测及fold门槛通过。** 见[续验记录](evidence/reader-ligatures/desktop-20260923.md)与[新CI日志](evidence/reader-ligatures/desktop-fixes-ci.log)。最终App已打包，但复验时Mac再次锁定，因此不能宣称修复后的可见鼠标与菜单流程已通过。
+
 ## 产品门禁补充
 
 完整产品门禁首次执行 18 个通道：15 通过、3 失败、0 挂起，因失败停止后续阶段，**整套产品门禁未通过**。见[原始日志](evidence/reader-ligatures/product-gates-first.log)。随后只复测失败通道，没有将单独复测冒充完整门禁重跑：
@@ -93,7 +97,7 @@ F1 峰值约 7 GiB，是该自测进程的指标，不能推导普通文件或�
 
 ## 尚需处理
 
-1. **解锁 Mac 后完成原生鼠标与 Settings/多窗口操作。** Computer Use 返回 Mac locked，已请求手动解锁。不能用离屏绘制和 AX 单测替代它。
+1. **再次解锁后复验最终构建。** 首轮真实桌面流程已执行，修复版1032项完整CI通过；最终CUA鼠标与菜单复验前Mac再次锁定。见[桌面续验](evidence/reader-ligatures/desktop-20260923.md)。
 2. **Tabs 内存门禁。** 旧产物同样超出100MiB，但没有精确基线提交对照；需独立解决图形内存问题后重跑完整产品门禁。
 3. **F1 性能范围决策。** 已提交保留原门槛继续专项优化或接受明确已知限制的选择，尚未收到答复；默认保留未通过状态。没有未经同意放宽门槛，也未将 goal 标记完成。
 

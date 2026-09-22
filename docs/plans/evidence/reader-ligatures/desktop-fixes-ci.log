@@ -1,0 +1,294 @@
+PASS: CodeInsightApp: 544 bilingual keys
+PASS: CodeInsightAppModel: 220 bilingual keys
+PASS: CodeInsightReaderUI: 29 bilingual keys
+PASS: 793 bilingual keys, placeholders and plural rules
+Building for debugging...
+[Computing dependencies]
+Build complete! (0.57秒)
+PASS: batch total=1027 (.build/ci-swift-test.log)
+PASS: batch total=2 (.build/ci-swift-test-isolated.log)
+PASS: batch total=2 (.build/ci-swift-test-panels.log)
+PASS: batch total=1 (.build/ci-swift-test-mouse.log)
+PASS: swift test total=1032 (main=1027 isolated=2 panels=2 mouse=1)
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"profileTitle":"Rust · exact_fixture · default · Safe","profileVisible":true,"readerFile":null,"step":"initial-status","variant":"fake"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":364.65412500000002,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":111.02612499999999,"relationFirstActionableTitle":"relation_root"},"coldFirstActionableSelectable":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"instrumentation-only; not real rust-analyzer","pinned":false,"readerFile":"lib.rs","sameSession":true,"step":"relation-timing","thresholdBasis":"structural-only; real threshold pending host measurement","variant":"delayed-exact-fake","warm":{"relationAllResultsMS":316.98162500000001,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":52.046916000000003,"relationFirstActionableTitle":"relation_root"},"warmFirstActionableSelectable":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyFirstAnswerMS":72.656415999999993,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"fake"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","exactUpgradeMS":338.04141600000003,"pinned":false,"readerFile":"main.rs","step":"exact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextReadyMS":599.86149999999998,"contextSummary":"src\/lib.rs:1:8","contextVisibleDuringSwitch":false,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"fakePrepareFeatures":["defaultFeatures","allFeatures"],"featurePrepared":true,"fuzzyAfterSwitch":true,"menuActionTriggered":true,"oldGenerationRelationResultReturned":true,"oldGenerationRequestInFlight":true,"oldGenerationResultDiscarded":true,"oldGenerationResultReturned":true,"pinned":false,"profileButtonFrame":"{{-3, -2}, {194, 40}}","profileButtonVisibleWithGeometry":true,"profileContainerBounds":"{{0, 0}, {188, 38}}","profileTitle":"Rust · exact_fixture · all · Safe","readerFile":"lib.rs","relationActiveBeforeSwitch":true,"relationRestoredAfterSwitch":true,"step":"feature-switch","switchedExactVisible":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextRestored":true,"contextSummary":"src\/lib.rs:1:8","direction":"references","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expectedUseOffset":603,"groupFrame":"{{0, 44}, {359, 44}}","groupTitle":"","groupVisibleWithGeometry":true,"historyBack":true,"historyRecorded":true,"intersection":"{{0, 44}, {359, 44}}","openedOffset":603,"originOffset":0,"pinned":false,"readerFile":"lib.rs","referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"returnedOffset":0,"segmentFrames":["{{1326, 843}, {78, 24}}","{{1404, 843}, {64, 24}}","{{1468, 843}, {102, 24}}","{{1570, 843}, {102, 24}}"],"selected":true,"step":"local-references","treeVisible":true,"variant":"reader-index","visibleRect":"{{0, 0}, {359, 716.5}}"}
+{"axLabel":"main.rs:4","axProvenanceReachable":true,"axReadOnly":true,"axRole":"AXUnknown","axValue":"direct · heuristic also matched, Verified","axValueSettable":false,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","crossFile":true,"declarationExcluded":true,"direction":"references","edgeCount":3,"edgeFrames":["{{0, 44}, {383, 44}}","{{0, 88}, {383, 44}}","{{0, 154}, {383, 44}}"],"edgeTitles":["main.rs:4","lib.rs:3","main.rs:1:20"],"exactEdgeTitles":["main.rs:4","lib.rs:3"],"exactGroupRowCount":2,"exactGroupTitle":null,"exactRowCount":2,"exactStatusText":"Exact: ready · Safe (limited)","exactVisible":true,"fuzzyEdgeTitles":["main.rs:1:20"],"fuzzyRowCount":1,"geometryReadDidNotForceLayout":true,"groupsDoNotOverlap":true,"groupTitle":"Show 1 possible match","heuristicProvenanceRetained":true,"mixedPresentationHonest":true,"pinned":false,"possibleDisclosure":"Show 1 possible match","readerFile":"lib.rs","resultsAndControlsDoNotOverlap":true,"rowsVisibleWithGeometry":true,"step":"project-references","variant":"exact+fuzzy","visibleRect":"{{0, 0}, {359, 695.5}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","doubleClickDidNotNavigateTwice":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","historyBack":true,"keyboardAXNotificationCorrect":true,"keyboardDownMovedSelection":true,"keyboardEnterOpened":true,"keyboardKeypadEnterOpened":true,"keyboardRestoredRelationFile":true,"keyboardSelectionNavigated":true,"keyboardUpMovedSelection":true,"navigated":true,"navigationExactlyOnce":true,"noFeedback":true,"noReroot":true,"pinned":false,"readerFile":"lib.rs","selected":true,"selectionCount":1,"step":"reference-single-click-navigation","variant":"fuzzy-two-stage"}
+{"candidateCount":1,"contextAndRelationsReadyMS":1188.1838749999999,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallerVisible":true,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"footprintMB":246.89176940917969,"inferredRowFrame":"{{0, 44}, {359, 44}}","pinned":false,"readerFile":"main.rs","relationsVisibleRect":"{{0, 0}, {359, 695.5}}","step":"relations","variant":"fake","verifiedRowFrame":"{{0, 110}, {359, 44}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"relation-exact-implementations","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","firstSummary":"src\/main.rs:1:5","pinned":false,"readerFile":"lib.rs","restored":true,"secondSummary":"src\/lib.rs:3:8","selectedFirst":true,"selectedSecond":true,"step":"relation-follow-context","updatedTwice":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","step":"pinnedExact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","generationIncremented":true,"pinned":true,"readerFile":"lib.rs","rootTitle":"relation_root","selectedEdge":true,"step":"relation-direction-root","variant":"fake"}
+{"candidateCount":1,"contextPreserved":true,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","rootTitle":"answer","selectedEdge":true,"step":"relation-deselect-root","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","navigated":true,"pinned":true,"readerFile":"main.rs","rootTitle":"main","selectedEdge":true,"step":"relation-double-click","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","externalGroupTitle":"","pinned":true,"readerFile":"lib.rs","rootTitle":"Backend","step":"relation-empty-external","variant":"fake"}
+{"bothQueriesFinished":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionRequests":0,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expandedDefinitionValidationRequests":1,"firstBatchUsedNodeReload":true,"heuristicPublishedWhileExactBlocked":true,"pinned":true,"possibleExpanded":true,"possibleRowRetained":true,"readerFile":"lib.rs","step":"relation-first-batch","variant":"blocked-root-exact-fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","inferredPossible":false,"inferredProbable":true,"inferredSubtitle":"direct","pinned":true,"readerFile":"lib.rs","step":"relation-receiver-types","traitObjectPossible":true,"traitObjectSubtitle":"dynamic · name match only","typedPossible":false,"typedStrong":true,"typedSubtitle":"direct","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","full":"No verified references","offline":"Analysis limited: dependencies unavailable offline","partial":"Analysis limited: build scripts disabled; proc macros disabled","pinned":true,"readerFile":"lib.rs","step":"relation-zero-coverage","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Trusted","pinned":false,"profileTitle":"Rust · history · default · Trusted","readerFile":null,"step":"trusted-status","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":null,"step":"trust-revoke","trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"initial-status","variant":"rust-analyzer"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":2253.8564999999999,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":117.65229100000001,"relationFirstActionableTitle":"relation_root"},"coldHeuristicFirstObserved":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"real rust-analyzer","pinned":false,"readerFile":"lib.rs","step":"relation-timing","thresholdBasis":"structural-only; threshold pending host measurement","variant":"rust-analyzer","warm":{"relationAllResultsMS":76.464541999999994,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":61.259582999999999,"relationFirstActionableTitle":"relation_root"},"warmHeuristicFirstObserved":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyVisibleBeforeExact":true,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"rust-analyzer"}
+{"candidateCount":2,"contextExactMS":61.401792,"contextFirstActionableMS":47.781167000000003,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"exact","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"ExactFixtureBackend"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-implementations","textDocumentImplementationReached":true,"variant":"rust-analyzer"}
+{"callHierarchyIncomingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"relation_root"},{"file":"src\/main.rs","symbol":"main"}],"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-incoming-calls","variant":"rust-analyzer"}
+{"callHierarchyOutgoingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"answer"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-outgoing-calls","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":3,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-references","textDocumentReferencesReached":true,"variant":"rust-analyzer"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: deps unavailable (offline) · Safe","noDefinitionRequest":true,"pinned":false,"readerFile":null,"step":"offline-coverage","variant":"rust-analyzer-offline"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · @302e8c7 (materialized) · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"provenanceAttributed":true,"providerRoot":"\/var\/folders\/9k\/7j3z072513z5hkf_xgcxzdzm0000gn\/T\/CodeInsightExactHistorySelfTest-33280512-542C-4EA2-A5B9-F6C6197F534D\/materialized\/302e8c7d587ae8d73dbdd6bb81ff9180c1c30110\/4d1bd1001728c15329194887321f4022453c86acde9d77c5f089dbb0ab90c493","providerRootIsMaterialized":true,"readerFile":"main.rs","revision":"302e8c7d587ae8d73dbdd6bb81ff9180c1c30110","step":"historicalExact","uiPath":"src\/lib.rs","uiPathIsRepoRelative":true,"variant":"historical-fake"}
+{"answerCallersReady":true,"bothRelationQueriesFinished":true,"callHierarchyIncomingCallsReached":true,"callHierarchyOutgoingCallsReached":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionSkipped":true,"deselectedRootPreserved":true,"deselectPreservedContext":true,"deselectRootReady":true,"directionGenerationIncremented":true,"doubleClickNavigatesAndSetsRoot":true,"exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallersRestored":true,"exactCallerVisible":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactImplementationsVisible":true,"exactReferencesDeclarationExcluded":true,"exactReferencesHeuristicProvenanceRetained":true,"exactReferencesVisible":true,"exactStatusText":"Exact: ready · Safe (limited)","exactStatusVisible":true,"exactVisible":true,"exactZeroCoverageCopyDistinct":true,"exactZeroFullCopyHonest":true,"exactZeroOfflineCopyHonest":true,"exactZeroPartialCopyHonest":true,"expandedDefinitionValidationOnDemand":true,"externalDemotionFileVisible":true,"externalGroupHeaderHonest":true,"externalGroupVisible":true,"featureContextClearedDuringSwitch":true,"featureFuzzyAfterSwitch":true,"featureMenuActionTriggered":true,"featureOldGenerationRelationResultReturned":true,"featureOldGenerationRequestInFlight":true,"featureOldGenerationResultDiscarded":true,"featureOldGenerationResultReturned":true,"featurePrepared":true,"featureProbeFileVisible":true,"featureProfileButtonVisibleWithGeometry":true,"featureRelationActiveBeforeSwitch":true,"featureRelationRestoredAfterSwitch":true,"featureSwitchedExactVisible":true,"firstBatchUsedNodeReload":true,"fuzzyRetained":true,"fuzzyVisible":true,"heuristicPublishedWhileExactBlocked":true,"historicalExactVisible":true,"historicalInitialStatusSafe":true,"historicalProvenanceAttributed":true,"inferredReceiverAbsentFromPossible":true,"inferredReceiverNameMatchNoteAbsent":true,"inferredReceiverProbable":true,"initialProfileTitleSafe":true,"initialProfileVisible":true,"initialStatusSafeBeforeClick":true,"localReferenceContextRestored":true,"localReferenceCountHonest":true,"localReferenceGroupVisibleWithGeometry":true,"localReferenceHistoryBack":true,"localReferenceHistoryRecorded":true,"localReferenceOpenedAtCorrectOffset":true,"localReferenceSelected":true,"localReferencesVisible":true,"mixedReferencePresentationHonest":true,"passed":true,"pinned":true,"pinnedTargetStable":true,"possibleExpandedForValidation":true,"possibleRowRetainedWithoutPromotion":true,"projectReferenceAXProvenanceReachable":true,"projectReferenceAXReadOnly":true,"projectReferenceGroupsDoNotOverlap":true,"projectReferenceResultsAndControlsDoNotOverlap":true,"projectReferenceRowsVisibleWithGeometry":true,"projectReferencesCrossFile":true,"projectReferencesVisible":true,"providerRootIsMaterialized":true,"readerFile":"lib.rs","realOfflineCoverage":"passed","realOfflineCoveragePassedOrSkipped":true,"realProvider":"passed","realProviderPassedOrSkipped":true,"realRelationColdFirstActionableSelectable":true,"realRelationColdTimingFieldsValid":true,"realRelationTimingFileVisible":true,"realRelationWarmFirstActionableSelectable":true,"realRelationWarmTimingFieldsValid":true,"referenceDoubleClickDidNotNavigateTwice":true,"referenceKeyboardAXNotificationCorrect":true,"referenceKeyboardDownMovedSelection":true,"referenceKeyboardEnterOpened":true,"referenceKeyboardKeypadEnterOpened":true,"referenceKeyboardRestoredRelationFile":true,"referenceKeyboardSelectionNavigated":true,"referenceKeyboardUpMovedSelection":true,"referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"referenceSingleClickExactlyOnce":true,"referenceSingleClickHistoryBack":true,"referenceSingleClickNavigated":true,"referenceSingleClickNoFeedback":true,"referenceSingleClickNoReroot":true,"referenceSingleClickSelected":true,"relationColdFirstActionableSelectable":true,"relationColdHeuristicFirst":true,"relationColdTimingFieldsValid":true,"relationFileRestoredAfterDependency":true,"relationFileVisible":true,"relationFollowContextRestored":true,"relationGeometryReadDidNotForceLayout":true,"relationRowsUpdateFollowContext":true,"relationTimingFileVisible":true,"relationTimingSameSession":true,"relationWarmFirstActionableSelectable":true,"relationWarmHeuristicFirst":true,"relationWarmTimingFieldsValid":true,"selectedEdgeDrivesRoot":true,"selectedFirstFollowCaller":true,"selectedForDeselect":true,"selectedForDirection":true,"selectedForOpen":true,"selectedSecondFollowCaller":true,"signatureTraitFileVisible":true,"step":"summary","textDocumentImplementationReached":true,"traitObjectAbsentFromStrongAndProbable":true,"traitObjectStaysPossible":true,"traitObjectSubtitleHonest":true,"trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"typedReceiverAbsentFromPossible":true,"typedReceiverNameMatchNoteAbsent":true,"typedReceiverStrong":true,"uiPathIsRepoRelative":true,"variant":"all","verifiedAndInferredRowsDoNotOverlap":true,"verifiedBadgesHonest":true,"verifiedBadgeVisibleWithGeometry":true,"verifiedRowsVisible":true}
+SELF_TEST_FINISH timestamp=1790118551.569932 pid=36712 channel=exact exit=0
+{"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openProject"}
+{"commitRowFrames":["{{0, 58}, {560, 58}}","{{0, 116}, {560, 58}}"],"contentHeight":480,"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"darkVersionPickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"file":"fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openFile","worktreeByteCount":374}
+{"commitRowFrames":["{{0, 10}, {560, 58}}","{{0, 68}, {560, 58}}"],"contentHeight":480,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":null,"step":"darkComparePickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"commitBlobByteCount":366,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"leftRevision":"worktree","revision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","rightReaderByteCount":366,"rightReaderCollapsed":false,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"selectHEAD~1"}
+{"diffComputeMS":0.13137499999999999,"expectedGutterCounts":{"added":0,"changed":16,"removed":0},"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":16,"removed":0},"gutterCountsMatch":true,"hunkCount":1,"leftLineCount":8,"leftRevision":"worktree","rightLineCount":8,"rightReaderCollapsed":false,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"gutter"}
+{"afterLine":1,"beforeLine":8,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"hunkNavMoved":true,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","selectedHunkIndex":0,"step":"nextHunk"}
+{"comparisonPreserved":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"readingPreset"}
+{"actionDispatched":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","markersCleared":true,"rightReaderCollapsed":true,"rightRevision":null,"stateCleared":true,"step":"closeComparison"}
+{"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"clearCompareAndApplySIClassic","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+{"closeComparisonClearedMarkers":true,"closeComparisonClearedState":true,"closeComparisonCollapsedRight":true,"closeComparisonDisabledAfterClosing":true,"closeComparisonHeaderAvailable":true,"closeComparisonMenuActionDispatched":true,"darkComparePickerGeometryValid":true,"darkVersionPickerGeometryValid":true,"gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":16,"removed":0},"gutterCountsMatch":true,"hunkNavMoved":true,"passed":true,"readingPresetCollapsedRight":true,"readingPresetPreservedComparison":true,"rightReaderCollapsed":true,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"step":"summary","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+SELF_TEST_FINISH timestamp=1790118554.845602 pid=37911 channel=diff exit=0
+{"alphaOccurrences":3,"availableContentMaxX":1600,"availableContentMinX":347,"availableContentWidth":1253,"betaOccurrences":2,"containerMaxX":1600,"containerMinX":321,"containerWidth":1279,"currentLine":2,"firstGlyphGapWithoutRuler":10,"firstGlyphGapWithRuler":10,"footprintMB":148.76670074462891,"readerMaxX":1600,"readerMinX":347,"readerWidth":1253,"readerWidthWithoutRuler":1279,"rulerMaxX":347,"rulerMinX":321,"rulerWidth":26,"step":"regular","visibleLineNumbers":[1,2,3]}
+2026-09-23 07:09:27.326 codeinsight-app[37914:18771487] WARNING: Application performed a reentrant operation in its NSTableView delegate. This warning will become an assert in the future.
+{"afterFootprintMB":203.45596313476562,"baselineFootprintMB":204.75274658203125,"candidateCount":18001,"deltaFootprintMB":-1.296783447265625,"firstBatchMS":2656.3327920000002,"footer":"201 verified references · partial","historyBack":true,"historyRecorded":true,"possibleDefaultCollapsed":true,"resultTotalMS":2722.334875,"serviceTotalMS":2656.5042079999998,"serviceTruncated":true,"step":"reference-scale","verifiedCount":201,"visibleRowCount":201}
+{"afterFootprintMB":537.70621490478516,"baselineFootprintMB":537.54996490478516,"deltaFootprintMB":0.15625,"firstVisibleMS":3492.3554169999998,"footprintMB":537.70621490478516,"incrementalFootprintMB":0.15625,"memoryAssessment":"metric-only: TextKit cache reclamation makes the S7 delta non-attributable; >100 MB absolute baseline predates S7 and is an M7 candidate after attributable measurement","occurrences":200,"step":"huge","styledFragments":176,"totalLines":100000,"visibleLines":35}
+{"referenceAttributeRuns":100,"referenceAttributeRunsWhenOff":0,"referenceScannedCount":100,"referenceStyledFragments":51,"referenceStyledFragmentsWhenOff":0,"step":"references","totalReferences":35000}
+{"alphaOccurrenceCountMatches":true,"blankClickClearsOccurrences":true,"currentLineIsExclusive":true,"didLiveScrollResumesViewportFollow":true,"disabledRulerExpandsReaderByRulerWidth":true,"disabledRulerRestoresFullWidth":true,"firstGlyphGapIsReadableWithoutRuler":true,"firstGlyphGapIsReadableWithRuler":true,"fontMenuChangesByOnePoint":true,"fontMenuLowerBoundDisabledAndClamped":true,"fontMenuPersistsUserDefaults":true,"fontMenuUpdatesFileReaderImmediately":true,"fontMenuUpdatesOpenSettingsImmediately":true,"fontMenuUpperBoundDisabledAndClamped":true,"fontMenuUsesExactKeyEquivalents":true,"hugeOccurrenceCountMatches":true,"idleFootprintUnderBudget":true,"largeReferenceCandidateCountMeasured":true,"largeReferenceFirstBatchMeasured":true,"largeReferenceFootprintUnderBudget":true,"largeReferenceHistoryBack":true,"largeReferenceHistoryRecorded":true,"largeReferencePossibleDefaultCollapsed":true,"largeReferenceResultVisibleWithGeometry":true,"largeReferenceRowsVisible":true,"largeReferenceServicePartialHonest":true,"largeReferenceTotalMeasured":true,"largeReferenceVerifiedCountMeasured":true,"metrics":{"firstVisibleMS":3492.3554169999998,"hugeAfterFootprintMB":537.70621490478516,"hugeBaselineFootprintMB":537.54996490478516,"hugeDeltaFootprintMB":0.15625,"hugeLineCount":100000,"hugeOccurrenceCount":200,"idleFootprintMB":21.688461303710938,"referenceAttributeRunCount":100,"referenceCandidateCount":18001,"referenceFirstBatchMS":2656.3327920000002,"referenceResultTotalMS":2722.334875,"referenceScaleAfterFootprintMB":203.45596313476562,"referenceScaleBaselineFootprintMB":204.75274658203125,"referenceScaleDeltaFootprintMB":-1.296783447265625,"referenceScannedCount":100,"referenceServiceTotalMS":2656.5042079999998,"referenceStyledFragmentCount":51,"referenceVerifiedCount":201,"referenceVisibleRowCount":201,"regularFootprintMB":148.76670074462891,"styledFragmentCount":176,"visibleLineCount":35},"navigationSetsNativePrimarySelection":true,"passed":true,"programmaticNavigationBlocksViewportFollow":true,"readerVisualControlsDoNotOverlap":true,"readerVisualControlsVisibleWithGeometry":true,"readerVisualSettingAppliedImmediately":true,"readerWidthEqualsContainerMinusRuler":true,"referenceFragmentsTrackViewport":true,"referenceLookupIsViewportGated":true,"referenceRunsDoNotTrackFile":true,"referenceRunsTrackViewport":true,"rulerExistsByDefault":true,"rulerInsideWindowContent":true,"rulerLinesTrackViewport":true,"step":"summary","styledFragmentsDoNotTrackFile":true,"styledFragmentsTrackViewport":true,"switchingToBetaReplacesOccurrences":true,"syntaxFormattingOffSuppressesReferenceRuns":true,"visibleLineNumbersMatchFixture":true}
+SELF_TEST_FINISH timestamp=1790118590.1983051 pid=37914 channel=reading exit=0
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1790118590.390955 pid=37930 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1790118590.531304 pid=37931 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+Building for production...
+[Computing dependencies]
+[24 / 61] CTreeSitterPython
+[33 / 64]
+[34 / 64] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[36 / 66] TreeSitterKit
+[39 / 68] CTreeSitterTypeScript
+[45 / 74] CTreeSitterTypeScript
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[45 / 74] CTreeSitter
+[49 / 73] CodeInsightCore
+[56 / 83] CodeInsightTypeScriptExtractor
+[64 / 90] CodeInsightGit
+[69 / 89] CodeInsightExact
+[72 / 90] CodeInsightPythonExtractor
+[75 / 91] CodeInsightRustExtractor
+[81 / 100] CodeInsightEngine
+[84 / 102] CodeInsightExact
+[85 / 101] CodeInsightReaderCore
+[88 / 98] CodeInsightReaderUI
+[89 / 99] CodeInsightEngine
+[95 / 104] CodeInsightAppModel
+[97 / 105] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[99 / 105] CodeInsightAppModel
+[104 / 106] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/[105 / 107] codeinsight-app-product
+diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[108 / 110] codeinsight-app-product
+[109 / 110] codeinsight-app-product
+Build complete! (74.47秒)
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 29.920999999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 545260816
+  },
+  "fold": {
+    "resolutionMs": 29.182292,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 560858408,
+    "foldLatencyMs": 270.23200000000003
+  },
+  "deltaBytes": 15597592,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf

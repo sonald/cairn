@@ -1,0 +1,60 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 50] TreeSitterKitTests-product
+[2 / 7] CodeInsightAppTests-product
+[8 / 28]
+[11 / 28]
+[23 / 28] CodeInsightAppTests-product
+[26 / 29] CodeInsightAppTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2498:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2496 |     )
+2497 | 
+2498 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2499 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2500 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2537:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2535 |     // The Reader caret moves to a call of `second`; the global command must
+2536 |     // query second, leaving the pinned preview untouched.
+2537 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2538 |         at: byteOffset(of: "second();", in: fixture.mainSource)
+2539 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2573:5: warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+2571 |     )
+2572 |     fixture.controller.showRelations(direction: .references)
+2573 |     try await pumpRunLoop()
+     |     `- warning: no calls to throwing functions occur within 'try' expression [#UnnecessaryEffectMarker]
+2574 |     #expect(fixture.model.relationTree.root == nil)
+2575 | }
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2601:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2599 |     fixture.controller.window?.setContentSize(NSSize(width: 900, height: 600))
+2600 |     fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+2601 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2602 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2603 |     )
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightAppTests/RelationNavigationTests.swift:2643:24: warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2641 |             == main.standardizedFileURL
+2642 |     })
+2643 |     fixture.controller.selfTestActivateReading(
+     |                        `- warning: result of call to 'selfTestActivateReading(at:)' is unused [#NoUsage]
+2644 |         at: byteOffset(of: "target() {}", in: fixture.mainSource)
+2645 |     )
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[28 / 32] CodeInsightAppTests-product
+Build complete! (9.47秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() started.
+✔ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() passed after 2.074 seconds.
+✔ Test run with 1 test in 0 suites passed after 2.074 seconds.
