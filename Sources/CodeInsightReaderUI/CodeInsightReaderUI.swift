@@ -512,7 +512,10 @@ public final class ReaderTextView {
     private var visibleFoldRegionsCache: [FoldRegion] = []
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
-    private var foldGutterHovered = false
+    /// The fold whose handle is currently hovered, identified by FoldID so
+    /// the hover matches the row the pointer actually hits (C4/D2.3), never
+    /// a whole-column state.
+    private var foldGutterHoveredID: FoldID?
     private var navigationLandingLine: Int?
     private var navigationMarkerGeneration = 0
     private var nativeSelectedTextAttributes: [NSAttributedString.Key: Any] = [:]
@@ -887,7 +890,7 @@ public final class ReaderTextView {
         visibleDeclarationMarkerLines = []
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
-        foldGutterHovered = false
+        foldGutterHoveredID = nil
         navigationLandingLine = nil
         navigationMarkerGeneration += 1
         // New content: any pending reflow restore and its corrections die
@@ -933,7 +936,7 @@ public final class ReaderTextView {
         visibleFoldRegionsCache = []
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
-        foldGutterHovered = false
+        foldGutterHoveredID = nil
         navigationLandingLine = nil
         navigationMarkerGeneration += 1
         projectionRevision += 1
@@ -2583,7 +2586,19 @@ public final class ReaderTextView {
         ruler?.ruleThickness ?? 0
     }
 
-    package var foldGutterIsHovered: Bool { foldGutterHovered }
+    package var foldGutterIsHovered: Bool { foldGutterHoveredID != nil }
+
+    /// First-row decoration observables (§7.1), recorded per ruler draw:
+    /// logical line -> first visual row rect and the line-number label draw
+    /// rect, both in text view coordinates.
+    package private(set) var lastRulerFirstRowRectsForTesting: [Int: NSRect] = [:]
+    package private(set) var lastRulerLabelDrawRectsForTesting: [Int: NSRect] = [:]
+    /// Segments the last primary-selection pass actually drew (§7.1), in
+    /// text view coordinates, one per visible visual-row fragment.
+    package private(set) var lastPrimarySelectionSegmentsForTesting: [NSRect] = []
+
+    /// The currently hovered fold handle, if any (D2.3).
+    package var foldGutterHoveredFoldID: FoldID? { foldGutterHoveredID }
 
     package func setFoldGutterHoverForTesting(_ point: NSPoint?) {
         guard let ruler else { return }
@@ -3224,37 +3239,40 @@ public final class ReaderTextView {
         dirtyRect: NSRect
     ) {
         guard let range = primarySelectionRange,
-              range.length > 0,
-              let window = textView.window
-        else { return }
-        let screenRect = textView.firstRect(
-            forCharacterRange: range,
-            actualRange: nil
+              range.length > 0
+        else {
+            lastPrimarySelectionSegmentsForTesting = []
+            return
+        }
+        let segments = ReaderViewportGeometry.visibleRects(
+            forDisplayRange: range,
+            in: textView,
+            clipTo: textView.visibleRect
         )
-        guard !screenRect.isEmpty else { return }
-        var rect = textView.convert(
-            window.convertFromScreen(screenRect),
-            from: nil
-        )
-        rect = NSRect(
-            x: rect.minX - 1.5,
-            y: rect.minY,
-            width: rect.width + 3,
-            height: rect.height
-        )
-        guard rect.intersects(dirtyRect) else { return }
-
-        let outer = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
-        theme.primarySelectionFillColor.setFill()
-        outer.fill()
-        let stroke = NSBezierPath(
-            roundedRect: rect.insetBy(dx: 0.8, dy: 0.8),
-            xRadius: 3.2,
-            yRadius: 3.2
-        )
-        stroke.lineWidth = 1.6
-        theme.accentColor.setStroke()
-        stroke.stroke()
+        lastPrimarySelectionSegmentsForTesting = segments
+        for segment in segments {
+            // Zero-length carets never reach here (length > 0 above); each
+            // visible visual-row fragment of the hit is emphasized on its
+            // own, never one box spanning whole rows (W23).
+            let rect = NSRect(
+                x: segment.minX - 1.5,
+                y: segment.minY,
+                width: segment.width + 3,
+                height: segment.height
+            )
+            guard rect.intersects(dirtyRect) else { continue }
+            let outer = NSBezierPath(roundedRect: rect, xRadius: 4, yRadius: 4)
+            theme.primarySelectionFillColor.setFill()
+            outer.fill()
+            let stroke = NSBezierPath(
+                roundedRect: rect.insetBy(dx: 0.8, dy: 0.8),
+                xRadius: 3.2,
+                yRadius: 3.2
+            )
+            stroke.lineWidth = 1.6
+            theme.accentColor.setStroke()
+            stroke.stroke()
+        }
     }
 
     func drawRuler(
@@ -3295,21 +3313,36 @@ public final class ReaderTextView {
             foldsByLine = [:]
             foldedDiffByLine = [:]
         }
+        // First-row decoration observables (§7.1): what this pass actually
+        // drew and where. Cleared per draw so stale rows never linger.
+        lastRulerFirstRowRectsForTesting = [:]
+        lastRulerLabelDrawRectsForTesting = [:]
         enumerateVisibleLayoutFragments { fragment, line in
-            let textRect = fragmentRectInTextView(fragment)
-            let rulerRect = ruler.convert(textRect, from: view)
-            // Text lies beside the ruler. Test the gutter row, not the text's x range.
+            guard let firstRowInView = ReaderViewportGeometry
+                .firstVisualRowRect(ofFragment: fragment, in: view)
+            else { return }
+            let firstRow = ruler.convert(firstRowInView, from: view)
+            // Gutter row spans the ruler width; decorations may only occupy
+            // the FIRST visual row of the logical line (D2.2).
             let rowRect = NSRect(
-                x: ruler.bounds.minX, y: rulerRect.minY,
-                width: ruler.bounds.width, height: rulerRect.height
+                x: ruler.bounds.minX, y: firstRow.minY,
+                width: ruler.bounds.width, height: firstRow.height
             )
+            // Decoration visibility follows the decoration's own rect, not
+            // the whole (possibly wrapped) fragment: a first row scrolled
+            // out leaves nothing to draw on continuation rows (W21).
             guard rowRect.intersects(dirtyRect) else { return }
+            lastRulerFirstRowRectsForTesting[line] = firstRowInView
             if lineNumbers {
+                // Explicit vertical centering from the measured number-font
+                // height; the label box never borrows the row's own height
+                // (D2.2: labelRect.minY != rowRect.minY when fonts differ).
+                let labelHeight = ceil(font.ascender - font.descender)
                 let labelRect = NSRect(
                     x: 2,
-                    y: rulerRect.minY,
+                    y: firstRow.midY - labelHeight / 2,
                     width: max(0, lineNumberColumnWidth - 6),
-                    height: rulerRect.height
+                    height: labelHeight
                 )
                 ("\(line)" as NSString).draw(
                     in: labelRect,
@@ -3319,13 +3352,17 @@ public final class ReaderTextView {
                         .paragraphStyle: paragraph,
                     ]
                 )
+                lastRulerLabelDrawRectsForTesting[line] = ruler.convert(
+                    labelRect,
+                    to: view
+                )
                 lines.append(line)
                 if let kind = declarationKindsByLine[line] {
                     drawDeclarationMarker(
                         kind,
                         in: NSRect(
                             x: lineNumberColumnWidth + 1,
-                            y: rulerRect.midY - 2,
+                            y: firstRow.midY - 2,
                             width: 4,
                             height: 4
                         )
@@ -3333,25 +3370,25 @@ public final class ReaderTextView {
                 }
             }
             if let fold = foldsByLine[line],
-               foldGutterHovered
+               foldGutterHoveredID == fold.id
             {
                 drawFoldChevron(
                     collapsed: renderedFoldIDs.contains(fold.id),
                     in: NSRect(
                         x: lineNumberColumnWidth + declarationColumnWidth,
-                        y: rulerRect.minY,
+                        y: firstRow.minY,
                         width: foldColumnWidth,
-                        height: rulerRect.height
+                        height: firstRow.height
                     )
                 )
             }
             if navigationLandingLine == line {
                 theme.accentColor.setFill()
-                let markerHeight = min(8, max(3, rulerRect.height - 4))
+                let markerHeight = min(8, max(3, firstRow.height - 4))
                 NSBezierPath(
                     roundedRect: NSRect(
                         x: lineNumberColumnWidth + declarationColumnWidth + 4,
-                        y: rulerRect.midY - markerHeight / 2,
+                        y: firstRow.midY - markerHeight / 2,
                         width: 4,
                         height: markerHeight
                     ),
@@ -3364,7 +3401,7 @@ public final class ReaderTextView {
                 NSBezierPath(ovalIn: NSRect(
                     x: lineNumberColumnWidth + declarationColumnWidth
                         + foldColumnWidth + 1,
-                    y: rulerRect.midY - 2.25,
+                    y: firstRow.midY - 2.25,
                     width: 4.5,
                     height: 4.5
                 )).fill()
@@ -3384,9 +3421,9 @@ public final class ReaderTextView {
                 NSRect(
                     x: lineNumberColumnWidth + declarationColumnWidth
                         + foldColumnWidth + bookmarkColumnWidth + 1,
-                    y: rulerRect.minY,
+                    y: firstRow.minY,
                     width: max(2, diffColumnWidth - 2),
-                    height: max(2, rulerRect.height)
+                    height: max(2, firstRow.height)
                 ).fill()
             }
         }
@@ -3412,14 +3449,9 @@ public final class ReaderTextView {
     }
 
     func updateFoldHover(at point: NSPoint?, in ruler: NSRulerView) {
-        let foldX = lineNumberColumnWidth + declarationColumnWidth
-        let next = point.map {
-            foldColumnWidth > 0
-                && $0.x >= foldX
-                && $0.x <= foldX + foldColumnWidth
-        } ?? false
-        guard next != foldGutterHovered else { return }
-        foldGutterHovered = next
+        let next = point.flatMap { foldRegion(at: $0, in: ruler)?.id }
+        guard next != foldGutterHoveredID else { return }
+        foldGutterHoveredID = next
         ruler.needsDisplay = true
     }
 
@@ -3460,8 +3492,14 @@ public final class ReaderTextView {
         var match: FoldRegion?
         enumerateVisibleLayoutFragments { fragment, line in
             guard match == nil, let region = byLine[line] else { return }
-            let rect = ruler.convert(fragmentRectInTextView(fragment), from: view)
-            if rect.minY <= point.y, point.y <= rect.maxY {
+            guard let firstRow = ReaderViewportGeometry.firstVisualRowRect(
+                ofFragment: fragment,
+                in: view
+            ) else { return }
+            // Half-open y range on the first visual row only: continuation
+            // rows of a wrapped fold header never hit (C4/D2.3).
+            let rowRect = ruler.convert(firstRow, from: view)
+            if rowRect.minY <= point.y, point.y < rowRect.maxY {
                 match = region
             }
         }

@@ -1,0 +1,121 @@
+warning: /Users/siancao/Library/org.swift.swiftpm/configuration is not accessible or not writable, disabling user-level cache features.
+warning: /Users/siancao/Library/org.swift.swiftpm/security is not accessible or not writable, disabling user-level cache features.
+warning: /Users/siancao/Library/Caches/org.swift.swiftpm is not accessible or not writable, disabling user-level cache features.
+warning: 'codeinsight': failed storing manifest for 'codeinsight' in cache: attempt to write a readonly database
+warning: 'swift-argument-parser': failed storing manifest for 'swift-argument-parser' in cache: attempt to write a readonly database
+Building for debugging...
+[Computing dependencies]
+[Pre-planning 1 / 1176]
+[Planning deferred tasks]
+[1 / 86] ArgumentParserToolInfo
+[7 / 91]
+[8 / 91] ArgumentParserToolInfo
+[20 / 112]
+[23 / 112]
+[31 / 135] ArgumentParser
+[41 / 161]
+[44 / 161]
+[59 / 164] TreeSitterKit-product
+[62 / 164]
+[67 / 164]
+[76 / 164]
+[80 / 164]
+[86 / 173]
+[88 / 173]
+[90 / 173]
+[95 / 173] TreeSitterKitTests-product
+[108 / 188] CodeInsightCore
+[111 / 205] ArgumentParser
+[115 / 206] CodeInsightPythonExtractor
+[132 / 206]
+[133 / 206] CodeInsightCoreTests-product
+[140 / 209] CodeInsightCoreTests-product
+[152 / 215] CodeInsightReaderCore
+[154 / 215] TypeScriptExtractorTests-product
+[163 / 230]
+[175 / 232] TypeScriptExtractorTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightGitTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[176 / 236] CodeInsightEngine
+[198 / 263] CodeInsightExact
+[215 / 268]
+[218 / 268] CodeInsightGitTests-product
+[219 / 268]
+[221 / 268]
+[223 / 268] codeinsight-product
+[233 / 268] CodeInsightAppModel
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: RustExtractorTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[236 / 270] RustExtractorTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightEngineTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightExactTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[240 / 284]
+[241 / 284] RustExtractorTests-product
+[247 / 285] CodeInsightExactTests-product
+[261 / 289] CodeInsightReaderUI
+[265 / 290] CodeInsightReaderUITests-product
+[268 / 294]
+[271 / 294] CodeInsightReaderUITests-product
+[272 / 298] CodeInsightReaderUITests-product
+[277 / 299] CodeInsightAppModel
+[287 / 304] CodeInsightAppModelTests-product
+[289 / 304] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppModelTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[301 / 320]
+[303 / 320]
+[305 / 320] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[305 / 320] codeinsight-app-product
+[312 / 324] CodeInsightApp
+[314 / 324] CodeInsightAppModelTests-product
+[323 / 333] CodeInsightAppTests-product
+[326 / 333] CodeInsightAppTests-product/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:472:19: warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 470 |         options: [.ensuresLayout]
+ 471 |     ) { fragment in
+ 472 |         guard let firstRow = fragment.textLineFragments.first else { return true }
+     |                   `- warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 473 |         let fragmentStart = content.offset(
+ 474 |             from: content.documentRange.location,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:719:9: warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 717 |     #expect(anchor - lineStart > 200)
+ 718 | 
+ 719 |     var wrapped = wrapSettings(true)
+     |         `- warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 720 |     var unwrapped = wrapSettings(false)
+ 721 |     for round in 0..<20 {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:720:9: warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 718 | 
+ 719 |     var wrapped = wrapSettings(true)
+ 720 |     var unwrapped = wrapSettings(false)
+     |         `- warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 721 |     for round in 0..<20 {
+ 722 |         // Each round ends wrapped so the quarter-anchor probe resolves the
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[331 / 335] CodeInsightReaderCoreTests-product
+[333 / 335] CodeInsightReaderCoreTests-product
+Build complete! (18.66秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test foldGutterHoverIdentifiesTheHoveredFoldRow() started.
+✔ Test foldGutterHoverIdentifiesTheHoveredFoldRow() passed after 0.158 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.158 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() started.
+2026-09-22 16:44:29.769 swiftpm-testing-helper[95331:17717514] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-22 16:44:29.769 swiftpm-testing-helper[95331:17717508] Error received in message reply handler: Connection invalid
+✔ Test wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() passed after 0.649 seconds.
+◇ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() started.
+✔ Test wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() passed after 1.324 seconds.
+◇ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() started.
+✔ Test wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() passed after 0.453 seconds.
+◇ Test wrapPrimarySelectionCoversAllVisibleRowSegments() started.
+✔ Test wrapPrimarySelectionCoversAllVisibleRowSegments() passed after 0.502 seconds.
+✔ Test run with 4 tests in 0 suites passed after 2.929 seconds.

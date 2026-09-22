@@ -953,6 +953,211 @@ func wrapToggleRoundTripsUnicodeAndFoldedContent() throws {
     withExtendedLifetime(window) {}
 }
 
+// MARK: - Reader wrap v2 · S2a first-visual-row decoration tests
+
+/// W20: with a logical line wrapped across visual rows, every gutter
+/// decoration is drawn once, positioned on the FIRST visual row, and the
+/// line-number label is vertically centered through the measured number-font
+/// height rather than the wrapped block's bounds.
+@MainActor
+@Test
+func wrapGutterDecorationsOccurOnceOnTheFirstVisualRow() throws {
+    let document = wrapLongLineDocument()
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    var wrapped = wrapSettings(true)
+    wrapped.lineNumbers = true
+    reader.apply(settings: wrapped)
+    reader.display(document: document)
+    reader.setDiffMarkers([32: .changed])
+    // Bring the wrapped mega line into the viewport: gutter passes only
+    // visit visible rows.
+    let megaByte = document.lineTable.lineStarts[31]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+    let ruler = try #require(scrollView.verticalRulerView)
+    let rulerRep = try #require(
+        ruler.bitmapImageRepForCachingDisplay(in: ruler.bounds)
+    )
+    ruler.cacheDisplay(in: ruler.bounds, to: rulerRep)
+
+    // The wrapped mega line recorded exactly one first-row rect.
+    let firstRow = try #require(reader.lastRulerFirstRowRectsForTesting[32])
+    let labelRect = try #require(reader.lastRulerLabelDrawRectsForTesting[32])
+    // One row tall, not the height of the whole wrapped block.
+    #expect(firstRow.height > 0 && firstRow.height < 40)
+    // The label box centers on the first row and is sized by the number
+    // font, so its height differs from the row when fonts differ.
+    #expect(abs(labelRect.midY - firstRow.midY) < 1.0)
+    // Each logical line appears exactly once in the drawn set.
+    #expect(reader.visibleLineNumbers.filter { $0 == 32 }.count == 1)
+    withExtendedLifetime(window) {}
+}
+
+/// W21: when the first visual row has scrolled out and only continuation
+/// rows remain visible, the line's recorded first-row rect lies outside the
+/// viewport, so nothing is painted onto the visible continuation rows.
+@MainActor
+@Test
+func wrapFirstRowScrolledOutLeavesContinuationRowsUndecorated() throws {
+    let document = wrapLongLineDocument()
+    let (reader, scrollView, window) = renderOffscreen(document)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    reader.restore(scrollByteOffset: megaByte, selectionByteOffset: nil)
+    wrapSettle(reader)
+    // Scroll deep into the wrapped rows so the first row is far above.
+    scrollView.contentView.scroll(
+        to: NSPoint(x: 0, y: scrollView.contentView.bounds.minY + 120)
+    )
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    wrapSettle(reader)
+    let ruler = try #require(scrollView.verticalRulerView)
+    let rulerRep = try #require(
+        ruler.bitmapImageRepForCachingDisplay(in: ruler.bounds)
+    )
+    ruler.cacheDisplay(in: ruler.bounds, to: rulerRep)
+
+    #expect(reader.lastRulerFirstRowRectsForTesting[megaLine] == nil)
+    #expect(!reader.visibleLineNumbers.contains(megaLine))
+    withExtendedLifetime(window) {}
+}
+
+/// W22: fold handle hover and click hit only the first visual row of the
+/// fold header; a wrapped header's continuation rows produce neither.
+@MainActor
+@Test
+func wrapFoldHandleHitTestingUsesOnlyTheFirstVisualRow() throws {
+    let longSignature = String(
+        repeating: "alpha_beta_gamma_delta: usize, ",
+        count: 12
+    )
+    let source = "fn wrapped_header(\(longSignature)tail: usize) {\n    let one = 1;\n    let two = 2;\n    let three = 3;\n}\nfn after() {}\n"
+    let bytes = Array(source.utf8)
+    let fold = FoldRegion(
+        id: FoldID(rawValue: 4200),
+        kind: .declaration,
+        headerRange: ByteRange(lowerBound: 0, upperBound: 3),
+        bodyRange: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count)),
+        outlineDepth: 0,
+        summary: FoldSummary(hiddenLineCount: 3)
+    )
+    let document = ReaderDocument(
+        bytes: bytes,
+        lineTable: LineTable(bytes: bytes),
+        byteUTF16Map: ByteUTF16Map(validUTF8: bytes),
+        highlightSpans: [],
+        outlineFacets: [],
+        foldRegions: [fold]
+    )
+    let (reader, scrollView, window) = renderOffscreen(document)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let ruler = try #require(scrollView.verticalRulerView)
+
+    // Park the viewport on the wrapped header so its first row is visible.
+    scrollView.contentView.scroll(to: NSPoint(x: 0, y: 0))
+    scrollView.reflectScrolledClipView(scrollView.contentView)
+    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    let rulerRep = try #require(
+        ruler.bitmapImageRepForCachingDisplay(in: ruler.bounds)
+    )
+    ruler.cacheDisplay(in: ruler.bounds, to: rulerRep)
+    let firstRow = try #require(reader.lastRulerFirstRowRectsForTesting[1])
+    let foldX = reader.rulerThickness - 6
+    // First visual row: hits. Points are RULER-space (as AppKit delivers
+    // from mouse events): x inside the ruler, y converted from the view.
+    func rulerPoint(y viewY: CGFloat) -> NSPoint {
+        NSPoint(
+            x: foldX,
+            y: ruler.convert(NSPoint(x: 0, y: viewY), from: reader.view).y
+        )
+    }
+    let hitPoint = rulerPoint(y: firstRow.midY)
+    reader.setFoldGutterHoverForTesting(hitPoint)
+    #expect(reader.foldGutterHoveredFoldID == fold.id)
+    // Click on the first row toggles the fold.
+    reader.clickFoldHandle(at: hitPoint, in: ruler, modifiers: [])
+    #expect(reader.renderedFoldIDsForTesting.contains(fold.id))
+    _ = reader.toggleFold(id: fold.id)
+
+    // Continuation row (one row below the first): no hover, no click.
+    let continuationY = firstRow.maxY + firstRow.height / 2
+    let missPoint = rulerPoint(y: continuationY)
+    reader.setFoldGutterHoverForTesting(missPoint)
+    #expect(reader.foldGutterHoveredFoldID == nil)
+    reader.clickFoldHandle(at: missPoint, in: ruler, modifiers: [])
+    #expect(!reader.renderedFoldIDsForTesting.contains(fold.id))
+    _ = scrollView
+    withExtendedLifetime(window) {}
+}
+
+/// W23: a find hit that spans visual rows is drawn as one box per visible
+/// segment (TextKit 2 segments), never one first-line rect; a zero-length
+/// range draws nothing.
+@MainActor
+@Test
+func wrapPrimarySelectionCoversAllVisibleRowSegments() throws {
+    let document = wrapLongLineDocument()
+    let reader = ReaderTextView()
+    let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 480, height: 180))
+    scrollView.hasVerticalScroller = true
+    scrollView.documentView = reader.view
+    reader.view.frame = scrollView.contentView.bounds
+    let window = NSWindow(
+        contentRect: scrollView.frame,
+        styleMask: [.borderless],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentView = scrollView
+    reader.apply(settings: wrapSettings(true))
+    reader.display(document: document)
+    let megaLine = 32
+    let megaByte = document.lineTable.lineStarts[megaLine - 1]
+    let hitLength = 900
+    reader.setFindMatches(
+        [ByteRange(
+            lowerBound: megaByte + 300,
+            upperBound: megaByte + 300 + UInt32(hitLength)
+        )],
+        selectedIndex: 0
+    )
+    _ = reader.revealFindMatch(at: 0)
+    wrapSettle(reader)
+
+    // Real draw pass through the bitmap cache (offscreen windows never
+    // draw otherwise): the background handler records the segments.
+    let rep = try #require(
+        reader.view.bitmapImageRepForCachingDisplay(in: reader.view.bounds)
+    )
+    reader.view.cacheDisplay(in: reader.view.visibleRect, to: rep)
+    let segments = reader.lastPrimarySelectionSegmentsForTesting
+    #expect(segments.count >= 2, "wrapped hit must produce multiple segments")
+    for segment in segments {
+        #expect(segment.height > 0 && segment.height < 40)
+        #expect(segment.width > 0)
+    }
+
+    // Zero-length range: no boxes.
+    reader.clearFindMatches(restoringSymbolAt: nil)
+    reader.view.cacheDisplay(in: reader.view.visibleRect, to: rep)
+    #expect(reader.lastPrimarySelectionSegmentsForTesting.isEmpty)
+    withExtendedLifetime(window) {}
+}
+
 /// W19 subset: a reflow never steals first responder. The reader surface
 /// only re-lays-out text; focus belongs to whoever held it (find field,
 /// Settings form, another window).

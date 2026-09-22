@@ -482,7 +482,7 @@ func gutterRepaintsItsBackgroundWhenThemeChanges() throws {
 
 @MainActor
 @Test
-func foldGutterHoverTracksTheWholeColumnInsteadOfOneFoldRow() throws {
+func foldGutterHoverIdentifiesTheHoveredFoldRow() throws {
     let source = """
         fn first() {
             let one = 1;
@@ -502,12 +502,42 @@ func foldGutterHoverTracksTheWholeColumnInsteadOfOneFoldRow() throws {
     reader.view.frame = scrollView.contentView.bounds
     reader.configureGutter(in: scrollView, lineNumbers: true)
     reader.display(document: document, fileURL: file)
+    let ruler = try #require(scrollView.verticalRulerView)
+    // Offscreen windows never draw: run the ruler's real draw pass through
+    // the bitmap cache (a graphics context is required for `.fill()`), which
+    // also populates the first-row observables.
+    let rulerRep = try #require(
+        ruler.bitmapImageRepForCachingDisplay(in: ruler.bounds)
+    )
+    ruler.cacheDisplay(in: ruler.bounds, to: rulerRep)
 
-    reader.setFoldGutterHoverForTesting(NSPoint(
-        x: reader.rulerThickness - 7,
-        y: 1
-    ))
+    // Hovering the fold column at a fold header's first visual row hovers
+    // exactly that fold (reader-wrap design C4/D2.3); the whole-column
+    // hover the old implementation used is gone.
+    let firstHeaderRow = try #require(
+        reader.lastRulerFirstRowRectsForTesting[1]
+    )
+    // Hit tests take RULER-space points (that is what AppKit delivers from
+    // mouse events): x is the fold column inside the ruler itself, y comes
+    // from converting the first row's view-space midY.
+    let foldX = reader.rulerThickness - 6
+    let headerPoint = NSPoint(
+        x: foldX,
+        y: ruler.convert(
+            NSPoint(x: 0, y: firstHeaderRow.midY),
+            from: reader.view
+        ).y
+    )
+    reader.setFoldGutterHoverForTesting(headerPoint)
     #expect(reader.foldGutterIsHovered)
+    #expect(reader.foldGutterHoveredFoldID != nil)
+
+    // A point in the fold column but NOT on any fold header row (above the
+    // first row) produces no hover.
+    reader.setFoldGutterHoverForTesting(NSPoint(x: foldX, y: 1))
+    #expect(!reader.foldGutterIsHovered)
+    #expect(reader.foldGutterHoveredFoldID == nil)
+
     reader.setFoldGutterHoverForTesting(nil)
     #expect(!reader.foldGutterIsHovered)
 }

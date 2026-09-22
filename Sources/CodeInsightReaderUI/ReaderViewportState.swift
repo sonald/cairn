@@ -91,6 +91,64 @@ enum ReaderViewportGeometry {
         return result
     }
 
+    /// Rect of the FIRST visual row of a layout fragment, in text view
+    /// coordinates (D2.1): fragment origin + the first row's typographic
+    /// bounds + textContainerOrigin. Gutter decorations belong to the first
+    /// visual row of each logical line; continuation rows carry none.
+    static func firstVisualRowRect(
+        ofFragment fragment: NSTextLayoutFragment,
+        in textView: NSTextView
+    ) -> NSRect? {
+        guard let row = fragment.textLineFragments.first else { return nil }
+        let origin = textView.textContainerOrigin
+        return NSRect(
+            x: fragment.layoutFragmentFrame.minX
+                + row.typographicBounds.minX + origin.x,
+            y: fragment.layoutFragmentFrame.minY
+                + row.typographicBounds.minY + origin.y,
+            width: row.typographicBounds.width,
+            height: row.typographicBounds.height
+        )
+    }
+
+    /// All visible text segments of a display range, in text view
+    /// coordinates (D2.4): TextKit 2 segment enumeration restricted to the
+    /// range and clipped to the viewport, so a find hit that wraps across
+    /// visual rows is drawn as one box per visible fragment instead of a
+    /// single first-line rect.
+    static func visibleRects(
+        forDisplayRange range: NSRange,
+        in textView: NSTextView,
+        clipTo clipRect: NSRect? = nil
+    ) -> [NSRect] {
+        guard let manager = textView.textLayoutManager,
+              let content = manager.textContentManager,
+              let start = content.location(
+                  content.documentRange.location,
+                  offsetBy: range.location
+              )
+        else { return [] }
+        let end = content.location(start, offsetBy: max(range.length, 0))
+        guard let textRange = NSTextRange(
+            location: start,
+            end: end ?? start
+        ) else { return [] }
+        let origin = textView.textContainerOrigin
+        let clip = clipRect ?? textView.visibleRect
+        var rects: [NSRect] = []
+        manager.enumerateTextSegments(
+            in: textRange,
+            type: .standard,
+            options: []
+        ) { _, frame, _, _ in
+            let rect = frame.offsetBy(dx: origin.x, dy: origin.y)
+            let clipped = rect.intersection(clip)
+            if !clipped.isNull { rects.append(clipped) }
+            return true
+        }
+        return rects
+    }
+
     /// Reference rect for the visual row containing `location`, in the text
     /// view's coordinate system (D2.1 composition: fragment origin +
     /// typographic bounds + textContainerOrigin).
