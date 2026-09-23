@@ -640,6 +640,12 @@ public final class ReaderTextView {
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
         }
+        textView.layoutCompleted = { [weak self] in
+            guard let self, !self.isRestoringViewport,
+                  self.renderingCoordinator.hasRenderingAttributes,
+                  let manager = self.view.textLayoutManager else { return }
+            self.validateVisibleRenderingAttributes(in: manager, updateLayout: false)
+        }
         textView.viewportChanged = { [weak self] in
             guard let self,
                   let layoutManager = self.view.textLayoutManager
@@ -3302,6 +3308,8 @@ public final class ReaderTextView {
             from: viewportRange.location,
             options: []
         ) { fragment in
+            // Permit the terminal empty fragment, but never scan an unlaid tail.
+            guard fragment.rangeInElement.location.compare(viewportRange.endLocation) != .orderedDescending else { return false }
             let frame = fragment.layoutFragmentFrame
             guard frame.minY <= viewport.maxY else { return false }
             guard frame.intersects(viewport) else { return true }
@@ -3968,14 +3976,16 @@ public final class ReaderTextView {
         }
     }
 
-    private func validateVisibleRenderingAttributes(in layoutManager: NSTextLayoutManager) {
+    private func validateVisibleRenderingAttributes(
+        in layoutManager: NSTextLayoutManager, updateLayout: Bool = true
+    ) {
         // TextKit can resize the document and post scroll notifications during layout.
         // Finish this pass before another notification can start viewport layout again.
         guard !isValidatingVisibleRenderingAttributes else { return }
         isValidatingVisibleRenderingAttributes = true
         defer { isValidatingVisibleRenderingAttributes = false }
         let controller = layoutManager.textViewportLayoutController
-        controller.layoutViewport()
+        if updateLayout { controller.layoutViewport() }
         guard let viewportRange = controller.viewportRange else { return }
         layoutManager.invalidateRenderingAttributes(for: viewportRange)
         let viewport = controller.viewportBounds.insetBy(
@@ -4337,6 +4347,7 @@ private final class ClickTextView: NSTextView {
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
+    var layoutCompleted: (() -> Void)?
     var escapeHandler: (() -> Bool)?
     var backgroundHandler: ((NSRect) -> Void)?
     /// Narrow size-change hooks (reader-wrap design D3.7): fired from
@@ -4354,6 +4365,13 @@ private final class ClickTextView: NSTextView {
         if widthChanged { widthWillChange?(oldWidth) }
         super.setFrameSize(newSize)
         if widthChanged { widthDidChange?(newSize.width) }
+    }
+
+    override func layout() {
+        super.layout()
+        // A scroll can notify before TextKit has moved its viewport. Style the
+        // final visible fragments after layout, without starting another layout.
+        layoutCompleted?()
     }
 
     override func viewDidMoveToSuperview() {

@@ -3254,8 +3254,11 @@ func wrapTrailingEmptyRowRemainsALegalViewportAnchor() throws {
 func largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() throws {
     let source = (0..<9000).map {
         "let value\($0) = compare(left, right) && compare(next_left, next_right) && compare(last_left, last_right);"
-    }.joined(separator: "\n") + String(repeating: "x", count: 4000)
-    let document = ReaderDocument(bytes: Array(source.utf8))
+    }.joined(separator: "\n") + String(repeating: "x", count: 4000) + "; let final_value = true;"
+    let bytes = Array(source.utf8)
+    let highlighted = try RustHighlighter().highlight(bytes: bytes)
+    let document = ReaderDocument(bytes: bytes, highlightSpans: highlighted.spans,
+                                  outlineFacets: highlighted.outlineFacets)
     let (reader, scrollView, window) = renderOffscreen(document)
     reader.apply(settings: wrapSettings(true))
     wrapSettle(reader)
@@ -3285,12 +3288,49 @@ func largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() throws {
     // Compare native screen geometry to the real clip view, without requiring
     // the ordinary-file 2 pt anchor guarantee on this >8,000-line document.
     let lastCharacter = NSRange(location: source.utf16.count - 1, length: 1)
+    let finalKeyword = NSRange(location: (source as NSString).range(of: "let final_value").location, length: 3)
     for wrapped in [false, true, false] {
         reader.apply(settings: wrapSettings(wrapped))
         wrapSettle(reader)
         reader.view.scrollRangeToVisible(lastCharacter)
         scrollView.reflectScrolledClipView(scrollView.contentView)
         wrapSettle(reader)
+        // Capture before querying rendering attributes: such queries may trigger
+        // lazy validation and conceal a frame that actually drew unstyled text.
+        let drawRect = reader.view.visibleRect
+        let bitmap = try #require(reader.view.bitmapImageRepForCachingDisplay(in: drawRect))
+        reader.view.cacheDisplay(in: drawRect, to: bitmap)
+        let keywordRect = reader.view.convert(window.convertFromScreen(reader.view.firstRect(
+            forCharacterRange: finalKeyword, actualRange: nil
+        )), from: nil).intersection(drawRect)
+        try #require(!keywordRect.isEmpty, "final keyword must be in the captured viewport")
+        let expectedColor = try #require(ReaderTheme(settings: wrapSettings(wrapped))
+            .color(for: .keyword).usingColorSpace(.sRGB))
+        let scaleX = CGFloat(bitmap.pixelsWide) / drawRect.width
+        let scaleY = CGFloat(bitmap.pixelsHigh) / drawRect.height
+        let pixelsX = max(0, Int((keywordRect.minX - drawRect.minX) * scaleX))..<min(
+            bitmap.pixelsWide, Int(ceil((keywordRect.maxX - drawRect.minX) * scaleX)))
+        let pixelsY = max(0, Int((keywordRect.minY - drawRect.minY) * scaleY))..<min(
+            bitmap.pixelsHigh, Int(ceil((keywordRect.maxY - drawRect.minY) * scaleY)))
+        var keywordPixels = 0
+        for x in pixelsX {
+            for y in pixelsY {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                // Antialiasing and display-profile conversion alter RGB values;
+                // retain the syntax hue while rejecting the gray unstyled glyphs.
+                let hueDifference = abs(color.hueComponent - expectedColor.hueComponent)
+                if min(hueDifference, 1 - hueDifference) < 0.08
+                    && color.saturationComponent > 0.2 { keywordPixels += 1 }
+            }
+        }
+        if keywordPixels == 0, let png = bitmap.representation(using: .png, properties: [:]) {
+            let path = "/tmp/cairn-eof-color-\(wrapped)-\(reader.renderingCoordinator.styledFragmentCount).png"
+            try png.write(to: URL(fileURLWithPath: path))
+            print("EOF_BITMAP path=\(path) draw=\(drawRect) keyword=\(keywordRect) pixelSize=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh) expected=\(expectedColor)")
+        }
+        #expect(keywordPixels > 0, "EOF keyword must draw its syntax color, wrapped=\(wrapped)")
+        let keywordColors = renderedColors(in: reader, intersecting: finalKeyword)
+        #expect(keywordColors.contains { colorsEqual($0, ReaderTheme(settings: wrapSettings(wrapped)).color(for: .keyword)) })
         let nativeRect = reader.view.convert(window.convertFromScreen(reader.view.firstRect(
             forCharacterRange: lastCharacter, actualRange: nil
         )), from: nil)
