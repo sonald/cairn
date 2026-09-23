@@ -40,6 +40,7 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
     )
     let (reader, scrollView, window) = renderOffscreen(document)
     let before = reader.renderingCoordinator.styledFragmentCount
+    #expect(before < 250, "initial styling must stay within the viewport, not visit all 500 paragraphs")
     let lastLine = (source as NSString).range(of: "let value499")
     let lastKeyword = NSRange(location: lastLine.location, length: 3)
 
@@ -1371,7 +1372,7 @@ func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {
         .load(file: URL(fileURLWithPath: "/fold-spike.rs"))
         .document
     let fold = try #require(document.foldRegions.first { $0.kind == .declaration })
-    let (reader, _, window) = renderOffscreen(document)
+    let (reader, scrollView, window) = renderOffscreen(document)
     #expect(reader.toggleFold(id: fold.id))
     reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     window.displayIfNeeded()
@@ -1423,6 +1424,37 @@ func foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() throws {
     // The chip target is intentionally 22pt tall and vertically centered on
     // the line, so it may extend slightly past the line fragment.
     #expect(providerView.bounds.height <= max(lineHeight, 22))
+
+    // Cross-check the hosted chip against AppKit's native character rectangle,
+    // including a viewport-height shrink/restore that must not shift its origin.
+    let placeholder = (reader.view.string as NSString).range(of: "\u{FFFC}")
+    #expect(placeholder.location != NSNotFound)
+    for height: CGFloat in [180, 90, 180] {
+        window.setContentSize(NSSize(width: 480, height: height))
+        window.layoutIfNeeded()
+        manager.textViewportLayoutController.layoutViewport()
+        let bitmap = try #require(scrollView.bitmapImageRepForCachingDisplay(in: scrollView.bounds))
+        scrollView.cacheDisplay(in: scrollView.bounds, to: bitmap)
+        var hostedChip: NSView?
+        manager.enumerateTextLayoutFragments(from: content.documentRange.location, options: [.ensuresLayout]) { fragment in
+            if let view = fragment.textAttachmentViewProviders.first?.view {
+                hostedChip = view
+                return false
+            }
+            return true
+        }
+        let chip = try #require(hostedChip)
+        #expect(chip.isDescendant(of: reader.view))
+        let chipRect = chip.convert(chip.bounds, to: reader.view)
+        let nativeRect = reader.view.convert(window.convertFromScreen(reader.view.firstRect(
+            forCharacterRange: placeholder, actualRange: nil
+        )), from: nil)
+        #expect(!nativeRect.isEmpty)
+        #expect(abs(chipRect.minX - nativeRect.minX) < 0.5,
+            "height=\(height), chip=\(chipRect), native=\(nativeRect)")
+        #expect(min(chipRect.maxY, nativeRect.maxY) > max(chipRect.minY, nativeRect.minY),
+            "chip must overlap its native text row after height=\(height): \(chipRect), \(nativeRect)")
+    }
 
     #expect(providerView.hitTest(
         NSPoint(x: providerView.bounds.midX, y: providerView.bounds.midY)
@@ -3214,4 +3246,64 @@ func wrapTrailingEmptyRowRemainsALegalViewportAnchor() throws {
         #expect(error <= 1)
         withExtendedLifetime(window) {}
     }
+}
+
+
+@MainActor
+@Test
+func largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() throws {
+    let source = (0..<9000).map {
+        "let value\($0) = compare(left, right) && compare(next_left, next_right) && compare(last_left, last_right);"
+    }.joined(separator: "\n") + String(repeating: "x", count: 4000)
+    let document = ReaderDocument(bytes: Array(source.utf8))
+    let (reader, scrollView, window) = renderOffscreen(document)
+    reader.apply(settings: wrapSettings(true))
+    wrapSettle(reader)
+    let middle = document.lineTable.lineStarts[4500]
+    reader.reveal(byteOffset: middle)
+    wrapSettle(reader)
+    let selection = NSRange(location: Int(middle) + 4, length: 9)
+    reader.view.setSelectedRanges([NSValue(range: selection)], affinity: .upstream, stillSelecting: false)
+    let selectedRanges = reader.view.selectedRanges
+    let selectedSource = reader.sourceText(forDisplaySelection: selection)
+    reader.apply(settings: wrapSettings(false))
+    wrapSettle(reader)
+    #expect(reader.lastViewportRestoreWasLimited)
+    #expect(reader.view.selectedRanges == selectedRanges)
+    #expect(reader.view.selectionAffinity == .upstream)
+    #expect(reader.sourceText(forDisplaySelection: selection) == selectedSource)
+    let manager = try #require(reader.view.textLayoutManager)
+    let content = try #require(manager.textContentManager)
+    let viewport = try #require(manager.textViewportLayoutController.viewportRange)
+    let visibleStart = content.offset(from: content.documentRange.location, to: viewport.location)
+    let visibleEnd = content.offset(from: content.documentRange.location, to: viewport.endLocation)
+    #expect(visibleStart >= 0 && visibleEnd > visibleStart && visibleEnd <= source.utf16.count)
+    let visibleSource = try #require(reader.firstVisibleByteOffset())
+    #expect(visibleSource < document.bytes.count)
+
+    // EOF must remain reachable after the estimated-height wrap-off transition.
+    // Compare native screen geometry to the real clip view, without requiring
+    // the ordinary-file 2 pt anchor guarantee on this >8,000-line document.
+    let lastCharacter = NSRange(location: source.utf16.count - 1, length: 1)
+    for wrapped in [false, true, false] {
+        reader.apply(settings: wrapSettings(wrapped))
+        wrapSettle(reader)
+        reader.view.scrollRangeToVisible(lastCharacter)
+        scrollView.reflectScrolledClipView(scrollView.contentView)
+        wrapSettle(reader)
+        let nativeRect = reader.view.convert(window.convertFromScreen(reader.view.firstRect(
+            forCharacterRange: lastCharacter, actualRange: nil
+        )), from: nil)
+        let clipRect = reader.view.convert(scrollView.contentView.bounds, from: scrollView.contentView)
+        #expect(!nativeRect.isEmpty)
+        #expect(nativeRect.midX >= clipRect.minX && nativeRect.midX <= clipRect.maxX,
+            "last character X must be visible, wrapped=\(wrapped): native=\(nativeRect), clip=\(clipRect)")
+        #expect(nativeRect.midY >= clipRect.minY && nativeRect.midY <= clipRect.maxY,
+            "last character Y must be visible, wrapped=\(wrapped): native=\(nativeRect), clip=\(clipRect)")
+        #expect(!nativeRect.intersection(clipRect).isEmpty)
+        #expect(reader.view.selectedRanges == selectedRanges)
+        #expect(reader.view.selectionAffinity == .upstream)
+    }
+    #expect(reader.view.string == source)
+    withExtendedLifetime(window) {}
 }

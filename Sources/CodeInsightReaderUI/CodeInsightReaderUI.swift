@@ -3773,6 +3773,7 @@ public final class ReaderTextView {
         // when the effective width actually changes so repeated gutter
         // reconfigures never trigger redundant relayouts.
         let previousWidth = view.textContainer?.size.width
+        let previousViewportStart = view.textLayoutManager?.textViewportLayoutController.viewportRange?.location
         let targetWidth: CGFloat = wrapLines ? width : CGFloat.greatestFiniteMagnitude
         scrollView.hasHorizontalScroller = !wrapLines
         view.isHorizontallyResizable = !wrapLines
@@ -3793,20 +3794,31 @@ public final class ReaderTextView {
                let content = manager.textContentManager,
                previousWidth.isFinite
             {
-                // Turning wrap off can only shrink the document, and the
-                // viewport may sit past the new (shorter) content, where
-                // viewport layout has nothing to lay and the frame height
-                // never shrinks on its own. Unwrapped paragraphs are
-                // single-row, so laying the whole document is bounded; the
-                // resulting extent explicitly re-sizes the view so the
-                // scroll range reflects the real content (D3.6).
+                // The old wrapped viewport can sit past the shorter content.
+                // Ordinary files resolve the full extent; large files use the
+                // native viewport estimate and refine it as content is visited.
                 var extent = CGRect.null
-                manager.enumerateTextLayoutFragments(
-                    from: content.documentRange.location,
-                    options: [.ensuresLayout]
-                ) { fragment in
-                    extent = extent.union(fragment.layoutFragmentFrame)
-                    return true
+                if (displayedDocument?.lineTable.lineStarts.count ?? 0) > 8_000,
+                   let previousViewportStart {
+                    // ponytail: above 8,000 lines the scrollbar extent is estimated;
+                    // TextKit refines it when the user visits more content.
+                    let controller = manager.textViewportLayoutController
+                    for _ in 0..<2 {
+                        let y = controller.relocateViewport(to: previousViewportStart)
+                        scrollView.contentView.scroll(to: NSPoint(
+                            x: scrollView.contentView.bounds.minX, y: y
+                        ))
+                        controller.layoutViewport()
+                    }
+                    extent = manager.usageBoundsForTextContainer
+                } else {
+                    manager.enumerateTextLayoutFragments(
+                        from: content.documentRange.location,
+                        options: [.ensuresLayout]
+                    ) { fragment in
+                        extent = extent.union(fragment.layoutFragmentFrame)
+                        return true
+                    }
                 }
                 if !extent.isNull, !extent.isEmpty {
                     let inset = view.textContainerInset
@@ -3974,7 +3986,10 @@ public final class ReaderTextView {
             from: viewportRange.location,
             options: []
         ) { fragment in
-            guard fragment.layoutFragmentFrame.minY <= viewport.maxY else {
+            // Unlaid fragments can have a zero frame; geometry alone would
+            // walk and style the rest of the document outside this viewport.
+            guard fragment.rangeInElement.location.compare(viewportRange.endLocation) == .orderedAscending,
+                  fragment.layoutFragmentFrame.minY <= viewport.maxY else {
                 return false
             }
             layoutManager.renderingAttributesValidator?(layoutManager, fragment)
@@ -4311,6 +4326,12 @@ private final class ReaderRulerView: NSRulerView {
 
 @MainActor
 private final class ClickTextView: NSTextView {
+    // Code is top-left aligned. AppKit's inferred origin can force full-document
+    // layout during scrolling; all native drawing and hit-testing use this origin.
+    override var textContainerOrigin: NSPoint {
+        NSPoint(x: textContainerInset.width, y: textContainerInset.height)
+    }
+
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
     var sourceCopyHandler: ((NSRange) -> String?)?
     var contextMenuHandler: ((Int) -> Void)?
