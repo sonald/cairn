@@ -10993,7 +10993,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// so a queued second open can never overwrite the visible choice
     /// (§6.2). The gate is the checkbox targets; nothing survives the
     /// modal session.
-    private final class LanguageSelectionGate: NSObject {
+    @MainActor private final class LanguageSelectionGate: NSObject {
         var checkboxes: [NSButton] = []
         weak var openButton: NSButton?
 
