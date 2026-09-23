@@ -26,7 +26,9 @@
 
 ## 产品门禁补充
 
-完整产品门禁首次执行 18 个通道：15 通过、3 失败、0 挂起，因失败停止后续阶段，**整套产品门禁未通过**。见[原始日志](evidence/reader-ligatures/product-gates-first.log)。随后只复测失败通道，没有将单独复测冒充完整门禁重跑：
+**最新整套产品门禁通过（解锁桌面）。** 使用原 `scripts/run-product-gates.sh` 契约完整重跑，退出0：1032项CI测试、18通道 `pass=18 fail=0 hang=0`、混合语言、书签原生/重启/三主题、正式App Support隔离及gold gates均成功。Tabs在该完整轮次为62.61MiB，低于原100MiB上限；另一次独立Release复测为62.06MiB。未更改产品代码或预算。见[完整门禁日志](evidence/reader-ligatures/product-gates-unlocked.log)、[独立Tabs](evidence/reader-ligatures/tabs-unlocked.stdout)。旧171–177MiB结果与桌面状态差异有关联，尚未证明因果。下文保留首次失败及修复过程，不再代表当前门禁状态。
+
+完整产品门禁首次执行 18 个通道：15 通过、3 失败、0 挂起，因失败停止后续阶段，**当时整套产品门禁未通过**。见[原始日志](evidence/reader-ligatures/product-gates-first.log)。随后只复测失败通道，没有将单独复测冒充完整门禁重跑：
 
 - Search：原断言硬编码 `2001`，实际本地化状态显示 `2,001`。改为使用相同的本地化数字格式；[复测](evidence/reader-ligatures/search-fixed.stdout)的真实总数、2000条上限及截断行可见性均通过，退出0。
 - History：旧自测在50ms后立即要求 cursor变化，但现有导航在异步replay成功后才提交cursor。将该断言纳入原30秒等待；[复测](evidence/reader-ligatures/history-fixed.stdout)导航序列与选择同步通过，退出0。
@@ -71,6 +73,8 @@ F3 wrap-off 原先约 1,738 ms。原生调用栈定位到 caret 几何扫描整�
 | wrap on | 3,980.39 ms | 3,991.18 ms | 均远超 250 ms；On 未增加这部分成本 |
 | wrap off | 3,746.87 ms | 1,904.58 ms | 超出 250 ms，且 On 超出 1.5× Off 的相对门槛 |
 
+解锁后追加1次预热+3次诊断样本，Fira On / wrap off稳定p95为3479.55ms，仍超250ms。该小样本只确认失败继续存在，不替代正式30样本：[诊断结果](evidence/reader-ligatures/f1-unlocked-diagnostic.json)。
+
 F1 峰值约 7 GiB，是该自测进程的指标，不能推导普通文件或日常窗口的内存。原始结果在运行清单中。F1 测于 78e0826；后续仅修复纯字体变化的折叠占位属性和 Reading Set，F1 的 wrap-only 路径未变。此项本来就是失败，不作为最终通过证据。
 
 已验证两条公开 TextKit 替代思路：relocateViewport + usageBounds 会出现中间空视口且仍全篇/重复成形；layoutQueue 在默认 NSTextView 路径未转移同步工作。未把这些不安全或无改善的试验放进产品：[视口探针](evidence/reader-ligatures/viewport-api-probe-mid.json)、[队列探针](evidence/reader-ligatures/layout-queue-probe.json)。JetBrains 的少量诊断样本更慢，不冒充正式预算。
@@ -93,12 +97,11 @@ F1 峰值约 7 GiB，是该自测进程的指标，不能推导普通文件或�
 | A12 | 通过 | 中文、emoji、组合字符、ZWJ、Tab、CRLF；几何扩展不回写源范围 |
 | A13 | 自动化通过 | 缺失字体、最近字重、字体环境刷新；设置原生菜单已复验；真实字体安装/移除组合未宣称通过 |
 | A14 | 通过 | 相同 apply 的投影/属性/段落增量0；纯字体投影增量0；缓存≤128，压力后释放通过 |
-| A15 | 未通过 | 完整CI通过，常规/长行/Reading Set预算通过；F1预算及产品门禁未通过；本轮鼠标与菜单桌面修复已复验 |
+| A15 | 未通过 | 完整CI通过，常规/长行/Reading Set预算通过；完整产品门禁已通过；F1预算仍未通过；本轮鼠标与菜单桌面修复已复验 |
 
 ## 尚需处理
 
-1. **Tabs 内存门禁。** 旧产物同样超出100MiB，但没有精确基线提交对照；需独立解决图形内存问题后重跑完整产品门禁。
-2. **F1 性能范围决策。** 已提交保留原门槛继续专项优化或接受明确已知限制的选择，尚未收到答复；默认保留未通过状态。没有未经同意放宽门槛，也未将 goal 标记完成。
+1. **F1 性能范围决策。** 已提交保留原门槛继续专项优化或接受明确已知限制的选择，尚未收到答复；默认保留未通过状态。没有未经同意放宽门槛，也未将 goal 标记完成。
 
 待用的独立 GUI fixture 路径记录于 `/tmp/cairn-ligatures-native-root.txt`，包含 Rust 调用关系、两次 Git 提交、普通文本和 Markdown。验收 bundle 为 `.build/ligature-acceptance/Cairn.app`，独立 bundle id `dev.cairn.LigatureAcceptance`；已从9eca0f9代码重新打包并完成鼠标与菜单复验。
 

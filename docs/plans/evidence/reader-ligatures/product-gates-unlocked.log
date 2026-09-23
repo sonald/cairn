@@ -1,0 +1,1471 @@
+--- product toolchain ---
+ProductName:		macOS
+ProductVersion:		27.0
+BuildVersion:		26A428
+Xcode 27.0
+Build version 27A266a
+swift-driver version: 1.168.6 Apple Swift version 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1)
+Target: arm64-apple-macosx27.0.0
+rust-analyzer 0.0.0 (682a84e95b 2026-09-13)
+pyright 1.1.414
+3.3.0
+v26.8.2
+/opt/homebrew/lib
+├── typescript-language-server@3.3.0
+└── typescript@5.0.2
+
+--- end product toolchain ---
+PASS: CodeInsightApp: 544 bilingual keys
+PASS: CodeInsightAppModel: 220 bilingual keys
+PASS: CodeInsightReaderUI: 29 bilingual keys
+PASS: 793 bilingual keys, placeholders and plural rules
+Building for debugging...
+[Computing dependencies]
+[17 / 82]
+[25 / 80] CTreeSitterRust
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[44 / 94] TreeSitterKit
+[52 / 93] CodeInsightGit
+[59 / 105] TreeSitterKit
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') t[59 / 105] CTreeSitter
+o 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[75 / 129] CodeInsightExact
+[86 / 123] CodeInsightRustExtractor
+[90 / 135] CodeInsightRustExtractor
+[97 / 131] CodeInsightRustExtractor
+[100 / 133] CTreeSitterRust
+[109 / 139] CodeInsightReaderCore
+[111 / 151] CodeInsightReaderCore
+[112 / 151] CodeInsightReaderCore
+[120 / 147] CodeInsightEngine
+[129 / 151] CodeInsightEngine
+[132 / 154] codeinsight-product
+[134 / 162] CodeInsightExact
+[140 / 174] CodeInsightAppModel
+[146 / 174] CodeInsightExact-product
+[150 / 174] CodeInsightAppModel
+[153 / 174] CodeInsightReaderUI
+[156 / 170] CodeInsightReaderUI
+[159 / 176] CodeInsightAppModel
+[160 / 174] CodeInsightAppModel
+[160 / 174] codeinsight-product
+[162 / 174] codeinsight-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[167 / 179] CodeInsightAppModel
+[168 / 179] CodeInsightReaderUI
+[168 / 178] CodeInsightAppModel
+[171 / 176] codeinsight-app-product
+[182 / 188] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[184 / 188] CodeInsightAppModel
+[184 / 187] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[185 / 187] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[187 / 187] codeinsight-app-product
+Build complete! (13.49秒)
+PASS: batch total=1027 (.build/ci-swift-test.log)
+PASS: batch total=2 (.build/ci-swift-test-isolated.log)
+PASS: batch total=2 (.build/ci-swift-test-panels.log)
+PASS: batch total=1 (.build/ci-swift-test-mouse.log)
+PASS: swift test total=1032 (main=1027 isolated=2 panels=2 mouse=1)
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"profileTitle":"Rust · exact_fixture · default · Safe","profileVisible":true,"readerFile":null,"step":"initial-status","variant":"fake"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":378.88049999999998,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":109.76475000000001,"relationFirstActionableTitle":"relation_root"},"coldFirstActionableSelectable":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"instrumentation-only; not real rust-analyzer","pinned":false,"readerFile":"lib.rs","sameSession":true,"step":"relation-timing","thresholdBasis":"structural-only; real threshold pending host measurement","variant":"delayed-exact-fake","warm":{"relationAllResultsMS":341.47583300000002,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":73.178167000000002,"relationFirstActionableTitle":"relation_root"},"warmFirstActionableSelectable":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyFirstAnswerMS":60.200125,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"fake"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","exactUpgradeMS":340.93904199999997,"pinned":false,"readerFile":"main.rs","step":"exact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextReadyMS":617.68704200000002,"contextSummary":"src\/lib.rs:1:8","contextVisibleDuringSwitch":false,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"fakePrepareFeatures":["defaultFeatures","allFeatures"],"featurePrepared":true,"fuzzyAfterSwitch":true,"menuActionTriggered":true,"oldGenerationRelationResultReturned":true,"oldGenerationRequestInFlight":true,"oldGenerationResultDiscarded":true,"oldGenerationResultReturned":true,"pinned":false,"profileButtonFrame":"{{-3, -2}, {194, 40}}","profileButtonVisibleWithGeometry":true,"profileContainerBounds":"{{0, 0}, {188, 38}}","profileTitle":"Rust · exact_fixture · all · Safe","readerFile":"lib.rs","relationActiveBeforeSwitch":true,"relationRestoredAfterSwitch":true,"step":"feature-switch","switchedExactVisible":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextRestored":true,"contextSummary":"src\/lib.rs:1:8","direction":"references","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expectedUseOffset":603,"groupFrame":"{{0, 44}, {359, 44}}","groupTitle":"","groupVisibleWithGeometry":true,"historyBack":true,"historyRecorded":true,"intersection":"{{0, 44}, {359, 44}}","openedOffset":603,"originOffset":0,"pinned":false,"readerFile":"lib.rs","referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"returnedOffset":0,"segmentFrames":["{{1326, 843}, {78, 24}}","{{1404, 843}, {64, 24}}","{{1468, 843}, {102, 24}}","{{1570, 843}, {102, 24}}"],"selected":true,"step":"local-references","treeVisible":true,"variant":"reader-index","visibleRect":"{{0, 0}, {359, 716.5}}"}
+{"axLabel":"lib.rs:3","axProvenanceReachable":true,"axReadOnly":true,"axRole":"AXUnknown","axValue":"direct · heuristic also matched, Verified","axValueSettable":false,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","crossFile":true,"declarationExcluded":true,"direction":"references","edgeCount":3,"edgeFrames":["{{0, 66}, {383, 44}}","{{0, 110}, {383, 44}}","{{0, 154}, {383, 44}}"],"edgeTitles":["main.rs:1:20","lib.rs:3","main.rs:4"],"exactEdgeTitles":["lib.rs:3","main.rs:4"],"exactGroupRowCount":2,"exactGroupTitle":null,"exactRowCount":2,"exactStatusText":"Exact: ready · Safe (limited)","exactVisible":true,"fuzzyEdgeTitles":["main.rs:1:20"],"fuzzyRowCount":1,"geometryReadDidNotForceLayout":true,"groupsDoNotOverlap":true,"groupTitle":"Show 1 possible match","heuristicProvenanceRetained":true,"mixedPresentationHonest":true,"pinned":false,"possibleDisclosure":"Show 1 possible match","readerFile":"lib.rs","resultsAndControlsDoNotOverlap":true,"rowsVisibleWithGeometry":true,"step":"project-references","variant":"exact+fuzzy","visibleRect":"{{0, 0}, {359, 695.5}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","doubleClickDidNotNavigateTwice":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","historyBack":true,"keyboardAXNotificationCorrect":true,"keyboardDownMovedSelection":true,"keyboardEnterOpened":true,"keyboardKeypadEnterOpened":true,"keyboardRestoredRelationFile":true,"keyboardSelectionNavigated":true,"keyboardUpMovedSelection":true,"navigated":true,"navigationExactlyOnce":true,"noFeedback":true,"noReroot":true,"pinned":false,"readerFile":"lib.rs","selected":true,"selectionCount":1,"step":"reference-single-click-navigation","variant":"fuzzy-two-stage"}
+{"candidateCount":1,"contextAndRelationsReadyMS":1166.4523340000001,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallerVisible":true,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","extracted":0,"footprintMB":238.00112152099609,"inferredRowFrame":"{{0, 44}, {359, 44}}","pinned":false,"readerFile":"main.rs","relationsVisibleRect":"{{0, 0}, {359, 695.5}}","step":"relations","variant":"fake","verifiedRowFrame":"{{0, 110}, {359, 44}}"}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"relation-exact-implementations","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","firstSummary":"src\/main.rs:1:5","pinned":false,"readerFile":"lib.rs","restored":true,"secondSummary":"src\/lib.rs:3:8","selectedFirst":true,"selectedSecond":true,"step":"relation-follow-context","updatedTwice":true,"variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","step":"pinnedExact","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Strong·direct","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","generationIncremented":true,"pinned":true,"readerFile":"lib.rs","rootTitle":"relation_root","selectedEdge":true,"step":"relation-direction-root","variant":"fake"}
+{"candidateCount":1,"contextPreserved":true,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":true,"readerFile":"lib.rs","rootTitle":"answer","selectedEdge":true,"step":"relation-deselect-root","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","navigated":true,"pinned":true,"readerFile":"main.rs","rootTitle":"main","selectedEdge":true,"step":"relation-double-click","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","externalGroupTitle":"","pinned":true,"readerFile":"lib.rs","rootTitle":"Backend","step":"relation-empty-external","variant":"fake"}
+{"bothQueriesFinished":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionRequests":0,"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","expandedDefinitionValidationRequests":1,"firstBatchUsedNodeReload":true,"heuristicPublishedWhileExactBlocked":true,"pinned":true,"possibleExpanded":true,"possibleRowRetained":true,"readerFile":"lib.rs","step":"relation-first-batch","variant":"blocked-root-exact-fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","inferredPossible":false,"inferredProbable":true,"inferredSubtitle":"direct","pinned":true,"readerFile":"lib.rs","step":"relation-receiver-types","traitObjectPossible":true,"traitObjectSubtitle":"dynamic · name match only","typedPossible":false,"typedStrong":true,"typedSubtitle":"direct","variant":"fake"}
+{"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","full":"No verified references","offline":"Analysis limited: dependencies unavailable offline","partial":"Analysis limited: build scripts disabled; proc macros disabled","pinned":true,"readerFile":"lib.rs","step":"relation-zero-coverage","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Trusted","pinned":false,"profileTitle":"Rust · history · default · Trusted","readerFile":null,"step":"trusted-status","variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":null,"step":"trust-revoke","trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"variant":"fake"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"initial-status","variant":"rust-analyzer"}
+{"candidateCount":0,"cold":{"relationAllResultsMS":2422.791041,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":111.178708,"relationFirstActionableTitle":"relation_root"},"coldHeuristicFirstObserved":true,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","measurementScope":"real rust-analyzer","pinned":false,"readerFile":"lib.rs","step":"relation-timing","thresholdBasis":"structural-only; threshold pending host measurement","variant":"rust-analyzer","warm":{"relationAllResultsMS":65.219083999999995,"relationCandidateEdgeCount":2,"relationFirstActionableKind":"heuristic","relationFirstActionableMS":51.272708999999999,"relationFirstActionableTitle":"relation_root"},"warmHeuristicFirstObserved":true}
+{"candidateCount":1,"contextProvenance":"Unresolved·direct","contextSummary":"src\/main.rs:1:5","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","fuzzyVisibleBeforeExact":true,"pinned":false,"readerFile":"main.rs","step":"fuzzy","variant":"rust-analyzer"}
+{"candidateCount":2,"contextExactMS":64.929709000000003,"contextFirstActionableMS":54.036333999999997,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"main.rs","step":"exact","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"ExactFixtureBackend"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-implementations","textDocumentImplementationReached":true,"variant":"rust-analyzer"}
+{"callHierarchyIncomingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"relation_root"},{"file":"src\/main.rs","symbol":"main"}],"exactGroupRowCount":2,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-incoming-calls","variant":"rust-analyzer"}
+{"callHierarchyOutgoingCallsReached":true,"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactEdges":[{"file":"src\/lib.rs","symbol":"answer"}],"exactGroupRowCount":1,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-outgoing-calls","variant":"rust-analyzer"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · rust-analyzer rust-analyzer 0.0.0 (682a84e95b 2026-09-13) · Safe · limitations: build scripts disabled; proc macros disabled · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":3,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"readerFile":"lib.rs","step":"real-references","textDocumentReferencesReached":true,"variant":"rust-analyzer"}
+{"candidateCount":0,"contextProvenance":null,"contextSummary":null,"exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: deps unavailable (offline) · Safe","noDefinitionRequest":true,"pinned":false,"readerFile":null,"step":"offline-coverage","variant":"rust-analyzer-offline"}
+{"candidateCount":2,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · @cc4bea3 (materialized) · features: default","contextSummary":"src\/lib.rs:1:8","exactGroupRowCount":0,"exactGroupTitle":null,"exactStatusText":"Exact: ready · Safe (limited)","pinned":false,"provenanceAttributed":true,"providerRoot":"\/var\/folders\/9k\/7j3z072513z5hkf_xgcxzdzm0000gn\/T\/CodeInsightExactHistorySelfTest-3013479F-3C91-4F8A-804E-91DB1631A33C\/materialized\/cc4bea388d310aba81236551439a0602d71c1e79\/4d1bd1001728c15329194887321f4022453c86acde9d77c5f089dbb0ab90c493","providerRootIsMaterialized":true,"readerFile":"main.rs","revision":"cc4bea388d310aba81236551439a0602d71c1e79","step":"historicalExact","uiPath":"src\/lib.rs","uiPathIsRepoRelative":true,"variant":"historical-fake"}
+{"answerCallersReady":true,"bothRelationQueriesFinished":true,"callHierarchyIncomingCallsReached":true,"callHierarchyOutgoingCallsReached":true,"candidateCount":1,"contextProvenance":"Exact·direct · fake-exact in-process-fake-1 · Safe · limitations: build scripts disabled; proc macros disabled · features: all","contextSummary":"src\/lib.rs:1:8","defaultDefinitionPromotionSkipped":true,"deselectedRootPreserved":true,"deselectPreservedContext":true,"deselectRootReady":true,"directionGenerationIncremented":true,"doubleClickNavigatesAndSetsRoot":true,"exactCallerCallSitesHonest":true,"exactCallerIsOneLevel":true,"exactCallersRestored":true,"exactCallerVisible":true,"exactGroupRowCount":2,"exactGroupTitle":null,"exactImplementationsVisible":true,"exactReferencesDeclarationExcluded":true,"exactReferencesHeuristicProvenanceRetained":true,"exactReferencesVisible":true,"exactStatusText":"Exact: ready · Safe (limited)","exactStatusVisible":true,"exactVisible":true,"exactZeroCoverageCopyDistinct":true,"exactZeroFullCopyHonest":true,"exactZeroOfflineCopyHonest":true,"exactZeroPartialCopyHonest":true,"expandedDefinitionValidationOnDemand":true,"externalDemotionFileVisible":true,"externalGroupHeaderHonest":true,"externalGroupVisible":true,"featureContextClearedDuringSwitch":true,"featureFuzzyAfterSwitch":true,"featureMenuActionTriggered":true,"featureOldGenerationRelationResultReturned":true,"featureOldGenerationRequestInFlight":true,"featureOldGenerationResultDiscarded":true,"featureOldGenerationResultReturned":true,"featurePrepared":true,"featureProbeFileVisible":true,"featureProfileButtonVisibleWithGeometry":true,"featureRelationActiveBeforeSwitch":true,"featureRelationRestoredAfterSwitch":true,"featureSwitchedExactVisible":true,"firstBatchUsedNodeReload":true,"fuzzyRetained":true,"fuzzyVisible":true,"heuristicPublishedWhileExactBlocked":true,"historicalExactVisible":true,"historicalInitialStatusSafe":true,"historicalProvenanceAttributed":true,"inferredReceiverAbsentFromPossible":true,"inferredReceiverNameMatchNoteAbsent":true,"inferredReceiverProbable":true,"initialProfileTitleSafe":true,"initialProfileVisible":true,"initialStatusSafeBeforeClick":true,"localReferenceContextRestored":true,"localReferenceCountHonest":true,"localReferenceGroupVisibleWithGeometry":true,"localReferenceHistoryBack":true,"localReferenceHistoryRecorded":true,"localReferenceOpenedAtCorrectOffset":true,"localReferenceSelected":true,"localReferencesVisible":true,"mixedReferencePresentationHonest":true,"passed":true,"pinned":true,"pinnedTargetStable":true,"possibleExpandedForValidation":true,"possibleRowRetainedWithoutPromotion":true,"projectReferenceAXProvenanceReachable":true,"projectReferenceAXReadOnly":true,"projectReferenceGroupsDoNotOverlap":true,"projectReferenceResultsAndControlsDoNotOverlap":true,"projectReferenceRowsVisibleWithGeometry":true,"projectReferencesCrossFile":true,"projectReferencesVisible":true,"providerRootIsMaterialized":true,"readerFile":"lib.rs","realOfflineCoverage":"passed","realOfflineCoveragePassedOrSkipped":true,"realProvider":"passed","realProviderPassedOrSkipped":true,"realRelationColdFirstActionableSelectable":true,"realRelationColdTimingFieldsValid":true,"realRelationTimingFileVisible":true,"realRelationWarmFirstActionableSelectable":true,"realRelationWarmTimingFieldsValid":true,"referenceDoubleClickDidNotNavigateTwice":true,"referenceKeyboardAXNotificationCorrect":true,"referenceKeyboardDownMovedSelection":true,"referenceKeyboardEnterOpened":true,"referenceKeyboardKeypadEnterOpened":true,"referenceKeyboardRestoredRelationFile":true,"referenceKeyboardSelectionNavigated":true,"referenceKeyboardUpMovedSelection":true,"referenceSegmentDoesNotOverlapOtherDirections":true,"referenceSegmentVisibleWithGeometry":true,"referenceSingleClickExactlyOnce":true,"referenceSingleClickHistoryBack":true,"referenceSingleClickNavigated":true,"referenceSingleClickNoFeedback":true,"referenceSingleClickNoReroot":true,"referenceSingleClickSelected":true,"relationColdFirstActionableSelectable":true,"relationColdHeuristicFirst":true,"relationColdTimingFieldsValid":true,"relationFileRestoredAfterDependency":true,"relationFileVisible":true,"relationFollowContextRestored":true,"relationGeometryReadDidNotForceLayout":true,"relationRowsUpdateFollowContext":true,"relationTimingFileVisible":true,"relationTimingSameSession":true,"relationWarmFirstActionableSelectable":true,"relationWarmHeuristicFirst":true,"relationWarmTimingFieldsValid":true,"selectedEdgeDrivesRoot":true,"selectedFirstFollowCaller":true,"selectedForDeselect":true,"selectedForDirection":true,"selectedForOpen":true,"selectedSecondFollowCaller":true,"signatureTraitFileVisible":true,"step":"summary","textDocumentImplementationReached":true,"traitObjectAbsentFromStrongAndProbable":true,"traitObjectStaysPossible":true,"traitObjectSubtitleHonest":true,"trustInitialProfileTitleSafe":true,"trustInitialProfileVisible":true,"trustInitialStatusSafe":true,"trustProfileTitleTrusted":true,"trustRevokeClosedTrustedSession":true,"trustRevokeJSONEmpty":true,"trustRevokeListRowLaidOut":true,"trustRevokePreparedSafe":true,"trustRevokeProfileTitleIsSafe":true,"trustRevokeRepositoriesEmpty":true,"trustRevokeStatusIsSafe":true,"trustRevokeTrustedReady":true,"trustStatusTrusted":true,"typedReceiverAbsentFromPossible":true,"typedReceiverNameMatchNoteAbsent":true,"typedReceiverStrong":true,"uiPathIsRepoRelative":true,"variant":"all","verifiedAndInferredRowsDoNotOverlap":true,"verifiedBadgesHonest":true,"verifiedBadgeVisibleWithGeometry":true,"verifiedRowsVisible":true}
+SELF_TEST_FINISH timestamp=1790125288.053838 pid=52185 channel=exact exit=0
+{"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openProject"}
+{"commitRowFrames":["{{0, 58}, {545, 58}}","{{0, 116}, {545, 58}}"],"contentHeight":480,"file":null,"hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"darkVersionPickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"file":"fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"openFile","worktreeByteCount":374}
+{"commitRowFrames":["{{0, 10}, {545, 58}}","{{0, 68}, {545, 58}}"],"contentHeight":480,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":null,"step":"darkComparePickerGeometry","valid":true,"viewportHeight":394,"visibleCommitRows":2}
+{"commitBlobByteCount":366,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"leftRevision":"worktree","revision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","rightReaderByteCount":366,"rightReaderCollapsed":false,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"selectHEAD~1"}
+{"diffComputeMS":0.14224999999999999,"expectedGutterCounts":{"added":0,"changed":16,"removed":0},"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":16,"removed":0},"gutterCountsMatch":true,"hunkCount":1,"leftLineCount":8,"leftRevision":"worktree","rightLineCount":8,"rightReaderCollapsed":false,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"gutter"}
+{"afterLine":1,"beforeLine":8,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"hunkNavMoved":true,"leftRevision":"worktree","rightReaderCollapsed":false,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","selectedHunkIndex":0,"step":"nextHunk"}
+{"comparisonPreserved":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":1,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":"7fcdd36afa62b0ad39a925a37bf674b469813ad9","step":"readingPreset"}
+{"actionDispatched":true,"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","markersCleared":true,"rightReaderCollapsed":true,"rightRevision":null,"stateCleared":true,"step":"closeComparison"}
+{"file":"\/Users\/siancao\/work\/ai\/vibecoding\/codeinsight\/fixtures\/ligatures\/unicode-crlf.rs","hunkCount":0,"leftRevision":"worktree","rightReaderCollapsed":true,"rightRevision":null,"step":"clearCompareAndApplySIClassic","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+{"closeComparisonClearedMarkers":true,"closeComparisonClearedState":true,"closeComparisonCollapsedRight":true,"closeComparisonDisabledAfterClosing":true,"closeComparisonHeaderAvailable":true,"closeComparisonMenuActionDispatched":true,"darkComparePickerGeometryValid":true,"darkVersionPickerGeometryValid":true,"gutterCoexistsWithLineNumbers":true,"gutterCounts":{"added":0,"changed":16,"removed":0},"gutterCountsMatch":true,"hunkNavMoved":true,"passed":true,"readingPresetCollapsedRight":true,"readingPresetPreservedComparison":true,"rightReaderCollapsed":true,"rightReaderDiffersFromWorktree":true,"rightReaderMatchesCommitBlob":true,"step":"summary","themeSwitchClearedRightReader":true,"themeSwitchPreservedLeftReader":true}
+SELF_TEST_FINISH timestamp=1790125292.405335 pid=53375 channel=diff exit=0
+{"alphaOccurrences":3,"availableContentMaxX":1585,"availableContentMinX":347,"availableContentWidth":1238,"betaOccurrences":2,"containerMaxX":1600,"containerMinX":321,"containerWidth":1279,"currentLine":2,"firstGlyphGapWithoutRuler":10,"firstGlyphGapWithRuler":10,"footprintMB":50.688507080078125,"readerMaxX":1585,"readerMinX":347,"readerWidth":1238,"readerWidthWithoutRuler":1264,"rulerMaxX":347,"rulerMinX":321,"rulerWidth":26,"step":"regular","visibleLineNumbers":[1,2,3]}
+2026-09-23 09:01:44.239 codeinsight-app[53378:18903311] WARNING: Application performed a reentrant operation in its NSTableView delegate. This warning will become an assert in the future.
+{"afterFootprintMB":201.59665679931641,"baselineFootprintMB":202.37786102294922,"candidateCount":18001,"deltaFootprintMB":-0.7812042236328125,"firstBatchMS":2539.2900420000001,"footer":"201 verified references · partial","historyBack":true,"historyRecorded":true,"possibleDefaultCollapsed":true,"resultTotalMS":2615.8587499999999,"serviceTotalMS":2539.4762919999998,"serviceTruncated":true,"step":"reference-scale","verifiedCount":201,"visibleRowCount":201}
+{"afterFootprintMB":531.70630645751953,"baselineFootprintMB":531.69068145751953,"deltaFootprintMB":0.015625,"firstVisibleMS":3193.4032499999998,"footprintMB":531.70630645751953,"incrementalFootprintMB":0.015625,"memoryAssessment":"metric-only: TextKit cache reclamation makes the S7 delta non-attributable; >100 MB absolute baseline predates S7 and is an M7 candidate after attributable measurement","occurrences":200,"step":"huge","styledFragments":172,"totalLines":100000,"visibleLines":35}
+{"referenceAttributeRuns":88,"referenceAttributeRunsWhenOff":0,"referenceScannedCount":88,"referenceStyledFragments":45,"referenceStyledFragmentsWhenOff":0,"step":"references","totalReferences":35000}
+{"alphaOccurrenceCountMatches":true,"blankClickClearsOccurrences":true,"currentLineIsExclusive":true,"didLiveScrollResumesViewportFollow":true,"disabledRulerExpandsReaderByRulerWidth":true,"disabledRulerRestoresFullWidth":true,"firstGlyphGapIsReadableWithoutRuler":true,"firstGlyphGapIsReadableWithRuler":true,"fontMenuChangesByOnePoint":true,"fontMenuLowerBoundDisabledAndClamped":true,"fontMenuPersistsUserDefaults":true,"fontMenuUpdatesFileReaderImmediately":true,"fontMenuUpdatesOpenSettingsImmediately":true,"fontMenuUpperBoundDisabledAndClamped":true,"fontMenuUsesExactKeyEquivalents":true,"hugeOccurrenceCountMatches":true,"idleFootprintUnderBudget":true,"largeReferenceCandidateCountMeasured":true,"largeReferenceFirstBatchMeasured":true,"largeReferenceFootprintUnderBudget":true,"largeReferenceHistoryBack":true,"largeReferenceHistoryRecorded":true,"largeReferencePossibleDefaultCollapsed":true,"largeReferenceResultVisibleWithGeometry":true,"largeReferenceRowsVisible":true,"largeReferenceServicePartialHonest":true,"largeReferenceTotalMeasured":true,"largeReferenceVerifiedCountMeasured":true,"metrics":{"firstVisibleMS":3193.4032499999998,"hugeAfterFootprintMB":531.70630645751953,"hugeBaselineFootprintMB":531.69068145751953,"hugeDeltaFootprintMB":0.015625,"hugeLineCount":100000,"hugeOccurrenceCount":200,"idleFootprintMB":22.657188415527344,"referenceAttributeRunCount":88,"referenceCandidateCount":18001,"referenceFirstBatchMS":2539.2900420000001,"referenceResultTotalMS":2615.8587499999999,"referenceScaleAfterFootprintMB":201.59665679931641,"referenceScaleBaselineFootprintMB":202.37786102294922,"referenceScaleDeltaFootprintMB":-0.7812042236328125,"referenceScannedCount":88,"referenceServiceTotalMS":2539.4762919999998,"referenceStyledFragmentCount":45,"referenceVerifiedCount":201,"referenceVisibleRowCount":201,"regularFootprintMB":50.688507080078125,"styledFragmentCount":172,"visibleLineCount":35},"navigationSetsNativePrimarySelection":true,"passed":true,"programmaticNavigationBlocksViewportFollow":true,"readerVisualControlsDoNotOverlap":true,"readerVisualControlsVisibleWithGeometry":true,"readerVisualSettingAppliedImmediately":true,"readerWidthEqualsContainerMinusRuler":true,"referenceFragmentsTrackViewport":true,"referenceLookupIsViewportGated":true,"referenceRunsDoNotTrackFile":true,"referenceRunsTrackViewport":true,"rulerExistsByDefault":true,"rulerInsideWindowContent":true,"rulerLinesTrackViewport":true,"step":"summary","styledFragmentsDoNotTrackFile":true,"styledFragmentsTrackViewport":true,"switchingToBetaReplacesOccurrences":true,"syntaxFormattingOffSuppressesReferenceRuns":true,"visibleLineNumbersMatchFixture":true}
+SELF_TEST_FINISH timestamp=1790125325.8243709 pid=53378 channel=reading exit=0
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1790125325.993911 pid=53397 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1790125326.1130981 pid=53398 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+Building for production...
+[Computing dependencies]
+[17 / 59]
+[24 / 66]
+[34 / 64] CProcessGuard
+[34 / 64] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[37 / 66] CTreeSitterRust
+[39 / 68] CTreeSitterTypeScript
+[45 / 74] CTreeSitterTypeScript
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') t[45 / 74] CTreeSitter
+o 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[49 / 73] CodeInsightCore
+[56 / 83] CodeInsightGit
+[64 / 90] CodeInsightGit
+[70 / 91]
+[75 / 91] CodeInsightRustExtractor
+[81 / 100] CodeInsightEngine
+[84 / 102] CodeInsightExact
+[85 / 101] CodeInsightReaderCore
+[88 / 98] CodeInsightReaderUI
+[89 / 99] CodeInsightEngine
+[95 / 104] CodeInsightAppModel
+[97 / 105] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[98 / 104] CodeInsightAppModel
+[103 / 105] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/[104 / 106] codeinsight-app-product
+diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[107 / 109] codeinsight-app-product
+[108 / 109] codeinsight-app-product
+Build complete! (60.38秒)
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 27.980708,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 534857000
+  },
+  "fold": {
+    "resolutionMs": 29.015250000000002,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 562971920,
+    "foldLatencyMs": 253.163791
+  },
+  "deltaBytes": 28114920,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf
+Building for debugging...
+[Computing dependencies]
+[17 / 82]
+[36 / 89] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[50 / 94] CodeInsightGit
+[58 / 105] TreeSitterKit
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[61 / 122] CodeInsightRustExtractor
+[75 / 129] CodeInsightRustExtractor
+[78 / 129] CodeInsightPythonExtractor
+[87 / 123] CodeInsightTypeScriptExtractor
+[94 / 131] CodeInsightExact
+[96 / 131] CTreeSitterTypeScript
+[99 / 132] CodeInsightTypeScriptExtractor
+[105 / 140] CodeInsightRustExtractor
+[111 / 151] CodeInsightRustExtractor
+[115 / 151] CodeInsightEngine
+[123 / 143] CodeInsightReaderCore
+[125 / 151] codeinsight-product
+[128 / 151] CodeInsightEngine
+[131 / 154] codeinsight-product
+[132 / 154] CodeInsightRustExtractor
+[135 / 153] CodeInsightAppModel
+[141 / 173] CodeInsightReaderUI
+[146 / 173] CodeInsightReaderUI
+[149 / 173] CodeInsightEngine
+[152 / 173] CodeInsightAppModel
+[156 / 169] CodeInsightReaderUI
+[157 / 169] CodeInsightReaderUI
+[159 / 175]
+[160 / 174] CodeInsightAppModel
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[162 / 174] codeinsight-product
+[167 / 179] CodeInsightAppModel
+[167 / 179] CodeInsightReaderUI
+[171 / 176] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[181 / 188] CodeInsightAppModel
+[183 / 188] codeinsight-app-product
+[184 / 187] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[185 / 187] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[187 / 187] codeinsight-app-product
+Build complete! (13.11秒)
+PASS base
+PASS multiwindow
+Building for production...
+[Computing dependencies]
+[17 / 59]
+[29 / 61] TreeSitterKit
+[34 / 64] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[36 / 66] TreeSitterKit
+[39 / 68] CTreeSitterTypeScript
+[45 / 74] CTreeSitterTypeScript
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') t[45 / 74] CTreeSitter
+o 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[49 / 73] CodeInsightCore
+[56 / 83] CodeInsightGit
+[64 / 90] CodeInsightGit
+[70 / 91]
+[75 / 91] CodeInsightRustExtractor
+[81 / 100] CodeInsightReaderCore
+[84 / 102] CodeInsightExact
+[85 / 101] CodeInsightReaderCore
+[88 / 98] CodeInsightReaderUI
+[89 / 99] CodeInsightEngine
+[95 / 104] CodeInsightAppModel
+[97 / 105] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[98 / 104] CodeInsightAppModel
+[103 / 105] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/[104 / 106] codeinsight-app-product
+diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[107 / 109] codeinsight-app-product
+[108 / 109] codeinsight-app-product
+Build complete! (60.44秒)
+PASS project-git
+PASS project-non-git
+PASS tabs
+PASS search
+PASS reading
+PASS projector
+PASS fold
+PASS diff
+PASS pin
+PASS history
+PASS exact
+PASS switch
+PASS open
+PASS python
+PASS typescript
+PASS mixed
+summary: pass=18 fail=0 hang=0
+artifacts: /Users/siancao/work/ai/vibecoding/codeinsight/.build/self-test-run-20260923-090331-53532
+PASS mixed product self-test
+bookmark official App Support fingerprint before=889dced9f3f0def7f172a9205e93cb3dc7296218624232822faff961c2ae47e0
+PASS bookmark product self-test and three-theme visual evidence
+PASS bookmark restart product self-test
+PASS real rust-analyzer and offline coverage
+PASS real Pyright coverage
+PASS real TypeScript coverage
+PASS no new provider processes after product gates
+corpus root: /Users/siancao/.cache/cairn-corpora
+  ok  tokio: be8ee45, 720 .rs files
+  ok  ripgrep: 4649aa9, 98 .rs files
+  ok  python corpus frozen: f55831ee798cd4d7bafab4d50d6dba46e6fce387
+  ok  typescript corpus frozen: f31fe4a9ce2d355c3a44203fcb6add9296cc9b61
+PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift
+Building for debugging...
+[Computing dependencies]
+[25 / 80] CTreeSitterTypeScript
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[50 / 94] TreeSitterKit
+[59 / 105] CodeInsightTypeScriptExtractor
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[74 / 129] CodeInsightRustExtractor
+[76 / 129] CodeInsightRustExtractor
+[83 / 121] CodeInsightRustExtractor
+[90 / 135] CodeInsightExact
+[96 / 131] CodeInsightExact
+[100 / 131] CodeInsightExact
+[108 / 139] CodeInsightReaderCore
+[112 / 151] CodeInsightReaderCore
+[116 / 151] CodeInsightEngine
+[120 / 147] CodeInsightEngine
+[127 / 144] CodeInsightReaderCore
+[131 / 146] codeinsight-product
+[135 / 153] codeinsight-product
+[136 / 153] CodeInsightEngine
+[147 / 173] CodeInsightReaderUI
+[148 / 173] CodeInsightReaderUI
+[148 / 173] CodeInsightAppModel
+[152 / 173] CodeInsightReaderUI
+[156 / 169] CodeInsightReaderUI
+[159 / 175]
+[162 / 174] CodeInsightAppModel
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[162 / 174] codeinsight-product
+[164 / 176] CodeInsightAppModel
+[167 / 174] CodeInsightReaderUI
+[179 / 185] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[180 / 185] codeinsight-app-product
+[181 / 184] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[182 / 184] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[184 / 184] codeinsight-app-product
+Build complete! (13.19秒)
+{"channel":"projector","copyExpandsHiddenSource":true,"fixtureFoldExists":true,"foldedLengthMatches":true,"hiddenMapsToFold":true,"identityLengthMatches":true,"identityTextMatches":true,"passed":true,"placeholderMapsToFold":true,"singlePlaceholder":true,"viewportSkipsHiddenSource":true}
+SELF_TEST_FINISH timestamp=1790125578.257883 pid=57953 channel=projector exit=0
+{"attachmentActivationExpands":true,"attachmentAXReadable":true,"attachmentCountWidthFixed":true,"attachmentFitsLineHeight":true,"attachmentProviderCreated":true,"attachmentYieldsHitTesting":true,"channel":"fold","fixtureFoldsExist":true,"maximalRenderedOnly":true,"nestedLogicalStatePreserved":true,"oldPairOverridesReturn":true,"pairIsolationStartsEmpty":true,"passed":true,"rulerVisibleForFoldingOnly":true,"singleUTF16Placeholder":true,"viewportSkipsPlaceholder":true}
+SELF_TEST_FINISH timestamp=1790125578.3690748 pid=57954 channel=fold exit=0
+  ok  fold fixture: sha=86bf0fac91bd7556b2ea49b9a6426d3d31de17cf1d81491972500371761f9578 bytes=3115800 newlines=50000
+Building for production...
+[Computing dependencies]
+[17 / 59]
+[30 / 63] CProcessGuard
+[34 / 64] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[36 / 66] TreeSitterKit
+[39 / 68] CTreeSitterTypeScript
+[45 / 74] CTreeSitterTypeScript
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') t[45 / 74] CTreeSitter
+o 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[49 / 73] CodeInsightCore
+[56 / 83] CodeInsightGit
+[64 / 90] CodeInsightGit
+[70 / 91]
+[75 / 91] CodeInsightRustExtractor
+[81 / 100] CodeInsightReaderCore
+[84 / 102] CodeInsightExact
+[85 / 101] CodeInsightReaderCore
+[88 / 98] CodeInsightReaderUI
+[89 / 99] CodeInsightEngine
+[95 / 104] CodeInsightAppModel
+[97 / 105] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[98 / 104] CodeInsightAppModel
+[103 / 105] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[104 / 106] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[107 / 109] codeinsight-app-product
+[108 / 109] codeinsight-app-product
+Build complete! (59.90秒)
+{
+  "schemaVersion": 1,
+  "control": {
+    "resolutionMs": 28.197790999999999,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 0,
+      "renderedFoldCount": 0
+    },
+    "peakPhysBytes": 535692560
+  },
+  "fold": {
+    "resolutionMs": 27.746625000000002,
+    "observed": {
+      "acceptedFoldCount": 8400,
+      "candidateCount": 8400,
+      "logicalFoldCount": 4400,
+      "renderedFoldCount": 200
+    },
+    "peakPhysBytes": 563496232,
+    "foldLatencyMs": 259.87741599999998
+  },
+  "deltaBytes": 27803672,
+  "status": "pass"
+}
+fold perf artifacts: .build/m11-fold-perf
+PASS  unsupported CLI language exits non-zero
+
+--- tokio gold ---
+{
+  "def5Top5Passed" : 3,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 8,
+  "defTop1Total" : 8,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 17,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  tokio gold
+
+--- ripgrep gold ---
+{
+  "def5Top5Passed" : 2,
+  "def5Top5Total" : 3,
+  "defTop1Passed" : 5,
+  "defTop1Total" : 6,
+  "failures" : [
+
+  ],
+  "knownFailures" : 3,
+  "noResults" : 2,
+  "noStrongViolations" : 0,
+  "total" : 16,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  ripgrep gold
+
+--- mcp-python-sdk gold ---
+{
+  "def5Top5Passed" : 0,
+  "def5Top5Total" : 0,
+  "defTop1Passed" : 3,
+  "defTop1Total" : 3,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 1,
+  "noStrongViolations" : 0,
+  "total" : 6,
+  "unresolvedPassed" : 1,
+  "unresolvedTotal" : 1
+}
+PASS  mcp-python-sdk gold
+
+--- morphic-typescript gold ---
+{
+  "def5Top5Passed" : 0,
+  "def5Top5Total" : 0,
+  "defTop1Passed" : 6,
+  "defTop1Total" : 6,
+  "failures" : [
+
+  ],
+  "knownFailures" : 0,
+  "noResults" : 1,
+  "noStrongViolations" : 0,
+  "total" : 10,
+  "unresolvedPassed" : 2,
+  "unresolvedTotal" : 2
+}
+PASS  morphic-typescript gold
+
+All gold gates passed.
