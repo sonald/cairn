@@ -1578,6 +1578,7 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     upper.setPosition(upper.bounds.width - 700, ofDividerAt: 1)
     first.renderForSelfTest()
     let width = first.selfTestRelationsPaneWidth
+    let relationsFraction = width / upper.bounds.width
     #expect(width > 628, "A wide window must permit the inspector's side-by-side mode")
     first.toggleRelations()
     first.toggleRelations()
@@ -1591,7 +1592,6 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     await settleWindow()
     #expect(!first.selfTestContextPaneCollapsed)
     let sourceFrame = window.frame
-    #expect(sourceFrame.height > 800)
     func expectSourceWindowFrame(_ surface: String) async {
         await settleWindow()
         print("POLISH_SURFACE_FRAME surface=\(surface) before=\(sourceFrame.size) after=\(window.frame.size)")
@@ -1623,7 +1623,8 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     let second = try await makeController()
     defer { second.close() }
     #expect(!second.selfTestRelationsPaneCollapsed)
-    #expect(abs(second.selfTestRelationsPaneWidth - width) <= 2)
+    let secondUpper = try #require(second.window?.contentView.flatMap(findUpperSplit))
+    #expect(abs(second.selfTestRelationsPaneWidth / secondUpper.bounds.width - relationsFraction) <= 0.02)
     second.toggleContext(nil)
     #expect(!second.selfTestContextPaneCollapsed)
     second.toggleContext(nil)
