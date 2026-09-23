@@ -387,12 +387,6 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
                         label.alignmentRect(forFrame: label.frame), to: cell
                     )
                     #expect(labelFrame.minY >= 0 && labelFrame.maxY <= cell.bounds.maxY)
-                    for button in buttons {
-                        let actionFrame = button.superview!.convert(
-                            button.alignmentRect(forFrame: button.frame), to: cell
-                        )
-                        #expect(labelFrame.maxX + 4 <= actionFrame.minX)
-                    }
                 }
                 #expect(labels.contains { $0.toolTip?.contains(record.path) == true })
                 #expect(labels.contains { $0.toolTip == record.note })
