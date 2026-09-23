@@ -21,6 +21,11 @@ package final class ReaderParagraphLayout {
 
     package func reset() { advances.removeAll(keepingCapacity: false) }
 
+    package static func maximumIndent(width: CGFloat, font: NSFont) -> CGFloat {
+        let space = (" " as NSString).size(withAttributes: [.font: font]).width
+        return min(24 * space, width * 0.25)
+    }
+
     @discardableResult
     package func apply(
         to text: NSMutableAttributedString,
@@ -51,6 +56,7 @@ package final class ReaderParagraphLayout {
             return updates
         }
         let space = (" " as NSString).size(withAttributes: [.font: font]).width
+        let limit = Self.maximumIndent(width: width, font: font)
         var offset = 0
         var updates = 0
         text.beginEditing()
@@ -67,7 +73,7 @@ package final class ReaderParagraphLayout {
                 let advance = prefix.contains("\t")
                     ? prefixAdvance(prefix, font: font, style: base)
                     : CGFloat(prefix.count) * space
-                indent = min(advance, 24 * space, width * 0.25)
+                indent = min(advance, limit)
             } else {
                 indent = 0
             }

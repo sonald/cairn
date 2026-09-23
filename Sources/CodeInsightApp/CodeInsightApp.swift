@@ -13757,7 +13757,9 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     // Main-thread stall probe: a 5ms heartbeat on a background queue whose
     // main-queue continuations record how late they actually ran. The maximum
     // lateness over the window approximates the longest contiguous stall.
-    let stallWindow = OSAllocatedUnfairLock(initialState: 0.0)
+    let stallWindow = OSAllocatedUnfairLock(initialState: (
+        generation: UInt64(0), max: 0.0, ignoredPreWindowSamples: 0
+    ))
     let stallQueue = DispatchQueue(label: "com.codeinsight.wrap-perf-stall")
     let stallTimer = DispatchSource.makeTimerSource(queue: stallQueue)
     stallTimer.schedule(
@@ -13768,27 +13770,40 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
     // Explicit @Sendable typing keeps this handler nonisolated: it runs on the
     // probe queue, only its main-queue continuation touches main state.
     let heartbeat: @Sendable () -> Void = {
-        let scheduled = ContinuousClock.now
+        let sample = stallWindow.withLock {
+            (generation: $0.generation, scheduled: ContinuousClock.now)
+        }
         DispatchQueue.main.async {
-            let lateness = milliseconds(since: scheduled)
-            stallWindow.withLock { $0 = max($0, lateness) }
+            let lateness = milliseconds(since: sample.scheduled)
+            stallWindow.withLock {
+                guard $0.generation == sample.generation else {
+                    $0.ignoredPreWindowSamples += 1
+                    return
+                }
+                $0.max = max($0.max, lateness)
+            }
         }
     }
     stallTimer.setEventHandler(handler: heartbeat)
     stallTimer.resume()
 
-    func stopProbes() -> (peak: UInt64, longestStallMs: Double) {
+    func stopProbes() -> (peak: UInt64, longestStallMs: Double, ignoredPreWindowSamples: Int) {
         sampler.cancel()
         stallTimer.cancel()
         samplerQueue.sync {}
         stallQueue.sync {}
-        return (peakBytes.withLock { $0 }, stallWindow.withLock { $0 })
+        let stall = stallWindow.withLock { $0 }
+        return (peakBytes.withLock { $0 }, stall.max, stall.ignoredPreWindowSamples)
     }
 
     // Stall samples during fixture load and initial setup would swamp the
     // per-scenario budget; the measurement window starts clean (§7.4.2).
     func resetStallProbe() {
-        stallWindow.withLock { $0 = 0 }
+        stallWindow.withLock {
+            $0.generation &+= 1
+            $0.max = 0
+            $0.ignoredPreWindowSamples = 0
+        }
     }
 
     let reader = ReaderTextView()
@@ -14100,7 +14115,8 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
                            "machineModel": sysctlString("hw.model") ?? ""],
             "observed": ["cardMeasureCount": readingSet.selfTestMeasurementCount,
                          "drawPassCount": readingSet.selfTestDrawCount,
-                         "anchorErrorPt": lastAnchorError, "longestMainThreadStallMs": probes.longestStallMs],
+                         "anchorErrorPt": lastAnchorError, "longestMainThreadStallMs": probes.longestStallMs,
+                         "ignoredPreWindowSamples": probes.ignoredPreWindowSamples],
         ]
         if let failure { object["error"] = failure }
         write(object, status: failure == nil ? 0 : 1)
@@ -14200,7 +14216,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         fitViewport()
         // Stall samples during fixture load and initial setup would swamp
         // the per-scenario budget; the window starts clean (§7.4.2).
-        stallWindow.withLock { $0 = 0 }
+        resetStallProbe()
     }
 
     switch request.scenario {
@@ -14460,6 +14476,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
                 $0 + ($1["rawResizeRequests"] as? Int ?? 0)
             } + reader.widthReflowNotificationCount,
             "longestMainThreadStallMs": probes.longestStallMs,
+            "ignoredPreWindowSamples": probes.ignoredPreWindowSamples,
         ],
         "samples": samples,
         "summary": summary,

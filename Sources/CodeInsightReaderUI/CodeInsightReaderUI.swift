@@ -528,6 +528,7 @@ public final class ReaderTextView {
     package private(set) var typographyAttributeUpdateCount = 0
     package private(set) var projectionInstallCount = 0
     private let paragraphLayout = ReaderParagraphLayout()
+    private var lastParagraphIndentLimit: CGFloat?
     private var paragraphWidthUpdatePending = false
     package private(set) var paragraphUpdateCount = 0
     package private(set) var backgroundDrawCount = 0
@@ -1582,6 +1583,7 @@ public final class ReaderTextView {
     /// storage inside one editing transaction. Every wrap reflow goes through
     /// this seam so the perf probe can count projection commits (§7.4.2).
     private func installProjectedText(_ attributed: NSAttributedString) {
+        lastParagraphIndentLimit = nil
         projectionInstallCount += 1
         let attributed = (attributed as? NSMutableAttributedString)
             ?? NSMutableAttributedString(attributedString: attributed)
@@ -3710,8 +3712,17 @@ public final class ReaderTextView {
         typographyAttributeUpdateCount += 1
     }
 
+    private var paragraphIndentLimit: CGFloat? {
+        guard wrapLines, let container = view.textContainer else { return nil }
+        return ReaderParagraphLayout.maximumIndent(
+            width: container.size.width - 2 * container.lineFragmentPadding,
+            font: ReaderFontResolver.shared.resolve(theme: theme).font
+        )
+    }
+
     private func applyParagraphLayout(to text: NSMutableAttributedString) {
         guard let container = view.textContainer else { return }
+        defer { lastParagraphIndentLimit = paragraphIndentLimit }
         let document = displayedDocument
         let map = displayMap
         let folds = Dictionary(uniqueKeysWithValues: (document?.foldRegions ?? []).map { ($0.id, $0.headerRange.lowerBound) })
@@ -3740,6 +3751,10 @@ public final class ReaderTextView {
     }
 
     private func updateParagraphLayout() {
+        // Geometry-only updates cannot change any indent when both widths
+        // have the same effective cap. Content/typography installs always
+        // use applyParagraphLayout directly and refresh this cached limit.
+        if let limit = paragraphIndentLimit, limit == lastParagraphIndentLimit { return }
         let selection = view.selectedRanges
         let affinity = view.selectionAffinity
         if let content = view.textContentStorage {
@@ -3985,7 +4000,10 @@ public final class ReaderTextView {
         isValidatingVisibleRenderingAttributes = true
         defer { isValidatingVisibleRenderingAttributes = false }
         let controller = layoutManager.textViewportLayoutController
-        if updateLayout { controller.layoutViewport() }
+        if updateLayout {
+            (view as? ClickTextView)?.viewportNeedsValidationAfterLayout = true
+            controller.layoutViewport()
+        }
         guard let viewportRange = controller.viewportRange else { return }
         layoutManager.invalidateRenderingAttributes(for: viewportRange)
         let viewport = controller.viewportBounds.insetBy(
@@ -4357,7 +4375,8 @@ private final class ClickTextView: NSTextView {
     /// after-the-fact (see the S0 resize-timing probe).
     var widthWillChange: ((CGFloat) -> Void)?
     var widthDidChange: ((CGFloat) -> Void)?
-    private var viewportOrigin: NSPoint?
+    private var viewportBounds: NSRect?
+    fileprivate var viewportNeedsValidationAfterLayout = false
 
     override func setFrameSize(_ newSize: NSSize) {
         let oldWidth = bounds.width
@@ -4369,9 +4388,12 @@ private final class ClickTextView: NSTextView {
 
     override func layout() {
         super.layout()
-        // A scroll can notify before TextKit has moved its viewport. Style the
-        // final visible fragments after layout, without starting another layout.
-        layoutCompleted?()
+        // A scroll can notify before TextKit has moved its viewport. Style once
+        // after that move, not on every otherwise unchanged layout/display pass.
+        if viewportNeedsValidationAfterLayout {
+            viewportNeedsValidationAfterLayout = false
+            layoutCompleted?()
+        }
     }
 
     override func viewDidMoveToSuperview() {
@@ -4382,7 +4404,8 @@ private final class ClickTextView: NSTextView {
             object: nil
         )
         guard let clipView = enclosingScrollView?.contentView else { return }
-        viewportOrigin = clipView.bounds.origin
+        viewportBounds = clipView.bounds
+        viewportNeedsValidationAfterLayout = true
         clipView.postsBoundsChangedNotifications = true
         NotificationCenter.default.addObserver(
             self,
@@ -4456,10 +4479,12 @@ private final class ClickTextView: NSTextView {
 
     @objc private func viewportDidChange(_ notification: Notification) {
         guard let clipView = notification.object as? NSClipView,
-              clipView.bounds.origin != viewportOrigin
+              clipView.bounds != viewportBounds
         else { return }
-        viewportOrigin = clipView.bounds.origin
-        viewportChanged?()
+        let moved = clipView.bounds.origin != viewportBounds?.origin
+        viewportBounds = clipView.bounds
+        viewportNeedsValidationAfterLayout = true
+        if moved { viewportChanged?() }
     }
 }
 
