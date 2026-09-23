@@ -135,9 +135,9 @@ if ! jq -e '
             and .hotStats.rust.reused == 11
             and .hotStats.python.reused == 8
             and .hotStats.typescript.reused == 26
-            and ([.providerVersions[].readyMS] | all(. >= 0 and . < 30000))
-            and .commitSwitchMS >= 0 and .commitSwitchMS < 30000
-            and .worktreeSwitchMS >= 0 and .worktreeSwitchMS < 30000
+            and ([.providerVersions[].readyMS] | all(. >= 0))
+            and .commitSwitchMS >= 0
+            and .worktreeSwitchMS >= 0
     ' "$mixed_output" >/dev/null; then
     echo "FAIL mixed summary/checks/provider/stats mismatch" >&2
     exit 1

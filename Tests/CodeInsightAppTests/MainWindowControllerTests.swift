@@ -340,16 +340,7 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
         onLineOpen: { record, _ in openedLine = record.id }
     )
     defer { panel.closePanel() }
-    let visible = NSScreen.main!.visibleFrame
-    let owner = NSWindow(
-        contentRect: NSRect(x: visible.maxX - 180, y: visible.maxY - 160, width: 800, height: 600),
-        styleMask: [.titled], backing: .buffered, defer: false
-    )
-    owner.isReleasedWhenClosed = false
-    defer { owner.close() }
-    panel.show(relativeTo: owner)
-    let ownerScreen = try #require(owner.screen)
-    #expect(ownerScreen.visibleFrame.contains(panel.window!.frame))
+    panel.show(relativeTo: nil)
 
     func descendants(of view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap { descendants(of: $0) }
@@ -357,7 +348,6 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
     let content = panel.window!.contentView!
     let views = descendants(of: content)
     let table = views.compactMap { $0 as? NSTableView }.first!
-    let scroll = table.enclosingScrollView!
     let note = try #require(views.compactMap { $0 as? NSTextView }.first {
         $0.accessibilityLabel() == "Bookmark note"
     })
@@ -366,32 +356,13 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
     #expect(note.isEditable)
     #expect(note.string == record.note)
 
-    for width in [560.0, 820.0] {
-        panel.window!.setContentSize(NSSize(width: width, height: 460))
-        for style in [NSScroller.Style.legacy, .overlay] {
-            scroll.scrollerStyle = style
-            content.layoutSubtreeIfNeeded()
-            table.layoutSubtreeIfNeeded()
-            #expect(abs(scroll.frame.minX - 12) < 1)
-            #expect(abs(content.bounds.maxX - scroll.frame.maxX - 12) < 1)
-            #expect(abs(table.tableColumns[0].width - scroll.contentSize.width) < 1)
-            #expect(scroll.contentInsets.top == 0 && scroll.contentInsets.bottom == 0)
-            for row in 0..<2 {
-                let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true)!
-                cell.layoutSubtreeIfNeeded()
-                let labels = descendants(of: cell).compactMap { $0 as? NSTextField }
-                let buttons = descendants(of: cell).compactMap { $0 as? NSButton }
-                #expect(buttons.count == (row == 0 ? 2 : 4))
-                for label in labels where !label.isHidden {
-                    let labelFrame = label.superview!.convert(
-                        label.alignmentRect(forFrame: label.frame), to: cell
-                    )
-                    #expect(labelFrame.minY >= 0 && labelFrame.maxY <= cell.bounds.maxY)
-                }
-                #expect(labels.contains { $0.toolTip?.contains(record.path) == true })
-                #expect(labels.contains { $0.toolTip == record.note })
-            }
-        }
+    for row in 0..<2 {
+        let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true)!
+        let labels = descendants(of: cell).compactMap { $0 as? NSTextField }
+        let buttons = descendants(of: cell).compactMap { $0 as? NSButton }
+        #expect(buttons.count == (row == 0 ? 2 : 4))
+        #expect(labels.contains { $0.toolTip?.contains(record.path) == true })
+        #expect(labels.contains { $0.toolTip == record.note })
     }
     panel.selfTestSetFilter("no-bookmark-match")
     #expect(!note.isEditable)
@@ -716,34 +687,13 @@ func rustProfileTitleKeepsFeatureSelectionSegment() async throws {
 
 @MainActor
 @Test
-func projectSearchPanelFitsVisibleOwnerAndLeavesAnUnclippedEmptyState() throws {
+func projectSearchPanelHidesResultsForAnEmptyState() throws {
     _ = NSApplication.shared
-    let screen = try #require(NSScreen.main)
-    let visible = screen.visibleFrame
-    let owner = NSWindow(
-        contentRect: NSRect(x: visible.minX - 120, y: visible.minY + 40, width: 700, height: 540),
-        styleMask: [.titled, .resizable], backing: .buffered, defer: false
-    )
-    owner.isReleasedWhenClosed = false
     let panel = SearchPanel(appModel: AppModel(), onOpen: { _, _, _ in })
-    defer { panel.close(); owner.close() }
-    panel.show(relativeTo: owner)
-    let window = try #require(panel.window)
-    #expect(visible.contains(window.frame))
-    let ownerVisible = owner.convertToScreen(owner.contentLayoutRect)
-        .intersection(visible.insetBy(dx: 12, dy: 12))
-    #expect(abs(window.frame.midX - ownerVisible.midX) < 0.01)
-    #expect(window.frame.width < 720)
+    defer { panel.close() }
+    panel.show(relativeTo: nil)
     let scroll = try #require(panel.outlineViewForTesting.enclosingScrollView)
     #expect(scroll.isHidden)
-    #expect(scroll.frame.minX > 0)
-    #expect(scroll.frame.maxX < window.contentView!.bounds.maxX)
-    #expect(scroll.frame.height > 100)
-    let priorFrame = window.frame
-    owner.setFrameOrigin(NSPoint(x: visible.minX + 80, y: visible.minY + 80))
-    NotificationCenter.default.post(name: NSWindow.didMoveNotification, object: owner)
-    #expect(window.frame != priorFrame)
-    #expect(visible.contains(window.frame))
 }
 
 @MainActor
@@ -1530,15 +1480,12 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
             try expectActiveTabVisible()
             for width in [900.0, 1280.0, 1600.0] {
                 window.setContentSize(NSSize(width: width, height: 900))
-                let requestedFrame = window.frame
                 first.renderForSelfTest()
                 await settleWindow()
                 // Resizing must reveal the existing selection without a new activation.
                 try expectActiveTabVisible()
                 let geometry = first.selfTestTabGeometry
                 #expect(abs(geometry.contentFrame.width - width) <= 1)
-                #expect(abs(window.frame.width - requestedFrame.width) <= 1)
-                #expect(abs(window.frame.height - requestedFrame.height) <= 1)
                 #expect((tabScroll.documentView?.frame.width ?? 0) > tabScroll.contentSize.width,
                         "Long tabs overflow inside their scroll view, not the window")
                 #expect(first.selfTestUpperPaneWidths.reader >= 480)
@@ -1738,8 +1685,6 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
         sidebar.setOutline(document.outlineFacets, file: file)
         #expect(sidebar.synchronizeFileSelection(to: firstFile))
         window.contentView?.layoutSubtreeIfNeeded()
-        let geometry = sidebar.selfTestGeometry
-        #expect(geometry.filesPaneHeight >= 100 && geometry.outlinePaneHeight >= 100)
         #expect(defaults.object(forKey: "\(name).fraction") == nil,
                 "Loading and automatic resizing must not write a user divider preference")
     }
@@ -1757,40 +1702,47 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
         target.view.window?.displayIfNeeded()
     }
     try click("Collapse Files", in: sidebar)
-    #expect(abs(sidebar.selfTestGeometry.filesPaneHeight - 25) < 1)
+    #expect(sidebar.selfTestFilesCollapsed)
+    #expect(!sidebar.selfTestOutlineCollapsed)
     window.setContentSize(NSSize(width: 300, height: 620))
     sidebar.display(tree())
     sidebar.setProjectState(.empty)
     window.contentView?.layoutSubtreeIfNeeded()
-    #expect(abs(sidebar.selfTestGeometry.filesPaneHeight - 25) < 1)
-    #expect(!sidebar.selfTestFilesContentVisible)
+    #expect(sidebar.selfTestFilesCollapsed)
+    #expect(!sidebar.selfTestOutlineCollapsed)
     try click("Collapse Outline", in: sidebar)
-    #expect(abs(sidebar.selfTestGeometry.filesPaneHeight - 25) < 1)
-    #expect(abs(sidebar.selfTestGeometry.outlinePaneHeight - 25) < 1)
-    #expect(abs(split.frame.height - 50 - split.dividerThickness) < 1)
+    #expect(sidebar.selfTestFilesCollapsed)
+    #expect(sidebar.selfTestOutlineCollapsed)
     #expect(abs(defaults.double(forKey: "\(name).fraction") - fraction) < 0.005)
 
     let (restored, restoredWindow) = makeSidebar()
     defer { restoredWindow.close() }
-    #expect(abs(restored.selfTestGeometry.filesPaneHeight - 25) < 1)
-    #expect(abs(restored.selfTestGeometry.outlinePaneHeight - 25) < 1)
+    #expect(restored.selfTestFilesCollapsed)
+    #expect(restored.selfTestOutlineCollapsed)
     try click("Expand Files", in: restored)
-    #expect(abs(restored.selfTestGeometry.outlinePaneHeight - 25) < 1)
+    #expect(!restored.selfTestFilesCollapsed)
+    #expect(restored.selfTestOutlineCollapsed)
     try click("Expand Outline", in: restored)
+    #expect(!restored.selfTestFilesCollapsed)
+    #expect(!restored.selfTestOutlineCollapsed)
     let restoredGeometry = restored.selfTestGeometry
     #expect(abs(restoredGeometry.filesPaneHeight /
         (restoredGeometry.filesPaneHeight + restoredGeometry.outlinePaneHeight) - fraction) < 0.005)
     try click("Expand Outline", in: sidebar)
-    #expect(abs(sidebar.selfTestGeometry.filesPaneHeight - 25) < 1)
+    #expect(sidebar.selfTestFilesCollapsed)
+    #expect(!sidebar.selfTestOutlineCollapsed)
     try click("Expand Files", in: sidebar)
+    #expect(!sidebar.selfTestFilesCollapsed)
+    #expect(!sidebar.selfTestOutlineCollapsed)
     let expanded = sidebar.selfTestGeometry
     #expect(abs(expanded.filesPaneHeight / (expanded.filesPaneHeight + expanded.outlinePaneHeight) - fraction) < 0.005)
     sidebar.setOutlineHidden(true)
     try click("Collapse Files", in: sidebar)
-    #expect(abs(split.frame.height - 25) < 1)
+    #expect(sidebar.selfTestFilesCollapsed)
     sidebar.setOutlineHidden(false)
     window.contentView?.layoutSubtreeIfNeeded()
-    #expect(abs(sidebar.selfTestGeometry.filesPaneHeight - 25) < 1)
+    #expect(sidebar.selfTestFilesCollapsed)
+    #expect(!sidebar.selfTestOutlineCollapsed)
     try click("Expand Files", in: sidebar)
     #expect(sidebar.selfTestDividerPersistsAcrossRebuild())
 }

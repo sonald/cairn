@@ -1,0 +1,74 @@
+name: Performance observations
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 2 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-observations
+  cancel-in-progress: true
+
+jobs:
+  performance:
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install tools
+        run: brew install libgit2
+
+      - name: Check median app performance
+        run: |
+          mkdir -p .build/performance
+          swift build -c release --product codeinsight-app
+          app=.build/release/codeinsight-app
+          fixture="$PWD/Tests/CodeInsightExactTests/Fixtures/exact_fixture/src/lib.rs"
+          for run in 1 2 3; do
+            "$app" --self-test >> .build/performance/base.jsonl
+            "$app" --self-test-project "$PWD" >> .build/performance/project.jsonl
+            "$app" --self-test-switch "$PWD" >> .build/performance/switch.jsonl
+            "$app" --self-test-open "$fixture" >> .build/performance/open.jsonl
+          done
+          jq -se '(sort_by(.coldStartMS)[1].coldStartMS | . >= 0 and . < 500)
+            and (sort_by(.idleFootprintMB)[1].idleFootprintMB | . >= 0 and . < 100)' \
+            .build/performance/base.jsonl
+          jq -se '(sort_by(.treeVisibleMS)[1].treeVisibleMS | . >= 0 and . < 1000)
+            and (sort_by(.indexReadyMS)[1].indexReadyMS | . >= 0 and . < 2500)' \
+            .build/performance/project.jsonl
+          jq -se 'sort_by(.firstPaintMS)[1]
+            | .firstPaintMS >= 0 and .firstPaintMS < 1000' \
+            .build/performance/switch.jsonl
+          jq -se 'sort_by(.firstVisibleMS)[1]
+            | .firstVisibleMS >= 0 and .firstVisibleMS < 100' \
+            .build/performance/open.jsonl
+
+      - name: Check fold performance budgets
+        run: |
+          bash scripts/provision-corpora.sh \
+            --verify-fold-fixture fixtures/fold_perf.rs \
+            --manifest fixtures/fold_perf.manifest.json
+          FOLD_PERF_RESULT_DIR=.build/performance/fold \
+            bash scripts/run-fold-perf.sh \
+              --app-bin .build/release/codeinsight-app \
+              --fixture fixtures/fold_perf.rs \
+              --manifest fixtures/fold_perf.manifest.json \
+              --enforce-budgets
+
+      - name: Upload performance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-${{ github.run_id }}
+          if-no-files-found: warn
+          retention-days: 30
+          path: .build/performance

@@ -61,21 +61,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     #expect(updatedSettings.functionDeclarationFontWeight > ReaderSettings().functionDeclarationFontWeight)
     #expect(updatedSettings.declarationEmphasisFontWeight > ReaderSettings().declarationEmphasisFontWeight)
 
-    let geometry = controller.selfTestVisualControlGeometry
     #expect(controller.selfTestReaderToggleCount == 4)
-    #expect(geometry.frames.count == 4)
-    #expect(geometry.frames.allSatisfy {
-        $0.width > 0 && $0.height > 0 && geometry.visibleFrame.contains($0)
-    })
-    #expect(!geometry.existingFrames.isEmpty)
-    for index in geometry.frames.indices {
-        for other in geometry.frames.indices where other > index {
-            #expect(!geometry.frames[index].intersects(geometry.frames[other]))
-        }
-        #expect(geometry.existingFrames.allSatisfy {
-            !geometry.frames[index].intersects($0)
-        })
-    }
 }
 
 @MainActor

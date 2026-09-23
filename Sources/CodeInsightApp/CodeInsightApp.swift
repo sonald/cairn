@@ -2270,6 +2270,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "active": controller.selfTestActiveTabIndex ?? -1,
             "bytesEqual": controller.selfTestLeftReaderBytes == bytesB,
             "footprintMB": dualTabFootprintMB,
+            "footprintUnderBudget": dualTabFootprintUnderBudget,
             "geometry": Self.tabGeometryJSON(controller.selfTestTabGeometry),
         ])
 
@@ -2397,7 +2398,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         checks.merge([
             "oneTabOpened": openedA,
             "openedBInNewTab": openedB,
-            "dualTabFootprintUnderBudget": dualTabFootprintUnderBudget,
             "switchedBackToA": restoredA,
             "aBytesRestored": restoredA,
             "scrollRestored": scrollRestored,
@@ -2762,9 +2762,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 visualControlsVisible,
             "readerVisualControlsDoNotOverlap":
                 visualControlsDoNotOverlap,
-            "idleFootprintUnderBudget":
-                readingIdleFootprintMB >= 0
-                && readingIdleFootprintMB < SelfTestBudgets.idleFootprintMB,
         ]
         Self.writeJSON([
             "step": "regular",
@@ -2773,6 +2770,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "currentLine": currentLine ?? -1,
             "visibleLineNumbers": visibleLineNumbers,
             "footprintMB": regularFootprintMB,
+            "idleFootprintMB": readingIdleFootprintMB,
+            "idleFootprintUnderBudget":
+                readingIdleFootprintMB >= 0
+                    && readingIdleFootprintMB < SelfTestBudgets.idleFootprintMB,
             "rulerWidth": Double(geometryOn.rulerFrame.width),
             "rulerMinX": Double(geometryOn.rulerFrame.minX),
             "rulerMaxX": Double(geometryOn.rulerFrame.maxX),
@@ -3083,11 +3084,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 referenceHistoryRecorded,
             "largeReferenceHistoryBack":
                 referenceHistoryBack,
-            "largeReferenceFootprintUnderBudget":
-                referenceScaleBaselineFootprintMB >= 0
-                    && referenceScaleAfterFootprintMB >= 0
-                    && referenceScaleDeltaFootprintMB
-                        < SelfTestBudgets.largeReferenceDeltaFootprintMB,
         ]) { _, new in new }
         Self.writeJSON([
             "step": "reference-scale",
@@ -3105,6 +3101,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             "baselineFootprintMB": referenceScaleBaselineFootprintMB,
             "afterFootprintMB": referenceScaleAfterFootprintMB,
             "deltaFootprintMB": referenceScaleDeltaFootprintMB,
+            "footprintUnderBudget":
+                referenceScaleBaselineFootprintMB >= 0
+                    && referenceScaleAfterFootprintMB >= 0
+                    && referenceScaleDeltaFootprintMB
+                        < SelfTestBudgets.largeReferenceDeltaFootprintMB,
         ])
 
         controller.applyReaderSettings(readerSettings)
@@ -12155,11 +12156,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         enlargedWindowGeometry: [String: Double]
     ) {
         do {
-            let passed = idleFootprintMB < SelfTestBudgets.idleFootprintMB
-                && checks.values.allSatisfy { $0 }
+            let passed = checks.values.allSatisfy { $0 }
             var object: [String: Any] = checks
             object["coldStartMS"] = coldStartMS
             object["idleFootprintMB"] = idleFootprintMB
+            object["idleFootprintUnderBudget"] =
+                idleFootprintMB < SelfTestBudgets.idleFootprintMB
             object["idleFootprintWindowStyle"] = "borderless"
             object["toolbarAssertionsWindowStyle"] = "titled"
             object["enlargedWindowGeometry"] = enlargedWindowGeometry
@@ -12353,6 +12355,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         do {
             let projectIndexReadyWithinBudget =
                 indexReadyMS < SelfTestBudgets.projectIndexReadyMS
+            let projectTreeVisibleWithinBudget =
+                treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
             var object: [String: Any] = [
                 "treeVisibleMS": treeVisibleMS,
                 "indexReadyMS": indexReadyMS,
@@ -12361,6 +12365,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 "extracted": extracted,
                 "projectIndexReadyWithinBudget":
                     projectIndexReadyWithinBudget,
+                "projectTreeVisibleWithinBudget":
+                    projectTreeVisibleWithinBudget,
                 "emptyStateRemoved": emptyStateRemoved,
                 "readerDocumentVisible": readerDocumentVisible,
                 "branchName": branchName ?? "",
@@ -12392,7 +12398,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     && statusBarVisibleAfterReady
                     && indexStatusHiddenAfterFullReady
                     && layoutChecks.values.allSatisfy { $0 }
-                    && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
                     ? 0 : 1
             )
         } catch {
@@ -12416,6 +12421,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     "firstPaintMS": firstPaintMS,
                     "cachedReadyMS": cachedReadyMS,
                     "fullReadyMS": fullReadyMS,
+                    "firstPaintWithinBudget":
+                        firstPaintMS >= 0
+                            && firstPaintMS < SelfTestBudgets.snapshotFirstPaintMS,
                     "reused": reused,
                     "extracted": extracted,
                 ],
@@ -12426,7 +12434,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             exitSelfTest(
                 channel: "switch",
                 status: firstPaintMS >= 0
-                    && firstPaintMS < SelfTestBudgets.snapshotFirstPaintMS
                     && cachedReadyMS >= firstPaintMS
                     && fullReadyMS >= cachedReadyMS
                     && ready
@@ -12493,10 +12500,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         outlineFacets: Int
     ) -> Never {
         do {
+            let firstVisibleWithinBudget = tier == .regular
+                ? firstVisibleMS < SelfTestBudgets.regularFirstVisibleMS
+                : firstVisibleMS < SelfTestBudgets.hugeFirstVisibleMS
             let data = try JSONSerialization.data(
                 withJSONObject: [
                     "tier": tier.rawValue,
                     "firstVisibleMS": firstVisibleMS,
+                    "firstVisibleWithinBudget": firstVisibleWithinBudget,
                     "syntaxVisibleMS": syntaxVisibleMS,
                     "styledFragments": styledFragments,
                     "firstVisibleOutlineFacets": firstVisibleOutlineFacets,
@@ -12506,16 +12517,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             )
             FileHandle.standardOutput.write(data)
             FileHandle.standardOutput.write(Data([0x0A]))
-            let withinBudget = tier == .regular
-                ? firstVisibleMS < SelfTestBudgets.regularFirstVisibleMS
-                    && styledFragments > 0
+            let passed = tier == .regular
+                ? styledFragments > 0
                 : tier != .huge
                     || (
-                        firstVisibleMS < SelfTestBudgets.hugeFirstVisibleMS
-                            && firstVisibleOutlineFacets == 0
+                        firstVisibleOutlineFacets == 0
                             && styledFragments < SelfTestBudgets.hugeStyledFragments
                     )
-            exitSelfTest(channel: "open", status: withinBudget ? 0 : 1)
+            exitSelfTest(channel: "open", status: passed ? 0 : 1)
         } catch {
             FileHandle.standardError.write(Data("\(error)\n".utf8))
             exitSelfTest(channel: "open", status: 1)

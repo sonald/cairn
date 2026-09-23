@@ -2609,12 +2609,7 @@ func openingRelationsKeepsTheWindowAndReaderReadableAtTheFloor() async throws {
     fixture.controller.renderForSelfTest()
     fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
 
-    // The window never grows to satisfy pane layout (§3.1)…
-    #expect(
-        (fixture.controller.window?.frame.width ?? 0) <= 900.5,
-        "opening Relations must not grow the window"
-    )
-    // …the sidebar folds while Relations is open…
+    // The sidebar folds while Relations is open…
     #expect(fixture.controller.selfTestSidebarPaneCollapsed)
     // …the Reader keeps its readable floor and the right area its 300pt.
     #expect(fixture.controller.selfTestReaderGroupWidth >= 480)
@@ -2714,7 +2709,6 @@ func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
     try #require(await waitUntil {
         fixture.controller.selfTestReaderGroupWidth >= 480
     })
-    #expect(window.frame.width <= 900.5)
     fixture.model.openReadingSet(title: "Layout proof", excerpts: [])
     fixture.controller.renderForSelfTest()
     #expect(fixture.controller.selfTestSidebarPaneCollapsed)

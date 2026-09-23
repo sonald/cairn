@@ -4,14 +4,16 @@ set -euo pipefail
 app_bin=""
 fixture=""
 manifest=""
+enforce_budgets=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --app-bin) app_bin="$2"; shift 2 ;;
         --fixture) fixture="$2"; shift 2 ;;
         --manifest) manifest="$2"; shift 2 ;;
+        --enforce-budgets) enforce_budgets=true; shift ;;
         --help|-h)
-            echo "usage: $0 --app-bin BIN --fixture RS --manifest JSON"
+            echo "usage: $0 --app-bin BIN --fixture RS --manifest JSON [--enforce-budgets]"
             exit 0 ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
     esac
@@ -88,7 +90,7 @@ common_filter='
     .samplePeriodMs == 25 and
     .observed.candidateCount == 8400 and
     .observed.acceptedFoldCount == 8400 and
-    .resolutionMs >= 0 and .resolutionMs <= 500 and
+    .resolutionMs >= 0 and
     .peakPhysBytes > 0 and
     .perfConfig.wrapLines == false and
     .perfConfig.resolvedFontName != "" and
@@ -108,7 +110,7 @@ jq -e --arg sha "$actual_sha" "$common_filter and
     .mode == \"fold\" and
     .observed.logicalFoldCount == 4400 and
     .observed.renderedFoldCount == 200 and
-    .foldLatencyMs >= 0 and .foldLatencyMs <= 400" "$fold_json" >/dev/null || valid=false
+    .foldLatencyMs >= 0" "$fold_json" >/dev/null || valid=false
 
 same_config="$(jq -n \
     --slurpfile control "$control_json" \
@@ -124,7 +126,12 @@ delta_bytes="$(jq -n \
     --slurpfile control "$control_json" \
     --slurpfile fold "$fold_json" \
     '[$fold[0].peakPhysBytes - $control[0].peakPhysBytes, 0] | max')"
-[[ "$delta_bytes" -le 83886080 ]] || valid=false
+budget_status="fail"
+if jq -e '.resolutionMs <= 500' "$control_json" >/dev/null \
+    && jq -e '.resolutionMs <= 500 and .foldLatencyMs <= 400' "$fold_json" >/dev/null \
+    && [[ "$delta_bytes" -le 83886080 ]]; then
+    budget_status="pass"
+fi
 
 status="fail"
 exit_code=1
@@ -132,12 +139,18 @@ if [[ "$valid" == "true" ]]; then
     status="pass"
     exit_code=0
 fi
+if [[ "$enforce_budgets" == true && "$budget_status" != "pass" ]]; then
+    status="fail"
+    exit_code=1
+fi
 
 result_tmp="$(mktemp "$result_dir/.result.XXXXXX")"
 jq -n \
     --slurpfile control "$control_json" \
     --slurpfile fold "$fold_json" \
     --arg status "$status" \
+    --arg budgetStatus "$budget_status" \
+    --argjson budgetsEnforced "$enforce_budgets" \
     --argjson delta "$delta_bytes" \
     '{
         schemaVersion: 1,
@@ -153,6 +166,8 @@ jq -n \
             foldLatencyMs: $fold[0].foldLatencyMs
         },
         deltaBytes: $delta,
+        budgetStatus: $budgetStatus,
+        budgetsEnforced: $budgetsEnforced,
         status: $status
     }' > "$result_tmp"
 mv "$result_tmp" "$result_json"

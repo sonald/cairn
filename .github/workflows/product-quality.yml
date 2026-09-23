@@ -134,6 +134,7 @@ jobs:
             .build/ci-swift-test.log
             .build/ci-swift-test-isolated.log
             .build/ci-swift-test-panels.log
+            .build/ci-swift-test-mouse.log
             .build/self-test-run-*
             .build/self-test-run-*/mixed.stdout
             .build/self-test-run-*/mixed.stderr

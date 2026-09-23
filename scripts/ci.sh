@@ -46,18 +46,18 @@ run_swift_test_batch() {
             2>&1 | tee "$log_file" >/dev/null; then
         cat "$log_file" >&2
         echo "FAIL: swift test command failed: $log_file" >&2
-        exit 1
+        return 1
     fi
     if grep -qE '^✘ Test run' "$log_file"; then
         cat "$log_file" >&2
         echo "FAIL: swift test reported a failed run: $log_file" >&2
-        exit 1
+        return 1
     fi
     summary="$(grep -E "$swift_test_summary_regex" "$log_file" || true)"
     if [[ -z "$summary" ]]; then
         cat "$log_file" >&2
         echo "FAIL: swift test did not report a complete successful run: $log_file" >&2
-        exit 1
+        return 1
     fi
     # Older toolchains print one aggregate summary line; newer ones print
     # one per test target. Summing the passing summary lines matches both
@@ -67,21 +67,30 @@ run_swift_test_batch() {
     if [[ "$actual" != "$expected" ]]; then
         cat "$log_file" >&2
         echo "FAIL: swift test expected $expected tests got $actual: $log_file" >&2
-        exit 1
+        return 1
     fi
     echo "PASS: batch total=$actual ($log_file)"
 }
 
+swift_test_failures=0
 run_swift_test_batch "$swift_test_log" "$expected_main_test_count" \
     --skip "$bookmark_test_one" --skip "$bookmark_test_two" \
-    --skip "$panel_test_one" --skip "$panel_test_two" --skip "$mouse_test"
+    --skip "$panel_test_one" --skip "$panel_test_two" --skip "$mouse_test" \
+    || swift_test_failures=$((swift_test_failures + 1))
 run_swift_test_batch "$isolated_test_log" "$expected_isolated_test_count" \
-    --filter "$bookmark_test_one|$bookmark_test_two"
+    --filter "$bookmark_test_one|$bookmark_test_two" \
+    || swift_test_failures=$((swift_test_failures + 1))
 run_swift_test_batch "$panel_test_log" "$expected_panel_test_count" \
-    --filter "$panel_test_one|$panel_test_two"
+    --filter "$panel_test_one|$panel_test_two" \
+    || swift_test_failures=$((swift_test_failures + 1))
 # Native mouse tracking also needs its own AppKit process: a combined run
 # can exit before the summary. Its isolated batch must still report completion.
-run_swift_test_batch "$mouse_test_log" 1 --filter "$mouse_test"
+run_swift_test_batch "$mouse_test_log" 1 --filter "$mouse_test" \
+    || swift_test_failures=$((swift_test_failures + 1))
+if [[ "$swift_test_failures" -ne 0 ]]; then
+    echo "FAIL: $swift_test_failures Swift test batch(es) failed" >&2
+    exit 1
+fi
 total_swift_test_count=$((expected_main_test_count + expected_isolated_test_count + expected_panel_test_count + 1))
 echo "PASS: swift test total=$total_swift_test_count (main=$expected_main_test_count isolated=$expected_isolated_test_count panels=$expected_panel_test_count mouse=1)"
 

@@ -3888,6 +3888,8 @@ final class SidebarViewController: NSViewController,
         loadViewIfNeeded()
         return symbolScrollView.selfTestIsVisibleInWindow
     }
+    var selfTestFilesCollapsed: Bool { filesCollapsed }
+    var selfTestOutlineCollapsed: Bool { outlineCollapsed }
     var selfTestGeometry: (
         filesPaneHeight: CGFloat,
         outlinePaneHeight: CGFloat,
