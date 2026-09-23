@@ -51,6 +51,8 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
     try #require(codeViews.count == 3)
     var settings = ReaderSettings()
     settings.codeFont = .postScriptName("Menlo-Regular")
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
     for mode in CodeLigatureMode.allCases {
         settings.codeLigatures = mode
         first.applyReaderSettings(settings)
@@ -59,6 +61,12 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
             #expect(view.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == resolved.font)
             #expect(view.textStorage?.attribute(.ligature, at: 0, effectiveRange: nil) as? Int
                 == resolved.attributes[.ligature] as? Int)
+            let operatorRange = (view.string as NSString).range(of: "!=")
+            try #require(operatorRange.location != NSNotFound)
+            view.setSelectedRange(NSRange(location: operatorRange.location + 1, length: 1))
+            pasteboard.declareTypes([.string], owner: nil)
+            #expect(view.writeSelection(to: pasteboard, type: .string))
+            #expect(pasteboard.string(forType: .string) == "=")
         }
     }
     ReaderFontResolver.shared.refresh()

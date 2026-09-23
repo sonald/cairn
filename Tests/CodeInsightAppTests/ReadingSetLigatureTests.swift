@@ -42,6 +42,8 @@ func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() asyn
     let anchor = try #require(view.selfTestViewportAnchor)
     let font = try #require(NSFont(name: "Menlo-Regular", size: settings.fontSize))
     settings.codeFont = .postScriptName(font.fontName)
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
     for mode in CodeLigatureMode.allCases {
         let before = view.selfTestMeasurementCount
         text.setSelectedRange(NSRange(location: NSMaxRange(selection), length: 0))
@@ -54,6 +56,10 @@ func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() asyn
         #expect(text.selectedRange() == selection)
         #expect(text.selectionAffinity == .upstream)
         #expect((text.string as NSString).substring(with: text.selectedRange()) == "=")
+        // Native NSTextView advertises the legacy plain-text type; its normal
+        // copy entry point declares those types and also provides modern .string.
+        #expect(text.writeSelection(to: pasteboard, types: text.writablePasteboardTypes))
+        #expect(pasteboard.string(forType: .string) == "=")
         text.moveLeftAndModifySelection(nil)
         #expect((text.string as NSString).substring(with: text.selectedRange()) == "!=")
         text.setSelectedRanges([NSValue(range: selection)], affinity: .upstream, stillSelecting: false)

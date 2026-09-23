@@ -49,6 +49,8 @@ func readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() async 
     let names = groups.values.first(where: { $0.count > 1 })?.sorted().prefix(2)
         ?? ["Menlo-Regular", "Menlo-Bold"].prefix(2)
     var labels: [String] = []
+    let pasteboard = NSPasteboard.withUniqueName()
+    defer { pasteboard.releaseGlobally() }
     for name in names {
         settings.codeFont = .postScriptName(name)
         controller.update(settings: settings)
@@ -63,6 +65,12 @@ func readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() async 
         #expect(label == expected)
         #expect(controller.currentSettings.codeFont == .postScriptName(name))
         labels.append(label)
+        let operatorRange = (preview.string as NSString).range(of: "!==")
+        try #require(operatorRange.location != NSNotFound)
+        preview.setSelectedRange(NSRange(location: operatorRange.location + 1, length: 2))
+        pasteboard.declareTypes([.string], owner: nil)
+        #expect(preview.writeSelection(to: pasteboard, type: .string))
+        #expect(pasteboard.string(forType: .string) == "==")
     }
     #expect(Set(labels).count == 2)
     #expect(commits.isEmpty)

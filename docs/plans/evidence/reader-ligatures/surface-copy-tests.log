@@ -1,0 +1,22 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 3] TreeSitterKit-product
+[1 / 8] CodeInsightAppTests-product
+[2 / 8] CodeInsightAppTests-product
+[8 / 19]
+[11 / 19]
+[13 / 19] CodeInsightAppTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[18 / 20] CodeInsightAppTests-product
+Build complete! (3.13秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() started.
+✔ Test readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainText() passed after 1.245 seconds.
+◇ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() started.
+✔ Test readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() passed after 1.897 seconds.
+◇ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() started.
+✔ Test readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() passed after 0.662 seconds.
+✔ Test run with 3 tests in 0 suites passed after 3.806 seconds.
