@@ -20,8 +20,8 @@ package var modelDisplayLanguage: String {
 
 func localized(_ key: String, language: String?) -> String {
     guard let language,
-          let path = Bundle.module.path(forResource: language, ofType: "lproj"),
-          let bundle = Bundle(path: path)
+          let resources = Bundle.module.resourceURL,
+          let bundle = Bundle(path: resources.appendingPathComponent("\(language).lproj").path)
     else { return localized(key) }
     return NSLocalizedString(key, bundle: bundle, comment: "")
 }

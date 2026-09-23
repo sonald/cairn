@@ -15,7 +15,8 @@ func localizationResourcesResolveBothLanguagesWithoutChangingMenuCommands() thro
         ("app.menu.wrap.lines", "Wrap Lines", "自动换行"),
     ]
     for language in ["en", "zh-Hans"] {
-        let path = try #require(Bundle.module.path(forResource: language, ofType: "lproj"))
+        let resources = try #require(Bundle.module.resourceURL)
+        let path = resources.appendingPathComponent("\(language).lproj").path
         let bundle = try #require(Bundle(path: path))
         for (key, english, chinese) in entries {
             #expect(NSLocalizedString(key, bundle: bundle, comment: "")

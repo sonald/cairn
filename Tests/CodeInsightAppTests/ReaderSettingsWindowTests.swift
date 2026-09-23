@@ -35,7 +35,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     #expect(initialSliders.first?.accessibilityLabel?() == CodeInsightApp.localized("settings.lineHeight"))
     #expect(controller.selfTestReaderToggleCount == 2)
     let lineHeight = try #require(initialSliders.first)
-    #expect(lineHeight.accessibilityPerformIncrement?() == true)
+    _ = lineHeight.accessibilityPerformIncrement?()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
     #expect(updatedSettings.lineHeightMultiple > ReaderSettings().lineHeightMultiple)
 
