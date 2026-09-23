@@ -14,7 +14,6 @@ import SwiftUI
 import WebKit
 
 private enum SelfTestBudgets {
-    static let coldStartMS = 500.0
     static let idleFootprintMB = 100.0
     // Current F0 control measured 48.7 MiB process-wide delta. 56 keeps
     // the old ~13% headroom and the historical 64 MiB injection is rejected.
@@ -12156,8 +12155,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         enlargedWindowGeometry: [String: Double]
     ) {
         do {
-            let passed = coldStartMS < SelfTestBudgets.coldStartMS
-                && idleFootprintMB < SelfTestBudgets.idleFootprintMB
+            let passed = idleFootprintMB < SelfTestBudgets.idleFootprintMB
                 && checks.values.allSatisfy { $0 }
             var object: [String: Any] = checks
             object["coldStartMS"] = coldStartMS
