@@ -79,6 +79,8 @@ F1 峰值约 7 GiB，是该自测进程的指标，不能推导普通文件或�
 
 已验证两条公开 TextKit 替代思路：relocateViewport + usageBounds 会出现中间空视口且仍全篇/重复成形；layoutQueue 在默认 NSTextView 路径未转移同步工作。未把这些不安全或无改善的试验放进产品：[视口探针](evidence/reader-ligatures/viewport-api-probe-mid.json)、[队列探针](evidence/reader-ligatures/layout-queue-probe.json)。JetBrains 的少量诊断样本更慢，不冒充正式预算。
 
+补充视口定位：已核对设计允许主Reader渐进高度调整，但关闭自动resize、直接bounds移动、锚点字符布局、抑制bounds通知等独立探针仍为1.8–2.84秒。约1.5秒集中在原生clip滚动阶段，且存在立即空viewport/旧frame未收敛；未合入产品。见[探针与原始数据](evidence/reader-ligatures/viewport-followup/README.md)。
+
 ## A01—A15 结论
 
 | ID | 结果 | 证据与边界 |

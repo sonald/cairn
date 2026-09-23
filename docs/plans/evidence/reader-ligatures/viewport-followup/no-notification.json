@@ -1,0 +1,71 @@
+{
+  "after" : {
+    "clip" : "{{0, 311963.79999991192}, {543, 383}}",
+    "containsTarget" : true,
+    "draws" : 19,
+    "frame" : "{{0, 0}, {543, 2677361}}",
+    "usage" : "{{5, 0}, {29272, 1298202.6985459584}}",
+    "viewportLines" : [
+      14998,
+      15018
+    ],
+    "viewportUTF16" : [
+      1554200,
+      1558381
+    ],
+    "visibleFragments" : 20
+  },
+  "before" : {
+    "clip" : "{{0, 1126054.400000094}, {543, 400}}",
+    "containsTarget" : true,
+    "draws" : 13,
+    "frame" : "{{0, 0}, {543, 2677361}}",
+    "usage" : "{{5, 0}, {504, 2677336.1869416735}}",
+    "viewportLines" : [
+      14999,
+      15008
+    ],
+    "viewportUTF16" : [
+      1554232,
+      1558072
+    ],
+    "visibleFragments" : 9
+  },
+  "createdFragments" : 29992,
+  "font" : "FiraCodeRoman-Regular",
+  "fragmentStates" : {
+    "1" : 15077,
+    "3" : 14915
+  },
+  "immediate" : {
+    "clip" : "{{0, 0}, {543, 383}}",
+    "containsTarget" : false,
+    "draws" : 13,
+    "frame" : "{{0, 0}, {543, 2677361}}",
+    "usage" : "{{5, 0}, {29272, 624020.800000016}}",
+    "viewportLines" : [
+      15000,
+      15000
+    ],
+    "viewportUTF16" : [
+      1554238,
+      1554238
+    ],
+    "visibleFragments" : 0
+  },
+  "ms" : 1800.3100156784058,
+  "stagesMs" : {
+    "clipScroll" : 1507.174015045166,
+    "containerAndInvalidation" : 3.0870437622070312,
+    "firstRelocate" : 3.1280517578125,
+    "immediateSnapshot" : 1507.3670148849487,
+    "reflect" : 1507.3380470275879,
+    "resizeScroll" : 1507.3380470275879,
+    "tile" : 4.114985466003418,
+    "usageBounds" : 4.0720701217651367
+  },
+  "strategy" : "natural",
+  "targetLine" : 15000,
+  "unwrappedRelocateReturn" : 311963.79999991192,
+  "wrappedRelocateReturn" : 1125240.0000000948
+}
