@@ -4002,7 +4002,12 @@ public final class ReaderTextView {
         let controller = layoutManager.textViewportLayoutController
         if updateLayout {
             (view as? ClickTextView)?.viewportNeedsValidationAfterLayout = true
+            // Native layout may adjust the clip origin. That is not user
+            // scrolling and must not discard the reflow anchor/corrections.
+            let wasRestoring = isRestoringViewport
+            isRestoringViewport = true
             controller.layoutViewport()
+            isRestoringViewport = wasRestoring
         }
         guard let viewportRange = controller.viewportRange else { return }
         layoutManager.invalidateRenderingAttributes(for: viewportRange)

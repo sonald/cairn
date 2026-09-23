@@ -129,12 +129,12 @@ func ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() throws {
     let font = try #require(NSFont(name: "Menlo-Regular", size: 13))
     let installs = reader.projectionInstallCount
     var settings = ReaderSettings()
-    for (mode, size, wrap) in [
+    for (step, (mode, size, wrap)) in [
         (CodeLigatureMode.enabled, 13.0, false),
         (.disabled, 17.0, true),
         (.fontDefault, 15.0, true),
         (.enabled, 13.0, false),
-    ] {
+    ].enumerated() {
         settings.codeFont = .postScriptName(font.fontName)
         settings.codeLigatures = mode
         settings.fontSize = size
@@ -145,7 +145,7 @@ func ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() throws {
             containingDisplayLocation: anchor, in: reader.view),
             "mode=\(mode), size=\(size), wrap=\(wrap), anchor=\(anchor), clip=\(scroll.contentView.bounds)")
         let error = abs(row.minY - scroll.contentView.bounds.minY - offset)
-        #expect(error <= 2, "mode=\(mode), size=\(size), wrap=\(wrap), anchor error=\(error)pt")
+        #expect(error <= 2, "step=\(step), mode=\(mode), size=\(size), wrap=\(wrap), anchor=\(anchor), row=\(row.minY), clip=\(scroll.contentView.bounds.minY), offset=\(offset), restores=\(reader.viewportRestorePassCount), anchor error=\(error)pt")
         #expect(reader.projectionInstallCount == installs)
         #expect(reader.view.selectedRange() == selection)
         #expect(reader.view.selectionAffinity == .upstream)
