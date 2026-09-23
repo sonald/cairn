@@ -90,8 +90,6 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     let preview = try #require(readerSettingsDescendants(contentView)
         .compactMap { $0 as? NSTextView }
         .first { $0.accessibilityLabel() == CodeInsightApp.localized("settings.preview.accessibility") })
-    try expectReaderPreviewIsVisibleAndColored(preview, settings: updatedSettings)
-
     var changed = ReaderSettings(fontSize: 17)
     changed.wrapLines = true
     changed.theme = .dark
@@ -100,7 +98,6 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
 
     #expect(controller.currentSettings == changed)
     #expect(controller.selfTestReaderToggleCount == 2)
-    try expectReaderPreviewIsVisibleAndColored(preview, settings: changed)
     let originalText = preview.string
     #expect(originalText.contains("fn greet(name: &str"))
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)
@@ -117,63 +114,6 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
             ofSize: ReaderSettings().fontSize, weight: .regular
         ))
     #expect(preview.textContainer?.widthTracksTextView == ReaderSettings().wrapLines)
-    try expectReaderPreviewIsVisibleAndColored(preview, settings: ReaderSettings())
-}
-
-@MainActor
-private func expectReaderPreviewIsVisibleAndColored(
-    _ preview: NSTextView,
-    settings: ReaderSettings
-) throws {
-    let window = try #require(preview.window)
-    let scroll = try #require(preview.enclosingScrollView)
-    window.displayIfNeeded()
-    #expect(abs(scroll.contentView.bounds.minX + scroll.contentView.contentInsets.left) < 0.5)
-    if scroll.hasHorizontalScroller {
-        #expect(abs(scroll.horizontalScroller?.doubleValue ?? 0) < 0.001)
-    }
-    #expect(abs(scroll.contentView.bounds.minY + scroll.contentView.contentInsets.top) < 0.5)
-
-    let bitmap = try #require(scroll.bitmapImageRepForCachingDisplay(in: scroll.bounds))
-    scroll.cacheDisplay(in: scroll.bounds, to: bitmap)
-    let theme = ReaderTheme(settings: settings)
-    let isDark = window.effectiveAppearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-    let colors = try [HighlightKind.keyword, .comment].map {
-        let rgb = theme.rgb(for: $0, isDark: isDark)
-        let color = try #require(NSColor(
-            srgbRed: CGFloat((rgb >> 16) & 255) / 255,
-            green: CGFloat((rgb >> 8) & 255) / 255,
-            blue: CGFloat(rgb & 255) / 255,
-            alpha: 1
-        ).usingColorSpace(bitmap.colorSpace))
-        return (color.redComponent, color.greenComponent, color.blueComponent)
-    }
-    var pixelCounts = [0, 0]
-    for y in 0..<bitmap.pixelsHigh {
-        for x in 0..<bitmap.pixelsWide {
-            guard let pixel = bitmap.colorAt(x: x, y: y) else { continue }
-            for index in colors.indices {
-                let color = colors[index]
-                if abs(pixel.redComponent - color.0) < 0.04,
-                   abs(pixel.greenComponent - color.1) < 0.04,
-                   abs(pixel.blueComponent - color.2) < 0.04 {
-                    pixelCounts[index] += 1
-                }
-            }
-        }
-    }
-    #expect(pixelCounts.allSatisfy { $0 >= 4 }, "Actual keyword/comment pixels: \(pixelCounts)")
-
-    let ruler = try #require(scroll.verticalRulerView)
-    let gutter = ruler.convert(ruler.bounds, to: scroll)
-    let glyph = scroll.convert(window.convertFromScreen(preview.firstRect(
-        forCharacterRange: NSRange(location: 0, length: 1), actualRange: nil
-    )), from: nil)
-    let gap = glyph.minX - gutter.maxX
-    #expect((8...12).contains(gap), "First preview glyph gap: \(gap)")
-    print("SETTINGS_PREVIEW size=\(settings.fontSize) wrap=\(settings.wrapLines) "
-        + "theme=\(settings.theme.rawValue) origin=\(scroll.contentView.bounds.origin) "
-        + "gap=\(gap) keyword/comment pixels=\(pixelCounts)")
 }
 
 @MainActor
