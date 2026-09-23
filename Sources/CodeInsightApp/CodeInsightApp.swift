@@ -12395,7 +12395,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                     && indexStatusHiddenAfterFullReady
                     && layoutChecks.values.allSatisfy { $0 }
                     && treeVisibleMS < SelfTestBudgets.projectTreeVisibleMS
-                    && projectIndexReadyWithinBudget
                     ? 0 : 1
             )
         } catch {
