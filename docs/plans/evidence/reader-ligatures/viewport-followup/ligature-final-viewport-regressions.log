@@ -1,0 +1,53 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 2] ArgumentParser
+[2 / 24] CodeInsightReaderUI
+[6 / 30]
+[8 / 30] CodeInsightReaderUI
+[11 / 32] CodeInsightReaderUI
+[16 / 25] CodeInsightReaderUITests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[20 / 27] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[23 / 25] CodeInsightAppTests-product
+Build complete! (4.55秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test gutterReservesOneWidthBeforeTheFirstGlyph() started.
+GUTTER_GEOMETRY style=0 size=10.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=0 size=10.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=0 size=13.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=0 size=13.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=0 size=24.0 numbers=true gutter=(0.0, 0.0, 59.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(69.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=0 size=24.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 583.0, 183.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=1 size=10.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=1 size=10.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 6.181640625, 15.599999999999994) gap=10.0
+GUTTER_GEOMETRY style=1 size=13.0 numbers=true gutter=(0.0, 0.0, 52.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(62.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=1 size=13.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 8.0361328125, 20.80000000000001) gap=10.0
+GUTTER_GEOMETRY style=1 size=24.0 numbers=true gutter=(0.0, 0.0, 59.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(69.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+GUTTER_GEOMETRY style=1 size=24.0 numbers=false gutter=(0.0, 0.0, 19.0, 200.0) clip=(0.0, 0.0, 600.0, 200.0) insets=NSEdgeInsets(top: 0.0, left: 0.0, bottom: 0.0, right: 0.0) glyph=(29.0, 12.0, 14.8359375, 36.400000000000006) gap=10.0
+✔ Test gutterReservesOneWidthBeforeTheFirstGlyph() passed after 0.196 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.196 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scrollingRendersNewlyVisibleSyntaxColors() started.
+✔ Test scrollingRendersNewlyVisibleSyntaxColors() passed after 0.209 seconds.
+◇ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() started.
+✔ Test wrapFirstVisualRowGeometryConventionsHoldInRealTextView() passed after 0.027 seconds.
+◇ Test wrapToggleClampsLegallyAtDocumentEdges() started.
+✔ Test wrapToggleClampsLegallyAtDocumentEdges() passed after 2.670 seconds.
+◇ Test wrapPrimarySelectionCoversAllVisibleRowSegments() started.
+✔ Test wrapPrimarySelectionCoversAllVisibleRowSegments() passed after 0.494 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.740 seconds.
+◇ Test foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() started.
+M11_ATTACHMENT_SPIKE providerCreated=true countUpdated=true axLabel=Collapsed, hides 4 lines, 999 matches hitTesting=NSTextView
+✔ Test foldAttachmentProviderSpikeCreatesUpdatesAndExposesAX() passed after 0.038 seconds.
+◇ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() started.
+✔ Test wrapTrailingEmptyRowRemainsALegalViewportAnchor() passed after 1.745 seconds.
+◇ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() started.
+✔ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() passed after 8.526 seconds.
+✔ Test run with 8 tests in 0 suites passed after 15.454 seconds.

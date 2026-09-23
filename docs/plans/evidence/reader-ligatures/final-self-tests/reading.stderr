@@ -1,0 +1,2 @@
+2026-09-23 12:20:44.350 codeinsight-app[94939:19227865] WARNING: Application performed a reentrant operation in its NSTableView delegate. This warning will become an assert in the future.
+SELF_TEST_FINISH timestamp=1790137255.39294 pid=94939 channel=reading exit=0

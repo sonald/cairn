@@ -1,0 +1,63 @@
+{
+  "resizeRecordedCodeSHA": "6eae9e1+coalesced",
+  "resizeChangesSubsequentlyCommittedAs": "1f907ece78181496fa322ecbf02edc48cf1b77fa",
+  "provenanceNote": "Artifacts preserve the original bytes and recorded source labels. Focused tests and standalone heartbeat probes are not desktop UI proof. The red EOF PNG is intentionally failing historical evidence. Resize measured before commit under the recorded dirty-tree label; it is not a rerun after commit. The heartbeat probe extracts the scheduling/reset logic and proves old queued callbacks are excluded while in-window delays remain visible.",
+  "files": [
+    {
+      "file": "ligature-resize-coalesced.json",
+      "source": "/tmp/ligature-resize-coalesced.json",
+      "sha256": "2638040ba1e70e9784980cb0df8b79e6bfa823ad8908a618124e1021cc6dc2bb"
+    },
+    {
+      "file": "ligature-resize-coalesced.log",
+      "source": "/tmp/ligature-resize-coalesced.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "file": "ligature-heartbeat-boundary-check.json",
+      "source": "/tmp/ligature-heartbeat-boundary-check.json",
+      "sha256": "de481f87c566ee26323f9d9f8cf90884117e4c6dd9c89d93d4c14cb6d1d7a0af"
+    },
+    {
+      "file": "ligature-heartbeat-old-boundary.swift",
+      "source": "/tmp/ligature-heartbeat-old-boundary.swift",
+      "sha256": "adab714aef5952a099896e0f62a78948fff4b3a9d35264517ce6f64475b091e6"
+    },
+    {
+      "file": "ligature-heartbeat-generation-boundary.swift",
+      "source": "/tmp/ligature-heartbeat-generation-boundary.swift",
+      "sha256": "b4cedf2b2e2c5e8174e4dd198c49697908d669575664cde3d353a83c8175ec3c"
+    },
+    {
+      "file": "ligature-eof-color-red3.log",
+      "source": "/tmp/ligature-eof-color-red3.log",
+      "sha256": "9f41056e07ec1f06697305f6fba0a894bcdf69b58934ace89f264c6f98a6f4c5"
+    },
+    {
+      "file": "ligature-eof-color-green-attempt.log",
+      "source": "/tmp/ligature-eof-color-green-attempt.log",
+      "sha256": "42ccfd55df871b3d6dbb0dd745284f52290868af1a49a0cdb753ae851821ec4c"
+    },
+    {
+      "file": "ligature-final-viewport-regressions.log",
+      "source": "/tmp/ligature-final-viewport-regressions.log",
+      "sha256": "a2bea87a18ed22eee63f9a721b87ecb3fce2adc3c64a363eefca8684e85c69a3"
+    },
+    {
+      "file": "ligature-indent-cache-regressions.log",
+      "source": "/tmp/ligature-indent-cache-regressions.log",
+      "sha256": "996aa713a3835e1fcfd14cda0771ef902f31d07f221b9a4bcb0134c7c86a8e6f"
+    },
+    {
+      "file": "ligature-layout-coalescing-tests.log",
+      "source": "/tmp/ligature-layout-coalescing-tests.log",
+      "sha256": "f3b44e70e7a77ce0137219b3e63a9481021694919d1bbb2bf2e2ce69860c448b"
+    },
+    {
+      "file": "cairn-eof-color-false-4620.png",
+      "source": "/tmp/cairn-eof-color-false-4620.png",
+      "sha256": "e2e75d64e069476bf7b638cab0e2373071f77044b697c28b9cbd4c933b52c95c"
+    }
+  ],
+  "missing": []
+}

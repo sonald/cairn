@@ -1,0 +1,231 @@
+/Users/siancao/work/ai/vibecoding/codeinsight/Resources/AppIcon.icns
+Building for production...
+[Computing dependencies]
+[17 / 59]
+[29 / 61] TreeSitterKit
+[34 / 64] CTreeSitterPython
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:389:12: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'unsigned int' [-Wshorten-64-to-32]
+  389 |     return size;
+      |     ~~~~~~ ^~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:406:49: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  406 |             array_reserve(&scanner->delimiters, delimiter_count);
+      |             ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^~~~~~~~~~~~~~~~
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:1:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/tree_sitter/array.h:56:59: note: expanded from macro 'array_reserve'
+   56 |   _array__reserve((Array *)(self), array_elem_size(self), new_capacity)
+      |   ~~~~~~~~~~~~~~~                                         ^~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitterPython/src/scanner.c:407:40: warning: implicit conversion loses integer precision: 'size_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  407 |             scanner->delimiters.size = delimiter_count;
+      |                                      ~ ^~~~~~~~~~~~~~~
+3 warnings generated.
+[36 / 66] TreeSitterKit
+[39 / 68] CTreeSitterTypeScript
+[45 / 74] CTreeSitterTypeScript
+[45 / 74] CTreeSitter
+In file included from /Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/lib.c:6:
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:402:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  400 |     return ts_wasm_store_call_scanner_serialize(
+      |            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  401 |       self->wasm_store,
+  402 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:429:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  427 |     ts_wasm_store_call_scanner_deserialize(
+      |     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  428 |       self->wasm_store,
+  429 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CTreeSitter/src/./parser.c:452:7: warning: implicit conversion loses integer precision: 'uintptr_t' (aka 'unsigned long') to 'uint32_t' (aka 'unsigned int') [-Wshorten-64-to-32]
+  450 |     bool result = ts_wasm_store_call_scanner_scan(
+      |                   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  451 |       self->wasm_store,
+  452 |       (uintptr_t)self->external_scanner_payload,
+      |       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3 warnings generated.
+[49 / 73] CodeInsightCore
+[56 / 83] CodeInsightGit
+[64 / 90] CodeInsightGit
+[69 / 89] CodeInsightExact
+[74 / 86] CodeInsightPythonExtractor
+[75 / 91] CodeInsightRustExtractor
+[81 / 100] CodeInsightReaderCore
+[84 / 102] CodeInsightExact
+[85 / 101] CodeInsightReaderCore
+[88 / 98] CodeInsightReaderUI
+[89 / 99] CodeInsightEngine
+[95 / 104] CodeInsightAppModel
+[97 / 105] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightAppModel/AppModel.swift:1010:19: warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1008 |     ) throws {
+1009 |         guard sessionRestoreWriteSuspension != generation,
+1010 |               let sessionURL,
+     |                   `- warning: immutable value 'sessionURL' was never used; consider replacing with '_' or removing it [#NoUsage]
+1011 |               let snapshot = makeSessionSnapshot(
+1012 |                   panelPreset: panelPreset,
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[99 / 105] CodeInsightAppModel
+[104 / 107] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14414:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14412 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14413 |     }
+14414 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14415 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14416 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14515:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14513 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14514 |     else { return nil }
+14515 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14516 | }
+14517 | 
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/[106 / 108] codeinsight-app-product
+diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[108 / 108] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[109 / 110] codeinsight-app-product
+Build complete! (85.23秒)
+Bundling Homebrew dylibs (CAIRN_LIBGIT2=brew).
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssl.3.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/install_name_tool: warning: changes being made to the file will invalidate the code signature in: .build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssl.3.dylib
+.build/ligature-acceptance/Cairn.app/Contents/Info.plist: OK
+.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib: replacing existing signature
+.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssl.3.dylib: replacing existing signature
+.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib: replacing existing signature
+.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libcrypto.3.dylib: replacing existing signature
+.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib: replacing existing signature
+.build/ligature-acceptance/Cairn.app: replacing existing signature
+--prepared:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+--prepared:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssl.3.dylib--validated:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssh2.1.dylib
+
+--prepared:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+--validated:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libssl.3.dylib
+--prepared:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+--prepared:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+--validated:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libgit2.1.9.dylib
+--validated:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libcrypto.3.dylib
+--validated:/Users/siancao/work/ai/vibecoding/codeinsight/.build/ligature-acceptance/Cairn.app/Contents/Frameworks/libllhttp.9.4.dylib
+.build/ligature-acceptance/Cairn.app: valid on disk
+.build/ligature-acceptance/Cairn.app: satisfies its Designated Requirement
+No notarization credentials; completed ad-hoc signed bundle flow.
+app: .build/ligature-acceptance/Cairn.app
+zip: .build/ligature-acceptance/Cairn.zip

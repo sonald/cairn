@@ -1,0 +1,25 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 57] CodeInsightReaderUI
+Build complete! (1.05秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() started.
+✔ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() passed after 2.612 seconds.
+◇ Test ligaturePendingRestoreYieldsToUserScroll() started.
+✔ Test ligaturePendingRestoreYieldsToUserScroll() passed after 0.969 seconds.
+◇ Test ligaturePendingRestoreCannotAffectAReplacementDocument() started.
+✔ Test ligaturePendingRestoreCannotAffectAReplacementDocument() passed after 0.657 seconds.
+✔ Test run with 3 tests in 0 suites passed after 4.240 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test scrollingRendersNewlyVisibleSyntaxColors() started.
+✔ Test scrollingRendersNewlyVisibleSyntaxColors() passed after 0.263 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.747 seconds.
+◇ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() started.
+✔ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() passed after 8.575 seconds.
+✔ Test run with 3 tests in 0 suites passed after 10.586 seconds.

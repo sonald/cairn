@@ -1,0 +1,17 @@
+{
+  "old-boundary": {
+    "afterResetMaximumMs": 138.979875,
+    "ignoredPreWindowSamples": 0,
+    "inWindowMaximumMs": 138.979875,
+    "passed": false,
+    "exitCode": 1
+  },
+  "generation-boundary": {
+    "afterResetMaximumMs": 0.329666,
+    "ignoredPreWindowSamples": 25,
+    "inWindowMaximumMs": 121.74875,
+    "passed": true,
+    "exitCode": 0
+  },
+  "sourceSHA256": "1e823f3fed8e61508c1267593d5648c2dbf5a03662504adf4c4e463def9f6f4a"
+}

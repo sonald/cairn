@@ -1,0 +1,59 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 2] ArgumentParser
+[1 / 23] CodeInsightAppModelTests-product
+[2 / 8] CodeInsightReaderCoreTests-product
+[7 / 18]
+[10 / 18]
+[12 / 18] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:473:19: warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 471 |         options: [.ensuresLayout]
+ 472 |     ) { fragment in
+ 473 |         guard let firstRow = fragment.textLineFragments.first else { return true }
+     |                   `- warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 474 |         let fragmentStart = content.offset(
+ 475 |             from: content.documentRange.location,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:720:9: warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 718 |     #expect(anchor - lineStart > 200)
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+     |         `- warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 721 |     var unwrapped = wrapSettings(false)
+ 722 |     for round in 0..<20 {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:721:9: warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+ 721 |     var unwrapped = wrapSettings(false)
+     |         `- warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 722 |     for round in 0..<20 {
+ 723 |         // Each round ends wrapped so the quarter-anchor probe resolves the
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[15 / 19] CodeInsightReaderCoreTests-product
+[17 / 19] CodeInsightReaderCoreTests-product
+Build complete! (9.92秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() started.
+EOF_BITMAP path=/tmp/cairn-eof-color-false-4620.png draw=(32746.0, 191300.4070193361, 480.0, 180.0) keyword=(33014.3974609375, 191429.89298067015, 24.1083984375, 20.79999999998836) pixelSize=960x360 expected=sRGB IEC61966-2.1 colorspace 0.611765 0.211765 0.709804 1
+✘ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() recorded an issue at ReaderUITests.swift:3331:9: Expectation failed: keywordPixels > 0
+↳ EOF keyword must draw its syntax color, wrapped=false
+↳ keywordPixels > 0 → false
+↳   keywordPixels → 0
+EOF_LAYOUT wrapped=false viewport=952042..<956914 bounds=(-10.0, 191288.4070193361, 33209.5, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 191417.89298067015, 33189.228515625, 20.8)
+EOF_COLOR wrapped=false keywordPixels=0 styledBefore=4620 styledAfter=4620
+✘ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() recorded an issue at ReaderUITests.swift:3344:9: Expectation failed: keywordColors.contains { colorsEqual($0, ReaderTheme(settings: wrapSettings(wrapped)).color(for: .keyword)) }
+↳ keywordColors.contains { colorsEqual($0, ReaderTheme(settings: wrapSettings(wrapped)).color(for: .keyword)) } → <not evaluated>
+EOF_LAYOUT wrapped=true viewport=952784..<956914 bounds=(-10.0, 527070.0, 480.0, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 525719.5556459839, 458.0595703125, 1518.399999999998)
+EOF_COLOR wrapped=true keywordPixels=251 styledBefore=4627 styledAfter=4627
+EOF_LAYOUT wrapped=false viewport=952042..<956914 bounds=(-10.0, 191345.99999998164, 33209.5, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 191475.78596134172, 33189.228515625, 20.8)
+EOF_COLOR wrapped=false keywordPixels=251 styledBefore=13509 styledAfter=13509
+✘ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() failed after 8.906 seconds with 2 issues.
+✘ Test run with 1 test in 0 suites failed after 8.906 seconds with 2 issues.
+Note: Some test targets reported failures:
+  - CodeInsightReaderCoreTests (Swift Testing)

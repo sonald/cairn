@@ -1,0 +1,44 @@
+{
+  "baselineCommit": "5a9800be5ac8523bb16ca0ae03da7dd9bb3d4092",
+  "baselineBinarySHA256": "180cbe4cacb8e0516f0917d5ce1edd9a251e9246ab0969d67ff9375b080eb27d",
+  "currentProductCommit": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+  "currentBinarySHA256": null,
+  "packageResolvedSHA256": "50aaf43c3ff386dcfd97cafe404c2e57e47cd037ac7b806813fc3887835b8fcf",
+  "build": "release, default debug info; exact git archive, identical pinned dependencies",
+  "warmup": 5,
+  "samples": 30,
+  "configuration": "system monospaced / default ligatures, same F1 fixture and native wrap toggle harness",
+  "cases": {
+    "on": {
+      "baselineP95MS": 4562.826041,
+      "currentP95MS": 161.521667,
+      "ratio": 0.03539947952181857,
+      "reductionPercent": 96.46005204781815
+    },
+    "off": {
+      "baselineP95MS": 2013.040292,
+      "currentP95MS": 119.322708,
+      "ratio": 0.05927487317278198,
+      "reductionPercent": 94.0725126827218
+    }
+  },
+  "provenanceNote": "Current data is the 6eae9e1 release run, before 1f907ec. The binary hash was not captured; the prior 05e4b53 hash must not be attributed to this run. JSON artifacts are copied without modification.",
+  "files": [
+    {
+      "file": "ligature-default-baseline-off.json",
+      "sha256": "3126cdd580eea103abff91febb981a73bc5da0ff0f73fea51246274175d3b59f"
+    },
+    {
+      "file": "ligature-default-baseline-on.json",
+      "sha256": "5e8a56d0c23b9ca4adb23c970ec5f3fd4bd217d073bb5109e3680f9e890e474d"
+    },
+    {
+      "file": "ligature-default-current-off.json",
+      "sha256": "c6f2e5cd8d53db58828addba95e544ba1e274281481d786af75f25a0aa43974e"
+    },
+    {
+      "file": "ligature-default-current-on.json",
+      "sha256": "36714ead573aac91f6d810d1d9aad3526e9aebe02ae4288dd0811a89f364e5c0"
+    }
+  ]
+}

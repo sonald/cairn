@@ -1,6 +1,6 @@
 {
-  "implementationCommit": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
-  "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+  "implementationCommit": null,
+  "binarySHA256": null,
   "build": "release",
   "environment": "../environment.md",
   "samples": 30,
@@ -10,147 +10,272 @@
     "2026-09-23"
   ],
   "rendering": "N03/N04: fixed 2x native cacheDisplay; N05: existing runWrapPerformance recipe. Neither is a vsync measurement.",
-  "provenanceNote": "F1 measured at 78e0826; later 6e53c63 only changes pure typography updates on retained folds, and 3bef9af only changes Reading Set. F1 wrap-only path is unchanged. F1 remains failed, not a final acceptance pass.",
+  "provenanceNote": "Mixed runs: each case records its own source revision. Updated complete-series JSON and PNG files are byte-for-byte copies of the 6eae9e1 release run; they precede the 1f907ec cache/coalescing and heartbeat changes. No captured binary hash is available for that release run. Historical operator/CRLF/system evidence retains its original revision and binary hash. Performance thresholds are best-effort targets per the 2026-09-23 user decision; raw statuses and measurements are preserved, not rewritten as final acceptance.",
   "cases": [
     {
       "file": "FiraCodeRoman-Regular-2000.json",
-      "sha256": "36d8bbcaeeeb841af1c76dff4a57c15b654422b20d3aa5380a45f0a828f61d2a",
+      "sha256": "60ba39960f0862ffa0afd15ff427ed239bae4c3233b30e9ef7f4b0cb86e38bb5",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-FiraCodeRoman-Regular-2000.json",
+      "binarySHA256": null,
       "status": "passed",
-      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
-      "checksPassed": true
+      "checksPassed": true,
+      "revisionProvenance": "Release run recorded by executing agent; this artifact schema has no codeSHA field."
+    },
+    {
+      "file": "FiraCodeRoman-Regular-2000.png",
+      "sha256": "0a370e1fec2be1c6964791f811abc458ff7b87245a814f968561948682cc1a1c",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-FiraCodeRoman-Regular-2000.png",
+      "binarySHA256": null,
+      "revisionProvenance": "Release run recorded by executing agent; this artifact schema has no codeSHA field."
     },
     {
       "file": "FiraCodeRoman-Regular-operators-disabled.json",
       "sha256": "a2405df3f6faee2aeca81cc5bce79aeacf66cc684756fb218c8615a32fa1c489",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
+    },
+    {
+      "file": "FiraCodeRoman-Regular-operators-disabled.png",
+      "sha256": "ed872f9ff944d7cc581cc735ce4ef1b0a3176c55ab36529816f51bd349918dc0",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
     },
     {
       "file": "FiraCodeRoman-Regular-operators-enabled.json",
       "sha256": "e47b7e396c05cce599b3a6938cf60468939670ffd102711fbc8f9cb006a2d4cd",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
+    },
+    {
+      "file": "FiraCodeRoman-Regular-operators-enabled.png",
+      "sha256": "c5c168279649f95d60c949539620e05fd07cade4e21528b7b40314950476917c",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
     },
     {
       "file": "FiraCodeRoman-Regular-operators-fontDefault.json",
       "sha256": "1f2d96d60b22b77c9935228e6fd223cbc7232ea1b1b494d501ae6fa18dca4906",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
     },
     {
-      "file": "JetBrainsMono-Regular-2000.json",
-      "sha256": "908bda80bf7a8af0ce5bdce43242440825cf7879793b3e97ae0005b233c8f756",
-      "status": "passed",
+      "file": "FiraCodeRoman-Regular-operators-fontDefault.png",
+      "sha256": "c5c168279649f95d60c949539620e05fd07cade4e21528b7b40314950476917c",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
-      "checksPassed": true
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
+    },
+    {
+      "file": "JetBrainsMono-Regular-2000.json",
+      "sha256": "4c456dea347cc7d0110027e103803b5606cefc7632f891ee1536839da97dfebb",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-JetBrainsMono-Regular-2000.json",
+      "binarySHA256": null,
+      "status": "passed",
+      "checksPassed": true,
+      "revisionProvenance": "Release run recorded by executing agent; this artifact schema has no codeSHA field."
+    },
+    {
+      "file": "JetBrainsMono-Regular-2000.png",
+      "sha256": "e9e111d669e4e02fbce7e1e61cc06df75754097faddcc968a342dd05c24c891c",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-JetBrainsMono-Regular-2000.png",
+      "binarySHA256": null,
+      "revisionProvenance": "Release run recorded by executing agent; this artifact schema has no codeSHA field."
     },
     {
       "file": "JetBrainsMono-Regular-operators-disabled.json",
       "sha256": "9dd2da7fe6d0d61129c6f3995b7f2589dc6200021b51aa8c3f9c5afcc497e648",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
+    },
+    {
+      "file": "JetBrainsMono-Regular-operators-disabled.png",
+      "sha256": "41cd17e1705b34542a5dbd833babab1c455fa2bb740b39563db859ded9597bb1",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
     },
     {
       "file": "JetBrainsMono-Regular-operators-enabled.json",
       "sha256": "5f65514a0aed070b6dde47f72d7c0b9001ab48ce967f00c9a580ee327195a178",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
+    },
+    {
+      "file": "JetBrainsMono-Regular-operators-enabled.png",
+      "sha256": "0a147ed63392421cbddcee8d380f474dbf9aad1d39fb20197f16ec0b5ee0ddf5",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
     },
     {
       "file": "JetBrainsMono-Regular-operators-fontDefault.json",
       "sha256": "2447c90856e1d80b0dba6c89af74b257a6061ebf52105b869c5e45a846b6e032",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
     },
     {
+      "file": "JetBrainsMono-Regular-operators-fontDefault.png",
+      "sha256": "0a147ed63392421cbddcee8d380f474dbf9aad1d39fb20197f16ec0b5ee0ddf5",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
+    },
+    {
       "file": "f1-fira-ligatures-disabled-wrap-off.json",
-      "sha256": "e13656171ccf3e6ca0652781e639786d535cc7f7ea230e78c485f2d129bcacb2",
+      "sha256": "a5de6ae566b42764eb3116dae0cc328dc4079857ab4cfb41d0edb0273f6f1194",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f1-disabled-off.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "78e0826",
       "checksPassed": null
     },
     {
       "file": "f1-fira-ligatures-disabled-wrap-on.json",
-      "sha256": "3444d94943692cb4f34cb0c9214181247f51e0b64560d994d68bc11b4ba2fca4",
+      "sha256": "c01e634acfaed567b885c90f14ccf18a3c798b7bef0944f85dbdb7ca115067a8",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f1-disabled-on.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "78e0826",
       "checksPassed": null
     },
     {
       "file": "f1-fira-ligatures-enabled-wrap-off.json",
-      "sha256": "e9573577bae4cf8eea5a1e26f157f1481fe93941c50757230d4c537f193ef5cd",
+      "sha256": "79252813011d243c6979ae5582e7e8e6165af239c84872d2f96dbc6c326044bb",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f1-enabled-off.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "78e0826",
       "checksPassed": null
     },
     {
       "file": "f1-fira-ligatures-enabled-wrap-on.json",
-      "sha256": "fde2b7c99b046d59f28d6638e8b53f6bec1222c5d1dbc8a640f8f53b9788e6f7",
+      "sha256": "bcb275a4d2addbcff79487c65a9e51626b2389ce3faa7accd8446a1a22123c35",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f1-enabled-on.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "78e0826",
       "checksPassed": null
     },
     {
       "file": "f2-mega-line-fira-off.json",
-      "sha256": "b60ee8088564ecffc744706839a0a53403e60fd66bba6b6dcfecc14bfaa0c73e",
+      "sha256": "996592a5f686983335e3598e026bfe342f062bb4353541fb183a858c5442b245",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f2-mega-line-off.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "f2-mega-line-fira-on.json",
-      "sha256": "b6303d19ec7fa46ed1a056f897050fc4da3b5de01a233d20f90780093fd5880e",
+      "sha256": "f67573e67583aa2b8844264aa811c20d278053c478fde30e6a5c059bea6961fe",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f2-mega-line-on.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "f3-no-whitespace-fira-off.json",
-      "sha256": "069302e3f9591baeaf75848d2e8b9ab41a888257ee011aa128d3fd598eac40a0",
+      "sha256": "1df69d2a450b2fdff8f541a4a138fd53c0ffb67c7fdbf53be7ebc3823a3dd510",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f3-no-whitespace-off.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "f3-no-whitespace-fira-on.json",
-      "sha256": "1d9029cc77beac11bbcc8650d6172594ce214a63078ce2eb1730cfe0a7ec7156",
+      "sha256": "7c3d47e1de1977af464e3fee37e7be4587e2547591f6616094e7feab3a6510c4",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-f3-no-whitespace-on.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "fira-crlf-final.json",
       "sha256": "2092df587ce7829e62466264e16d12be70c904a8cbf05a22e4fe3984705edb8a",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
     },
     {
+      "file": "fira-crlf-final.png",
+      "sha256": "c5c168279649f95d60c949539620e05fd07cade4e21528b7b40314950476917c",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
+    },
+    {
       "file": "readingset-fira-off.json",
-      "sha256": "931d502e0c16951539bfdee4471a95e278351a35453d70eb2e4fca1fcb2cd8dc",
+      "sha256": "617f5f57132ad1efd586e1b4a76baafdcb67217734d036ae780a4b526bf7e63a",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-reading-set-off.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "readingset-fira-on.json",
-      "sha256": "b422b116f8e6c6184924e704d0b5ffa975e25ce0e132796a6ec8d30b2e6d87f5",
+      "sha256": "9cd0427ddf9e5ebb04dd8b3af8976f958e0226866e7ce8556647b514ed653e43",
+      "codeSHA": "6eae9e1c0a4c61d35b8d9fd635e027995be11112",
+      "source": "/tmp/ligature-complete-reading-set-on.json",
+      "binarySHA256": null,
       "status": "ok",
-      "codeSHA": "3bef9af",
       "checksPassed": null
     },
     {
       "file": "system-final.json",
       "sha256": "15e6f58f2591641ec8e0ea732c0abb873939abc9001219d609cc65db4448a6aa",
-      "status": "passed",
       "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241",
+      "status": "passed",
       "checksPassed": true
+    },
+    {
+      "file": "system-final.png",
+      "sha256": "6b7701ca0c063e8d07f85a8bb7f45257455e71f43dc07cf544f7aaf460715255",
+      "codeSHA": "3bef9afcdf1081c408c1e7e2ca0049972d930710",
+      "source": "retained original evidence",
+      "binarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
+    },
+    {
+      "file": "final-policy-native.json",
+      "sha256": "d408aef9e4ff5f0a58fde3a568bd7fc521e8338ac3906fa73a57431b6d939636",
+      "codeSHA": "0296f21e748a4ea9406ae51746855f945a71ee60",
+      "binarySHA256": "82e17993d2fa0b6ba5eab0d43efd6447da0b5dfaf3b10ce1630f168d9f0647a7",
+      "status": "passed",
+      "checksPassed": true,
+      "performanceTargetsAreBlocking": false,
+      "source": "/tmp/ligature-final-policy-native.json"
     }
-  ]
+  ],
+  "historicalBinarySHA256": "e5bde5415c1c2942dcdb46a18bbba64560d275efe6e0dfe0b7c6f747daec4241"
 }

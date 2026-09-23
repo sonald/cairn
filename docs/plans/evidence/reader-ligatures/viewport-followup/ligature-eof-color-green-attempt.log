@@ -1,0 +1,328 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 1]
+[1 / 55] CodeInsightExact
+[2 / 25] CodeInsightReaderUI
+[6 / 31]
+[8 / 31] CodeInsightReaderUI
+[14 / 36] CodeInsightApp
+[25 / 47] CodeInsightApp
+[25 / 47] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/ReaderSettingsWindowController.swift:186:30: warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+184 | 
+185 |     static func selfTestEnableAccessibility() {
+186 |         NSApplication.shared.accessibilitySetValue(
+    |                              `- warning: 'accessibilitySetValue(_:forAttribute:)' was deprecated in macOS 10.10: Use the NSAccessibility protocol methods instead (see NSAccessibilityProtocols.h) [#DeprecatedDeclaration]
+187 |             true, forAttribute: .init(rawValue: "AXEnhancedUserInterface")
+188 |         )
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[25 / 47] CodeInsightApp
+[28 / 51] CodeInsightReaderUI
+[32 / 49] CodeInsightReaderUITests-product
+[33 / 59]
+[35 / 59]
+[36 / 59]
+[42 / 59] CodeInsightReaderUITests-product
+[44 / 61] CodeInsightReaderUITests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[44 / 61] CodeInsightApp
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/MainWindowController.swift:2024:27: warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2022 |                 return true
+2023 |             } catch {
+2024 |                 guard let window else { return true }
+     |                           `- warning: value 'window' was defined but never used; consider replacing with boolean test [#NoUsage]
+2025 |                 let alert = NSAlert()
+2026 |                 alert.alertStyle = .warning
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[44 / 61] codeinsight-app-product
+[44 / 61] CodeInsightReaderUITests-product
+[46 / 61] CodeInsightReaderCoreTests-product
+[48 / 63] CodeInsightReaderUITests-product
+[50 / 64] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:473:19: warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 471 |         options: [.ensuresLayout]
+ 472 |     ) { fragment in
+ 473 |         guard let firstRow = fragment.textLineFragments.first else { return true }
+     |                   `- warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 474 |         let fragmentStart = content.offset(
+ 475 |             from: content.documentRange.location,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:720:9: warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 718 |     #expect(anchor - lineStart > 200)
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+     |         `- warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 721 |     var unwrapped = wrapSettings(false)
+ 722 |     for round in 0..<20 {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:721:9: warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+ 721 |     var unwrapped = wrapSettings(false)
+     |         `- warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 722 |     for round in 0..<20 {
+ 723 |         // Each round ends wrapped so the quarter-anchor probe resolves the
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[52 / 64] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[54 / 65] CodeInsightApp
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:25: warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+10998 |         weak var openButton: NSButton?
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+      |                    `- note: add '@MainActor' to make instance method 'checkboxChanged' part of global actor 'MainActor'
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                         `- warning: main actor-isolated property 'isEnabled' can not be mutated from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSControl.h:29:35: note: mutation of this property is only permitted within the actor
+ 27 | @property BOOL ignoresMultiClick;
+ 28 | @property (getter=isContinuous) BOOL continuous;
+ 29 | @property (getter=isEnabled) BOOL enabled;
+    |                                   `- note: mutation of this property is only permitted within the actor
+ 30 | @property BOOL refusesFirstResponder;
+ 31 | @property (getter=isHighlighted) BOOL highlighted API_AVAILABLE(macos(10.10));
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11001:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+10999 | 
+11000 |         @objc func checkboxChanged(_ sender: NSButton) {
+11001 |             openButton?.isEnabled = checkboxes.contains { $0.state == .on }
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11002 |         }
+11003 | 
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11006:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11004 |         var selection: [LanguageID]? {
+11005 |             var selected: [LanguageID] = []
+11006 |             if checkboxes.indices.contains(0), checkboxes[0].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11009:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11007 |                 selected.append(.rust)
+11008 |             }
+11009 |             if checkboxes.indices.contains(1), checkboxes[1].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11012:62: warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11010 |                 selected.append(.python)
+11011 |             }
+11012 |             if checkboxes.indices.contains(2), checkboxes[2].state == .on {
+      |                                                              `- warning: main actor-isolated property 'state' can not be referenced from a nonisolated context
+11013 |                 selected.append(.typescript)
+11014 |             }
+
+/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/AppKit.framework/Headers/NSButton.h:151:31: note: property declared here
+149 | 
+150 | /*! The button's state. Buttons support the off and on states, and an additional mixed state depending on the value of the `allowsMixedState` property. */
+151 | @property NSControlStateValue state;
+    |                               `- note: property declared here
+152 | 
+153 | /*! A Boolean value that indicates whether the button allows a mixed state. If NO, the button has two states (on and off), and if YES, the button has three states (on, off, and mixed). The mixed state is commonly used with checkboxes and radio buttons to indicate a value which is partially on. */
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:11219:17: warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11217 |                 await coordinator.stopAllWorkForCacheClear()
+11218 |             }
+11219 |             try await sharedMaterializer.clear()
+      |                 `- warning: no 'async' operations occur within 'await' expression [#UnnecessaryEffectMarker]
+11220 |             return .cleared
+11221 |         } catch {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14398:9: warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14396 |         return storage.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+14397 |     }
+14398 |     let viewport = scrollView.contentView.bounds.size
+      |         `- warning: initialization of immutable value 'viewport' was never used; consider replacing with assignment to '_' or removing it [#NoUsage]
+14399 |     let windowSize = window.contentView?.bounds.size ?? .zero
+14400 |     let wrapState = measuredWrapState ?? (
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Sources/CodeInsightApp/CodeInsightApp.swift:14498:12: warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14496 |     guard sysctlbyname(name, &buffer, &length, nil, 0) == 0
+14497 |     else { return nil }
+14498 |     return String(cString: buffer)
+      |            `- warning: 'init(cString:)' is deprecated: Use String(decoding: array, as: UTF8.self) instead, after truncating the null termination. [#DeprecatedDeclaration]
+14499 | }
+14500 | 
+
+[#DeprecatedDeclaration]: <https://docs.swift.org/compiler/documentation/diagnostics/deprecated-declaration>
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#UnnecessaryEffectMarker]: <https://docs.swift.org/compiler/documentation/diagnostics/unnecessary-effect-marker>
+[56 / 64] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[57 / 64] codeinsight-app-product
+[60 / 66] CodeInsightAppTests-product
+[64 / 70] CodeInsightAppTests-product
+[66 / 70] CodeInsightAppTests-product
+[68 / 70] CodeInsightAppTests-product/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+
+Build complete! (19.82秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() started.
+EOF_LAYOUT wrapped=false viewport=952042..<956914 bounds=(-10.0, 191288.4070193361, 33209.5, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 191417.89298067015, 33189.228515625, 20.8)
+EOF_COLOR wrapped=false keywordPixels=251 styledBefore=4657 styledAfter=4657
+EOF_LAYOUT wrapped=true viewport=952784..<956914 bounds=(-10.0, 527070.0, 480.0, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 525719.5556459839, 458.0595703125, 1518.399999999998)
+EOF_COLOR wrapped=true keywordPixels=251 styledBefore=4669 styledAfter=4669
+EOF_LAYOUT wrapped=false viewport=952042..<956914 bounds=(-10.0, 191345.99999998164, 33209.5, 180.0) fragment=952784..<956914 state=3 frame=(0.0, 191475.78596134172, 33189.228515625, 20.8)
+EOF_COLOR wrapped=false keywordPixels=251 styledBefore=13567 styledAfter=13567
+✔ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() passed after 8.787 seconds.
+✔ Test run with 1 test in 0 suites passed after 8.787 seconds.

@@ -1,0 +1,9 @@
+{
+  "sourceCommit": "0296f21e748a4ea9406ae51746855f945a71ee60",
+  "files": {
+    ".build/release/codeinsight-app": "82e17993d2fa0b6ba5eab0d43efd6447da0b5dfaf3b10ce1630f168d9f0647a7",
+    ".build/ligature-acceptance/Cairn.app/Contents/MacOS/codeinsight-app": "01711d30fa2f93133aca4ed0f6381591f98eda8c6c55ff2d943f6aee43b746c7",
+    "Sources/CodeInsightApp/LigatureSelfTest.swift": "10b40ea889a3b1a3b863012a5beee7e4f015ce7caf35f7cddf22735aabb2493a",
+    "Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift": "66bd7bb697e72e6d10eb37d7d7c747ffd39d8cc4a90c4e905685efa524ab096f"
+  }
+}

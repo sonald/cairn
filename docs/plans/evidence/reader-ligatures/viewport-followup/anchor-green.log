@@ -1,0 +1,20 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 43] CodeInsightEngineTests-product
+[2 / 25] CodeInsightReaderUI
+[6 / 31]
+[8 / 31] CodeInsightReaderUI
+[11 / 32] CodeInsightReaderUI
+[16 / 25] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[20 / 27] codeinsight-app-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[23 / 25] CodeInsightAppTests-product
+Build complete! (4.59秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() started.
+✔ Test ligatureAndFontReflowsKeepAnIndependentlyMeasuredViewportAnchor() passed after 2.576 seconds.
+✔ Test run with 1 test in 0 suites passed after 2.576 seconds.

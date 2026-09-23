@@ -1,9 +1,9 @@
 # Cairn 编程连字支持：技术设计
 
 日期：2026-09-22  
-版本：1.0，评审稿  
+版本：1.1，已实施（2026-09-23验收）
 代码基线：`sonald/cairn@d1f68eee3300df8525ce914b2fb37760c82c65a3`  
-状态：功能实现已落地，发布验收进行中；实际通过项、性能结果与阻塞见[验收记录](2026-09-22-reader-ligatures-acceptance.md)。
+状态：已实施，验收通过；最终源码`0296f21`，性能按用户确认的best-effort口径披露；实际证据见[验收记录](2026-09-22-reader-ligatures-acceptance.md)。
 
 配套文档：[需求说明](2026-09-22-reader-ligatures-requirements.md) · [实施计划](2026-09-22-reader-ligatures-implementation-plan.md)
 
@@ -288,6 +288,8 @@ CI 已约束 ReaderUI 只有 `DisplayMap.swift` 可以直接引用 `ByteUTF16Map
 
 ## D10 观测、失败处理与性能
 
+2026-09-23 按用户明确决定，本文及引用的 wrap 设计中未经实测或理论支持的性能阈值（包括 33 ms、250 ms 及相对耗时目标）均为 best-effort 参考，不作为发布硬门槛。保留原数值与各版本实测，说明差异及体验影响；正确成形、选区、复制、布局完整性和资源生命周期仍须验证。
+
 建议增加以下可测试计数：`fontResolutionCount`、`fontCacheHitCount`、`typographyAttributeUpdateCount`、`projectionInstallCount` 的增量、卡片 `measurements` 的增量，以及视口恢复是否因规模或过期任务被跳过。
 
 诊断记录实际字体名、字号、有效 feature、macOS / SDK、字体环境版本、fixture、显示内容身份与阶段耗时。源代码正文不进入普通性能日志。
@@ -345,3 +347,21 @@ CI 已约束 ReaderUI 只有 `DisplayMap.swift` 可以直接引用 `ByteUTF16Map
 [^opentype]: [Apple：Core Text OpenType feature tag](https://developer.apple.com/documentation/coretext/kctfontopentypefeaturetag). 源码链接固定于本文基线；外部资料核对日期：2026-09-22。
 [^segments]: [Apple：TextKit 2 文本段几何枚举](https://developer.apple.com/documentation/appkit/nstextlayoutmanager/enumeratetextsegments(in:type:options:using:)). 源码链接固定于本文基线；外部资料核对日期：2026-09-22。
 [^wrapdesign]: [既有 Soft Wrap 设计；其中现状部分使用更早的代码基线](https://github.com/sonald/cairn/blob/d1f68eee3300df8525ce914b2fb37760c82c65a3/docs/plans/2026-09-19-reader-wrap-design.md). 源码链接固定于本文基线；外部资料核对日期：2026-09-22。
+
+
+## 实施补充：F1 视口布局成本
+
+`05e4b53` 保留原生 TextKit 2/NSTextView 成形、选择和辅助功能链路，仅收紧既有布局路径：
+
+- Reader 固定左上对齐，`ClickTextView.textContainerOrigin` 返回当前 `textContainerInset`。采样发现 AppKit 的推导原点会在 clip 滚动时调用全文 `ensureLayoutForRange`；这一策略只适用于本 Reader，不声称适用于居中或特殊文字布局。
+- 主动渲染属性验证同时受 `viewportRange` 的字符边界限制。未布局 fragment 的零矩形不能作为“仍在可见范围”的依据，否则会扫描并写入整篇临时样式。
+- 超过8000源行的wrap-off使用原生viewport relocation与usageBounds估计，最多两次本地布局，避免显式全篇成形。滚动范围可随后由TextKit更新；普通文件仍保留原精确extent路径。
+- 几何回归覆盖gutter、选区、附件实际位置和9000行文件末尾4000字符长行的水平/垂直可达性。大文件继续不承诺2pt精确锚点，保留原文、选区和affinity。
+
+`05e4b53` 阶段的 F1 正式测量为 5 次预热 + 30 次样本：Fira 连字 On 的 wrap-on 稳定 p95 约 210 ms、wrap-off 约 170 ms；同字体 Off 约 187 ms、156 ms。这是阶段数据，后续实现的结果见验收记录。原 250 ms 及相对耗时数值保留作 best-effort 参考，按 2026-09-23 用户决定不再作为硬性验收门槛。
+
+### 最终正确性收尾（2026-09-23）
+
+`6eae9e1` 修复真实窗口滚动至EOF后语法颜色未及时应用的问题：在原生布局完成后校验最终可见片段，避免嵌套触发布局。`1f907ec` 将该校验合并到实际视口变化，并在宽度变化未改变缩进上限时复用段落属性；性能探针以测量代次排除旧队列回调，仍记录新窗口内阻塞。
+
+最终回归又独立复现连续字体/wrap切换后8.69pt锚点偏移。`0296f21` 在共享可见属性校验触发原生布局期间保留既有恢复标志，防止布局自动调整clip origin被误作用户滚动而清掉锚点；真实用户滚动仍取消恢复，换文档仍取消旧状态。原断言及六项关联回归通过，红绿证据见验收记录。没有为追逐33ms参考值增加新的布局完成协议。

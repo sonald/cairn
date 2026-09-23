@@ -1,0 +1,51 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 2] CTreeSitterPython
+[2 / 4] CodeInsightReaderUI
+[6 / 10]
+[8 / 10] CodeInsightReaderUI
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: codeinsight-app-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[14 / 14] codeinsight-app-product
+[18 / 29] codeinsight-app-product
+[19 / 27] CodeInsightReaderCoreTests-product
+[20 / 33] CodeInsightReaderUITests-product
+[22 / 34]
+/Users/siancao/work/ai/vibecoding/codeinsight/Package.swift: CodeInsightAppTests-product: ld: warning: building for macOS-14.0, but linking with dylib '/opt/homebrew/opt/libgit2/lib/libgit2.1.9.dylib' which was built for newer version 26.0
+[27 / 35]
+[29 / 35] CodeInsightReaderCoreTests-product
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:473:19: warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 471 |         options: [.ensuresLayout]
+ 472 |     ) { fragment in
+ 473 |         guard let firstRow = fragment.textLineFragments.first else { return true }
+     |                   `- warning: value 'firstRow' was defined but never used; consider replacing with boolean test [#NoUsage]
+ 474 |         let fragmentStart = content.offset(
+ 475 |             from: content.documentRange.location,
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:720:9: warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 718 |     #expect(anchor - lineStart > 200)
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+     |         `- warning: variable 'wrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 721 |     var unwrapped = wrapSettings(false)
+ 722 |     for round in 0..<20 {
+
+/Users/siancao/work/ai/vibecoding/codeinsight/Tests/CodeInsightReaderCoreTests/ReaderUITests.swift:721:9: warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 719 | 
+ 720 |     var wrapped = wrapSettings(true)
+ 721 |     var unwrapped = wrapSettings(false)
+     |         `- warning: variable 'unwrapped' was never mutated; consider changing to 'let' constant [#VariableNeverMutated]
+ 722 |     for round in 0..<20 {
+ 723 |         // Each round ends wrapped so the quarter-anchor probe resolves the
+
+[#NoUsage]: <https://docs.swift.org/compiler/documentation/diagnostics/no-usage>
+[#VariableNeverMutated]: <https://docs.swift.org/compiler/documentation/diagnostics/variable-never-mutated>
+[32 / 36] CodeInsightReaderCoreTests-product
+[34 / 36] CodeInsightReaderCoreTests-product
+Build complete! (9.82秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() started.
+✔ Test largeDocumentWrapOffKeepsVisibleSourceSelectionAndReachableEOF() passed after 4.411 seconds.
+✔ Test run with 1 test in 0 suites passed after 4.411 seconds.

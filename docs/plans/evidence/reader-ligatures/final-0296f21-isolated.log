@@ -1,0 +1,20 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 1]
+[1 / 8] CProcessGuardTestSupport
+[1 / 26] TreeSitterKit-product
+[1 / 52] CodeInsightTypeScriptExtractor
+[1 / 81] CodeInsightAppTests-product
+[1 / 100] ArgumentParserToolInfo
+[1 / 69] CodeInsightCoreTests-product
+[1 / 10] PythonExtractorTests-product
+Build complete! (1.86秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() started.
+✔ Test bookmarkPanelClearsInvalidFilteredAndDeletedSelectionsBeforeEditingANote() passed after 0.294 seconds.
+◇ Test bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() started.
+✔ Test bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() passed after 0.274 seconds.
+✔ Test run with 2 tests in 0 suites passed after 0.569 seconds.

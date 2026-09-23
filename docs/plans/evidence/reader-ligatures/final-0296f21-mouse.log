@@ -1,0 +1,11 @@
+Building for debugging...
+[Computing dependencies]
+[Using on-disk description]
+[1 / 1]
+Build complete! (1.01秒)
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() started.
+✔ Test nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() passed after 0.548 seconds.
+✔ Test run with 1 test in 0 suites passed after 0.548 seconds.
