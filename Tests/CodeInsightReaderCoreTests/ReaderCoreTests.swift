@@ -1565,7 +1565,7 @@ func hugeDocumentDeclarationSpanProbe() throws {
 }
 
 @Test
-func excerptAttachesAdjacentDocCommentsAndMarksOverflow() {
+func excerptAttachesAdjacentCommentsAndIncludesEntireDeclaration() throws {
     let body = (1...26).map { "    let value\($0) = \($0);" }
     let source = ([
         "//! Module detail",
@@ -1576,28 +1576,53 @@ func excerptAttachesAdjacentDocCommentsAndMarksOverflow() {
         from: source.utf8.startIndex,
         to: source.range(of: "fn connect")!.lowerBound
     ))
-    let document = readerDocument(source)
+    let document = try localReferenceDocument(source)
 
     let value = excerpt(
         for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
         in: document
     )
 
-    #expect(value.hasPrefix("//! Module detail\n/// Opens the database.\nfn connect() {"))
-    #expect(value.hasSuffix("… 4 more lines"))
+    #expect(value == source)
+    #expect(excerpt(
+        for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
+        in: readerDocument(source)
+    ) == source)
+    for comment in ["// Ordinary comment", "/** Block documentation\n * with details\n */", "/* Block comment\n\n   with a blank line\n */"] {
+        let source = "\(comment)\nfn connect() {\n    work();\n}"
+        let start = UInt32(source[..<source.range(of: "fn connect")!.lowerBound].utf8.count)
+        #expect(excerpt(
+            for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
+            in: try localReferenceDocument(source)
+        ) == source)
+    }
+    let pythonSource = (["# Executes the code.", "def execute():", "    \"\"\"Run all steps.\"\"\""]
+        + (1...100).map { "    value\($0) = \($0)" }
+        + ["    return value100"]).joined(separator: "\n")
+    let pythonBytes = Array(pythonSource.utf8)
+    let python = try pythonReaderHighlightWithFolds(bytes: pythonBytes)
+    #expect(excerpt(
+        for: try #require(python.outlineFacets.first).range,
+        in: ReaderDocument(
+            bytes: pythonBytes,
+            languageMode: LanguageMode(language: .python),
+            highlightSpans: python.spans,
+            outlineFacets: python.outlineFacets
+        )
+    ) == pythonSource)
 }
 
 @Test
-func excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() {
-    let source = "// ordinary comment\n\nfn plain() {\n    work();\n}"
-    let start = UInt32(source[..<source.range(of: "fn plain")!.lowerBound].utf8.count)
-
-    let value = excerpt(
-        for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
-        in: readerDocument(source)
-    )
-
-    #expect(value == "fn plain() {\n    work();\n}")
+func excerptStartsAtTargetWhenThereIsNoAdjacentDocComment() throws {
+    for prefix in ["// ordinary comment\n\n", "fn previous() {} // trailing comment\n", "/* comment */ fn previous() {}\n"] {
+        let source = "\(prefix)fn plain() {\n    work();\n}"
+        let start = UInt32(source[..<source.range(of: "fn plain")!.lowerBound].utf8.count)
+        let value = excerpt(
+            for: ByteRange(lowerBound: start, upperBound: UInt32(source.utf8.count)),
+            in: try localReferenceDocument(source)
+        )
+        #expect(value == "fn plain() {\n    work();\n}")
+    }
 }
 
 @Test

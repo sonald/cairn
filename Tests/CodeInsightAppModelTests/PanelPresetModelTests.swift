@@ -10,7 +10,7 @@ func panelPresetsDescribeReadingRelationsCompareAndFocusLayouts() {
         relationsCollapsed: true,
         readerSplit: false,
         sidebarFraction: 0.20,
-        contextFraction: 0.24,
+        contextFraction: 0.40,
         relationsFraction: 0,
         secondaryReaderFraction: 0
     ))
@@ -21,7 +21,7 @@ func panelPresetsDescribeReadingRelationsCompareAndFocusLayouts() {
         relationsCollapsed: false,
         readerSplit: false,
         sidebarFraction: 0,
-        contextFraction: 0.24,
+        contextFraction: 0.40,
         relationsFraction: 0.28,
         secondaryReaderFraction: 0
     ))
@@ -32,7 +32,7 @@ func panelPresetsDescribeReadingRelationsCompareAndFocusLayouts() {
         relationsCollapsed: true,
         readerSplit: true,
         sidebarFraction: 0,
-        contextFraction: 0.24,
+        contextFraction: 0.40,
         relationsFraction: 0,
         secondaryReaderFraction: 0.5
     ))

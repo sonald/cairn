@@ -251,7 +251,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let upperItem = NSSplitViewItem(viewController: upperSplitController)
         upperItem.minimumThickness = 300
         contextItem.minimumThickness = 120
-        contextItem.automaticMaximumThickness = 280
         contextItem.canCollapse = true
         contentSplitController.addSplitViewItem(upperItem)
         contentSplitController.addSplitViewItem(contextItem)

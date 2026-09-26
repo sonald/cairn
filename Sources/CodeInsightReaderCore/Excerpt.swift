@@ -28,21 +28,37 @@ public func excerpt(
         Int(document.lineTable.lineColumn(at: endOffset)?.line ?? targetStart.line) - 1
     )
     var firstLine = targetLine
-    while firstLine > 0, isDocComment(line(firstLine - 1, in: document)) {
-        firstLine -= 1
+    for span in document.highlightSpans.reversed()
+        where (span.kind == .comment || span.kind == .commentFigure)
+            && span.range.upperBound <= document.lineTable.lineStarts[firstLine]
+    {
+        guard span.range.upperBound > span.range.lowerBound,
+              let start = document.lineTable.lineColumn(at: span.range.lowerBound),
+              let end = document.lineTable.lineColumn(at: span.range.upperBound - 1),
+              Int(end.line) == firstLine
+        else { break }
+        let commentLine = Int(start.line) - 1
+        let prefix = document.bytes[
+            Int(document.lineTable.lineStarts[commentLine])..<Int(span.range.lowerBound)
+        ]
+        let suffix = document.bytes[
+            Int(span.range.upperBound)..<Int(document.lineTable.lineStarts[firstLine])
+        ]
+        guard prefix.allSatisfy({ $0 == 0x20 || $0 == 0x09 }),
+              suffix.allSatisfy({ $0 == 0x20 || $0 == 0x09 || $0 == 0x0D || $0 == 0x0A })
+        else { break }
+        firstLine = commentLine
     }
-    let includedEnd = min(targetEndLine, targetLine + 23)
-    var result = lines(from: firstLine, through: includedEnd, in: document)
-    let remaining = targetEndLine - includedEnd
-    if remaining > 0 {
-        result.append("… \(remaining) more lines")
+    if document.highlightSpans.isEmpty {
+        while firstLine > 0 {
+            let previous = line(firstLine - 1, in: document)
+                .trimmingCharacters(in: .whitespaces)
+            guard previous.hasPrefix("///") || previous.hasPrefix("//!") else { break }
+            firstLine -= 1
+        }
     }
-    return result.joined(separator: "\n")
-}
-
-private func isDocComment(_ value: String) -> Bool {
-    let trimmed = value.trimmingCharacters(in: .whitespaces)
-    return trimmed.hasPrefix("///") || trimmed.hasPrefix("//!")
+    return lines(from: firstLine, through: targetEndLine, in: document)
+        .joined(separator: "\n")
 }
 
 private func lines(
