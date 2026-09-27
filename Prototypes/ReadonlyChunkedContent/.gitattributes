@@ -1,0 +1,2 @@
+# Preserve exact line endings and intentional spaces in the geometry fixture.
+unicode.txt -text -whitespace

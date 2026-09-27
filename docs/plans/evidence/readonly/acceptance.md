@@ -1,6 +1,6 @@
 # Readonly implementation acceptance
 
-Status: **S0–S8 development work complete at the user-adjusted testing scope; final stage commits being recorded**.
+Status: **S0–S8 development work complete and committed at the user-adjusted testing scope**.
 This is not a release approval. No remote push or distribution has been performed.
 
 | Stage | Commit | Evidence |
@@ -13,8 +13,8 @@ This is not a release approval. No remote push or distribution has been performe
 | S5a | `0cec95d` | [Pure projection](stage-s5a.md) |
 | S5b | `92a46af` | [Local projection commits](stage-s5b.md) |
 | S6 | `2c1bd48` | [Reflow and lifecycle](stage-s6.md) |
-| S7 | pending | [Integrated evidence](stage-s7.md), [requirement matrix](stage-s7-requirements.md) |
-| S8 | commit pending | [Completed prototype decision](stage-s8.md); adoption deferred |
+| S7 | `1365f10` | [Integrated evidence](stage-s7.md), [requirement matrix](stage-s7-requirements.md) |
+| S8 | this record’s S8 commit | [Completed prototype decision](stage-s8.md); adoption deferred |
 
 Current frozen measurement candidate: `a99f10b2ec09c27c2610f3a651a638c070075470`
 (r5), based on S6 plus the S7 font-notification, viewport-query and subscription

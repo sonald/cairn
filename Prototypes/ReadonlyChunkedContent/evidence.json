@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "status": "functional_geometry_fail",
+  "adoption": "defer_this_paragraph_chunking_scheme",
+  "scope": "Public API wiring repaired; this is not evidence that all public TextKit 2 providers are infeasible.",
+  "fixture": "Prototypes/ReadonlyChunkedContent/unicode.txt",
+  "sourceSHA256": "2813ac7d4a96825942663f255a2f7f35135c9019bda43977ffabed608436ed76",
+  "sourceUTF16": 13819,
+  "probeSHA256": "563d06a168ae5f4f67a2c620971bafddc686d6de13f9230a57acbc66911066d0",
+  "toolchain": "Apple Swift 6.4 (swiftlang-6.4.0.34.1 clang-2100.3.34.1), SDK 27.0",
+  "osVersion": "Version 27.0 (Build 26A428)",
+  "font13": ".AppleSystemUIFontMonospaced-Regular",
+  "geometryFontSize": 17,
+  "viewportPt": [
+    700,
+    1046
+  ],
+  "chunkUTF16": 4096,
+  "buildCommand": "swiftc -swift-version 6 -O Prototypes/ReadonlyChunkedContent/ChunkedContentProbe.swift -o Prototypes/ReadonlyChunkedContent/chunked-content-probe",
+  "runCommand": "bash Prototypes/ReadonlyChunkedContent/run-pair.sh Prototypes/ReadonlyChunkedContent/unicode.txt .build/readonly/s8-unicode-repaired/native-sizing",
+  "checks": {
+    "sourceTextPreservedBoth": true,
+    "nativeCopyAcross3BoundariesBoth": true,
+    "AXTextAndCharacterCountBoth": true,
+    "EOFSelectionBoth": true,
+    "all11CaretSamplesVisibleBoth": true,
+    "failedGeometrySamples": 9
+  },
+  "failedPositions": [
+    {
+      "sourceUTF16": 4098,
+      "ordinaryXY": [
+        261.3693268178502,
+        1180
+      ],
+      "chunkedXY": [
+        676.9743072866002,
+        1200
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 4102,
+      "ordinaryXY": [
+        343.5968658803502,
+        1180
+      ],
+      "chunkedXY": [
+        635.8605377553502,
+        1200
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 8190,
+      "ordinaryXY": [
+        479.2897369741002,
+        2360
+      ],
+      "chunkedXY": [
+        99.5791015625,
+        2360
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 8194,
+      "ordinaryXY": [
+        521.3248932241002,
+        2360
+      ],
+      "chunkedXY": [
+        5,
+        2380
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 8198,
+      "ordinaryXY": [
+        563.3600494741002,
+        2360
+      ],
+      "chunkedXY": [
+        47.03515625,
+        2380
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 12286,
+      "ordinaryXY": [
+        47.03515625,
+        3560
+      ],
+      "chunkedXY": [
+        362.298828125,
+        3590
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 12290,
+      "ordinaryXY": [
+        89.0703125,
+        3560
+      ],
+      "chunkedXY": [
+        5,
+        3610
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 12294,
+      "ordinaryXY": [
+        131.10546875,
+        3560
+      ],
+      "chunkedXY": [
+        47.03515625,
+        3610
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    },
+    {
+      "sourceUTF16": 13819,
+      "ordinaryXY": [
+        5,
+        4020
+      ],
+      "chunkedXY": [
+        5,
+        4040
+      ],
+      "bothVisible": true,
+      "heightPt": [
+        20,
+        20
+      ]
+    }
+  ],
+  "rawDirectory": ".build/readonly/s8-unicode-repaired/native-sizing",
+  "rawSHA256": {
+    "ordinary.json": "134b013abb73e231b0c764e46590e3f3859d01dafd3b611e9593ce2d8123c712",
+    "chunked.json": "b39fc8ac195be5531cdfb467c4bd3c17f6fc159c25d1d00a4b6ec2c47ab775bf",
+    "comparison.json": "245f282bce79bbd992a14e61b1c7d73c2b5b64997e22ba2cedec42f6af513949"
+  },
+  "originalCrashPreserved": ".build/readonly/s8-unicode/chunked.stderr.txt",
+  "rangeDiagnosticsDirectory": ".build/readonly/s8-unicode-repaired",
+  "notRun": [
+    "manual native drag/Shift active-end and VoiceOver navigation",
+    "30 interleaved benchmark samples",
+    "production adoption"
+  ],
+  "S8bS8c": "not_built_no_additional_concrete_experience_requirement"
+}
