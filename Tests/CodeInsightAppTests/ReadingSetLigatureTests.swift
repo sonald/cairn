@@ -83,6 +83,45 @@ func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() asyn
     await settleLigatureReadingSet(window)
     #expect(view.selfTestMeasurementCount > beforeRefresh)
     #expect(text.selectedRange() == selection)
+
+    // Paint changes must not enqueue the card measurement/reflow path. Check
+    // both immediately and after AppKit has had a chance to deliver layout.
+    settings.theme = .light
+    view.apply(settings: settings)
+    await settleLigatureReadingSet(window)
+    func rgba(_ color: NSColor?) throws -> [CGFloat] {
+        let value = try #require(color?.usingColorSpace(.deviceRGB))
+        return [value.redComponent, value.greenComponent, value.blueComponent, value.alphaComponent]
+    }
+    for theme in [ReaderSettings.Theme.dark, .siClassic, .light] {
+        let measured = view.selfTestMeasurementCount
+        let selected = text.selectedRanges
+        let affinity = text.selectionAffinity
+        let beforeAnchor = try #require(view.selfTestViewportAnchor)
+        let beforeColor = try rgba(text.textColor)
+        #expect(!view.selfTestLayoutPending)
+        settings.theme = theme
+        view.apply(settings: settings)
+        #expect(!view.selfTestLayoutPending)
+        #expect(view.selfTestMeasurementCount == measured)
+        await settleLigatureReadingSet(window)
+        #expect(!view.selfTestLayoutPending)
+        #expect(view.selfTestMeasurementCount == measured)
+        #expect(text.string == source)
+        #expect(text.selectedRanges == selected)
+        #expect(text.selectionAffinity == affinity)
+        #expect(text.writeSelection(to: pasteboard, types: text.writablePasteboardTypes))
+        #expect(pasteboard.string(forType: .string) == "=")
+        let afterAnchor = try #require(view.selfTestViewportAnchor)
+        #expect(afterAnchor.card == beforeAnchor.card)
+        #expect(afterAnchor.location == beforeAnchor.location)
+        #expect(abs(afterAnchor.offset - beforeAnchor.offset) <= 0.01)
+        let expectedColor = try rgba(ReaderTheme(settings: settings).foregroundColor)
+        #expect(try rgba(text.textColor) == expectedColor)
+        #expect(try rgba(text.textColor) != beforeColor)
+        #expect(try rgba(text.textStorage?.attribute(.foregroundColor, at: selection.location,
+            effectiveRange: nil) as? NSColor) == expectedColor)
+    }
 }
 
 @MainActor

@@ -106,6 +106,7 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
             ], options: [.prettyPrinted, .sortedKeys]).write(to: output, options: .atomic)
             let before = try counters()
             let drawBefore = reader.backgroundDrawCount
+            let capturesBefore = reader.viewportGeometryCaptureCount
             let start = ContinuousClock.now
             try operation()
             draw()
@@ -132,8 +133,19 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                     NSLocalizedDescriptionKey: "A local fold transition fell back to full character replacement: \(reader.projectionFallbackReason ?? "unknown")"
                 ])
             }
+            if ["font-only", "color-font-wrap"].contains(name),
+               ProcessInfo.processInfo.environment["CAIRN_READONLY_REFLOW"] != "0",
+               let cost = document.cost, ReaderReflowPolicy().requiresViewportOnlyLayout(for: cost) {
+                guard after["applicationFullLayoutCount"] == before["applicationFullLayoutCount"],
+                      reader.viewportGeometryCaptureCount == capturesBefore else {
+                    throw NSError(domain: "ReadonlyWorkload", code: 8, userInfo: [
+                        NSLocalizedDescriptionKey: "High-cost reflow performed a synchronous caret capture or full extent enumeration"
+                    ])
+                }
+            }
             if name == "color-only" || name == "identical-settings" {
                 guard after["applicationFullLayoutCount"] == before["applicationFullLayoutCount"],
+                      reader.viewportGeometryCaptureCount == capturesBefore,
                       after["paragraphRecordsVisited"] == before["paragraphRecordsVisited"],
                       after["attributeUpdatedUTF16Units"] == before["attributeUpdatedUTF16Units"] else {
                     throw NSError(domain: "ReadonlyWorkload", code: 5, userInfo: [
@@ -149,6 +161,11 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                            "sourceByteCount": reader.displayedBytes?.count ?? 0,
                            "fontSize": settings.fontSize, "wrapLines": settings.wrapLines,
                            "viewportPt": [scroll.contentView.bounds.width, scroll.contentView.bounds.height],
+                           "projectedUTF16Length": reader.view.textStorage?.length ?? 0,
+                           "viewportGeometryCaptureDelta": reader.viewportGeometryCaptureCount - capturesBefore,
+                           "lastViewportRestoreWasLimited": reader.lastViewportRestoreWasLimited,
+                           "lastViewportRestoreLimitation": reader.lastViewportRestoreLimitation as Any? ?? NSNull(),
+                           "lastViewportAnchorErrorPt": reader.lastViewportAnchorErrorPt as Any? ?? NSNull(),
                            "occurrenceCount": reader.occurrenceCount,
                            "selectedRanges": reader.view.selectedRanges.map { ["location": $0.rangeValue.location, "length": $0.rangeValue.length] },
                            "before": before, "after": after,
@@ -300,11 +317,18 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
         let font = ReaderFontResolver.shared.resolve(selection: settings.codeFont, mode: settings.codeLigatures,
                                                      size: CGFloat(settings.fontSize)).actualPostScriptName
         try measure("close-reader") { reader.clear(); window.close() }
+        let documentCost: [String: Any]
+        if let cost = document.cost {
+            documentCost = ["byteCount": cost.byteCount, "logicalLineCount": cost.logicalLineCount,
+                            "maximumLineByteLengthIncludingTerminator": cost.maximumLineByteLength,
+                            "highlightSpanCount": cost.highlightSpanCount, "foldRegionCount": cost.foldRegionCount]
+        } else { documentCost = ["status": "unavailable"] }
         finish([
             "schemaVersion": 1, "status": events.contains { ($0["status"] as? String) == "blocked" } ? "blocked" : "pass",
             "captureOnly": true, "suite": option("--suite") ?? "all", "fixture": path,
             "preparationMs": preparationMs, "hoverHitCount": hoverHits,
-            "sourceLineCount": document.lineTable.lineStarts.count,
+            "sourceLineCount": document.lineTable.lineStarts.count, "documentCost": documentCost,
+            "costAwareReflow": ProcessInfo.processInfo.environment["CAIRN_READONLY_REFLOW"] != "0",
             "foldCount": document.foldRegions.count, "outlineCount": document.outlineFacets.count,
             "topologyCompatibility": document.foldTopology?.usesCompatibilityRelations ?? false,
             "topologyCompatibilityRecordVisits": document.foldTopology?.compatibilityRecordVisits ?? 0,

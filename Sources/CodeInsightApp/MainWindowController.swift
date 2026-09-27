@@ -5185,7 +5185,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         pendingFocusNavigationOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
-        textView.cancelDerivedDataSubscription()
+        textView.stopPendingReaderWork()
+        readingSetView.stopPendingLayout()
     }
 
     required init?(coder: NSCoder) {
@@ -7750,7 +7751,7 @@ final class ContextWindowViewController: NSViewController {
     /// Terminal window teardown: later model observations must not redisplay the excerpt.
     func cancelDerivedDataSubscription() {
         isClosing = true
-        miniReader.cancelDerivedDataSubscription()
+        miniReader.stopPendingReaderWork()
     }
 
     required init?(coder: NSCoder) {

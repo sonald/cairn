@@ -612,6 +612,15 @@ public final class ReaderTextView {
     /// transaction and every user-facing content/geometry change. Pending
     /// async restores validate against it and die when it moves (D3.6).
     private var viewportStateGeneration = 0
+    private let reflowPolicy: ReaderReflowPolicy
+    private let usesCostAwareReflow = ProcessInfo.processInfo.environment["CAIRN_READONLY_REFLOW"] != "0"
+    private var readerWorkStopped = false
+    package private(set) var lastViewportRestoreLimitation: String?
+    package private(set) var viewportGeometryCaptureCount = 0
+    private var requiresViewportOnlyLayout: Bool {
+        guard let cost = displayedDocument?.cost else { return true }
+        return reflowPolicy.requiresViewportOnlyLayout(for: cost)
+    }
     /// True while a reflow transaction is restoring selection/scroll; view
     /// and selection callbacks must not treat this as user interaction.
     private var isRestoringViewport = false
@@ -619,6 +628,8 @@ public final class ReaderTextView {
     /// sequence (wrap/font/width changes). Cleared by user interaction,
     /// navigation, fold changes, and content replacement (D3.5/E3).
     private var pendingReflowState: ReaderViewportState?
+    // No source/pixel anchor is fabricated when precision is cost-limited.
+    private var pendingHorizontalState: ReaderViewportState.HorizontalState?
     /// Coalescing flag for width-change-driven reflows (D3.7): one merged
     /// restore per runloop turn no matter how many tile/frame notifications
     /// AppKit delivers for a single resize.
@@ -633,9 +644,16 @@ public final class ReaderTextView {
         state: ReaderViewportState,
         generation: Int,
         remaining: Int,
-        staleAttempts: Int
+        staleAttempts: Int,
+        targetWidth: CGFloat,
+        targetTypography: ReaderTypographyKey,
+        targetFontEnvironment: UInt64
     )?
     private var pendingWidthReflowGeneration: Int?
+    package var reflowDiagnostics: (generation: Int, widthCapture: Bool, widthPending: Bool, correctionPending: Bool, stopped: Bool) {
+        (viewportStateGeneration, widthReflowCapturedState != nil, pendingWidthReflowGeneration != nil,
+         pendingViewportCorrection != nil, readerWorkStopped)
+    }
     public private(set) var currentLineNumber: Int?
     public private(set) var occurrenceCount = 0
     public private(set) var primarySelectionRange: NSRange?
@@ -647,7 +665,9 @@ public final class ReaderTextView {
         self.init(settings: settings, derivedDataStore: ReaderDerivedDataStore())
     }
 
-    package init(settings: ReaderSettings = ReaderSettings(), derivedDataStore: ReaderDerivedDataStore) {
+    package init(settings: ReaderSettings = ReaderSettings(), derivedDataStore: ReaderDerivedDataStore,
+                 reflowPolicy: ReaderReflowPolicy = ReaderReflowPolicy()) {
+        self.reflowPolicy = reflowPolicy
         self.derivedDataStore = derivedDataStore
         theme = ReaderTheme(settings: settings)
         typographyKey = ReaderTypographyKey(settings: settings)
@@ -711,13 +731,19 @@ public final class ReaderTextView {
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
         }
         textView.layoutCompleted = { [weak self] in
-            guard let self, !self.isCommittingProjection, !self.isRestoringViewport,
+            guard let self, !self.readerWorkStopped, !self.isCommittingProjection, !self.isRestoringViewport,
                   self.renderingCoordinator.hasRenderingAttributes,
                   let manager = self.view.textLayoutManager else { return }
             self.validateVisibleRenderingAttributes(in: manager, updateLayout: false)
+            self.processPendingViewportCorrection()
+        }
+        textView.userScrollHandler = { [weak self] in
+            guard let self, !self.readerWorkStopped else { return }
+            self.invalidateReflowSequence()
+            self.focusState?.followsExplicitNavigation = false
         }
         textView.viewportChanged = { [weak self] in
-            guard let self, !self.isCommittingProjection,
+            guard let self, !self.readerWorkStopped, !self.isCommittingProjection,
                   let layoutManager = self.view.textLayoutManager
             else { return }
             self.foldGutterHoveredID = nil
@@ -727,8 +753,8 @@ public final class ReaderTextView {
             // (seconds on the 30k-line fixture). The owning transaction
             // validates and publishes once at its end (D3.4).
             if self.isRestoringViewport { return }
-            // User scrolling ends the pure-reflow sequence (D3.5).
-            self.invalidateReflowSequence()
+            // Bounds changes may come from TextKit layout. Only explicit user
+            // input clears the anchor; still refresh visible rendering here.
             self.validateVisibleRenderingAttributes(in: layoutManager)
             self.ruler?.needsDisplay = true
             self.onViewportChange?()
@@ -736,8 +762,8 @@ public final class ReaderTextView {
         // Width changes: capture the old stable state before the frame
         // actually changes, then merge all tile/frame notifications of one
         // resize into a single reflow restore (D3.7).
-        textView.widthWillChange = { [weak self] _ in
-            self?.captureStateForWidthChange()
+        textView.widthWillChange = { [weak self] oldWidth in
+            self?.captureStateForWidthChange(previousViewportWidth: oldWidth)
         }
         textView.widthDidChange = { [weak self] _ in
             self?.scheduleWidthReflow()
@@ -750,6 +776,15 @@ public final class ReaderTextView {
             let store = derivedDataStore
             Task { await store.cancel(subscription) }
         }
+    }
+
+    /// Terminal host teardown; identifier refresh itself must not cancel reflow.
+    /// Preserve text/selection for the host's final reading-position checkpoint.
+    package func stopPendingReaderWork() {
+        readerWorkStopped = true
+        invalidateReflowSequence()
+        paragraphWidthUpdatePending = false
+        cancelDerivedDataSubscription()
     }
 
     package func cancelDerivedDataSubscription() {
@@ -1010,6 +1045,7 @@ public final class ReaderTextView {
 
     private func display(document: ReaderDocument, fileURL: URL?) {
         guard document.foldTopology != nil else { return }
+        readerWorkStopped = false
         paragraphLayout.reset()
         let scope = FoldScopeKey(
             file: (fileURL ?? URL(fileURLWithPath: "/__codeinsight_memory__"))
@@ -1931,7 +1967,9 @@ public final class ReaderTextView {
     /// fallback — simply do not fight the lazy layout).
     private func supportsSynchronousViewportRestore(for state: ReaderViewportState) -> Bool {
         guard let document = displayedDocument else { return false }
-        guard document.lineTable.lineStarts.count <= 8_000 else { return false }
+        if usesCostAwareReflow {
+            guard !requiresViewportOnlyLayout else { return false }
+        } else if document.lineTable.lineStarts.count > 8_000 { return false }
         let byte: UInt32
         switch state.anchor {
         case .source(let offset): byte = offset
@@ -1948,7 +1986,7 @@ public final class ReaderTextView {
         let end = starts.indices.contains(index + 1) ? Int(starts[index + 1]) : document.bytes.count
         // Core Text caret offsets scan a whole shaped line (1.7s at 1.8MB).
         // ponytail: cap synchronous precision at 64KiB; async restore if needed.
-        return end - Int(starts[index]) <= 64 * 1024
+        return end - Int(starts[index]) <= (usesCostAwareReflow ? reflowPolicy.maximumSynchronousLineBytes : 64 * 1024)
     }
 
     /// Ends the current pure-reflow sequence: the next reflow picks a fresh
@@ -1958,6 +1996,9 @@ public final class ReaderTextView {
     /// correction passes die too: user interaction always outranks a
     /// pending restore (D3.6).
     private func invalidateReflowSequence() {
+        viewportStateGeneration &+= 1
+        widthReflowCapturedState = nil
+        pendingHorizontalState = nil
         pendingReflowState = nil
         pendingViewportCorrection = nil
         pendingWidthReflowGeneration = nil
@@ -1969,9 +2010,19 @@ public final class ReaderTextView {
     /// are reused (D3.5) so consecutive toggles cannot drift — re-picking the
     /// 25% row after every toggle would walk a long logical line toward its
     /// start. Selection and horizontal state are always re-read live.
-    private func captureViewportStateForReflow() -> ReaderViewportState? {
-        guard let document = displayedDocument else { return nil }
-        if let pending = pendingReflowState, pending.contentID == document.contentID {
+    private func captureViewportStateForReflow(previousViewportWidth: CGFloat? = nil) -> ReaderViewportState? {
+        guard let document = displayedDocument, !readerWorkStopped else { return nil }
+        // Run before old-state reuse or any native insertion/caret geometry query.
+        guard !usesCostAwareReflow || !requiresViewportOnlyLayout else {
+            lastViewportRestoreWasLimited = true
+            lastViewportAnchorErrorPt = nil
+            lastViewportRestoreLimitation = "cost-limited-capture"
+            pendingHorizontalState = currentHorizontalState()
+            return nil
+        }
+        // Settings may arrive before queued width work. Preserve the earliest
+        // source anchor instead of sampling the intermediate layout again.
+        if let pending = pendingReflowState ?? widthReflowCapturedState, pending.contentID == document.contentID {
             var updated = pending
             updated.selectedRanges = currentSelectedRanges()
             updated.selectionAffinity = view.selectionAffinity
@@ -1981,23 +2032,36 @@ public final class ReaderTextView {
             updated.horizontal = currentHorizontalState()
             return updated
         }
-        guard let captured = captureFreshViewportState(for: document) else {
+        guard let captured = captureFreshViewportState(for: document, previousViewportWidth: previousViewportWidth) else {
             return nil
         }
         return captured
     }
 
     private func captureFreshViewportState(
-        for document: ReaderDocument
+        for document: ReaderDocument,
+        previousViewportWidth: CGFloat? = nil
     ) -> ReaderViewportState? {
         guard let manager = view.textLayoutManager,
               let content = manager.textContentManager
         else { return nil }
-        let visible = view.visibleRect
+        var visible = view.visibleRect
+        // During a wrapped width hook the clip already has its new width,
+        // while character geometry still belongs to the old document-view width.
+        // Reuse that old horizontal probe position instead of choosing another source character.
+        if let previousViewportWidth { visible.size.width = previousViewportWidth }
         // Zero-size or unmounted surfaces keep only settings and selection;
         // a stable anchor forms once real geometry exists (D3.2).
-        guard visible.height > 1, visible.width > 1 else { return nil }
+        guard visible.height > 1, visible.width > 1 else {
+            lastViewportRestoreWasLimited = true
+            lastViewportAnchorErrorPt = nil
+            lastViewportRestoreLimitation = "zero-geometry"
+            pendingHorizontalState = currentHorizontalState()
+            return nil
+        }
 
+        viewportGeometryCaptureCount += 1
+        lastViewportRestoreLimitation = nil
         let anchorYInView = visible.minY + visible.height * 0.25
         // Resolve an actual character at the probe point inside the visible
         // horizontal region, so a horizontally scrolled long line anchors to
@@ -2088,6 +2152,7 @@ public final class ReaderTextView {
     private func currentHorizontalState() -> ReaderViewportState.HorizontalState {
         let originX = view.enclosingScrollView?.contentView.bounds.minX ?? 0
         let stash = pendingReflowState?.horizontal.stashedUnwrappedX
+            ?? pendingHorizontalState?.stashedUnwrappedX
             ?? (wrapLines ? nil : originX)
         return ReaderViewportState.HorizontalState(
             clipOriginX: originX,
@@ -2278,6 +2343,8 @@ public final class ReaderTextView {
         ) {
             characterRect = segment
         }
+        lastViewportRestoreWasLimited = false
+        lastViewportRestoreLimitation = nil
         let clipView = scrollView.contentView
         let desiredOriginY = rowRect.minY - state.offsetFromViewportTop
         let clamped = clampVerticalScrollOrigin(desiredOriginY, clipView: clipView)
@@ -2310,6 +2377,13 @@ public final class ReaderTextView {
         from state: ReaderViewportState,
         anchorGeometry: (rowRect: NSRect, characterRect: NSRect)?
     ) {
+        restoreHorizontalPosition(state.horizontal, anchorGeometry: anchorGeometry)
+    }
+
+    private func restoreHorizontalPosition(
+        _ horizontal: ReaderViewportState.HorizontalState,
+        anchorGeometry: (rowRect: NSRect, characterRect: NSRect)? = nil
+    ) {
         guard let scrollView = view.enclosingScrollView else { return }
         let clipView = scrollView.contentView
         let insets = clipView.contentInsets
@@ -2318,7 +2392,7 @@ public final class ReaderTextView {
         if wrapLines {
             clipView.scroll(to: NSPoint(x: minX, y: clipView.bounds.minY))
         } else {
-            var x = state.horizontal.stashedUnwrappedX ?? minX
+            var x = horizontal.stashedUnwrappedX ?? horizontal.clipOriginX
             x = min(max(x, minX), maxX)
             clipView.scroll(to: NSPoint(x: x, y: clipView.bounds.minY))
             scrollView.reflectScrolledClipView(clipView)
@@ -2355,15 +2429,20 @@ public final class ReaderTextView {
         remaining: Int,
         staleAttempts: Int = 0
     ) {
-        guard remaining > 0, supportsSynchronousViewportRestore(for: state) else { return }
+        guard !readerWorkStopped, remaining > 0, supportsSynchronousViewportRestore(for: state) else { return }
         pendingViewportCorrection = (
             state: state,
             generation: generation,
             remaining: remaining,
-            staleAttempts: staleAttempts
+            staleAttempts: staleAttempts,
+            targetWidth: view.textContainer?.size.width ?? 0,
+            targetTypography: typographyKey,
+            targetFontEnvironment: fontEnvironmentRevision
         )
         DispatchQueue.main.async { [weak self] in
-            self?.processPendingViewportCorrection()
+            guard let self, !self.readerWorkStopped,
+                  self.viewportStateGeneration == generation else { return }
+            self.processPendingViewportCorrection()
         }
     }
 
@@ -2376,7 +2455,10 @@ public final class ReaderTextView {
             state: pending.state,
             generation: pending.generation,
             remaining: pending.remaining,
-            staleAttempts: pending.staleAttempts
+            staleAttempts: pending.staleAttempts,
+            targetWidth: pending.targetWidth,
+            targetTypography: pending.targetTypography,
+            targetFontEnvironment: pending.targetFontEnvironment
         )
     }
 
@@ -2392,12 +2474,20 @@ public final class ReaderTextView {
         state: ReaderViewportState,
         generation: Int,
         remaining: Int,
-        staleAttempts: Int
+        staleAttempts: Int,
+        targetWidth: CGFloat,
+        targetTypography: ReaderTypographyKey,
+        targetFontEnvironment: UInt64
     ) {
-        guard viewportStateGeneration == generation,
+        guard !readerWorkStopped, viewportStateGeneration == generation,
               let document = displayedDocument,
               document.contentID == state.contentID,
+              state.surfaceFileURL == activeFoldScope?.file,
               state.projectionRevision == projectionRevision,
+              targetWidth == view.textContainer?.size.width,
+              targetTypography == typographyKey,
+              targetFontEnvironment == fontEnvironmentRevision,
+              targetFontEnvironment == ReaderFontResolver.shared.fontEnvironmentRevision,
               let scrollView = view.enclosingScrollView
         else { return }
         guard let location = anchorDisplayLocation(
@@ -2407,8 +2497,12 @@ public final class ReaderTextView {
         guard let rowRect = freshAnchorRowRect(
             containingDisplayLocation: location
         ) else {
-            // Layout not settled yet: retry next turn without consuming a
-            // correction pass (bounded by staleAttempts).
+            lastViewportRestoreWasLimited = true
+            lastViewportAnchorErrorPt = nil
+            lastViewportRestoreLimitation = staleAttempts < 6
+                ? "awaiting-target-layout" : "target-layout-unavailable"
+            // Actual layout callbacks also drain pending corrections. Keep the
+            // existing bounded next-turn retry for surfaces without a new draw.
             if staleAttempts < 6 {
                 scheduleViewportCorrections(
                     for: state,
@@ -2419,6 +2513,8 @@ public final class ReaderTextView {
             }
             return
         }
+        lastViewportRestoreWasLimited = false
+        lastViewportRestoreLimitation = nil
         let clipView = scrollView.contentView
         let desiredOriginY = rowRect.minY - state.offsetFromViewportTop
         isRestoringViewport = true
@@ -2427,6 +2523,7 @@ public final class ReaderTextView {
             ? (ReaderViewportGeometry.characterRect(displayLocation: location, in: view) ?? rowRect)
             : rowRect
         restoreHorizontalPosition(from: state, anchorGeometry: (rowRect, characterRect))
+        lastViewportAnchorErrorPt = abs(desiredOriginY - clipView.bounds.minY)
         guard abs(desiredOriginY - clipView.bounds.minY) > 0.5 else {
             if abs(oldX - clipView.bounds.minX) > 0.5 { viewportRestorePassCount += 1 }
             isRestoringViewport = false
@@ -2456,37 +2553,45 @@ public final class ReaderTextView {
     /// Pre-change hook for width-driven reflows (D3.7). AppKit delivers
     /// several frame changes per resize; only the first captures, while the
     /// geometry is still the old stable one.
-    private func captureStateForWidthChange() {
+    private func captureStateForWidthChange(previousViewportWidth: CGFloat) {
         foldGutterHoveredID = nil
-        guard wrapLines,
+        guard !readerWorkStopped, !isCommittingProjection, wrapLines,
               !isRestoringViewport,
               widthReflowCapturedState == nil
         else { return }
-        widthReflowCapturedState = captureViewportStateForReflow()
+        widthReflowCapturedState = captureViewportStateForReflow(previousViewportWidth: previousViewportWidth)
     }
 
     /// Merges all width notifications of one resize into a single reflow
     /// restore on the next runloop turn (D3.7).
     private func scheduleWidthReflow() {
         widthReflowNotificationCount += 1
-        guard wrapLines,
+        guard !readerWorkStopped, !isCommittingProjection, wrapLines,
               !isRestoringViewport,
               displayedDocument != nil
         else { return }
         paragraphWidthUpdatePending = true
         if hasScheduledWidthReflow {
             mergedWidthReflowCount += 1
+            // Font/analysis changes can advance the generation between two widths.
+            // Keep the queued width work attached to the latest compatible target.
+            pendingWidthReflowGeneration = viewportStateGeneration
             return
         }
         hasScheduledWidthReflow = true
         viewportStateGeneration += 1
         pendingWidthReflowGeneration = viewportStateGeneration
         DispatchQueue.main.async { [weak self] in
-            self?.processPendingWidthReflow()
+            guard let self, !self.readerWorkStopped else { return }
+            // Drain even after another settings/analysis transaction changes generation.
+            // The worker discards stale anchors, but must clear its scheduling flag
+            // and still apply paragraph geometry for the current width.
+            self.processPendingWidthReflow()
         }
     }
 
     package func processPendingWidthReflow() {
+        guard !readerWorkStopped else { return }
         // Scrolling cancels position restoration, but cannot cancel the
         // paragraph values required by the current container width.
         if paragraphWidthUpdatePending {
@@ -2513,6 +2618,9 @@ public final class ReaderTextView {
                 generation: generation,
                 remaining: 3
             )
+        }
+        if captured == nil, let horizontal = pendingHorizontalState {
+            restoreHorizontalPosition(horizontal)
         }
         isRestoringViewport = false
         // A width reflow changes no attribute ranges: the installed
@@ -2672,7 +2780,12 @@ public final class ReaderTextView {
         let captured = needsLayout && !foldsChanged ? captureViewportStateForReflow() : nil
         let wasRestoring = isRestoringViewport
         isRestoringViewport = true
-        defer { isRestoringViewport = wasRestoring }
+        defer {
+            if needsLayout, captured == nil, let horizontal = pendingHorizontalState {
+                restoreHorizontalPosition(horizontal)
+            }
+            isRestoringViewport = wasRestoring
+        }
         if foldsChanged {
             projectionRevision += 1
             invalidateReflowSequence()
@@ -2742,6 +2855,7 @@ public final class ReaderTextView {
     }
 
     public func apply(settings: ReaderSettings) {
+        guard !readerWorkStopped else { return }
         let newTheme = ReaderTheme(settings: settings)
         let themeChanged = newTheme != theme
         let newTypographyKey = ReaderTypographyKey(settings: settings)
@@ -2833,6 +2947,9 @@ public final class ReaderTextView {
                 generation: generation,
                 remaining: 3
             )
+        }
+        if captured == nil, let horizontal = pendingHorizontalState {
+            restoreHorizontalPosition(horizontal)
         }
         if captured == nil,
            view.selectedRanges != selectedRanges || view.selectionAffinity != selectionAffinity {
@@ -4133,14 +4250,31 @@ public final class ReaderTextView {
     }
 
     private func configureWrapping(in scrollView: NSScrollView) {
+        configureWrapping(in: scrollView,
+                          previousViewportStart: view.textLayoutManager?.textViewportLayoutController.viewportRange?.location)
+    }
+
+    /// Exercises the missing-state policy independently of TextKit eagerly creating a viewport.
+    package func configureWrappingForTesting(previousViewportStart: (any NSTextLocation)?) {
+        guard let scrollView = view.enclosingScrollView else { return }
+        configureWrapping(in: scrollView, previousViewportStart: previousViewportStart)
+    }
+
+    private func configureWrapping(in scrollView: NSScrollView, previousViewportStart: (any NSTextLocation)?) {
         let width = scrollView.contentView.bounds.width
+        // Do not consume the container-width transition before a real viewport exists.
+        guard width > 1, scrollView.contentView.bounds.height > 1 else {
+            lastViewportRestoreWasLimited = true
+            lastViewportAnchorErrorPt = nil
+            lastViewportRestoreLimitation = "zero-geometry"
+            return
+        }
         // TextKit 2 does not invalidate layout when the container size
         // changes: without this, a wrap toggle keeps serving fragments from
         // the previous layout (verified by the S1 probes). Invalidate only
         // when the effective width actually changes so repeated gutter
         // reconfigures never trigger redundant relayouts.
         let previousWidth = view.textContainer?.size.width
-        let previousViewportStart = view.textLayoutManager?.textViewportLayoutController.viewportRange?.location
         let targetWidth: CGFloat = wrapLines ? width : CGFloat.greatestFiniteMagnitude
         scrollView.hasHorizontalScroller = !wrapLines
         view.isHorizontallyResizable = !wrapLines
@@ -4165,17 +4299,23 @@ public final class ReaderTextView {
                 // Ordinary files resolve the full extent; large files use the
                 // native viewport estimate and refine it as content is visited.
                 var extent = CGRect.null
-                if (displayedDocument?.lineTable.lineStarts.count ?? 0) > 8_000,
-                   let previousViewportStart {
-                    // ponytail: above 8,000 lines the scrollbar extent is estimated;
-                    // TextKit refines it when the user visits more content.
-                    let controller = manager.textViewportLayoutController
-                    for _ in 0..<2 {
-                        let y = controller.relocateViewport(to: previousViewportStart)
-                        scrollView.contentView.scroll(to: NSPoint(
-                            x: scrollView.contentView.bounds.minX, y: y
-                        ))
-                        controller.layoutViewport()
+                let viewportOnly = usesCostAwareReflow ? requiresViewportOnlyLayout
+                    : ((displayedDocument?.lineTable.lineStarts.count ?? 0) > 8_000 && previousViewportStart != nil)
+                if viewportOnly {
+                    // Estimated extent is the large-cost policy even without an old viewport.
+                    if let previousViewportStart {
+                        let controller = manager.textViewportLayoutController
+                        for _ in 0..<2 {
+                            let y = controller.relocateViewport(to: previousViewportStart)
+                            scrollView.contentView.scroll(to: NSPoint(
+                                x: scrollView.contentView.bounds.minX, y: y
+                            ))
+                            controller.layoutViewport()
+                        }
+                    } else {
+                        lastViewportRestoreWasLimited = true
+                        lastViewportAnchorErrorPt = nil
+                        lastViewportRestoreLimitation = "no-previous-viewport"
                     }
                     extent = manager.usageBoundsForTextContainer
                 } else {
@@ -4198,6 +4338,13 @@ public final class ReaderTextView {
             }
         }
         scrollView.tile()
+        guard scrollView.contentView.bounds.width > 1,
+              scrollView.contentView.bounds.height > 1 else {
+            lastViewportRestoreWasLimited = true
+            lastViewportAnchorErrorPt = nil
+            lastViewportRestoreLimitation = "zero-geometry"
+            return
+        }
         view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     }
 
@@ -4780,6 +4927,7 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
+    var userScrollHandler: (() -> Void)?
     var layoutCompleted: (() -> Void)?
     var escapeHandler: (() -> Bool)?
     var backgroundHandler: ((NSRect) -> Void)?
@@ -4818,7 +4966,13 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
             name: NSView.boundsDidChangeNotification,
             object: nil
         )
-        guard let clipView = enclosingScrollView?.contentView else { return }
+        NotificationCenter.default.removeObserver(self, name: NSScrollView.willStartLiveScrollNotification, object: nil)
+        NotificationCenter.default.removeObserver(self, name: NSScrollView.didLiveScrollNotification, object: nil)
+        guard let scrollView = enclosingScrollView else { return }
+        let clipView = scrollView.contentView
+        for name in [NSScrollView.willStartLiveScrollNotification, NSScrollView.didLiveScrollNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(userDidScroll(_:)), name: name, object: scrollView)
+        }
         viewportBounds = clipView.bounds
         viewportNeedsValidationAfterLayout = true
         clipView.postsBoundsChangedNotifications = true
@@ -4901,6 +5055,16 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         backgroundHandler?(rect)
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        userScrollHandler?()
+        super.scrollWheel(with: event)
+    }
+
+    @objc private func userDidScroll(_ notification: Notification) {
+        // Synchronous: a queued restore must not run between user input and cancellation.
+        userScrollHandler?()
     }
 
     @objc private func viewportDidChange(_ notification: Notification) {

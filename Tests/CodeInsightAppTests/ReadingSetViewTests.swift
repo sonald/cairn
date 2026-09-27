@@ -140,7 +140,7 @@ func readingSetDisablesDriftedSourceActionsButKeepsFrozenEvidence() {
 
 @MainActor
 @Test
-func readingSetScrollPublishesItsNumericCheckpointOffset() async {
+func readingSetScrollPublishesItsNumericCheckpointOffset() async throws {
     _ = NSApplication.shared
     let controller = ReaderViewController()
     var observedOffset: Double?
@@ -152,6 +152,8 @@ func readingSetScrollPublishesItsNumericCheckpointOffset() async {
         backing: .buffered,
         defer: false
     )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
     window.contentViewController = controller
     controller.display(.readingSet(
         title: "spawn",
@@ -164,6 +166,38 @@ func readingSetScrollPublishesItsNumericCheckpointOffset() async {
 
     #expect(observedOffset == 80)
     #expect(controller.currentReadingSetScrollOffset == 80)
+    let surface = try #require(readingSetTestViews(in: controller.view).compactMap { $0 as? ReadingSetView }.first)
+    await settleReadingSet(window)
+    let measured = surface.selfTestMeasurementCount
+    let frozenSources = surface.selfTestTextViews.map(\.string)
+    #expect(measured > 0)
+    var settings = ReaderSettings()
+    settings.fontSize = 22
+    controller.apply(settings: settings)
+    #expect(surface.selfTestLayoutPending)
+    #expect(surface.selfTestMeasurementCount == measured)
+
+    // Queue a real bounds notification before terminal teardown. Its async
+    // publication must not escape after the final session checkpoint.
+    surface.selfTestScrollView.contentView.scroll(to: NSPoint(x: 0, y: 85))
+    let closedOffset = surface.scrollOffset
+    observedOffset = -1
+    controller.cancelDerivedDataSubscription()
+    window.close()
+    #expect(!surface.selfTestLayoutPending)
+    // A retained closed host can receive a settings broadcast and native layout.
+    settings.fontSize = 24
+    controller.apply(settings: settings)
+    await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+        DispatchQueue.main.async { continuation.resume() }
+    }
+    await settleReadingSet(window)
+    #expect(!surface.selfTestLayoutPending)
+    #expect(surface.selfTestMeasurementCount == measured)
+    #expect(surface.selfTestTextViews.map(\.string) == frozenSources)
+    #expect(surface.scrollOffset == closedOffset)
+    #expect(controller.currentReadingSetScrollOffset == closedOffset)
+    #expect(observedOffset == -1)
 }
 
 private func prototypeReadingSetExcerpts() -> [ReadingSetExcerpt] {

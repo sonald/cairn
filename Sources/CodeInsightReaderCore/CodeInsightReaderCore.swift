@@ -141,6 +141,7 @@ public final class ReaderDocument: Sendable {
     public let contentID: ContentID
     package let analysisKey: ReaderAnalysisKey
     public let languageMode: LanguageMode
+    package let cost: ReaderDocumentCost?
     public let lineTable: LineTable
     public let byteUTF16Map: ByteUTF16Map
     public let highlightSpans: [HighlightSpan]
@@ -172,6 +173,8 @@ public final class ReaderDocument: Sendable {
         self.contentID = contentID ?? ContentID.sha256(of: bytes)
         self.languageMode = languageMode
         self.analysisKey = ReaderAnalysisKey(contentID: self.contentID, languageMode: languageMode, phase: analysisPhase)
+        self.cost = ReaderDocumentCost(byteCount: bytes.count, lineStarts: lineTable.lineStarts,
+                                       highlightSpanCount: highlightSpans.count, foldRegionCount: foldRegions.count)
         self.lineTable = lineTable
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans

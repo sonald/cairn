@@ -28,6 +28,7 @@ final class ReadingSetView: NSView {
     private var theme = ReaderTheme(settings: ReaderSettings())
     private var settings = ReaderSettings()
     private var fontEnvironmentRevision: UInt64?
+    private var isStopped = false
     private var layoutPending = false
     private var updatingLayout = false
     private var lastWidth: CGFloat = -1
@@ -85,7 +86,7 @@ final class ReadingSetView: NSView {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                guard let self else { return }
+                guard let self, !self.isStopped else { return }
                 self.onScroll?(Double(self.scrollView.contentView.bounds.minY))
             }
         }
@@ -120,6 +121,7 @@ final class ReadingSetView: NSView {
         expandAvailability: [Bool]? = nil,
         skippedReasons: [String] = []
     ) {
+        guard !isStopped else { return }
         anchor = nil
         titleLabel.stringValue = localizedFormat("readingSet.title", title)
         var subtitle = localizedFormat("readingSet.count", Int64(excerpts.count))
@@ -178,9 +180,13 @@ final class ReadingSetView: NSView {
     }
 
     func apply(settings: ReaderSettings) {
+        guard !isStopped else { return }
         let revision = ReaderFontResolver.shared.fontEnvironmentRevision
         guard self.settings != settings || fontEnvironmentRevision != revision else { return }
-        captureAnchor()
+        let metricsChanged = ReaderTypographyKey(settings: self.settings) != ReaderTypographyKey(settings: settings)
+            || self.settings.wrapLines != settings.wrapLines
+            || fontEnvironmentRevision != revision
+        if metricsChanged { captureAnchor() }
         fontEnvironmentRevision = revision
         self.settings = settings
         theme = ReaderTheme(settings: settings)
@@ -189,11 +195,12 @@ final class ReadingSetView: NSView {
         subtitleLabel.textColor = theme.chromeSecondaryColor
         emptyLabel.textColor = theme.chromeSecondaryColor
         cards.forEach { $0.apply(settings: settings) }
-        requestLayout()
+        if metricsChanged { requestLayout() }
+        needsDisplay = true
     }
 
     func restoreScrollOffset(_ offset: Double?) {
-        guard let offset else { return }
+        guard !isStopped, let offset else { return }
         anchor = nil
         scrollView.contentView.scroll(to: NSPoint(x: 0, y: max(0, offset)))
         scrollView.reflectScrolledClipView(scrollView.contentView)
@@ -221,7 +228,7 @@ final class ReadingSetView: NSView {
     }
 
     private func captureAnchor() {
-        guard anchor == nil, !updatingLayout, !isHidden, cards.contains(where: { $0.measurements > 0 }) else { return }
+        guard !isStopped, anchor == nil, !updatingLayout, !isHidden, cards.contains(where: { $0.measurements > 0 }) else { return }
         anchor = viewportAnchor()
     }
 
@@ -239,14 +246,31 @@ final class ReadingSetView: NSView {
         return (index, nil, card.convert(reference, to: documentView).y - top, bottom)
     }
 
+    /// Terminal host teardown. Keep frozen cards and the final scroll position
+    /// readable for checkpointing, but never resume queued layout or publication.
+    func stopPendingLayout() {
+        isStopped = true
+        layoutPending = false
+        anchor = nil
+        onScroll = nil
+        if let scrollObserver {
+            NotificationCenter.default.removeObserver(scrollObserver)
+            self.scrollObserver = nil
+        }
+        if let scrollEventMonitor {
+            NSEvent.removeMonitor(scrollEventMonitor)
+            self.scrollEventMonitor = nil
+        }
+    }
+
     private func requestLayout() {
-        guard !layoutPending else { return }
+        guard !isStopped, !layoutPending else { return }
         layoutPending = true
         DispatchQueue.main.async { [weak self] in self?.selfTestFlushLayout() }
     }
 
     func selfTestFlushLayout() {
-        guard layoutPending, !updatingLayout else { return }
+        guard !isStopped, layoutPending, !updatingLayout else { return }
         layoutPending = false
         guard bounds.width > 0 else { return }
         updatingLayout = true
@@ -358,6 +382,7 @@ private final class ReadingSetExcerptView: NSView {
     }
     private var signature: ExcerptLayoutKey?
     private var resolvedFont: ResolvedCodeFont?
+    private var measuredGutterWidth: CGFloat?
     private var rows: [(range: NSRange, rect: NSRect)] = []
     private var sourceLabels: [(offset: Int, label: String)] = []
     private var unwrappedX: CGFloat = 0
@@ -453,6 +478,7 @@ private final class ReadingSetExcerptView: NSView {
             return (offset, String(nextLine))
         }
         signature = nil
+        measuredGutterWidth = nil
         openButton.isHidden = excerpt.sourceKind == .dependencyCaptured
         openButton.isEnabled = onOpen != nil
         expandButton.isEnabled = onExpand != nil
@@ -467,6 +493,9 @@ private final class ReadingSetExcerptView: NSView {
     }
 
     func apply(settings: ReaderSettings) {
+        let metricsChanged = resolvedFont == nil
+            || ReaderTypographyKey(settings: self.settings) != ReaderTypographyKey(settings: settings)
+            || resolvedFont?.key.fontEnvironmentRevision != ReaderFontResolver.shared.fontEnvironmentRevision
         self.settings = settings
         let theme = ReaderTheme(settings: settings)
         if signature == nil || self.theme.selection != theme.selection {
@@ -478,11 +507,11 @@ private final class ReadingSetExcerptView: NSView {
         roleLabel.textColor = theme.accentColor
         symbolLabel.textColor = theme.foregroundColor
         pathLabel.textColor = theme.chromeSecondaryColor
-        resolvedFont = ReaderFontResolver.shared.resolve(theme: theme)
-        lineNumbers.font = .monospacedDigitSystemFont(
-            ofSize: theme.fontSize,
-            weight: .regular
-        )
+        if metricsChanged {
+            resolvedFont = ReaderFontResolver.shared.resolve(theme: theme)
+            lineNumbers.font = .monospacedDigitSystemFont(ofSize: theme.fontSize, weight: .regular)
+            measuredGutterWidth = nil
+        }
         lineNumbers.textColor = theme.chromeTertiaryColor
         lineNumbers.needsDisplay = true
         guard let excerpt else { return }
@@ -554,7 +583,13 @@ private final class ReadingSetExcerptView: NSView {
               let content = manager.textContentManager else { return }
         guard let resolvedFont else { return }
         let font = resolvedFont.font
-        let gutterWidth = ceil(sourceLabels.map { ($0.label as NSString).size(withAttributes: [.font: lineNumbers.font]).width }.max() ?? 0) + 8
+        let gutterWidth: CGFloat
+        if let measuredGutterWidth {
+            gutterWidth = measuredGutterWidth
+        } else {
+            gutterWidth = ceil(sourceLabels.map { ($0.label as NSString).size(withAttributes: [.font: lineNumbers.font]).width }.max() ?? 0) + 8
+            measuredGutterWidth = gutterWidth
+        }
         let nextSignature = ExcerptLayoutKey(
             width: bounds.width, wrap: settings.wrapLines, font: resolvedFont.key,
             lineHeight: settings.lineHeightMultiple, gutterWidth: gutterWidth,

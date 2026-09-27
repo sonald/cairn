@@ -846,10 +846,13 @@ func wrapToggleClampsLegallyAtDocumentEdges() throws {
     let documentMaxUnwrapped = reader.view.frame.height
         - clipView.bounds.height
         + clipView.contentInsets.bottom
-    clipView.scroll(
-        to: NSPoint(x: 0, y: max(documentMaxUnwrapped, insetTop))
-    )
-    scrollView.reflectScrolledClipView(clipView)
+    // Begin a new reading position with real user input. Native layout's own
+    // bounds adjustments intentionally do not end the preceding reflow sequence.
+    let bottomTarget = max(documentMaxUnwrapped, insetTop)
+    let wheelCG = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+        wheelCount: 1, wheel1: Int32((clipView.bounds.minY - bottomTarget).rounded()), wheel2: 0, wheel3: 0))
+    reader.view.scrollWheel(with: try #require(NSEvent(cgEvent: wheelCG)))
+    readonlyWaitForWheelTarget(scrollView, expectedY: bottomTarget)
     wrapSettle(reader, pumps: 2)
     let bottomUnwrapped = clipView.bounds.minY
     reader.apply(settings: wrapSettings(true))
@@ -3251,8 +3254,17 @@ func wrapTrailingEmptyRowRemainsALegalViewportAnchor() throws {
         let fragment = try #require(manager.textLayoutFragment(for: .zero))
         #expect(fragment.textLineFragments.filter { $0.characterRange.length > 0 }.count == (source.contains("\u{2028}") ? 2 : 1))
         #expect(fragment.textLineFragments.last?.characterRange.length == 0)
-        let error = try #require(reader.lastViewportAnchorErrorPt)
-        #expect(error <= 1)
+        if source.utf8.count > 64 * 1024 {
+            // S6 avoids even the initial caret probe for an oversized source
+            // paragraph. The trailing native row still exists, but precision
+            // must be reported unavailable instead of inventing zero error.
+            #expect(reader.viewportGeometryCaptureCount == 0)
+            #expect(reader.lastViewportRestoreWasLimited)
+            #expect(reader.lastViewportAnchorErrorPt == nil)
+        } else {
+            let error = try #require(reader.lastViewportAnchorErrorPt)
+            #expect(error <= 1)
+        }
         withExtendedLifetime(window) {}
     }
 }

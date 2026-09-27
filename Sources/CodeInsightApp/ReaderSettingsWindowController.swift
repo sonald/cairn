@@ -560,7 +560,7 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
 
     func cancelDerivedDataSubscription() {
         displayGeneration &+= 1
-        reader.cancelDerivedDataSubscription()
+        reader.stopPendingReaderWork()
         displayed = false
     }
 

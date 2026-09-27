@@ -163,10 +163,18 @@ func ligaturePendingRestoreYieldsToUserScroll() throws {
     scroll.reflectScrolledClipView(scroll.contentView)
     settleLigatureLayout(reader)
     reader.apply(settings: ReaderSettings(fontSize: 17, codeLigatures: .enabled))
-    // Apply schedules corrections; a subsequent clip-view scroll is the same
-    // bounds-change notification route used by actual wheel/trackpad input.
-    scroll.contentView.scroll(to: NSPoint(x: 0, y: 100))
-    scroll.reflectScrolledClipView(scroll.contentView)
+    // Apply schedules corrections. Send actual user input; layout-originated
+    // bounds notifications intentionally no longer cancel those corrections.
+    let delta = Int32((scroll.contentView.bounds.minY - 100).rounded())
+    let cgEvent = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
+                                      wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0))
+    let wheel = try #require(NSEvent(cgEvent: cgEvent))
+    var expectedBounds = scroll.contentView.bounds
+    expectedBounds.origin.y -= wheel.scrollingDeltaY
+    let expectedY = scroll.contentView.constrainBoundsRect(expectedBounds).minY
+    reader.view.scrollWheel(with: wheel)
+    #expect(!reader.reflowDiagnostics.correctionPending)
+    ligatureWaitForWheelTarget(scroll, expectedY: expectedY)
     let requestedY = scroll.contentView.bounds.minY
     let restores = reader.viewportRestorePassCount
     settleLigatureLayout(reader)
@@ -393,4 +401,13 @@ func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() async throw
     let selectedBackground = try #require(reader.view.selectedTextAttributes[.backgroundColor] as? NSColor)
     #expect(selectedBackground.alphaComponent > 0)
     #expect(clicks == 0)
+}
+
+@MainActor
+private func ligatureWaitForWheelTarget(_ scroll: NSScrollView, expectedY: CGFloat) {
+    let deadline = Date(timeIntervalSinceNow: 1)
+    while abs(scroll.contentView.bounds.minY - expectedY) > 1, Date() < deadline {
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+    }
+    #expect(abs(scroll.contentView.bounds.minY - expectedY) <= 1)
 }
