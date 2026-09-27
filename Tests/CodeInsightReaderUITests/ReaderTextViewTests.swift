@@ -558,7 +558,7 @@ func mismatchedStorageSkipsTypography() throws {
 
 @MainActor
 @Test
-func activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() throws {
+func activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() async throws {
     let source = "fn greet() { greet(); }\n"
     let bytes = Array(source.utf8)
     let highlighted = try RustHighlighter().highlight(bytes: bytes)
@@ -571,6 +571,7 @@ func activationKeepsSelectionSemanticsButUsesThePrototypePrimaryStyle() throws {
 
     let byteOffset = UInt32(try #require(source.range(of: "greet"))
         .lowerBound.utf16Offset(in: source))
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: byteOffset) == 2)
     #expect(reader.primarySelectionRange?.length == 5)
     #expect(reader.view.selectedRange().length == 5)

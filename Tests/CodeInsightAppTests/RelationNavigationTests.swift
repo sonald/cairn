@@ -2495,6 +2495,7 @@ func keyboardRelationCommandsFollowTheReaderSelection() async throws {
         "a caret in a project source file must enable the commands"
     )
 
+    await fixture.controller.selfTestWaitForIdentifierPreparation()
     fixture.controller.selfTestActivateReading(
         at: byteOffset(of: "target() {}", in: fixture.mainSource)
     )
@@ -2534,6 +2535,7 @@ func pinnedContextDoesNotStealRelationCommandTargets() async throws {
 
     // The Reader caret moves to a call of `second`; the global command must
     // query second, leaving the pinned preview untouched.
+    await fixture.controller.selfTestWaitForIdentifierPreparation()
     fixture.controller.selfTestActivateReading(
         at: byteOffset(of: "second();", in: fixture.mainSource)
     )
@@ -2598,6 +2600,7 @@ func openingRelationsKeepsTheWindowAndReaderReadableAtTheFloor() async throws {
     // Open Relations from the reader caret at the 900pt minimum window.
     fixture.controller.window?.setContentSize(NSSize(width: 900, height: 600))
     fixture.controller.window?.contentView?.layoutSubtreeIfNeeded()
+    await fixture.controller.selfTestWaitForIdentifierPreparation()
     fixture.controller.selfTestActivateReading(
         at: byteOffset(of: "target() {}", in: fixture.mainSource)
     )
@@ -2635,6 +2638,7 @@ func inspectorReplacesTheListInNarrowRightAreaAndRestoresIt() async throws {
         fixture.controller.displayedReaderFile?.standardizedFileURL
             == main.standardizedFileURL
     })
+    await fixture.controller.selfTestWaitForIdentifierPreparation()
     fixture.controller.selfTestActivateReading(
         at: byteOffset(of: "target() {}", in: fixture.mainSource)
     )
@@ -2696,6 +2700,7 @@ func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
     let window = try #require(fixture.controller.window)
     window.setContentSize(NSSize(width: 1600, height: 820))
     fixture.controller.applyPanelPreset(.reading)
+    await fixture.controller.selfTestWaitForIdentifierPreparation()
     _ = fixture.controller.selfTestActivateReading(at: byteOffset(of: "target() {}", in: fixture.mainSource))
     fixture.controller.showRelations(direction: .references)
     try #require(await relationTestWaitUntil("resize relations loaded") {

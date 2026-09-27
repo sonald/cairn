@@ -37,8 +37,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     let model: AppModel
     private let sidebarController = SidebarViewController()
-    private let readerController = ReaderViewController()
-    private let secondaryReaderController = ReaderViewController(showsCompareControls: true)
+    private let readerController: ReaderViewController
+    private let secondaryReaderController: ReaderViewController
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
     private let contentSplitController = NSSplitViewController()
@@ -55,6 +55,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let settingsButton = NSButton()
     private let profileButton = NSButton()
     private let indexLabel = NSTextField(labelWithString: "")
+    private let identifierStatusLabel = NSTextField(labelWithString: "")
     private let refreshIndexButton = NSButton()
     private let exactLabel = NSTextField(labelWithString: localized("main.exact.off.safe"))
     private let exactInfoButton = NSButton()
@@ -139,6 +140,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         model: AppModel,
         settings: ReaderSettings,
         offscreen: Bool,
+        derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore(),
         measuresIdleFootprint: Bool = false,
         recentProjectsStore: RecentProjectsStore = RecentProjectsStore(),
         recordsRecentProjects: Bool = false,
@@ -151,6 +153,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         onShowSettings: @escaping () -> Void = {}
     ) {
         self.model = model
+        readerController = ReaderViewController(derivedDataStore: derivedDataStore)
+        secondaryReaderController = ReaderViewController(showsCompareControls: true, derivedDataStore: derivedDataStore)
         currentReaderSettings = settings
         self.recentProjectsStore = recentProjectsStore
         self.recordsRecentProjects = recordsRecentProjects
@@ -164,7 +168,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         sidebarController.setSplitAutosaveName(
             offscreen ? "CodeInsightSidebarSplit.SelfTest" : "CodeInsightSidebarSplit"
         )
-        contextController = ContextWindowViewController(model: model.contextWindow)
+        contextController = ContextWindowViewController(model: model.contextWindow, derivedDataStore: derivedDataStore)
         relationController = RelationWindowController(
             model: model.relationTree,
             verificationReadiness: { [weak model] in
@@ -268,6 +272,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         separator.wantsLayer = true
         separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
 
+        identifierStatusLabel.font = .systemFont(ofSize: 12)
+        identifierStatusLabel.textColor = .secondaryLabelColor
+        identifierStatusLabel.isHidden = true
+        identifierStatusLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         indexLabel.font = .systemFont(ofSize: 12)
         indexLabel.textColor = .secondaryLabelColor
         indexLabel.setAccessibilityLabel(localized("main.index.status"))
@@ -315,7 +323,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextButton.setAccessibilityLabel(localized("main.show.definition.context"))
 
         let statusStack = NSStackView()
-        statusStack.setViews([contextButton, indexLabel, refreshIndexButton], in: .leading)
+        statusStack.setViews([contextButton, indexLabel, identifierStatusLabel, refreshIndexButton], in: .leading)
         statusStack.setViews([truncatedLabel], in: .center)
         statusStack.setViews([exactLabel, exactInfoButton], in: .trailing)
         statusStack.translatesAutoresizingMaskIntoConstraints = false
@@ -466,6 +474,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onLiveScroll = { [weak self] in
             self?.outlineFollowArbitration.didLiveScroll()
+        }
+        readerController.onIdentifierPreparationChanged = { [weak self] in
+            self?.renderIdentifierStatus()
+        }
+        secondaryReaderController.onIdentifierPreparationChanged = { [weak self] in
+            self?.renderIdentifierStatus()
         }
         readerController.onFocusNotice = { [weak self] message in
             self?.focusNotice = message
@@ -1021,6 +1035,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestReferenceAttributeRunCount: Int {
         readerController.selfTestReferenceAttributeRunCount
+    }
+    func selfTestWaitForIdentifierPreparation() async {
+        await readerController.selfTestWaitForIdentifierPreparation()
+    }
+    var selfTestIdentifierPreparationState: ReaderIdentifierState {
+        readerController.selfTestIdentifierPreparationState
     }
     func selfTestActivateReading(at byteOffset: UInt32) -> Int {
         readerController.selfTestActivate(at: byteOffset)
@@ -2066,6 +2086,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func beginTeardown(runFinalCheckpoint: Bool) {
         guard !isClosing else { return }
         isClosing = true
+        readerController.cancelDerivedDataSubscription()
+        secondaryReaderController.cancelDerivedDataSubscription()
+        contextController.cancelDerivedDataSubscription()
         if runFinalCheckpoint {
             checkpointSessionSynchronously()
         }
@@ -2619,6 +2642,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func observe() {
+        guard !isClosing else { return }
         withObservationTracking {
             _ = model.projectState
             _ = model.generation
@@ -2658,13 +2682,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.bookmarkModel.lastAttemptMessage
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.render()
-                self?.observe()
+                guard let self, !self.isClosing else { return }
+                self.render()
+                self.observe()
             }
         }
     }
 
     private func render() {
+        guard !isClosing else { return }
         updateContentSurfaceIfNeeded()
         updateRelationsWidthAdaptation()
         updateContextVisibility()
@@ -3133,6 +3159,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
               case .indexing = model.projectState
         else { return nil }
         return localizedFormat("main.indexing.files", Int64(model.fileTree?.fileCount ?? 0))
+    }
+
+    private func renderIdentifierStatus() {
+        let primary = readerController.identifierPreparationNotice
+        let secondary = secondaryReaderController.identifierPreparationNotice
+        let messages = primary == secondary ? [primary] : [primary, secondary]
+        identifierStatusLabel.stringValue = messages.compactMap { $0 }.joined(separator: " · ")
+        identifierStatusLabel.isHidden = identifierStatusLabel.stringValue.isEmpty
+        identifierStatusLabel.setAccessibilityLabel(identifierStatusLabel.stringValue)
     }
 
     private func renderStatusBar() {
@@ -5050,7 +5085,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onNextDiffHunk: (() -> Void)?
     var onFunctionChange: ((DiffCore.FunctionChange) -> Void)?
     private let label = NSTextField(labelWithString: "")
-    private let textView = ReaderTextView()
+    private let textView: ReaderTextView
     private let readingSetView = ReadingSetView()
     private let previewArea = NSView()
     private let loader = DocumentLoader()
@@ -5107,6 +5142,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var previewHTMLLoadError: String?
     private var htmlInitialNavigationAllowed = false
     private var loadGeneration: UInt64 = 0
+    private var isClosing = false
     private var syntaxLoadPending = false
     private var pendingFocusNavigationOffset: UInt32?
     private var findTask: Task<Void, Never>?
@@ -5123,10 +5159,33 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var scopeHeaderByteOffset: UInt32?
     nonisolated(unsafe) private var liveScrollObserver: NSObjectProtocol?
 
-    init(showsCompareControls: Bool = false) {
+    init(showsCompareControls: Bool = false, derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore()) {
+        textView = ReaderTextView(derivedDataStore: derivedDataStore)
         self.showsCompareControls = showsCompareControls
         super.init(nibName: nil, bundle: nil)
         findBar.isHidden = true
+        textView.onIdentifierPreparationChanged = { [weak self] state in
+            let notice = readerIdentifierPreparationNotice(state)
+            self?.textView.view.setAccessibilityHelp(notice)
+            self?.textView.view.toolTip = notice
+            self?.onIdentifierPreparationChanged?()
+        }
+    }
+
+    var onIdentifierPreparationChanged: (() -> Void)?
+    var identifierPreparationNotice: String? {
+        readerIdentifierPreparationNotice(textView.identifierPreparationState)
+    }
+
+    /// Terminal window teardown, not a temporary pause. Preserve text for the final checkpoint.
+    func cancelDerivedDataSubscription() {
+        isClosing = true
+        loadGeneration &+= 1
+        syntaxLoadPending = false
+        pendingFocusNavigationOffset = nil
+        readingPositionTask?.cancel()
+        readingPositionTask = nil
+        textView.cancelDerivedDataSubscription()
     }
 
     required init?(coder: NSCoder) {
@@ -6651,6 +6710,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.captureVisibleDecorationState()
         return textView.visibleCurrentLineNumbers
     }
+    var selfTestSyntaxLoadPending: Bool { syntaxLoadPending }
+    func selfTestWaitForIdentifierPreparation() async {
+        await textView.waitForIdentifierPreparation()
+    }
+    var selfTestIdentifierPreparationState: ReaderIdentifierState {
+        textView.identifierPreparationState
+    }
     func selfTestActivate(at byteOffset: UInt32) -> Int {
         textView.activate(atByteOffset: byteOffset)
     }
@@ -7344,6 +7410,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         source: DocumentLoader.ContentSource? = nil,
         languageMode: LanguageMode? = LanguageMode(language: .rust)
     ) {
+        guard !isClosing else { return }
         loadViewIfNeeded()
         guard file != displayedFile
                 || snapshotID != displayedSnapshotID
@@ -7663,14 +7730,27 @@ final class ContextWindowViewController: NSViewController {
             localized("main.click.a.symbol.to.see.its.definition.here.click.jumps.to.it")
     )
     private let scrollView = NSScrollView()
-    private let miniReader = ReaderTextView()
+    private let miniReader: ReaderTextView
+    private var isClosing = false
     private let container = NSView()
     private let headerSurface = NSView()
     private var theme = ReaderTheme(settings: ReaderSettings())
 
-    init(model: ContextWindowModel) {
+    init(model: ContextWindowModel, derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore()) {
+        miniReader = ReaderTextView(derivedDataStore: derivedDataStore)
         self.model = model
         super.init(nibName: nil, bundle: nil)
+        miniReader.onIdentifierPreparationChanged = { [weak miniReader] state in
+            let notice = readerIdentifierPreparationNotice(state)
+            miniReader?.view.setAccessibilityHelp(notice)
+            miniReader?.view.toolTip = notice
+        }
+    }
+
+    /// Terminal window teardown: later model observations must not redisplay the excerpt.
+    func cancelDerivedDataSubscription() {
+        isClosing = true
+        miniReader.cancelDerivedDataSubscription()
     }
 
     required init?(coder: NSCoder) {
@@ -7899,18 +7979,21 @@ final class ContextWindowViewController: NSViewController {
     }
 
     private func observe() {
+        guard !isClosing else { return }
         withObservationTracking {
             _ = model.mode
             _ = model.stage
         } onChange: { [weak self] in
             Task { @MainActor [weak self] in
-                self?.render()
-                self?.observe()
+                guard let self, !self.isClosing else { return }
+                self.render()
+                self.observe()
             }
         }
     }
 
     private func render() {
+        guard !isClosing else { return }
         modeControl.selectedSegment = model.mode == .pinned ? 1 : 0
         let text: String
         let highlightsSyntax: Bool
@@ -8019,5 +8102,14 @@ private extension NSView {
         let contentFrameInWindow = contentView.convert(contentView.bounds, to: nil)
         let visibleFrame = frameInWindow.intersection(contentFrameInWindow)
         return visibleFrame.width > 0 && visibleFrame.height > 0
+    }
+}
+
+/// Keep identifier preparation separate from focus and syntax-load notices.
+func readerIdentifierPreparationNotice(_ state: ReaderIdentifierState) -> String? {
+    switch state {
+    case .notRequested, .ready: nil
+    case .building: localized("reader.identifiers.preparing")
+    case .unavailable: localized("reader.identifiers.unavailable")
     }
 }

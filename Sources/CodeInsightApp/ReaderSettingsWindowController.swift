@@ -44,23 +44,27 @@ enum MaterializedCacheClearOutcome: Equatable {
 }
 
 @MainActor
-final class ReaderSettingsWindowController: NSWindowController {
+final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate {
     private let hostingController: NSHostingController<SettingsView>
+    private let derivedDataStore: ReaderDerivedDataStore
     private let trustModel: TrustListModel
     private let onRevoke: @MainActor (URL) async -> Void
     private let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
     private let onChange: @MainActor (ReaderSettings) -> Void
     private(set) var currentSettings: ReaderSettings
+    fileprivate var previewActive = true
 
     /// Production initializer: global operations stay application-owned.
     init(
         settings: ReaderSettings,
+        derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore(),
         trustModel: TrustListModel,
         onRevoke: @escaping @MainActor (URL) async -> Void,
         onClearCache: @escaping @MainActor () async -> MaterializedCacheClearOutcome,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
         currentSettings = settings
+        self.derivedDataStore = derivedDataStore
         self.trustModel = trustModel
         self.onRevoke = onRevoke
         self.onClearCache = onClearCache
@@ -68,6 +72,7 @@ final class ReaderSettingsWindowController: NSWindowController {
         hostingController = NSHostingController(
             rootView: SettingsView(
                 settings: settings,
+                derivedDataStore: derivedDataStore,
                 trustModel: trustModel,
                 onRevoke: onRevoke,
                 onClearCache: onClearCache,
@@ -79,6 +84,7 @@ final class ReaderSettingsWindowController: NSWindowController {
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         super.init(window: window)
+        window.delegate = self
     }
 
     /// Test/single-coordinator initializer kept for existing coverage.
@@ -117,13 +123,36 @@ final class ReaderSettingsWindowController: NSWindowController {
 
     override func showWindow(_ sender: Any?) {
         ReaderFontResolver.shared.refreshIfNeeded()
+        previewActive = true
         super.showWindow(sender)
+        forEachReaderPreview { $0.needsLayout = true }
+        window?.contentView?.needsLayout = true
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        previewActive = false
+        forEachReaderPreview { $0.cancelDerivedDataSubscription() }
+    }
+
+    private func forEachReaderPreview(_ action: (ReaderSettingsPreviewScrollView) -> Void) {
+        func visit(_ view: NSView) {
+            if let preview = view as? ReaderSettingsPreviewScrollView { action(preview) }
+            view.subviews.forEach(visit)
+        }
+        if let content = window?.contentView { visit(content) }
+    }
+
+    /// Force the same deferred preview layout while testing retained closed windows.
+    func selfTestLayoutReaderPreviews() {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        forEachReaderPreview { $0.layout() }
     }
 
     func update(settings: ReaderSettings) {
         currentSettings = settings
         hostingController.rootView = SettingsView(
             settings: settings,
+            derivedDataStore: derivedDataStore,
             trustModel: trustModel,
             onRevoke: onRevoke,
             onClearCache: onClearCache,
@@ -215,6 +244,7 @@ final class ReaderSettingsWindowController: NSWindowController {
 
 private struct SettingsView: View {
     let settings: ReaderSettings
+    let derivedDataStore: ReaderDerivedDataStore
     let trustModel: TrustListModel
     let onRevoke: @MainActor (URL) async -> Void
     let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
@@ -224,7 +254,7 @@ private struct SettingsView: View {
 
     var body: some View {
         TabView {
-            ReaderSettingsView(settings: settings, onChange: onChange)
+            ReaderSettingsView(settings: settings, derivedDataStore: derivedDataStore, onChange: onChange)
                 .tabItem { Label(localized("settings.reader"), systemImage: "textformat") }
             VStack(spacing: 12) {
                 TrustSettingsView(
@@ -267,6 +297,7 @@ private struct SettingsView: View {
 }
 
 private struct ReaderSettingsView: View {
+    let derivedDataStore: ReaderDerivedDataStore
     let suppliedSettings: ReaderSettings
     @State private var settings: ReaderSettings
     @State private var showsAdvancedTypography = false
@@ -276,8 +307,10 @@ private struct ReaderSettingsView: View {
 
     init(
         settings: ReaderSettings,
+        derivedDataStore: ReaderDerivedDataStore,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
     ) {
+        self.derivedDataStore = derivedDataStore
         suppliedSettings = settings
         _settings = State(initialValue: settings)
         self.onChange = onChange
@@ -360,7 +393,7 @@ private struct ReaderSettingsView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                ReaderSettingsPreview(settings: settings, fontEnvironmentRevision: fontEnvironmentRevision)
+                ReaderSettingsPreview(settings: settings, fontEnvironmentRevision: fontEnvironmentRevision, derivedDataStore: derivedDataStore)
                     .frame(height: 180)
                     .overlay(Rectangle().stroke(Color(nsColor: .separatorColor), lineWidth: 1))
             }
@@ -471,6 +504,7 @@ private struct ReaderSettingsView: View {
 private struct ReaderSettingsPreview: NSViewRepresentable {
     let settings: ReaderSettings
     let fontEnvironmentRevision: UInt64
+    let derivedDataStore: ReaderDerivedDataStore
     private static let document: ReaderDocument = {
         let plain = ReaderDocument(bytes: Array("""
             // Operators: != !== -> => <= >= :: .. ... ===
@@ -487,7 +521,7 @@ private struct ReaderSettingsPreview: NSViewRepresentable {
     }()
 
     func makeNSView(context: Context) -> ReaderSettingsPreviewScrollView {
-        ReaderSettingsPreviewScrollView(settings: settings, document: Self.document)
+        ReaderSettingsPreviewScrollView(settings: settings, document: Self.document, derivedDataStore: derivedDataStore)
     }
 
     func updateNSView(_ scrollView: ReaderSettingsPreviewScrollView, context: Context) {
@@ -500,9 +534,13 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
     private let document: ReaderDocument
     private var settings: ReaderSettings
     private var displayed = false
+    private var displayGeneration: UInt64 = 0
+    private var previewActive: Bool {
+        (window?.windowController as? ReaderSettingsWindowController)?.previewActive == true
+    }
 
-    init(settings: ReaderSettings, document: ReaderDocument) {
-        reader = ReaderTextView(settings: settings)
+    init(settings: ReaderSettings, document: ReaderDocument, derivedDataStore: ReaderDerivedDataStore) {
+        reader = ReaderTextView(settings: settings, derivedDataStore: derivedDataStore)
         self.settings = settings
         self.document = document
         super.init(frame: .zero)
@@ -511,22 +549,35 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
         autohidesScrollers = true
         documentView = reader.view
         reader.view.setAccessibilityLabel(localized("settings.preview.accessibility"))
+        reader.onIdentifierPreparationChanged = { [weak reader] state in
+            let notice = readerIdentifierPreparationNotice(state)
+            reader?.view.setAccessibilityHelp(notice)
+            reader?.view.toolTip = notice
+        }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    func cancelDerivedDataSubscription() {
+        displayGeneration &+= 1
+        reader.cancelDerivedDataSubscription()
+        displayed = false
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
+        if window == nil { cancelDerivedDataSubscription() }
         needsLayout = true
     }
 
     override func layout() {
         super.layout()
-        guard !displayed, window != nil, !contentView.bounds.isEmpty else { return }
+        guard !displayed, previewActive, !contentView.bounds.isEmpty else { return }
         displayed = true
+        let generation = displayGeneration
         // Finish the first AppKit layout before installing TextKit's viewport styles.
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, self.previewActive, self.displayGeneration == generation else { return }
             reader.view.frame = NSRect(origin: .zero, size: contentView.bounds.size)
             reader.configureGutter(in: self, lineNumbers: settings.lineNumbers)
             reader.display(document: document)
@@ -538,7 +589,7 @@ private final class ReaderSettingsPreviewScrollView: NSScrollView {
 
     func apply(settings: ReaderSettings) {
         self.settings = settings
-        guard displayed else { return }
+        guard displayed, previewActive else { return }
         let wasAtBeginning = abs(contentView.bounds.minX + contentView.contentInsets.left) < 0.5
             && abs(contentView.bounds.minY + contentView.contentInsets.top) < 0.5
         reader.apply(settings: settings)

@@ -346,10 +346,11 @@ func ligatureMegaLineKeepsSelectionWithoutSynchronousCaretGeometry() throws {
 }
 
 @MainActor @Test
-func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() throws {
+func nativeMouseDragKeepsOperatorSelectionInsteadOfActivatingClick() async throws {
     let source = "let value = left !== right;\n"
     let (reader, window) = ligatureReader(source)
     defer { window.close() }
+    await reader.waitForIdentifierPreparation()
     settleLigatureLayout(reader)
     window.makeFirstResponder(reader.view)
     let selection = (source as NSString).range(of: "!==")

@@ -35,7 +35,7 @@ panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPr
 # each finish in their own SwiftPM process. Mixing the rebuild pair with a later
 # async inspector test can exit 0 before the Swift Testing summary. Never accept
 # that exit code alone. Every test must report completion exactly once.
-expected_main_test_count=1032
+expected_main_test_count=1058
 expected_isolated_test_count=2
 expected_panel_test_count=2
 
@@ -93,6 +93,16 @@ if [[ "$swift_test_failures" -ne 0 ]]; then
 fi
 total_swift_test_count=$((expected_main_test_count + expected_isolated_test_count + expected_panel_test_count + 1))
 echo "PASS: swift test total=$total_swift_test_count (main=$expected_main_test_count isolated=$expected_isolated_test_count panels=$expected_panel_test_count mouse=1)"
+
+# Interactive readers must consume prepared data, never the synchronous compatibility builder.
+if identifier_scan_hits=$(rg -n 'identifierOccurrences\(' Sources/CodeInsightReaderUI Sources/CodeInsightApp); then
+    echo "$identifier_scan_hits"
+    echo "FAIL: Reader interaction calls the synchronous identifier builder" >&2
+    exit 1
+elif [[ $? -ne 1 ]]; then
+    echo "FAIL: identifier boundary search failed" >&2
+    exit 1
+fi
 
 if reader_map_hits=$(rg -n 'ByteUTF16Map|byteUTF16Map' \
     Sources/CodeInsightReaderUI/ \

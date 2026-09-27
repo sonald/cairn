@@ -93,13 +93,13 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
         var screenshots: [String: String] = [:]
         let suite = option("--suite") ?? "all"
         let suites: [String: Set<String>] = [
-            "identifiers": ["hot-identifier"], "gutter": ["stable-scroll", "hover"],
+            "identifiers": ["identifier-preparation", "hot-identifier"], "gutter": ["stable-scroll", "hover"],
             "projection": ["single-fold", "single-unfold", "overview", "full"],
             "reflow": ["color-only", "font-only", "color-font-wrap", "identical-settings", "syntax-arrival", "wrap-off-without-viewport"],
             "lifetime": ["a-b-a", "external-refresh", "multi-window-close", "close-reader"]
         ]
-        func measure(_ name: String, _ operation: () -> Void) throws {
-            guard suite == "all" || name == "cold-display" || suites[suite]?.contains(name) == true else { return }
+        func measure(_ name: String, _ operation: () throws -> Void) throws {
+            guard suite == "all" || name == "cold-display" || name == "identifier-preparation" || suites[suite]?.contains(name) == true else { return }
             try JSONSerialization.data(withJSONObject: [
                 "schemaVersion": 1, "status": "not_run", "pendingScenario": name,
                 "fixture": path, "events": events
@@ -107,7 +107,7 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
             let before = try counters()
             let drawBefore = reader.backgroundDrawCount
             let start = ContinuousClock.now
-            operation()
+            try operation()
             draw()
             let duration = start.duration(to: .now).components
             let after = try counters()
@@ -135,12 +135,34 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                 }
             }
         }
+        func waitForIdentifiers() throws {
+            let deadline = Date(timeIntervalSinceNow: 30)
+            while reader.identifierPreparationState == .building, Date() < deadline {
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+            }
+            guard reader.identifierPreparationState == .ready else {
+                throw NSError(domain: "ReadonlyWorkload", code: 1, userInfo: [
+                    NSLocalizedDescriptionKey: "Identifier preparation did not become ready: \(reader.identifierPreparationState)"
+                ])
+            }
+        }
         try measure("cold-display") { reader.display(document: document, fileURL: url) }
+        try measure("identifier-preparation") { try waitForIdentifiers() }
         let offset = String(decoding: data, as: UTF8.self).range(of: "repeated").map {
             UInt32(String(decoding: data, as: UTF8.self)[..<$0.lowerBound].utf8.count)
         } ?? 0
         if suite == "all" || suite == "identifiers" { _ = reader.activate(atByteOffset: offset) }
-        try measure("hot-identifier") { for _ in 0..<10 { _ = reader.activate(atByteOffset: offset) } }
+        try measure("hot-identifier") {
+            let before = ReaderWorkCounters.snapshot()
+            for _ in 0..<10 { _ = reader.activate(atByteOffset: offset) }
+            let after = ReaderWorkCounters.snapshot()
+            guard before.identifierBuildCount == after.identifierBuildCount,
+                  before.identifierScannedBytes == after.identifierScannedBytes else {
+                throw NSError(domain: "ReadonlyWorkload", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "Prepared identifier interaction scanned or rebuilt source"
+                ])
+            }
+        }
         try measure("stable-scroll") {
             for y in stride(from: 0, through: 200, by: 20) { scroll.contentView.scroll(to: NSPoint(x: 0, y: y)); draw() }
         }

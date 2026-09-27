@@ -6,7 +6,7 @@ import Testing
 
 @MainActor
 @Test
-func scopeHeaderMatchesPrototypeWithoutMovingTheReader() throws {
+func scopeHeaderMatchesPrototypeWithoutMovingTheReader() async throws {
     _ = NSApplication.shared
     let source = """
         use std::future::Future;
@@ -31,6 +31,7 @@ func scopeHeaderMatchesPrototypeWithoutMovingTheReader() throws {
     controller.display(file, source: { _ in bytes })
     window.contentView?.layoutSubtreeIfNeeded()
 
+    await controller.selfTestWaitForIdentifierPreparation()
     _ = controller.selfTestActivate(at: 0)
     window.contentView?.layoutSubtreeIfNeeded()
     let hidden = controller.selfTestScopeHeader

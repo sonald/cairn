@@ -707,6 +707,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// touches real user data (§11).
     private let windowSessionURL: URL?
     private var readerSettings = ReaderSettings(defaults: .standard)
+    private let readerDerivedDataStore = ReaderDerivedDataStore()
     nonisolated(unsafe) private var wrapKeyMonitor: Any?
     // Window collection and routing state (all MainActor, §4.1).
     private var projectWindows: [MainWindowController] = []
@@ -2573,6 +2574,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         pumpRunLoop()
 
         let geometryOn = controller.selfTestReadingGeometry
+        guard waitUntil(timeout: 10, condition: {
+            controller.selfTestIdentifierPreparationState == .ready
+        }) else {
+            finish(checks: [:], metrics: [:], error: "regular identifier preparation did not finish")
+        }
         let alphaCount = controller.selfTestActivateReading(
             at: UInt32(alphaOffset)
         )
@@ -3133,6 +3139,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let hugeBaselineFootprintMB = physicalFootprintBytes().map {
             Double($0) / 1_048_576
         } ?? -1
+        guard waitUntil(timeout: 30, condition: {
+            controller.selfTestIdentifierPreparationState == .ready
+        }) else {
+            finish(checks: checks, metrics: [:], error: "huge identifier preparation did not finish")
+        }
         let hugeOccurrenceCount = controller.selfTestActivateReading(
             at: UInt32(needleOffset)
         )
@@ -4496,7 +4507,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             windowController.displayedReaderFile?.standardizedFileURL
                 == target.relationFile.standardizedFileURL
         })
-        if relationFileVisible {
+        if relationFileVisible && waitUntil(timeout: 10, condition: {
+            windowController.selfTestIdentifierPreparationState == .ready
+        }) {
             _ = windowController.selfTestActivateReading(
                 at: localReferenceDeclarationOffset
             )
@@ -10350,6 +10363,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             model: windowModel,
             settings: readerSettings,
             offscreen: offscreen,
+            derivedDataStore: readerDerivedDataStore,
             measuresIdleFootprint: measuresIdleFootprint,
             recentProjectsStore: recentProjectsStore,
             recordsRecentProjects: !offscreen,
@@ -11152,6 +11166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         if settingsWindowController == nil {
             settingsWindowController = ReaderSettingsWindowController(
                 settings: readerSettings,
+                derivedDataStore: readerDerivedDataStore,
                 trustModel: trustListModel,
                 onRevoke: { [weak self] repositoryURL in
                     await self?.revokeRepositoryTrustAppLevel(repositoryURL)

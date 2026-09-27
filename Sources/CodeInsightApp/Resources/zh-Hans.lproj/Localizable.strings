@@ -541,3 +541,6 @@
 "settings.codeLigatures.enabled" = "开启";
 "settings.codeLigatures.disabled" = "关闭";
 "settings.codeLigatures.unverified" = "连接形态取决于字体。兼容性说明未列出的字体尚未验证，请查看预览。";
+
+"reader.identifiers.preparing" = "正在准备标识符高亮…";
+"reader.identifiers.unavailable" = "标识符高亮不可用";

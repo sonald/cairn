@@ -139,6 +139,7 @@ public struct OutlineFacet: Equatable, Sendable {
 public final class ReaderDocument: Sendable {
     public let bytes: [UInt8]
     public let contentID: ContentID
+    package let analysisKey: ReaderAnalysisKey
     public let languageMode: LanguageMode
     public let lineTable: LineTable
     public let byteUTF16Map: ByteUTF16Map
@@ -161,12 +162,14 @@ public final class ReaderDocument: Sendable {
         outlineFacets: [OutlineFacet],
         foldRegions: [FoldRegion],
         localBindings: [BindingRecord] = [],
-        referencesByBinding: [[CodeInsightCore.ByteRange]] = []
+        referencesByBinding: [[CodeInsightCore.ByteRange]] = [],
+        analysisPhase: ReaderAnalysisKey.Phase = .custom(UUID())
     ) {
         precondition(localBindings.count == referencesByBinding.count)
         self.bytes = bytes
         self.contentID = contentID ?? ContentID.sha256(of: bytes)
         self.languageMode = languageMode
+        self.analysisKey = ReaderAnalysisKey(contentID: self.contentID, languageMode: languageMode, phase: analysisPhase)
         self.lineTable = lineTable
         self.byteUTF16Map = byteUTF16Map
         self.highlightSpans = highlightSpans
@@ -324,124 +327,13 @@ public final class ReaderDocument: Sendable {
         return result
     }
 
+    /// Compatibility entry point: builds synchronously. Interactive readers use prepared data.
+    @available(*, deprecated, message: "Build IdentifierIndex off the UI thread and reuse its occurrence slices")
     public func identifierOccurrences(at byteOffset: UInt32) -> [CodeInsightCore.ByteRange] {
-        switch languageMode.language {
-        case .rust, .python, .typescript:
-            break
-        case .javascript:
-            return []
-        }
-        guard byteOffset < bytes.count else { return [] }
-        ReaderWorkCounters.record(\.identifierDecodedBytes, bytes.count)
-        guard let source = String(bytes: bytes, encoding: .utf8),
-              let selectedIndex = source.utf8.index(
-                  source.utf8.startIndex,
-                  offsetBy: Int(byteOffset),
-                  limitedBy: source.utf8.endIndex
-              )?.samePosition(in: source.unicodeScalars),
-              selectedIndex < source.unicodeScalars.endIndex,
-              isIdentifierContinue(source.unicodeScalars[selectedIndex])
-        else { return [] }
-
-        let scalars = source.unicodeScalars
-        var lower = selectedIndex
-        while lower > scalars.startIndex {
-            let previous = scalars.index(before: lower)
-            guard isIdentifierContinue(scalars[previous]) else { break }
-            lower = previous
-        }
-        guard isIdentifierStart(scalars[lower]) else { return [] }
-
-        var upper = selectedIndex
-        while upper < scalars.endIndex,
-              isIdentifierContinue(scalars[upper])
-        {
-            upper = scalars.index(after: upper)
-        }
-        let selected = String(scalars[lower..<upper])
-        switch languageMode.language {
-        case .rust:
-            guard !RustHighlighter.isKeyword(selected) else { return [] }
-        case .python:
-            guard !pythonReaderIsKeyword(selected) else { return [] }
-        case .typescript:
-            guard !typeScriptReaderIsKeyword(selected) else { return [] }
-        case .javascript:
-            return []
-        }
-
-        var spanIndex = 0
-        var result: [CodeInsightCore.ByteRange] = []
-        var index = scalars.startIndex
-        var bytePosition: UInt32 = 0
-        defer { ReaderWorkCounters.record(\.identifierScannedBytes, Int(bytePosition)) }
-        while index < scalars.endIndex {
-            let scalar = scalars[index]
-            guard isIdentifierStart(scalar) else {
-                bytePosition += UInt32(scalar.utf8.count)
-                index = scalars.index(after: index)
-                continue
-            }
-
-            let tokenStart = index
-            let lowerByte = bytePosition
-            while index < scalars.endIndex,
-                  isIdentifierContinue(scalars[index])
-            {
-                bytePosition += UInt32(scalars[index].utf8.count)
-                index = scalars.index(after: index)
-            }
-            guard String(scalars[tokenStart..<index]) == selected else { continue }
-            let range = CodeInsightCore.ByteRange(
-                lowerBound: lowerByte,
-                upperBound: bytePosition
-            )
-            while highlightSpans.indices.contains(spanIndex),
-                  highlightSpans[spanIndex].range.upperBound <= range.lowerBound
-            {
-                spanIndex += 1
-            }
-            var probe = spanIndex
-            var excluded = false
-            while highlightSpans.indices.contains(probe),
-                  highlightSpans[probe].range.lowerBound < range.upperBound
-            {
-                if Self.excludesOccurrences(highlightSpans[probe].kind),
-                   highlightSpans[probe].range.overlaps(range)
-                {
-                    excluded = true
-                    break
-                }
-                probe += 1
-            }
-            if !excluded {
-                result.append(range)
-            }
-        }
-        return result
+        guard let index = try? IdentifierIndex(document: self) else { return [] }
+        return Array(index.occurrences(at: byteOffset))
     }
 
-    private func isIdentifierStart(_ scalar: Unicode.Scalar) -> Bool {
-        scalar == "_"
-            || (languageMode.language == .typescript && scalar == "$")
-            || scalar.properties.isXIDStart
-    }
-
-    private func isIdentifierContinue(_ scalar: Unicode.Scalar) -> Bool {
-        scalar == "_"
-            || (languageMode.language == .typescript && scalar == "$")
-            || scalar.properties.isXIDContinue
-    }
-
-    private static func excludesOccurrences(_ kind: HighlightKind) -> Bool {
-        switch kind {
-        case .keyword, .comment, .commentFigure, .string, .number:
-            true
-        case .functionName, .typeName, .declarationTitle, .declarationEmphasis,
-             .functionCall, .property, .macro, .attribute, .parameter, .localBinding, .enumMember:
-            false
-        }
-    }
 }
 
 public enum FileTier: String, Sendable {
@@ -978,7 +870,8 @@ public struct DocumentLoader: Sendable {
             byteUTF16Map: map,
             highlightSpans: [],
             outlineFacets: [],
-            foldRegions: []
+            foldRegions: [],
+            analysisPhase: .plain
         )
 
         if tier == .regular {
@@ -997,7 +890,8 @@ public struct DocumentLoader: Sendable {
                 outlineFacets: highlighted.outlineFacets,
                 foldRegions: highlighted.folds,
                 localBindings: highlighted.bindings,
-                referencesByBinding: highlighted.referencesByBinding
+                referencesByBinding: highlighted.referencesByBinding,
+                analysisPhase: .syntax
             ), tier)
         }
 
@@ -1034,7 +928,8 @@ public struct DocumentLoader: Sendable {
             outlineFacets: highlighted.outlineFacets,
             foldRegions: highlighted.folds,
             localBindings: highlighted.bindings,
-            referencesByBinding: highlighted.referencesByBinding
+            referencesByBinding: highlighted.referencesByBinding,
+            analysisPhase: .syntax
         )
     }
 

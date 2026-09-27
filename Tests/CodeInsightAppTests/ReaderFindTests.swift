@@ -12,6 +12,7 @@ struct ReaderFindTests {
         let fixture = makeFindFixture("Alpha alpha alpha beta\n")
         defer { fixture.window.close() }
 
+        await fixture.controller.selfTestWaitForIdentifierPreparation()
         #expect(fixture.controller.selfTestActivate(at: 6) == 2)
         #expect(fixture.controller.showFindBar())
         fixture.controller.selfTestSetFind("beta")

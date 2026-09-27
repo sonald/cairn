@@ -1321,7 +1321,7 @@ func wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() throws {
 
 @MainActor
 @Test
-func revealResetsHorizontalScrollAfterNavigation() throws {
+func revealResetsHorizontalScrollAfterNavigation() async throws {
     _ = NSApplication.shared
     let source = (0..<80).map { "let value\($0) = \"" + String(repeating: "x", count: 160) + "\";" }.joined(separator: "\n")
     let file = URL(fileURLWithPath: "/navigation.rs")
@@ -1336,6 +1336,7 @@ func revealResetsHorizontalScrollAfterNavigation() throws {
     reader.configureGutter(in: scroll, lineNumbers: true)
     window.layoutIfNeeded()
     reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+    await reader.waitForIdentifierPreparation()
     for action in ["symbol", "restore", "diff"] {
         scroll.contentView.scroll(to: NSPoint(x: 150, y: 0))
         #expect(scroll.contentView.bounds.minX > 0)
@@ -1736,6 +1737,7 @@ func navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() asyn
     let nestedOffset = regions.declaration.bodyRange.lowerBound + 1
     #expect(reader.logicalFoldIDsForTesting.contains(regions.container.id))
     #expect(reader.logicalFoldIDsForTesting.contains(regions.declaration.id))
+    await reader.waitForIdentifierPreparation()
     let markerStarted = ContinuousClock.now
     var lastPoll = markerStarted
     var mainActorWasStarved = false
@@ -1884,7 +1886,7 @@ func scopeHeaderKeepsOuterAndInnerWhenThreeAssociatedLevelsContainCaret() {
 
 @MainActor
 @Test
-func focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() throws {
+func focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() async throws {
     let (document, regions) = readingHeightLevelDocument()
     let reader = ReaderTextView()
     reader.display(document: document, fileURL: URL(fileURLWithPath: "/focus-restore.rs"))
@@ -1895,6 +1897,7 @@ func focusIsIndependentAndEscapeRestoresHeightAndOverridesExactly() throws {
         regions.topLevelDeclaration.id
     )
 
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: 20) > 0)
     let savedOccurrenceCount = reader.occurrenceCount
     #expect(reader.focusCurrentScope(at: 20))
@@ -2033,7 +2036,7 @@ func foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() throws {
 
 @MainActor
 @Test
-func foldedCurrentSymbolOccurrencesAreExposedByTheChip() throws {
+func foldedCurrentSymbolOccurrencesAreExposedByTheChip() async throws {
     let source = """
         fn first() {
             target();
@@ -2059,6 +2062,7 @@ func foldedCurrentSymbolOccurrencesAreExposedByTheChip() throws {
     )
     let selected = (source as NSString).range(of: "target")
     #expect(selected.location != NSNotFound)
+    await reader.waitForIdentifierPreparation()
     _ = reader.activate(atByteOffset: UInt32(selected.location))
     #expect(reader.toggleFold(id: fold.id))
 
@@ -2160,7 +2164,7 @@ func foldingKeepsRulerWhenLineNumbersAndDiffAreOff() throws {
 
 @MainActor
 @Test
-func foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() throws {
+func foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() async throws {
     let firstBody = (0..<32).map { "    let first_\($0) = \($0);" }
         .joined(separator: "\n")
     let secondBody = (0..<32).map { "    let second_\($0) = \($0);" }
@@ -2184,6 +2188,7 @@ func foldMutationRestoresIndependentSelectionAndViewportLatentAnchors() throws {
         (source as NSString).range(of: "second_20").location
     )
     let (reader, _, window) = renderOffscreen(document)
+    await reader.waitForIdentifierPreparation()
     reader.restore(
         scrollByteOffset: requestedViewportByte,
         selectionByteOffset: selectionByte
@@ -2278,7 +2283,7 @@ func lineNumberRulerDrawsOnlyVisibleKnownLinesAndCanBeDisabled() throws {
 
 @MainActor
 @Test
-func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() throws {
+func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() async throws {
     let source = """
         fn alpha() {}
         fn beta() { alpha(); }
@@ -2297,6 +2302,7 @@ func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() throws {
     let beta = try #require(source.range(of: "beta"))
     let betaOffset = UInt32(source[..<beta.lowerBound].utf8.count)
 
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: alphaOffset) == 3)
     window.displayIfNeeded()
     #expect(reader.currentLineNumber == 1)
@@ -2342,7 +2348,7 @@ func clickingIdentifiersReplacesOccurrencesAndTracksOneCurrentLine() throws {
 
 @MainActor
 @Test
-func typeScriptIdentifierClickHighlightsLexicalOccurrences() throws {
+func typeScriptIdentifierClickHighlightsLexicalOccurrences() async throws {
     let source = """
         const $value = 1;
         const alias = $value;
@@ -2362,6 +2368,7 @@ func typeScriptIdentifierClickHighlightsLexicalOccurrences() throws {
     let keyword = try #require(source.range(of: "const"))
     let keywordOffset = UInt32(source[..<keyword.lowerBound].utf8.count)
 
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: selectedOffset) == 4)
     window.displayIfNeeded()
     #expect(reader.occurrenceCount == 4)
@@ -2370,7 +2377,7 @@ func typeScriptIdentifierClickHighlightsLexicalOccurrences() throws {
 
 @MainActor
 @Test
-func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
+func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() async throws {
     let source = "struct Widget;\nfn make(value: Widget) -> Widget { value }\n"
     let bytes = Array(source.utf8)
     let highlighted = try RustHighlighter().highlight(bytes: bytes)
@@ -2399,6 +2406,7 @@ func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
     let declaration = try range(for: .declarationTitle)
     let typeReference = try range(for: .typeName)
     let untouchedFunction = try range(for: .functionName)
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: UInt32(declaration.location)) == 3)
     window.displayIfNeeded()
 
@@ -2431,7 +2439,7 @@ func occurrenceHighlightsPreserveDifferentSyntaxForegroundColors() throws {
 
 @MainActor
 @Test
-func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
+func semanticLocalAndParamReferencesUseDistinctViewportStyles() async throws {
     let source = """
         fn demo(param: i32) -> i32 {
             let local = param;
@@ -2518,6 +2526,7 @@ func semanticLocalAndParamReferencesUseDistinctViewportStyles() throws {
         byteLowerBound: Int(otherParamReference.lowerBound),
         byteUpperBound: Int(otherParamReference.upperBound)
     ))
+    await reader.waitForIdentifierPreparation()
     #expect(reader.activate(atByteOffset: paramByteOffset) == 3)
     #expect(renderedBackgroundColors(
         in: reader,

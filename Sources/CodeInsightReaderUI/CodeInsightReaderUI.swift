@@ -501,6 +501,21 @@ public final class ReaderTextView {
     private var lineNumbers = true
     private var wrapLines: Bool
     private var isValidatingVisibleRenderingAttributes = false
+    private let derivedDataStore: ReaderDerivedDataStore
+    private var derivedDataTask: Task<Void, Never>?
+    private var derivedDataSubscription: ReaderDerivedDataStore.Subscription?
+    private var derivedDataGeneration = 0
+    private var identifierIndex: IdentifierIndex?
+    private var preparedAnalysisKey: ReaderAnalysisKey?
+    private var pendingOccurrenceActivation: UInt32?
+    package var onIdentifierPreparationChanged: ((ReaderIdentifierState) -> Void)?
+    package private(set) var identifierPreparationState: ReaderIdentifierState = .notRequested {
+        didSet {
+            if oldValue != identifierPreparationState {
+                onIdentifierPreparationChanged?(identifierPreparationState)
+            }
+        }
+    }
     private var occurrenceSelectionByteOffset: UInt32?
     private var findMatchByteRanges: [ByteRange]?
     private var findSelectionIndex: Int?
@@ -581,7 +596,12 @@ public final class ReaderTextView {
     public private(set) var visibleCurrentLineNumbers: [Int] = []
     public private(set) var visibleDeclarationMarkerLines: [Int] = []
 
-    public init(settings: ReaderSettings = ReaderSettings()) {
+    public convenience init(settings: ReaderSettings = ReaderSettings()) {
+        self.init(settings: settings, derivedDataStore: ReaderDerivedDataStore())
+    }
+
+    package init(settings: ReaderSettings = ReaderSettings(), derivedDataStore: ReaderDerivedDataStore) {
+        self.derivedDataStore = derivedDataStore
         theme = ReaderTheme(settings: settings)
         typographyKey = ReaderTypographyKey(settings: settings)
         fontEnvironmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
@@ -610,6 +630,7 @@ public final class ReaderTextView {
             else {
                 return
             }
+            pendingOccurrenceActivation = nil
             // Programmatic restores set the selection themselves; only real
             // user interaction ends a pure-reflow sequence (D3.5).
             invalidateReflowSequence()
@@ -632,7 +653,7 @@ public final class ReaderTextView {
         textView.escapeHandler = { [weak self] in
             guard let self else { return false }
             if isFocusMode { return exitFocusMode() }
-            guard occurrenceCount > 0 else { return false }
+            guard occurrenceCount > 0 || pendingOccurrenceActivation != nil else { return false }
             clearOccurrences()
             return true
         }
@@ -674,6 +695,85 @@ public final class ReaderTextView {
         textView.widthDidChange = { [weak self] _ in
             self?.scheduleWidthReflow()
         }
+    }
+
+    deinit {
+        derivedDataTask?.cancel()
+        if let subscription = derivedDataSubscription {
+            let store = derivedDataStore
+            Task { await store.cancel(subscription) }
+        }
+    }
+
+    package func cancelDerivedDataSubscription() {
+        derivedDataGeneration += 1
+        derivedDataTask?.cancel()
+        derivedDataTask = nil
+        if let subscription = derivedDataSubscription {
+            let store = derivedDataStore
+            Task { await store.cancel(subscription) }
+        }
+        derivedDataSubscription = nil
+        identifierIndex = nil
+        preparedAnalysisKey = nil
+        pendingOccurrenceActivation = nil
+        identifierPreparationState = .notRequested
+    }
+
+    private func prepareIdentifiers(for document: ReaderDocument) {
+        let previousSubscription = derivedDataSubscription
+        let pending = pendingOccurrenceActivation
+        cancelDerivedDataSubscription()
+        pendingOccurrenceActivation = pending
+        identifierPreparationState = .building
+        let generation = derivedDataGeneration
+        let key = document.analysisKey
+        let store = derivedDataStore
+        derivedDataTask = Task { [weak self] in
+            if let previousSubscription { await store.cancel(previousSubscription) }
+            let subscription = await store.subscribe(key: key, document: document)
+            guard !Task.isCancelled,
+                  self?.derivedDataGeneration == generation,
+                  self?.displayedDocument?.analysisKey == key else {
+                await store.cancel(subscription)
+                return
+            }
+            self?.derivedDataSubscription = subscription
+            await withTaskCancellationHandler {
+                do {
+                    let index = try await store.value(for: subscription)
+                    guard !Task.isCancelled, let self,
+                          self.derivedDataGeneration == generation,
+                          self.displayedDocument?.analysisKey == key else { return }
+                    self.identifierIndex = index
+                    self.preparedAnalysisKey = key
+                    self.identifierPreparationState = .ready
+                    if let pending = self.pendingOccurrenceActivation,
+                       pending == self.occurrenceSelectionByteOffset {
+                        self.pendingOccurrenceActivation = nil
+                        self.finishOccurrenceActivation(at: pending)
+                    } else if self.occurrenceSelectionByteOffset != nil {
+                        self.refreshOccurrenceRendering()
+                    }
+                } catch {
+                    guard !Task.isCancelled, let self,
+                          self.derivedDataGeneration == generation,
+                          self.displayedDocument?.analysisKey == key else { return }
+                    self.identifierPreparationState = .unavailable(String(describing: error))
+                }
+            } onCancel: {
+                Task { await store.cancel(subscription) }
+            }
+        }
+    }
+
+    package func waitForIdentifierPreparation() async {
+        await derivedDataTask?.value
+    }
+
+    private func preparedOccurrences(in document: ReaderDocument, at offset: UInt32) -> ArraySlice<ByteRange> {
+        guard preparedAnalysisKey == document.analysisKey, let identifierIndex else { return [] }
+        return identifierIndex.occurrences(at: offset)
     }
 
     package static func projectorSelfTestChecks() -> [String: Bool] {
@@ -894,6 +994,8 @@ public final class ReaderTextView {
         displayMap = projection.map
         foldAttachments = projection.attachments
         displayedDocument = document
+        pendingOccurrenceActivation = nil
+        prepareIdentifiers(for: document)
         refreshVisibleFoldRegions()
         diffMarkers = [:]
         bookmarkMarkers = [:]
@@ -940,6 +1042,7 @@ public final class ReaderTextView {
     }
 
     public func clear() {
+        cancelDerivedDataSubscription()
         paragraphLayout.reset()
         if let focusState {
             readingHeightLevel = focusState.readingHeightLevel
@@ -2313,9 +2416,12 @@ public final class ReaderTextView {
     ) {
         guard
             let layoutManager = view.textLayoutManager,
-            displayedDocument?.contentID == document.contentID
+            displayedDocument?.contentID == document.contentID,
+            displayedDocument?.languageMode == document.languageMode
         else { return }
+        let analysisChanged = displayedDocument?.analysisKey != document.analysisKey
         displayedDocument = document
+        if analysisChanged { prepareIdentifiers(for: document) }
         baselineFoldIDs = Self.baselineFoldIDs(
             for: readingHeightLevel,
             in: document.foldRegions
@@ -2742,7 +2848,24 @@ public final class ReaderTextView {
             clearOccurrences()
             return 0
         }
-        let occurrenceRanges = document.identifierOccurrences(at: byteOffset)
+        occurrenceSelectionByteOffset = byteOffset
+        guard identifierPreparationState == .ready else {
+            pendingOccurrenceActivation = byteOffset
+            primarySelectionRange = nil
+            view.selectedTextAttributes = nativeSelectedTextAttributes
+            let location = visibleDisplayOffset(forByte: byteOffset) ?? 0
+            view.setSelectedRange(NSRange(location: location, length: 0))
+            setOccurrences([])
+            refreshFoldExposures(in: document, occurrenceRanges: [])
+            return 0
+        }
+        return finishOccurrenceActivation(at: byteOffset)
+    }
+
+    @discardableResult
+    private func finishOccurrenceActivation(at byteOffset: UInt32) -> Int {
+        guard let document = displayedDocument else { return 0 }
+        let occurrenceRanges = preparedOccurrences(in: document, at: byteOffset)
         let ranges = projectedOccurrenceNSRanges(occurrenceRanges)
         occurrenceSelectionByteOffset = ranges.isEmpty ? nil : byteOffset
         let location = visibleDisplayOffset(forByte: byteOffset)
@@ -2763,6 +2886,7 @@ public final class ReaderTextView {
     }
 
     public func clearOccurrences() {
+        pendingOccurrenceActivation = nil
         occurrenceSelectionByteOffset = nil
         primarySelectionRange = nil
         view.selectedTextAttributes = nativeSelectedTextAttributes
@@ -2796,6 +2920,7 @@ public final class ReaderTextView {
         _ ranges: [ByteRange],
         selectedIndex: Int?
     ) {
+        pendingOccurrenceActivation = nil
         findMatchByteRanges = ranges
         findSelectionIndex = selectedIndex.flatMap {
             ranges.indices.contains($0) ? $0 : nil
@@ -3051,11 +3176,9 @@ public final class ReaderTextView {
             setOccurrences([])
             return
         }
-        let occurrenceRanges = document.identifierOccurrences(
-            at: occurrenceSelectionByteOffset
-        )
+        let occurrenceRanges = preparedOccurrences(in: document, at: occurrenceSelectionByteOffset)
         let ranges = projectedOccurrenceNSRanges(occurrenceRanges)
-        if occurrenceRanges.isEmpty { self.occurrenceSelectionByteOffset = nil }
+        if identifierPreparationState == .ready, occurrenceRanges.isEmpty { self.occurrenceSelectionByteOffset = nil }
         refreshFoldExposures(
             in: document,
             occurrenceRanges: occurrenceRanges
@@ -3068,13 +3191,13 @@ public final class ReaderTextView {
         at byteOffset: UInt32
     ) -> [NSRange] {
         projectedOccurrenceNSRanges(
-            document.identifierOccurrences(at: byteOffset)
+            preparedOccurrences(in: document, at: byteOffset)
         )
     }
 
-    private func projectedOccurrenceNSRanges(
-        _ ranges: [ByteRange]
-    ) -> [NSRange] {
+    private func projectedOccurrenceNSRanges<R: Sequence>(
+        _ ranges: R
+    ) -> [NSRange] where R.Element == ByteRange {
         guard let displayMap else { return [] }
         return ranges.flatMap {
             displayMap.project(byteRange: $0)?.visible ?? []
@@ -3083,7 +3206,7 @@ public final class ReaderTextView {
 
     private func refreshFoldExposures(
         in document: ReaderDocument? = nil,
-        occurrenceRanges: [ByteRange]? = nil
+        occurrenceRanges: ArraySlice<ByteRange>? = nil
     ) {
         guard let document = document ?? displayedDocument else { return }
         let matchCounts = foldedRangeCounts(
@@ -3091,7 +3214,7 @@ public final class ReaderTextView {
             in: document
         )
         let occurrenceRanges = occurrenceRanges ?? occurrenceSelectionByteOffset.map {
-            document.identifierOccurrences(at: $0)
+            preparedOccurrences(in: document, at: $0)
         } ?? []
         let occurrenceCounts = foldedRangeCounts(
             occurrenceRanges,
@@ -3107,10 +3230,10 @@ public final class ReaderTextView {
         }
     }
 
-    private func foldedRangeCounts(
-        _ ranges: [ByteRange],
+    private func foldedRangeCounts<R: Collection>(
+        _ ranges: R,
         in document: ReaderDocument
-    ) -> [FoldID: Int] {
+    ) -> [FoldID: Int] where R.Element == ByteRange {
         let regions = renderedRegions(in: document)
         guard !regions.isEmpty, !ranges.isEmpty else { return [:] }
         var result: [FoldID: Int] = [:]
@@ -4456,6 +4579,12 @@ private final class ClickTextView: NSTextView {
             return
         }
         clickHandler?(index, modifiers)
+    }
+
+    override func showFindIndicator(for charRange: NSRange) {
+        // An unattached/closed reader has no native geometry for the deferred effect.
+        guard window?.isVisible == true else { return }
+        super.showFindIndicator(for: charRange)
     }
 
     override func writeSelection(
