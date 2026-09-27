@@ -7754,6 +7754,10 @@ final class ContextWindowViewController: NSViewController {
     private let countLabel = NSTextField(labelWithString: "")
     private let nextButton = NSButton(title: "›", target: nil, action: nil)
     private let pathLabel = NSTextField(labelWithString: "")
+    private let symbolLabel = NSTextField(labelWithString: "")
+    private let stones = CertaintyStonesView(
+        certainty: .possible, theme: ReaderTheme(settings: ReaderSettings()), size: 14
+    )
     private let candidateLabel = NSTextField(labelWithString: "")
     private let candidateBadge = NSView()
     private let placeholderLabel = NSTextField(
@@ -7793,10 +7797,35 @@ final class ContextWindowViewController: NSViewController {
         miniReader.apply(settings: settings)
         if isViewLoaded {
             container.layer?.backgroundColor = theme.chromeColor.cgColor
-            headerSurface.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
+            applyHeaderStyle()
             view.needsDisplay = true
         }
         applyBadgeStyle()
+    }
+
+    /// Pinned is a mode the reader must not forget: the header turns amber.
+    private func applyHeaderStyle() {
+        let pinned = model.mode == .pinned
+        headerSurface.layer?.backgroundColor = (pinned
+            ? theme.amberSoftColor : theme.chromeHeaderColor).cgColor
+        modeControl.selectedSegmentBezelColor = pinned ? theme.amberMarkColor : theme.accentColor
+        symbolLabel.textColor = theme.foregroundColor
+        pathLabel.textColor = theme.chromeSecondaryColor
+        countLabel.textColor = theme.chromeSecondaryColor
+        placeholderLabel.textColor = theme.chromeSecondaryColor
+    }
+
+    var selfTestLensStyle: (headerFill: CGColor?, stones: Certainty?, stonesVisible: Bool,
+                            symbol: String, symbolFont: NSFont?, badgeFill: CGColor?) {
+        loadViewIfNeeded()
+        return (
+            headerSurface.layer?.backgroundColor,
+            stones.isHidden ? nil : stones.certainty,
+            stones.window != nil && !stones.isHiddenOrHasHiddenAncestor && stones.frame.width > 0,
+            symbolLabel.stringValue,
+            symbolLabel.font,
+            candidateBadge.layer?.backgroundColor
+        )
     }
 
     func selfTestSetPinned(_ pinned: Bool) {
@@ -7869,8 +7898,12 @@ final class ContextWindowViewController: NSViewController {
         nextButton.target = self
         nextButton.action = #selector(selectNext(_:))
         pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.font = .systemFont(ofSize: 12)
+        pathLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         pathLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        symbolLabel.font = cairnSerifFont(ofSize: 15, weight: .medium)
+        symbolLabel.lineBreakMode = .byTruncatingTail
+        symbolLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+        stones.isHidden = true
         countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
         candidateBadge.wantsLayer = true
@@ -7914,7 +7947,9 @@ final class ContextWindowViewController: NSViewController {
             previousButton,
             countLabel,
             nextButton,
+            symbolLabel,
             pathLabel,
+            stones,
             candidateBadge,
         ])
         header.orientation = .horizontal
@@ -7933,7 +7968,7 @@ final class ContextWindowViewController: NSViewController {
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         placeholderLabel.font = .systemFont(ofSize: 12)
-        placeholderLabel.textColor = .secondaryLabelColor
+        placeholderLabel.textColor = theme.chromeSecondaryColor
         placeholderLabel.alignment = .center
         placeholderLabel.lineBreakMode = .byWordWrapping
         placeholderLabel.maximumNumberOfLines = 2
@@ -7948,7 +7983,7 @@ final class ContextWindowViewController: NSViewController {
             headerSurface.topAnchor.constraint(equalTo: container.topAnchor),
             headerSurface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             headerSurface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            headerSurface.heightAnchor.constraint(equalToConstant: 30),
+            headerSurface.heightAnchor.constraint(equalToConstant: 34),
             header.leadingAnchor.constraint(equalTo: headerSurface.leadingAnchor, constant: 8),
             header.trailingAnchor.constraint(equalTo: headerSurface.trailingAnchor, constant: -8),
             header.centerYAnchor.constraint(equalTo: headerSurface.centerYAnchor),
@@ -8026,10 +8061,15 @@ final class ContextWindowViewController: NSViewController {
     private func render() {
         guard !isClosing else { return }
         modeControl.selectedSegment = model.mode == .pinned ? 1 : 0
+        applyHeaderStyle()
         let text: String
         let highlightsSyntax: Bool
         if let candidate = model.selectedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
+            symbolLabel.stringValue = candidate.label
+            symbolLabel.isHidden = candidate.label.isEmpty
+            stones.update(certainty: candidate.certainty, theme: theme)
+            stones.isHidden = false
             let fullProvenance = [
                 candidate.provenanceBadge,
                 candidate.bindingKind,
@@ -8053,6 +8093,9 @@ final class ContextWindowViewController: NSViewController {
             applyBadgeStyle()
         } else {
             pathLabel.stringValue = ""
+            symbolLabel.stringValue = ""
+            symbolLabel.isHidden = true
+            stones.isHidden = true
             candidateLabel.stringValue = ""
             candidateLabel.toolTip = nil
             candidateLabel.setAccessibilityLabel(nil)
@@ -8095,13 +8138,13 @@ final class ContextWindowViewController: NSViewController {
         let colors: (background: NSColor, foreground: NSColor) =
             switch provenanceBadgeStyle(for: model.selectedCandidate?.certainty) {
             case .exact:
-                (.systemGreen.withAlphaComponent(0.12), .systemGreen)
+                (theme.mossSoftColor, theme.verifiedColor)
             case .strong:
-                (.systemBlue.withAlphaComponent(0.12), .systemBlue)
+                (theme.slateSoftColor, theme.inferredColor)
             case .possible:
-                (.systemOrange.withAlphaComponent(0.12), .systemOrange)
+                (theme.amberSoftColor, theme.warningColor)
             case .fallback:
-                (.quaternaryLabelColor, .secondaryLabelColor)
+                (theme.chipBackgroundColor, theme.chipForegroundColor)
             }
         candidateBadge.layer?.backgroundColor = colors.background.cgColor
         candidateLabel.textColor = colors.foreground

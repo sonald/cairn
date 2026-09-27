@@ -1746,3 +1746,62 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     try click("Expand Files", in: sidebar)
     #expect(sidebar.selfTestDividerPersistsAcrossRebuild())
 }
+
+@MainActor
+@Test
+func lensShowsSerifSymbolStonesThemedBadgeAndAPinnedTint() async throws {
+    _ = NSApplication.shared
+    let source = "pub fn target() -> i32 { 42 }\npub fn main() { target(); }\n"
+    let root = try mainWindowTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let contextModel = ContextWindowModel()
+    contextModel.updateProjectState(.ready(session, context), root: root)
+    let controller = ContextWindowViewController(model: contextModel)
+    controller.apply(settings: ReaderSettings(theme: .light))
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
+        styleMask: [.titled], backing: .buffered, defer: false
+    )
+    window.contentViewController = controller
+    defer { window.orderOut(nil) }
+
+    contextModel.tokenClicked(
+        file: "main.rs",
+        offset: UInt32(source[..<source.range(of: "target();")!.lowerBound].utf8.count)
+    )
+    #expect(await mainWindowWaitUntil(contextModel.candidateCount >= 1))
+    try await Task.sleep(for: .milliseconds(150))
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    func rgb(_ color: CGColor?) -> UInt32? {
+        guard let color, let srgb = NSColor(cgColor: color)?.usingColorSpace(.sRGB) else { return nil }
+        return UInt32((srgb.redComponent * 255).rounded()) << 16
+            | UInt32((srgb.greenComponent * 255).rounded()) << 8
+            | UInt32((srgb.blueComponent * 255).rounded())
+    }
+    let certainty = try #require(contextModel.selectedCandidate?.certainty)
+    var style = controller.selfTestLensStyle
+    #expect(style.stones == certainty)
+    #expect(style.stonesVisible)
+    #expect(style.symbol == contextModel.selectedCandidate?.label)
+    #expect(!style.symbol.isEmpty)
+    #expect(style.symbolFont?.fontName.contains("NewYork") == true)
+    // Fuzzy resolution in this project is Strong: the inferred slate fill.
+    #expect(certainty == .strong)
+    #expect(rgb(style.badgeFill) == 0xDFE6ED)
+    #expect(rgb(style.headerFill) == 0xE7E3DA)
+
+    controller.selfTestSetPinned(true)
+    try await Task.sleep(for: .milliseconds(50))
+    style = controller.selfTestLensStyle
+    #expect(rgb(style.headerFill) == 0xF3E5CA)
+    controller.selfTestSetPinned(false)
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(rgb(controller.selfTestLensStyle.headerFill) == 0xE7E3DA)
+}
