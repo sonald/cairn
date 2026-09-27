@@ -199,8 +199,11 @@ func structAndTraitDeclarationNamesUsePrimaryTypography() throws {
         theme: theme
     )
 
+    // Type titles sit one step below function names in the hierarchy.
+    #expect(theme.typeNameFontSize < theme.functionNameFontSize)
+    #expect(theme.typeNameFontSize > theme.fontSize)
     let expected = NSFont.monospacedSystemFont(
-        ofSize: theme.functionNameFontSize,
+        ofSize: theme.typeNameFontSize,
         weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
     )
     for name in ["Widget", "Work"] {
@@ -433,7 +436,7 @@ func everyThemeAppliesTypographyWithinStorageBounds() throws {
                     as? NSFont
             )
             let expectedCommentFont = humanistComments
-                ? NSFont.systemFont(ofSize: settings.fontSize)
+                ? ReaderTextView.proseCommentFont(size: settings.fontSize)
                 : NSFont.monospacedSystemFont(
                     ofSize: settings.fontSize,
                     weight: .regular
@@ -648,4 +651,30 @@ private func attributedSource(
             .font: NSFont.monospacedSystemFont(ofSize: fontSize, weight: .regular),
         ]
     )
+}
+
+@MainActor
+@Test
+func proseCommentsStayMonospacedInDocumentsThatNeedViewportOnlyLayout() throws {
+    func document(lines: Int) -> ReaderDocument {
+        let source = (0..<lines).map { "// note \($0)\n" }.joined()
+        let bytes = Array(source.utf8)
+        return ReaderDocument(
+            bytes: bytes, contentID: nil, lineTable: LineTable(bytes: bytes),
+            byteUTF16Map: ByteUTF16Map(validUTF8: bytes), highlightSpans: [],
+            outlineFacets: [], foldRegions: []
+        )
+    }
+    let serif = ReaderTheme(settings: ReaderSettings())
+    let mono = ReaderTheme(settings: ReaderSettings(humanistComments: false))
+    let small = document(lines: 200)
+    let large = document(lines: 8_001)
+    #expect(ReaderTextView.proseCommentsEnabled(small, theme: serif))
+    #expect(!ReaderTextView.proseCommentsEnabled(large, theme: serif))
+    #expect(!ReaderTextView.proseCommentsEnabled(small, theme: mono))
+
+    let font = ReaderTextView.proseCommentFont(size: 13)
+    #expect(font.pointSize == 14)
+    #expect(font.fontDescriptor.symbolicTraits.contains(.italic))
+    #expect(font.fontName.contains("NewYork"))
 }

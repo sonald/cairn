@@ -2594,7 +2594,7 @@ func defaultVisualSettingsRenderRestrainedDeclarationsAndParameterRoles() throws
             ofSize: legacyTheme.functionNameFontSize,
             weight: NSFont.Weight(rawValue: legacyTheme.functionDeclarationFontWeight)
         ),
-        functionKern: 0,
+        functionKern: legacyTheme.functionNameFontSize > legacyTheme.fontSize ? 0.15 : 0,
         emphasisFont: .monospacedSystemFont(
             ofSize: legacyTheme.fontSize,
             weight: NSFont.Weight(rawValue: legacyTheme.declarationEmphasisFontWeight)
@@ -3230,7 +3230,7 @@ func wrapParagraphLayoutPreservesProportionalCommentsAndLargeDeclarations() thro
     let storage = try #require(reader.view.textStorage)
     let commentFont = try #require(storage.attribute(.font, at: 4, effectiveRange: nil) as? NSFont)
     let declarationFont = try #require(storage.attribute(.font, at: Int(nameStart), effectiveRange: nil) as? NSFont)
-    #expect(commentFont == NSFont.systemFont(ofSize: settings.fontSize))
+    #expect(commentFont == ReaderTextView.proseCommentFont(size: settings.fontSize))
     #expect(abs(declarationFont.pointSize - settings.fontSize - settings.functionNameDelta) < 0.001)
     for offset in [0, comment.utf16.count] {
         let style = try #require(storage.attribute(.paragraphStyle, at: offset, effectiveRange: nil) as? NSParagraphStyle)

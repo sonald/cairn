@@ -7,14 +7,15 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
     #expect(ReaderSettings() == ReaderSettings(
         lineHeightMultiple: 1.3,
         fontSize: 13,
-        functionNameDelta: 0,
+        functionNameDelta: 4.5,
+        typeNameDelta: 2,
         parameterReferenceAlpha: 0.9,
         declarationMarkerAlpha: 0.7,
         functionDeclarationFontWeight: 0.23,
         declarationEmphasisFontWeight: 0.23,
         theme: .auto,
         syntaxFormatting: true,
-        humanistComments: false,
+        humanistComments: true,
         lineNumbers: true
     ))
 
@@ -30,11 +31,13 @@ func readerSettingsHaveValidatedDefaultsAndClampOutOfRangeValues() {
     let high = ReaderSettings(
         lineHeightMultiple: 3,
         fontSize: 30,
-        functionNameDelta: 8
+        functionNameDelta: 12,
+        typeNameDelta: 9
     )
     #expect(high.lineHeightMultiple == 2)
     #expect(high.fontSize == 24)
-    #expect(high.functionNameDelta == 4)
+    #expect(high.functionNameDelta == 8)
+    #expect(high.typeNameDelta == 6)
 
     var mutated = ReaderSettings()
     mutated.lineHeightMultiple = 9
@@ -268,4 +271,36 @@ private func linearComponent(_ value: Double) -> Double {
     value <= 0.04045
         ? value / 12.92
         : pow((value + 0.055) / 1.055, 2.4)
+}
+
+@Test
+func readerSettingsAdoptRedesignDefaultsOnceWhereOldDefaultsWereStored() throws {
+    let suite = "ReaderSettingsTests.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    // What every save before the redesign wrote: the old defaults, no revision.
+    defaults.set(0.0, forKey: "reader.functionNameDelta")
+    defaults.set(false, forKey: "reader.humanistComments")
+    defaults.set(15.0, forKey: "reader.fontSize")
+    let migrated = ReaderSettings(defaults: defaults)
+    #expect(migrated.functionNameDelta == 4.5)
+    #expect(migrated.humanistComments)
+    #expect(migrated.typeNameDelta == 2)
+    #expect(migrated.fontSize == 15)
+
+    // A value the user changed away from the old default is kept.
+    defaults.set(2.0, forKey: "reader.functionNameDelta")
+    #expect(ReaderSettings(defaults: defaults).functionNameDelta == 2)
+
+    // After one save the revision is recorded; a later explicit 0 / off sticks.
+    var chosen = migrated
+    chosen.functionNameDelta = 0
+    chosen.humanistComments = false
+    chosen.typeNameDelta = 5
+    chosen.save(to: defaults)
+    let reloaded = ReaderSettings(defaults: defaults)
+    #expect(reloaded.functionNameDelta == 0)
+    #expect(!reloaded.humanistComments)
+    #expect(reloaded.typeNameDelta == 5)
+    #expect(ReaderTheme(settings: reloaded).typeNameFontSize == 15 + 5)
 }

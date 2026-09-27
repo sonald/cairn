@@ -24,6 +24,7 @@ public struct ReaderTypographyKey: Hashable, Sendable {
     public let codeLigatures: CodeLigatureMode
     public let fontSize: Double
     public let functionNameDelta: Double
+    public let typeNameDelta: Double
     public let functionDeclarationFontWeight: Double
     public let declarationEmphasisFontWeight: Double
     public let lineHeightMultiple: Double
@@ -35,6 +36,7 @@ public struct ReaderTypographyKey: Hashable, Sendable {
         codeLigatures = settings.codeLigatures
         fontSize = settings.fontSize
         functionNameDelta = settings.functionNameDelta
+        typeNameDelta = settings.typeNameDelta
         functionDeclarationFontWeight = settings.functionDeclarationFontWeight
         declarationEmphasisFontWeight = settings.declarationEmphasisFontWeight
         lineHeightMultiple = settings.lineHeightMultiple
@@ -53,7 +55,10 @@ public struct ReaderSettings: Equatable, Sendable {
 
     public static let lineHeightRange = 1.0...2.0
     public static let fontSizeRange = 10.0...24.0
-    public static let functionNameDeltaRange = 0.0...4.0
+    public static let functionNameDeltaRange = 0.0...8.0
+    public static let typeNameDeltaRange = 0.0...6.0
+    /// Bumped when a default changes in a way stored settings should adopt once.
+    static let defaultsRevision = 2
     public static let parameterReferenceAlphaRange = 0.0...1.0
     public static let declarationMarkerAlphaRange = 0.0...1.0
     public static let functionDeclarationFontWeightRange = -1.0...1.0
@@ -71,6 +76,9 @@ public struct ReaderSettings: Equatable, Sendable {
                 to: Self.functionNameDeltaRange
             )
         }
+    }
+    public var typeNameDelta: Double {
+        didSet { typeNameDelta = typeNameDelta.clamped(to: Self.typeNameDeltaRange) }
     }
     public var parameterReferenceAlpha: Double {
         didSet {
@@ -113,14 +121,15 @@ public struct ReaderSettings: Equatable, Sendable {
     public init(
         lineHeightMultiple: Double = 1.3,
         fontSize: Double = 13,
-        functionNameDelta: Double = 0,
+        functionNameDelta: Double = 4.5,
+        typeNameDelta: Double = 2,
         parameterReferenceAlpha: Double = 0.9,
         declarationMarkerAlpha: Double = 0.7,
         functionDeclarationFontWeight: Double = 0.23,
         declarationEmphasisFontWeight: Double = 0.23,
         theme: Theme = .auto,
         syntaxFormatting: Bool = true,
-        humanistComments: Bool = false,
+        humanistComments: Bool = true,
         lineNumbers: Bool = true,
         codeFont: CodeFontSelection = .systemMonospaced,
         codeLigatures: CodeLigatureMode = .fontDefault
@@ -130,6 +139,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.functionNameDelta = functionNameDelta.clamped(
             to: Self.functionNameDeltaRange
         )
+        self.typeNameDelta = typeNameDelta.clamped(to: Self.typeNameDeltaRange)
         self.parameterReferenceAlpha = parameterReferenceAlpha.clamped(
             to: Self.parameterReferenceAlphaRange
         )
@@ -160,7 +170,10 @@ public struct ReaderSettings: Equatable, Sendable {
                 ?? 13,
             functionNameDelta: (defaults.object(forKey: Keys.functionNameDelta) as? NSNumber)?
                 .doubleValue
-                ?? 0,
+                ?? 4.5,
+            typeNameDelta: (defaults.object(forKey: Keys.typeNameDelta) as? NSNumber)?
+                .doubleValue
+                ?? 2,
             parameterReferenceAlpha:
                 (defaults.object(forKey: Keys.parameterReferenceAlpha) as? NSNumber)?
                     .doubleValue
@@ -186,7 +199,7 @@ public struct ReaderSettings: Equatable, Sendable {
                 ?? true,
             humanistComments: (defaults.object(forKey: Keys.humanistComments) as? NSNumber)?
                 .boolValue
-                ?? false,
+                ?? true,
             lineNumbers: (defaults.object(forKey: Keys.lineNumbers) as? NSNumber)?
                 .boolValue
                 ?? true,
@@ -199,6 +212,16 @@ public struct ReaderSettings: Equatable, Sendable {
         wrapLines = (defaults.object(forKey: Keys.wrapLines) as? NSNumber)?
             .boolValue
             ?? false
+        // Revision 2 (UI redesign): settings saved before it hold the old
+        // defaults for every key; adopt the new ones once where unchanged.
+        if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
+            if (defaults.object(forKey: Keys.functionNameDelta) as? NSNumber)?.doubleValue == 0 {
+                functionNameDelta = 4.5
+            }
+            if (defaults.object(forKey: Keys.humanistComments) as? NSNumber)?.boolValue == false {
+                humanistComments = true
+            }
+        }
     }
 
     public func save(to defaults: UserDefaults) {
@@ -206,6 +229,7 @@ public struct ReaderSettings: Equatable, Sendable {
             lineHeightMultiple: lineHeightMultiple,
             fontSize: fontSize,
             functionNameDelta: functionNameDelta,
+            typeNameDelta: typeNameDelta,
             parameterReferenceAlpha: parameterReferenceAlpha,
             declarationMarkerAlpha: declarationMarkerAlpha,
             functionDeclarationFontWeight: functionDeclarationFontWeight,
@@ -221,6 +245,8 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
+        defaults.set(validated.typeNameDelta, forKey: Keys.typeNameDelta)
+        defaults.set(Self.defaultsRevision, forKey: Keys.defaultsRevision)
         defaults.set(
             validated.parameterReferenceAlpha,
             forKey: Keys.parameterReferenceAlpha
@@ -260,6 +286,8 @@ public struct ReaderSettings: Equatable, Sendable {
         static let lineHeightMultiple = "reader.lineHeightMultiple"
         static let fontSize = "reader.fontSize"
         static let functionNameDelta = "reader.functionNameDelta"
+        static let typeNameDelta = "reader.typeNameDelta"
+        static let defaultsRevision = "reader.defaultsRevision"
         static let parameterReferenceAlpha = "reader.parameterReferenceAlpha"
         static let declarationMarkerAlpha = "reader.declarationMarkerAlpha"
         static let functionDeclarationFontWeight =
@@ -281,6 +309,7 @@ public struct ReaderTheme: Equatable, Sendable {
     public let lineHeightMultiple: Double
     public let fontSize: Double
     public let functionNameFontSize: Double
+    public let typeNameFontSize: Double
     public let parameterReferenceAlpha: Double
     public let declarationMarkerAlpha: Double
     public let functionDeclarationFontWeight: Double
@@ -295,6 +324,7 @@ public struct ReaderTheme: Equatable, Sendable {
         lineHeightMultiple = settings.lineHeightMultiple
         fontSize = settings.fontSize
         functionNameFontSize = settings.fontSize + settings.functionNameDelta
+        typeNameFontSize = settings.fontSize + settings.typeNameDelta
         parameterReferenceAlpha = settings.parameterReferenceAlpha
         declarationMarkerAlpha = settings.declarationMarkerAlpha
         functionDeclarationFontWeight = settings.functionDeclarationFontWeight

@@ -2775,8 +2775,10 @@ public final class ReaderTextView {
             || selectedRegions.map(\.bodyRange) != previousRegions.map(\.bodyRange)
         let attachmentsChanged = selectedRegions != previousRegions
         let typographyChanged = theme.syntaxFormatting
-            && Self.metricSpans(previousDocument?.highlightSpans ?? [], theme: theme)
-                != Self.metricSpans(document.highlightSpans, theme: theme)
+            && Self.metricSpans(previousDocument?.highlightSpans ?? [], theme: theme,
+                                proseComments: previousDocument.map(proseCommentsEnabled(for:)) ?? false)
+                != Self.metricSpans(document.highlightSpans, theme: theme,
+                                    proseComments: proseCommentsEnabled(for: document))
         let geometryChanged = previousDocument?.foldRegions != document.foldRegions
         let needsLayout = foldsChanged || attachmentsChanged || typographyChanged || geometryChanged
         let captured = needsLayout && !foldsChanged ? captureViewportStateForReflow() : nil
@@ -4144,7 +4146,8 @@ public final class ReaderTextView {
             self.backingTextStorage.addAttributes(attributes, range: range)
             self.updateFoldAttachmentAttributes(document: document, map: map)
             Self.applyTypography(document.highlightSpans, map: map,
-                to: self.backingTextStorage, theme: self.theme)
+                to: self.backingTextStorage, theme: self.theme,
+                proseComments: self.proseCommentsEnabled(for: document))
             self.paragraphLayout.reset()
             self.applyParagraphLayout(to: self.backingTextStorage)
             self.backingTextStorage.endEditing()
@@ -4390,7 +4393,8 @@ public final class ReaderTextView {
             document.highlightSpans,
             map: map,
             to: attributed,
-            theme: theme, displayRange: range
+            theme: theme, displayRange: range,
+            proseComments: proseCommentsEnabled(document, theme: theme)
         )
         var attachments: [FoldID: FoldAttachment] = [:]
         guard let placeholders = map.foldPlaceholders(in: range) else { return nil }
@@ -4420,14 +4424,44 @@ public final class ReaderTextView {
         return matches
     }
 
-    private static func metricSpans(_ spans: [HighlightSpan], theme: ReaderTheme) -> [HighlightSpan] {
+    /// Prose comments are a font run per comment, applied to the whole backing
+    /// store. Documents that already need viewport-only layout keep monospaced
+    /// comments so a comment-dense file never builds hundreds of thousands of runs.
+    static func proseCommentsEnabled(
+        _ document: ReaderDocument,
+        theme: ReaderTheme,
+        policy: ReaderReflowPolicy = ReaderReflowPolicy()
+    ) -> Bool {
+        guard theme.humanistComments else { return false }
+        guard let cost = document.cost else { return false }
+        return !policy.requiresViewportOnlyLayout(for: cost)
+    }
+
+    private func proseCommentsEnabled(for document: ReaderDocument) -> Bool {
+        Self.proseCommentsEnabled(document, theme: theme, policy: reflowPolicy)
+    }
+
+    private static func metricSpans(
+        _ spans: [HighlightSpan], theme: ReaderTheme, proseComments: Bool
+    ) -> [HighlightSpan] {
         spans.filter {
             switch $0.kind {
             case .functionName, .declarationTitle, .declarationEmphasis: true
-            case .comment: theme.humanistComments
+            case .comment: proseComments
             default: false
             }
         }
+    }
+
+    /// Prose comments use the system serif italic (New York), one point larger
+    /// so it reads at the same visual size as the monospaced code beside it.
+    static func proseCommentFont(size: Double) -> NSFont {
+        let pointSize = CGFloat(size + 1)
+        let base = NSFont.systemFont(ofSize: pointSize)
+        guard let serif = base.fontDescriptor.withDesign(.serif) else { return base }
+        let italic = serif.withSymbolicTraits(.italic)
+        return NSFont(descriptor: italic, size: pointSize)
+            ?? NSFont(descriptor: serif, size: pointSize) ?? base
     }
 
     static func applyTypography(
@@ -4435,9 +4469,11 @@ public final class ReaderTextView {
         map: DisplayMap,
         to attributed: NSMutableAttributedString,
         theme: ReaderTheme,
-        displayRange: NSRange? = nil
+        displayRange: NSRange? = nil,
+        proseComments: Bool? = nil
     ) {
         guard theme.syntaxFormatting else { return }
+        let proseComments = proseComments ?? theme.humanistComments
         let extent = displayRange ?? NSRange(location: 0, length: map.projectedUTF16Length)
 
         func apply(_ span: HighlightSpan) {
@@ -4450,14 +4486,18 @@ public final class ReaderTextView {
                 switch span.kind {
                 case .functionName, .declarationTitle:
                     ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, safeRange.length)
+                    // Source Insight hierarchy: definitions read as headings,
+                    // type titles one step below function names.
+                    let size = span.kind == .functionName
+                        ? theme.functionNameFontSize : theme.typeNameFontSize
                     let resolved = ReaderFontResolver.shared.resolve(
-                        theme: theme, size: theme.functionNameFontSize,
+                        theme: theme, size: size,
                         weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
                     )
                     attributed.addAttributes(resolved.attributes, range: safeRange)
                     if theme.codeFont == .systemMonospaced && theme.codeLigatures == .fontDefault {
                         attributed.addAttribute(.kern,
-                            value: theme.functionNameFontSize > theme.fontSize ? 0.15 : 0,
+                            value: size > theme.fontSize ? 0.15 : 0,
                             range: safeRange)
                     } else {
                         attributed.removeAttribute(.kern, range: safeRange)
@@ -4468,10 +4508,10 @@ public final class ReaderTextView {
                         theme: theme,
                         weight: NSFont.Weight(rawValue: theme.declarationEmphasisFontWeight)
                     ).attributes, range: safeRange)
-                case .comment where theme.humanistComments:
+                case .comment where proseComments:
                     ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, safeRange.length)
                     attributed.addAttribute(.font,
-                        value: NSFont.systemFont(ofSize: theme.fontSize), range: safeRange)
+                        value: Self.proseCommentFont(size: theme.fontSize), range: safeRange)
                     attributed.removeAttribute(.ligature, range: safeRange)
                     attributed.removeAttribute(.kern, range: safeRange)
                 default:

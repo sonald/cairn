@@ -233,7 +233,8 @@ func readonlyIntegratedTwoWindowFontEnvironmentKeepsIndependentAnchorsAndSelecti
         #expect(reader.projectionInstallCount == installs[index])
         #expect(reader.backgroundDrawCount > draws[index])
         let font = try #require(reader.view.textStorage?.attribute(.font, at: anchor.selection.location, effectiveRange: nil) as? NSFont)
-        #expect(font.pointSize == CGFloat(size))
+        // The anchor sits in a prose comment, which renders one point larger.
+        #expect(font.pointSize == ReaderTextView.proseCommentFont(size: size).pointSize)
     }
     #expect(await store.statistics.buildCount == 1)
     #expect(await store.statistics.subscriptionCount == 2)
