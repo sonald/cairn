@@ -227,6 +227,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             gutter: gutter(for: rows[row]),
             cause: incoming.map { causeText($0.cause) } ?? localized("trail.root"),
             snapshot: snapshotText(node.jump),
+            historical: node.jump.revision != nil,
             badge: incoming.flatMap(badgeText),
             isCurrent: node.id == trail.activeNodeID,
             crossesSnapshot: rows[row].crossesSnapshot,
@@ -470,37 +471,34 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         // survived, so it is labeled as historical rather than current.
         let isRestoredEvidence = incoming?.frozenInspectorDisplay != nil
             && incoming?.currentExplanationID == nil
-        var sections = [
-            displayName(node),
-            locationText(node.jump),
-            "",
-            localized("trail.snapshot"),
-            snapshotText(node.jump),
-            "",
-            localized("trail.via"),
-            incoming.map { causeText($0.cause) } ?? localized("trail.sessionRoot"),
-            "",
-            localized("trail.explanation"),
-            isRestoredEvidence
+        var sections: [(DetailStyle, String)] = [
+            (.title, displayName(node)),
+            (.location, locationText(node.jump)),
+            (.gap, ""),
+            (.heading, localized("trail.snapshot")),
+            (node.jump.revision == nil ? .body : .history, snapshotText(node.jump)),
+            (.gap, ""),
+            (.heading, localized("trail.via")),
+            (.body, incoming.map { causeText($0.cause) } ?? localized("trail.sessionRoot")),
+            (.gap, ""),
+            (.heading, localized("trail.explanation")),
+            (.caption, isRestoredEvidence
                 ? localized("trail.previousEvidence")
-                : localized("trail.frozenEvidence"),
-            observed.map(explanationText) ?? localized("trail.noExplanation"),
-            "",
-            localized("trail.currentEvidence"),
-            current.map(explanationText) ?? localized("trail.noNewEvidence"),
+                : localized("trail.frozenEvidence")),
+            (.body, observed.map(explanationText) ?? localized("trail.noExplanation")),
+            (.gap, ""),
+            (.heading, localized("trail.currentEvidence")),
+            (.body, current.map(explanationText) ?? localized("trail.noNewEvidence")),
         ]
         if isRestoredEvidence {
-            sections += [
-                "",
-                localized("trail.snapshotOnly"),
-            ]
+            sections += [(.gap, ""), (.warning, localized("trail.snapshotOnly"))]
         }
         if let observed, let current,
            explanationText(observed) != explanationText(current)
         {
-            sections += ["", localized("trail.changed")]
+            sections += [(.gap, ""), (.warning, localized("trail.changed"))]
         }
-        detailText.stringValue = sections.joined(separator: "\n")
+        detailText.attributedStringValue = styledDetail(sections)
         restoreButton.isEnabled = true
         readingSetButton.isEnabled = path(
             to: selectedID,
@@ -508,6 +506,69 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         ).dropFirst().contains { id in
             incomingEdge(to: id, in: trail)?.frozenInspectorDisplay != nil
         }
+    }
+
+    private enum DetailStyle {
+        case title, location, heading, caption, body, history, warning, gap
+    }
+
+    /// One line per section, so the plain string stays the joined section text.
+    private func styledDetail(_ sections: [(DetailStyle, String)]) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for (index, (style, text)) in sections.enumerated() {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.paragraphSpacingBefore = style == .heading ? 2 : 0
+            var attributes: [NSAttributedString.Key: Any] = [.paragraphStyle: paragraph]
+            switch style {
+            case .title:
+                attributes[.font] = cairnSerifFont(ofSize: 20, weight: .medium)
+                attributes[.foregroundColor] = theme.foregroundColor
+            case .location:
+                attributes[.font] = NSFont.monospacedSystemFont(ofSize: 11.5, weight: .regular)
+                attributes[.foregroundColor] = theme.chromeSecondaryColor
+            case .heading:
+                attributes[.font] = NSFont.systemFont(ofSize: 10.5, weight: .semibold)
+                attributes[.foregroundColor] = theme.chromeSecondaryColor
+                attributes[.kern] = 0.8
+            case .caption:
+                attributes[.font] = NSFont.systemFont(ofSize: 11)
+                attributes[.foregroundColor] = theme.chromeSecondaryColor
+            case .body:
+                attributes[.font] = NSFont.systemFont(ofSize: 12.5)
+                attributes[.foregroundColor] = theme.foregroundColor
+            case .history:
+                attributes[.font] = NSFont.systemFont(ofSize: 12.5, weight: .medium)
+                attributes[.foregroundColor] = theme.histColor
+            case .warning:
+                attributes[.font] = NSFont.systemFont(ofSize: 12, weight: .medium)
+                attributes[.foregroundColor] = theme.warningColor
+            case .gap:
+                attributes[.font] = NSFont.systemFont(ofSize: 6)
+            }
+            let line = index == sections.count - 1 ? text : text + "\n"
+            result.append(NSAttributedString(string: line, attributes: attributes))
+        }
+        return result
+    }
+
+    var selfTestDetailTitleFont: NSFont? {
+        guard detailText.attributedStringValue.length > 0 else { return nil }
+        return detailText.attributedStringValue.attribute(.font, at: 0, effectiveRange: nil) as? NSFont
+    }
+
+    func selfTestDetailColor(of text: String) -> NSColor? {
+        let value = detailText.attributedStringValue
+        let range = (value.string as NSString).range(of: text)
+        guard range.location != NSNotFound else { return nil }
+        return value.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    }
+
+    func selfTestRowStyle(path: String) -> (gutter: NSColor?, snapshotFill: CGColor?, current: Bool)? {
+        guard let row = rows.firstIndex(where: { trail?.nodes[$0.id]?.jump.path == path }),
+              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+                as? ReadingTrailCellView
+        else { return nil }
+        return cell.selfTestStyle
     }
 
     private func flattenedRows(_ trail: ReadingTrail) -> [Row] {
@@ -681,6 +742,11 @@ private final class ReadingTrailCellView: NSTableCellView {
     private let causeChip = RelationChipView()
     private let snapshotChip = RelationChipView()
     private let badge = RelationChipView()
+    private var isCurrentRow = false
+
+    var selfTestStyle: (gutter: NSColor?, snapshotFill: CGColor?, current: Bool) {
+        (gutter.textColor, snapshotChip.layer?.backgroundColor, isCurrentRow)
+    }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -733,6 +799,7 @@ private final class ReadingTrailCellView: NSTableCellView {
         gutter gutterText: String,
         cause: String,
         snapshot: String,
+        historical: Bool,
         badge badgeText: String?,
         isCurrent: Bool,
         crossesSnapshot: Bool,
@@ -740,30 +807,32 @@ private final class ReadingTrailCellView: NSTableCellView {
     ) {
         snapshotBoundary.stringValue = crossesSnapshot ? localized("trail.boundary") : ""
         snapshotBoundary.isHidden = !crossesSnapshot
-        snapshotBoundary.textColor = theme.chromeTertiaryColor
+        snapshotBoundary.textColor = theme.histColor
         gutter.stringValue = gutterText
-        gutter.textColor = isCurrent ? theme.accentColor : theme.chromeTertiaryColor
+        gutter.textColor = isCurrent ? theme.amberMarkColor
+            : historical ? theme.histColor : theme.accentColor
         titleLabel.stringValue = title
         titleLabel.textColor = theme.foregroundColor
         currentLabel.stringValue = isCurrent ? localized("trail.current") : ""
-        currentLabel.textColor = theme.accentColor
+        currentLabel.textColor = theme.warningColor
         causeChip.display(
             cause,
-            foreground: theme.accentColor,
-            background: theme.inferredBackgroundColor,
-            border: theme.inferredBackgroundColor
+            foreground: theme.chipForegroundColor,
+            background: theme.chipBackgroundColor,
+            border: theme.chipBackgroundColor
         )
         snapshotChip.display(
             snapshot,
-            foreground: theme.chromeSecondaryColor,
-            background: .clear,
-            border: theme.chromeDividerColor
+            foreground: historical ? theme.histColor : theme.chromeSecondaryColor,
+            background: historical ? theme.histSoftColor : .clear,
+            border: historical ? theme.histSoftColor : theme.chromeDividerColor
         )
+        isCurrentRow = isCurrent
         let badgeColors: (NSColor, NSColor, NSColor, Bool) = switch badgeText {
         case "Verified": (
             theme.verifiedColor,
-            theme.verifiedBackgroundColor,
-            theme.verifiedBackgroundColor,
+            theme.mossSoftColor,
+            theme.mossSoftColor,
             false
         )
         case "Unresolved": (
@@ -774,8 +843,8 @@ private final class ReadingTrailCellView: NSTableCellView {
         )
         default: (
             theme.inferredColor,
-            theme.inferredBackgroundColor,
-            theme.inferredBackgroundColor,
+            theme.slateSoftColor,
+            theme.slateSoftColor,
             false
         )
         }
