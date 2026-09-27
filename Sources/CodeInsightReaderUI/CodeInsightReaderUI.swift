@@ -968,6 +968,7 @@ public final class ReaderTextView {
     }
 
     private func display(document: ReaderDocument, fileURL: URL?) {
+        guard document.foldTopology != nil else { return }
         paragraphLayout.reset()
         let scope = FoldScopeKey(
             file: (fileURL ?? URL(fileURLWithPath: "/__codeinsight_memory__"))
@@ -987,7 +988,7 @@ public final class ReaderTextView {
         )
         renderedFoldIDs = Self.maximalFoldIDs(
             logicalFoldIDs,
-            in: document.foldRegions
+            in: document
         )
         guard
             let projection = Self.project(
@@ -1107,7 +1108,7 @@ public final class ReaderTextView {
     internal func toggleFold(id: FoldID) -> Bool {
         guard !isFocusMode,
               let document = displayedDocument,
-              document.foldRegions.contains(where: { $0.id == id })
+              document.foldTopology?.region(for: id) != nil
         else { return false }
         let shouldFold = !logicalFoldIDs.contains(id)
         return applyFoldMutation { overrides in
@@ -1127,38 +1128,12 @@ public final class ReaderTextView {
     ) -> Bool {
         guard !isFocusMode,
               let document = displayedDocument,
-              let region = visibleFoldRegions(in: document).first(where: {
-                  document.lineTable.lineColumn(at: $0.headerRange.lowerBound)
-                      .map { Int($0.line) == line } ?? false
-              })
+              let region = visibleFoldsByLine[line]
         else { return false }
         guard recursiveSiblings else { return toggleFold(id: region.id) }
 
         let shouldFold = !logicalFoldIDs.contains(region.id)
-        let parent = document.foldRegions
-            .filter {
-                $0.id != region.id
-                    && $0.bodyRange.lowerBound <= region.bodyRange.lowerBound
-                    && region.bodyRange.upperBound <= $0.bodyRange.upperBound
-            }
-            .max { lhs, rhs in lhs.outlineDepth < rhs.outlineDepth }
-        let siblings = document.foldRegions.filter { candidate in
-            guard candidate.outlineDepth == region.outlineDepth else { return false }
-            let candidateParent = document.foldRegions
-                .filter {
-                    $0.id != candidate.id
-                        && $0.bodyRange.lowerBound <= candidate.bodyRange.lowerBound
-                        && candidate.bodyRange.upperBound <= $0.bodyRange.upperBound
-                }
-                .max { lhs, rhs in lhs.outlineDepth < rhs.outlineDepth }
-            return candidateParent?.id == parent?.id
-        }
-        let affected = document.foldRegions.filter { candidate in
-            siblings.contains { sibling in
-                sibling.bodyRange.lowerBound <= candidate.bodyRange.lowerBound
-                    && candidate.bodyRange.upperBound <= sibling.bodyRange.upperBound
-            }
-        }.map(\.id)
+        let affected = document.foldTopology?.recursiveSiblings(of: region.id) ?? []
         return applyFoldMutation { overrides in
             for id in affected {
                 Self.setFold(
@@ -1398,52 +1373,15 @@ public final class ReaderTextView {
         at byteOffset: UInt32,
         in document: ReaderDocument
     ) -> (facet: OutlineFacet, region: FoldRegion)? {
-        let containing = document.outlineFacets.filter {
-            $0.range.lowerBound <= byteOffset && byteOffset < $0.range.upperBound
-        }
-        let declarations = containing.filter {
-            $0.kind == .fn || $0.kind == .method
-        }
-        let containers = containing.filter {
-            switch $0.kind {
-            case .struct, .enum, .trait, .impl, .mod, .class: true
-            case .fn, .method, .const, .static, .typeAlias, .field, .enumMember: false
-            }
-        }
-        guard let facet = (declarations.isEmpty ? containers : declarations)
-            .min(by: { lhs, rhs in
-                let lhsLength = lhs.range.upperBound - lhs.range.lowerBound
-                let rhsLength = rhs.range.upperBound - rhs.range.lowerBound
-                if lhsLength != rhsLength { return lhsLength < rhsLength }
-                return lhs.depth > rhs.depth
-            })
-        else { return nil }
-        guard let region = document.foldRegions.filter({
-            associatedFacet(for: $0, in: document.outlineFacets) == facet
-        }).min(by: {
-            ($0.bodyRange.upperBound - $0.bodyRange.lowerBound)
-                < ($1.bodyRange.upperBound - $1.bodyRange.lowerBound)
-        }) else { return nil }
-        return (facet, region)
+        document.foldTopology?.focusTarget(at: byteOffset)
     }
 
     private static func enclosingAssociatedFacets(
         at byteOffset: UInt32,
         in document: ReaderDocument
     ) -> [OutlineFacet] {
-        var result: [OutlineFacet] = []
-        for region in document.foldRegions {
-            guard let facet = associatedFacet(
-                for: region,
-                in: document.outlineFacets
-            ), facetContainsCaret(
-                byteOffset,
-                facet: facet,
-                in: document
-            ),
-                !result.contains(facet)
-            else { continue }
-            result.append(facet)
+        let result = (document.foldTopology?.associatedFacets ?? []).filter {
+            facetContainsCaret(byteOffset, facet: $0, in: document)
         }
         return result.sorted { lhs, rhs in
             if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
@@ -1483,33 +1421,6 @@ public final class ReaderTextView {
         return firstLine <= caretLine && caretLine <= lastLine
     }
 
-    private static func associatedFacet(
-        for region: FoldRegion,
-        in facets: [OutlineFacet]
-    ) -> OutlineFacet? {
-        facets.filter { facet in
-            guard facet.range.lowerBound <= region.bodyRange.lowerBound,
-                  region.bodyRange.upperBound <= facet.range.upperBound
-            else { return false }
-            switch (region.kind, facet.kind) {
-            case (.declaration, .fn), (.declaration, .method):
-                return true
-            case (.container, .struct), (.container, .enum),
-                (.container, .trait), (.container, .impl), (.container, .mod),
-                (.cfgTest, .struct), (.cfgTest, .enum), (.cfgTest, .trait),
-                (.cfgTest, .impl), (.cfgTest, .mod):
-                return true
-            default:
-                return false
-            }
-        }.min { lhs, rhs in
-            let lhsLength = lhs.range.upperBound - lhs.range.lowerBound
-            let rhsLength = rhs.range.upperBound - rhs.range.lowerBound
-            if lhsLength != rhsLength { return lhsLength < rhsLength }
-            return lhs.depth > rhs.depth
-        }
-    }
-
     private static func focusFoldIDs(
         around facet: OutlineFacet,
         in document: ReaderDocument
@@ -1524,27 +1435,9 @@ public final class ReaderTextView {
 
     private static func maximalFoldIDs(
         _ logical: Set<FoldID>,
-        in regions: [FoldRegion]
+        in document: ReaderDocument
     ) -> Set<FoldID> {
-        let active = regions.filter { logical.contains($0.id) }.sorted {
-            if $0.bodyRange.lowerBound != $1.bodyRange.lowerBound {
-                return $0.bodyRange.lowerBound < $1.bodyRange.lowerBound
-            }
-            return $0.bodyRange.upperBound > $1.bodyRange.upperBound
-        }
-        var result: Set<FoldID> = []
-        result.reserveCapacity(active.count)
-        var maximalUpper: UInt32?
-        for region in active {
-            if let maximalUpper,
-               region.bodyRange.upperBound <= maximalUpper
-            {
-                continue
-            }
-            result.insert(region.id)
-            maximalUpper = region.bodyRange.upperBound
-        }
-        return result
+        document.foldTopology?.maximalFoldIDs(logical) ?? []
     }
 
     private static func setFold(
@@ -1573,9 +1466,8 @@ public final class ReaderTextView {
     @discardableResult
     private func unfoldAncestors(containing byteOffset: UInt32) -> Bool {
         guard !isFocusMode, let document = displayedDocument else { return false }
-        let ancestors = document.foldRegions.filter {
-            logicalFoldIDs.contains($0.id) && $0.bodyRange.contains(byteOffset)
-        }
+        let containing = document.foldTopology?.containing(byteOffset) ?? []
+        let ancestors = containing.filter { logicalFoldIDs.contains($0.id) }
         guard !ancestors.isEmpty else { return false }
         let unfolded = applyFoldMutation { overrides in
             for region in ancestors {
@@ -1652,7 +1544,7 @@ public final class ReaderTextView {
         let viewportAnchor = latentViewportAnchor.flatMap { latent in
             renderedFoldIDs.contains(latent.foldID) ? latent.byteOffset : nil
         } ?? firstVisibleByteOffset()
-        let rendered = Self.maximalFoldIDs(logical, in: document.foldRegions)
+        let rendered = Self.maximalFoldIDs(logical, in: document)
         guard let projection = Self.project(
             document: document,
             renderedFoldIDs: rendered,
@@ -1722,7 +1614,7 @@ public final class ReaderTextView {
             return byteOffset
         case .placeholder(let foldID):
             if latent?.foldID == foldID { return latent?.byteOffset }
-            return displayedDocument?.foldRegions.first { $0.id == foldID }?
+            return displayedDocument?.foldTopology?.region(for: foldID)?
                 .bodyRange.lowerBound
         }
     }
@@ -1765,9 +1657,7 @@ public final class ReaderTextView {
                 latentViewportAnchor = nil
             }
         case .hidden(let foldID):
-            guard let region = document.foldRegions.first(where: {
-                $0.id == foldID
-            }) else { return }
+            guard let region = document.foldTopology?.region(for: foldID) else { return }
             latentViewportAnchor = LatentFoldAnchor(
                 byteOffset: byteOffset,
                 foldID: foldID
@@ -1796,7 +1686,7 @@ public final class ReaderTextView {
         case .documentStart: byte = 0
         case .documentEnd: byte = UInt32(clamping: document.bytes.count)
         case .foldPlaceholder(let id):
-            guard let fold = document.foldRegions.first(where: { $0.id == id }) else { return false }
+            guard let fold = document.foldTopology?.region(for: id) else { return false }
             byte = fold.bodyRange.lowerBound
         }
         guard let line = document.lineTable.lineColumn(at: byte)?.line else { return true }
@@ -2410,7 +2300,7 @@ public final class ReaderTextView {
         visibleFoldsByLine = [:]
         for region in visibleFoldRegionsCache {
             if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits) }
-            guard let line = document.lineTable.lineColumn(at: region.headerRange.lowerBound)?.line else { continue }
+            guard let line = document.foldTopology?.headerLine(for: region.id) else { continue }
             // Keep the original document-order priority when several folds share a line.
             visibleFoldsByLine[Int(line)] = visibleFoldsByLine[Int(line)] ?? region
         }
@@ -2431,7 +2321,7 @@ public final class ReaderTextView {
         for region in renderedFoldRegionsCache {
             if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits) }
             guard let marker = foldedDiffCache[region.id],
-                  let line = document.lineTable.lineColumn(at: region.headerRange.lowerBound)?.line else { continue }
+                  let line = document.foldTopology?.headerLine(for: region.id) else { continue }
             foldedDiffByLine[Int(line)] = marker
         }
     }
@@ -2462,6 +2352,7 @@ public final class ReaderTextView {
     ) {
         guard
             let layoutManager = view.textLayoutManager,
+            document.foldTopology != nil,
             displayedDocument?.contentID == document.contentID,
             displayedDocument?.languageMode == document.languageMode
         else { return }
@@ -2510,7 +2401,7 @@ public final class ReaderTextView {
         let previousRenderedFoldIDs = renderedFoldIDs
         renderedFoldIDs = Self.maximalFoldIDs(
             logicalFoldIDs,
-            in: document.foldRegions
+            in: document
         )
         // Syntax fonts change geometry; the fold projection usually does not.
         // Preserve the viewport across the font change, but treat a fold-set
@@ -4015,7 +3906,8 @@ public final class ReaderTextView {
         map: DisplayMap,
         attachments: [FoldID: FoldAttachment]
     )? {
-        guard let map = DisplayMap(
+        guard let topology = document.foldTopology,
+              let map = DisplayMap(
             document: document,
             renderedFoldIDs: renderedFoldIDs
         ) else { return nil }
@@ -4030,13 +3922,10 @@ public final class ReaderTextView {
             to: attributed,
             theme: theme
         )
-        let regionsByID = Dictionary(
-            uniqueKeysWithValues: document.foldRegions.map { ($0.id, $0) }
-        )
         var attachments: [FoldID: FoldAttachment] = [:]
         attachments.reserveCapacity(map.foldPlaceholders.count)
         for placeholder in map.foldPlaceholders {
-            guard let region = regionsByID[placeholder.id] else { return nil }
+            guard let region = topology.region(for: placeholder.id) else { return nil }
             let attachment = FoldAttachment(region: region, theme: theme)
             attributed.addAttribute(
                 .attachment,

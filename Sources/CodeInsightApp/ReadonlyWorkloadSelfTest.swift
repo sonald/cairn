@@ -39,6 +39,8 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
     memoryTimer.setEventHandler(handler: sampleMemory)
     memoryTimer.resume()
     defer { memoryTimer.cancel() }
+    ReaderWorkCounters.setEnabled(true)
+    ReaderWorkCounters.reset()
     let preparationStart = ContinuousClock.now
     do {
         let url = URL(fileURLWithPath: path)
@@ -87,8 +89,6 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
         func counters() throws -> [String: Int] {
             try JSONDecoder().decode([String: Int].self, from: JSONEncoder().encode(ReaderWorkCounters.snapshot()))
         }
-        ReaderWorkCounters.setEnabled(true)
-        ReaderWorkCounters.reset()
         var events: [[String: Any]] = []
         var screenshots: [String: String] = [:]
         let suite = option("--suite") ?? "all"
@@ -276,6 +276,9 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
             "preparationMs": preparationMs, "hoverHitCount": hoverHits,
             "sourceLineCount": document.lineTable.lineStarts.count,
             "foldCount": document.foldRegions.count, "outlineCount": document.outlineFacets.count,
+            "topologyCompatibility": document.foldTopology?.usesCompatibilityRelations ?? false,
+            "topologyCompatibilityRecordVisits": document.foldTopology?.compatibilityRecordVisits ?? 0,
+            "foldAssociationRecordVisits": document.foldTopology?.associationRecordVisits ?? 0,
             "physicalMemorySamplesBytes": memorySamples.withLock { $0 },
             "peakPhysBytes": memorySamples.withLock { $0.max() } as Any? ?? NSNull(),
             "memorySampleIntervalMs": 25,

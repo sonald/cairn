@@ -146,6 +146,8 @@ public final class ReaderDocument: Sendable {
     public let highlightSpans: [HighlightSpan]
     public let outlineFacets: [OutlineFacet]
     package let foldRegions: [FoldRegion]
+    package let foldTopology: FoldTopology?
+    package let foldTopologyFailureReason: String?
     public let localBindings: [BindingRecord]
     public let referencesByBinding: [[CodeInsightCore.ByteRange]]
 
@@ -175,6 +177,10 @@ public final class ReaderDocument: Sendable {
         self.highlightSpans = highlightSpans
         self.outlineFacets = outlineFacets
         self.foldRegions = foldRegions
+        foldTopology = FoldTopology(regions: foldRegions, facets: outlineFacets,
+                                    lineTable: lineTable, sourceMap: byteUTF16Map)
+        foldTopologyFailureReason = foldTopology == nil
+            ? FoldTopology.rejectionReason(regions: foldRegions, sourceMap: byteUTF16Map) : nil
         self.localBindings = localBindings
         self.referencesByBinding = referencesByBinding
         let references = referencesByBinding.enumerated().flatMap {

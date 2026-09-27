@@ -105,6 +105,7 @@ public final class EngineSession: Sendable {
     private let contentKeysByPath: [PathID: ContentIndexKey]
     private let occurrencesByContentKey: [ContentIndexKey: [FileOccurrence]]
     private let aliasIndex: [NameID: Set<NameID>]
+    private let callOwnershipByContent: [ContentIndexKey: CallOwnershipIndex]
     private let implIndex: ImplIndex
     private let searchableDefinitionNameIDs: [NameID]
     var sourceBytesByContent: [ContentID: [UInt8]] {
@@ -146,6 +147,7 @@ public final class EngineSession: Sendable {
             }
         }
         self.aliasIndex = aliasIndex
+        callOwnershipByContent = viewIndexes.mapValues { CallOwnershipIndex(content: $0) }
         implIndex = ImplIndex(indexes: viewIndexes)
         namePosting = NamePosting(indexes: viewIndexes)
         searchableDefinitionNameIDs = Array(namePosting.definitions.keys)
@@ -208,12 +210,10 @@ public final class EngineSession: Sendable {
                         localIndex: posting.callIndex
                     )
                     guard seen.insert(callSite).inserted,
-                          let region = index.executableRegions.first(where: {
-                              ReaderWorkCounters.record(\.regionQueryRecordVisits)
-                              return $0.id == call.regionID
-                          })
+                          let regionOffset = callOwnershipByContent[posting.key]?.regionIndexByID[call.regionID]
                     else { continue }
 
+                    let region = index.executableRegions[regionOffset]
                     let candidates = resolver.resolve(
                         file: file.pathID,
                         offset: call.nameRange.lowerBound,
@@ -265,41 +265,20 @@ public final class EngineSession: Sendable {
         try validate(context)
         guard definition.snapshotID == snapshotID,
               definition.localKind == .declarationFacet,
-              let (_, index) = content(at: definition.pathID),
+              let (key, index) = content(at: definition.pathID),
               index.symbols.indices.contains(Int(definition.localIndex))
         else {
             return OutgoingCallsResult(calls: [], completeness: .complete)
         }
 
-        let facet = index.symbols[Int(definition.localIndex)]
-        let matching = index.calls.enumerated().filter { _, call in
-            guard facet.range.lowerBound <= call.range.lowerBound,
-                  call.range.upperBound <= facet.range.upperBound
-            else { return false }
-            // ponytail: file-local calls × regions scan; add region parents if it gets hot.
-            ReaderWorkCounters.record(\.regionQueryRecordVisits, index.executableRegions.count)
-            let owner = index.executableRegions.filter {
-                $0.associatedFacetIndex != nil
-                    && $0.range.contains(call.range.lowerBound)
-            }.min {
-                if $0.range.length != $1.range.length {
-                    return $0.range.length < $1.range.length
-                }
-                return $0.id.rawValue > $1.id.rawValue
-            }?.associatedFacetIndex
-            return owner == definition.localIndex
-        }.sorted {
-            if $0.element.range.lowerBound != $1.element.range.lowerBound {
-                return $0.element.range.lowerBound < $1.element.range.lowerBound
-            }
-            return $0.offset < $1.offset
-        }
+        let matching = callOwnershipByContent[key]?.callIndicesByFacet[Int(definition.localIndex)] ?? []
         let completeness: Completeness = matching.count > 512
             ? .truncated : .complete
         let resolver = Resolver(session: self)
         let calls = matching.prefix(512).compactMap {
-            callIndex, call -> OutgoingCall? in
-            guard let callIndex = UInt32(exactly: callIndex) else { return nil }
+            offset -> OutgoingCall? in
+            let call = index.calls[offset]
+            guard let callIndex = UInt32(exactly: offset) else { return nil }
             return OutgoingCall(
                 callSite: SymbolOccurrenceID(
                     snapshotID: snapshotID,
