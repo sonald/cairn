@@ -28,10 +28,11 @@ exact population rule in [S7](stage-s7.md).
 
 Completed integrated checks: 1,138 tests, 795 bilingual keys, architecture/native
 self-tests, six native reading surfaces, actual historical/frozen navigation and
-normal process restart, and all four rollback branches. The additional reflow/summary scenarios passed in the full CI. Actual VoiceOver
-operation and extended same-process resource observation remain NOT_RUN. The user
-requested restrained early-stage testing; these are deferred release checks, not
-claimed passes or reasons to expand this delivery’s test campaign. The S8 investigation
+normal process restart, and all four rollback branches. The additional reflow/summary scenarios passed in the full CI. VoiceOver and
+speech-related accessibility testing are explicitly excluded by the user, not
+awaiting authorization and not blockers. Extended same-process resource observation
+remains NOT_RUN under the user’s restrained early-stage testing scope. No unrun
+check is claimed as PASS or used to expand this delivery’s test campaign. The S8 investigation
 is complete with adoption deferred because geometry differs. Full details and precise limits belong
 to the linked records rather than inferred PASS labels here.
 

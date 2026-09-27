@@ -180,14 +180,13 @@ cancellation/weak-reference/bounded-cache regressions remain valid within their
 stated scope. Extended resource observation is deferred to a concrete leak report
 or release need.
 
-## Remaining acceptance boundary
+## Acceptance scope
 
-Actual VoiceOver navigation requires the pending confirmation to temporarily
-change the OS accessibility setting and restore it. AX getters, CUA accessibility
-inspection and native copy/mouse tests do not substitute for VoiceOver operation.
-The user-adjusted development delivery does not claim full release acceptance.
-Actual VoiceOver remains NOT_RUN; enabling it still needs the earlier requested
-OS-setting authorization. No further test expansion is part of this delivery. The independent [S8 investigation](stage-s8.md) is complete and defers
+The user explicitly excludes VoiceOver and speech-related accessibility testing.
+They were not run, are not awaiting authorization, and do not block this goal.
+Existing AX/native checks retain their own scope; no VoiceOver PASS is claimed.
+The user-adjusted development delivery is complete and does not claim full release
+acceptance. The independent [S8 investigation](stage-s8.md) is complete and defers
 adoption because the corrected chunking prototype changes source-position geometry.
 
 ## Cold subscription scheduling follow-up

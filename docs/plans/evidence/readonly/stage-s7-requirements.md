@@ -20,7 +20,7 @@ Status: **development evidence at the user-adjusted testing scope; not full rele
 | Requirement | Status | Evidence and precise remaining boundary |
 | --- | --- | --- |
 | R01 — source snapshot identity | PASS, functional/native | S5 projection/copy tests and all six host surfaces preserve independently expected bytes/hashes. The actual historical/frozen operator restart verifies revision/content/byte-range identity against a deliberately drifted worktree. |
-| R02 — byte/UTF-16/glyph/pixel coordinates | PASS, tested functional/native scope | Frozen projection oracle, Unicode/emoji/combining/CRLF/EOF tests, actual TextKit geometry, complete selection restoration and native Shift extension. Native mouse drag-selection is exercised. VoiceOver navigation is separately unverified under X01. |
+| R02 — byte/UTF-16/glyph/pixel coordinates | PASS, tested functional/native scope | Frozen projection oracle, Unicode/emoji/combining/CRLF/EOF tests, actual TextKit geometry, complete selection restoration and native Shift extension. Native mouse drag-selection is exercised. VoiceOver navigation is explicitly excluded by the user under X01. |
 | R03 — prepared identifier reuse | PASS, work-count/functionality; performance reported at actual n | S1 whole-position oracle comparison and shared-build/native interaction tests; hot queries have zero scan/build increments. S7 cold/hot/peak-memory results use the actual retained n; no universal performance claim is made. |
 | R04 — same name versus same binding | PASS, functional | Identifier oracle preserves lexical matching; existing Rust/Python/TS local-reference/shadowing tests independently check binding boundaries. Native parameter/reference styling and occurrence tests remain in full CI. |
 | R05 — prepared gutter data | PASS, work-count/native | S2 real draw/hover and 50k-line captures have zero stable-scroll preparation/global visits; first visual row, same-line fold priority, diff/bookmark/hidden-match cases are checked. S2 disabled-environment Release recheck passed all six fixtures under X04. |
@@ -31,7 +31,7 @@ Status: **development evidence at the user-adjusted testing scope; not full rele
 | R10 — async result ownership | PASS, tested lifecycle scope | A→B→A/subscription/analysis identities, one-subscriber cancellation, old-syntax teardown, stale preflight rejection, Settings queued reopen/close and Context late observation tests. Analysis-only refresh is distinguished from content replacement. |
 | R11 — full reading state through reflow | PASS within explicit high-cost limits | Existing native reflow cases plus the new L04/L09 integrated tests pass. Real detached syntax arrives while reading in the middle/end; two simultaneously visible 500/790pt windows share one identifier build and retain independent measured anchors and selections after font-environment refresh. High-cost precision remains explicitly limited. |
 | R12 — bounded cache/task lifetime | PASS for cache/subscription and tested object ownership; extended resource observation deferred | Budgets/eviction/oversized active entries are tested. A weak-reference test proves Reader and ReaderDocument release even while an idle derived result remains cached; terminal tasks/observers are tested. This is stronger than an LRU count, but not proof that every native provider/process allocation returns to baseline across an extended same-process version-switch cycle. Keep cache bytes, retained objects and physical footprint distinct. |
-| R13 — surfaces, compatibility and safety | PARTIAL | Six actual native surfaces, real historical/frozen workflow, non-source preview, language dispatch, Safe mode and bilingual checks passed. X01 VoiceOver operation remains outstanding; X04 disabled-runtime checks have now passed. |
+| R13 — surfaces, compatibility and safety | PASS within user-adjusted scope | Six actual native surfaces, real historical/frozen workflow, non-source preview, language dispatch, Safe mode and bilingual checks passed. X01 VoiceOver operation is excluded by the user; X04 disabled-runtime checks have now passed. |
 | R14 — verifiable functional/work measurement | PARTIAL | Full completed test summaries and actual-site work counters exist; native artifacts include source identity and draw/copy evidence. The final report records actual 29/30-pair results and high-cost limits; the original full-release sampling gate is not claimed under the user-adjusted scope. |
 
 ## Projection P01–P12
@@ -80,7 +80,7 @@ Status: **development evidence at the user-adjusted testing scope; not full rele
 
 | Cases | Status | Evidence / boundary |
 | --- | --- | --- |
-| X01 | PARTIAL — VoiceOver NOT_RUN | Actual native mouse drag-selection, word/keyboard selection, Shift direction, copy and TextKit 2 checks passed. AX roles/labels/getters and CUA accessibility inspection are present; **neither is actual VoiceOver navigation/speech/focus testing**. OS drag-export to another app is also unobserved, but the plan's X01 asks for mouse drag-selection, not that extra workflow. |
+| X01 | PASS within user-adjusted scope; VoiceOver EXCLUDED | Actual native mouse drag-selection, word/keyboard selection, Shift direction, copy and TextKit 2 checks passed. AX roles/labels/getters and CUA accessibility inspection are present; **neither is actual VoiceOver navigation/speech/focus testing**. OS drag-export to another app is also unobserved, but the plan's X01 asks for mouse drag-selection, not that extra workflow. |
 | X02 | PASS — actual workflow + regressions | Relation jumps, historical/worktree boundary, stale content, bookmarks, frozen Reading Set and normal process/session restore are covered by tests plus the real operator sequence. |
 | X03 | PASS in recorded scope | Actual Safe-mode operator session, native non-source previews and Settings propagation plus 795-key localization checks. The CI fake Exact provider is not counted as real-provider evidence. Runtime locale attachment details remain the V08 boundary. |
 | X04 | PASS | S1/S2 targeted disabled-policy tests plus fresh Release environment-flag runs on all six fixtures each passed; [retained records](stage-s7-rollback.json). S5/S6 explicit native Release flag runs passed. |
@@ -99,8 +99,8 @@ more samples, repeat full CI, or build the prepared twenty-switch resource overl
 to close this document's remaining cells. Revisit them when a relevant change,
 observed regression or release decision justifies the work.
 
-- **VoiceOver:** actual navigation/speech/focus remains NOT_RUN, with OS-setting
-  authorization pending. AX inspection is not a substitute.
+- **VoiceOver:** navigation/speech/focus testing is explicitly excluded by the
+  user. It is not awaiting authorization and is not a goal blocker; no PASS is claimed.
 - **Extended resources:** the prepared same-process twenty-switch observer was
   never built/run and is not evidence. Existing cache/cancellation/weak-reference
   checks prove their narrower scope; process peaks do not establish leak freedom.
@@ -146,5 +146,5 @@ The later scheduling repair adds three regressions for worker start before
 MainActor yields, already-cancelled subscription, and a dropped Reader's unpublished
 token. Complete final CI is **1,138/1,138 PASS**, with native self-tests and
 architecture gates: [verified record](stage-s7-ci.json). Final packaged session
-restoration and six cache-disabled native fixtures also pass. Actual sample counts are retained in the performance report; VoiceOver and
-extended resource checks are explicitly deferred under the user-adjusted scope.
+restoration and six cache-disabled native fixtures also pass. Actual sample counts are retained in the performance report. VoiceOver testing
+is excluded by the user; extended resource checks are deferred under the adjusted scope.
