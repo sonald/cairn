@@ -1857,3 +1857,54 @@ func lensSpansTheReaderAndRelationsButNotTheSidebar() async throws {
     // The sidebar runs the full height beside the Lens.
     #expect(sidebar.minY <= lens.minY + 1)
 }
+
+@MainActor
+@Test
+func statusBarUsesThemeColorsAndShowsTheReachableCertainty() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn target() -> i32 { 42 }\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "StatusBarTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel()
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(theme: .light),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    try model.openProject(root: root, language: .rust)
+    #expect(await mainWindowWaitUntil(model.fileTree != nil))
+    controller.renderForSelfTest()
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    #expect(controller.selfTestStatusBarVisible)
+
+    func rgb(_ value: Any?) -> UInt32? {
+        let color: NSColor? = switch value {
+        case let color as NSColor: color
+        case let color as CGColor: NSColor(cgColor: color)
+        default: nil
+        }
+        guard let srgb = color?.usingColorSpace(.sRGB) else { return nil }
+        return UInt32((srgb.redComponent * 255).rounded()) << 16
+            | UInt32((srgb.greenComponent * 255).rounded()) << 8
+            | UInt32((srgb.blueComponent * 255).rounded())
+    }
+    var style = controller.selfTestStatusStyle
+    #expect(style.stonesVisible)
+    // No provider in tests: Exact is preparing, off or unavailable, and fuzzy
+    // still reaches Strong. Each state uses its theme token, never a system color.
+    #expect(style.reach == .strong)
+    #expect([0x5C645F, 0x8A5610, 0x9B3D27].contains(rgb(style.exactColor) ?? 0))
+    #expect(rgb(style.truncatedFill) == 0xF3E5CA)
+    #expect(rgb(style.separator) == 0xD5D1C6)
+
+    controller.applyReaderSettings(ReaderSettings(theme: .siClassic))
+    style = controller.selfTestStatusStyle
+    #expect([0x555555, 0x8A6100, 0xA01E1E].contains(rgb(style.exactColor) ?? 0))
+    #expect(rgb(style.truncatedFill) == 0xFFF1C2)
+    #expect(rgb(style.separator) == 0xC9C9C1)
+}

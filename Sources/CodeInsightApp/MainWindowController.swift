@@ -65,6 +65,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let contextButton = NSButton(title: localized("main.context"), target: nil, action: nil)
     private let trailView = ReadingTrailView()
     private let statusBar = NSView()
+    private let statusSeparator = NSView()
+    /// The highest certainty Exact can currently deliver, as stones.
+    private let exactStones = CertaintyStonesView(
+        certainty: .possible, theme: ReaderTheme(settings: ReaderSettings()), size: 13
+    )
     private let truncatedLabel = NSTextField(labelWithString: localized("main.results.truncated"))
     private var focusNotice: String?
     // A unique identifier per controller keeps AppKit's toolbar-family
@@ -275,7 +280,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.isHidden = true
-        let separator = NSView()
+        let separator = statusSeparator
         separator.translatesAutoresizingMaskIntoConstraints = false
         separator.wantsLayer = true
         separator.layer?.backgroundColor = NSColor.separatorColor.cgColor
@@ -333,7 +338,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let statusStack = NSStackView()
         statusStack.setViews([contextButton, indexLabel, identifierStatusLabel, refreshIndexButton], in: .leading)
         statusStack.setViews([truncatedLabel], in: .center)
-        statusStack.setViews([exactLabel, exactInfoButton], in: .trailing)
+        statusStack.setViews([exactStones, exactLabel, exactInfoButton], in: .trailing)
         statusStack.translatesAutoresizingMaskIntoConstraints = false
         statusStack.orientation = .horizontal
         statusStack.alignment = .centerY
@@ -1813,7 +1818,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         let visible = contextVisibilityOverride ?? (panelPreset != .focus && hasContext)
         contextItem.isCollapsed = !visible
         contextButton.setAccessibilityLabel(visible ? localized("main.hide.definition.context") : localized("main.show.definition.context"))
-        contextButton.contentTintColor = visible ? .controlAccentColor : .secondaryLabelColor
+        let theme = ReaderTheme(settings: currentReaderSettings)
+        contextButton.contentTintColor = visible ? theme.accentColor : theme.chromeSecondaryColor
     }
 
     @objc private func showExactStatusDetails(_ sender: NSButton) {
@@ -2327,6 +2333,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         window?.titlebarAppearsTransparent = true
         statusBar.wantsLayer = true
         statusBar.layer?.backgroundColor = theme.chromeColor.cgColor
+        applyStatusTheme(theme)
         readerController.apply(settings: settings)
         secondaryReaderController.apply(settings: settings)
         sidebarController.apply(settings: settings)
@@ -3117,40 +3124,50 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case nil: nil
         }
         let trustSuffix = trust.map { " · \($0)" } ?? ""
+        let theme = ReaderTheme(settings: currentReaderSettings)
         let status: String
         let color: NSColor
+        // Exact ready (even limited) reaches Exact; otherwise fuzzy still reaches Strong.
+        let reach: Certainty
         let statusDetail: String?
         switch coordinator.readiness {
         case .ready:
             if environment?.limitations.contains(.dependenciesUnavailableOffline) == true {
                 status = localizedFormat("main.exact.deps.unavailable.offline", trustSuffix)
-                color = .systemOrange
+                color = theme.warningColor
+                reach = .exact
             } else if environment?.limitations.isEmpty == false {
                 status = localizedFormat("main.exact.ready.limited", trustSuffix)
-                color = .systemBlue
+                color = theme.inferredColor
+                reach = .exact
             } else if environment != nil {
                 status = localizedFormat("main.exact.ready", trustSuffix)
-                color = .systemGreen
+                color = theme.verifiedColor
+                reach = .exact
             } else {
                 status = localizedFormat("main.exact.ready.environment.unknown", trustSuffix)
-                color = .systemBlue
+                color = theme.inferredColor
+                reach = .exact
             }
             statusDetail = nil
         case .preparing:
             status = localizedFormat("main.exact.preparing", trustSuffix)
-            color = .secondaryLabelColor
+            color = theme.chromeSecondaryColor
+            reach = .strong
             statusDetail = nil
         case .unavailable(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
                 ? localized("main.exact.unavailable.sandbox")
                 : localized("main.exact.unavailable")
-            color = .systemRed
+            color = theme.unresolvedColor
+            reach = .strong
             statusDetail = reason
         case .off(let reason):
             status = reason.localizedCaseInsensitiveContains("sandbox")
                 ? localized("main.exact.unavailable.sandbox")
                 : localized("main.exact.off.safe")
-            color = .systemOrange
+            color = theme.warningColor
+            reach = .strong
             statusDetail = reason
         }
         let limitations = environment?.limitations
@@ -3181,6 +3198,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         exactLabel.stringValue = status
         exactLabel.textColor = color
         exactLabel.toolTip = detail
+        exactStones.update(certainty: reach, theme: theme)
+        exactStones.toolTip = detail
+    }
+
+    private func applyStatusTheme(_ theme: ReaderTheme) {
+        statusSeparator.layer?.backgroundColor = theme.chromeDividerColor.cgColor
+        indexLabel.textColor = theme.chromeSecondaryColor
+        identifierStatusLabel.textColor = theme.chromeSecondaryColor
+        truncatedLabel.textColor = theme.warningColor
+        truncatedLabel.backgroundColor = theme.amberSoftColor
+        contextButton.contentTintColor = contextItem.isCollapsed
+            ? theme.chromeSecondaryColor : theme.accentColor
+        renderExactStatus()
+    }
+
+    var selfTestStatusStyle: (exactColor: NSColor?, reach: Certainty, stonesVisible: Bool,
+                              truncatedFill: NSColor?, separator: CGColor?) {
+        (exactLabel.textColor, exactStones.certainty,
+         exactStones.window != nil && !exactStones.isHiddenOrHasHiddenAncestor
+            && exactStones.frame.width > 0,
+         truncatedLabel.backgroundColor, statusSeparator.layer?.backgroundColor)
     }
 
     private var initialIndexStatus: String? {
