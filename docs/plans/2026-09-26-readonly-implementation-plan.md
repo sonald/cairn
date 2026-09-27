@@ -1,7 +1,7 @@
 # Cairn 只读架构优化：实施计划与验收
 
 日期：2026-09-26  
-状态：**实施中。S0–S4 已完成（各阶段限制单独记录）；S5–S7 尚未验收。实际结果见 [S0](evidence/readonly/stage-s0.md)、[S1](evidence/readonly/stage-s1.md)、[S2](evidence/readonly/stage-s2.md)、[S3](evidence/readonly/stage-s3.md)、[S4](evidence/readonly/stage-s4.md)。**
+状态：**实施中。S0–S4、S5a 已完成（各阶段限制单独记录）；S5b–S7 尚未验收。实际结果见 [S0](evidence/readonly/stage-s0.md)、[S1](evidence/readonly/stage-s1.md)、[S2](evidence/readonly/stage-s2.md)、[S3](evidence/readonly/stage-s3.md)、[S4](evidence/readonly/stage-s4.md)、[S5a](evidence/readonly/stage-s5a.md)。**
 复核基线：`6a54ef1562282c8852c3038022c12720b96d9fc0`。  
 设计依据：[只读架构详细设计](2026-09-26-readonly-design.md)。
 

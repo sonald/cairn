@@ -3959,11 +3959,18 @@ public final class ReaderTextView {
         map: DisplayMap,
         attachments: [FoldID: FoldAttachment]
     )? {
-        guard let topology = document.foldTopology,
-              let map = DisplayMap(
-            document: document,
-            renderedFoldIDs: renderedFoldIDs
-        ) else { return nil }
+        guard let map = DisplayMap(document: document, renderedFoldIDs: renderedFoldIDs),
+              let materialized = materializeProjection(document: document, map: map,
+                  attributes: attributes, theme: theme) else { return nil }
+        return (materialized.attributed, map, materialized.attachments)
+    }
+
+    /// Geometry is already validated; this is the explicit UI materialization seam.
+    private static func materializeProjection(
+        document: ReaderDocument, map: DisplayMap,
+        attributes: [NSAttributedString.Key: Any], theme: ReaderTheme
+    ) -> (attributed: NSMutableAttributedString, attachments: [FoldID: FoldAttachment])? {
+        guard let topology = document.foldTopology else { return nil }
         ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, map.projectedUTF16Length)
         let attributed = NSMutableAttributedString(
             string: map.projectedString,
@@ -3987,7 +3994,7 @@ public final class ReaderTextView {
             )
             attachments[placeholder.id] = attachment
         }
-        return (attributed, map, attachments)
+        return (attributed, attachments)
     }
 
     // Defense-in-depth fuse only; projection construction is the root consistency seam.
