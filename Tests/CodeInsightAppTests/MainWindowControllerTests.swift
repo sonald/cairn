@@ -1413,9 +1413,12 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
         controller.renderForSelfTest()
         return controller
     }
-    func findUpperSplit(_ view: NSView) -> NSSplitView? {
-        if let split = view as? NSSplitView, split.isVertical, split.arrangedSubviews.count == 3 { return split }
-        return view.subviews.lazy.compactMap(findUpperSplit).first
+    // D5: sidebar | (reader | Relations over the Lens). Vertical splits in
+    // depth-first order are the outer split, the reader/Relations split, then
+    // the compare split.
+    func verticalSplits(_ view: NSView) -> [NSSplitView] {
+        let own = (view as? NSSplitView).flatMap { $0.isVertical ? [$0] : nil } ?? []
+        return own + view.subviews.flatMap(verticalSplits)
     }
     let first = try await makeController()
     defer { first.close() }
@@ -1520,9 +1523,11 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     first.renderForSelfTest()
     #expect(first.selfTestContextPaneCollapsed)
     first.toggleRelations()
-    let upper = try #require(first.window?.contentView.flatMap(findUpperSplit))
-    upper.setPosition(250, ofDividerAt: 0)
-    upper.setPosition(upper.bounds.width - 700, ofDividerAt: 1)
+    let splits = try #require(first.window?.contentView.map(verticalSplits))
+    try #require(splits.count >= 2)
+    splits[0].setPosition(250, ofDividerAt: 0)
+    splits[0].layoutSubtreeIfNeeded()
+    splits[1].setPosition(splits[1].bounds.width - 700, ofDividerAt: 0)
     first.renderForSelfTest()
     let width = first.selfTestRelationsPaneWidth
     #expect(width > 628, "A wide window must permit the inspector's side-by-side mode")
@@ -1804,4 +1809,51 @@ func lensShowsSerifSymbolStonesThemedBadgeAndAPinnedTint() async throws {
     controller.selfTestSetPinned(false)
     try await Task.sleep(for: .milliseconds(50))
     #expect(rgb(controller.selfTestLensStyle.headerFill) == 0xE7E3DA)
+}
+
+@MainActor
+@Test
+func lensSpansTheReaderAndRelationsButNotTheSidebar() async throws {
+    _ = NSApplication.shared
+    let source = "pub fn target() -> i32 { 42 }\n"
+    let root = try mainWindowTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "LensLayoutTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel()
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    try model.openProject(root: root, language: .rust)
+    #expect(await mainWindowWaitUntil(model.fileTree != nil))
+    let window = try #require(controller.window)
+    window.setContentSize(NSSize(width: 1400, height: 900))
+    controller.renderForSelfTest()
+    if controller.selfTestContextPaneCollapsed { controller.toggleContext(nil) }
+    window.contentView?.layoutSubtreeIfNeeded()
+    #expect(!controller.selfTestSidebarPaneCollapsed)
+    #expect(!controller.selfTestContextPaneCollapsed)
+
+    func frame(_ name: String) throws -> NSRect {
+        let child = Mirror(reflecting: controller).children.first { $0.label == name }?.value
+        let view = try #require((child as? NSViewController)?.view)
+        #expect(view.window === window && !view.isHiddenOrHasHiddenAncestor)
+        return view.convert(view.bounds, to: nil)
+    }
+    let sidebar = try frame("sidebarController")
+    let lens = try frame("contextController")
+    let reader = try frame("readerController")
+    #expect(sidebar.width > 0 && lens.width > 0 && lens.height > 0)
+    // D5: the Lens starts where the sidebar ends and reaches the window edge.
+    #expect(lens.minX >= sidebar.maxX - 1)
+    #expect(abs(lens.maxX - (window.contentView?.bounds.maxX ?? 0)) <= 1)
+    #expect(abs(lens.minX - reader.minX) <= 1)
+    // The sidebar runs the full height beside the Lens.
+    #expect(sidebar.minY <= lens.minY + 1)
 }

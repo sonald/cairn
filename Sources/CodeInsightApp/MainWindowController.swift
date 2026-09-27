@@ -41,6 +41,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private let secondaryReaderController: ReaderViewController
     private let contextController: ContextWindowViewController
     private let relationController: RelationWindowController
+    /// D5: sidebar | work area; the Lens spans only the reader and Relations.
+    private let outerSplitController = NSSplitViewController()
     private let contentSplitController = NSSplitViewController()
     private let upperSplitController = NSSplitViewController()
     private let readerSplitController = NSSplitViewController()
@@ -220,6 +222,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerGroupItem = NSSplitViewItem(viewController: readerSplitController)
         contextItem = NSSplitViewItem(viewController: contextController)
 
+        outerSplitController.splitView.isVertical = true
+        outerSplitController.splitView.dividerStyle = .thin
         contentSplitController.splitView.isVertical = false
         upperSplitController.splitView.isVertical = true
         readerSplitController.splitView.isVertical = true
@@ -247,7 +251,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         relationItem.minimumThickness = 300
         relationItem.automaticMaximumThickness = 380
         relationItem.canCollapse = true
-        upperSplitController.addSplitViewItem(sidebarItem)
         upperSplitController.addSplitViewItem(readerGroupItem)
         upperSplitController.addSplitViewItem(relationItem)
         relationItem.isCollapsed = true
@@ -258,12 +261,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextItem.canCollapse = true
         contentSplitController.addSplitViewItem(upperItem)
         contentSplitController.addSplitViewItem(contextItem)
+        let workItem = NSSplitViewItem(viewController: contentSplitController)
+        workItem.minimumThickness = 300
+        workItem.canCollapse = false
+        outerSplitController.addSplitViewItem(sidebarItem)
+        outerSplitController.addSplitViewItem(workItem)
 
         let contentView = NSView()
         let contentViewController = NSViewController()
         contentViewController.view = contentView
-        contentViewController.addChild(contentSplitController)
-        contentSplitController.view.translatesAutoresizingMaskIntoConstraints = false
+        contentViewController.addChild(outerSplitController)
+        outerSplitController.view.translatesAutoresizingMaskIntoConstraints = false
 
         statusBar.translatesAutoresizingMaskIntoConstraints = false
         statusBar.isHidden = true
@@ -331,7 +339,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         statusStack.alignment = .centerY
         statusStack.spacing = 12
         let contentStack = NSStackView(
-            views: [trailView, contentSplitController.view, statusBar]
+            views: [trailView, outerSplitController.view, statusBar]
         )
         contentStack.translatesAutoresizingMaskIntoConstraints = false
         contentStack.orientation = .vertical
@@ -354,7 +362,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             contentStack.bottomAnchor.constraint(
                 equalTo: contentView.bottomAnchor
             ),
-            contentSplitController.view.widthAnchor.constraint(
+            outerSplitController.view.widthAnchor.constraint(
                 equalTo: contentStack.widthAnchor
             ),
             trailView.widthAnchor.constraint(equalTo: contentStack.widthAnchor),
@@ -1272,8 +1280,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
     var selfTestContentSplitFrameInContentView: NSRect {
         guard let contentView = window?.contentView else { return .zero }
-        return contentSplitController.view.convert(
-            contentSplitController.view.bounds,
+        return outerSplitController.view.convert(
+            outerSplitController.view.bounds,
             to: contentView
         )
     }
@@ -1287,8 +1295,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestStatusBarVisible: Bool {
         guard selfTestViewIsVisibleInWindow(statusBar) else { return false }
         let statusFrame = statusBar.convert(statusBar.bounds, to: nil)
-        let contentFrame = contentSplitController.view.convert(
-            contentSplitController.view.bounds,
+        let contentFrame = outerSplitController.view.convert(
+            outerSplitController.view.bounds,
             to: nil
         )
         return abs(statusFrame.height - 24) < 0.5
@@ -1927,24 +1935,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// floor, and the pane's restored thickness is clamped to the width
     /// that fits beside the reader (§3.1).
     private func openRelationsPane() {
+        let outerSplit = outerSplitController.splitView
         let upperSplit = upperSplitController.splitView
-        upperSplit.layoutSubtreeIfNeeded()
+        outerSplit.layoutSubtreeIfNeeded()
         let available = min(
-            upperSplit.bounds.width,
-            window?.contentLayoutRect.width ?? upperSplit.bounds.width
+            outerSplit.bounds.width,
+            window?.contentLayoutRect.width ?? outerSplit.bounds.width
         )
         let sidebarWidth = sidebarItem.isCollapsed
             ? 0
-            : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+            : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
         if !sidebarItem.isCollapsed,
            available - sidebarWidth - relationItem.minimumThickness < 480
         {
             sidebarItem.isCollapsed = true
             sidebarTemporarilyCollapsedForRelations = true
         }
+        outerSplit.layoutSubtreeIfNeeded()
         let fittedSidebar = sidebarItem.isCollapsed
             ? 0
-            : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+            : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
         let target = max(
             relationItem.minimumThickness,
             available - fittedSidebar - 480 - upperSplit.dividerThickness
@@ -1957,9 +1967,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         // never grows to satisfy pane layout.
         capRelationsPane(width: target)
         relationItem.isCollapsed = false
+        outerSplit.layoutSubtreeIfNeeded()
         upperSplit.layoutSubtreeIfNeeded()
         let preferredWidth = (restoredPanelLayout()?.relationsFraction ?? 0) * available
-        upperSplit.setPosition(available - min(target, max(300, preferredWidth > 0 ? preferredWidth : 360)), ofDividerAt: 1)
+        upperSplit.setPosition(
+            upperSplit.bounds.width - min(target, max(300, preferredWidth > 0 ? preferredWidth : 360)),
+            ofDividerAt: 0
+        )
         if let frameBefore,
            window?.frame.width ?? 0 > frameBefore.width + 0.5
         {
@@ -1992,16 +2006,17 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         guard contentSurfaceMode == .source else { return }
         if case .some(.readingSet) = model.tabStrip.activeTab?.content { return }
         let relationsOpen = !relationItem.isCollapsed
+        let outerSplit = outerSplitController.splitView
         let upperSplit = upperSplitController.splitView
         if relationsOpen {
-            upperSplit.layoutSubtreeIfNeeded()
+            outerSplit.layoutSubtreeIfNeeded()
             let available = min(
-                upperSplit.bounds.width,
-                window?.contentLayoutRect.width ?? upperSplit.bounds.width
+                outerSplit.bounds.width,
+                window?.contentLayoutRect.width ?? outerSplit.bounds.width
             )
             let sidebarWidth = sidebarItem.isCollapsed
                 ? 0
-                : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+                : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
             let preferredWidth = upperSplit.arrangedSubviews.last?.frame.width ?? 360
             if !sidebarItem.isCollapsed,
                available - sidebarWidth - preferredWidth
@@ -2012,7 +2027,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             }
             let sidebarWidthNow = sidebarItem.isCollapsed
                 ? 0
-                : (upperSplit.arrangedSubviews.first?.frame.width ?? 0)
+                : (outerSplit.arrangedSubviews.first?.frame.width ?? 0)
             capRelationsPane(width: available - sidebarWidthNow - 480 - upperSplit.dividerThickness)
         } else {
             capRelationsPane(width: nil)
@@ -2206,24 +2221,26 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// preset defaults.
     private func currentPanelLayout() -> PanelLayoutDescription {
         let base = restoredPanelLayout() ?? panelPreset.layout
+        let outerSplit = outerSplitController.splitView
         let upperSplit = upperSplitController.splitView
         let contentSplit = contentSplitController.splitView
         let readerSplit = readerSplitController.splitView
+        // Fractions stay relative to the whole width, as before D5.
         let sidebarFraction: Double
         if !sidebarItem.isCollapsed,
-           upperSplit.bounds.width > 0,
-           let sidebar = upperSplit.arrangedSubviews.first
+           outerSplit.bounds.width > 0,
+           let sidebar = outerSplit.arrangedSubviews.first
         {
-            sidebarFraction = sidebar.frame.width / upperSplit.bounds.width
+            sidebarFraction = sidebar.frame.width / outerSplit.bounds.width
         } else {
             sidebarFraction = base.sidebarFraction
         }
         let relationsFraction: Double
         if !relationItem.isCollapsed,
-           upperSplit.bounds.width > 0,
+           outerSplit.bounds.width > 0,
            let relations = upperSplit.arrangedSubviews.last
         {
-            relationsFraction = relations.frame.width / upperSplit.bounds.width
+            relationsFraction = relations.frame.width / outerSplit.bounds.width
         } else {
             relationsFraction = base.relationsFraction
         }
@@ -2417,29 +2434,33 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     var selfTestUpperPaneWidths: (sidebar: CGFloat, reader: CGFloat) {
         window?.contentView?.layoutSubtreeIfNeeded()
-        let panes = upperSplitController.splitView.arrangedSubviews
-        guard panes.count >= 2 else { return (0, 0) }
-        return (panes[0].frame.width, panes[1].frame.width)
+        let sidebar = outerSplitController.splitView.arrangedSubviews.first
+        let reader = upperSplitController.splitView.arrangedSubviews.first
+        guard let sidebar, let reader else { return (0, 0) }
+        return (sidebar.frame.width, reader.frame.width)
     }
 
     var selfTestContentView: NSView? { window?.contentView }
 
     private func applyPanelSizes(_ layout: PanelLayoutDescription) {
         window?.contentView?.layoutSubtreeIfNeeded()
+        let outerSplit = outerSplitController.splitView
         let upperSplit = upperSplitController.splitView
         // The deferred application must not re-open panes the surface
         // adaptation folded after the preset was applied.
         if !layout.sidebarCollapsed, !sidebarItem.isCollapsed,
-           upperSplit.bounds.width > 0 {
-            upperSplit.setPosition(
-                upperSplit.bounds.width * layout.sidebarFraction,
+           outerSplit.bounds.width > 0 {
+            outerSplit.setPosition(
+                outerSplit.bounds.width * layout.sidebarFraction,
                 ofDividerAt: 0
             )
+            outerSplit.layoutSubtreeIfNeeded()
         }
         if !layout.relationsCollapsed, !relationItem.isCollapsed, upperSplit.bounds.width > 0 {
             upperSplit.setPosition(
-                upperSplit.bounds.width * (1 - layout.relationsFraction) - upperSplit.dividerThickness,
-                ofDividerAt: 1
+                upperSplit.bounds.width - outerSplit.bounds.width * layout.relationsFraction
+                    - upperSplit.dividerThickness,
+                ofDividerAt: 0
             )
         }
         let contentSplit = contentSplitController.splitView
