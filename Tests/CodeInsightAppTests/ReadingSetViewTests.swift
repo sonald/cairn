@@ -390,3 +390,45 @@ private func wrapReadingSetExcerpts() -> [ReadingSetExcerpt] {
                           inspector: original.inspector, caveat: original.caveat)
     }
 }
+
+@MainActor
+@Test
+func readingSetUsesASerifTitleCardsOnTheWellAndBadgeColoredRoles() throws {
+    _ = NSApplication.shared
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 980, height: 900),
+        styleMask: [.titled], backing: .buffered, defer: false
+    )
+    window.contentViewController = controller
+    defer { window.orderOut(nil) }
+    controller.apply(settings: ReaderSettings(theme: .light))
+    controller.display(TabContent.readingSet(title: "spawn", excerpts: prototypeReadingSetExcerpts()))
+    window.contentView?.layoutSubtreeIfNeeded()
+
+    func rgb(_ value: Any?) -> UInt32? {
+        let color: NSColor? = switch value {
+        case let color as NSColor: color
+        case let color as CGColor: NSColor(cgColor: color)
+        default: nil
+        }
+        guard let srgb = color?.usingColorSpace(.sRGB) else { return nil }
+        return UInt32((srgb.redComponent * 255).rounded()) << 16
+            | UInt32((srgb.greenComponent * 255).rounded()) << 8
+            | UInt32((srgb.blueComponent * 255).rounded())
+    }
+    let view = try #require(Mirror(reflecting: controller).children
+        .first { $0.label == "readingSetView" }?.value as? ReadingSetView)
+    #expect(view.window === window && !view.isHiddenOrHasHiddenAncestor)
+    let style = view.selfTestStyle
+    #expect(style.titleFont?.fontName.contains("NewYork") == true)
+    #expect(rgb(style.pageFill) == 0xF3F1EB)
+    #expect(style.cards.count == 5)
+    #expect(style.cards.allSatisfy { rgb($0.fill) == 0xFBFAF6 })
+    // Card 2 is a verified caller, card 3 an inferred one.
+    #expect(rgb(style.cards[1].role) == 0x2B5849)
+    #expect(rgb(style.cards[1].badgeFill) == 0xDCE7E0)
+    #expect(rgb(style.cards[2].role) == 0x3A5873)
+    #expect(rgb(style.cards[2].badgeFill) == 0xDFE6ED)
+}

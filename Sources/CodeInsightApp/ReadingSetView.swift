@@ -59,7 +59,7 @@ final class ReadingSetView: NSView {
         content.alignment = .width
         content.spacing = 14
         content.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold)
+        titleLabel.font = cairnSerifFont(ofSize: 22, weight: .medium)
         subtitleLabel.font = .systemFont(ofSize: 11)
         emptyLabel.font = .systemFont(ofSize: 12)
         emptyLabel.alignment = .center
@@ -190,7 +190,8 @@ final class ReadingSetView: NSView {
         fontEnvironmentRevision = revision
         self.settings = settings
         theme = ReaderTheme(settings: settings)
-        layer?.backgroundColor = theme.backgroundColor.cgColor
+        // Cards sit on the chrome well so each frozen excerpt reads as a page.
+        layer?.backgroundColor = theme.chromeColor.cgColor
         titleLabel.textColor = theme.foregroundColor
         subtitleLabel.textColor = theme.chromeSecondaryColor
         emptyLabel.textColor = theme.chromeSecondaryColor
@@ -293,6 +294,10 @@ final class ReadingSetView: NSView {
     }
 
     var selfTestGutterLabels: [[String]] { cards.map { $0.gutterLabels } }
+    var selfTestStyle: (titleFont: NSFont?, pageFill: CGColor?,
+                        cards: [(fill: CGColor?, role: NSColor?, badgeFill: CGColor?)]) {
+        (titleLabel.font, layer?.backgroundColor, cards.map(\.selfTestStyle))
+    }
     var selfTestCodeViews: [NSTextView] { cards.map(\.codeView) }
     var selfTestTextViews: [NSTextView] { selfTestCodeViews }
     var selfTestCodeScrollViews: [NSScrollView] { cards.map(\.codeScroll) }
@@ -395,14 +400,14 @@ private final class ReadingSetExcerptView: NSView {
         self.index = index
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.cornerRadius = 8
+        layer?.cornerRadius = 10
         layer?.borderWidth = 1
         translatesAutoresizingMaskIntoConstraints = false
         header.orientation = .horizontal
         header.alignment = .centerY
         header.spacing = 8
         roleLabel.font = .systemFont(ofSize: 9.5, weight: .bold)
-        symbolLabel.font = .systemFont(ofSize: 12, weight: .semibold)
+        symbolLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
         pathLabel.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
         pathLabel.lineBreakMode = .byTruncatingMiddle
         let spacer = NSView()
@@ -502,7 +507,7 @@ private final class ReadingSetExcerptView: NSView {
             codeView.textColor = theme.foregroundColor
         }
         self.theme = theme
-        layer?.backgroundColor = theme.chromeColor.cgColor
+        layer?.backgroundColor = theme.backgroundColor.cgColor
         layer?.borderColor = theme.chromeDividerColor.cgColor
         roleLabel.textColor = theme.accentColor
         symbolLabel.textColor = theme.foregroundColor
@@ -515,22 +520,26 @@ private final class ReadingSetExcerptView: NSView {
         lineNumbers.textColor = theme.chromeTertiaryColor
         lineNumbers.needsDisplay = true
         guard let excerpt else { return }
+        // The role eyebrow speaks in the same color as its provenance badge.
         switch excerpt.inspector.badge {
         case .verified:
+            roleLabel.textColor = theme.verifiedColor
             badge.display(
                 localized("readingSet.verified"),
                 foreground: theme.verifiedColor,
-                background: theme.verifiedBackgroundColor,
-                border: theme.verifiedBackgroundColor
+                background: theme.mossSoftColor,
+                border: theme.mossSoftColor
             )
         case .inferred:
+            roleLabel.textColor = theme.inferredColor
             badge.display(
                 localized("readingSet.inferred"),
                 foreground: theme.inferredColor,
-                background: theme.inferredBackgroundColor,
-                border: theme.inferredBackgroundColor
+                background: theme.slateSoftColor,
+                border: theme.slateSoftColor
             )
         case .unresolved:
+            roleLabel.textColor = theme.unresolvedColor
             badge.display(
                 localized("readingSet.unresolved"),
                 foreground: theme.unresolvedColor,
@@ -687,6 +696,9 @@ private final class ReadingSetExcerptView: NSView {
     }
 
     var gutterLabels: [String] { lineNumbers.labels.map(\.0) }
+    var selfTestStyle: (fill: CGColor?, role: NSColor?, badgeFill: CGColor?) {
+        (layer?.backgroundColor, roleLabel.textColor, badge.layer?.backgroundColor)
+    }
 
     var selfTestCodeState: (String, Bool, Bool) {
         (codeView.string, codeView.isSelectable, codeView.isEditable)
