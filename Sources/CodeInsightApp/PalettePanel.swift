@@ -149,6 +149,39 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 
     var rowsForTesting: [Row] { rows }
+    var isModeLockedForTesting: Bool { lockedMode != nil }
+    var hintForTesting: NSAttributedString { hintLabel.attributedStringValue }
+
+    static func prefix(for mode: Mode) -> Character? {
+        switch mode {
+        case .file: nil
+        case .command: ">"
+        case .currentSymbol: "@"
+        case .projectSymbol: "#"
+        case .line: ":"
+        }
+    }
+
+    /// Seek's prefix legend with the active mode's segment in the accent color,
+    /// so switching by typing a prefix is visible where the hint already sits.
+    static func modeHint(_ hint: String, active: Mode, theme: ReaderTheme) -> NSAttributedString {
+        let text = NSMutableAttributedString(string: hint, attributes: [
+            .font: NSFont.systemFont(ofSize: 10.5),
+            .foregroundColor: theme.chromeTertiaryColor,
+        ])
+        guard let prefix = prefix(for: active) else { return text }
+        let ns = hint as NSString
+        let start = ns.range(of: "\(prefix) ")
+        guard start.location != NSNotFound else { return text }
+        let rest = NSRange(location: start.location, length: ns.length - start.location)
+        let gap = ns.range(of: "  ", options: [], range: rest)
+        let end = gap.location == NSNotFound ? ns.length : gap.location
+        text.addAttributes([
+            .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+            .foregroundColor: theme.accentColor,
+        ], range: NSRange(location: start.location, length: end - start.location))
+        return text
+    }
     var tableViewForTesting: NSTableView { tableView }
     var emptyMessageForTesting: String { emptyLabel.stringValue }
     var inputFrameForTesting: NSRect { input.convert(input.bounds, to: nil) }
@@ -460,9 +493,13 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         case .projectSymbol: localized("panel.palette.projectSymbol")
         case .line: localized("panel.palette.line")
         }
-        hintLabel.stringValue = lockedMode == nil
-            ? localized("panel.palette.hint")
-            : localized("panel.palette.navigation")
+        if lockedMode == nil {
+            hintLabel.attributedStringValue = Self.modeHint(
+                localized("panel.palette.hint"), active: parsed.mode, theme: theme
+            )
+        } else {
+            hintLabel.stringValue = localized("panel.palette.navigation")
+        }
         switch parsed.mode {
         case .file:
             symbolModel.reset()

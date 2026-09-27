@@ -1,5 +1,6 @@
 import AppKit
 import CodeInsightCore
+import CodeInsightEngine
 import CodeInsightReaderCore
 import Foundation
 import Testing
@@ -585,4 +586,67 @@ private func waitUntil(
         try? await Task.sleep(for: .milliseconds(10))
     }
     return condition()
+}
+
+@MainActor
+@Test
+func seekStartsInProjectSymbolsButSwitchesModesByPrefix() throws {
+    let panel = PalettePanel(appModel: AppModel(), settings: ReaderSettings(theme: .light), onOpen: { _, _, _ in })
+    defer { panel.close() }
+    panel.show(prefill: "#", relativeTo: nil)
+    #expect(!panel.isModeLockedForTesting)
+    #expect(panel.emptyMessageForTesting == "Type a project symbol")
+    // The active prefix is highlighted in the legend.
+    let hint = panel.hintForTesting
+    let symbols = (hint.string as NSString).range(of: "# Project symbols")
+    #expect(symbols.location != NSNotFound)
+    let symbolsColor = hint.attribute(.foregroundColor, at: symbols.location, effectiveRange: nil) as? NSColor
+    let commandsColor = hint.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+    #expect(symbolsColor != commandsColor)
+    #expect(paletteRGB(symbolsColor) == 0x2B5849)
+
+    // Unlike the old locked symbol search, a prefix now switches mode.
+    panel.setQueryForTesting("> Item")
+    #expect(panel.emptyMessageForTesting != "No project symbols found")
+    let commandsNow = panel.hintForTesting.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor
+    #expect(paletteRGB(commandsNow) == 0x2B5849)
+}
+
+@MainActor
+private func paletteRGB(_ color: NSColor?) -> UInt32? {
+    guard let srgb = color?.usingColorSpace(.sRGB) else { return nil }
+    return UInt32((srgb.redComponent * 255).rounded()) << 16
+        | UInt32((srgb.greenComponent * 255).rounded()) << 8
+        | UInt32((srgb.blueComponent * 255).rounded())
+}
+
+private struct SeekIndexService: IndexService {
+    func index(root: URL, language: LanguageID) async throws -> EngineSession {
+        throw CocoaError(.featureUnsupported)
+    }
+}
+
+@MainActor
+@Test
+func commandTOpensTheSameUnlockedSeekPalette() throws {
+    let suite = "SeekTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let controller = MainWindowController(
+        model: AppModel(indexService: SeekIndexService()),
+        settings: ReaderSettings(),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    controller.showSymbolSearch()
+    let palette = try #require(Mirror(reflecting: controller).children
+        .first { $0.label == "palettePanel" }?.value as? PalettePanel)
+    #expect(!palette.isModeLockedForTesting)
+    #expect(palette.emptyMessageForTesting == "Type a project symbol")
+    controller.showPalette()
+    let same = try #require(Mirror(reflecting: controller).children
+        .first { $0.label == "palettePanel" }?.value as? PalettePanel)
+    #expect(same === palette)
 }

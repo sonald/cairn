@@ -248,6 +248,9 @@
 "main.switch.features.here.the.current.unit.is.detected" = "在此切换特性；当前单元自动检测";
 "main.symbols" = "符号";
 "main.symbols.t" = "符号  ⌘T";
+"main.seek" = "跳转";
+"main.seek.p" = "跳转  ⌘P";
+"main.open.seek" = "打开跳转面板";
 "main.syntax.highlighting.failed" = "语法高亮失败";
 "main.tab.title" = "%@%@";
 "main.this.project" = "此项目";

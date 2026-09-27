@@ -248,6 +248,9 @@
 "main.switch.features.here.the.current.unit.is.detected" = "Switch features here; the current unit is detected";
 "main.symbols" = "Symbols";
 "main.symbols.t" = "Symbols  ⌘T";
+"main.seek" = "Seek";
+"main.seek.p" = "Seek  ⌘P";
+"main.open.seek" = "Open Seek";
 "main.syntax.highlighting.failed" = "Syntax highlighting failed";
 "main.tab.title" = "%@%@";
 "main.this.project" = "this project";

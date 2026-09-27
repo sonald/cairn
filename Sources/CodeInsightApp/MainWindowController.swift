@@ -1684,8 +1684,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return visibleFrame.width > 0 && visibleFrame.height > 0
     }
 
+    /// D1: ⌘T and ⌘P share one Seek palette; ⌘T only starts in project symbols.
     func showSymbolSearch() {
-        showPalette(prefill: "#", lockMode: true)
+        showPalette(prefill: "#")
     }
 
     func showPalette(prefill: String = "", lockMode: Bool = false) {
@@ -2569,27 +2570,27 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.symbolsItemIdentifier:
-            item.label = localized("main.symbols")
+            item.label = localized("main.seek")
             item.view = symbolsButton
-            // §3.2: Symbols stays visible at 900pt with long project names;
+            // §3.2: Seek stays visible at 900pt with long project names;
             // project/version/profile chrome overflows first.
             item.visibilityPriority = .high
-            symbolsButton.title = localized("main.symbols.t")
+            symbolsButton.title = localized("main.seek.p")
             symbolsButton.image = NSImage(
                 systemSymbolName: "magnifyingglass",
-                accessibilityDescription: localized("main.symbols")
+                accessibilityDescription: localized("main.seek")
             )
             symbolsButton.imagePosition = .imageLeading
             symbolsButton.bezelStyle = .rounded
             symbolsButton.font = .systemFont(ofSize: 12)
             symbolsButton.target = self
-            symbolsButton.action = #selector(showSymbolSearchFromToolbar(_:))
+            symbolsButton.action = #selector(showSeekFromToolbar(_:))
             symbolsButton.frame.size = NSSize(width: 120, height: 28)
-            symbolsButton.setAccessibilityLabel(localized("main.open.symbol.search"))
+            symbolsButton.setAccessibilityLabel(localized("main.open.seek"))
             let menuItem = NSMenuItem(
-                title: localized("main.symbols"),
-                action: #selector(showSymbolSearchFromToolbar(_:)),
-                keyEquivalent: "t"
+                title: localized("main.seek"),
+                action: #selector(showSeekFromToolbar(_:)),
+                keyEquivalent: "p"
             )
             menuItem.keyEquivalentModifierMask = .command
             menuItem.target = self
@@ -3305,6 +3306,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     @objc private func showCommitPickerFromMenu(_ sender: Any?) {
         // Let the overflow menu finish tracking before showing a transient popover.
         DispatchQueue.main.async { [weak self] in self?.showCommitPicker(nil) }
+    }
+
+    @objc private func showSeekFromToolbar(_ sender: Any?) {
+        showPalette()
     }
 
     @objc private func showSymbolSearchFromToolbar(_ sender: Any?) {
