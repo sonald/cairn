@@ -50,15 +50,15 @@ public extension ReaderTheme {
     }
 
     var chromeColor: NSColor {
-        selection == .auto ? .windowBackgroundColor : dynamicColor(chromeRGB(isDark:))
+        dynamicColor(chromeRGB(isDark:))
     }
 
     var chromeHeaderColor: NSColor {
-        selection == .auto ? .controlBackgroundColor : dynamicColor(chromeHeaderRGB(isDark:))
+        dynamicColor(chromeHeaderRGB(isDark:))
     }
 
     var chromeDividerColor: NSColor {
-        selection == .auto ? .separatorColor : dynamicColor(chromeDividerRGB(isDark:))
+        dynamicColor(chromeDividerRGB(isDark:))
     }
 
     var chromeSelectionColor: NSColor {
@@ -68,7 +68,7 @@ public extension ReaderTheme {
     }
 
     var accentColor: NSColor {
-        selection == .auto ? .controlAccentColor : dynamicColor(accentRGB(isDark:))
+        dynamicColor(accentRGB(isDark:))
     }
 
     var chromeSecondaryColor: NSColor {

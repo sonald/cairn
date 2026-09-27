@@ -137,57 +137,67 @@ func readerThemeDerivesSIClassicPaletteAndTypographyFromSettings() {
     #expect(theme.functionNameFontSize == 18)
     #expect(!theme.syntaxFormatting)
     #expect(theme.humanistComments)
-    #expect(theme.backgroundRGB(isDark: false) == 0xF5F0E6)
-    #expect(theme.backgroundRGB(isDark: true) == 0xF5F0E6)
-    #expect(theme.foregroundRGB(isDark: false) == 0x1F2733)
-    #expect(theme.rgb(for: .keyword, isDark: false) == 0x7A1F1F)
-    #expect(theme.rgb(for: .functionName, isDark: false) == 0x163A5F)
+    #expect(theme.backgroundRGB(isDark: false) == 0xFFFFFF)
+    #expect(theme.backgroundRGB(isDark: true) == 0xFFFFFF)
+    #expect(theme.foregroundRGB(isDark: false) == 0x111111)
+    #expect(theme.rgb(for: .keyword, isDark: false) == 0x00008B)
+    #expect(theme.rgb(for: .functionName, isDark: false) == 0x000000)
 
     let light = ReaderTheme(settings: ReaderSettings(theme: .light))
     let dark = ReaderTheme(settings: ReaderSettings(theme: .dark))
-    #expect(light.backgroundRGB(isDark: true) == 0xFFFFFF)
-    #expect(dark.backgroundRGB(isDark: false) == 0x1E1E1E)
+    #expect(light.backgroundRGB(isDark: true) == 0xFBFAF6)
+    #expect(dark.backgroundRGB(isDark: false) == 0x121614)
 }
 
 @Test
 func readerThemeProvidesChromeSurfacesForEveryExplicitTheme() {
     let light = ReaderTheme(settings: ReaderSettings(theme: .light))
-    #expect(light.chromeSelectionRGB(isDark: false) == 0xE7F0FF)
-    #expect(light.chromeSecondaryRGB(isDark: false) == 0x5A6472)
-    #expect(light.verifiedRGB(isDark: false) == 0x1A7F37)
-    #expect(light.inferredRGB(isDark: false) == 0x175CD3)
-    #expect(light.unresolvedRGB(isDark: false) == 0x57606A)
-    #expect(light.unresolvedBorderRGB(isDark: false) == 0xC4CAD1)
-    #expect(light.warningRGB(isDark: false) == 0xB54708)
-    #expect(light.warningBorderRGB(isDark: false) == 0xEAAA7A)
+    #expect(light.chromeSelectionRGB(isDark: false) == 0xDCE7E0)
+    #expect(light.chromeSecondaryRGB(isDark: false) == 0x5C645F)
+    #expect(light.verifiedRGB(isDark: false) == 0x2B5849)
+    #expect(light.inferredRGB(isDark: false) == 0x3A5873)
+    #expect(light.unresolvedRGB(isDark: false) == 0x9B3D27)
+    #expect(light.unresolvedBorderRGB(isDark: false) == 0x9B3D27)
+    #expect(light.warningRGB(isDark: false) == 0x8A5610)
+    #expect(light.warningBorderRGB(isDark: false) == 0xC98A2E)
     #expect(light.warningFillAlpha(isDark: false) == 0.10)
-    #expect(light.chipBackgroundRGB(isDark: false) == 0xEFF1F4)
+    #expect(light.chipBackgroundRGB(isDark: false) == 0xE7E3DA)
+    #expect(light.amberMarkRGB(isDark: false) == 0xC98A2E)
+    #expect(light.amberSoftRGB(isDark: false) == 0xF3E5CA)
+    #expect(light.histRGB(isDark: false) == 0x7A5A2C)
+    #expect(light.histSoftRGB(isDark: false) == 0xEFE4CC)
+    #expect(light.histReaderRGB(isDark: false) == 0xFAF5EA)
+    #expect(light.mossSoftRGB(isDark: false) == 0xDCE7E0)
+    #expect(light.slateSoftRGB(isDark: false) == 0xDFE6ED)
+    #expect(light.rustSoftRGB(isDark: false) == 0xF4DFD7)
     #expect(light.primarySelectionFillAlpha(isDark: false) == 0.13)
 
     let dark = ReaderTheme(settings: ReaderSettings(theme: .dark))
-    #expect(dark.chromeRGB(isDark: true) == 0x252528)
-    #expect(dark.chromeHeaderRGB(isDark: true) == 0x2C2C30)
-    #expect(dark.chromeDividerRGB(isDark: true) == 0x34363B)
-    #expect(dark.accentRGB(isDark: true) == 0x84ADFF)
-    #expect(dark.verifiedRGB(isDark: true) == 0x4EC777)
+    #expect(dark.chromeRGB(isDark: true) == 0x161A18)
+    #expect(dark.chromeHeaderRGB(isDark: true) == 0x1D221F)
+    #expect(dark.chromeDividerRGB(isDark: true) == 0x2B312D)
+    #expect(dark.accentRGB(isDark: true) == 0x8CC6A9)
+    #expect(dark.verifiedRGB(isDark: true) == 0x8CC6A9)
     #expect(dark.inferredFillAlpha(isDark: true) == 0.18)
-    #expect(dark.unresolvedRGB(isDark: true) == 0xAAB1B8)
-    #expect(dark.unresolvedBorderRGB(isDark: true) == 0x4A4E54)
-    #expect(dark.warningRGB(isDark: true) == 0xF0A868)
-    #expect(dark.warningBorderRGB(isDark: true) == 0x6B5334)
+    #expect(dark.unresolvedRGB(isDark: true) == 0xE8927A)
+    #expect(dark.unresolvedBorderRGB(isDark: true) == 0xE8927A)
+    #expect(dark.warningRGB(isDark: true) == 0xE6AE5A)
+    #expect(dark.warningBorderRGB(isDark: true) == 0x7A5A2C)
+    #expect(dark.histReaderRGB(isDark: true) == 0x17140F)
     #expect(dark.warningFillAlpha(isDark: true) == 0.15)
     #expect(dark.primarySelectionFillAlpha(isDark: true) == 0.20)
 
     let classic = ReaderTheme(settings: ReaderSettings(theme: .siClassic))
-    #expect(classic.chromeRGB(isDark: false) == 0xEEE7D6)
-    #expect(classic.chromeHeaderRGB(isDark: false) == 0xE7DEC9)
-    #expect(classic.chromeSelectionRGB(isDark: false) == 0xE7DAB9)
-    #expect(classic.accentRGB(isDark: false) == 0x163A5F)
-    #expect(classic.chipForegroundRGB(isDark: false) == 0x6E6857)
-    #expect(classic.unresolvedRGB(isDark: false) == 0x6E6857)
-    #expect(classic.unresolvedBorderRGB(isDark: false) == 0xC4B79A)
-    #expect(classic.warningRGB(isDark: false) == 0x8A5A2E)
-    #expect(classic.warningBorderRGB(isDark: false) == 0xC7A574)
+    #expect(classic.chromeRGB(isDark: false) == 0xEFEFEA)
+    #expect(classic.chromeHeaderRGB(isDark: false) == 0xE0E0DA)
+    #expect(classic.chromeSelectionRGB(isDark: false) == 0xFFF1C2)
+    #expect(classic.accentRGB(isDark: false) == 0x1D3A8F)
+    #expect(classic.chipForegroundRGB(isDark: false) == 0x555555)
+    #expect(classic.unresolvedRGB(isDark: false) == 0xA01E1E)
+    #expect(classic.unresolvedBorderRGB(isDark: false) == 0xA01E1E)
+    #expect(classic.warningRGB(isDark: false) == 0x8A6100)
+    #expect(classic.warningBorderRGB(isDark: false) == 0xC9A227)
+    #expect(classic.rustSoftRGB(isDark: false) == 0xF7DEDE)
     #expect(classic.warningFillAlpha(isDark: false) == 0.12)
     #expect(classic.verifiedFillAlpha(isDark: false) == 0.15)
     #expect(classic.primarySelectionFillAlpha(isDark: false) == 0.12)
@@ -208,4 +218,54 @@ func readerThemeProvidesDistinctDiffColorsForEveryTheme() {
         #expect(theme.currentLineRGB(isDark: isDark) != theme.backgroundRGB(isDark: isDark))
         #expect(theme.occurrenceRGB(isDark: isDark) != theme.backgroundRGB(isDark: isDark))
     }
+}
+
+@Test
+func readerThemePaletteMeetsRequiredContrastRatios() {
+    for selection in ReaderSettings.Theme.allCases {
+        let theme = ReaderTheme(settings: ReaderSettings(theme: selection))
+        for isDark in [false, true] {
+            let checks: [(String, UInt32, UInt32, Double)] = [
+                ("foreground/background", theme.foregroundRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 4.5),
+                ("chromeSecondary/chrome", theme.chromeSecondaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                ("verified/chrome", theme.verifiedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                ("verified/mossSoft", theme.verifiedRGB(isDark: isDark), theme.mossSoftRGB(isDark: isDark), 4.5),
+                ("inferred/chrome", theme.inferredRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                ("inferred/slateSoft", theme.inferredRGB(isDark: isDark), theme.slateSoftRGB(isDark: isDark), 4.5),
+                ("unresolved/chrome", theme.unresolvedRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                ("unresolved/rustSoft", theme.unresolvedRGB(isDark: isDark), theme.rustSoftRGB(isDark: isDark), 4.5),
+                ("warning/chrome", theme.warningRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 4.5),
+                ("warning/amberSoft", theme.warningRGB(isDark: isDark), theme.amberSoftRGB(isDark: isDark), 4.5),
+                ("hist/histSoft", theme.histRGB(isDark: isDark), theme.histSoftRGB(isDark: isDark), 4.5),
+                ("lineNumber/background", theme.lineNumberRGB(isDark: isDark), theme.backgroundRGB(isDark: isDark), 3.0),
+                ("chromeTertiary/chrome", theme.chromeTertiaryRGB(isDark: isDark), theme.chromeRGB(isDark: isDark), 3.0),
+            ]
+            for (name, foreground, background, minimum) in checks {
+                let ratio = contrastRatio(foreground, background)
+                #expect(
+                    ratio >= minimum,
+                    "\(selection.rawValue) isDark=\(isDark) \(name) ratio=\(ratio), minimum=\(minimum)"
+                )
+            }
+        }
+    }
+}
+
+private func contrastRatio(_ first: UInt32, _ second: UInt32) -> Double {
+    let lighter = max(relativeLuminance(first), relativeLuminance(second))
+    let darker = min(relativeLuminance(first), relativeLuminance(second))
+    return (lighter + 0.05) / (darker + 0.05)
+}
+
+private func relativeLuminance(_ rgb: UInt32) -> Double {
+    let red = linearComponent(Double((rgb >> 16) & 0xff) / 255)
+    let green = linearComponent(Double((rgb >> 8) & 0xff) / 255)
+    let blue = linearComponent(Double(rgb & 0xff) / 255)
+    return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+}
+
+private func linearComponent(_ value: Double) -> Double {
+    value <= 0.04045
+        ? value / 12.92
+        : pow((value + 0.055) / 1.055, 2.4)
 }

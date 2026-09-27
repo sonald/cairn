@@ -306,22 +306,22 @@ public struct ReaderTheme: Equatable, Sendable {
     public func backgroundRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
         case .dark:
-            0x1E1E1E
+            0x121614
         case .siClassic:
-            0xF5F0E6
-        case .auto, .light:
             0xFFFFFF
+        case .auto, .light:
+            0xFBFAF6
         }
     }
 
     public func foregroundRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
         case .dark:
-            0xD4D4D4
+            0xE7E5DD
         case .siClassic:
-            0x1F2733
+            0x111111
         case .auto, .light:
-            0x1F2328
+            0x1B211F
         }
     }
 
@@ -329,39 +329,54 @@ public struct ReaderTheme: Equatable, Sendable {
         switch resolvedSelection(isDark: isDark) {
         case .dark:
             switch kind {
-            case .keyword: 0xE879F9
-            case .comment, .commentFigure: 0x91AA8B
-            case .string: 0xFDA29B
-            case .number: 0xC4B5FD
-            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x84ADFF
-            case .typeName, .property, .parameter: 0x80CBC4
-            case .macro, .attribute: 0xD6A0D9
-            case .enumMember: 0xC4B5FD
-            case .localBinding: 0xD4D4D4
+            case .keyword: 0xE89C80
+            case .comment, .commentFigure: 0x99A198
+            case .string: 0xAACB8C
+            case .number: 0xE6AE5A
+            case .functionName: 0xF4F2EA
+            case .declarationTitle: 0x93C4DE
+            case .functionCall: 0xCFE3D8
+            case .declarationEmphasis: 0xE7E5DD
+            case .typeName: 0x93C4DE
+            case .property: 0xC7C9C1
+            case .parameter: 0xB9BDB5
+            case .macro, .attribute: 0xBCA9E8
+            case .enumMember: 0x93C4DE
+            case .localBinding: 0xE7E5DD
             }
         case .siClassic:
             switch kind {
-            case .keyword: 0x7A1F1F
-            case .comment, .commentFigure: 0x526B45
-            case .string: 0x8A3C2E
-            case .number: 0x6E3B6F
-            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x163A5F
-            case .typeName, .property, .parameter: 0x245B78
-            case .macro, .attribute: 0x7A1F1F
-            case .enumMember: 0x6E3B6F
-            case .localBinding: 0x1F2733
+            case .keyword: 0x00008B
+            case .comment, .commentFigure: 0x2E7D32
+            case .string: 0x8B1A1A
+            case .number: 0xA0522D
+            case .functionName: 0x000000
+            case .declarationTitle: 0x006A6A
+            case .functionCall: 0x1A1A1A
+            case .declarationEmphasis: 0x111111
+            case .typeName: 0x006A6A
+            case .property: 0x2E2E2E
+            case .parameter: 0x3A3A3A
+            case .macro, .attribute: 0x7A1F7A
+            case .enumMember: 0x006A6A
+            case .localBinding: 0x111111
             }
         case .auto, .light:
             switch kind {
-            case .keyword: 0x9C36B5
-            case .comment, .commentFigure: 0x536F47
-            case .string: 0xB42318
-            case .number: 0x7F56D9
-            case .functionName, .functionCall, .declarationTitle, .declarationEmphasis: 0x175CD3
-            case .typeName, .property, .parameter: 0x087078
-            case .macro, .attribute: 0x9C36B5
-            case .enumMember: 0x7F56D9
-            case .localBinding: 0x1F2328
+            case .keyword: 0x8A3A28
+            case .comment, .commentFigure: 0x5F665F
+            case .string: 0x4D7030
+            case .number: 0x8A5610
+            case .functionName: 0x111715
+            case .declarationTitle: 0x2D5D77
+            case .functionCall: 0x24443B
+            case .declarationEmphasis: 0x1B211F
+            case .typeName: 0x2D5D77
+            case .property: 0x38403C
+            case .parameter: 0x4B544F
+            case .macro, .attribute: 0x6A5594
+            case .enumMember: 0x2D5D77
+            case .localBinding: 0x1B211F
             }
         }
     }
@@ -370,150 +385,150 @@ public struct ReaderTheme: Equatable, Sendable {
         switch resolvedSelection(isDark: isDark) {
         case .dark:
             switch kind {
-            case .added: 0x3FB950
-            case .removed: 0xF85149
-            case .changed: 0xD29922
+            case .added: 0x79B873
+            case .removed: 0xE0826A
+            case .changed: 0xE6AE5A
             }
         case .siClassic:
             switch kind {
-            case .added: 0x3F6B42
-            case .removed: 0x9A3B32
-            case .changed: 0xA66A1F
+            case .added: 0x2E7D32
+            case .removed: 0xA01E1E
+            case .changed: 0xC9A227
             }
         case .auto, .light:
             switch kind {
-            case .added: 0x1A7F37
-            case .removed: 0xCF222E
-            case .changed: 0xBF8700
+            case .added: 0x4E8A4A
+            case .removed: 0xB0513A
+            case .changed: 0xC98A2E
             }
         }
     }
 
     public func lineNumberRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x858585
-        case .siClassic: 0x706755
-        case .auto, .light: 0x66707B
+        case .dark: 0x6F766F
+        case .siClassic: 0x8A8A8A
+        case .auto, .light: 0x7E847F
         }
     }
 
     public func currentLineRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x2A2D2E
-        case .siClassic: 0xEDE6D8
-        case .auto, .light: 0xF3F6FA
+        case .dark: 0x191E1B
+        case .siClassic: 0xFFFBE6
+        case .auto, .light: 0xF1EEE3
         }
     }
 
     public func occurrenceRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x4A4424
-        case .siClassic: 0xE2D3A6
-        case .auto, .light: 0xFFF1A8
+        case .dark: 0x2E2F21
+        case .siClassic: 0xFFF1C2
+        case .auto, .light: 0xECE3C6
         }
     }
 
     public func chromeRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x252528
-        case .siClassic: 0xEEE7D6
-        case .auto, .light: 0xF4F5F7
+        case .dark: 0x161A18
+        case .siClassic: 0xEFEFEA
+        case .auto, .light: 0xF3F1EB
         }
     }
 
     public func chromeHeaderRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x2C2C30
-        case .siClassic: 0xE7DEC9
-        case .auto, .light: 0xECEEF1
+        case .dark: 0x1D221F
+        case .siClassic: 0xE0E0DA
+        case .auto, .light: 0xE7E3DA
         }
     }
 
     public func chromeDividerRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x34363B
-        case .siClassic: 0xDAD0B9
-        case .auto, .light: 0xE1E4EA
+        case .dark: 0x2B312D
+        case .siClassic: 0xC9C9C1
+        case .auto, .light: 0xD5D1C6
         }
     }
 
     public func chromeSelectionRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x2C3644
-        case .siClassic: 0xE7DAB9
-        case .auto, .light: 0xE7F0FF
+        case .dark: 0x1D3A2F
+        case .siClassic: 0xFFF1C2
+        case .auto, .light: 0xDCE7E0
         }
     }
 
     public func accentRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x84ADFF
-        case .siClassic: 0x163A5F
-        case .auto, .light: 0x175CD3
+        case .dark: 0x8CC6A9
+        case .siClassic: 0x1D3A8F
+        case .auto, .light: 0x2B5849
         }
     }
 
     public func chromeSecondaryRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x9BA1A8
-        case .siClassic: 0x6E6857
-        case .auto, .light: 0x5A6472
+        case .dark: 0x9BA29B
+        case .siClassic: 0x555555
+        case .auto, .light: 0x5C645F
         }
     }
 
     public func chromeTertiaryRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x8A9097
-        case .siClassic: 0x706755
-        case .auto, .light: 0x66707B
+        case .dark: 0x858C85
+        case .siClassic: 0x6B6B6B
+        case .auto, .light: 0x6E756F
         }
     }
 
     public func verifiedRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x4EC777
-        case .siClassic: 0x3F6B42
-        case .auto, .light: 0x1A7F37
+        case .dark: 0x8CC6A9
+        case .siClassic: 0x1D3A8F
+        case .auto, .light: 0x2B5849
         }
     }
 
     public func inferredRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x7AA7FF
-        case .siClassic: 0x245B78
-        case .auto, .light: 0x175CD3
+        case .dark: 0xA3BDD6
+        case .siClassic: 0x4A4A7A
+        case .auto, .light: 0x3A5873
         }
     }
 
     public func unresolvedRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0xAAB1B8
-        case .siClassic: 0x6E6857
-        case .auto, .light: 0x57606A
+        case .dark: 0xE8927A
+        case .siClassic: 0xA01E1E
+        case .auto, .light: 0x9B3D27
         }
     }
 
     public func unresolvedBorderRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x4A4E54
-        case .siClassic: 0xC4B79A
-        case .auto, .light: 0xC4CAD1
+        case .dark: 0xE8927A
+        case .siClassic: 0xA01E1E
+        case .auto, .light: 0x9B3D27
         }
     }
 
     public func warningRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0xF0A868
-        case .siClassic: 0x8A5A2E
-        case .auto, .light: 0xB54708
+        case .dark: 0xE6AE5A
+        case .siClassic: 0x8A6100
+        case .auto, .light: 0x8A5610
         }
     }
 
     public func warningBorderRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x6B5334
-        case .siClassic: 0xC7A574
-        case .auto, .light: 0xEAAA7A
+        case .dark: 0x7A5A2C
+        case .siClassic: 0xC9A227
+        case .auto, .light: 0xC98A2E
         }
     }
 
@@ -527,17 +542,81 @@ public struct ReaderTheme: Equatable, Sendable {
 
     public func chipBackgroundRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0x34383D
-        case .siClassic: 0xE3D8BE
-        case .auto, .light: 0xEFF1F4
+        case .dark: 0x1D221F
+        case .siClassic: 0xE0E0DA
+        case .auto, .light: 0xE7E3DA
         }
     }
 
     public func chipForegroundRGB(isDark: Bool) -> UInt32 {
         switch resolvedSelection(isDark: isDark) {
-        case .dark: 0xAAB1B8
-        case .siClassic: 0x6E6857
-        case .auto, .light: 0x57606A
+        case .dark: 0x9BA29B
+        case .siClassic: 0x555555
+        case .auto, .light: 0x5C645F
+        }
+    }
+
+    public func amberMarkRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xE6AE5A
+        case .siClassic: 0xC9A227
+        case .auto, .light: 0xC98A2E
+        }
+    }
+
+    public func amberSoftRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x3A2D18
+        case .siClassic: 0xFFF1C2
+        case .auto, .light: 0xF3E5CA
+        }
+    }
+
+    public func histRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0xD9B377
+        case .siClassic: 0x6E5320
+        case .auto, .light: 0x7A5A2C
+        }
+    }
+
+    public func histSoftRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x33291A
+        case .siClassic: 0xEFE6CF
+        case .auto, .light: 0xEFE4CC
+        }
+    }
+
+    public func histReaderRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x17140F
+        case .siClassic: 0xFFFDF6
+        case .auto, .light: 0xFAF5EA
+        }
+    }
+
+    public func mossSoftRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x1D3A2F
+        case .siClassic: 0xDEE4F5
+        case .auto, .light: 0xDCE7E0
+        }
+    }
+
+    public func slateSoftRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x21303D
+        case .siClassic: 0xE6E6F0
+        case .auto, .light: 0xDFE6ED
+        }
+    }
+
+    public func rustSoftRGB(isDark: Bool) -> UInt32 {
+        switch resolvedSelection(isDark: isDark) {
+        case .dark: 0x3E241E
+        case .siClassic: 0xF7DEDE
+        case .auto, .light: 0xF4DFD7
         }
     }
 

@@ -15,6 +15,38 @@ func readerThemeColorResolvesFromDetachedExecutor() async throws {
     #expect(values.allSatisfy { $0 >= 0 && $0 <= 1 })
 }
 
+@MainActor
+@Test
+func autoThemeChromeAndAccentColorsResolveFromThemeTables() {
+    let theme = ReaderTheme(settings: ReaderSettings(theme: .auto))
+    let cases: [(NSAppearance.Name, [UInt32])] = [
+        (.aqua, [0xF3F1EB, 0xE7E3DA, 0xD5D1C6, 0x2B5849]),
+        (.darkAqua, [0x161A18, 0x1D221F, 0x2B312D, 0x8CC6A9]),
+    ]
+
+    for (appearance, expected) in cases {
+        #expect([
+            resolvedRGB(theme.chromeColor, appearance: appearance),
+            resolvedRGB(theme.chromeHeaderColor, appearance: appearance),
+            resolvedRGB(theme.chromeDividerColor, appearance: appearance),
+            resolvedRGB(theme.accentColor, appearance: appearance),
+        ] == expected.map(Optional.some))
+    }
+}
+
+@MainActor
+private func resolvedRGB(_ color: NSColor, appearance name: NSAppearance.Name) -> UInt32? {
+    guard let appearance = NSAppearance(named: name) else { return nil }
+    var value: UInt32?
+    appearance.performAsCurrentDrawingAppearance {
+        guard let rgb = color.usingColorSpace(.sRGB) else { return }
+        value = UInt32((rgb.redComponent * 255).rounded()) << 16
+            | UInt32((rgb.greenComponent * 255).rounded()) << 8
+            | UInt32((rgb.blueComponent * 255).rounded())
+    }
+    return value
+}
+
 @Test
 func displayMapRoundTripsVisibleAndHiddenSourceWithoutSplittingScalars() throws {
     let source = "α\nfn outer() {\n    let emoji = \"😀é\";\n}\nω\n"
