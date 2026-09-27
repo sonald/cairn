@@ -10,3 +10,10 @@ func cairnSerifFont(ofSize size: CGFloat, weight: NSFont.Weight = .regular) -> N
     else { return base }
     return serif
 }
+
+@MainActor
+func cairnItalicSerifFont(ofSize size: CGFloat) -> NSFont {
+    let serif = cairnSerifFont(ofSize: size)
+    let descriptor = serif.fontDescriptor.withSymbolicTraits(.italic)
+    return NSFont(descriptor: descriptor, size: size) ?? serif
+}

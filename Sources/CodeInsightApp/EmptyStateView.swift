@@ -1,5 +1,7 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightReaderCore
+import CodeInsightReaderUI
 
 @MainActor
 final class EmptyStateView: NSView {
@@ -16,6 +18,8 @@ final class EmptyStateView: NSView {
     private let recentStack = NSStackView()
     private var recentPaths: [String] = []
     private var isFailure = false
+    private let dropHint = NSTextField(labelWithString: localized("welcome.dropHint"))
+    private(set) var theme = ReaderTheme(settings: ReaderSettings())
 
     private let onChooseProject: () -> Void
     private let onOpenRecent: (URL) -> Void
@@ -44,15 +48,12 @@ final class EmptyStateView: NSView {
         markView.setAccessibilityIdentifier("CairnMark")
         markView.translatesAutoresizingMaskIntoConstraints = false
 
-        titleLabel.font = .systemFont(ofSize: 28, weight: .semibold)
-        titleLabel.textColor = .labelColor
+        titleLabel.font = cairnSerifFont(ofSize: 34)
         titleLabel.alignment = .center
-        taglineLabel.font = .systemFont(ofSize: 13)
-        taglineLabel.textColor = .secondaryLabelColor
+        taglineLabel.font = cairnItalicSerifFont(ofSize: 19)
         taglineLabel.alignment = .center
         // Short, bounded failure reason; selectable so it stays copyable.
         reasonLabel.font = .systemFont(ofSize: 13)
-        reasonLabel.textColor = .secondaryLabelColor
         reasonLabel.alignment = .center
         reasonLabel.isSelectable = true
         reasonLabel.setContentHuggingPriority(
@@ -75,9 +76,7 @@ final class EmptyStateView: NSView {
         chooseFolderButton.setAccessibilityLabel(localized("welcome.otherFolderAX"))
         chooseFolderButton.isHidden = true
 
-        let dropHint = NSTextField(labelWithString: localized("welcome.dropHint"))
-        dropHint.font = .systemFont(ofSize: 11)
-        dropHint.textColor = .secondaryLabelColor
+        dropHint.font = .systemFont(ofSize: 11.5)
         dropHint.alignment = .center
 
         recentStack.orientation = .vertical
@@ -97,9 +96,9 @@ final class EmptyStateView: NSView {
         stack.orientation = .vertical
         stack.alignment = .centerX
         stack.spacing = 0
-        stack.setCustomSpacing(12, after: markView)
-        stack.setCustomSpacing(4, after: titleLabel)
-        stack.setCustomSpacing(8, after: taglineLabel)
+        stack.setCustomSpacing(14, after: markView)
+        stack.setCustomSpacing(2, after: titleLabel)
+        stack.setCustomSpacing(18, after: taglineLabel)
         stack.setCustomSpacing(16, after: reasonLabel)
         stack.setCustomSpacing(8, after: openButton)
         stack.setCustomSpacing(24, after: chooseFolderButton)
@@ -121,7 +120,21 @@ final class EmptyStateView: NSView {
         ])
 
         update(recentPaths: recentPaths, failed: failed, reason: nil)
+        apply(theme: theme)
     }
+
+    func apply(theme: ReaderTheme) {
+        self.theme = theme
+        layer?.backgroundColor = theme.backgroundColor.cgColor
+        titleLabel.textColor = theme.foregroundColor
+        taglineLabel.textColor = theme.accentColor
+        reasonLabel.textColor = theme.chromeSecondaryColor
+        dropHint.textColor = theme.chromeSecondaryColor
+        rebuildRecents()
+    }
+
+    var selfTestTaglineColor: NSColor? { taglineLabel.textColor }
+    var selfTestTitleFont: NSFont? { titleLabel.font }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -244,8 +257,8 @@ final class EmptyStateView: NSView {
         guard !recentPaths.isEmpty else { return }
 
         let heading = NSTextField(labelWithString: localized("welcome.recent"))
-        heading.font = .systemFont(ofSize: 11, weight: .semibold)
-        heading.textColor = .secondaryLabelColor
+        heading.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        heading.textColor = theme.chromeSecondaryColor
         recentStack.addArrangedSubview(heading)
 
         for (index, path) in recentPaths.enumerated() {
@@ -259,7 +272,8 @@ final class EmptyStateView: NSView {
             button.imagePosition = .imageLeading
             button.imageScaling = .scaleProportionallyDown
             button.alignment = .left
-            button.attributedTitle = Self.recentTitle(path: path)
+            button.attributedTitle = Self.recentTitle(path: path, theme: theme)
+            button.hoverColor = theme.mossSoftColor
             button.toolTip = path
             button.setAccessibilityLabel(localizedFormat("welcome.openRecent", URL(fileURLWithPath: path).lastPathComponent))
             recentStack.addArrangedSubview(button)
@@ -292,27 +306,27 @@ final class EmptyStateView: NSView {
 
     private func setDropHighlighted(_ highlighted: Bool) {
         layer?.borderWidth = highlighted ? 2 : 0
-        layer?.borderColor = highlighted ? NSColor.controlAccentColor.cgColor : nil
+        layer?.borderColor = highlighted ? theme.accentColor.cgColor : nil
         layer?.cornerRadius = 14
     }
 
-    private static func recentTitle(path: String) -> NSAttributedString {
+    private static func recentTitle(path: String, theme: ReaderTheme) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.lineSpacing = 1
         let title = NSMutableAttributedString(
             string: "\(URL(fileURLWithPath: path).lastPathComponent)\n",
             attributes: [
-                .font: NSFont.systemFont(ofSize: 13),
-                .foregroundColor: NSColor.labelColor,
+                .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
+                .foregroundColor: theme.foregroundColor,
                 .paragraphStyle: paragraph,
             ]
         )
         title.append(NSAttributedString(
             string: (path as NSString).abbreviatingWithTildeInPath,
             attributes: [
-                .font: NSFont.systemFont(ofSize: 12),
-                .foregroundColor: NSColor.tertiaryLabelColor,
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: theme.chromeSecondaryColor,
                 .paragraphStyle: paragraph,
             ]
         ))
@@ -323,6 +337,7 @@ final class EmptyStateView: NSView {
 @MainActor
 private final class HoverButton: NSButton {
     private var hoverTrackingArea: NSTrackingArea?
+    var hoverColor: NSColor = .clear
 
     override func updateTrackingAreas() {
         if let hoverTrackingArea {
@@ -341,8 +356,7 @@ private final class HoverButton: NSButton {
     override func mouseEntered(with event: NSEvent) {
         wantsLayer = true
         layer?.cornerRadius = 6
-        layer?.backgroundColor = NSColor.controlAccentColor
-            .withAlphaComponent(0.10).cgColor
+        layer?.backgroundColor = hoverColor.cgColor
     }
 
     override func mouseExited(with event: NSEvent) {

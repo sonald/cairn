@@ -6049,6 +6049,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readerTheme = ReaderTheme(settings: settings)
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)
+        emptyStateView?.apply(theme: readerTheme)
         previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
         if let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
             previewTextView.backgroundColor = readerTheme.backgroundColor
@@ -6137,6 +6138,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             failed: failed,
             reason: failureReason
         )
+        emptyStateView.apply(theme: readerTheme)
         emptyStateView.translatesAutoresizingMaskIntoConstraints = false
         readerArea.addSubview(emptyStateView)
         NSLayoutConstraint.activate([
