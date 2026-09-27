@@ -1794,8 +1794,9 @@ func lensShowsSerifSymbolStonesThemedBadgeAndAPinnedTint() async throws {
     var style = controller.selfTestLensStyle
     #expect(style.stones == certainty)
     #expect(style.stonesVisible)
-    #expect(style.symbol == contextModel.selectedCandidate?.label)
-    #expect(!style.symbol.isEmpty)
+    // The title is the declared name, never the provenance label.
+    #expect(style.symbol == "target")
+    #expect(style.symbol != contextModel.selectedCandidate?.label)
     #expect(style.symbolFont?.fontName.contains("NewYork") == true)
     // Fuzzy resolution in this project is Strong: the inferred slate fill.
     #expect(certainty == .strong)
@@ -1968,4 +1969,16 @@ func readingAHistoricalCommitTurnsTheReaderAndCommitButtonSepia() async throws {
     controller.renderForSelfTest()
     #expect(!controller.selfTestReaderHistorical.flag)
     #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFBFAF6)
+}
+
+
+@MainActor
+@Test
+func lensTitleReadsTheDeclaredNameOrNothing() {
+    #expect(ContextWindowViewController.declaredName(in: "    async fn handle(\n        &mut self,") == "handle")
+    #expect(ContextWindowViewController.declaredName(in: "/// docs\n#[derive(Debug)]\npub struct ActorRuntime<M> {") == "ActorRuntime")
+    #expect(ContextWindowViewController.declaredName(in: "def spawn(task):") == "spawn")
+    #expect(ContextWindowViewController.declaredName(in: "export function render() {") == "render")
+    #expect(ContextWindowViewController.declaredName(in: "value + 1") == nil)
+    #expect(ContextWindowViewController.declaredName(in: "") == nil)
 }

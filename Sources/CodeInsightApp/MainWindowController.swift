@@ -8140,8 +8140,9 @@ final class ContextWindowViewController: NSViewController {
         let highlightsSyntax: Bool
         if let candidate = model.selectedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
-            symbolLabel.stringValue = candidate.label
-            symbolLabel.isHidden = candidate.label.isEmpty
+            let name = Self.declaredName(in: candidate.excerpt) ?? ""
+            symbolLabel.stringValue = name
+            symbolLabel.isHidden = name.isEmpty
             stones.update(certainty: candidate.certainty, theme: theme)
             stones.isHidden = false
             let fullProvenance = [
@@ -8191,6 +8192,27 @@ final class ContextWindowViewController: NSViewController {
             return
         }
         miniReader.display(document: document)
+    }
+
+    /// The name a definition excerpt declares on its first code line, or nil
+    /// when it is not a recognizable declaration (the Lens then shows no title
+    /// rather than guessing).
+    static func declaredName(in excerpt: String) -> String? {
+        let keywords: Set<String> = [
+            "fn", "struct", "enum", "trait", "type", "union", "mod", "const", "static",
+            "def", "class", "function", "interface", "let", "var",
+        ]
+        for line in excerpt.split(separator: "\n", omittingEmptySubsequences: true) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("//") || trimmed.hasPrefix("#") || trimmed.hasPrefix("@") { continue }
+            let words = trimmed.split { !($0.isLetter || $0.isNumber || $0 == "_") }
+            guard let keyword = words.firstIndex(where: { keywords.contains(String($0)) }),
+                  words.index(after: keyword) < words.endIndex
+            else { return nil }
+            let name = String(words[words.index(after: keyword)])
+            return name.first.map { $0.isLetter || $0 == "_" } == true ? name : nil
+        }
+        return nil
     }
 
     /// Short header label for a full provenance badge: keeps the certainty
