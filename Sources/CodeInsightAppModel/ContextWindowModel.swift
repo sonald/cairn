@@ -992,7 +992,7 @@ private func loadReaderDocument(
     }.value
 }
 
-func resolutionCertaintyLabel(_ certainty: Certainty) -> String {
+package func resolutionCertaintyLabel(_ certainty: Certainty) -> String {
     switch certainty {
     case .unresolved: localized("model.context.unresolved")
     case .possible: localized("model.context.possible")
