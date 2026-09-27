@@ -2718,3 +2718,25 @@ func liveWindowResizeAdaptsRelationsWithoutManualRender() async throws {
     fixture.controller.renderForSelfTest()
     #expect(fixture.controller.selfTestSidebarPaneCollapsed)
 }
+
+@MainActor
+@Test
+func relationRowsShowVisibleCertaintyStonesAndASerifRootTitle() async throws {
+    let fixture = try await makeRelationUXFixture(expandPossible: false)
+    defer { fixture.close() }
+
+    let exact = fixture.controller.selfTestEdgeStones(inGroup: "Exact")
+    #expect(!exact.isEmpty)
+    #expect(exact.map(\.0) == ["first"])
+    #expect(exact.allSatisfy { $0.1 == .exact && $0.2 })
+    #expect(fixture.controller.selfTestPossibleDisclosureStones.0 == .possible)
+    #expect(fixture.controller.selfTestPossibleDisclosureStones.1)
+
+    #expect(fixture.controller.selfTestExpandPossibleMatches())
+    let possible = fixture.controller.selfTestEdgeStones(inGroup: "Possible")
+    #expect(possible.map(\.0) == ["second"])
+    #expect(possible.allSatisfy {
+        ($0.1 == .possible || $0.1 == .probable) && $0.2
+    })
+    #expect(fixture.controller.selfTestRootTitleIsSerif)
+}

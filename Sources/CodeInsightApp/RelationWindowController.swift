@@ -365,6 +365,46 @@ final class RelationWindowController: NSViewController,
         return cell.selfTestBadgeLabelFrame(in: outlineView)
     }
 
+    /// Certainty and on-screen visibility of each visible edge's stones.
+    func selfTestEdgeStones(inGroup titlePrefix: String) -> [(String, Certainty?, Bool)] {
+        selfTestVisibleEdgeNodes(inGroup: titlePrefix).map { node in
+            let row = outlineView.row(forItem: node)
+            guard let cell = outlineView.view(atColumn: 0, row: row, makeIfNecessary: true)
+                    as? RelationCellView,
+                  let stones = cell.selfTestStones
+            else { return (node.title, nil, false) }
+            let frame = stones.convert(stones.bounds, to: outlineView)
+            let visible = stones.window != nil && !stones.isHiddenOrHasHiddenAncestor
+                && selfTestFrameIsVisible(frame)
+            return (node.title, stones.certainty, visible)
+        }
+    }
+
+    var selfTestPossibleDisclosureStones: (Certainty?, Bool) {
+        guard let item = selfTestPossibleDisclosureItem,
+              let cell = outlineView.view(
+                atColumn: 0, row: outlineView.row(forItem: item), makeIfNecessary: true
+              ) as? RelationCellView,
+              let stones = cell.selfTestStones
+        else { return (nil, false) }
+        let frame = stones.convert(stones.bounds, to: outlineView)
+        return (stones.certainty, !stones.isHiddenOrHasHiddenAncestor && selfTestFrameIsVisible(frame))
+    }
+
+    var selfTestRootTitleIsSerif: Bool {
+        guard let root = model.root,
+              let cell = outlineView.view(
+                atColumn: 0, row: outlineView.row(forItem: root), makeIfNecessary: true
+              ) as? NSTableCellView,
+              let font = cell.textField?.font
+        else { return false }
+        return font.fontDescriptor.symbolicTraits.contains(.classModernSerifs)
+            || font.fontDescriptor.symbolicTraits.contains(.classOldStyleSerifs)
+            || font.fontDescriptor.symbolicTraits.contains(.classTransitionalSerifs)
+            || font.familyName?.contains("New York") == true
+            || font.fontName.contains("NewYork")
+    }
+
     func selfTestBadgeCornerRadius(titled title: String) -> CGFloat {
         (selfTestCell(titled: title, inGroup: "") as? RelationCellView)?
             .selfTestBadgeCornerRadius ?? 0
@@ -720,7 +760,8 @@ final class RelationWindowController: NSViewController,
         outlineView.selectionChanged = { [weak self] in
             self?.selectSelection(nil)
         }
-        outlineView.rowSizeStyle = .default
+        // Custom keeps AppKit from overriding the cell fonts; row heights come from the delegate.
+        outlineView.rowSizeStyle = .custom
         outlineView.style = .plain
         outlineView.intercellSpacing = .zero
         outlineView.indentationPerLevel = 12
@@ -1738,7 +1779,7 @@ private final class ResolutionInspectorView: NSView {
         content.translatesAutoresizingMaskIntoConstraints = false
         documentView.addSubview(content)
 
-        nodeTitle.font = .systemFont(ofSize: 13, weight: .semibold)
+        nodeTitle.font = .monospacedSystemFont(ofSize: 13.5, weight: .semibold)
         nodeTitle.lineBreakMode = .byTruncatingMiddle
         nodeTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         badge.setContentHuggingPriority(.required, for: .horizontal)
@@ -1749,7 +1790,10 @@ private final class ResolutionInspectorView: NSView {
         identity.orientation = .horizontal
         identity.alignment = .centerY
         identity.spacing = 8
-        why.font = .systemFont(ofSize: 12, weight: .medium)
+        why.font = cairnSerifFont(ofSize: 16)
+        correctionSection.wantsLayer = true
+        correctionSection.layer?.cornerRadius = 8
+        correctionSection.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
         configure(section: sourceSection, title: sourceTitle, body: sourceBody)
         configure(
             section: verificationSection,
@@ -1783,7 +1827,7 @@ private final class ResolutionInspectorView: NSView {
         formerCandidateButton.setAccessibilityLabel(localized("relation.former.open"))
         auditStack.orientation = .vertical
         auditStack.alignment = .leading
-        auditStack.spacing = 5
+        auditStack.spacing = 0
         auditStack.isHidden = true
         [
             identity,
@@ -1892,6 +1936,7 @@ private final class ResolutionInspectorView: NSView {
         headerTitle.textColor = theme.foregroundColor
         nodeTitle.textColor = theme.foregroundColor
         why.textColor = theme.foregroundColor
+        correctionSection.layer?.backgroundColor = theme.rustSoftColor.cgColor
         for label in [
             sourceTitle,
             verificationTitle,
@@ -1900,17 +1945,18 @@ private final class ResolutionInspectorView: NSView {
             environmentTitle,
         ] {
             label.textColor = label === correctionTitle
-                ? theme.warningColor : theme.chromeSecondaryColor
+                ? theme.unresolvedColor : theme.chromeSecondaryColor
         }
+        verificationTitle.textColor = theme.verifiedColor
         [sourceBody, verificationBody, correctionBody, availabilityBody,
-         environmentBody].forEach { $0.textColor = theme.chromeSecondaryColor }
+         environmentBody].forEach { $0.textColor = theme.foregroundColor }
         styleButton(auditButton, color: theme.accentColor)
         styleButton(formerCandidateButton, color: theme.warningColor)
         for row in auditStack.arrangedSubviews.compactMap({ $0 as? NSStackView }) {
             (row.arrangedSubviews.first as? NSTextField)?.textColor =
-                theme.chromeTertiaryColor
-            (row.arrangedSubviews.last as? NSTextField)?.textColor =
                 theme.chromeSecondaryColor
+            (row.arrangedSubviews.last as? NSTextField)?.textColor =
+                theme.foregroundColor
         }
     }
 
@@ -1963,15 +2009,15 @@ private final class ResolutionInspectorView: NSView {
             badge.display(
                 display.badge.displayText,
                 foreground: theme.verifiedColor,
-                background: theme.verifiedBackgroundColor,
-                border: theme.verifiedBackgroundColor
+                background: theme.mossSoftColor,
+                border: theme.mossSoftColor
             )
         case .inferred:
             badge.display(
                 display.badge.displayText,
                 foreground: theme.inferredColor,
-                background: theme.inferredBackgroundColor,
-                border: theme.inferredBackgroundColor
+                background: theme.slateSoftColor,
+                border: theme.slateSoftColor
             )
         case .unresolved:
             badge.display(
@@ -2032,11 +2078,14 @@ private final class ResolutionInspectorView: NSView {
         section.orientation = .vertical
         section.alignment = .leading
         section.spacing = 4
-        title.font = .systemFont(ofSize: 11, weight: .semibold)
-        body.font = .systemFont(ofSize: 12)
+        title.font = .systemFont(ofSize: 10.5, weight: .semibold)
+        body.font = .systemFont(ofSize: 12.5)
         section.addArrangedSubview(title)
         section.addArrangedSubview(body)
-        body.widthAnchor.constraint(equalTo: section.widthAnchor).isActive = true
+        body.widthAnchor.constraint(
+            equalTo: section.widthAnchor,
+            constant: -(section.edgeInsets.left + section.edgeInsets.right)
+        ).isActive = true
     }
 
     private func styleButton(_ button: NSButton, color: NSColor) {
@@ -2059,17 +2108,18 @@ private final class ResolutionInspectorView: NSView {
         }
         for (key, value) in rows {
             let keyLabel = NSTextField(labelWithString: key)
-            keyLabel.font = .systemFont(ofSize: 11)
-            keyLabel.textColor = theme.chromeTertiaryColor
-            keyLabel.setContentHuggingPriority(.required, for: .horizontal)
+            keyLabel.font = .systemFont(ofSize: 11.5)
+            keyLabel.textColor = theme.chromeSecondaryColor
+            keyLabel.widthAnchor.constraint(equalToConstant: 130).isActive = true
             let valueLabel = NSTextField(wrappingLabelWithString: value)
-            valueLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
-            valueLabel.textColor = theme.chromeSecondaryColor
+            valueLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+            valueLabel.textColor = theme.foregroundColor
             valueLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             let row = NSStackView(views: [keyLabel, valueLabel])
             row.orientation = .horizontal
             row.alignment = .firstBaseline
             row.spacing = 8
+            row.edgeInsets = NSEdgeInsets(top: 5, left: 0, bottom: 5, right: 0)
             auditStack.addArrangedSubview(row)
             row.widthAnchor.constraint(equalTo: auditStack.widthAnchor).isActive = true
         }
@@ -2093,6 +2143,11 @@ private final class RelationCellView: NSTableCellView {
     private let badgeLabel = NSTextField(labelWithString: "")
     private let badgePill = InspectableBadgeView()
     private let spinner = NSProgressIndicator()
+    private let stones = CertaintyStonesView(
+        certainty: .possible,
+        theme: ReaderTheme(settings: ReaderSettings()),
+        size: 14
+    )
 
     init() {
         super.init(frame: .zero)
@@ -2115,6 +2170,7 @@ private final class RelationCellView: NSTableCellView {
         dispatchChip.setContentCompressionResistancePriority(.required, for: .horizontal)
         dispatchChip.wantsLayer = true
         dispatchChip.layer?.cornerRadius = 4
+        dispatchChip.layer?.borderWidth = 1
         dispatchChip.addArrangedSubview(dispatchLabel)
         badgePill.orientation = .horizontal
         badgePill.alignment = .centerY
@@ -2162,10 +2218,10 @@ private final class RelationCellView: NSTableCellView {
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 1
-        let row = NSStackView(views: [spinner, labels, badgePill])
+        let row = NSStackView(views: [spinner, stones, labels, badgePill])
         row.orientation = .horizontal
         row.alignment = .top
-        row.spacing = 6
+        row.spacing = 7
         row.translatesAutoresizingMaskIntoConstraints = false
         addSubview(row)
         NSLayoutConstraint.activate([
@@ -2193,10 +2249,12 @@ private final class RelationCellView: NSTableCellView {
         correctedChip.isHidden = true
         modifiersLabel.isHidden = true
         countPill.isHidden = true
+        stones.isHidden = true
         titleLabel.textColor = theme.foregroundColor
         locationLabel.textColor = theme.chromeSecondaryColor
-        dispatchLabel.textColor = theme.chipForegroundColor
-        dispatchChip.layer?.backgroundColor = theme.chipBackgroundColor.cgColor
+        dispatchLabel.textColor = theme.chromeSecondaryColor
+        dispatchChip.layer?.backgroundColor = NSColor.clear.cgColor
+        dispatchChip.layer?.borderColor = theme.chromeDividerColor.cgColor
         modifiersLabel.textColor = theme.chromeTertiaryColor
         countLabel.textColor = theme.chromeSecondaryColor
         countPill.layer?.backgroundColor = theme.chipBackgroundColor.cgColor
@@ -2211,7 +2269,7 @@ private final class RelationCellView: NSTableCellView {
         switch node.certainty {
         case .exact:
             badgeLabel.textColor = theme.verifiedColor
-            badgePill.layer?.backgroundColor = theme.verifiedBackgroundColor.cgColor
+            badgePill.layer?.backgroundColor = theme.mossSoftColor.cgColor
             badgePill.layer?.borderWidth = 0
         case .unresolved:
             badgeLabel.textColor = theme.unresolvedColor
@@ -2220,7 +2278,7 @@ private final class RelationCellView: NSTableCellView {
             badgePill.layer?.borderWidth = 1
         default:
             badgeLabel.textColor = theme.inferredColor
-            badgePill.layer?.backgroundColor = theme.inferredBackgroundColor.cgColor
+            badgePill.layer?.backgroundColor = theme.slateSoftColor.cgColor
             badgePill.layer?.borderWidth = 0
         }
         badgeLabel.font = .systemFont(ofSize: 10, weight: .semibold)
@@ -2228,7 +2286,7 @@ private final class RelationCellView: NSTableCellView {
         switch node.kind {
         case .root:
             titleLabel.stringValue = node.title
-            titleLabel.font = .systemFont(ofSize: 12.5, weight: .semibold)
+            titleLabel.font = cairnSerifFont(ofSize: 17, weight: .medium)
             locationLabel.stringValue = location(of: node) ?? ""
             locationLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             locationLabel.toolTip = location(of: node)
@@ -2245,6 +2303,8 @@ private final class RelationCellView: NSTableCellView {
                 titleLabel.stringValue = localized("relation.possible.show")
                 titleLabel.font = .systemFont(ofSize: 11.5, weight: .semibold)
                 titleLabel.textColor = theme.accentColor
+                stones.update(certainty: .possible, theme: theme)
+                stones.isHidden = false
                 countLabel.stringValue = (node.children?.count ?? 0).formatted()
                 countLabel.font = .systemFont(ofSize: 10, weight: .semibold)
                 countPill.isHidden = countLabel.stringValue.isEmpty
@@ -2255,7 +2315,11 @@ private final class RelationCellView: NSTableCellView {
             }
         case .edge:
             titleLabel.stringValue = node.title
-            titleLabel.font = .systemFont(ofSize: 12.5, weight: .medium)
+            titleLabel.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+            if let certainty = node.certainty {
+                stones.update(certainty: certainty, theme: theme)
+                stones.isHidden = false
+            }
             locationLabel.stringValue = location(of: node) ?? ""
             locationLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
             locationLabel.toolTip = location(of: node)
@@ -2303,11 +2367,11 @@ private final class RelationCellView: NSTableCellView {
         case .truncated:
             titleLabel.stringValue = node.title
             titleLabel.font = .systemFont(ofSize: 12)
-            titleLabel.textColor = .systemOrange
+            titleLabel.textColor = theme.warningColor
         case .error:
             titleLabel.stringValue = node.title
             titleLabel.font = .systemFont(ofSize: 12)
-            titleLabel.textColor = .systemRed
+            titleLabel.textColor = theme.unresolvedColor
         }
         setAccessibilityLabel(node.title)
         setAccessibilityValue(
@@ -2324,6 +2388,7 @@ private final class RelationCellView: NSTableCellView {
     }
 
     var selfTestBadgeToolTip: String? { badgeLabel.toolTip }
+    var selfTestStones: CertaintyStonesView? { stones.isHidden ? nil : stones }
     var selfTestBadgeCornerRadius: CGFloat { badgePill.layer?.cornerRadius ?? 0 }
     func selfTestInspect() { onInspect?() }
     var selfTestTitleAndCount: [String] {
