@@ -1,7 +1,7 @@
 # UI 重设计 · 第二阶段实施计划
 
 日期：2026-09-27
-状态：P1–P7 已实现并提交；三条依赖真实滚轮事件的测试与真实应用目视因屏幕锁定待补（见 §5.4）。
+状态：P1–P7 已实现并提交；锁屏期间被阻塞的检查已在解锁后补做（见 §5.4）。
 设计依据：[UI/UX 重设计方案](2026-09-27-ui-ux-redesign-design.md)；第一阶段见[第一阶段计划](2026-09-27-ui-redesign-phase1-plan.md)。
 代码基线：本分支已 rebase 到 `main`（`e38e4fd`，含只读架构 S0–S8）。
 
@@ -76,7 +76,13 @@
 
 用临时测试把整窗（打开 knuth-rs 的 `actor.rs`）在三个主题下渲染成 PNG 查看：函数名放大加粗、类型名大 2pt、prose 注释衬线斜体、定义行自然增高；Lens 位于阅读区下方、侧栏全高；状态栏堆石与 Exact 状态色正确。路径栏在离屏图里呈黑底，判断为离屏渲染拍不到其材质，需真实应用确认。探针测试未提交。
 
-### 5.4 被阻塞的检查（屏幕锁定）
+### 5.4 锁屏期间被阻塞的检查
 
 - `ligaturePendingRestoreYieldsToUserScroll`、`readonlyResizeUserScrollResizeUsesTheUsersNewPosition`、`wrapToggleClampsLegallyAtDocumentEdges`：依赖向窗口投递真实滚轮事件，锁屏时事件送不到窗口而失败；阅读器模块自 P3（这三条通过）以来无改动。解锁后需重跑。
 - computer-use 真实应用目视：锁屏时截图不可用。解锁后需确认路径栏、Lens、状态栏与历史着色。
+
+**解锁后补做（2026-09-28）：**
+
+- 三条滚轮测试在解锁后重跑全部通过（`ligaturePendingRestoreYieldsToUserScroll` 1.0s、`readonlyResizeUserScrollResizeUsesTheUsersNewPosition` 0.3s、`wrapToggleClampsLegallyAtDocumentEdges` 2.7s），证实失败源于锁屏。
+- 真实应用（`45573c1` 打包）computer-use 截图：路径栏为正常窗口底色，离屏图里的黑底确为渲染伪影；工具栏入口为「跳转 ⌘P」；Lens 位于阅读区与 Relations 下方、侧栏全高；状态栏显示堆石与琥珀色 Exact 状态；Python 注释为衬线斜体，`class` 名放大。
+- 未做：后台模式的点击只设置光标、不触发阅读器鼠标事件，Lens 的点击联动未在真实应用中目视（已有单元测试与离屏渲染覆盖）；历史着色需切换 commit，也未在真实应用中目视。
