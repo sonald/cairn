@@ -34,7 +34,7 @@ private struct PanelThemeIndexService: IndexService {
 
 @MainActor
 @Test
-func projectSearchHighlightsHitsAndLeadsGroupsWithTheFileName() {
+func projectSearchHighlightsHitsAndLeadsGroupsWithTheFileName() throws {
     let panel = SearchPanel(appModel: AppModel(indexService: PanelThemeIndexService())) { _, _, _ in }
     panel.apply(settings: ReaderSettings(theme: .dark))
     let match = SearchMatch(
@@ -51,6 +51,21 @@ func projectSearchHighlightsHitsAndLeadsGroupsWithTheFileName() {
     #expect(panelRGB(styled.attribute(.backgroundColor, at: hit.location, effectiveRange: nil)) == 0x2E2F21)
     #expect(panelRGB(styled.attribute(.foregroundColor, at: hit.location, effectiveRange: nil)) == 0xE7E5DD)
     #expect(styled.attribute(.backgroundColor, at: hit.location - 1, effectiveRange: nil) == nil)
+    // One row per match: indentation dropped, tail truncated instead of wrapping.
+    #expect(styled.string == "   75  self.ask(build_msg)")
+    let style = styled.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+    #expect(style?.lineBreakMode == .byTruncatingTail)
+    let long = SearchMatch(
+        pathID: PathID(rawValue: 2),
+        byteRange: ByteRange(lowerBound: 4, upperBound: 8),
+        line: 21,
+        column: 5,
+        lineText: "    REPL = \"\"\"" + String(repeating: "context you can access interactively ", count: 12),
+        lineTextRange: ByteRange(lowerBound: 0, upperBound: 4 + 8 + 12 * 38)
+    )
+    let label = NSTextField(labelWithAttributedString: panel.selfTestStyledMatch(long))
+    let height = try #require(label.cell).cellSize(forBounds: NSRect(x: 0, y: 0, width: 300, height: 1_000)).height
+    #expect(height < 20)
 
     let group = panel.selfTestStyledGroup(path: "crates/knuth-agent/src/actor.rs", count: 2)
     #expect(group.string == "actor.rs  crates/knuth-agent/src  2")

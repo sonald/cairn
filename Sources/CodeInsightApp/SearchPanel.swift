@@ -617,6 +617,8 @@ final class SearchPanel: NSWindowController,
                 .foregroundColor: theme.foregroundColor,
             ]
         )
+        defer { text.addAttribute(.paragraphStyle, value: Self.singleLine(.byTruncatingMiddle),
+                                  range: NSRange(location: 0, length: text.length)) }
         let secondary: [NSAttributedString.Key: Any] = [
             .font: NSFont.systemFont(ofSize: 11),
             .foregroundColor: theme.chromeSecondaryColor,
@@ -644,20 +646,50 @@ final class SearchPanel: NSWindowController,
         )
 
         let bytes = Array(match.lineText.utf8)
-        guard bytes.count == Int(match.lineTextRange.length) else { return value }
+        let plain = { Self.singleLineMatch(value, prefixLength: prefix.utf16.count, hitLocation: value.length) }
+        guard bytes.count == Int(match.lineTextRange.length) else { return plain() }
         let lower = max(match.byteRange.lowerBound, match.lineTextRange.lowerBound)
         let upper = min(match.byteRange.upperBound, match.lineTextRange.upperBound)
-        guard lower < upper else { return value }
+        guard lower < upper else { return plain() }
         let map = ByteUTF16Map(validUTF8: bytes)
         guard let range = map.nsRange(
             byteLowerBound: Int(lower - match.lineTextRange.lowerBound),
             byteUpperBound: Int(upper - match.lineTextRange.lowerBound)
-        ) else { return value }
+        ) else { return plain() }
         let hit = NSRange(location: prefix.utf16.count + range.location, length: range.length)
         value.addAttributes([
             .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
             .backgroundColor: theme.occurrenceColor,
         ], range: hit)
+        return Self.singleLineMatch(value, prefixLength: prefix.utf16.count, hitLocation: hit.location)
+    }
+
+    /// Attributed strings replace the label's line break mode, so every result
+    /// carries its own single-line paragraph style.
+    static func singleLine(_ mode: NSLineBreakMode) -> NSParagraphStyle {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = mode
+        return style
+    }
+
+    /// Drops the source indentation after the line number (never past the hit)
+    /// and truncates the tail so a long line stays on one row.
+    static func singleLineMatch(
+        _ value: NSMutableAttributedString,
+        prefixLength: Int,
+        hitLocation: Int
+    ) -> NSAttributedString {
+        let text = value.string as NSString
+        var end = prefixLength
+        while end < min(hitLocation, text.length),
+              let scalar = UnicodeScalar(text.character(at: end)),
+              scalar == " " || scalar == "\t"
+        {
+            end += 1
+        }
+        value.deleteCharacters(in: NSRange(location: prefixLength, length: end - prefixLength))
+        value.addAttribute(.paragraphStyle, value: singleLine(.byTruncatingTail),
+                           range: NSRange(location: 0, length: value.length))
         return value
     }
 
