@@ -1530,6 +1530,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.selfTestEmptyStateOpenButtonIsVisibleDefaultAction
     }
     var selfTestCommitButtonTitle: String { commitButton.title }
+    var selfTestCommitButtonBezel: NSColor? { commitButton.bezelColor }
+    var selfTestReaderHistorical: (flag: Bool, background: NSColor?) {
+        readerController.selfTestHistoricalSnapshot
+    }
     var selfTestCommitToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.commitItemIdentifier)
     }
@@ -2334,6 +2338,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         statusBar.wantsLayer = true
         statusBar.layer?.backgroundColor = theme.chromeColor.cgColor
         applyStatusTheme(theme)
+        renderCommitButton()
         readerController.apply(settings: settings)
         secondaryReaderController.apply(settings: settings)
         sidebarController.apply(settings: settings)
@@ -3296,6 +3301,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     }
 
     private func renderCommitButton() {
+        let theme = ReaderTheme(settings: currentReaderSettings)
+        readerController.setHistoricalSnapshot(model.currentRevision != nil)
         guard let revision = model.currentRevision else {
             commitButton.title = switch model.commitPicker.currentBranchName {
             case "detached": localized("main.detached")
@@ -3316,8 +3323,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         commitButton.title = summary.isEmpty
             ? "⎇ \(sha)"
             : "⎇ \(sha) \(summary)"
-        commitButton.bezelColor = .controlAccentColor
-        commitButton.contentTintColor = .white
+        commitButton.bezelColor = theme.histColor
+        commitButton.contentTintColor = theme.backgroundColor
         commitButton.toolTip = commit.map { "\($0.fullSHA) — \($0.summary)" }
             ?? revision
         commitButton.isEnabled = model.fileTree != nil
@@ -6104,6 +6111,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         case .signatureChanged: localized("main.signature")
         case .bodyChanged: localized("main.body")
         }
+    }
+
+    func setHistoricalSnapshot(_ historical: Bool) {
+        textView.historicalSnapshot = historical
+    }
+
+    var selfTestHistoricalSnapshot: (flag: Bool, background: NSColor?) {
+        (textView.historicalSnapshot, textView.view.backgroundColor)
     }
 
     func apply(settings: ReaderSettings) {

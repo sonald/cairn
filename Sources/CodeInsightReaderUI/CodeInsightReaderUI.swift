@@ -4355,8 +4355,17 @@ public final class ReaderTextView {
         view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     }
 
+    /// Reading a historical commit: the page turns sepia so the past is never
+    /// mistaken for the working tree.
+    public var historicalSnapshot = false {
+        didSet {
+            guard historicalSnapshot != oldValue else { return }
+            applyThemeColors()
+        }
+    }
+
     private func applyThemeColors() {
-        view.backgroundColor = theme.backgroundColor
+        view.backgroundColor = historicalSnapshot ? theme.histReaderColor : theme.backgroundColor
     }
 
     private static func project(

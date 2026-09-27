@@ -1908,3 +1908,64 @@ func statusBarUsesThemeColorsAndShowsTheReachableCertainty() async throws {
     #expect(rgb(style.truncatedFill) == 0xFFF1C2)
     #expect(rgb(style.separator) == 0xC9C9C1)
 }
+
+@MainActor
+@Test
+func readingAHistoricalCommitTurnsTheReaderAndCommitButtonSepia() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryGitProject(["main.rs": "pub fn target() -> i32 { 42 }\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    func git(_ arguments: [String]) throws -> String {
+        let process = Process()
+        let pipe = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root.path, "-c", "user.name=t", "-c", "user.email=t@t"] + arguments
+        process.standardOutput = pipe
+        try process.run()
+        process.waitUntilExit()
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    _ = try git(["add", "main.rs"])
+    _ = try git(["commit", "-q", "-m", "first"])
+    let sha = try git(["rev-parse", "HEAD"])
+    #expect(sha.count == 40)
+
+    let suite = "HistoryTintTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel()
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(theme: .light),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    try model.openProject(root: root, language: .rust)
+    #expect(await mainWindowWaitUntil(model.fileTree != nil))
+    controller.renderForSelfTest()
+
+    func rgb(_ color: NSColor?) -> UInt32? {
+        guard let srgb = color?.usingColorSpace(.sRGB) else { return nil }
+        return UInt32((srgb.redComponent * 255).rounded()) << 16
+            | UInt32((srgb.greenComponent * 255).rounded()) << 8
+            | UInt32((srgb.blueComponent * 255).rounded())
+    }
+    #expect(!controller.selfTestReaderHistorical.flag)
+    #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFBFAF6)
+
+    model.switchToCommit(sha)
+    #expect(await mainWindowWaitUntil(model.currentRevision != nil))
+    controller.renderForSelfTest()
+    #expect(controller.selfTestReaderHistorical.flag)
+    #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFAF5EA)
+    #expect(rgb(controller.selfTestCommitButtonBezel) == 0x7A5A2C)
+
+    model.switchToWorktree()
+    #expect(await mainWindowWaitUntil(model.currentRevision == nil))
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestReaderHistorical.flag)
+    #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFBFAF6)
+}
