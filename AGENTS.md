@@ -31,6 +31,8 @@ Keep AppKit/SwiftUI imports in UI targets; CI forbids them in core and model tar
 
 Use Swift Testing (`@Test`, `#expect`) in `*Tests.swift`, with descriptive behavior-based function names. Add meaningful regression checks for changed logic; avoid tests that merely duplicate trivial edits. Update CI's expected batch counts when adding tests. Require completed test summaries; an exit code alone is insufficient. Verify UI changes in the native app and record blocked or skipped checks explicitly.
 
+This is an early-stage project: keep verification proportional to the change. Prefer focused regression checks and a few representative performance samples to establish direction. Reserve repeated p95 studies and extended resource runs for a concrete regression or release decision. Once relevant checks pass, do not repeat full CI or expand the measurement campaign without a new code change or failure that justifies it.
+
 ## Commit & Pull Request Guidelines
 
 Follow history: `fix: ...`, `feat: ...`, `docs: ...`, or scoped subjects such as `fix(reader): preserve selection`. Keep commits focused. PRs should describe behavior changes, link relevant issues or plans, list validation, and include screenshots or native acceptance evidence for UI changes.

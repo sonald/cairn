@@ -2,6 +2,7 @@ import AppKit
 import CodeInsightCore
 import CodeInsightReaderCore
 import Testing
+import os
 @testable import CodeInsightReaderUI
 
 @MainActor
@@ -62,11 +63,24 @@ func readonlyTerminalStopCancelsQueuedWidthRestoreWithoutClearingText() {
 
 @MainActor
 @Test
-func readonlyResizeUserScrollResizeUsesTheUsersNewPosition() throws {
+func readonlyResizeUserScrollResizeUsesTheUsersNewPosition() async throws {
     let document = ReaderDocument(bytes: Array((0..<400).map { "// row \($0): source text\n" }.joined().utf8))
     let (reader, scroll, window) = s6NativeReader(document)
     defer { reader.stopPendingReaderWork(); window.close() }
-    reader.view.setFrameSize(NSSize(width: 620, height: reader.view.frame.height))
+    func turn() async {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.main.async { continuation.resume() }
+        }
+    }
+    func nativePaintTurn() {
+        window.layoutIfNeeded()
+        window.displayIfNeeded()
+        RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
+    }
+    for _ in 0..<3 { nativePaintTurn(); await turn() }
+    window.setContentSize(NSSize(width: 620, height: 400))
+    window.layoutIfNeeded()
+    reader.configureGutter(in: scroll, lineNumbers: true)
     #expect(reader.reflowDiagnostics.widthCapture)
     let original = scroll.contentView.bounds.minY
     let cgEvent = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
@@ -76,18 +90,23 @@ func readonlyResizeUserScrollResizeUsesTheUsersNewPosition() throws {
     expectedBounds.origin.y -= wheel.scrollingDeltaY
     let expectedY = scroll.contentView.constrainBoundsRect(expectedBounds).minY
     // Cancellation is synchronous; AppKit applies the actual wheel delta on its run loop.
-    reader.view.scrollWheel(with: wheel)
-    #expect(!reader.reflowDiagnostics.widthCapture)
-    readonlyWaitForWheelTarget(scroll, expectedY: expectedY)
-    reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
-    #expect(scroll.contentView.bounds.minY > original + 10)
-    let desiredByte = try #require(reader.firstVisibleByteOffset())
-    let desiredLine = try #require(document.lineTable.lineColumn(at: desiredByte)?.line)
-    reader.view.setFrameSize(NSSize(width: 560, height: reader.view.frame.height))
-    for _ in 0..<4 {
-        reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
-        reader.processPendingViewportRestoresForTesting()
+    try readonlyWaitForWheelTarget(scroll, expectedY: expectedY) {
+        reader.view.scrollWheel(with: wheel)
+        #expect(!reader.reflowDiagnostics.widthCapture)
     }
+    for _ in 0..<4 { nativePaintTurn(); await turn() }
+    #expect(scroll.contentView.bounds.minY > original + 10)
+    let beforeQueryBounds = scroll.contentView.bounds
+    let beforeQueryFrame = reader.view.frame
+    let desiredByte = try #require(reader.firstVisibleByteOffset())
+    #expect(scroll.contentView.bounds == beforeQueryBounds)
+    #expect(reader.view.frame == beforeQueryFrame)
+    #expect(scroll.contentView.bounds.minY > original + 10, "Reading the visible source must not undo completed user scrolling")
+    let desiredLine = try #require(document.lineTable.lineColumn(at: desiredByte)?.line)
+    window.setContentSize(NSSize(width: 560, height: 400))
+    window.layoutIfNeeded()
+    reader.configureGutter(in: scroll, lineNumbers: true)
+    for _ in 0..<4 { nativePaintTurn(); await turn() }
     let actualByte = try #require(reader.firstVisibleByteOffset())
     let actualLine = try #require(document.lineTable.lineColumn(at: actualByte)?.line)
     #expect(abs(Int(actualLine) - Int(desiredLine)) <= 1)
@@ -202,10 +221,19 @@ func readonlyMissingPreviousViewportNeverEnumeratesFullExtentForHighCostDocument
 }
 
 @MainActor
-func readonlyWaitForWheelTarget(_ scroll: NSScrollView, expectedY: CGFloat) {
+func readonlyWaitForWheelTarget(_ scroll: NSScrollView, expectedY: CGFloat, action: () -> Void) throws {
+    let ended = OSAllocatedUnfairLock(initialState: false)
+    let observer = NotificationCenter.default.addObserver(
+        forName: NSScrollView.didEndLiveScrollNotification, object: scroll, queue: nil
+    ) { _ in ended.withLock { $0 = true } }
+    defer { NotificationCenter.default.removeObserver(observer) }
+    action()
     let deadline = Date(timeIntervalSinceNow: 1)
-    while abs(scroll.contentView.bounds.minY - expectedY) > 1, Date() < deadline {
+    // Reaching the target can precede AppKit's end-of-scroll notification.
+    // Starting a new layout then would overlap two different test actions.
+    while (!ended.withLock({ $0 }) || abs(scroll.contentView.bounds.minY - expectedY) > 1), Date() < deadline {
         RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005))
     }
-    #expect(abs(scroll.contentView.bounds.minY - expectedY) <= 1)
+    try #require(ended.withLock { $0 }, "Native wheel tracking did not finish")
+    try #require(abs(scroll.contentView.bounds.minY - expectedY) <= 1)
 }

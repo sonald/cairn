@@ -57,6 +57,9 @@ package actor ReaderDerivedDataStore {
             contentID: key.contentID, languageMode: key.languageMode, readerVersion: key.readerVersion
         )
         let token = Subscription(id: UUID(), key: key)
+        // Cancellation may happen while a detached view task awaits this actor.
+        // An unregistered token already fails value(for:) and makes cancel a no-op.
+        guard !Task.isCancelled else { return token }
         clock &+= 1
         if var entry = entries[key] {
             entry.subscribers.insert(token.id)

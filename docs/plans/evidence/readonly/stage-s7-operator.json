@@ -1,0 +1,128 @@
+{
+  "status": "pass",
+  "root": "/private/tmp/cairn-readonly-operator-nqw4x2tm",
+  "baseCommit": "9aef36e5f62f499c948d6488444b6aaa86ac4b8a",
+  "headCommit": "b279ae1fe5053c836681487ad28c3d60c3ea567b",
+  "currentHelperSHA256": "7c8ace8484008d40076fc61bae24351100567f147857389b0a50c3b450818570",
+  "bundleIdentifier": "dev.cairn.readonly-acceptance",
+  "driftedMainSHA256": "176db6739ddc345049b5313119e89eca84866c52221d3f50417b2181f43a40bc",
+  "driftedHelperSHA256": "9bf00b40db0d128fda202e06f5e96f62f9293a71c284654f0707777bb6c037cf",
+  "operatorStepsCompleted": [
+    "openRustProject",
+    "findLeafTargetTwoMatches",
+    "symbolDefinitionJump",
+    "verifiedCallerRelationJump",
+    "focusCallerOne",
+    "historicalSourceValue10",
+    "freezeHistoricalCallers",
+    "normalQuit",
+    "processRestartRestoredReadingSet",
+    "historicalHelperStill10",
+    "workingTreeHelper999",
+    "workingTreeCallers101And202",
+    "frozenCallersStill1And2",
+    "normalQuitAfterVerification"
+  ],
+  "sessionChecks": {
+    "capturedExcerptsUnchanged": true,
+    "count": 2,
+    "activeReadingSetAfterRestart": true,
+    "snapshotBoundaryObserved": true
+  },
+  "frozenExcerpts": [
+    {
+      "symbol": "caller_one",
+      "path": "src/main.rs",
+      "revision": "9aef36e5f62f499c948d6488444b6aaa86ac4b8a",
+      "byteRange": {
+        "lowerBound": 13,
+        "upperBound": 110
+      },
+      "sourceText": "fn caller_one(value: i32) -> i32 {\n    let result = helper::leaf_target(value);\n    result + 1\n}\n",
+      "contentID": {
+        "algorithm": 1,
+        "bytes": [
+          5,
+          75,
+          5,
+          24,
+          209,
+          238,
+          155,
+          174,
+          174,
+          165,
+          74,
+          138,
+          229,
+          69,
+          165,
+          197,
+          114,
+          227,
+          39,
+          181,
+          206,
+          233,
+          209,
+          7,
+          150,
+          247,
+          195,
+          115,
+          246,
+          188,
+          188,
+          244
+        ]
+      }
+    },
+    {
+      "symbol": "caller_two",
+      "path": "src/main.rs",
+      "revision": "9aef36e5f62f499c948d6488444b6aaa86ac4b8a",
+      "byteRange": {
+        "lowerBound": 111,
+        "upperBound": 208
+      },
+      "sourceText": "fn caller_two(value: i32) -> i32 {\n    let result = helper::leaf_target(value);\n    result + 2\n}\n",
+      "contentID": {
+        "algorithm": 1,
+        "bytes": [
+          5,
+          75,
+          5,
+          24,
+          209,
+          238,
+          155,
+          174,
+          174,
+          165,
+          74,
+          138,
+          229,
+          69,
+          165,
+          197,
+          114,
+          227,
+          39,
+          181,
+          206,
+          233,
+          209,
+          7,
+          150,
+          247,
+          195,
+          115,
+          246,
+          188,
+          188,
+          244
+        ]
+      }
+    }
+  ]
+}

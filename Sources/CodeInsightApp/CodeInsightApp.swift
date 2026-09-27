@@ -757,6 +757,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         NotificationCenter.default.addObserver(self,
             selector: #selector(installedFontsChanged),
             name: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil)
+        // Core Text uses the distributed center for session/persistent registrations.
+        DistributedNotificationCenter.default().addObserver(self,
+            selector: #selector(installedFontsChanged),
+            name: Notification.Name(kCTFontManagerRegisteredFontsChangedNotification as String), object: nil)
     }
 
     @objc nonisolated private func installedFontsChanged(_ notification: Notification) {
@@ -846,6 +850,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        DistributedNotificationCenter.default().removeObserver(self)
         if let wrapKeyMonitor { NSEvent.removeMonitor(wrapKeyMonitor) }
     }
 

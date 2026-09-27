@@ -831,7 +831,6 @@ func wrapToggleClampsLegallyAtDocumentEdges() throws {
     let (reader, scrollView, window) = renderOffscreen(document)
     let clipView = scrollView.contentView
     let insetTop = -clipView.contentInsets.top
-
     // Document start.
     clipView.scroll(to: NSPoint(x: 0, y: 0))
     scrollView.reflectScrolledClipView(clipView)
@@ -851,8 +850,10 @@ func wrapToggleClampsLegallyAtDocumentEdges() throws {
     let bottomTarget = max(documentMaxUnwrapped, insetTop)
     let wheelCG = try #require(CGEvent(scrollWheelEvent2Source: nil, units: .pixel,
         wheelCount: 1, wheel1: Int32((clipView.bounds.minY - bottomTarget).rounded()), wheel2: 0, wheel3: 0))
-    reader.view.scrollWheel(with: try #require(NSEvent(cgEvent: wheelCG)))
-    readonlyWaitForWheelTarget(scrollView, expectedY: bottomTarget)
+    let wheel = try #require(NSEvent(cgEvent: wheelCG))
+    try readonlyWaitForWheelTarget(scrollView, expectedY: bottomTarget) {
+        reader.view.scrollWheel(with: wheel)
+    }
     wrapSettle(reader, pumps: 2)
     let bottomUnwrapped = clipView.bounds.minY
     reader.apply(settings: wrapSettings(true))
@@ -863,7 +864,8 @@ func wrapToggleClampsLegallyAtDocumentEdges() throws {
     // The wrapped document is taller, so restoring the anchor at its saved
     // offset legitimately leaves the viewport above the new maximum; what
     // must hold is a legal origin (W17: clamps legal, no fake limits).
-    #expect(bottomWrapped >= insetTop - 0.5 && bottomWrapped <= maxWrapped + 0.5)
+    #expect(bottomWrapped >= insetTop - 0.5 && bottomWrapped <= maxWrapped + 0.5,
+        "wrappedY=\(bottomWrapped), legal=\(insetTop)...\(maxWrapped), insets=\(clipView.contentInsets), frame=\(reader.view.frame), pending=\(reader.reflowDiagnostics)")
     reader.apply(settings: wrapSettings(false))
     wrapSettle(reader)
     // Back in the identical unwrapped layout, the anchor restore reproduces

@@ -60,6 +60,12 @@ func readingSetFontChangesRemeasureWithoutChangingSourceSelectionOrAnchor() asyn
         // copy entry point declares those types and also provides modern .string.
         #expect(text.writeSelection(to: pasteboard, types: text.writablePasteboardTypes))
         #expect(pasteboard.string(forType: .string) == "=")
+        try readonlyCaptureSurfaceEvidence("reading-set-" + mode.rawValue, textView: text,
+            expectedSource: excerpt.sourceText, provenance: [
+                "sourceScope": "frozen-excerpt", "path": excerpt.path,
+                "capturedContentID": excerpt.contentID.bytes.map { String(format: "%02x", $0) }.joined(),
+                "sourceKind": "worktreeCaptured", "card": "2",
+            ], drawView: view, drawCount: { view.selfTestDrawCount })
         text.moveLeftAndModifySelection(nil)
         #expect((text.string as NSString).substring(with: text.selectedRange()) == "!=")
         text.setSelectedRanges([NSValue(range: selection)], affinity: .upstream, stillSelecting: false)

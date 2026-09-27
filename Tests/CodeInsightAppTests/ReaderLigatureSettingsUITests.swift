@@ -71,6 +71,10 @@ func readerLigatureSettingsShowControlsAndPreserveUnavailableFontIntent() async 
         pasteboard.declareTypes([.string], owner: nil)
         #expect(preview.writeSelection(to: pasteboard, type: .string))
         #expect(pasteboard.string(forType: .string) == "==")
+        try readonlyCaptureSurfaceEvidence("settings-" + name, textView: preview,
+            expectedSource: controller.selfTestReaderPreviewSource,
+            provenance: ["sourceScope": "settings-built-in-sample", "postScriptName": name],
+            drawCount: { controller.selfTestReaderPreviewDrawCount })
     }
     #expect(Set(labels).count == 2)
     #expect(commits.isEmpty)

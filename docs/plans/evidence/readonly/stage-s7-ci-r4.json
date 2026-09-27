@@ -1,0 +1,92 @@
+{
+  "status": "pass",
+  "command": "CAIRN_READONLY_FONT_EVIDENCE_DIR=.build/readonly/font-ci-final CODEX_SANDBOX=1 bash scripts/ci.sh",
+  "testCount": 1135,
+  "batches": [
+    1128,
+    2,
+    2,
+    1,
+    1,
+    1
+  ],
+  "bilingualKeyCount": 795,
+  "logs": [
+    {
+      "path": ".build/readonly/s7-verified-test-logs/s7-ci-verified.log",
+      "sha256": "608eff46a8510aa6ad007a6ba4cd149f0a98d72e0912c2aa76a56af611419123",
+      "completedTestCounts": []
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test.log",
+      "sha256": "78b6f08b241d2a439ce00bd6d1854627e67bccdfab61c09ed06d74ff6291eb27",
+      "completedTestCounts": [
+        18,
+        8,
+        30,
+        11,
+        32,
+        233,
+        19,
+        100,
+        131,
+        16,
+        147,
+        383
+      ]
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test-isolated.log",
+      "sha256": "4c7ea74473d01aff88c2106d56438a06874df030727873cad90324a9a5b9e66f",
+      "completedTestCounts": [
+        2
+      ]
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test-panels.log",
+      "sha256": "5258edd79ae8ee8f3d960a4af703c28b7f197b02172ec9f6c156a5d3f7e280c7",
+      "completedTestCounts": [
+        2
+      ]
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test-mouse.log",
+      "sha256": "d6902cc9c69e547ac421d1daca5a9f06db562abe85ec996c11c903463c92afd8",
+      "completedTestCounts": [
+        1
+      ]
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test-font-process.log",
+      "sha256": "86538c04d053052f1d7f0c2cf9d25ba92d90f72eab1eb046b2d6582f3af22154",
+      "completedTestCounts": [
+        1
+      ]
+    },
+    {
+      "path": ".build/readonly/s7-verified-test-logs/ci-swift-test-font-routing.log",
+      "sha256": "8e179d42b61a36710fd429ef98866db7ca2e2781e167322c51c63bcb87e5aa32",
+      "completedTestCounts": [
+        1
+      ]
+    }
+  ],
+  "verifiedSourceSHA256": {
+    "Sources/CodeInsightApp/CodeInsightApp.swift": "f4170dad5413204eb233ef7f2ab7b6f047e2af4f90b29d5d65f8660216a2c34d",
+    "Sources/CodeInsightApp/MainWindowController.swift": "cd55ffbde1e0c90548a7fca2a6f118d851d5c5fd5f3d966aab09fa2433a6f949",
+    "Sources/CodeInsightApp/ReaderSettingsWindowController.swift": "d091c02f43b0b229ee3713a1db137c67428b75d299559ce0296e6c7514991fff",
+    "Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift": "cb01ce1d21e1db7974dedc296c245ac560d289a57b4cead578cf1b2d251460d2",
+    "Tests/CodeInsightAppTests/ReadonlyFontRegistrationTests.swift": "7bc724f65c18a9abfc758e056bb58f9fd5b32d64faafab91a79421abd27c8085",
+    "Tests/CodeInsightReaderCoreTests/ReaderReflowLifecycleTests.swift": "e33efdb93254316037ded5cecd2bc51f97b7352a406330699383c3d2d4a203cd",
+    "Tests/CodeInsightReaderCoreTests/ReaderUITests.swift": "73a3aec12e65b865e0e3727dae272e85c663282491de10573b9d3ff4465ada64"
+  },
+  "nativeSelfTests": [
+    "exact (in-process fake provider)",
+    "diff",
+    "reading",
+    "projector",
+    "fold"
+  ],
+  "existingFoldWorkload": "pass; budgetsEnforced=false",
+  "priorFailedAttempt": ".build/readonly/s7-ci-font-failure/record.json"
+}

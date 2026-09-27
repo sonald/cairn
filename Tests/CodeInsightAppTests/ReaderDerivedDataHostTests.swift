@@ -105,11 +105,14 @@ func readonlyReaderHostDiscardsSyntaxArrivalAfterTeardown() async throws {
     controller.display(URL(fileURLWithPath: "/readonly-delayed.rs"), source: { _ in bytes })
     #expect(controller.selfTestSyntaxLoadPending)
     controller.cancelDerivedDataSubscription()
+    // Eager background work may have started before close; no build may start
+    // after the cancelled request reaches the store or late syntax arrives.
+    let buildsAtTeardown = await store.statistics.buildCount
     for _ in 0..<500 { try await Task.sleep(for: .milliseconds(2)) }
     #expect(await store.statistics.subscriptionCount == 0)
     #expect(controller.displayedBytes == bytes)
     #expect(controller.identifierPreparationNotice == nil)
-    #expect(await store.statistics.buildCount == 0)
+    #expect(await store.statistics.buildCount == buildsAtTeardown)
 }
 
 @MainActor

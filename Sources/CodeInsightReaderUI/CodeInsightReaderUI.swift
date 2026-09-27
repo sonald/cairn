@@ -811,43 +811,45 @@ public final class ReaderTextView {
         let generation = derivedDataGeneration
         let key = document.analysisKey
         let store = derivedDataStore
-        derivedDataTask = Task { [weak self] in
-            guard !Task.isCancelled, self?.derivedDataGeneration == generation,
-                  self?.displayedDocument?.analysisKey == key else { return }
+        // Register/build independently of synchronous first-screen AppKit work.
+        // This task owns its token until the matching Reader accepts the result.
+        derivedDataTask = Task.detached(priority: .userInitiated) { [weak self] in
+            guard !Task.isCancelled else { return }
             if let previousSubscription { await store.cancel(previousSubscription) }
             let subscription = await store.subscribe(key: key, document: document)
-            guard !Task.isCancelled,
-                  self?.derivedDataGeneration == generation,
-                  self?.displayedDocument?.analysisKey == key else {
-                await store.cancel(subscription)
-                return
-            }
-            self?.derivedDataSubscription = subscription
-            await withTaskCancellationHandler {
+            let published = await withTaskCancellationHandler {
                 do {
                     let index = try await store.value(for: subscription)
-                    guard !Task.isCancelled, let self,
-                          self.derivedDataGeneration == generation,
-                          self.displayedDocument?.analysisKey == key else { return }
-                    self.identifierIndex = index
-                    self.preparedAnalysisKey = key
-                    self.identifierPreparationState = .ready
-                    if let pending = self.pendingOccurrenceActivation,
-                       pending == self.occurrenceSelectionByteOffset {
-                        self.pendingOccurrenceActivation = nil
-                        self.finishOccurrenceActivation(at: pending)
-                    } else if self.occurrenceSelectionByteOffset != nil {
-                        self.refreshOccurrenceRendering()
+                    return await MainActor.run { [weak self] in
+                        guard !Task.isCancelled, let self,
+                              self.derivedDataGeneration == generation,
+                              self.displayedDocument?.analysisKey == key else { return false }
+                        self.derivedDataSubscription = subscription
+                        self.identifierIndex = index
+                        self.preparedAnalysisKey = key
+                        self.identifierPreparationState = .ready
+                        if let pending = self.pendingOccurrenceActivation,
+                           pending == self.occurrenceSelectionByteOffset {
+                            self.pendingOccurrenceActivation = nil
+                            self.finishOccurrenceActivation(at: pending)
+                        } else if self.occurrenceSelectionByteOffset != nil {
+                            self.refreshOccurrenceRendering()
+                        }
+                        return true
                     }
                 } catch {
-                    guard !Task.isCancelled, let self,
-                          self.derivedDataGeneration == generation,
-                          self.displayedDocument?.analysisKey == key else { return }
-                    self.identifierPreparationState = .unavailable(String(describing: error))
+                    await MainActor.run { [weak self] in
+                        guard !Task.isCancelled, let self,
+                              self.derivedDataGeneration == generation,
+                              self.displayedDocument?.analysisKey == key else { return }
+                        self.identifierPreparationState = .unavailable(String(describing: error))
+                    }
+                    return false
                 }
             } onCancel: {
                 Task { await store.cancel(subscription) }
             }
+            if !published { await store.cancel(subscription) }
         }
     }
 
@@ -3048,6 +3050,8 @@ public final class ReaderTextView {
                 y: lineRect.minY
             ))
             scrollView.reflectScrolledClipView(clipView)
+            // Settle this explicit scroll before measuring the restoration error.
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             guard let actualOffset = firstVisibleByteOffset(),
                   let actual = document.lineTable.lineColumn(at: actualOffset)
             else { return }
@@ -3374,7 +3378,7 @@ public final class ReaderTextView {
         guard !isCommittingProjection, let layoutManager = view.textLayoutManager,
               let content = layoutManager.textContentManager
         else { return nil }
-        layoutManager.textViewportLayoutController.layoutViewport()
+        // Reading the current viewport must not trigger TextKit layout/extent changes.
         guard let viewport = layoutManager.textViewportLayoutController.viewportRange else {
             return nil
         }

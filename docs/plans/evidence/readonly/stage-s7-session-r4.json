@@ -1,0 +1,96 @@
+{
+  "status": "pass",
+  "scope": "Two actual processes, normal termination, Reader viewport/caret, trail identity and Back/Forward; after getter/restore and DNC repairs, before any later index scheduling change",
+  "bundleIdentifier": "dev.cairn.readonly-acceptance",
+  "binaryPath": ".build/readonly/s7-final-bundle/Cairn.app/Contents/MacOS/codeinsight-app",
+  "binarySHA256": "e4802f3678d0249d45b63de368c3feb5bf11b99e2b129df4e2c7a8e3f24e2c72",
+  "productSourceSHA256": {
+    "Sources/CodeInsightApp/CodeInsightApp.swift": "f4170dad5413204eb233ef7f2ab7b6f047e2af4f90b29d5d65f8660216a2c34d",
+    "Sources/CodeInsightApp/MainWindowController.swift": "cd55ffbde1e0c90548a7fca2a6f118d851d5c5fd5f3d966aab09fa2433a6f949",
+    "Sources/CodeInsightApp/ReaderSettingsWindowController.swift": "d091c02f43b0b229ee3713a1db137c67428b75d299559ce0296e6c7514991fff",
+    "Sources/CodeInsightReaderUI/CodeInsightReaderUI.swift": "cb01ce1d21e1db7974dedc296c245ac560d289a57b4cead578cf1b2d251460d2"
+  },
+  "artifactDirectory": "/tmp/cairn-session-acceptance.bp2nGP",
+  "events": {
+    "save.stdout": [
+      {
+        "channel": "session",
+        "expectations": {
+          "activeIndex": 2,
+          "canGoBack": true,
+          "canGoForward": false,
+          "historyCursor": 1,
+          "historyRecords": 1,
+          "root": "/tmp/cairn-session-acceptance.bp2nGP/project",
+          "scrollAnchor": 2747,
+          "selectionAnchor": 2751,
+          "tabPaths": [
+            "main.rs",
+            "other.rs",
+            "third.rs"
+          ],
+          "trailActiveID": "91B71247-58F8-4186-A969-FFE41B8087A5",
+          "trailEdges": [
+            [
+              "1A744C64-479F-41B0-99A2-45602C66A1B4",
+              "FEFDE8CA-1A51-4930-8B40-AF74180E6C8E"
+            ],
+            [
+              "1A744C64-479F-41B0-99A2-45602C66A1B4",
+              "91B71247-58F8-4186-A969-FFE41B8087A5"
+            ]
+          ],
+          "trailNodeIDs": [
+            "1A744C64-479F-41B0-99A2-45602C66A1B4",
+            "FEFDE8CA-1A51-4930-8B40-AF74180E6C8E",
+            "91B71247-58F8-4186-A969-FFE41B8087A5"
+          ]
+        },
+        "passed": true
+      },
+      {
+        "channel": "session-termination",
+        "willTerminate": true
+      }
+    ],
+    "restore.stdout": [
+      {
+        "channel": "session-restart",
+        "checks": {
+          "activeTab": true,
+          "backAfterRestart": true,
+          "canGoBack": true,
+          "canGoForward": true,
+          "forwardAfterRestart": true,
+          "historyCursor": true,
+          "historyRecords": true,
+          "readerDisplaysActiveTab": true,
+          "scrollAnchor": true,
+          "selectionAnchor": true,
+          "tabOrder": true,
+          "trailActive": true,
+          "trailEdges": true,
+          "trailNodes": true
+        },
+        "historyCursor": 1,
+        "passed": true,
+        "processRestart": true,
+        "tabPaths": [
+          "main.rs",
+          "other.rs",
+          "third.rs"
+        ],
+        "trailEdges": [
+          [
+            "1A744C64-479F-41B0-99A2-45602C66A1B4",
+            "FEFDE8CA-1A51-4930-8B40-AF74180E6C8E"
+          ],
+          [
+            "1A744C64-479F-41B0-99A2-45602C66A1B4",
+            "91B71247-58F8-4186-A969-FFE41B8087A5"
+          ]
+        ]
+      }
+    ]
+  }
+}

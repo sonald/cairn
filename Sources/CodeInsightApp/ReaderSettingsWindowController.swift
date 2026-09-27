@@ -142,6 +142,15 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         if let content = window?.contentView { visit(content) }
     }
 
+    var selfTestReaderPreviewSource: String {
+        String(decoding: ReaderSettingsPreview.document.bytes, as: UTF8.self)
+    }
+    var selfTestReaderPreviewDrawCount: Int {
+        var count = 0
+        forEachReaderPreview { count += $0.selfTestDrawCount }
+        return count
+    }
+
     /// Force the same deferred preview layout while testing retained closed windows.
     func selfTestLayoutReaderPreviews() {
         window?.contentView?.layoutSubtreeIfNeeded()
@@ -505,7 +514,7 @@ private struct ReaderSettingsPreview: NSViewRepresentable {
     let settings: ReaderSettings
     let fontEnvironmentRevision: UInt64
     let derivedDataStore: ReaderDerivedDataStore
-    private static let document: ReaderDocument = {
+    fileprivate static let document: ReaderDocument = {
         let plain = ReaderDocument(bytes: Array("""
             // Operators: != !== -> => <= >= :: .. ... ===
             const MAX_VISITS: usize = 3;
@@ -530,6 +539,7 @@ private struct ReaderSettingsPreview: NSViewRepresentable {
 }
 
 private final class ReaderSettingsPreviewScrollView: NSScrollView {
+    var selfTestDrawCount: Int { reader.backgroundDrawCount }
     private let reader: ReaderTextView
     private let document: ReaderDocument
     private var settings: ReaderSettings

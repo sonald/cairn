@@ -1,0 +1,21 @@
+{
+  "generator": "generate.py",
+  "postScriptName": "CairnReadonlyV06Synthetic-Regular",
+  "unitsPerEm": 1000,
+  "fonts": [
+    {
+      "file": "CairnReadonlyV06-A.ttf",
+      "advanceUnits": 500,
+      "bytes": 5148,
+      "sha256": "1cd23f49e217ecaff42e16a4e53fed91628512ff13867a5a2bb94c82e5cd0d6b",
+      "hmtxSHA256": "13b36aa9d31f511bb6603c8a43595a612497d267ad85fa39f076d0d4ecb0354f"
+    },
+    {
+      "file": "CairnReadonlyV06-B.ttf",
+      "advanceUnits": 900,
+      "bytes": 5148,
+      "sha256": "f4a20ac6076873cc87d3af4aefd98343c520d14d884395e4cbfda0733570c79d",
+      "hmtxSHA256": "6333d040638d70fda77876e12149512470366dcd2d0ef0ad051ab3f73e4abbfd"
+    }
+  ]
+}

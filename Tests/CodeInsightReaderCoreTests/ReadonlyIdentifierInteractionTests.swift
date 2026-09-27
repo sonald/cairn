@@ -158,3 +158,59 @@ func readonlyIdentifierCompletedCacheDoesNotRetainReaderOrDocument() async {
     #expect(await store.statistics.entryCount == 1)
     #expect(await store.statistics.retainedDerivedBytes > 0)
 }
+
+@MainActor
+@Test
+func readonlyIdentifierBuilderStartsBeforeMainActorYields() async {
+    let started = DispatchSemaphore(value: 0)
+    let store = ReaderDerivedDataStore(builder: { document in
+        func isBackgroundThread() -> Bool { !Thread.isMainThread }
+        #expect(isBackgroundThread())
+        started.signal()
+        return try IdentifierIndex(document: document)
+    })
+    let reader = ReaderTextView(derivedDataStore: store)
+    reader.display(document: ReaderDocument(bytes: Array("alpha alpha".utf8)))
+    // Deliberately do not yield MainActor: the old inherited Task cannot reach
+    // subscribe until this wait times out. The builder's signal is the evidence.
+    func waitForBackgroundStart() -> DispatchTimeoutResult { started.wait(timeout: .now() + 2) }
+    #expect(waitForBackgroundStart() == .success)
+    #expect(reader.identifierPreparationState == .building)
+    await reader.waitForIdentifierPreparation()
+    #expect(reader.identifierPreparationState == .ready)
+    reader.clear()
+}
+
+@Test
+func readonlyIdentifierCancelledSubscribeNeverStartsAWorker() async {
+    let store = ReaderDerivedDataStore(builder: { document in
+        Issue.record("A task cancelled before subscribe started a builder")
+        return try IdentifierIndex(document: document)
+    })
+    let document = ReaderDocument(bytes: Array("alpha".utf8))
+    await Task.detached {
+        withUnsafeCurrentTask { $0?.cancel() }
+        let subscription = await store.subscribe(key: document.analysisKey, document: document)
+        do { _ = try await store.value(for: subscription); Issue.record("Cancelled token returned data") }
+        catch is CancellationError {} catch { Issue.record("Unexpected error: \(error)") }
+        await store.cancel(subscription)
+    }.value
+    #expect(await store.statistics.buildCount == 0)
+    #expect(await store.statistics.subscriptionCount == 0)
+}
+
+@MainActor
+@Test
+func readonlyIdentifierDroppedReaderCancelsUnpublishedSubscription() async {
+    let gate = ReadonlyBuildGate()
+    let store = ReaderDerivedDataStore(builder: { try await gate.build($0) })
+    var reader: ReaderTextView? = ReaderTextView(derivedDataStore: store)
+    weak var released = reader
+    reader?.display(document: ReaderDocument(bytes: Array("alpha alpha".utf8)))
+    await gate.waitUntilStarted(1)
+    reader = nil
+    #expect(released == nil)
+    await gate.waitForCancellation()
+    #expect(await store.statistics.subscriptionCount == 0)
+    #expect(await store.statistics.entryCount == 0)
+}

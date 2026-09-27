@@ -1,9 +1,15 @@
 # Cairn 只读架构优化：实施计划与验收
 
 日期：2026-09-26  
-状态：**实施中。S0–S6 已完成（各阶段限制单独记录）；S7 尚未验收。实际结果见 [S0](evidence/readonly/stage-s0.md)、[S1](evidence/readonly/stage-s1.md)、[S2](evidence/readonly/stage-s2.md)、[S3](evidence/readonly/stage-s3.md)、[S4](evidence/readonly/stage-s4.md)、[S5a](evidence/readonly/stage-s5a.md)、[S5b](evidence/readonly/stage-s5b.md)、[S6](evidence/readonly/stage-s6.md)。**
+状态：**本轮开发交付完成，按下述用户调整后的验证尺度收尾。S0–S7 已实施，完整发布验收不作通过声明（[交付记录](evidence/readonly/acceptance.md)）；S8 原型验证完成，因几何不等价暂缓采用（[记录](evidence/readonly/stage-s8.md)）。实际结果见 [S0](evidence/readonly/stage-s0.md)、[S1](evidence/readonly/stage-s1.md)、[S2](evidence/readonly/stage-s2.md)、[S3](evidence/readonly/stage-s3.md)、[S4](evidence/readonly/stage-s4.md)、[S5a](evidence/readonly/stage-s5a.md)、[S5b](evidence/readonly/stage-s5b.md)、[S6](evidence/readonly/stage-s6.md)。**
 复核基线：`6a54ef1562282c8852c3038022c12720b96d9fc0`。  
 设计依据：[只读架构详细设计](2026-09-26-readonly-design.md)。
+
+## 本轮验收尺度调整（2026-09-27）
+
+用户明确指出项目仍处于早期开发，要求克制性能测试的方法和频率。本轮按开发交付收尾：保留已完成的相关回归、原生工作流和性能证据，不再为凑足样本追加运行，也不启动额外的长时资源观测。已有测试通过后，仅在相关代码改变或出现新失败时重跑对应检查。
+
+下文原定的固定 30 次性能采样和完整发布验收作为后续发布时的参考，不再是本次开发提交的前置条件。实际样本数、供电分层、历史失败与未执行项按原始记录报告；不将部分证据改写为完整发布验收通过。VoiceOver 实际操作和扩展的同进程历史版本内存观察保留为未执行项。S8 只完成独立原型及采用裁决，不强行接入产品。
 
 ## 1. 执行方式
 
@@ -654,7 +660,7 @@ PR-04 与 PR-05 分开，避免 Reader 与 Engine 的独立风险相互阻塞。
 
 ## 15. 最终验收与交接
 
-验收记录使用随文档提供的 [验收模板](evidence/readonly/acceptance-template.md)。填写实际 candidate SHA、阶段完成状态、测试摘要、原生证据、性能样本与回退结果。
+实际结果保存在 [验收记录](evidence/readonly/acceptance.md)，包含 candidate SHA、阶段完成状态、测试摘要、原生证据、性能样本与回退结果。
 
 正式交接同时给出：实现了哪些需求、还保留哪些限制、已知失败是否为历史问题、运行新脚本的方法、新增缓存的所有者与预算、尚未删除的兼容入口。
 

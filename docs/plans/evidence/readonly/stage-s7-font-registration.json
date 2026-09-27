@@ -1,0 +1,115 @@
+{
+  "status": "pass",
+  "scope": "real process-scope same-name replacement plus separate isolated distributed routing; no system font installation",
+  "process": {
+    "after": {
+      "advance": 11.7,
+      "hmtxSHA256": "6333d040638d70fda77876e12149512470366dcd2d0ef0ad051ab3f73e4abbfd",
+      "name": "CairnReadonlyV06Synthetic-Regular",
+      "url": "/Users/siancao/work/ai/vibecoding/codeinsight/fixtures/readonly/fonts/CairnReadonlyV06-B.ttf"
+    },
+    "before": {
+      "advance": 6.5,
+      "hmtxSHA256": "13b36aa9d31f511bb6603c8a43595a612497d267ad85fa39f076d0d4ecb0354f",
+      "name": "CairnReadonlyV06Synthetic-Regular",
+      "url": "/Users/siancao/work/ai/vibecoding/codeinsight/fixtures/readonly/fonts/CairnReadonlyV06-A.ttf"
+    },
+    "postScriptName": "CairnReadonlyV06Synthetic-Regular",
+    "registerA": "registered",
+    "registerB": "registered",
+    "scope": "process",
+    "selectionUnchanged": true,
+    "sourceUnchanged": true,
+    "status": "replacement-observed",
+    "unregisterA": "unregistered"
+  },
+  "distributedRouting": {
+    "actualSystemFontInstallation": false,
+    "scope": "distributed-notification-only",
+    "status": "routing-observed"
+  },
+  "surfaces": [
+    {
+      "copiedUTF8": [
+        118,
+        97,
+        108,
+        117,
+        101
+      ],
+      "displayTextSHA256": "23c480d0b0c28869d82fd2399be85df8fdcbc09878393be70e84fd44e8600eb3",
+      "drawCountAfter": 7,
+      "drawCountBefore": 5,
+      "fontName": "CairnReadonlyV06Synthetic-Regular",
+      "image": "/Users/siancao/work/ai/vibecoding/codeinsight/.build/readonly/font-registration/surfaces/font-registration-before.png",
+      "isEditable": false,
+      "pixelSize": [
+        1996,
+        1544
+      ],
+      "pngSHA256": "c976190afaea561d96da015f38f9644e7360a31a204883e5ba49f7e37e5b3d36",
+      "provenance": {},
+      "sampledDistinctColors": 9,
+      "selectedRanges": [
+        [
+          7,
+          5
+        ]
+      ],
+      "selectionAffinity": 0,
+      "sourceByteCount": 31,
+      "sourceSHA256": "23c480d0b0c28869d82fd2399be85df8fdcbc09878393be70e84fd44e8600eb3",
+      "surface": "font-registration-before",
+      "usesTextKit2": true,
+      "visibleRect": "{{0, 0}, {998, 772}}",
+      "windowVisible": true
+    },
+    {
+      "copiedUTF8": [
+        118,
+        97,
+        108,
+        117,
+        101
+      ],
+      "displayTextSHA256": "23c480d0b0c28869d82fd2399be85df8fdcbc09878393be70e84fd44e8600eb3",
+      "drawCountAfter": 10,
+      "drawCountBefore": 9,
+      "fontName": "CairnReadonlyV06Synthetic-Regular",
+      "image": "/Users/siancao/work/ai/vibecoding/codeinsight/.build/readonly/font-registration/surfaces/font-registration-after.png",
+      "isEditable": false,
+      "pixelSize": [
+        1996,
+        1544
+      ],
+      "pngSHA256": "ce697595d2800ca5997eb222ee68540e15213c9aeec716ae35eb3525072c33c8",
+      "provenance": {},
+      "sampledDistinctColors": 7,
+      "selectedRanges": [
+        [
+          7,
+          5
+        ]
+      ],
+      "selectionAffinity": 0,
+      "sourceByteCount": 31,
+      "sourceSHA256": "23c480d0b0c28869d82fd2399be85df8fdcbc09878393be70e84fd44e8600eb3",
+      "surface": "font-registration-after",
+      "usesTextKit2": true,
+      "visibleRect": "{{0, 0}, {998, 772}}",
+      "windowVisible": true
+    }
+  ],
+  "logs": [
+    {
+      "path": ".build/readonly/s7-font-registration.log",
+      "sha256": "0b71f2b27edbb437bc8b3de6df98de9caa0790f18a006657f79c6704914e9261"
+    },
+    {
+      "path": ".build/readonly/s7-font-routing-isolated.log",
+      "sha256": "6f9a90834dea67bb5d566b2ef4017bb6ec49fbdb2d92bf67fcf83547da0b2a4b"
+    }
+  ],
+  "fixtureNote": "Original rectangle-outline ASCII glyphs deliberately make the A/B width difference visible; these are test fonts, not product typography.",
+  "fontTablesMatchFixtureManifest": true
+}

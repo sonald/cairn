@@ -5044,6 +5044,12 @@ private final class ReadingHeightControl: NSSegmentedControl {
 /// Intercepts the native autoresize before TextKit discards the old line geometry.
 @MainActor
 private final class PlainTextPreviewView: NSTextView {
+    private(set) var backgroundDrawCount = 0
+    override func drawBackground(in rect: NSRect) {
+        super.drawBackground(in: rect)
+        backgroundDrawCount += 1
+    }
+
     var onWidthChange: ((CGFloat) -> Void)?
     var isReflowing = false
 
@@ -6711,6 +6717,13 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.captureVisibleDecorationState()
         return textView.visibleCurrentLineNumbers
     }
+    var selfTestReaderDrawCount: Int { textView.backgroundDrawCount }
+    var selfTestPlainTextDrawCount: Int {
+        ((previewView as? NSScrollView)?.documentView as? PlainTextPreviewView)?.backgroundDrawCount ?? 0
+    }
+    var selfTestReadingSetDrawCount: Int { readingSetView.selfTestDrawCount }
+    var selfTestReadingSetSurface: NSView { readingSetView }
+    var selfTestReadingSetTextViews: [NSTextView] { readingSetView.selfTestTextViews }
     var selfTestSyntaxLoadPending: Bool { syntaxLoadPending }
     func selfTestWaitForIdentifierPreparation() async {
         await textView.waitForIdentifierPreparation()
@@ -7711,6 +7724,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
 @MainActor
 final class ContextWindowViewController: NSViewController {
+    var selfTestReaderDrawCount: Int { miniReader.backgroundDrawCount }
     var onOpen: ((ContextWindowModel.Candidate) -> Void)?
 
     private let model: ContextWindowModel

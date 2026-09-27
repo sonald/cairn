@@ -1,0 +1,58 @@
+{
+  "status": "pass",
+  "sourceFixtureSHA256": "53ceb819f54aa2540697ca5a114c053bea33c9f7dcd5d253a990ed18e4577fdd",
+  "oldTrace": [
+    "RESIZE_WHEEL_TRACE wheel-ended-before-layout t=1790503491.252204 clip=(-40.0, 320.0, 620.0, 400.0) frame=(0.0, 0.0, 620.0, 8539.0) container=Optional((600.0, 1.7976931348623157e+308)) viewport=Optional(NSCountableTextRange: {312, 483}) viewportBounds=Optional((-10.0, 308.0, 620.0, 400.0)) source=Optional(312) state=(generation: 6, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)",
+    "RESIZE_WHEEL_TRACE wheel-ended-after-layout t=1790503491.255605 clip=(-40.0, 0.0, 620.0, 400.0) frame=(0.0, 0.0, 620.0, 394.0) container=Optional((600.0, 1.7976931348623157e+308)) viewport=Optional(NSCountableTextRange: {0, 427}) viewportBounds=Optional((-10.0, -12.0, 620.0, 400.0)) source=Optional(0) state=(generation: 6, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)"
+  ],
+  "snapshotQueryExperiment": [
+    "RESIZE_WHEEL_TRACE wheel-ended-before-layout t=1790503954.4593558 clip=(-40.0, 320.0, 620.0, 400.0) frame=(0.0, 0.0, 620.0, 8539.0) container=Optional((600.0, 1.7976931348623157e+308)) heightTracks=Optional(false) min=(580.0, 394.0) max=(1.7976931348623157e+308, 1.7976931348623157e+308) viewport=Optional(NSCountableTextRange: {312, 483}) viewportBounds=Optional((-10.0, 308.0, 620.0, 400.0)) source=Optional(312) state=(generation: 6, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)",
+    "RESIZE_WHEEL_TRACE wheel-ended-after-layout t=1790503954.581084 clip=(-40.0, 320.0, 620.0, 400.0) frame=(0.0, 0.0, 620.0, 8539.0) container=Optional((600.0, 1.7976931348623157e+308)) heightTracks=Optional(false) min=(580.0, 394.0) max=(1.7976931348623157e+308, 1.7976931348623157e+308) viewport=Optional(NSCountableTextRange: {312, 483}) viewportBounds=Optional((-10.0, 308.0, 620.0, 400.0)) source=Optional(312) state=(generation: 6, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)",
+    "RESIZE_WHEEL_TRACE after-firstVisibleByteOffset t=1790503954.581536 clip=(-40.0, 320.0, 620.0, 400.0) frame=(0.0, 0.0, 620.0, 8539.0) container=Optional((600.0, 1.7976931348623157e+308)) heightTracks=Optional(false) min=(580.0, 394.0) max=(1.7976931348623157e+308, 1.7976931348623157e+308) viewport=Optional(NSCountableTextRange: {312, 483}) viewportBounds=Optional((-10.0, 308.0, 620.0, 400.0)) source=Optional(312) state=(generation: 6, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)",
+    "RESIZE_WHEEL_TRACE settled-B t=1790503954.648192 clip=(-40.0, 320.0, 560.0, 400.0) frame=(0.0, 0.0, 560.0, 8539.0) container=Optional((540.0, 1.7976931348623157e+308)) heightTracks=Optional(false) min=(520.0, 394.0) max=(1.7976931348623157e+308, 1.7976931348623157e+308) viewport=Optional(NSCountableTextRange: {312, 483}) viewportBounds=Optional((-10.0, 308.0, 560.0, 400.0)) source=Optional(312) state=(generation: 7, widthCapture: false, widthPending: false, correctionPending: false, stopped: false)"
+  ],
+  "productChange": "firstVisibleByteOffset reads existing viewport; restore explicitly lays out after clip scroll before calibrating its source anchor",
+  "historicalGetterCommit": "b2e10062",
+  "targetedTests": 6,
+  "readerCoreTests": 233,
+  "logs": [
+    {
+      "path": ".build/readonly/s7-edge-repro.log",
+      "sha256": "4181204d7524348a8cae6f8a1b2d8d4c8d83c6fd1fa7e293e0278d6c7f53d6a6"
+    },
+    {
+      "path": ".build/readonly/s7-edge-core-context-r2.log",
+      "sha256": "7bee1cbb7531c88418f0a11ed819247b5d4b15a718aa4f18a427991fd0b844e2"
+    },
+    {
+      "path": ".build/readonly/s7-edge-fixture-native.log",
+      "sha256": "402dee6ea256ab8f629b1c7550d990cf37d248e4ed717ded58e409a4f38ea762"
+    },
+    {
+      "path": ".build/readonly/s7-edge-snapshot-query.log",
+      "sha256": "cc2f90b6f97ddaee41b2279d6b14bc7d3072c1e8260e02e9b0fe7048f232de1b"
+    },
+    {
+      "path": ".build/readonly/s7-edge-focused-fixed.log",
+      "sha256": "3210432b045c3cce387106782a97960c1eb9732a30ee28f317a6ee5a35067813"
+    },
+    {
+      "path": ".build/readonly/s7-edge-fold-query-trace.log",
+      "sha256": "f9d784afba6fd410b33f9d2ed9f18614c5e29a49d5bb5976d3c725e66181e9af"
+    },
+    {
+      "path": ".build/readonly/s7-edge-focused-final.log",
+      "sha256": "e0f09442b0f8db2fe65f83b84ed95f4199953693c71e9c796b95688136dd5d27"
+    },
+    {
+      "path": ".build/readonly/s7-edge-core-final.log",
+      "sha256": "fe916fdf8aadbc6e0a003bfd8e56c62b2fa093c21f6c99001d45ea5f5d712944"
+    }
+  ],
+  "limitations": [
+    "The initial intermittent W17 lower-bound failure had no numeric trace; 20 isolated repetitions and the original full-context run passed. Its early scroll wait was independently shown to precede didEndLiveScroll.",
+    "The subsequent query-induced height collapse was reproduced on a real resized window and through the production getter.",
+    "Old r3 performance samples are superseded and remain partial; a new candidate must be measured."
+  ],
+  "finalCI": "stage-s7-ci.json"
+}

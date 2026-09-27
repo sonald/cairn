@@ -49,6 +49,12 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
     let codeViews = readers.flatMap { ligatureTextViews($0.view) }.filter { $0.string == source }
         + ligatureTextViews(context.view).filter { $0.string.contains("pub fn target") }
     try #require(codeViews.count == 3)
+    if ProcessInfo.processInfo.environment["CAIRN_READONLY_SURFACE_EVIDENCE_DIR"] != nil {
+        first.window?.setContentSize(NSSize(width: 1600, height: 900))
+        if first.selfTestContextPaneCollapsed { first.toggleContext(nil) }
+        first.renderForSelfTest()
+        first.window?.contentView?.layoutSubtreeIfNeeded()
+    }
     var settings = ReaderSettings()
     settings.codeFont = .postScriptName("Menlo-Regular")
     let pasteboard = NSPasteboard.withUniqueName()
@@ -57,7 +63,7 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
         settings.codeLigatures = mode
         first.applyReaderSettings(settings)
         let resolved = ReaderFontResolver.shared.resolve(theme: ReaderTheme(settings: settings))
-        for view in codeViews {
+        for (surfaceIndex, view) in codeViews.enumerated() {
             #expect(view.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == resolved.font)
             #expect(view.textStorage?.attribute(.ligature, at: 0, effectiveRange: nil) as? Int
                 == resolved.attributes[.ligature] as? Int)
@@ -67,6 +73,17 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
             pasteboard.declareTypes([.string], owner: nil)
             #expect(view.writeSelection(to: pasteboard, type: .string))
             #expect(pasteboard.string(forType: .string) == "=")
+            let isContext = surfaceIndex == readers.count
+            let role = isContext ? "context" : readers[surfaceIndex].canFindInFile ? "main" : "secondary"
+            let expectedSource = isContext ? (model.contextWindow.selectedCandidate?.excerpt ?? "") : source
+            let snapshot = isContext ? model.contextWindow.selectedCandidate?.symbol?.snapshotID
+                : role == "secondary" ? model.compare.rightSnapshotID : model.currentSnapshotID
+            try readonlyCaptureSurfaceEvidence(role + "-" + mode.rawValue, textView: view,
+                expectedSource: expectedSource, provenance: [
+                    "path": "main.rs", "sourceScope": isContext ? "candidate-excerpt" : "file",
+                    "snapshotID": snapshot?.rawValue.uuidString ?? "missing",
+                    "revision": isContext ? "pinned-candidate" : role == "secondary" ? "HEAD" : "worktree",
+                ], drawCount: { isContext ? context.selfTestReaderDrawCount : readers[surfaceIndex].selfTestReaderDrawCount })
         }
     }
     ReaderFontResolver.shared.refresh()
@@ -115,6 +132,12 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
     #expect(plainView.textStorage?.attribute(.font, at: 0, effectiveRange: nil) as? NSFont == oldFont)
     #expect(plainView.textStorage?.attribute(.ligature, at: 0, effectiveRange: nil) as? Int == oldLigature)
     #expect(plainView.string == plain)
+    if ProcessInfo.processInfo.environment["CAIRN_READONLY_SURFACE_EVIDENCE_DIR"] != nil {
+        plainView.setSelectedRange((plain as NSString).range(of: "!="))
+        try readonlyCaptureSurfaceEvidence("plain-text", textView: plainView, expectedSource: plain,
+            provenance: ["path": "notes.txt", "sourceScope": "file", "revision": "worktree"],
+            drawCount: { readers.first(where: { $0.displayedFile?.lastPathComponent == "notes.txt" })?.selfTestPlainTextDrawCount ?? 0 })
+    }
 }
 
 @MainActor
