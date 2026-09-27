@@ -118,6 +118,22 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                     NSLocalizedDescriptionKey: "Stable gutter interaction rebuilt or scanned document decorations"
                 ])
             }
+            if ["color-only", "font-only", "color-font-wrap", "identical-settings", "syntax-arrival"].contains(name),
+               (after["projectionPlanBuildCount"] != before["projectionPlanBuildCount"]
+                || after["fullTextReplacementCount"] != before["fullTextReplacementCount"]) {
+                throw NSError(domain: "ReadonlyWorkload", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey: "A settings or unchanged-projection syntax update rebuilt characters"
+                ])
+            }
+            if name == "color-only" || name == "identical-settings" {
+                guard after["applicationFullLayoutCount"] == before["applicationFullLayoutCount"],
+                      after["paragraphRecordsVisited"] == before["paragraphRecordsVisited"],
+                      after["attributeUpdatedUTF16Units"] == before["attributeUpdatedUTF16Units"] else {
+                    throw NSError(domain: "ReadonlyWorkload", code: 5, userInfo: [
+                        NSLocalizedDescriptionKey: "Paint-only or identical settings performed layout/typography work"
+                    ])
+                }
+            }
             let delta = after.map { ($0.key, $0.value - before[$0.key, default: 0]) }
             let drew = reader.backgroundDrawCount > drawBefore
             let drawRequired = name != "close-reader"

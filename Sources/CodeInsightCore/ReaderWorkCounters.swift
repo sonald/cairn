@@ -13,6 +13,7 @@ package enum ReaderWorkCounters {
         package var partialTextReplacementCount = 0
         package var replacedUTF16Units = 0
         package var attributeUpdatedUTF16Units = 0
+        package var renderingAttributeUpdatedUTF16Units = 0
         package var paragraphRecordsVisited = 0
         package var decorationBuildCount = 0
         package var drawGlobalRecordVisits = 0

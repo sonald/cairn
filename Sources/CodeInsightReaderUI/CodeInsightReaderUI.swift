@@ -1,6 +1,7 @@
 @preconcurrency import AppKit
 import CodeInsightCore
 import CodeInsightReaderCore
+import os
 
 private func readerDynamicColor(
     value: @escaping @Sendable (Bool) -> UInt32,
@@ -161,6 +162,19 @@ public final class RenderingAttributesCoordinator {
     /// 输出计数会被 fragment 交集过滤，测不出 viewport 门控是否失效。
     public private(set) var referenceScannedCount = 0
 
+    private typealias StyledRange = (
+        range: NSRange, kind: HighlightKind?, occurrence: Bool, isParameterReference: Bool?
+    )
+    private var cachedRuns: [NSRange: [StyledRange]] = [:]
+    private var cachedRunCount = 0
+    package private(set) var rangeCalculationCount = 0
+    package private(set) var rangeCacheHitCount = 0
+
+    private func clearRangeCache() {
+        cachedRuns.removeAll(keepingCapacity: true)
+        cachedRunCount = 0
+    }
+
     private var spans: [HighlightSpan] = []
     private var occurrenceRanges: [NSRange] = []
     private var document: ReaderDocument?
@@ -178,6 +192,7 @@ public final class RenderingAttributesCoordinator {
     }
 
     func update(document: ReaderDocument, map: DisplayMap, theme: ReaderTheme) {
+        clearRangeCache()
         spans = document.highlightSpans
         self.document = document
         self.map = map
@@ -188,16 +203,10 @@ public final class RenderingAttributesCoordinator {
         referenceScannedCount = 0
     }
 
-    var hasRenderingAttributes: Bool {
-        !spans.isEmpty
-            || !occurrenceRanges.isEmpty
-            || (
-                theme.syntaxFormatting
-                    && document?.localBindings.isEmpty == false
-            )
-    }
+    var hasRenderingAttributes: Bool { document != nil }
 
     func setOccurrences(_ ranges: [NSRange]) {
+        clearRangeCache()
         occurrenceRanges = ranges
         styledFragmentCount = 0
         referenceStyledFragmentCount = 0
@@ -206,6 +215,7 @@ public final class RenderingAttributesCoordinator {
     }
 
     func clear() {
+        clearRangeCache()
         spans = []
         occurrenceRanges = []
         document = nil
@@ -243,6 +253,13 @@ public final class RenderingAttributesCoordinator {
             )
         else { return }
 
+        let fragmentNSRange = NSRange(location: start, length: end - start)
+        if let runs = cachedRuns[fragmentNSRange] {
+            rangeCacheHitCount += 1
+            submit(runs, for: fragmentNSRange, in: manager, content: content)
+            return
+        }
+        rangeCalculationCount += 1
         var visibleSpans: [HighlightSpan] = []
         for sourceRange in sourceRanges {
             visibleSpans.append(contentsOf: ViewportGating.spans(
@@ -251,7 +268,6 @@ public final class RenderingAttributesCoordinator {
                 buffer: 0
             ))
         }
-        let fragmentNSRange = NSRange(location: start, length: end - start)
         var syntaxRanges: [(range: NSRange, kind: HighlightKind)] = []
         syntaxRanges.reserveCapacity(visibleSpans.count)
         for span in visibleSpans {
@@ -311,14 +327,7 @@ public final class RenderingAttributesCoordinator {
             visibleOccurrences.append(intersection)
         }
 
-        var styledRanges: [
-            (
-                range: NSRange,
-                kind: HighlightKind?,
-                occurrence: Bool,
-                isParameterReference: Bool?
-            )
-        ] = []
+        var styledRanges: [StyledRange] = []
         styledRanges.reserveCapacity(
             syntaxRanges.count
                 + visibleOccurrences.count
@@ -395,6 +404,26 @@ public final class RenderingAttributesCoordinator {
             location = next
         }
 
+        if styledRanges.count <= 8_192 {
+            if cachedRuns.count >= 128 || cachedRunCount + styledRanges.count > 8_192 {
+                clearRangeCache()
+            }
+            cachedRuns[fragmentNSRange] = styledRanges
+            cachedRunCount += styledRanges.count
+        }
+        submit(styledRanges, for: fragmentNSRange, in: manager, content: content)
+    }
+
+    private func submit(
+        _ styledRanges: [StyledRange], for fragmentRange: NSRange,
+        in manager: NSTextLayoutManager, content: NSTextContentManager
+    ) {
+        // Validator callbacks must always republish: TextKit may have discarded
+        // its attributes even when our pure range calculations are unchanged.
+        if let textRange = textRange(fragmentRange, in: content) {
+            ReaderWorkCounters.record(\.renderingAttributeUpdatedUTF16Units, fragmentRange.length)
+            manager.setRenderingAttributes([.foregroundColor: theme.foregroundColor], for: textRange)
+        }
         var wroteAttributes = false
         var wroteReferenceAttributes = false
         for styled in styledRanges {
@@ -415,6 +444,7 @@ public final class RenderingAttributesCoordinator {
             if styled.occurrence {
                 attributes[.backgroundColor] = theme.occurrenceColor
             }
+            ReaderWorkCounters.record(\.renderingAttributeUpdatedUTF16Units, styled.range.length)
             manager.setRenderingAttributes(attributes, for: textRange)
             wroteAttributes = true
             if styled.isParameterReference != nil {
@@ -2356,6 +2386,7 @@ public final class ReaderTextView {
             displayedDocument?.contentID == document.contentID,
             displayedDocument?.languageMode == document.languageMode
         else { return }
+        let previousDocument = displayedDocument
         let analysisChanged = displayedDocument?.analysisKey != document.analysisKey
         displayedDocument = document
         if analysisChanged { prepareIdentifiers(for: document) }
@@ -2403,64 +2434,74 @@ public final class ReaderTextView {
             logicalFoldIDs,
             in: document
         )
-        // Syntax fonts change geometry; the fold projection usually does not.
-        // Preserve the viewport across the font change, but treat a fold-set
-        // change as a projection change (D3.1/D3.7).
+        let selectedRegions = document.foldRegions.filter { renderedFoldIDs.contains($0.id) }
+            .sorted { $0.bodyRange.lowerBound < $1.bodyRange.lowerBound }
+        let previousRegions = (previousDocument?.foldRegions.filter {
+            previousRenderedFoldIDs.contains($0.id)
+        } ?? []).sorted { $0.bodyRange.lowerBound < $1.bodyRange.lowerBound }
         let foldsChanged = renderedFoldIDs != previousRenderedFoldIDs
+            || selectedRegions.map(\.bodyRange) != previousRegions.map(\.bodyRange)
+        let attachmentsChanged = selectedRegions != previousRegions
+        let typographyChanged = theme.syntaxFormatting
+            && Self.metricSpans(previousDocument?.highlightSpans ?? [], theme: theme)
+                != Self.metricSpans(document.highlightSpans, theme: theme)
+        let geometryChanged = previousDocument?.foldRegions != document.foldRegions
+        let needsLayout = foldsChanged || attachmentsChanged || typographyChanged || geometryChanged
+        let captured = needsLayout && !foldsChanged ? captureViewportStateForReflow() : nil
+        let wasRestoring = isRestoringViewport
+        isRestoringViewport = true
+        defer { isRestoringViewport = wasRestoring }
         if foldsChanged {
             projectionRevision += 1
             invalidateReflowSequence()
             widthReflowCapturedState = nil
         }
-        viewportStateGeneration += 1
+        if needsLayout { viewportStateGeneration += 1 }
         let generation = viewportStateGeneration
-        let captured = foldsChanged ? nil : captureViewportStateForReflow()
-        guard let projection = Self.project(
-            document: document,
-            renderedFoldIDs: renderedFoldIDs,
-            attributes: baseAttributes,
-            theme: theme
-        ) else {
+        let viewportRange = layoutManager.textViewportLayoutController.viewportRange
+        if foldsChanged || displayMap == nil {
+            guard let projection = Self.project(document: document,
+                renderedFoldIDs: renderedFoldIDs, attributes: baseAttributes, theme: theme)
+            else { layoutManager.renderingAttributesValidator = nil; return }
+            displayMap = projection.map
+            foldAttachments = projection.attachments
             layoutManager.renderingAttributesValidator = nil
-            return
+            installProjectedText(projection.attributed)
+        } else if let map = displayMap {
+            guard projectionMatchesStorage(map) else {
+                layoutManager.renderingAttributesValidator = nil
+                return
+            }
+            if typographyChanged {
+                updateTypography(document: document, map: map)
+            } else if attachmentsChanged {
+                let update = { self.updateFoldAttachmentAttributes(document: document, map: map) }
+                if let content = view.textContentStorage { content.performEditingTransaction(update) }
+                else { update() }
+            }
         }
-        displayMap = projection.map
-        foldAttachments = projection.attachments
+        guard let map = displayMap else { return }
         refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
-        renderingCoordinator.update(
-            document: document,
-            map: projection.map,
-            theme: theme
-        )
-        refreshOccurrenceRendering(in: document)
-        if let scrollView = view.enclosingScrollView ?? scrollView {
+        renderingCoordinator.update(document: document, map: map, theme: theme)
+        refreshOccurrenceRendering(in: document, updateLayout: false)
+        if geometryChanged, let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
-        updateRulerThickness()
         ruler?.needsDisplay = true
-        let viewportRange = layoutManager.textViewportLayoutController.viewportRange
-        layoutManager.renderingAttributesValidator = nil
-        installProjectedText(projection.attributed)
         installRenderingValidator(in: layoutManager)
-        if let viewportRange {
-            layoutManager.invalidateRenderingAttributes(for: viewportRange)
-        }
+        if let viewportRange { layoutManager.invalidateRenderingAttributes(for: viewportRange) }
         if let captured {
             pendingReflowState = captured
             isRestoringViewport = true
             restoreViewportState(captured)
             isRestoringViewport = false
-            scheduleViewportCorrections(
-                for: captured,
-                generation: generation,
-                remaining: 3
-            )
+            scheduleViewportCorrections(for: captured, generation: generation, remaining: 3)
         }
         view.needsDisplay = true
         DispatchQueue.main.async { [weak self, weak layoutManager] in
             guard let self, let layoutManager else { return }
-            self.validateVisibleRenderingAttributes(in: layoutManager)
+            self.validateVisibleRenderingAttributes(in: layoutManager, updateLayout: needsLayout)
         }
     }
 
@@ -2471,10 +2512,6 @@ public final class ReaderTextView {
         let environmentRevision = ReaderFontResolver.shared.fontEnvironmentRevision
         let typographyChanged = newTypographyKey != typographyKey
             || environmentRevision != fontEnvironmentRevision
-        // Fold chips own UI colors, so preserve their existing theme path.
-        let colorsChanged = newTheme.selection != theme.selection
-            || newTheme.parameterReferenceAlpha != theme.parameterReferenceAlpha
-            || newTheme.declarationMarkerAlpha != theme.declarationMarkerAlpha
         let wrapChanged = settings.wrapLines != wrapLines
         // Idempotent apply (D1.2/W06): equal settings perform no projection
         // and no layout work — unless the reader was mounted into a new
@@ -2484,6 +2521,27 @@ public final class ReaderTextView {
             && !wrapChanged
         let mountedScrollView = view.enclosingScrollView ?? scrollView
         if settingsEqual, mountedScrollView == nil || scrollView === mountedScrollView {
+            return
+        }
+
+        let geometryChanged = wrapChanged || settings.lineNumbers != lineNumbers
+            || (mountedScrollView != nil && scrollView !== mountedScrollView)
+        if !typographyChanged && !geometryChanged {
+            theme = newTheme
+            applyThemeColors()
+            for attachment in foldAttachments.values { attachment.updateTheme(theme) }
+            if let document = displayedDocument, let map = displayMap,
+               let layoutManager = view.textLayoutManager {
+                guard projectionMatchesStorage(map) else {
+                    layoutManager.renderingAttributesValidator = nil
+                    return
+                }
+                renderingCoordinator.update(document: document, map: map, theme: theme)
+                installRenderingValidator(in: layoutManager)
+                validateVisibleRenderingAttributes(in: layoutManager, updateLayout: false)
+            }
+            ruler?.needsDisplay = true
+            view.needsDisplay = true
             return
         }
 
@@ -2517,48 +2575,19 @@ public final class ReaderTextView {
             return
         }
 
-        if typographyChanged && !colorsChanged, let map = displayMap {
-            updateTypography(document: document, map: map)
-            renderingCoordinator.update(document: document, map: map, theme: theme)
-        } else if !themeChanged {
-            // Geometry-only change (wrap toggle, line numbers): the projected
-            // string and DisplayMap are identical, so rebuilding them would
-            // only add latency — configureGutter already installed the new
-            // container geometry that re-flows the text.
-            updateParagraphLayout()
-        } else {
-            guard let projection = Self.project(
-                document: document,
-                renderedFoldIDs: renderedFoldIDs,
-                attributes: baseAttributes,
-                theme: theme
-            ) else {
-                layoutManager.renderingAttributesValidator = nil
-                isRestoringViewport = false
-                return
-            }
-            guard projectionMatchesStorage(projection.map) else {
-                layoutManager.renderingAttributesValidator = nil
-                isRestoringViewport = false
-                return
-            }
-
-            displayMap = projection.map
-            foldAttachments = projection.attachments
-            refreshFoldExposures(in: document)
-            renderingCoordinator.update(
-                document: document,
-                map: projection.map,
-                theme: theme
-            )
-            let viewportRange = layoutManager.textViewportLayoutController.viewportRange
+        guard let map = displayMap, projectionMatchesStorage(map) else {
             layoutManager.renderingAttributesValidator = nil
-            installProjectedText(projection.attributed)
-            installRenderingValidator(in: layoutManager)
-            if let viewportRange {
-                layoutManager.invalidateRenderingAttributes(for: viewportRange)
-            }
+            isRestoringViewport = false
+            return
         }
+        if typographyChanged {
+            updateTypography(document: document, map: map)
+        } else {
+            updateParagraphLayout()
+            for attachment in foldAttachments.values { attachment.updateTheme(theme) }
+        }
+        renderingCoordinator.update(document: document, map: map, theme: theme)
+        installRenderingValidator(in: layoutManager)
 
         if let captured {
             pendingReflowState = captured
@@ -3077,7 +3106,8 @@ public final class ReaderTextView {
 
     private func setOccurrences(
         _ ranges: [NSRange],
-        logicalCount: Int? = nil
+        logicalCount: Int? = nil,
+        updateLayout: Bool = true
     ) {
         occurrenceCount = logicalCount ?? ranges.count
         renderingCoordinator.setOccurrences(
@@ -3089,16 +3119,17 @@ public final class ReaderTextView {
             layoutManager.textViewportLayoutController.viewportRange
         {
             layoutManager.invalidateRenderingAttributes(for: viewportRange)
-            validateVisibleRenderingAttributes(in: layoutManager)
+            validateVisibleRenderingAttributes(in: layoutManager, updateLayout: updateLayout)
         }
         view.needsDisplay = true
     }
 
     private func refreshOccurrenceRendering(
-        in document: ReaderDocument? = nil
+        in document: ReaderDocument? = nil,
+        updateLayout: Bool = true
     ) {
         guard let document = document ?? displayedDocument else {
-            setOccurrences([])
+            setOccurrences([], updateLayout: updateLayout)
             return
         }
         if let findMatchByteRanges {
@@ -3112,12 +3143,12 @@ public final class ReaderTextView {
                     byteRange: findMatchByteRanges[index]
                 )?.visible.first
             }
-            setOccurrences(visible, logicalCount: findMatchByteRanges.count)
+            setOccurrences(visible, logicalCount: findMatchByteRanges.count, updateLayout: updateLayout)
             return
         }
         guard let occurrenceSelectionByteOffset else {
             refreshFoldExposures(in: document)
-            setOccurrences([])
+            setOccurrences([], updateLayout: updateLayout)
             return
         }
         let occurrenceRanges = preparedOccurrences(in: document, at: occurrenceSelectionByteOffset)
@@ -3127,7 +3158,7 @@ public final class ReaderTextView {
             in: document,
             occurrenceRanges: occurrenceRanges
         )
-        setOccurrences(ranges)
+        setOccurrences(ranges, updateLayout: updateLayout)
     }
 
     private func occurrenceNSRanges(
@@ -3715,7 +3746,7 @@ public final class ReaderTextView {
         return attributes
     }
 
-    /// Change typography without replacing source text, the map, or fold attachments.
+    /// Preserve source text and the map; remeasure attachments through attributes.
     private func updateTypography(document: ReaderDocument, map: DisplayMap) {
         let started = ContinuousClock.now
         defer {
@@ -3733,6 +3764,7 @@ public final class ReaderTextView {
             self.backingTextStorage.removeAttribute(.kern, range: range)
             ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, range.length)
             self.backingTextStorage.addAttributes(attributes, range: range)
+            self.updateFoldAttachmentAttributes(document: document, map: map)
             Self.applyTypography(document.highlightSpans, map: map,
                 to: self.backingTextStorage, theme: self.theme)
             self.paragraphLayout.reset()
@@ -3745,6 +3777,27 @@ public final class ReaderTextView {
             update()
         }
         typographyAttributeUpdateCount += 1
+    }
+
+    private func updateFoldAttachmentAttributes(document: ReaderDocument, map: DisplayMap) {
+        for placeholder in map.foldPlaceholders {
+            guard let region = document.foldTopology?.region(for: placeholder.id) else { continue }
+            let attachment: FoldAttachment
+            if let previous = foldAttachments[placeholder.id], previous.matches(region) {
+                previous.updateTypography(theme)
+                attachment = previous
+            } else {
+                attachment = FoldAttachment(region: region, theme: theme)
+                if let previous = foldAttachments[placeholder.id] {
+                    attachment.updateExposure(matchCount: previous.matchCount,
+                        hasDiff: previous.hasDiff, occurrenceCount: previous.occurrenceCount)
+                }
+                foldAttachments[placeholder.id] = attachment
+            }
+            backingTextStorage.addAttribute(.attachment, value: attachment,
+                range: NSRange(location: placeholder.offset, length: 1))
+            ReaderWorkCounters.record(\.attributeUpdatedUTF16Units)
+        }
     }
 
     private var paragraphIndentLimit: CGFloat? {
@@ -3949,6 +4002,16 @@ public final class ReaderTextView {
         return matches
     }
 
+    private static func metricSpans(_ spans: [HighlightSpan], theme: ReaderTheme) -> [HighlightSpan] {
+        spans.filter {
+            switch $0.kind {
+            case .functionName, .declarationTitle, .declarationEmphasis: true
+            case .comment: theme.humanistComments
+            default: false
+            }
+        }
+    }
+
     static func applyTypography(
         _ spans: [HighlightSpan],
         map: DisplayMap,
@@ -4074,16 +4137,21 @@ public final class ReaderTextView {
 
 @MainActor
 private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
-    nonisolated(unsafe) private weak var activeProvider: FoldAttachmentViewProvider?
-    nonisolated let chipSize: NSSize
+    private weak var activeProvider: FoldAttachmentViewProvider?
+    private nonisolated let measuredSize: OSAllocatedUnfairLock<NSSize>
+    nonisolated var chipSize: NSSize { measuredSize.withLock { $0 } }
+    private let kind: FoldKind
+    private let summary: FoldSummary
     nonisolated let bodyText: String
     nonisolated let accessibilityText: String
-    nonisolated let theme: ReaderTheme
-    nonisolated(unsafe) private(set) var matchCount = 0
-    nonisolated(unsafe) private(set) var hasDiff = false
-    nonisolated(unsafe) private(set) var occurrenceCount = 0
+    private(set) var theme: ReaderTheme
+    private(set) var chipFont: NSFont
+    private(set) var chipAttributes: [NSAttributedString.Key: Any]
+    private(set) var matchCount = 0
+    private(set) var hasDiff = false
+    private(set) var occurrenceCount = 0
 
-    nonisolated var visualExposureText: String {
+    var visualExposureText: String {
         if matchCount > 999 { return " · 999" }
         if matchCount > 0 { return " · " + localizedFormat("reader.matches", Int64(matchCount)) }
         if occurrenceCount > 999 { return " · 999" }
@@ -4091,7 +4159,7 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
         return hasDiff ? " · " + localized("reader.diff") : ""
     }
 
-    nonisolated var accessibilityExposureText: String {
+    var accessibilityExposureText: String {
         var values: [String] = []
         if matchCount > 0 { values.append(localizedFormat("reader.matches", Int64(matchCount))) }
         if occurrenceCount > 0 { values.append(localizedFormat("reader.occurrences", Int64(occurrenceCount))) }
@@ -4101,18 +4169,50 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
 
     init(region: FoldRegion, theme: ReaderTheme) {
         self.theme = theme
+        kind = region.kind
+        summary = region.summary
         bodyText = Self.bodyText(for: region)
         accessibilityText = Self.accessibilityText(for: region)
-        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
-        let measured = (bodyText as NSString).size(withAttributes: [.font: font])
-        let bodyWidth = min(180, ceil(measured.width))
-        chipSize = NSSize(width: 5 + bodyWidth + 54 + 5, height: 22)
+        let resolved = ReaderFontResolver.shared.resolve(
+            theme: theme, size: max(8, theme.fontSize * 10 / 13), weight: .medium
+        )
+        chipFont = resolved.font
+        chipAttributes = resolved.attributes
+        measuredSize = OSAllocatedUnfairLock(initialState: Self.measure(
+            bodyText, font: resolved.font, attributes: resolved.attributes
+        ))
         super.init(data: nil, ofType: "com.codeinsight.fold-attachment")
         allowsTextAttachmentView = true
     }
 
+    private static func measure(_ text: String, font: NSFont,
+                                attributes: [NSAttributedString.Key: Any]) -> NSSize {
+        let width = min(180, ceil((text as NSString).size(withAttributes: attributes).width))
+        return NSSize(width: 5 + width + 54 + 5,
+                      height: max(22, ceil(font.ascender - font.descender) + 8))
+    }
+
+    func matches(_ region: FoldRegion) -> Bool { kind == region.kind && summary == region.summary }
+
+    func updateTypography(_ theme: ReaderTheme) {
+        self.theme = theme
+        let resolved = ReaderFontResolver.shared.resolve(
+            theme: theme, size: max(8, theme.fontSize * 10 / 13), weight: .medium
+        )
+        chipFont = resolved.font
+        chipAttributes = resolved.attributes
+        let size = Self.measure(bodyText, font: resolved.font, attributes: resolved.attributes)
+        measuredSize.withLock { $0 = size }
+        activeProvider?.update()
+    }
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func updateTheme(_ theme: ReaderTheme) {
+        self.theme = theme
+        activeProvider?.update()
     }
 
     func setMatchCount(_ count: Int) {
@@ -4235,12 +4335,8 @@ private final class FoldAttachmentViewProvider:
                 position: position
             )
         }
-        return CGRect(
-            x: 0,
-            y: -6,
-            width: attachment.chipSize.width,
-            height: attachment.chipSize.height
-        )
+        let size = attachment.chipSize
+        return CGRect(x: 0, y: -6, width: size.width, height: size.height)
     }
 
     nonisolated override func loadView() {
@@ -4256,16 +4352,16 @@ private final class FoldAttachmentViewProvider:
         }
     }
 
-    nonisolated func update() {
-        nonisolated(unsafe) let provider = self
-        MainActor.assumeIsolated { provider.updateOnMainActor() }
-    }
+    @MainActor
+    func update() { updateOnMainActor() }
 
     @MainActor
     private func updateOnMainActor() {
         guard let attachment = textAttachment as? FoldAttachment,
               let chip = view as? FoldChipView
         else { return }
+        let size = attachment.chipSize
+        if chip.frame.size != size { chip.setFrameSize(size) }
         chip.exposureText = attachment.visualExposureText
         chip.setAccessibilityLabel(
             attachment.accessibilityText + attachment.accessibilityExposureText
@@ -4300,14 +4396,12 @@ private final class FoldChipView: NSView {
         attachment.theme.chromeDividerColor.setStroke()
         border.stroke()
 
-        let font = NSFont.monospacedSystemFont(ofSize: 10, weight: .medium)
+        let font = attachment.chipFont
         let paragraph = NSMutableParagraphStyle()
         paragraph.lineBreakMode = .byTruncatingTail
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: attachment.theme.chipForegroundColor,
-            .paragraphStyle: paragraph,
-        ]
+        var attributes = attachment.chipAttributes
+        attributes[.foregroundColor] = attachment.theme.chipForegroundColor
+        attributes[.paragraphStyle] = paragraph
         let countWidth: CGFloat = 54
         let textY = floor((bounds.height - font.ascender + font.descender) / 2)
         (attachment.bodyText as NSString).draw(
