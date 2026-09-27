@@ -331,8 +331,9 @@ public final class ReaderDocument: Sendable {
         case .javascript:
             return []
         }
-        guard byteOffset < bytes.count,
-              let source = String(bytes: bytes, encoding: .utf8),
+        guard byteOffset < bytes.count else { return [] }
+        ReaderWorkCounters.record(\.identifierDecodedBytes, bytes.count)
+        guard let source = String(bytes: bytes, encoding: .utf8),
               let selectedIndex = source.utf8.index(
                   source.utf8.startIndex,
                   offsetBy: Int(byteOffset),
@@ -373,6 +374,7 @@ public final class ReaderDocument: Sendable {
         var result: [CodeInsightCore.ByteRange] = []
         var index = scalars.startIndex
         var bytePosition: UInt32 = 0
+        defer { ReaderWorkCounters.record(\.identifierScannedBytes, Int(bytePosition)) }
         while index < scalars.endIndex {
             let scalar = scalars[index]
             guard isIdentifierStart(scalar) else {

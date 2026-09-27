@@ -1,18 +1,20 @@
+// Frozen from f5e116d6477fe20ed9bd83b08b82f4a0512594a7 (S0).
+// Test-only reference: do not delegate to optimized production queries.
 import CodeInsightCore
 import CodeInsightReaderCore
 import Foundation
 
-internal enum DisplayPosition: Equatable, Sendable {
+internal enum ReadonlyDisplayPosition: Equatable, Sendable {
     case visible(Int)
     case hidden(FoldID)
 }
 
-internal enum SourcePosition: Equatable, Sendable {
+internal enum ReadonlySourcePosition: Equatable, Sendable {
     case source(UInt32)
     case placeholder(FoldID)
 }
 
-internal struct DisplayMap: Sendable {
+internal struct ReadonlyDisplayMapOracle: Sendable {
     private struct FoldEntry: Sendable {
         let id: FoldID
         let bodyRange: ByteRange
@@ -43,7 +45,6 @@ internal struct DisplayMap: Sendable {
         document: ReaderDocument,
         renderedFoldIDs: Set<FoldID>
     ) {
-        ReaderWorkCounters.record(\.projectionPlanBuildCount)
         sourceMap = document.byteUTF16Map
         let selected = document.foldRegions.filter {
             renderedFoldIDs.contains($0.id)
@@ -78,7 +79,6 @@ internal struct DisplayMap: Sendable {
                   )
             else { return nil }
 
-            ReaderWorkCounters.record(\.materializedUTF8Bytes, Int(body.lowerBound - sourceCursor))
             projected += String(
                 decoding: document.bytes[Int(sourceCursor)..<Int(body.lowerBound)],
                 as: UTF8.self
@@ -100,7 +100,6 @@ internal struct DisplayMap: Sendable {
             byteLowerBound: Int(sourceCursor),
             byteUpperBound: document.bytes.count
         ) else { return nil }
-        ReaderWorkCounters.record(\.materializedUTF8Bytes, document.bytes.count - Int(sourceCursor))
         projected += String(
             decoding: document.bytes[Int(sourceCursor)..<document.bytes.count],
             as: UTF8.self
@@ -117,7 +116,7 @@ internal struct DisplayMap: Sendable {
         guard (projected as NSString).length == displayCursor else { return nil }
     }
 
-    internal func displayPosition(ofByte byteOffset: UInt32) -> DisplayPosition? {
+    internal func displayPosition(ofByte byteOffset: UInt32) -> ReadonlyDisplayPosition? {
         guard let sourceUTF16 = sourceMap.utf16Offset(forByte: Int(byteOffset)) else {
             return nil
         }
@@ -167,14 +166,14 @@ internal struct DisplayMap: Sendable {
         return (visible, hidden)
     }
 
-    internal func sourcePosition(ofDisplay displayOffset: Int) -> SourcePosition? {
+    internal func sourcePosition(ofDisplay displayOffset: Int) -> ReadonlySourcePosition? {
         guard displayOffset >= 0, displayOffset <= projectedUTF16Length else {
             return nil
         }
         if let fold = fold(atPlaceholder: displayOffset) {
             return .placeholder(fold.id)
         }
-        return sourceByte(forVisibleDisplay: displayOffset).map(SourcePosition.source)
+        return sourceByte(forVisibleDisplay: displayOffset).map(ReadonlySourcePosition.source)
     }
 
     internal func sourceRanges(forDisplay range: NSRange) -> [ByteRange]? {

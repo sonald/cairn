@@ -1,4 +1,5 @@
 import AppKit
+import CodeInsightCore
 
 /// Code-paragraph indentation shared by the reader and frozen excerpts.
 @MainActor
@@ -46,9 +47,11 @@ package final class ReaderParagraphLayout {
                 let style = base.mutableCopy() as! NSMutableParagraphStyle
                 style.headIndent = 0
                 style.firstLineHeadIndent = 0
+                ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, range.length)
                 text.addAttribute(.paragraphStyle, value: style, range: range)
                 var offset = range.location
                 while offset < NSMaxRange(range) {
+                    ReaderWorkCounters.record(\.paragraphRecordsVisited)
                     updates += 1
                     offset = NSMaxRange(string.paragraphRange(for: NSRange(location: offset, length: 0)))
                 }
@@ -62,6 +65,7 @@ package final class ReaderParagraphLayout {
         text.beginEditing()
         defer { text.endEditing() }
         while offset < text.length {
+            ReaderWorkCounters.record(\.paragraphRecordsVisited)
             let range = string.paragraphRange(for: NSRange(location: offset, length: 0))
             let base = (text.attribute(.paragraphStyle, at: offset, effectiveRange: nil)
                 as? NSParagraphStyle) ?? .default
@@ -81,6 +85,7 @@ package final class ReaderParagraphLayout {
                 let style = base.mutableCopy() as! NSMutableParagraphStyle
                 style.firstLineHeadIndent = 0
                 style.headIndent = indent
+                ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, range.length)
                 text.addAttribute(.paragraphStyle, value: style, range: range)
                 updates += 1
             }

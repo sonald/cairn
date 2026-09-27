@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "seed": 260926,
+  "generator": "scripts/generate-readonly-fixtures.py",
+  "fixtures": [
+    {
+      "path": "workload.rs",
+      "sha256": "fc95d836a17fa58a1ff7623d5b34631742a8da60433ef065073e06c7a59539a9",
+      "byteCount": 25180,
+      "newlineCount": 1000,
+      "logicalLineCount": 1001,
+      "longestLineBytes": 36,
+      "language": "rust",
+      "variant": null
+    },
+    {
+      "path": "workload.py",
+      "sha256": "029ab69f3d6979e0c4986f52ced30462e227d91c1a5df4fc35ccf826267fcd53",
+      "byteCount": 22780,
+      "newlineCount": 1000,
+      "logicalLineCount": 1001,
+      "longestLineBytes": 30,
+      "language": "python",
+      "variant": null
+    },
+    {
+      "path": "workload.ts",
+      "sha256": "7899d63f5a11e7bf914c55885f796608bfd2d75b7a889dbf00431cdc398fd906",
+      "byteCount": 29180,
+      "newlineCount": 1000,
+      "logicalLineCount": 1001,
+      "longestLineBytes": 46,
+      "language": "typescript",
+      "variant": null
+    },
+    {
+      "path": "workload.tsx",
+      "sha256": "a969a1e868fbcc1ab1682541ce38e8ca1a3e82cff9c38b254db3a0ad78e1614e",
+      "byteCount": 24780,
+      "newlineCount": 1000,
+      "logicalLineCount": 1001,
+      "longestLineBytes": 35,
+      "language": "typescript",
+      "variant": "tsx"
+    },
+    {
+      "path": "large.rs",
+      "sha256": "e3d19985cd83e3d5155f170567d05e20aed75774c169d80c15f9d7852bd2e999",
+      "byteCount": 313962,
+      "newlineCount": 9002,
+      "logicalLineCount": 9003,
+      "longestLineBytes": 36,
+      "language": "rust",
+      "variant": null
+    },
+    {
+      "path": "long-line.rs",
+      "sha256": "0e86e3f81ea2ca8578e9ff31126d7c324e6d916700aa5c1c4f4771493c8f6ef0",
+      "byteCount": 1050017,
+      "newlineCount": 2,
+      "logicalLineCount": 3,
+      "longestLineBytes": 1050003,
+      "language": "rust",
+      "variant": null
+    }
+  ]
+}

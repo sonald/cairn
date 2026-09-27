@@ -177,6 +177,10 @@ private struct CodeInsightApplication {
     static func main() {
         let startedAt = ContinuousClock.now
         let arguments = Array(CommandLine.arguments.dropFirst())
+        if arguments.contains("--self-test-readonly") {
+            _ = NSApplication.shared
+            runReadonlyWorkloadSelfTest(arguments: arguments)
+        }
         if arguments.contains("--self-test-ligatures") {
             _ = NSApplication.shared
             runLigatureSelfTest(arguments: arguments)
@@ -14521,7 +14525,7 @@ private func sysctlString(_ name: String) -> String? {
     return String(cString: buffer)
 }
 
-private func physicalFootprintBytes() -> UInt64? {
+func physicalFootprintBytes() -> UInt64? {
     var info = task_vm_info_data_t()
     var count = mach_msg_type_number_t(
         MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size

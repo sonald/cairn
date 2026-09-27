@@ -492,6 +492,7 @@ public final class ReaderTextView {
     private var theme: ReaderTheme
     private var typographyKey: ReaderTypographyKey
     private var fontEnvironmentRevision: UInt64
+    private var isDrawingRuler = false
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
     private var bookmarkMarkers: [Int: [String]] = [:]
     private var declarationKindsByLine: [Int: OutlineKind] = [:]
@@ -1585,6 +1586,8 @@ public final class ReaderTextView {
     private func installProjectedText(_ attributed: NSAttributedString) {
         lastParagraphIndentLimit = nil
         projectionInstallCount += 1
+        ReaderWorkCounters.record(\.fullTextReplacementCount)
+        ReaderWorkCounters.record(\.replacedUTF16Units, backingTextStorage.length)
         let attributed = (attributed as? NSMutableAttributedString)
             ?? NSMutableAttributedString(attributedString: attributed)
         // Fresh projections already have the unwrapped base paragraph style.
@@ -3137,6 +3140,7 @@ public final class ReaderTextView {
         var result: [FoldID: DiffCore.MarkerKind] = [:]
         var regionIndex = 0
         for (line, kind) in diffMarkers.sorted(by: { $0.key < $1.key }) {
+            if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits) }
             guard line > 0,
                   document.lineTable.lineStarts.indices.contains(line - 1)
             else { continue }
@@ -3163,6 +3167,7 @@ public final class ReaderTextView {
         var result: [Int: [String]] = [:]
         let regions = renderedRegions(in: document)
         for (line, labels) in bookmarkMarkers {
+            if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits, 1 + regions.count) }
             guard line > 0,
                   document.lineTable.lineStarts.indices.contains(line - 1)
             else { continue }
@@ -3201,7 +3206,8 @@ public final class ReaderTextView {
     }
 
     private func renderedRegions(in document: ReaderDocument) -> [FoldRegion] {
-        document.foldRegions.filter {
+        if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits, document.foldRegions.count) }
+        return document.foldRegions.filter {
             renderedFoldIDs.contains($0.id)
         }.sorted {
             ($0.bodyRange.lowerBound, $0.bodyRange.upperBound)
@@ -3286,6 +3292,7 @@ public final class ReaderTextView {
     private static func declarationKindsByLine(
         in document: ReaderDocument
     ) -> [Int: OutlineKind] {
+        ReaderWorkCounters.record(\.decorationBuildCount)
         var result: [Int: OutlineKind] = [:]
         for facet in document.outlineFacets {
             guard let position = document.lineTable.lineColumn(
@@ -3402,6 +3409,8 @@ public final class ReaderTextView {
         in ruler: NSRulerView,
         dirtyRect: NSRect
     ) {
+        isDrawingRuler = true
+        defer { isDrawingRuler = false }
         theme.backgroundColor.setFill()
         dirtyRect.intersection(ruler.bounds).fill()
         var lines: [Int] = []
@@ -3412,8 +3421,11 @@ public final class ReaderTextView {
         let foldedDiffByLine: [Int: DiffCore.MarkerKind]
         let bookmarksByLine = lineNumbers ? visibleBookmarkMarkers() : [:]
         if let document = displayedDocument {
+            ReaderWorkCounters.record(\.decorationBuildCount)
+            ReaderWorkCounters.record(\.drawGlobalRecordVisits, document.foldRegions.count)
             var mapped: [Int: FoldRegion] = [:]
             for region in visibleFoldRegions(in: document) {
+                ReaderWorkCounters.record(\.drawGlobalRecordVisits)
                 guard let line = document.lineTable.lineColumn(
                     at: region.headerRange.lowerBound
                 )?.line else { continue }
@@ -3605,6 +3617,7 @@ public final class ReaderTextView {
               point.x <= foldX + foldColumnWidth,
               let document = displayedDocument
         else { return nil }
+        ReaderWorkCounters.record(\.decorationBuildCount)
         var byLine: [Int: FoldRegion] = [:]
         for region in visibleFoldRegions(in: document) {
             guard let line = document.lineTable.lineColumn(
@@ -3697,6 +3710,7 @@ public final class ReaderTextView {
             // Merging leaves attachments, links and other owners' keys intact.
             self.backingTextStorage.removeAttribute(.ligature, range: range)
             self.backingTextStorage.removeAttribute(.kern, range: range)
+            ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, range.length)
             self.backingTextStorage.addAttributes(attributes, range: range)
             Self.applyTypography(document.highlightSpans, map: map,
                 to: self.backingTextStorage, theme: self.theme)
@@ -3835,6 +3849,7 @@ public final class ReaderTextView {
                     }
                     extent = manager.usageBoundsForTextContainer
                 } else {
+                    ReaderWorkCounters.record(\.applicationFullLayoutCount)
                     manager.enumerateTextLayoutFragments(
                         from: content.documentRange.location,
                         options: [.ensuresLayout]
@@ -3874,6 +3889,7 @@ public final class ReaderTextView {
             document: document,
             renderedFoldIDs: renderedFoldIDs
         ) else { return nil }
+        ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, map.projectedUTF16Length)
         let attributed = NSMutableAttributedString(
             string: map.projectedString,
             attributes: attributes
@@ -3935,6 +3951,7 @@ public final class ReaderTextView {
                 guard safeRange.length > 0 else { continue }
                 switch span.kind {
                 case .functionName, .declarationTitle:
+                    ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, safeRange.length)
                     let resolved = ReaderFontResolver.shared.resolve(
                         theme: theme, size: theme.functionNameFontSize,
                         weight: NSFont.Weight(rawValue: theme.functionDeclarationFontWeight)
@@ -3948,11 +3965,13 @@ public final class ReaderTextView {
                         attributed.removeAttribute(.kern, range: safeRange)
                     }
                 case .declarationEmphasis:
+                    ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, safeRange.length)
                     attributed.addAttributes(ReaderFontResolver.shared.resolve(
                         theme: theme,
                         weight: NSFont.Weight(rawValue: theme.declarationEmphasisFontWeight)
                     ).attributes, range: safeRange)
                 case .comment where theme.humanistComments:
+                    ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, safeRange.length)
                     attributed.addAttribute(.font,
                         value: NSFont.systemFont(ofSize: theme.fontSize), range: safeRange)
                     attributed.removeAttribute(.ligature, range: safeRange)

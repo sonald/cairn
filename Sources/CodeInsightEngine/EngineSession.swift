@@ -209,7 +209,8 @@ public final class EngineSession: Sendable {
                     )
                     guard seen.insert(callSite).inserted,
                           let region = index.executableRegions.first(where: {
-                              $0.id == call.regionID
+                              ReaderWorkCounters.record(\.regionQueryRecordVisits)
+                              return $0.id == call.regionID
                           })
                     else { continue }
 
@@ -276,6 +277,7 @@ public final class EngineSession: Sendable {
                   call.range.upperBound <= facet.range.upperBound
             else { return false }
             // ponytail: file-local calls × regions scan; add region parents if it gets hot.
+            ReaderWorkCounters.record(\.regionQueryRecordVisits, index.executableRegions.count)
             let owner = index.executableRegions.filter {
                 $0.associatedFacetIndex != nil
                     && $0.range.contains(call.range.lowerBound)
