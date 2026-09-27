@@ -16,6 +16,13 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let depth: Int
         let isLastSibling: Bool
         let crossesSnapshot: Bool
+        /// First node of a side branch: drawn with a connector from its parent's lane.
+        var isBranchStart = false
+        var parentIndex: Int?
+        /// Lanes whose line continues below this row (own lane included when it does).
+        var lanesBelow: Set<Int> = []
+        /// Lanes whose line enters this row from above.
+        var lanesAbove: Set<Int> = []
     }
 
     private let titleLabel = NSTextField(labelWithString: localized("trail.title"))
@@ -224,7 +231,13 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let incoming = incomingEdge(to: node.id, in: trail)
         cell.display(
             title: displayName(node),
-            gutter: gutter(for: rows[row]),
+            lanes: TrailGutterView.Lanes(
+                depth: rows[row].depth,
+                count: laneCount,
+                above: rows[row].lanesAbove,
+                below: rows[row].lanesBelow,
+                isBranchStart: rows[row].isBranchStart
+            ),
             cause: incoming.map { causeText($0.cause) } ?? localized("trail.root"),
             snapshot: snapshotText(node.jump),
             historical: node.jump.revision != nil,
@@ -563,6 +576,15 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         return value.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
     }
 
+    /// Row order with each row's lane and branch flag, as drawn.
+    var selfTestRowLanes: [(path: String, depth: Int, branchStart: Bool, above: Set<Int>, below: Set<Int>)] {
+        rows.compactMap { row in
+            trail?.nodes[row.id].map {
+                ($0.jump.path, row.depth, row.isBranchStart, row.lanesAbove, row.lanesBelow)
+            }
+        }
+    }
+
     func selfTestRowStyle(path: String) -> (gutter: NSColor?, snapshotFill: CGColor?, current: Bool)? {
         guard let row = rows.firstIndex(where: { trail?.nodes[$0.id]?.jump.path == path }),
               let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
@@ -587,7 +609,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         }
         var result: [Row] = []
         var visited: Set<TrailNodeID> = []
-        func append(_ id: TrailNodeID, depth: Int, isLast: Bool) {
+        func append(_ id: TrailNodeID, depth: Int, isLast: Bool, parentIndex: Int? = nil) {
             guard visited.insert(id).inserted, let node = trail.nodes[id] else { return }
             let parent = incomingEdge(to: id, in: trail).flatMap {
                 trail.nodes[$0.from]
@@ -597,18 +619,51 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
                 depth: depth,
                 isLastSibling: isLast,
                 crossesSnapshot: parent?.jump.snapshotID != nil
-                    && parent?.jump.snapshotID != node.jump.snapshotID
+                    && parent?.jump.snapshotID != node.jump.snapshotID,
+                parentIndex: parentIndex
             ))
+            let index = result.count - 1
             let children = trail.edges.filter { $0.from == id }.map(\.to)
-            for (index, child) in children.enumerated() {
-                append(child, depth: depth + 1, isLast: index == children.count - 1)
+            guard !children.isEmpty else { return }
+            // Reading on is not branching: the first route taken from a node keeps
+            // its lane, so later detours never reshuffle what was already drawn.
+            // Rows stay in visiting order; later routes indent one lane.
+            append(children[0], depth: depth, isLast: children.count == 1, parentIndex: index)
+            for (offset, child) in children.dropFirst().enumerated() {
+                let start = result.count
+                append(child, depth: depth + 1, isLast: offset == children.count - 2, parentIndex: index)
+                if result.indices.contains(start), result[start].id == child {
+                    result[start].isBranchStart = true
+                }
             }
         }
         for (index, root) in roots.enumerated() {
             append(root, depth: 0, isLast: index == roots.count - 1)
         }
+        // A lane continues below row i when the next row at or left of that
+        // lane sits on it and is not the start of a new branch.
+        for i in result.indices {
+            for lane in 0...result[i].depth {
+                guard let next = result[(i + 1)...].first(where: { $0.depth <= lane })
+                else { continue }
+                if next.depth == lane && !next.isBranchStart {
+                    result[i].lanesBelow.insert(lane)
+                }
+            }
+        }
+        // A branch hangs off its parent's lane: keep that lane open from the
+        // parent down to the branch's first row.
+        for (j, row) in result.enumerated() where row.isBranchStart {
+            guard let parent = row.parentIndex else { continue }
+            for i in parent..<j { result[i].lanesBelow.insert(row.depth - 1) }
+        }
+        for i in result.indices.dropFirst() {
+            result[i].lanesAbove = result[i - 1].lanesBelow
+        }
         return result
     }
+
+    private var laneCount: Int { (rows.map(\.depth).max() ?? 0) + 1 }
 
     private func path(
         to active: TrailNodeID?,
@@ -721,11 +776,6 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         }
     }
 
-    private func gutter(for row: Row) -> String {
-        if row.depth == 0 { return "●" }
-        let prefix = String(repeating: "│  ", count: max(0, row.depth - 1))
-        return prefix + (row.isLastSibling ? "└─●" : "├─●")
-    }
 }
 
 @MainActor
@@ -736,7 +786,7 @@ private final class ReadingTrailDocumentView: NSView {
 @MainActor
 private final class ReadingTrailCellView: NSTableCellView {
     private let snapshotBoundary = NSTextField(labelWithString: "")
-    private let gutter = NSTextField(labelWithString: "")
+    private let gutter = TrailGutterView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let currentLabel = NSTextField(labelWithString: "")
     private let causeChip = RelationChipView()
@@ -745,15 +795,13 @@ private final class ReadingTrailCellView: NSTableCellView {
     private var isCurrentRow = false
 
     var selfTestStyle: (gutter: NSColor?, snapshotFill: CGColor?, current: Bool) {
-        (gutter.textColor, snapshotChip.layer?.backgroundColor, isCurrentRow)
+        (gutter.nodeColor, snapshotChip.layer?.backgroundColor, isCurrentRow)
     }
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         snapshotBoundary.font = .systemFont(ofSize: 9)
         snapshotBoundary.isHidden = true
-        gutter.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
-        gutter.alignment = .right
         titleLabel.font = .monospacedSystemFont(ofSize: 11.5, weight: .semibold)
         titleLabel.lineBreakMode = .byTruncatingMiddle
         currentLabel.font = .monospacedSystemFont(ofSize: 9, weight: .semibold)
@@ -771,20 +819,21 @@ private final class ReadingTrailCellView: NSTableCellView {
         titleRow.orientation = .horizontal
         titleRow.alignment = .centerY
         titleRow.spacing = 7
-        let row = NSStackView(views: [gutter, titleRow])
+        let row = titleRow
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.orientation = .horizontal
-        row.alignment = .centerY
-        row.spacing = 8
+        gutter.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(gutter)
         addSubview(snapshotBoundary)
         addSubview(row)
         snapshotBoundary.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            snapshotBoundary.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            snapshotBoundary.leadingAnchor.constraint(equalTo: row.leadingAnchor),
             snapshotBoundary.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
             snapshotBoundary.topAnchor.constraint(equalTo: topAnchor, constant: 1),
-            gutter.widthAnchor.constraint(equalToConstant: 48),
-            row.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            gutter.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
+            gutter.topAnchor.constraint(equalTo: topAnchor),
+            gutter.bottomAnchor.constraint(equalTo: bottomAnchor),
+            row.leadingAnchor.constraint(equalTo: gutter.trailingAnchor, constant: 6),
             row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
             row.centerYAnchor.constraint(equalTo: centerYAnchor, constant: 3),
         ])
@@ -796,7 +845,7 @@ private final class ReadingTrailCellView: NSTableCellView {
 
     func display(
         title: String,
-        gutter gutterText: String,
+        lanes: TrailGutterView.Lanes,
         cause: String,
         snapshot: String,
         historical: Bool,
@@ -808,9 +857,15 @@ private final class ReadingTrailCellView: NSTableCellView {
         snapshotBoundary.stringValue = crossesSnapshot ? localized("trail.boundary") : ""
         snapshotBoundary.isHidden = !crossesSnapshot
         snapshotBoundary.textColor = theme.histColor
-        gutter.stringValue = gutterText
-        gutter.textColor = isCurrent ? theme.amberMarkColor
-            : historical ? theme.histColor : theme.accentColor
+        gutter.update(
+            lanes: lanes,
+            nodeColor: isCurrent ? theme.amberMarkColor
+                : historical ? theme.histColor : theme.accentColor,
+            haloColor: isCurrent ? theme.amberSoftColor : nil,
+            lineColor: theme.accentColor.withAlphaComponent(0.45),
+            boundaryColor: crossesSnapshot ? theme.histColor : nil,
+            fillColor: theme.chromeColor
+        )
         titleLabel.stringValue = title
         titleLabel.textColor = theme.foregroundColor
         currentLabel.stringValue = isCurrent ? localized("trail.current") : ""
@@ -867,5 +922,120 @@ private final class ReadingTrailCellView: NSTableCellView {
             [cause, snapshot, displayBadge, isCurrent ? localized("trail.currentAX") : nil]
                 .compactMap { $0 }.joined(separator: ", ")
         )
+    }
+}
+
+/// Draws the trail as a path: one lane per branch level, a node on the row's
+/// lane, straight lines where a lane continues and a curve where a branch starts.
+@MainActor
+final class TrailGutterView: NSView {
+    struct Lanes: Equatable {
+        var depth = 0
+        var count = 1
+        var above: Set<Int> = []
+        var below: Set<Int> = []
+        var isBranchStart = false
+    }
+
+    static let laneWidth: CGFloat = 14
+    static let inset: CGFloat = 10
+
+    private(set) var lanes = Lanes()
+    private(set) var nodeColor: NSColor = .clear
+    private var haloColor: NSColor?
+    private var lineColor: NSColor = .clear
+    private var boundaryColor: NSColor?
+    private var fillColor: NSColor = .clear
+    private var widthConstraint: NSLayoutConstraint?
+
+    override var isFlipped: Bool { true }
+
+    static func x(forLane lane: Int) -> CGFloat {
+        inset + CGFloat(lane) * laneWidth
+    }
+
+    var nodeCenterX: CGFloat { Self.x(forLane: lanes.depth) }
+
+    func update(
+        lanes: Lanes,
+        nodeColor: NSColor,
+        haloColor: NSColor?,
+        lineColor: NSColor,
+        boundaryColor: NSColor?,
+        fillColor: NSColor
+    ) {
+        self.lanes = lanes
+        self.nodeColor = nodeColor
+        self.haloColor = haloColor
+        self.lineColor = lineColor
+        self.boundaryColor = boundaryColor
+        self.fillColor = fillColor
+        let width = Self.x(forLane: lanes.count - 1) + Self.inset
+        if let widthConstraint {
+            widthConstraint.constant = width
+        } else {
+            translatesAutoresizingMaskIntoConstraints = false
+            widthConstraint = widthAnchor.constraint(equalToConstant: width)
+            widthConstraint?.isActive = true
+        }
+        needsDisplay = true
+    }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let midY = bounds.midY
+        let x = nodeCenterX
+        for lane in lanes.above.union(lanes.below) where lane != lanes.depth {
+            let lx = Self.x(forLane: lane)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: lx, y: lanes.above.contains(lane) ? 0 : midY))
+            path.line(to: NSPoint(x: lx, y: lanes.below.contains(lane) ? bounds.maxY : midY))
+            stroke(path)
+        }
+        if lanes.above.contains(lanes.depth) && !lanes.isBranchStart {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: x, y: 0))
+            path.line(to: NSPoint(x: x, y: midY))
+            stroke(path, dashed: boundaryColor != nil, color: boundaryColor)
+        }
+        if lanes.isBranchStart, lanes.depth > 0 {
+            let from = Self.x(forLane: lanes.depth - 1)
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: from, y: 0))
+            path.curve(
+                to: NSPoint(x: x, y: midY),
+                controlPoint1: NSPoint(x: from, y: midY * 0.8),
+                controlPoint2: NSPoint(x: x, y: midY * 0.4)
+            )
+            stroke(path, dashed: boundaryColor != nil, color: boundaryColor)
+        }
+        if lanes.below.contains(lanes.depth) {
+            let path = NSBezierPath()
+            path.move(to: NSPoint(x: x, y: midY))
+            path.line(to: NSPoint(x: x, y: bounds.maxY))
+            stroke(path)
+        }
+        if let haloColor {
+            haloColor.setFill()
+            NSBezierPath(ovalIn: NSRect(x: x - 8, y: midY - 8, width: 16, height: 16)).fill()
+        }
+        let radius: CGFloat = haloColor == nil ? 4 : 5
+        let node = NSBezierPath(ovalIn: NSRect(x: x - radius, y: midY - radius, width: radius * 2, height: radius * 2))
+        if haloColor == nil {
+            fillColor.setFill()
+            node.fill()
+            nodeColor.setStroke()
+            node.lineWidth = 2
+            node.stroke()
+        } else {
+            nodeColor.setFill()
+            node.fill()
+        }
+    }
+
+    private func stroke(_ path: NSBezierPath, dashed: Bool = false, color: NSColor? = nil) {
+        (color ?? lineColor).setStroke()
+        path.lineWidth = 1.5
+        if dashed { path.setLineDash([3, 3], count: 2, phase: 0) }
+        path.stroke()
     }
 }
