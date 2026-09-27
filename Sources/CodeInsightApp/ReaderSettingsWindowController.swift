@@ -346,17 +346,27 @@ private struct ReaderSettingsView: View {
                         range: ReaderSettings.lineHeightRange,
                         step: 0.05
                     )
+                    // Source Insight hierarchy: definitions read as headings.
+                    Stepper(
+                        localizedFormat("settings.functionSize", settings.functionNameDelta),
+                        value: $settings.functionNameDelta,
+                        in: ReaderSettings.functionNameDeltaRange,
+                        step: 0.5
+                    )
+                    .accessibilityIdentifier("functionNameSize")
+                    Stepper(
+                        localizedFormat("settings.typeSize", settings.typeNameDelta),
+                        value: $settings.typeNameDelta,
+                        in: ReaderSettings.typeNameDeltaRange,
+                        step: 0.5
+                    )
+                    .accessibilityIdentifier("typeNameSize")
+                    Toggle(localized("settings.comments"), isOn: $settings.humanistComments)
                     Toggle(localized("settings.wrap"), isOn: $settings.wrapLines)
                     Toggle(localized("settings.lineNumbers"), isOn: $settings.lineNumbers)
                     fontControls
 
                     DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {
-                        Stepper(
-                            localizedFormat("settings.functionSize", settings.functionNameDelta),
-                            value: $settings.functionNameDelta,
-                            in: ReaderSettings.functionNameDeltaRange,
-                            step: 1
-                        )
                         valueControl(
                             localized("settings.parameterOpacity"),
                             value: $settings.parameterReferenceAlpha,
@@ -382,7 +392,6 @@ private struct ReaderSettingsView: View {
                             step: 0.05
                         )
                         Toggle(localized("settings.syntax"), isOn: $settings.syntaxFormatting)
-                        Toggle(localized("settings.comments"), isOn: $settings.humanistComments)
                     }
                     .accessibilityIdentifier("advancedTypography")
                     .accessibilityLabel(localized("settings.advanced"))

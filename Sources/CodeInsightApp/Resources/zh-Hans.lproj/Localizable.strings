@@ -418,11 +418,12 @@
 "settings.cache.warning" = "删除所有历史精确分析快照。需要时会重新构建。";
 "settings.cancel" = "取消";
 "settings.clear" = "清除";
-"settings.comments" = "注释使用比例字体";
+"settings.comments" = "注释使用衬线字体";
 "settings.constantWeight" = "常量与模块字重";
 "settings.exact" = "精确分析";
 "settings.fontSize" = "字号：%.0f 磅";
-"settings.functionSize" = "函数与类型字号：+%.0f 磅";
+"settings.functionSize" = "函数名字号：+%.1f 磅";
+"settings.typeSize" = "类型名字号：+%.1f 磅";
 "settings.functionWeight" = "函数与类型字重";
 "settings.gutterOpacity" = "边栏标记不透明度";
 "settings.lineHeight" = "行高";

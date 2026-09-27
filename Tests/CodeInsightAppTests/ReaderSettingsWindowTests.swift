@@ -33,7 +33,22 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     }
     #expect(initialSliders.count == 1)
     #expect(initialSliders.first?.accessibilityLabel?() == CodeInsightApp.localized("settings.lineHeight"))
-    #expect(controller.selfTestReaderToggleCount == 2)
+    // Serif comments sit beside wrap and line numbers, outside Advanced.
+    #expect(controller.selfTestReaderToggleCount == 3)
+    // The declaration hierarchy is a primary control, not an advanced one.
+    let steppers = controller.selfTestReaderAccessibilityElements.filter {
+        $0.accessibilityRole?() == .incrementor
+    }
+    let functionStepper = try #require(steppers.first { $0.accessibilityIdentifier?() == "functionNameSize" })
+    #expect(steppers.contains { $0.accessibilityIdentifier?() == "typeNameSize" })
+    #expect(CodeInsightApp.localizedFormat("settings.functionSize", 4.5).contains("4.5"))
+    // Press the stepper's own increment arrow (its first button child).
+    let arrows = (functionStepper.accessibilityChildren?() ?? []).compactMap { $0 as AnyObject }
+        .filter { $0.accessibilityRole?() == .button }
+    #expect(arrows.count == 2)
+    _ = arrows.first?.accessibilityPerformPress?()
+    RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+    #expect(updatedSettings.functionNameDelta == 5)
     let lineHeight = try #require(initialSliders.first)
     _ = lineHeight.accessibilityPerformIncrement?()
     RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
@@ -97,7 +112,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     try await Task.sleep(for: .milliseconds(200))
 
     #expect(controller.currentSettings == changed)
-    #expect(controller.selfTestReaderToggleCount == 2)
+    #expect(controller.selfTestReaderToggleCount == 3)
     let originalText = preview.string
     #expect(originalText.contains("fn greet(name: &str"))
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)

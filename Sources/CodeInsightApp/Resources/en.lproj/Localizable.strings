@@ -418,11 +418,12 @@
 "settings.cache.warning" = "Deletes all historical Exact snapshots. They will be rebuilt on demand.";
 "settings.cancel" = "Cancel";
 "settings.clear" = "Clear";
-"settings.comments" = "Proportional comment font";
+"settings.comments" = "Serif comment font";
 "settings.constantWeight" = "Constant and module weight";
 "settings.exact" = "Exact";
 "settings.fontSize" = "Font size: %.0f pt";
-"settings.functionSize" = "Function and type size: +%.0f pt";
+"settings.functionSize" = "Function name size: +%.1f pt";
+"settings.typeSize" = "Type name size: +%.1f pt";
 "settings.functionWeight" = "Function and type weight";
 "settings.gutterOpacity" = "Gutter marker opacity";
 "settings.lineHeight" = "Line height";
