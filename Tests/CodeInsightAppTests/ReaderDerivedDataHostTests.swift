@@ -109,6 +109,7 @@ func readonlyReaderHostDiscardsSyntaxArrivalAfterTeardown() async throws {
     #expect(await store.statistics.subscriptionCount == 0)
     #expect(controller.displayedBytes == bytes)
     #expect(controller.identifierPreparationNotice == nil)
+    #expect(await store.statistics.buildCount == 0)
 }
 
 @MainActor

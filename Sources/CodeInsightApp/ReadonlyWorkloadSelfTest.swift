@@ -111,6 +111,13 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
             draw()
             let duration = start.duration(to: .now).components
             let after = try counters()
+            if (name == "stable-scroll" || name == "hover"), reader.usesPreparedDecorations,
+               (after["decorationBuildCount"] != before["decorationBuildCount"]
+                || after["drawGlobalRecordVisits"] != before["drawGlobalRecordVisits"]) {
+                throw NSError(domain: "ReadonlyWorkload", code: 3, userInfo: [
+                    NSLocalizedDescriptionKey: "Stable gutter interaction rebuilt or scanned document decorations"
+                ])
+            }
             let delta = after.map { ($0.key, $0.value - before[$0.key, default: 0]) }
             let drew = reader.backgroundDrawCount > drawBefore
             let drawRequired = name != "close-reader"

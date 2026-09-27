@@ -22,7 +22,7 @@ sources = {
 }
 if args.scales:
     for count in (10000, 30000, 50000, 100000):
-        sources[f'scale-{count}.rs'] = ''.join(f'let value_{i} = {i};\n' for i in range(count))
+        sources[f'scale-{count}.rs'] = ''.join(f'fn scale_{i}(value: i32) -> i32 {{\n    let repeated = value + {i};\n    // seed {seed}, 中文\n    repeated\n}}\n' for i in range(count // 5))
 entries = []
 for name, source in sources.items():
     data = source.encode()

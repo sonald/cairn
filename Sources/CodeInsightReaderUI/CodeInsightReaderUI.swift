@@ -493,6 +493,7 @@ public final class ReaderTextView {
     private var typographyKey: ReaderTypographyKey
     private var fontEnvironmentRevision: UInt64
     private var isDrawingRuler = false
+    package var usesPreparedDecorations = ProcessInfo.processInfo.environment["CAIRN_READONLY_DECORATION_CACHE"] != "0"
     private var diffMarkers: [Int: DiffCore.MarkerKind] = [:]
     private var bookmarkMarkers: [Int: [String]] = [:]
     private var declarationKindsByLine: [Int: OutlineKind] = [:]
@@ -528,6 +529,11 @@ public final class ReaderTextView {
     private var foldAttachments: [FoldID: FoldAttachment] = [:]
     private var focusState: FocusState?
     private var visibleFoldRegionsCache: [FoldRegion] = []
+    private var renderedFoldRegionsCache: [FoldRegion] = []
+    private var visibleFoldsByLine: [Int: FoldRegion] = [:]
+    private var foldedDiffCache: [FoldID: DiffCore.MarkerKind] = [:]
+    private var foldedDiffByLine: [Int: DiffCore.MarkerKind] = [:]
+    private var visibleBookmarksByLine: [Int: [String]] = [:]
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
     /// The fold whose handle is currently hovered, identified by FoldID so
@@ -730,6 +736,8 @@ public final class ReaderTextView {
         let key = document.analysisKey
         let store = derivedDataStore
         derivedDataTask = Task { [weak self] in
+            guard !Task.isCancelled, self?.derivedDataGeneration == generation,
+                  self?.displayedDocument?.analysisKey == key else { return }
             if let previousSubscription { await store.cancel(previousSubscription) }
             let subscription = await store.subscribe(key: key, document: document)
             guard !Task.isCancelled,
@@ -996,9 +1004,9 @@ public final class ReaderTextView {
         displayedDocument = document
         pendingOccurrenceActivation = nil
         prepareIdentifiers(for: document)
-        refreshVisibleFoldRegions()
         diffMarkers = [:]
         bookmarkMarkers = [:]
+        refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         occurrenceSelectionByteOffset = nil
         findMatchByteRanges = nil
@@ -1058,6 +1066,11 @@ public final class ReaderTextView {
         renderedFoldIDs = []
         foldAttachments = [:]
         visibleFoldRegionsCache = []
+        renderedFoldRegionsCache = []
+        visibleFoldsByLine = [:]
+        foldedDiffCache = [:]
+        foldedDiffByLine = [:]
+        visibleBookmarksByLine = [:]
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
         foldGutterHoveredID = nil
@@ -1211,16 +1224,7 @@ public final class ReaderTextView {
         foldAttachments[id]?.visualExposureText
     }
     internal var foldedDiffMarkersForTesting: [Int: DiffCore.MarkerKind] {
-        guard let document = displayedDocument else { return [:] }
-        return foldedDiffMarkers(in: document).reduce(into: [:]) {
-            result, element in
-            guard let region = document.foldRegions.first(where: {
-                $0.id == element.key
-            }), let line = document.lineTable.lineColumn(
-                at: region.headerRange.lowerBound
-            )?.line else { return }
-            result[Int(line)] = element.value
-        }
+        foldedDiffByLine
     }
 
     @discardableResult
@@ -2387,12 +2391,54 @@ public final class ReaderTextView {
     private func refreshVisibleFoldRegions() {
         guard let document = displayedDocument else {
             visibleFoldRegionsCache = []
+            renderedFoldRegionsCache = []
+            visibleFoldsByLine = [:]
+            foldedDiffCache = [:]
+            foldedDiffByLine = [:]
+            visibleBookmarksByLine = [:]
             return
         }
-        visibleFoldRegionsCache = Self.visibleFoldRegions(
-            in: document,
-            map: displayMap
-        )
+        ReaderWorkCounters.record(\.decorationBuildCount)
+        if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits, document.foldRegions.count * 2) }
+        visibleFoldRegionsCache = Self.visibleFoldRegions(in: document, map: displayMap)
+        renderedFoldRegionsCache = document.foldRegions.filter {
+            renderedFoldIDs.contains($0.id)
+        }.sorted {
+            ($0.bodyRange.lowerBound, $0.bodyRange.upperBound)
+                < ($1.bodyRange.lowerBound, $1.bodyRange.upperBound)
+        }
+        visibleFoldsByLine = [:]
+        for region in visibleFoldRegionsCache {
+            if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits) }
+            guard let line = document.lineTable.lineColumn(at: region.headerRange.lowerBound)?.line else { continue }
+            // Keep the original document-order priority when several folds share a line.
+            visibleFoldsByLine[Int(line)] = visibleFoldsByLine[Int(line)] ?? region
+        }
+        refreshFoldedDiffMarkers()
+        refreshVisibleBookmarkMarkers()
+    }
+
+    private func refreshFoldedDiffMarkers() {
+        ReaderWorkCounters.record(\.decorationBuildCount)
+        guard let document = displayedDocument else {
+            foldedDiffCache = [:]
+            foldedDiffByLine = [:]
+            return
+        }
+        foldedDiffCache = foldedDiffMarkers(in: document)
+        foldedDiffByLine = [:]
+        // Rendered folds are disjoint; reuse their records instead of building another ID dictionary.
+        for region in renderedFoldRegionsCache {
+            if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits) }
+            guard let marker = foldedDiffCache[region.id],
+                  let line = document.lineTable.lineColumn(at: region.headerRange.lowerBound)?.line else { continue }
+            foldedDiffByLine[Int(line)] = marker
+        }
+    }
+
+    private func refreshVisibleBookmarkMarkers() {
+        ReaderWorkCounters.record(\.decorationBuildCount)
+        visibleBookmarksByLine = buildVisibleBookmarkMarkers()
     }
 
     private static func visibleFoldRegions(
@@ -2771,8 +2817,11 @@ public final class ReaderTextView {
     }
 
     public func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
-        diffMarkers = markers
-        refreshFoldExposures()
+        if diffMarkers != markers {
+            diffMarkers = markers
+            refreshFoldedDiffMarkers()
+            refreshFoldExposures()
+        }
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -2781,9 +2830,13 @@ public final class ReaderTextView {
     }
 
     public func setBookmarkMarkers(_ labelsBySourceLine: [Int: [String]]) {
-        bookmarkMarkers = labelsBySourceLine.reduce(into: [:]) { result, entry in
+        let markers: [Int: [String]] = labelsBySourceLine.reduce(into: [:]) { result, entry in
             guard entry.key > 0, !entry.value.isEmpty else { return }
             result[entry.key] = entry.value.sorted()
+        }
+        if bookmarkMarkers != markers {
+            bookmarkMarkers = markers
+            refreshVisibleBookmarkMarkers()
         }
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
@@ -2798,14 +2851,14 @@ public final class ReaderTextView {
     }
 
     internal var bookmarkMarkerLabelsForTesting: [Int: [String]] {
-        visibleBookmarkMarkers()
+        visibleBookmarksByLine
     }
 
     internal var bookmarkMarkerAccessibilityLabelForTesting: String {
         bookmarkAccessibilityLabel
     }
 
-    package var bookmarkMarkerLines: [Int] { visibleBookmarkMarkers().keys.sorted() }
+    package var bookmarkMarkerLines: [Int] { visibleBookmarksByLine.keys.sorted() }
 
     package var bookmarkMarkerAccessibilityLabel: String? {
         guard lineNumbers, !bookmarkMarkers.isEmpty else { return nil }
@@ -3220,7 +3273,7 @@ public final class ReaderTextView {
             occurrenceRanges,
             in: document
         )
-        let foldedDiff = foldedDiffMarkers(in: document)
+        let foldedDiff = foldedDiffCache
         for (id, attachment) in foldAttachments {
             attachment.updateExposure(
                 matchCount: matchCounts[id] ?? 0,
@@ -3234,7 +3287,7 @@ public final class ReaderTextView {
         _ ranges: R,
         in document: ReaderDocument
     ) -> [FoldID: Int] where R.Element == ByteRange {
-        let regions = renderedRegions(in: document)
+        let regions = renderedFoldRegionsCache
         guard !regions.isEmpty, !ranges.isEmpty else { return [:] }
         var result: [FoldID: Int] = [:]
         var regionIndex = 0
@@ -3258,7 +3311,7 @@ public final class ReaderTextView {
     private func foldedDiffMarkers(
         in document: ReaderDocument
     ) -> [FoldID: DiffCore.MarkerKind] {
-        let regions = renderedRegions(in: document)
+        let regions = renderedFoldRegionsCache
         guard !regions.isEmpty, !diffMarkers.isEmpty else { return [:] }
         var result: [FoldID: DiffCore.MarkerKind] = [:]
         var regionIndex = 0
@@ -3285,10 +3338,10 @@ public final class ReaderTextView {
         return result
     }
 
-    private func visibleBookmarkMarkers() -> [Int: [String]] {
+    private func buildVisibleBookmarkMarkers() -> [Int: [String]] {
         guard let document = displayedDocument else { return [:] }
         var result: [Int: [String]] = [:]
-        let regions = renderedRegions(in: document)
+        let regions = renderedFoldRegionsCache
         for (line, labels) in bookmarkMarkers {
             if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits, 1 + regions.count) }
             guard line > 0,
@@ -3313,7 +3366,7 @@ public final class ReaderTextView {
     }
 
     private var bookmarkAccessibilityLabel: String {
-        let markers = visibleBookmarkMarkers()
+        let markers = visibleBookmarksByLine
         guard !markers.isEmpty else { return "" }
         return localizedFormat("reader.bookmarks", markers.keys.sorted().map { line in
             localizedFormat("reader.bookmark.line", Int64(line), markers[line, default: []].joined(separator: ", "))
@@ -3326,16 +3379,6 @@ public final class ReaderTextView {
             return
         }
         ruler?.setAccessibilityLabel(bookmarkAccessibilityLabel)
-    }
-
-    private func renderedRegions(in document: ReaderDocument) -> [FoldRegion] {
-        if isDrawingRuler { ReaderWorkCounters.record(\.drawGlobalRecordVisits, document.foldRegions.count) }
-        return document.foldRegions.filter {
-            renderedFoldIDs.contains($0.id)
-        }.sorted {
-            ($0.bodyRange.lowerBound, $0.bodyRange.upperBound)
-                < ($1.bodyRange.lowerBound, $1.bodyRange.upperBound)
-        }
     }
 
     private func installRenderingValidator(
@@ -3534,43 +3577,14 @@ public final class ReaderTextView {
     ) {
         isDrawingRuler = true
         defer { isDrawingRuler = false }
+        if !usesPreparedDecorations { refreshVisibleFoldRegions() }
         theme.backgroundColor.setFill()
         dirtyRect.intersection(ruler.bounds).fill()
         var lines: [Int] = []
         let font = lineNumberFont
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .right
-        let foldsByLine: [Int: FoldRegion]
-        let foldedDiffByLine: [Int: DiffCore.MarkerKind]
-        let bookmarksByLine = lineNumbers ? visibleBookmarkMarkers() : [:]
-        if let document = displayedDocument {
-            ReaderWorkCounters.record(\.decorationBuildCount)
-            ReaderWorkCounters.record(\.drawGlobalRecordVisits, document.foldRegions.count)
-            var mapped: [Int: FoldRegion] = [:]
-            for region in visibleFoldRegions(in: document) {
-                ReaderWorkCounters.record(\.drawGlobalRecordVisits)
-                guard let line = document.lineTable.lineColumn(
-                    at: region.headerRange.lowerBound
-                )?.line else { continue }
-                mapped[Int(line)] = mapped[Int(line)] ?? region
-            }
-            foldsByLine = mapped
-            let regionsByID = Dictionary(
-                uniqueKeysWithValues: document.foldRegions.map { ($0.id, $0) }
-            )
-            foldedDiffByLine = foldedDiffMarkers(in: document).reduce(into: [:]) {
-                result, element in
-                guard let region = regionsByID[element.key],
-                      let line = document.lineTable.lineColumn(
-                        at: region.headerRange.lowerBound
-                      )?.line
-                else { return }
-                result[Int(line)] = element.value
-            }
-        } else {
-            foldsByLine = [:]
-            foldedDiffByLine = [:]
-        }
+        let bookmarksByLine = lineNumbers ? visibleBookmarksByLine : [:]
         // First-row decoration observables (§7.1): what this pass actually
         // drew and where. Cleared per draw so stale rows never linger.
         lastRulerFirstRowRectsForTesting = [:]
@@ -3627,7 +3641,7 @@ public final class ReaderTextView {
                     )
                 }
             }
-            if let fold = foldsByLine[line],
+            if let fold = visibleFoldsByLine[line],
                foldGutterHoveredID == fold.id
             {
                 drawFoldChevron(
@@ -3738,19 +3752,12 @@ public final class ReaderTextView {
         guard foldColumnWidth > 0,
               point.x >= foldX,
               point.x <= foldX + foldColumnWidth,
-              let document = displayedDocument
+              displayedDocument != nil
         else { return nil }
-        ReaderWorkCounters.record(\.decorationBuildCount)
-        var byLine: [Int: FoldRegion] = [:]
-        for region in visibleFoldRegions(in: document) {
-            guard let line = document.lineTable.lineColumn(
-                at: region.headerRange.lowerBound
-            )?.line else { continue }
-            byLine[Int(line)] = byLine[Int(line)] ?? region
-        }
+        if !usesPreparedDecorations { refreshVisibleFoldRegions() }
         var match: FoldRegion?
         enumerateVisibleLayoutFragments { fragment, line in
-            guard match == nil, let region = byLine[line] else { return }
+            guard match == nil, let region = visibleFoldsByLine[line] else { return }
             guard let firstRow = ReaderViewportGeometry.firstVisualRowRect(
                 ofFragment: fragment,
                 in: view
