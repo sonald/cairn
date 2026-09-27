@@ -24,6 +24,8 @@ package struct ReaderProjection: Sendable {
         let placeholderOffset: Int
     }
 
+    /// Copies retain this identity; rebuilding a plan creates a new commit target.
+    package let identity = UUID()
     package let contentID: ContentID
     package let segments: [Segment]
     package let displayUTF16Starts: [Int]
@@ -33,9 +35,37 @@ package struct ReaderProjection: Sendable {
     private let removedUTF16Prefix: [Int]
     private let placeholderOffsetsByID: [FoldID: Int]
 
+    package var sourceByteCount: Int { sourceMap.bytes.count }
+
     package var renderedFoldIDs: Set<FoldID> { Set(folds.map(\.id)) }
     package var foldPlaceholders: [(id: FoldID, offset: Int)] {
-        folds.map { ($0.id, $0.placeholderOffset) }
+        ReaderWorkCounters.record(\.projectionPlaceholderRecordsVisited, folds.count)
+        return folds.map { ($0.id, $0.placeholderOffset) }
+    }
+
+    /// Search only the requested display window; counts comparisons and returned records.
+    package func foldPlaceholders(in range: NSRange) -> [(id: FoldID, offset: Int)]? {
+        guard range.location >= 0, range.length >= 0,
+              range.location <= projectedUTF16Length,
+              range.length <= projectedUTF16Length - range.location,
+              displayBoundaryIsValid(range.location),
+              displayBoundaryIsValid(range.location + range.length) else { return nil }
+        guard range.length > 0 else { return [] }
+        var low = 0, high = folds.count
+        while low < high {
+            let middle = (low + high) / 2
+            ReaderWorkCounters.record(\.projectionPlaceholderRecordsVisited)
+            if folds[middle].placeholderOffset < range.location { low = middle + 1 }
+            else { high = middle }
+        }
+        var result: [(id: FoldID, offset: Int)] = []
+        let upper = range.location + range.length
+        while low < folds.count, folds[low].placeholderOffset < upper {
+            ReaderWorkCounters.record(\.projectionPlaceholderRecordsVisited)
+            result.append((folds[low].id, folds[low].placeholderOffset))
+            low += 1
+        }
+        return result
     }
     package func placeholderOffset(for id: FoldID) -> Int? { placeholderOffsetsByID[id] }
 
@@ -97,17 +127,43 @@ package struct ReaderProjection: Sendable {
         projectedUTF16Length = length
     }
 
-    /// Explicit compatibility materialization; callers doing geometry must not request this.
+    /// Full materialization is reserved for first installation and explicit fallback.
     package func materialize() -> String {
+        // The full range is valid by construction, including empty documents.
+        materialize(displayRange: NSRange(location: 0, length: projectedUTF16Length))!
+    }
+
+    /// Decode only visible source slices in this display range; placeholder units remain structural.
+    package func materialize(displayRange range: NSRange) -> String? {
+        guard range.location >= 0, range.length >= 0,
+              range.location <= Int.max - range.length else { return nil }
+        let upper = range.location + range.length
+        guard upper <= projectedUTF16Length,
+              displayBoundaryIsValid(range.location), displayBoundaryIsValid(upper) else { return nil }
+        guard range.length > 0 else { return "" }
+        var low = 0, high = displayUTF16Starts.count
+        while low < high {
+            let middle = (low + high) / 2
+            if displayUTF16Starts[middle] <= range.location { low = middle + 1 }
+            else { high = middle }
+        }
+        var index = max(0, low - 1)
         var result = ""
-        for segment in segments {
-            switch segment {
-            case .source(let range, _):
-                ReaderWorkCounters.record(\.materializedUTF8Bytes, Int(range.upperBound - range.lowerBound))
-                result += String(decoding: sourceMap.bytes[Int(range.lowerBound)..<Int(range.upperBound)], as: UTF8.self)
+        while index < segments.count, displayUTF16Starts[index] < upper {
+            let start = displayUTF16Starts[index]
+            let end = index + 1 < segments.count ? displayUTF16Starts[index + 1] : projectedUTF16Length
+            let lower = max(range.location, start)
+            let clippedUpper = min(upper, end)
+            switch segments[index] {
+            case .source:
+                guard let lowerByte = sourceByte(forVisibleDisplay: lower),
+                      let upperByte = sourceByte(forVisibleDisplay: clippedUpper) else { return nil }
+                ReaderWorkCounters.record(\.materializedUTF8Bytes, Int(upperByte - lowerByte))
+                result += String(decoding: sourceMap.bytes[Int(lowerByte)..<Int(upperByte)], as: UTF8.self)
             case .folded:
                 result.append("\u{FFFC}")
             }
+            index += 1
         }
         return result
     }

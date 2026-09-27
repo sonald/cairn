@@ -564,6 +564,17 @@ public final class ReaderTextView {
     private var foldedDiffCache: [FoldID: DiffCore.MarkerKind] = [:]
     private var foldedDiffByLine: [Int: DiffCore.MarkerKind] = [:]
     private var visibleBookmarksByLine: [Int: [String]] = [:]
+    private var projectionSelectionUsesPrimaryStyle = false
+    private var latentProjectionSelection: (sourceRanges: [ByteRange], displayRanges: [NSRange])?
+    private var isCommittingProjection = false
+    package var localProjectionUpdatesEnabled = ProcessInfo.processInfo.environment["CAIRN_READONLY_LOCAL_REPLACEMENT"] != "0"
+    package var forceProjectionPreflightFailureForTesting = false
+    package private(set) var partialProjectionCommitCount = 0
+    package private(set) var projectionFallbackCount = 0
+    package private(set) var projectionFallbackReason: String?
+    package private(set) var projectionCommitRejectionReason: String?
+    package private(set) var projectionRejectedCount = 0
+    package var projectionPreflightHookForTesting: (() -> Void)?
     private var latentSelectionAnchor: LatentFoldAnchor?
     private var latentViewportAnchor: LatentFoldAnchor?
     /// The fold whose handle is currently hovered, identified by FoldID so
@@ -651,26 +662,26 @@ public final class ReaderTextView {
         nativeSelectedTextAttributes = view.selectedTextAttributes
         applyThemeColors()
         textView.clickHandler = { [weak self] index, modifiers in
+            self?.clearProjectionSelection()
             self?.activate(atCharacterIndex: index)
             self?.onClick?(index, modifiers)
         }
-        textView.sourceCopyHandler = { [weak self] range in
-            self?.sourceText(forDisplaySelection: range)
+        textView.sourceCopyHandler = { [weak self] in
+            self?.sourceTextForCurrentSelections()
         }
         textView.contextMenuHandler = { [weak self] index in
             self?.onContextMenu?(index)
         }
         textView.selectionHandler = { [weak self] index in
-            guard let self,
-                  let byteOffset = byteOffset(forCharacterIndex: index)
-            else {
-                return
-            }
+            guard let self, !self.isCommittingProjection else { return }
+            clearProjectionSelection()
             pendingOccurrenceActivation = nil
             // Programmatic restores set the selection themselves; only real
             // user interaction ends a pure-reflow sequence (D3.5).
             invalidateReflowSequence()
-            updateCurrentLine(byteOffset: byteOffset)
+            if let byteOffset = byteOffset(forCharacterIndex: index) {
+                updateCurrentLine(byteOffset: byteOffset)
+            }
             // A native gesture can select the same symbol range as activation.
             // It still needs the native selection background and anchor semantics.
             if primarySelectionRange != nil {
@@ -694,19 +705,19 @@ public final class ReaderTextView {
             return true
         }
         textView.backgroundHandler = { [weak self, weak textView] rect in
-            guard let self, let textView else { return }
+            guard let self, let textView, !self.isCommittingProjection else { return }
             self.backgroundDrawCount += 1
             self.drawCurrentLineBackground(in: textView, dirtyRect: rect)
             self.drawPrimarySelection(in: textView, dirtyRect: rect)
         }
         textView.layoutCompleted = { [weak self] in
-            guard let self, !self.isRestoringViewport,
+            guard let self, !self.isCommittingProjection, !self.isRestoringViewport,
                   self.renderingCoordinator.hasRenderingAttributes,
                   let manager = self.view.textLayoutManager else { return }
             self.validateVisibleRenderingAttributes(in: manager, updateLayout: false)
         }
         textView.viewportChanged = { [weak self] in
-            guard let self,
+            guard let self, !self.isCommittingProjection,
                   let layoutManager = self.view.textLayoutManager
             else { return }
             self.foldGutterHoveredID = nil
@@ -1030,6 +1041,8 @@ public final class ReaderTextView {
             let layoutManager = view.textLayoutManager
         else { return }
 
+        isCommittingProjection = true
+        layoutManager.renderingAttributesValidator = nil
         displayMap = projection.map
         foldAttachments = projection.attachments
         displayedDocument = document
@@ -1049,6 +1062,8 @@ public final class ReaderTextView {
         visibleLineNumbers = []
         visibleCurrentLineNumbers = []
         visibleDeclarationMarkerLines = []
+        projectionSelectionUsesPrimaryStyle = false
+        latentProjectionSelection = nil
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
         foldGutterHoveredID = nil
@@ -1073,14 +1088,17 @@ public final class ReaderTextView {
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
-        installRenderingValidator(in: layoutManager)
         installProjectedText(projection.attributed)
+        isCommittingProjection = false
+        installRenderingValidator(in: layoutManager)
         if renderingCoordinator.hasRenderingAttributes {
             validateVisibleRenderingAttributes(in: layoutManager)
         }
     }
 
     public func clear() {
+        isCommittingProjection = true
+        defer { isCommittingProjection = false }
         cancelDerivedDataSubscription()
         paragraphLayout.reset()
         if let focusState {
@@ -1102,6 +1120,8 @@ public final class ReaderTextView {
         foldedDiffCache = [:]
         foldedDiffByLine = [:]
         visibleBookmarksByLine = [:]
+        projectionSelectionUsesPrimaryStyle = false
+        latentProjectionSelection = nil
         latentSelectionAnchor = nil
         latentViewportAnchor = nil
         foldGutterHoveredID = nil
@@ -1558,54 +1578,178 @@ public final class ReaderTextView {
     }
 
     private func applyFoldProjection(_ logical: Set<FoldID>) -> Bool {
-        guard let document = displayedDocument,
-              let layoutManager = view.textLayoutManager
-        else { return false }
-        // A fold change is a projection change: it ends any pure-reflow
-        // sequence (D3.5) and voids captured display offsets (D3.1).
+        guard !isCommittingProjection, let document = displayedDocument, let oldMap = displayMap,
+              let manager = view.textLayoutManager else { return false }
+        projectionCommitRejectionReason = nil
+        let oldRevision = projectionRevision
+        let oldAnalysisKey = document.analysisKey
+        let oldTheme = theme
+        let oldTypographyKey = typographyKey
+        let oldEnvironmentRevision = fontEnvironmentRevision
+        func targetIsCurrent() -> Bool {
+            displayedDocument === document
+                && displayedDocument?.analysisKey == oldAnalysisKey
+                && displayMap?.projection.identity == oldMap.projection.identity
+                && projectionRevision == oldRevision
+                && theme == oldTheme && typographyKey == oldTypographyKey
+                && fontEnvironmentRevision == oldEnvironmentRevision
+        }
+        let rendered = Self.maximalFoldIDs(logical, in: document)
+        // Logical child overrides may change while hidden by the same ancestor.
+        if rendered == renderedFoldIDs {
+            logicalFoldIDs = logical
+            return true
+        }
+        guard let target = DisplayMap(document: document, renderedFoldIDs: rendered) else {
+            projectionCommitRejectionReason = "invalid-target"
+            projectionRejectedCount += 1
+            return false
+        }
+        let selections = captureProjectionSelections()
+        let affinity = view.selectionAffinity
+        let viewport = latentViewportAnchor.flatMap {
+            renderedFoldIDs.contains($0.foldID) ? $0.byteOffset : nil
+        } ?? firstVisibleByteOffset()
+
+        var replacements: [(range: NSRange, targetRange: NSRange, text: NSMutableAttributedString)] = []
+        var attachments = foldAttachments.filter { rendered.contains($0.key) }
+        var fallback: (attributed: NSMutableAttributedString, attachments: [FoldID: FoldAttachment])?
+        var reason: String?
+        if !localProjectionUpdatesEnabled { reason = "disabled" }
+        else if forceProjectionPreflightFailureForTesting { reason = "forced-preflight" }
+        else if let delta = ProjectionDelta(old: oldMap.projection, new: target.projection),
+                delta.isApplicable(current: oldMap.projection, target: target.projection,
+                    storageUTF16Length: backingTextStorage.length) {
+            for patch in delta.patches {
+                guard oldMap.sourceRanges(forDisplay: patch.oldDisplayRange) != nil,
+                      target.sourceRanges(forDisplay: patch.newDisplayRange) != nil,
+                      let piece = Self.materializeProjection(document: document, map: target,
+                          attributes: baseAttributes, theme: theme, displayRange: patch.newDisplayRange),
+                      piece.attributed.length == patch.newDisplayRange.length
+                else { reason = "invalid-replacement"; break }
+                guard let targetPlaceholders = target.foldPlaceholders(in: patch.newDisplayRange) else {
+                    reason = "invalid-placeholder-range"; break
+                }
+                for placeholder in targetPlaceholders {
+                    let local = placeholder.offset - patch.newDisplayRange.location
+                    guard piece.attributed.mutableString.character(at: local) == 0xFFFC,
+                          (piece.attributed.attribute(.attachment, at: local, effectiveRange: nil) as? FoldAttachment) === piece.attachments[placeholder.id] else {
+                        reason = "new-attachment-mismatch"; break
+                    }
+                }
+                if reason != nil { break }
+                attachments.merge(piece.attachments) { _, new in new }
+                replacements.append((patch.oldDisplayRange, patch.newDisplayRange, piece.attributed))
+            }
+            // Unchanged attachments remain in storage. TextKit's opaque
+            // locations relocate surviving providers; invalidated fragments
+            // create new providers. Only current fragment providers are used.
+        } else { reason = "invalid-delta" }
+
+        let preflightHook = projectionPreflightHookForTesting
+        projectionPreflightHookForTesting = nil
+        preflightHook?()
+        // A stale intent is rejected, never "recovered" by installing its old
+        // target over the user's new document, analysis, projection or settings.
+        guard targetIsCurrent() else {
+            projectionCommitRejectionReason = "stale-target"
+            projectionRejectedCount += 1
+            return false
+        }
+        if backingTextStorage.length != oldMap.projectedUTF16Length {
+            reason = "storage-length-mismatch"
+        }
+        if reason == nil {
+            for replacement in replacements {
+                guard let oldPlaceholders = oldMap.foldPlaceholders(in: replacement.range) else {
+                    reason = "invalid-placeholder-range"; break
+                }
+                for placeholder in oldPlaceholders {
+                    if (backingTextStorage.attribute(.attachment, at: placeholder.offset, effectiveRange: nil) as? FoldAttachment)
+                        !== foldAttachments[placeholder.id] {
+                        reason = "old-attachment-mismatch"
+                        break
+                    }
+                }
+                if reason != nil { break }
+            }
+        }
+        if reason != nil {
+            guard let full = Self.materializeProjection(document: document, map: target,
+                attributes: baseAttributes, theme: theme) else {
+                projectionCommitRejectionReason = "invalid-target-materialization"
+                projectionRejectedCount += 1
+                return false
+            }
+            fallback = full
+            attachments = full.attachments
+        }
+        // Full recovery also has to pass the identity guard after preparation.
+        guard targetIsCurrent() else {
+            projectionCommitRejectionReason = "stale-target"
+            projectionRejectedCount += 1
+            return false
+        }
+        projectionFallbackReason = reason
+        if fallback != nil { projectionFallbackCount += 1 }
+
         projectionRevision += 1
         invalidateReflowSequence()
         widthReflowCapturedState = nil
-
-        let selectionAnchor = sourceAnchor(
-            atDisplayOffset: view.selectedRange().location,
-            latent: latentSelectionAnchor
-        )
-        let viewportAnchor = latentViewportAnchor.flatMap { latent in
-            renderedFoldIDs.contains(latent.foldID) ? latent.byteOffset : nil
-        } ?? firstVisibleByteOffset()
-        let rendered = Self.maximalFoldIDs(logical, in: document)
-        guard let projection = Self.project(
-            document: document,
-            renderedFoldIDs: rendered,
-            attributes: baseAttributes,
-            theme: theme
-        ) else { return false }
-
-        logicalFoldIDs = logical
-        renderedFoldIDs = rendered
-        displayMap = projection.map
-        foldAttachments = projection.attachments
-        refreshVisibleFoldRegions()
-        renderingCoordinator.update(
-            document: document,
-            map: projection.map,
-            theme: theme
-        )
-        refreshOccurrenceRendering(in: document)
-        layoutManager.renderingAttributesValidator = nil
-        installProjectedText(projection.attributed)
-        installRenderingValidator(in: layoutManager)
-        restoreSelectionAnchor(selectionAnchor)
-        restoreViewportAnchor(viewportAnchor, in: document)
-        if let scrollView = view.enclosingScrollView ?? scrollView {
-            configureGutter(in: scrollView, lineNumbers: lineNumbers)
+        let wasRestoring = isRestoringViewport
+        isRestoringViewport = true
+        isCommittingProjection = true
+        manager.renderingAttributesValidator = nil
+        let commit = {
+            self.backingTextStorage.beginEditing()
+            if let fallback {
+                // The target map is needed by paragraph source metadata, but
+                // external mapping callbacks stay blocked until the commit ends.
+                self.displayMap = target
+                self.lastParagraphIndentLimit = nil
+                self.projectionInstallCount += 1
+                ReaderWorkCounters.record(\.fullTextReplacementCount)
+                ReaderWorkCounters.record(\.replacedUTF16Units, self.backingTextStorage.length)
+                if self.wrapLines { self.applyParagraphLayout(to: fallback.attributed) }
+                self.backingTextStorage.setAttributedString(fallback.attributed)
+            } else {
+                for replacement in replacements.reversed() {
+                    ReaderWorkCounters.record(\.partialTextReplacementCount)
+                    ReaderWorkCounters.record(\.replacedUTF16Units, replacement.range.length)
+                    self.backingTextStorage.replaceCharacters(in: replacement.range, with: replacement.text)
+                }
+                self.displayMap = target
+                // Every patch carries final coordinates. Only its paragraphs
+                // and their join neighbors may need indentation recomputation.
+                for replacement in replacements {
+                    self.applyParagraphLayout(to: self.backingTextStorage, in: replacement.targetRange)
+                }
+                self.partialProjectionCommitCount += 1
+            }
+            self.logicalFoldIDs = logical
+            self.renderedFoldIDs = rendered
+            self.foldAttachments = attachments
+            self.backingTextStorage.endEditing()
         }
-        updateRulerThickness()
+        if let content = view.textContentStorage { content.performEditingTransaction(commit) }
+        else { commit() }
+        isCommittingProjection = false
+
+        refreshVisibleFoldRegions()
+        renderingCoordinator.update(document: document, map: target, theme: theme)
+        restoreProjectionSelections(selections, affinity: affinity)
+        refreshOccurrenceRendering(in: document, updateLayout: false)
+        installRenderingValidator(in: manager)
+        restoreViewportAnchor(viewport, in: document)
+        if let scroll = view.enclosingScrollView ?? scrollView {
+            configureGutter(in: scroll, lineNumbers: lineNumbers)
+        }
         updateBookmarkAccessibilityLabel()
         ruler?.needsDisplay = true
-        validateVisibleRenderingAttributes(in: layoutManager)
+        validateVisibleRenderingAttributes(in: manager)
+        isRestoringViewport = wasRestoring
         view.needsDisplay = true
+        onViewportChange?()
         return true
     }
 
@@ -1649,28 +1793,106 @@ public final class ReaderTextView {
         }
     }
 
-    private func restoreSelectionAnchor(
-        _ byteOffset: UInt32?
-    ) {
-        guard let byteOffset,
-              let position = displayMap?.displayPosition(ofByte: byteOffset)
-        else { return }
-        switch position {
-        case .visible(let offset):
-            view.setSelectedRange(NSRange(location: offset, length: 0))
-            if latentSelectionAnchor?.byteOffset == byteOffset {
-                latentSelectionAnchor = nil
-            }
-        case .hidden(let foldID):
-            guard let placeholder = displayMap?.placeholderOffset(for: foldID) else {
-                return
-            }
-            latentSelectionAnchor = LatentFoldAnchor(
-                byteOffset: byteOffset,
-                foldID: foldID
-            )
-            view.setSelectedRange(NSRange(location: placeholder, length: 0))
+    private func clearProjectionSelection() {
+        latentProjectionSelection = nil
+        projectionSelectionUsesPrimaryStyle = false
+        latentSelectionAnchor = nil
+    }
+
+    private func captureProjectionSelections() -> [ByteRange] {
+        let actual = view.selectedRanges.map(\.rangeValue)
+        if let latent = latentProjectionSelection, latent.displayRanges == actual {
+            return latent.sourceRanges
         }
+        let usesPrimaryStyle = primarySelectionRange != nil
+        clearProjectionSelection()
+        projectionSelectionUsesPrimaryStyle = usesPrimaryStyle
+        guard let map = displayMap else { return [] }
+        return actual.compactMap { range in
+            if range.length == 0 {
+                guard let byte = sourceAnchor(atDisplayOffset: range.location, latent: nil) else { return nil }
+                return ByteRange(lowerBound: byte, upperBound: byte)
+            }
+            guard let ranges = map.sourceRanges(forDisplay: range),
+                  let first = ranges.first, let last = ranges.last else { return nil }
+            return ByteRange(lowerBound: first.lowerBound, upperBound: last.upperBound)
+        }
+    }
+
+    private func projectedSelection(_ source: ByteRange) -> NSRange? {
+        guard let map = displayMap else { return nil }
+        func offset(_ byte: UInt32, upper: Bool) -> Int? {
+            switch map.displayPosition(ofByte: byte) {
+            case .visible(let offset): return offset
+            case .hidden(let id):
+                guard let body = displayedDocument?.foldTopology?.region(for: id)?.bodyRange else { return nil }
+                // A half-open upper endpoint exactly at the hidden body start
+                // excludes that body and must stay before the placeholder.
+                let coversHiddenSource = upper && byte > body.lowerBound
+                return map.placeholderOffset(for: id).map { $0 + (coversHiddenSource ? 1 : 0) }
+            case nil: return nil
+            }
+        }
+        guard let lower = offset(source.lowerBound, upper: false),
+              let upper = offset(source.upperBound, upper: source.length > 0), lower <= upper else { return nil }
+        return NSRange(location: lower, length: upper - lower)
+    }
+
+    private func restoreProjectionSelections(_ sources: [ByteRange], affinity: NSSelectionAffinity) {
+        let ranges = sources.compactMap(projectedSelection)
+        guard ranges.count == sources.count, !ranges.isEmpty else { return }
+        if let native = view as? ClickTextView {
+            native.restoreProjectionRanges(ranges.map(NSValue.init(range:)), affinity: affinity)
+        } else {
+            view.setSelectedRanges(ranges.map(NSValue.init(range:)), affinity: affinity, stillSelecting: false)
+        }
+        if projectionSelectionUsesPrimaryStyle,
+           let selected = sources.first, sources.count == 1,
+           let focused = occurrenceSelectionByteOffset,
+           findMatchByteRanges == nil,
+           selected.contains(focused),
+           case .visible = displayMap?.displayPosition(ofByte: selected.lowerBound),
+           case .visible = displayMap?.displayPosition(ofByte: selected.upperBound) {
+            primarySelectionRange = view.selectedRange()
+        } else {
+            primarySelectionRange = nil
+        }
+        view.selectedTextAttributes = primarySelectionRange == nil
+            ? nativeSelectedTextAttributes : [.backgroundColor: NSColor.clear]
+        // AppKit may merge several hidden selections into one placeholder.
+        // Match its actual normalized ranges, but retain every original endpoint.
+        latentProjectionSelection = (sources, view.selectedRanges.map(\.rangeValue))
+        latentSelectionAnchor = sources.first.flatMap { first in
+            guard case .hidden(let id) = displayMap?.displayPosition(ofByte: first.lowerBound) else { return nil }
+            return LatentFoldAnchor(byteOffset: first.lowerBound, foldID: id)
+        }
+    }
+
+    private func copiedSourceRanges(for ranges: [NSRange]) -> [ByteRange]? {
+        if let latent = latentProjectionSelection,
+           view.selectedRanges.map(\.rangeValue) == latent.displayRanges,
+           ranges == latent.displayRanges {
+            return latent.sourceRanges.filter { $0.length > 0 }
+        }
+        guard let map = displayMap else { return nil }
+        var result: [ByteRange] = []
+        for range in ranges where range.length > 0 {
+            guard let sources = map.sourceRanges(forDisplay: range) else { return nil }
+            // A selected placeholder means its entire hidden source range.
+            if let first = sources.first, let last = sources.last {
+                result.append(ByteRange(lowerBound: first.lowerBound, upperBound: last.upperBound))
+            }
+        }
+        return result
+    }
+
+    private func sourceTextForCurrentSelections() -> String? {
+        guard !isCommittingProjection, let document = displayedDocument,
+              let ranges = copiedSourceRanges(for: view.selectedRanges.map(\.rangeValue)),
+              !ranges.isEmpty else { return nil }
+        return ranges.map {
+            String(decoding: document.bytes[Int($0.lowerBound)..<Int($0.upperBound)], as: UTF8.self)
+        }.joined()
     }
 
     private func restoreViewportAnchor(
@@ -2031,7 +2253,7 @@ public final class ReaderTextView {
             // A larger font or new wrapping can move the anchor outside the
             // old viewport. Materialize that character's layout on ordinary
             // files; viewport-only passes cannot discover its new position.
-            let string = backingTextStorage.string as NSString
+            let string = backingTextStorage.mutableString
             let query = location < string.length
                 ? string.rangeOfComposedCharacterSequence(at: location)
                 : NSRange(location: location, length: 0)
@@ -2386,10 +2608,10 @@ public final class ReaderTextView {
             displayedDocument?.contentID == document.contentID,
             displayedDocument?.languageMode == document.languageMode
         else { return }
+        let projectionSelections = captureProjectionSelections()
+        let projectionAffinity = view.selectionAffinity
         let previousDocument = displayedDocument
         let analysisChanged = displayedDocument?.analysisKey != document.analysisKey
-        displayedDocument = document
-        if analysisChanged { prepareIdentifiers(for: document) }
         baselineFoldIDs = Self.baselineFoldIDs(
             for: readingHeightLevel,
             in: document.foldRegions
@@ -2459,10 +2681,22 @@ public final class ReaderTextView {
         if needsLayout { viewportStateGeneration += 1 }
         let generation = viewportStateGeneration
         let viewportRange = layoutManager.textViewportLayoutController.viewportRange
-        if foldsChanged || displayMap == nil {
-            guard let projection = Self.project(document: document,
-                renderedFoldIDs: renderedFoldIDs, attributes: baseAttributes, theme: theme)
-            else { layoutManager.renderingAttributesValidator = nil; return }
+        let syntaxProjection = (foldsChanged || displayMap == nil)
+            ? Self.project(document: document, renderedFoldIDs: renderedFoldIDs,
+                           attributes: baseAttributes, theme: theme) : nil
+        if (foldsChanged || displayMap == nil) && syntaxProjection == nil { return }
+        if let map = displayMap, !foldsChanged, !projectionMatchesStorage(map) {
+            layoutManager.renderingAttributesValidator = nil
+            return
+        }
+        isCommittingProjection = true
+        defer { isCommittingProjection = false }
+        layoutManager.renderingAttributesValidator = nil
+        displayedDocument = document
+        if analysisChanged { prepareIdentifiers(for: document) }
+        if let projection = syntaxProjection {
+            projectionFallbackReason = "syntax-projection-change"
+            projectionFallbackCount += 1
             displayMap = projection.map
             foldAttachments = projection.attachments
             layoutManager.renderingAttributesValidator = nil
@@ -2484,6 +2718,8 @@ public final class ReaderTextView {
         refreshVisibleFoldRegions()
         declarationKindsByLine = Self.declarationKindsByLine(in: document)
         renderingCoordinator.update(document: document, map: map, theme: theme)
+        isCommittingProjection = false
+        if foldsChanged { restoreProjectionSelections(projectionSelections, affinity: projectionAffinity) }
         refreshOccurrenceRendering(in: document, updateLayout: false)
         if geometryChanged, let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
@@ -2611,12 +2847,13 @@ public final class ReaderTextView {
     }
 
     public func reveal(byteOffset: UInt32) {
+        clearProjectionSelection()
         invalidateReflowSequence()
         _ = unfoldAncestors(containing: byteOffset)
         guard let location = visibleDisplayOffset(forByte: byteOffset),
               location <= backingTextStorage.length
         else { return }
-        let lineRange = (backingTextStorage.string as NSString).lineRange(
+        let lineRange = (backingTextStorage.mutableString).lineRange(
             for: NSRange(location: location, length: 0)
         )
         updateCurrentLine(byteOffset: byteOffset)
@@ -2641,6 +2878,7 @@ public final class ReaderTextView {
         scrollByteOffset: UInt32?,
         selectionByteOffset: UInt32?
     ) {
+        if selectionByteOffset != nil { clearProjectionSelection() }
         invalidateReflowSequence()
         if let selectionByteOffset,
            let location = visibleDisplayOffset(forByte: selectionByteOffset),
@@ -2666,6 +2904,17 @@ public final class ReaderTextView {
                   )
             else { return }
             let range = NSRange(location: location, length: 0)
+            if let manager = view.textLayoutManager,
+               let content = manager.textContentManager,
+               let target = content.location(content.documentRange.location, offsetBy: location) {
+                // A partial edit can leave the old viewport beyond the new
+                // document extent. Relocate lazy layout to the source target
+                // before asking AppKit for its native line rectangle.
+                let controller = manager.textViewportLayoutController
+                let y = controller.relocateViewport(to: target)
+                scrollView.contentView.scroll(to: NSPoint(x: scrollView.contentView.bounds.minX, y: y))
+                controller.layoutViewport()
+            }
             view.scrollRangeToVisible(range)
             view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             let screenRect = view.firstRect(
@@ -2814,6 +3063,7 @@ public final class ReaderTextView {
 
     @discardableResult
     public func activate(atByteOffset byteOffset: UInt32) -> Int {
+        clearProjectionSelection()
         invalidateReflowSequence()
         _ = unfoldAncestors(containing: byteOffset)
         updateCurrentLine(byteOffset: byteOffset)
@@ -2859,6 +3109,7 @@ public final class ReaderTextView {
     }
 
     public func clearOccurrences() {
+        clearProjectionSelection()
         pendingOccurrenceActivation = nil
         occurrenceSelectionByteOffset = nil
         primarySelectionRange = nil
@@ -2913,6 +3164,7 @@ public final class ReaderTextView {
 
     @discardableResult
     package func revealFindMatch(at index: Int) -> Bool {
+        clearProjectionSelection()
         invalidateReflowSequence()
         guard let ranges = findMatchByteRanges,
               ranges.indices.contains(index)
@@ -2937,6 +3189,7 @@ public final class ReaderTextView {
     }
 
     public func captureVisibleDecorationState() {
+        guard !isCommittingProjection else { return }
         var lines: [Int] = []
         enumerateVisibleLayoutFragments { _, line in
             lines.append(line)
@@ -2952,6 +3205,7 @@ public final class ReaderTextView {
 
     @discardableResult
     public func revealDiffLine(_ line: Int) -> Bool {
+        clearProjectionSelection()
         invalidateReflowSequence()
         guard line > 0,
               let document = displayedDocument,
@@ -2962,7 +3216,7 @@ public final class ReaderTextView {
         guard let location = visibleDisplayOffset(forByte: byteOffset) else {
             return false
         }
-        let range = (backingTextStorage.string as NSString).lineRange(
+        let range = (backingTextStorage.mutableString).lineRange(
             for: NSRange(location: location, length: 0)
         )
         view.setSelectedRange(range)
@@ -2995,11 +3249,12 @@ public final class ReaderTextView {
     }
 
     public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
-        sourceByteOffset(forDisplay: index)
+        guard !isCommittingProjection else { return nil }
+        return sourceByteOffset(forDisplay: index)
     }
 
     public func firstVisibleByteOffset() -> UInt32? {
-        guard let layoutManager = view.textLayoutManager,
+        guard !isCommittingProjection, let layoutManager = view.textLayoutManager,
               let content = layoutManager.textContentManager
         else { return nil }
         layoutManager.textViewportLayoutController.layoutViewport()
@@ -3011,7 +3266,7 @@ public final class ReaderTextView {
             to: viewport.location
         )
         guard location != NSNotFound else { return nil }
-        let lineStart = (backingTextStorage.string as NSString).lineRange(
+        let lineStart = (backingTextStorage.mutableString).lineRange(
             for: NSRange(location: location, length: 0)
         ).location
         return sourceByteOffset(forDisplay: lineStart)
@@ -3047,20 +3302,20 @@ public final class ReaderTextView {
     }
 
     private func visibleDisplayOffset(forByte byteOffset: UInt32) -> Int? {
-        guard case .visible(let offset) = displayMap?.displayPosition(ofByte: byteOffset)
+        guard !isCommittingProjection, case .visible(let offset) = displayMap?.displayPosition(ofByte: byteOffset)
         else { return nil }
         return offset
     }
 
     private func sourceByteOffset(forDisplay displayOffset: Int) -> UInt32? {
-        guard case .source(let offset) = displayMap?.sourcePosition(
+        guard !isCommittingProjection, case .source(let offset) = displayMap?.sourcePosition(
             ofDisplay: displayOffset
         ) else { return nil }
         return offset
     }
 
     func sourceText(forDisplaySelection range: NSRange) -> String? {
-        guard range.length > 0,
+        guard !isCommittingProjection, range.length > 0,
               let document = displayedDocument,
               let ranges = displayMap?.sourceRanges(forDisplay: range)
         else { return nil }
@@ -3306,6 +3561,7 @@ public final class ReaderTextView {
     private func installRenderingValidator(
         in layoutManager: NSTextLayoutManager
     ) {
+        guard !isCommittingProjection else { return }
         guard renderingCoordinator.hasRenderingAttributes else {
             layoutManager.renderingAttributesValidator = nil
             return
@@ -3497,6 +3753,7 @@ public final class ReaderTextView {
         in ruler: NSRulerView,
         dirtyRect: NSRect
     ) {
+        guard !isCommittingProjection else { return }
         isDrawingRuler = true
         defer { isDrawingRuler = false }
         if !usesPreparedDecorations { refreshVisibleFoldRegions() }
@@ -3808,23 +4065,22 @@ public final class ReaderTextView {
         )
     }
 
-    private func applyParagraphLayout(to text: NSMutableAttributedString) {
+    private func applyParagraphLayout(to text: NSMutableAttributedString, in range: NSRange? = nil) {
         guard let container = view.textContainer else { return }
         defer { lastParagraphIndentLimit = paragraphIndentLimit }
         let document = displayedDocument
         let map = displayMap
-        let folds = Dictionary(uniqueKeysWithValues: (document?.foldRegions ?? []).map { ($0.id, $0.headerRange.lowerBound) })
         paragraphUpdateCount += paragraphLayout.apply(
             to: text, wrap: wrapLines,
             width: container.size.width - 2 * container.lineFragmentPadding,
-            font: ReaderFontResolver.shared.resolve(theme: theme).font
-        ) { offset in
+            font: ReaderFontResolver.shared.resolve(theme: theme).font,
+            sourceLineAt: { offset in
             guard let document, let position = map?.sourcePosition(ofDisplay: offset) else { return nil }
             let byte: UInt32
             switch position {
             case .source(let source): byte = source
             case .placeholder(let id):
-                guard let header = folds[id] else { return nil }
+                guard let header = document.foldTopology?.region(for: id)?.headerRange.lowerBound else { return nil }
                 byte = header
             }
             guard let line = document.lineTable.lineColumn(at: byte)?.line else { return nil }
@@ -3835,7 +4091,7 @@ public final class ReaderTextView {
             let prefix = String(decoding: document.bytes[start..<end], as: UTF8.self)
             let hasBody = end < document.bytes.count && document.bytes[end] != 10 && document.bytes[end] != 13
             return prefix + (hasBody ? "x" : "")
-        }
+        }, in: range)
     }
 
     private func updateParagraphLayout() {
@@ -3968,29 +4224,33 @@ public final class ReaderTextView {
     /// Geometry is already validated; this is the explicit UI materialization seam.
     private static func materializeProjection(
         document: ReaderDocument, map: DisplayMap,
-        attributes: [NSAttributedString.Key: Any], theme: ReaderTheme
+        attributes: [NSAttributedString.Key: Any], theme: ReaderTheme,
+        displayRange: NSRange? = nil
     ) -> (attributed: NSMutableAttributedString, attachments: [FoldID: FoldAttachment])? {
         guard let topology = document.foldTopology else { return nil }
-        ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, map.projectedUTF16Length)
+        let range = displayRange ?? NSRange(location: 0, length: map.projectedUTF16Length)
+        guard let string = map.projection.materialize(displayRange: range) else { return nil }
+        ReaderWorkCounters.record(\.attributeUpdatedUTF16Units, range.length)
         let attributed = NSMutableAttributedString(
-            string: map.projectedString,
+            string: string,
             attributes: attributes
         )
         applyTypography(
             document.highlightSpans,
             map: map,
             to: attributed,
-            theme: theme
+            theme: theme, displayRange: range
         )
         var attachments: [FoldID: FoldAttachment] = [:]
-        attachments.reserveCapacity(map.foldPlaceholders.count)
-        for placeholder in map.foldPlaceholders {
+        guard let placeholders = map.foldPlaceholders(in: range) else { return nil }
+        attachments.reserveCapacity(placeholders.count)
+        for placeholder in placeholders {
             guard let region = topology.region(for: placeholder.id) else { return nil }
             let attachment = FoldAttachment(region: region, theme: theme)
             attributed.addAttribute(
                 .attachment,
                 value: attachment,
-                range: NSRange(location: placeholder.offset, length: 1)
+                range: NSRange(location: placeholder.offset - range.location, length: 1)
             )
             attachments[placeholder.id] = attachment
         }
@@ -4023,20 +4283,18 @@ public final class ReaderTextView {
         _ spans: [HighlightSpan],
         map: DisplayMap,
         to attributed: NSMutableAttributedString,
-        theme: ReaderTheme
+        theme: ReaderTheme,
+        displayRange: NSRange? = nil
     ) {
         guard theme.syntaxFormatting else { return }
+        let extent = displayRange ?? NSRange(location: 0, length: map.projectedUTF16Length)
 
         func apply(_ span: HighlightSpan) {
             guard let projected = map.project(byteRange: span.range) else { return }
             for range in projected.visible {
-                guard range.location >= 0, range.location < attributed.length else {
-                    continue
-                }
-                let safeRange = NSRange(
-                    location: range.location,
-                    length: min(range.length, attributed.length - range.location)
-                )
+                let intersection = NSIntersectionRange(range, extent)
+                let safeRange = NSRange(location: intersection.location - extent.location,
+                                        length: intersection.length)
                 guard safeRange.length > 0 else { continue }
                 switch span.kind {
                 case .functionName, .declarationTitle:
@@ -4071,31 +4329,12 @@ public final class ReaderTextView {
             }
         }
 
-        guard !map.renderedFoldIDs.isEmpty else {
-            for span in spans { apply(span) }
-            return
-        }
-        guard let visibleRanges = map.visibleSourceRanges(forDisplay: NSRange(
-            location: 0,
-            length: map.projectedUTF16Length
-        )) else { return }
-
-        // Highlight spans and visible source ranges are source ordered. Advance
-        // through both once so fully hidden spans never pay projection cost.
-        var spanIndex = 0
+        guard let visibleRanges = map.visibleSourceRanges(forDisplay: extent) else { return }
         for visible in visibleRanges {
-            while spans.indices.contains(spanIndex),
-                  spans[spanIndex].range.upperBound <= visible.lowerBound
-            {
-                spanIndex += 1
+            for span in ViewportGating.spans(spans,
+                intersectingBytes: visible.lowerBound..<visible.upperBound, buffer: 0) {
+                apply(span)
             }
-            while spans.indices.contains(spanIndex),
-                  spans[spanIndex].range.lowerBound < visible.upperBound
-            {
-                apply(spans[spanIndex])
-                spanIndex += 1
-            }
-            guard spans.indices.contains(spanIndex) else { break }
         }
     }
 
@@ -4104,7 +4343,7 @@ public final class ReaderTextView {
     ) {
         // TextKit can resize the document and post scroll notifications during layout.
         // Finish this pass before another notification can start viewport layout again.
-        guard !isValidatingVisibleRenderingAttributes else { return }
+        guard !isCommittingProjection, !isValidatingVisibleRenderingAttributes else { return }
         isValidatingVisibleRenderingAttributes = true
         defer { isValidatingVisibleRenderingAttributes = false }
         let controller = layoutManager.textViewportLayoutController
@@ -4497,7 +4736,39 @@ private final class ReaderRulerView: NSRulerView {
 }
 
 @MainActor
-private final class ClickTextView: NSTextView {
+private final class ClickTextView: NSTextView, NSTextViewDelegate {
+    private var projectionRestoreRanges: [NSValue]?
+
+    /// Setting NSRange+affinity loses AppKit's reverse Shift-extension anchor.
+    /// One native command establishes it; the public delegate supplies the full
+    /// target range instead of requiring one command per selected character.
+    func restoreProjectionRanges(_ ranges: [NSValue], affinity: NSSelectionAffinity) {
+        guard ranges.count == 1, affinity == .upstream,
+              let range = ranges.first?.rangeValue, range.length > 0 else {
+            setSelectedRanges(ranges, affinity: affinity, stillSelecting: false)
+            return
+        }
+        let previousDelegate = delegate
+        setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
+        projectionRestoreRanges = ranges
+        delegate = self
+        defer {
+            projectionRestoreRanges = nil
+            delegate = previousDelegate
+        }
+        // Direct command, not a synthesized key event: selectionHandler remains
+        // reserved for actual user gestures and must not erase latent ranges.
+        super.moveLeftAndModifySelection(nil)
+    }
+
+    func textView(
+        _ textView: NSTextView, willChangeSelectionFromCharacterRanges oldSelectedCharRanges: [NSValue],
+        toCharacterRanges newSelectedCharRanges: [NSValue]
+    ) -> [NSValue] {
+        projectionRestoreRanges ?? newSelectedCharRanges
+    }
+
+
     // Code is top-left aligned. AppKit's inferred origin can force full-document
     // layout during scrolling; all native drawing and hit-testing use this origin.
     override var textContainerOrigin: NSPoint {
@@ -4505,7 +4776,7 @@ private final class ClickTextView: NSTextView {
     }
 
     var clickHandler: ((Int, NSEvent.ModifierFlags) -> Void)?
-    var sourceCopyHandler: ((NSRange) -> String?)?
+    var sourceCopyHandler: (() -> String?)?
     var contextMenuHandler: ((Int) -> Void)?
     var selectionHandler: ((Int) -> Void)?
     var viewportChanged: (() -> Void)?
@@ -4585,22 +4856,27 @@ private final class ClickTextView: NSTextView {
     }
 
     override func writeSelection(
-        to pasteboard: NSPasteboard,
-        type: NSPasteboard.PasteboardType
+        to pasteboard: NSPasteboard, types: [NSPasteboard.PasteboardType]
     ) -> Bool {
-        guard type == .string,
-              let source = sourceCopyHandler?(selectedRange())
-        else {
-            return super.writeSelection(to: pasteboard, type: type)
-        }
+        guard let sourceCopyHandler else { return super.writeSelection(to: pasteboard, types: types) }
+        guard types.contains(.string) || types.contains(where: { $0.rawValue == "NSStringPboardType" }),
+              let source = sourceCopyHandler() else { return false }
+        pasteboard.declareTypes([.string], owner: nil)
+        return pasteboard.setString(source, forType: .string)
+    }
+
+    override func writeSelection(
+        to pasteboard: NSPasteboard, type: NSPasteboard.PasteboardType
+    ) -> Bool {
+        guard let sourceCopyHandler else { return super.writeSelection(to: pasteboard, type: type) }
+        guard type == .string || type.rawValue == "NSStringPboardType",
+              let source = sourceCopyHandler() else { return false }
         return pasteboard.setString(source, forType: .string)
     }
 
     override func copy(_ sender: Any?) {
-        guard let source = sourceCopyHandler?(selectedRange()) else {
-            super.copy(sender)
-            return
-        }
+        guard let sourceCopyHandler else { super.copy(sender); return }
+        guard let source = sourceCopyHandler() else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([source as NSString])

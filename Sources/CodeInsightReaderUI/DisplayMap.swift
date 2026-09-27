@@ -18,6 +18,9 @@ internal struct DisplayMap: Sendable {
         self.projection = projection
     }
 
+    internal func foldPlaceholders(in range: NSRange) -> [(id: FoldID, offset: Int)]? {
+        projection.foldPlaceholders(in: range)
+    }
     internal func placeholderOffset(for id: FoldID) -> Int? { projection.placeholderOffset(for: id) }
     internal func displayPosition(ofByte byteOffset: UInt32) -> DisplayPosition? { projection.displayPosition(ofByte: byteOffset) }
     internal func project(byteRange: ByteRange) -> (visible: [NSRange], folds: [FoldID])? { projection.project(byteRange: byteRange) }

@@ -125,6 +125,13 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
                     NSLocalizedDescriptionKey: "A settings or unchanged-projection syntax update rebuilt characters"
                 ])
             }
+            if ["single-fold", "single-unfold", "overview", "full"].contains(name),
+               reader.localProjectionUpdatesEnabled,
+               after["fullTextReplacementCount"] != before["fullTextReplacementCount"] {
+                throw NSError(domain: "ReadonlyWorkload", code: 6, userInfo: [
+                    NSLocalizedDescriptionKey: "A local fold transition fell back to full character replacement: \(reader.projectionFallbackReason ?? "unknown")"
+                ])
+            }
             if name == "color-only" || name == "identical-settings" {
                 guard after["applicationFullLayoutCount"] == before["applicationFullLayoutCount"],
                       after["paragraphRecordsVisited"] == before["paragraphRecordsVisited"],
@@ -206,14 +213,21 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
         if (suite == "all" || suite == "gutter"), hoverHits == 0 {
             events.append(["scenario": "hover-hit", "status": "not_run", "reason": "No visible fold handle was hit"])
         }
-        if let fold = document.foldRegions.first,
+        if let fold = document.foldRegions.first(where: { $0.summary.hiddenLineCount >= 2 }),
            let position = document.lineTable.lineColumn(at: fold.headerRange.lowerBound) {
-            try measure("single-fold") { _ = reader.toggleFold(atLine: Int(position.line)) }
-            try measure("single-unfold") { _ = reader.toggleFold(atLine: Int(position.line)) }
+            for scenario in ["single-fold", "single-unfold"] {
+                try measure(scenario) {
+                    guard reader.toggleFold(atLine: Int(position.line)) else {
+                        throw NSError(domain: "ReadonlyWorkload", code: 7, userInfo: [
+                            NSLocalizedDescriptionKey: "The fixture's visible fold was not toggled"
+                        ])
+                    }
+                }
+            }
             try measure("overview") { _ = reader.setReadingHeightLevel(.overview) }
             try measure("full") { _ = reader.setReadingHeightLevel(.full) }
         } else if suite == "all" || suite == "projection" {
-            events.append(["scenario": "fold-presets", "status": "not_run", "reason": "Fixture has no fold regions"])
+            events.append(["scenario": "fold-presets", "status": "not_run", "reason": "Fixture has no fold region with a visible handle"])
         }
         try measure("color-only") { settings.theme = .dark; reader.apply(settings: settings) }
         try measure("font-only") { settings.fontSize = 15; reader.apply(settings: settings) }

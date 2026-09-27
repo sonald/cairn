@@ -1,0 +1,1589 @@
+{
+  "probe-shift-selection-v4": [
+    {
+      "actualAfterShift": [
+        24,
+        4
+      ],
+      "before": [
+        24,
+        3
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        24,
+        4
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        24,
+        3
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 1,
+      "reverse": false,
+      "steps": 3,
+      "textKit2": true,
+      "unicode": false,
+      "viewAffinity": 1
+    },
+    {
+      "actualAfterShift": [
+        24,
+        6
+      ],
+      "before": [
+        24,
+        4
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        24,
+        6
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        24,
+        4
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 1,
+      "reverse": false,
+      "steps": 3,
+      "textKit2": true,
+      "unicode": true,
+      "viewAffinity": 1
+    },
+    {
+      "actualAfterShift": [
+        24,
+        9
+      ],
+      "before": [
+        24,
+        8
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        24,
+        9
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        24,
+        8
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 1,
+      "reverse": false,
+      "steps": 8,
+      "textKit2": true,
+      "unicode": false,
+      "viewAffinity": 1
+    },
+    {
+      "actualAfterShift": [
+        24,
+        11
+      ],
+      "before": [
+        24,
+        10
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        24,
+        11
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        24,
+        10
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 1,
+      "reverse": false,
+      "steps": 8,
+      "textKit2": true,
+      "unicode": true,
+      "viewAffinity": 1
+    },
+    {
+      "actualAfterShift": [
+        23,
+        4
+      ],
+      "before": [
+        24,
+        3
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        23,
+        4
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        24,
+        3
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 0,
+      "reverse": true,
+      "steps": 3,
+      "textKit2": true,
+      "unicode": false,
+      "viewAffinity": 0
+    },
+    {
+      "actualAfterShift": [
+        26,
+        6
+      ],
+      "before": [
+        28,
+        4
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        26,
+        6
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        28,
+        4
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 0,
+      "reverse": true,
+      "steps": 3,
+      "textKit2": true,
+      "unicode": true,
+      "viewAffinity": 0
+    },
+    {
+      "actualAfterShift": [
+        18,
+        9
+      ],
+      "before": [
+        19,
+        8
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        18,
+        9
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        19,
+        8
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 0,
+      "reverse": true,
+      "steps": 8,
+      "textKit2": true,
+      "unicode": false,
+      "viewAffinity": 0
+    },
+    {
+      "actualAfterShift": [
+        21,
+        11
+      ],
+      "before": [
+        22,
+        10
+      ],
+      "delegateHookCalls": 2,
+      "expectedAfterShift": [
+        21,
+        11
+      ],
+      "mode": "delegate-range-hook",
+      "nativeAffinity": 1,
+      "nativeAnchor": -1,
+      "nativeLogical": false,
+      "pass": true,
+      "proposedHookCalls": 0,
+      "restored": [
+        22,
+        10
+      ],
+      "restoredNativeAffinity": 1,
+      "restoredNativeTransient": false,
+      "restoredViewAffinity": 0,
+      "reverse": true,
+      "steps": 8,
+      "textKit2": true,
+      "unicode": true,
+      "viewAffinity": 0
+    }
+  ],
+  "probe-multirange-shift": [
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "initialShift": false,
+      "mode": "setter",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "initialShift": true,
+      "mode": "setter",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "affinity": 0,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "initialShift": false,
+      "mode": "setter",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": true
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "initialShift": true,
+      "mode": "setter",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "reverse": true
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "initialShift": false,
+      "mode": "first-anchor",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "initialShift": true,
+      "mode": "first-anchor",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          18,
+          4
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "affinity": 0,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 2,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "initialShift": false,
+      "mode": "first-anchor",
+      "pass": false,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": true
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "initialShift": true,
+      "mode": "first-anchor",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "reverse": true
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "initialShift": false,
+      "mode": "all-anchors",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          5
+        ]
+      ],
+      "initialShift": true,
+      "mode": "all-anchors",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          4
+        ]
+      ],
+      "reverse": false
+    },
+    {
+      "actual": [
+        [
+          18,
+          4
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "affinity": 0,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 2,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "initialShift": false,
+      "mode": "all-anchors",
+      "pass": false,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          3
+        ]
+      ],
+      "reverse": true
+    },
+    {
+      "actual": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "affinity": 1,
+      "before": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "collapsed": [
+        [
+          5,
+          1
+        ]
+      ],
+      "delegateCalls": 0,
+      "expected": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          1
+        ]
+      ],
+      "initialShift": true,
+      "mode": "all-anchors",
+      "pass": true,
+      "restored": [
+        [
+          19,
+          3
+        ],
+        [
+          42,
+          2
+        ]
+      ],
+      "reverse": true
+    }
+  ],
+  "copyContract": {
+    "requirement": "Source-range concatenation per design section 8.5 and P04; native visual-row newlines are not source bytes",
+    "nativeSamples": [
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          10,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          10,
+          10,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          13,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          13,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          13,
+          13,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          13
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          13,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          13,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          13,
+          10,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          13,
+          10,
+          13,
+          10,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          13,
+          10
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          13,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          8232,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          8232,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          8232,
+          8232,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          8232
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          8232,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          8233,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          8233,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          8233,
+          8233,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          8233
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          8233,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          133,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          133,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          133,
+          133,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          133
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          133,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          11,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          11,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          11,
+          11,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          11
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          11,
+          99
+        ]
+      },
+      {
+        "case": "gap",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          101
+        ]
+      },
+      {
+        "case": "trailing-selected",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          12,
+          101
+        ]
+      },
+      {
+        "case": "leading-selected",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          10,
+          12,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "both-selected",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          98,
+          12,
+          12,
+          101,
+          102
+        ]
+      },
+      {
+        "case": "adjacent-lines",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          98,
+          10,
+          99
+        ]
+      },
+      {
+        "case": "newline-inside-next",
+        "separatorUTF16": [
+          12
+        ],
+        "width": 480,
+        "actualUTF16": [
+          97,
+          12,
+          99
+        ]
+      },
+      {
+        "case": "soft-wrap",
+        "separatorUTF16": null,
+        "width": 80,
+        "actualUTF16": [
+          102,
+          105,
+          114,
+          115,
+          116,
+          10,
+          108,
+          97,
+          115,
+          116
+        ]
+      },
+      {
+        "case": "soft-wrap",
+        "separatorUTF16": null,
+        "width": 800,
+        "actualUTF16": [
+          102,
+          105,
+          114,
+          115,
+          116,
+          10,
+          108,
+          97,
+          115,
+          116
+        ]
+      }
+    ]
+  }
+}

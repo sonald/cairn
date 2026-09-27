@@ -8,6 +8,7 @@ package enum ReaderWorkCounters {
         package var identifierScannedBytes = 0
         package var identifierBuildCount = 0
         package var projectionPlanBuildCount = 0
+        package var projectionPlaceholderRecordsVisited = 0
         package var materializedUTF8Bytes = 0
         package var fullTextReplacementCount = 0
         package var partialTextReplacementCount = 0
