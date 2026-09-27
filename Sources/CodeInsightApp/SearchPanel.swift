@@ -1,7 +1,9 @@
 import AppKit
 import CodeInsightAppModel
 import CodeInsightCore
+import CodeInsightEngine
 import CodeInsightReaderCore
+import CodeInsightReaderUI
 import Observation
 
 @MainActor
@@ -21,6 +23,8 @@ final class SearchPanel: NSWindowController,
     private let statusLabel = NSTextField(labelWithString: "")
     private let truncatedLabel = NSTextField(labelWithString: "")
     private let spinner = NSProgressIndicator()
+    private let contentView = NSView()
+    private var theme = ReaderTheme(settings: ReaderSettings())
     private let onOpen: (URL, UInt32, ContentID?) -> Void
     private var reloadTask: Task<Void, Never>?
     private weak var ownerWindow: NSWindow?
@@ -52,6 +56,28 @@ final class SearchPanel: NSWindowController,
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        window?.appearance = cairnAppearance(for: settings.theme)
+        window?.backgroundColor = theme.chromeColor
+        contentView.layer?.backgroundColor = theme.chromeColor.cgColor
+        placeholderLabel.textColor = theme.chromeSecondaryColor
+        statusLabel.textColor = theme.chromeSecondaryColor
+        truncatedLabel.textColor = theme.warningColor
+        outlineView.reloadData()
+        outlineView.expandItem(nil, expandChildren: true)
+    }
+
+    var selfTestTheme: ReaderTheme { theme }
+
+    func selfTestStyledMatch(_ match: SearchMatch) -> NSAttributedString {
+        styledMatch(match)
+    }
+
+    func selfTestStyledGroup(path: String, count: Int) -> NSAttributedString {
+        styledGroup(path: path, count: count)
     }
 
     func show(relativeTo owner: NSWindow?) {
@@ -259,21 +285,7 @@ final class SearchPanel: NSWindowController,
     ) -> NSView? {
         if let group = item as? SearchPanelModel.Group {
             let cell = reusableCell(identifier: "SearchGroup", in: outlineView)
-            let text = NSMutableAttributedString(
-                string: group.path,
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 12, weight: .semibold),
-                    .foregroundColor: NSColor.labelColor,
-                ]
-            )
-            text.append(NSAttributedString(
-                string: "  \(group.matches.count)",
-                attributes: [
-                    .font: NSFont.systemFont(ofSize: 11),
-                    .foregroundColor: NSColor.secondaryLabelColor,
-                ]
-            ))
-            cell.textField?.attributedStringValue = text
+            cell.textField?.attributedStringValue = styledGroup(path: group.path, count: group.matches.count)
             cell.textField?.lineBreakMode = .byTruncatingMiddle
             cell.toolTip = group.path
             return cell
@@ -282,12 +294,12 @@ final class SearchPanel: NSWindowController,
             let cell = reusableCell(identifier: "SearchTruncation", in: outlineView)
             cell.textField?.stringValue = message
             cell.textField?.font = .systemFont(ofSize: 11, weight: .semibold)
-            cell.textField?.textColor = .systemOrange
+            cell.textField?.textColor = theme.warningColor
             return cell
         }
         guard let match = item as? SearchPanelModel.Match else { return nil }
         let cell = reusableCell(identifier: "SearchMatch", in: outlineView)
-        cell.textField?.attributedStringValue = styledMatch(match)
+        cell.textField?.attributedStringValue = styledMatch(match.value)
         cell.toolTip = localizedFormat("panel.search.line", Int64(match.value.line), match.value.lineText)
         return cell
     }
@@ -402,18 +414,18 @@ final class SearchPanel: NSWindowController,
         scrollView.drawsBackground = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        placeholderLabel.textColor = .secondaryLabelColor
+        placeholderLabel.textColor = theme.chromeSecondaryColor
         placeholderLabel.alignment = .center
         placeholderLabel.maximumNumberOfLines = 3
         placeholderLabel.lineBreakMode = .byWordWrapping
         placeholderLabel.setAccessibilityLabel(localized("panel.search.status"))
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.textColor = theme.chromeSecondaryColor
         statusLabel.font = .systemFont(ofSize: 11)
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
         truncatedLabel.stringValue = localized("panel.search.truncated")
-        truncatedLabel.textColor = .systemOrange
+        truncatedLabel.textColor = theme.warningColor
         truncatedLabel.font = .systemFont(ofSize: 11, weight: .semibold)
         truncatedLabel.translatesAutoresizingMaskIntoConstraints = false
         spinner.style = .spinning
@@ -421,7 +433,9 @@ final class SearchPanel: NSWindowController,
         spinner.isDisplayedWhenStopped = false
         spinner.translatesAutoresizingMaskIntoConstraints = false
 
-        let content = NSView()
+        let content = contentView
+        content.wantsLayer = true
+        content.layer?.backgroundColor = theme.chromeColor.cgColor
         content.addSubview(header)
         content.addSubview(scrollView)
         content.addSubview(placeholderLabel)
@@ -592,19 +606,40 @@ final class SearchPanel: NSWindowController,
         return nil
     }
 
-    private func styledMatch(_ item: SearchPanelModel.Match) -> NSAttributedString {
-        let match = item.value
+    /// File name first in semibold ink, then its directory and count muted.
+    private func styledGroup(path: String, count: Int) -> NSAttributedString {
+        let name = (path as NSString).lastPathComponent
+        let directory = (path as NSString).deletingLastPathComponent
+        let text = NSMutableAttributedString(
+            string: name,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 12.5, weight: .semibold),
+                .foregroundColor: theme.foregroundColor,
+            ]
+        )
+        let secondary: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: theme.chromeSecondaryColor,
+        ]
+        if !directory.isEmpty {
+            text.append(NSAttributedString(string: "  \(directory)", attributes: secondary))
+        }
+        text.append(NSAttributedString(string: "  \(count)", attributes: secondary))
+        return text
+    }
+
+    private func styledMatch(_ match: SearchMatch) -> NSAttributedString {
         let prefix = String(format: "%5u  ", match.line)
         let value = NSMutableAttributedString(
             string: prefix + match.lineText,
             attributes: [
                 .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .regular),
-                .foregroundColor: NSColor.labelColor,
+                .foregroundColor: theme.foregroundColor,
             ]
         )
         value.addAttribute(
             .foregroundColor,
-            value: NSColor.secondaryLabelColor,
+            value: theme.lineNumberColor,
             range: NSRange(location: 0, length: prefix.utf16.count)
         )
 
@@ -618,14 +653,11 @@ final class SearchPanel: NSWindowController,
             byteLowerBound: Int(lower - match.lineTextRange.lowerBound),
             byteUpperBound: Int(upper - match.lineTextRange.lowerBound)
         ) else { return value }
-        value.addAttribute(
-            .font,
-            value: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
-            range: NSRange(
-                location: prefix.utf16.count + range.location,
-                length: range.length
-            )
-        )
+        let hit = NSRange(location: prefix.utf16.count + range.location, length: range.length)
+        value.addAttributes([
+            .font: NSFont.monospacedSystemFont(ofSize: 12, weight: .bold),
+            .backgroundColor: theme.occurrenceColor,
+        ], range: hit)
         return value
     }
 

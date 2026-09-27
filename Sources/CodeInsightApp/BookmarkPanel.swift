@@ -1,5 +1,7 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightReaderCore
+import CodeInsightReaderUI
 
 @MainActor
 final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
@@ -21,6 +23,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
     private var rows: [BookmarkRecord] = []
     private var selectedID: UUID?
     private var lastCopiedMarkdown = ""
+    private var theme = ReaderTheme(settings: ReaderSettings())
 
     init(
         appModel: AppModel,
@@ -295,18 +298,22 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         let cell = NSTableCellView()
         let title = NSTextField(labelWithString: appModel.bookmarkModel.title(for: record))
         title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.textColor = theme.foregroundColor
         title.lineBreakMode = .byTruncatingMiddle
         title.toolTip = title.stringValue
-        let detail = NSTextField(labelWithString:
-            "\(record.path) · \(snapshotText(record)) · \(status)"
+        let detail = NSTextField(labelWithString: "")
+        detail.attributedStringValue = styledDetail(
+            path: record.path,
+            snapshot: snapshotText(record),
+            status: status,
+            statusColor: statusColor(appModel.bookmarkStatus(for: record)),
+            historical: { if case .commit = record.snapshot { true } else { false } }()
         )
-        detail.font = .systemFont(ofSize: 11)
-        detail.textColor = .secondaryLabelColor
         detail.lineBreakMode = .byTruncatingMiddle
         detail.toolTip = detail.stringValue
         let note = NSTextField(labelWithString: record.note.replacingOccurrences(of: "\n", with: " "))
-        note.font = .systemFont(ofSize: 11)
-        note.textColor = .secondaryLabelColor
+        note.font = cairnSerifFont(ofSize: 12)
+        note.textColor = theme.foregroundColor
         note.lineBreakMode = .byTruncatingTail
         note.toolTip = record.note
         note.isHidden = record.note.isEmpty
@@ -466,14 +473,14 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         searchField.delegate = self
         searchField.setAccessibilityLabel(localized("panel.bookmark.filter"))
         statsLabel.font = .systemFont(ofSize: 11)
-        statsLabel.textColor = .secondaryLabelColor
+        statsLabel.textColor = theme.chromeSecondaryColor
         statsLabel.lineBreakMode = .byTruncatingTail
         statsLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         emptyLabel.font = .systemFont(ofSize: 13)
-        emptyLabel.textColor = .secondaryLabelColor
+        emptyLabel.textColor = theme.chromeSecondaryColor
         emptyLabel.alignment = .center
         emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        errorLabel.textColor = .systemRed
+        errorLabel.textColor = theme.unresolvedColor
         errorLabel.setAccessibilityLabel(localized("panel.bookmark.storageError"))
         exportButton.target = self
         exportButton.action = #selector(exportRawCopy(_:))
@@ -481,14 +488,14 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         noteView.delegate = self
         noteView.isRichText = false
         noteView.isEditable = false
-        noteView.font = .systemFont(ofSize: 13)
+        noteView.font = cairnSerifFont(ofSize: 14)
         noteView.textContainerInset = NSSize(width: 6, height: 6)
         noteView.isHorizontallyResizable = false
         noteView.autoresizingMask = [.width]
         noteView.textContainer?.widthTracksTextView = true
         noteView.setAccessibilityLabel(localized("panel.bookmark.noteAX"))
         noteLabel.font = .systemFont(ofSize: 11)
-        noteLabel.textColor = .secondaryLabelColor
+        noteLabel.textColor = theme.chromeSecondaryColor
         noteLabel.translatesAutoresizingMaskIntoConstraints = false
         copyButton.target = self
         copyButton.action = #selector(copyMarkdown(_:))
@@ -581,6 +588,52 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     private func buttons(in view: NSView) -> [NSButton] {
         (view as? NSButton).map { [$0] } ?? view.subviews.flatMap(buttons(in:))
+    }
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        window?.appearance = cairnAppearance(for: settings.theme)
+        window?.backgroundColor = theme.chromeColor
+        window?.contentView?.layer?.backgroundColor = theme.chromeColor.cgColor
+        statsLabel.textColor = theme.chromeSecondaryColor
+        emptyLabel.textColor = theme.chromeSecondaryColor
+        errorLabel.textColor = theme.unresolvedColor
+        noteLabel.textColor = theme.chromeSecondaryColor
+        noteView.font = cairnSerifFont(ofSize: 14)
+        noteView.textColor = theme.foregroundColor
+        noteView.backgroundColor = theme.backgroundColor
+        tableView.backgroundColor = theme.chromeColor
+        tableView.reloadData()
+    }
+
+    func statusColor(_ status: BookmarkStatus) -> NSColor {
+        switch status {
+        case .exactContent: theme.verifiedColor
+        case .drifted: theme.warningColor
+        case .revisionUnavailable, .fileAbsent, .offsetInvalid: theme.unresolvedColor
+        case .notEvaluated: theme.chromeSecondaryColor
+        }
+    }
+
+    /// Keeps the plain text "path · snapshot · status" while coloring its parts.
+    private func styledDetail(
+        path: String, snapshot: String, status: String,
+        statusColor: NSColor, historical: Bool
+    ) -> NSAttributedString {
+        let muted: [NSAttributedString.Key: Any] = [
+            .font: NSFont.systemFont(ofSize: 11),
+            .foregroundColor: theme.chromeSecondaryColor,
+        ]
+        let text = NSMutableAttributedString(string: "\(path) · ", attributes: muted)
+        var snapshotAttributes = muted
+        if historical { snapshotAttributes[.foregroundColor] = theme.histColor }
+        text.append(NSAttributedString(string: snapshot, attributes: snapshotAttributes))
+        text.append(NSAttributedString(string: " · ", attributes: muted))
+        text.append(NSAttributedString(string: status, attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: statusColor,
+        ]))
+        return text
     }
 
     private func snapshotText(_ record: BookmarkRecord) -> String {

@@ -940,6 +940,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                     }
                 }
             )
+            commitPickerPopover?.apply(settings: currentReaderSettings)
         }
         return commitPickerPopover?.chooseCommit(revision) == true
     }
@@ -1720,6 +1721,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                     expectedContentID: expectedContentID
                 )
             }
+            searchPanel?.apply(settings: currentReaderSettings)
         }
         searchPanel?.show(relativeTo: window)
     }
@@ -2314,6 +2316,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.apply(settings: settings)
         trailView.apply(settings: settings)
         palettePanel?.apply(settings: settings)
+        searchPanel?.apply(settings: settings)
+        bookmarkPanel?.apply(settings: settings)
+        commitPickerPopover?.apply(settings: settings)
+        compareCommitPickerPopover?.apply(settings: settings)
     }
 
     var readingHeightLevel: ReadingHeightLevel {
@@ -2357,6 +2363,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                     self?.openDriftedBookmarkLine(record, line: line)
                 }
             )
+            bookmarkPanel?.apply(settings: currentReaderSettings)
         }
         bookmarkPanel?.show(relativeTo: window)
     }
@@ -3290,6 +3297,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                     }
                 }
             )
+            commitPickerPopover?.apply(settings: currentReaderSettings)
         }
         commitPickerPopover?.show(relativeTo: anchor)
     }
@@ -3342,6 +3350,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 model?.selectCompareCommit(commit.fullSHA)
             }
         )
+        compareCommitPickerPopover?.apply(settings: currentReaderSettings)
     }
 
     @objc func selectPreviousContextCandidate(_ sender: Any?) {

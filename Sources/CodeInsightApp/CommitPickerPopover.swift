@@ -1,5 +1,7 @@
 import AppKit
 import CodeInsightAppModel
+import CodeInsightReaderCore
+import CodeInsightReaderUI
 import CodeInsightGit
 import Observation
 
@@ -43,6 +45,19 @@ final class CommitPickerPopover: NSViewController,
         fatalError("init(coder:) has not been implemented")
     }
 
+    private var theme = ReaderTheme(settings: ReaderSettings())
+
+    func apply(settings: ReaderSettings) {
+        theme = ReaderTheme(settings: settings)
+        guard isViewLoaded else { return }
+        view.appearance = cairnAppearance(for: settings.theme)
+        view.layer?.backgroundColor = theme.chromeColor.cgColor
+        statusLabel.textColor = theme.chromeSecondaryColor
+        tableView.reloadData()
+    }
+
+    var selfTestTheme: ReaderTheme { theme }
+
     override func loadView() {
         input.placeholderString = localized("panel.commit.search")
         input.delegate = self
@@ -68,10 +83,12 @@ final class CommitPickerPopover: NSViewController,
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
         statusLabel.font = .systemFont(ofSize: 11)
-        statusLabel.textColor = .secondaryLabelColor
+        statusLabel.textColor = theme.chromeSecondaryColor
         statusLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let content = NSView(frame: NSRect(x: 0, y: 0, width: 560, height: 480))
+        content.wantsLayer = true
+        content.layer?.backgroundColor = theme.chromeColor.cgColor
         content.addSubview(input)
         content.addSubview(scrollView)
         content.addSubview(statusLabel)
@@ -283,27 +300,33 @@ final class CommitPickerPopover: NSViewController,
     private func worktreeCell() -> NSView {
         let title = NSTextField(labelWithString: localized("panel.commit.worktree"))
         title.font = .systemFont(ofSize: 13, weight: .semibold)
+        title.textColor = theme.foregroundColor
         let detail = NSTextField(labelWithString: localized("panel.commit.onDisk"))
         detail.font = .systemFont(ofSize: 11)
-        detail.textColor = .secondaryLabelColor
+        detail.textColor = theme.chromeSecondaryColor
         let labels = NSStackView(views: [title, detail])
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 1
         return rowCell(
             checkmarked: selectedRevision() == nil,
-            content: labels
+            content: labels,
+            historical: false
         )
     }
 
     private func commitCell(_ commit: CommitInfo) -> NSView {
         let sha = NSTextField(labelWithString: commit.shortSHA)
+        let selected = selectedRevision().map {
+            $0 == commit.fullSHA || $0 == commit.shortSHA
+        } ?? false
         sha.font = .monospacedSystemFont(ofSize: 11, weight: .semibold)
-        sha.textColor = .secondaryLabelColor
+        sha.textColor = selected ? theme.histColor : theme.chromeSecondaryColor
         sha.setContentHuggingPriority(.required, for: .horizontal)
 
         let summary = NSTextField(labelWithString: commit.summary)
         summary.font = .systemFont(ofSize: 13)
+        summary.textColor = theme.foregroundColor
         summary.lineBreakMode = .byTruncatingTail
         summary.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
@@ -316,13 +339,13 @@ final class CommitPickerPopover: NSViewController,
             labelWithString: "\(dateFormatter.string(from: commit.date)) · \(commit.authorName)"
         )
         metadata.font = .systemFont(ofSize: 10)
-        metadata.textColor = .secondaryLabelColor
+        metadata.textColor = theme.chromeSecondaryColor
         metadata.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let badges = commit.branchNames.map {
-            badge("⎇ \($0)", color: .systemBlue)
+            badge("⎇ \($0)", color: theme.verifiedColor, fill: theme.mossSoftColor)
         } + commit.tagNames.map {
-            badge(localizedFormat("panel.commit.tag", $0), color: .systemPurple)
+            badge(localizedFormat("panel.commit.tag", $0), color: theme.histColor, fill: theme.histSoftColor)
         }
         let bottom = NSStackView(views: [metadata] + badges)
         bottom.orientation = .horizontal
@@ -333,24 +356,25 @@ final class CommitPickerPopover: NSViewController,
         labels.orientation = .vertical
         labels.alignment = .leading
         labels.spacing = 3
-        return rowCell(
-            checkmarked: selectedRevision().map {
-                $0 == commit.fullSHA || $0 == commit.shortSHA
-            } ?? false,
-            content: labels
-        )
+        return rowCell(checkmarked: selected, content: labels, historical: true)
     }
 
-    private func rowCell(checkmarked: Bool, content: NSView) -> NSView {
+    private func rowCell(checkmarked: Bool, content: NSView, historical: Bool) -> NSView {
         let check = NSImageView(image: NSImage(
             systemSymbolName: checkmarked ? "checkmark" : "circle",
             accessibilityDescription: checkmarked ? localized("panel.commit.current") : nil
         ) ?? NSImage())
-        check.contentTintColor = checkmarked ? .controlAccentColor : .clear
+        check.contentTintColor = checkmarked
+            ? (historical ? theme.histColor : theme.accentColor) : .clear
         check.translatesAutoresizingMaskIntoConstraints = false
         content.translatesAutoresizingMaskIntoConstraints = false
 
         let cell = NSTableCellView()
+        if checkmarked && historical {
+            cell.wantsLayer = true
+            cell.layer?.cornerRadius = 6
+            cell.layer?.backgroundColor = theme.histSoftColor.cgColor
+        }
         cell.addSubview(check)
         cell.addSubview(content)
         NSLayoutConstraint.activate([
@@ -365,12 +389,12 @@ final class CommitPickerPopover: NSViewController,
         return cell
     }
 
-    private func badge(_ value: String, color: NSColor) -> NSTextField {
+    private func badge(_ value: String, color: NSColor, fill: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: " \(value) ")
-        label.font = .systemFont(ofSize: 9, weight: .semibold)
+        label.font = .systemFont(ofSize: 9.5, weight: .semibold)
         label.textColor = color
         label.drawsBackground = true
-        label.backgroundColor = color.withAlphaComponent(0.12)
+        label.backgroundColor = fill
         label.wantsLayer = true
         label.layer?.cornerRadius = 4
         label.layer?.masksToBounds = true
