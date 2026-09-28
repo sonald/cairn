@@ -816,6 +816,15 @@ public final class AppModel {
             == rhs.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
+    /// When the project was last read: its session checkpoint's modification
+    /// time. Nil when the project has no saved session.
+    package func lastSessionDate(forProjectRoot root: String) -> Date? {
+        guard let fileURL = sessionFileURL(forProjectRoot: root) else { return nil }
+        return (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[
+            .modificationDate
+        ] as? Date
+    }
+
     private func sessionFileURL(
         forProjectRoot root: String
     ) -> URL? {

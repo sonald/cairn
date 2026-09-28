@@ -3116,6 +3116,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
                 recentLanguages: recentLanguageLabels(),
+                recentStatus: recentProjectStatus(),
                 failed: false,
                 onChooseProject: onChooseProject,
                 onOpenRecent: { [weak self] in self?.openRecentProject($0) },
@@ -3126,6 +3127,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
                 recentLanguages: recentLanguageLabels(),
+                recentStatus: recentProjectStatus(),
                 failed: true,
                 failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
@@ -3331,6 +3333,43 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             store: model.resolutionExplanations
         )
         trailView.isHidden = model.readingTrail.nodes.isEmpty || contentSurfaceMode != .source
+    }
+
+    /// Canonical paths of trusted repositories, fetched from the registry actor.
+    private var trustedRepositoryPaths: Set<String> = []
+    private var trustedRepositoryTask: Task<Void, Never>?
+
+    /// Trusted repositories and last reading times for the welcome screen.
+    private func recentProjectStatus() -> (trusted: Set<String>, lastRead: [String: Date]) {
+        refreshTrustedRepositoryPaths()
+        let paths = recentProjectsStore.paths
+        let trusted = paths.filter {
+            trustedRepositoryPaths.contains(
+                URL(fileURLWithPath: $0).resolvingSymlinksInPath().standardizedFileURL.path
+            )
+        }
+        let lastRead = paths.compactMap { path in
+            model.lastSessionDate(forProjectRoot: path).map { (path, $0) }
+        }
+        return (Set(trusted), Dictionary(lastRead, uniquingKeysWith: { first, _ in first }))
+    }
+
+    /// The registry is an actor: read it asynchronously and re-render the
+    /// welcome screen only when the trusted set actually changed.
+    private func refreshTrustedRepositoryPaths() {
+        guard trustedRepositoryTask == nil else { return }
+        let registry = model.exactCoordinator.trustRegistry
+        trustedRepositoryTask = Task { [weak self] in
+            let paths = Set(await registry.trustedRepositories().map(\.path))
+            guard let self else { return }
+            trustedRepositoryTask = nil
+            guard paths != trustedRepositoryPaths else { return }
+            trustedRepositoryPaths = paths
+            switch model.projectState {
+            case .empty, .failed: renderEmptyState()
+            case .indexing, .ready: break
+            }
+        }
     }
 
     /// Short language labels for the welcome screen's recent projects.
@@ -6270,6 +6309,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     func showEmptyState(
         recentPaths: [String],
         recentLanguages: [String: String] = [:],
+        recentStatus: (trusted: Set<String>, lastRead: [String: Date]) = ([], [:]),
         failed: Bool,
         failureReason: String? = nil,
         onChooseProject: @escaping () -> Void,
@@ -6285,6 +6325,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         scrollView?.isHidden = true
         if let emptyStateView {
             emptyStateView.updateRecentLanguages(recentLanguages)
+            emptyStateView.updateRecentStatus(trusted: recentStatus.trusted, lastRead: recentStatus.lastRead)
             emptyStateView.update(
                 recentPaths: recentPaths,
                 failed: failed,
@@ -6301,6 +6342,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onRetry: onRetry
         )
         emptyStateView.updateRecentLanguages(recentLanguages)
+        emptyStateView.updateRecentStatus(trusted: recentStatus.trusted, lastRead: recentStatus.lastRead)
         emptyStateView.update(
             recentPaths: recentPaths,
             failed: failed,

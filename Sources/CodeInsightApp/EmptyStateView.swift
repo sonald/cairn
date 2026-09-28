@@ -20,6 +20,8 @@ final class EmptyStateView: NSView {
     private var recentPaths: [String] = []
     /// Short language labels (RS, PY, TS…) per recent path; empty when unknown.
     private var recentLanguages: [String: String] = [:]
+    private var recentTrusted: Set<String> = []
+    private var recentLastRead: [String: Date] = [:]
     private var isFailure = false
     private let dropHint = NSTextField(labelWithString: localized("welcome.dropHint"))
     private(set) var theme = ReaderTheme(settings: ReaderSettings())
@@ -154,6 +156,19 @@ final class EmptyStateView: NSView {
         guard languages != recentLanguages else { return }
         recentLanguages = languages
         rebuildRecents()
+    }
+
+    /// Trusted repositories and each project's last reading time, when known.
+    func updateRecentStatus(trusted: Set<String>, lastRead: [String: Date]) {
+        guard trusted != recentTrusted || lastRead != recentLastRead else { return }
+        recentTrusted = trusted
+        recentLastRead = lastRead
+        rebuildRecents()
+    }
+
+    func selfTestRecentTitle(path: String) -> NSAttributedString? {
+        recentStack.arrangedSubviews.compactMap { $0 as? NSButton }
+            .first { $0.toolTip == path }?.attributedTitle
     }
 
     override func layout() {
@@ -304,7 +319,12 @@ final class EmptyStateView: NSView {
             button.imagePosition = .imageLeading
             button.imageScaling = .scaleProportionallyDown
             button.alignment = .left
-            button.attributedTitle = Self.recentTitle(path: path, theme: theme)
+            button.attributedTitle = Self.recentTitle(
+                path: path,
+                trusted: recentTrusted.contains(path),
+                lastRead: recentLastRead[path],
+                theme: theme
+            )
             button.hoverColor = theme.mossSoftColor
             button.languageLabel = recentLanguages[path]
             button.toolTip = path
@@ -366,26 +386,49 @@ final class EmptyStateView: NSView {
         }
     }
 
-    private static func recentTitle(path: String, theme: ReaderTheme) -> NSAttributedString {
+    private static func recentTitle(
+        path: String,
+        trusted: Bool,
+        lastRead: Date?,
+        theme: ReaderTheme
+    ) -> NSAttributedString {
         let paragraph = NSMutableParagraphStyle()
         paragraph.alignment = .left
         paragraph.lineSpacing = 1
         let title = NSMutableAttributedString(
-            string: "\(URL(fileURLWithPath: path).lastPathComponent)\n",
+            string: URL(fileURLWithPath: path).lastPathComponent,
             attributes: [
                 .font: NSFont.systemFont(ofSize: 13, weight: .semibold),
                 .foregroundColor: theme.foregroundColor,
                 .paragraphStyle: paragraph,
             ]
         )
+        // Safe is the default; only a trusted repository is worth a mark.
+        if trusted {
+            title.append(NSAttributedString(
+                string: "  \(localized("main.trusted"))",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 10.5, weight: .semibold),
+                    .foregroundColor: theme.warningColor,
+                    .paragraphStyle: paragraph,
+                ]
+            ))
+        }
+        let detailAttributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+            .foregroundColor: theme.chromeSecondaryColor,
+            .paragraphStyle: paragraph,
+        ]
         title.append(NSAttributedString(
-            string: (path as NSString).abbreviatingWithTildeInPath,
-            attributes: [
-                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
-                .foregroundColor: theme.chromeSecondaryColor,
-                .paragraphStyle: paragraph,
-            ]
+            string: "\n" + (path as NSString).abbreviatingWithTildeInPath,
+            attributes: detailAttributes
         ))
+        if let lastRead {
+            title.append(NSAttributedString(
+                string: " · " + RelativeDateTimeFormatter().localizedString(for: lastRead, relativeTo: Date()),
+                attributes: detailAttributes.merging([.font: NSFont.systemFont(ofSize: 11)]) { $1 }
+            ))
+        }
         return title
     }
 }
