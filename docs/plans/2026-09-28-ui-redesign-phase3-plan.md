@@ -64,3 +64,14 @@
 另：`swift test --filter bookmark` 并行跑时，`bookmarkCommandReportsTheEligibilityReasonOutsideThePrimaryReader` 所在进程会中途退出、没有批次摘要；在第三阶段之前的基线 `6cae0fd` 上同样如此，单独运行通过，CI 串行批次完整报告，属既有的测试隔离问题。
 
 修复后（`75c4e12`）重跑全量 CI 通过：主批次 1164 条全部报告完成，合计 1171 条，折叠性能门禁 pass。
+
+### 4.4 Q6 / Q7（2026-09-28）
+
+| 片 | 提交 | 测试（均逐条注入变红后恢复） |
+|---|---|---|
+| Q6 提交物化标记 | `5e8c56d` | `materializerListsOnlyCommitsWithACompleteDirectory`（真实物化 + 缺完成标记的半成品目录不算）；`commitPickerMarksOnlyCompletelyMaterializedCommits`（真实 git 两个提交，只有完成物化的那个显示可见徽章） |
+| Q7 Inspector 堆石 | `9e56372` | `inspectorShowsLiveCertaintyStonesAndHidesThemForACapture`（实时模式堆石与关系行 certainty 一致且可见；冻结快照不显示） |
+
+- 首轮全量 CI 中应用测试进程在 Q6 测试之后段错误退出（主批次只报告 989 条）：测试自建窗口在弹窗关闭动画结束前被释放。改为窗口不在关闭时自我释放、等弹窗关闭后再关窗口（`84b81b3`），重跑全量 CI 通过：主批次 1167 条全部报告完成，合计 1174 条，折叠性能门禁 pass。
+- 真实应用（rlm-minimal，后台模式）：`_colorize` 调用方 → 点 `_print_separator` 的徽章打开 Inspector，标题左侧为苔绿堆石、右侧「已验证」。
+- 提交选择器是瞬态弹窗，后台模式会立即关闭，全屏控制的授权卡片本轮无人确认，改为离屏渲染：深 / 浅主题下已物化提交带石板蓝「已物化」徽章，与苔绿分支徽章区分清楚。本机缓存中 rlm-minimal 最近 50 个提交有 3 个已物化，真实应用目视待下次全屏控制时补看。
