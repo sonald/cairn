@@ -650,3 +650,41 @@ func commandTOpensTheSameUnlockedSeekPalette() throws {
         .first { $0.label == "palettePanel" }?.value as? PalettePanel)
     #expect(same === palette)
 }
+
+@MainActor
+@Test
+func paletteSymbolRowsCarryVisibleKindTagsColoredByFamily() throws {
+    let file = URL(fileURLWithPath: "/palette.rs")
+    let document = ReaderDocument(
+        bytes: Array(String(repeating: "x", count: 100).utf8),
+        outlineFacets: [facet("spawn", .fn, 10), facet("Spawner", .struct, 30), facet("Spawn", .trait, 50)]
+    )
+    let rows = PalettePanel.currentSymbolRows(query: "spawn", document: document, file: file)
+    #expect(Set(rows.compactMap { $0.kind?.label }) == ["fn", "st", "tr"])
+    #expect(PalettePanel.KindTag(DeclarationKind.pythonClass)?.label == "cl")
+    #expect(PalettePanel.KindTag(DeclarationKind.rustImpl)?.label == "im")
+
+    // Render through the table: the tag sits left of the title and is visible.
+    let panel = PalettePanel(appModel: AppModel(), settings: ReaderSettings(theme: .light), onOpen: { _, _, _ in })
+    defer { panel.close() }
+    let item = NSMenuItem(title: "x", action: #selector(NSText.selectAll(_:)), keyEquivalent: "")
+    let tagged = rows.map { row in
+        var copy = PalettePanel.Row(title: row.title, detail: row.detail, shortcut: "",
+                                    identity: row.identity, payload: .command(item))
+        copy.kind = row.kind
+        return copy
+    }
+    panel.prepareForTesting(prefill: ">", owner: nil, commands: tagged)
+    let table = panel.tableViewForTesting
+    table.window?.contentView?.layoutSubtreeIfNeeded()
+    let fnRow = try #require(panel.rowsForTesting.firstIndex { $0.kind?.label == "fn" })
+    let cell = try #require(table.view(atColumn: 0, row: fnRow, makeIfNecessary: true) as? NSTableCellView)
+    cell.layoutSubtreeIfNeeded()
+    let tag = try #require(cell.subviews.first { $0.identifier?.rawValue == "PaletteKindTag" } as? NSTextField)
+    let title = try #require(cell.textField)
+    #expect(tag.stringValue == "fn")
+    #expect(tag.frame.width > 0 && tag.frame.maxX <= title.frame.minX)
+    let fill = tag.layer?.backgroundColor.flatMap { NSColor(cgColor: $0)?.usingColorSpace(.sRGB) }
+    #expect(fill.map { Int(($0.redComponent * 255).rounded()) } == 0xDC)
+    #expect(fill.map { Int(($0.greenComponent * 255).rounded()) } == 0xE7)
+}

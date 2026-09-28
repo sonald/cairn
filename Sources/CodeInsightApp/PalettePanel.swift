@@ -38,12 +38,64 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         case command(NSMenuItem)
     }
 
+    /// The design's symbol-kind block: a two-letter tag colored by family.
+    struct KindTag: Equatable {
+        enum Family: Equatable { case function, type, trait, container, value }
+        let label: String
+        let family: Family
+
+        init?(_ kind: OutlineKind) {
+            switch kind {
+            case .fn, .method: self.init(label: "fn", family: .function)
+            case .struct: self.init(label: "st", family: .type)
+            case .enum: self.init(label: "en", family: .type)
+            case .class: self.init(label: "cl", family: .type)
+            case .typeAlias: self.init(label: "ty", family: .type)
+            case .trait: self.init(label: "tr", family: .trait)
+            case .impl: self.init(label: "im", family: .container)
+            case .mod: self.init(label: "md", family: .container)
+            case .const, .static, .field, .enumMember: self.init(label: "va", family: .value)
+            }
+        }
+
+        init?(_ kind: DeclarationKind) {
+            switch kind {
+            case .rustFn, .rustMethod, .pythonFunction, .typescriptFunction:
+                self.init(label: "fn", family: .function)
+            case .rustStruct: self.init(label: "st", family: .type)
+            case .rustEnum: self.init(label: "en", family: .type)
+            case .rustTypeAlias: self.init(label: "ty", family: .type)
+            case .pythonClass, .typescriptClass: self.init(label: "cl", family: .type)
+            case .rustTrait: self.init(label: "tr", family: .trait)
+            case .rustImpl: self.init(label: "im", family: .container)
+            case .rustMod: self.init(label: "md", family: .container)
+            case .rustConst, .rustStatic, .rustField: self.init(label: "va", family: .value)
+            @unknown default: return nil
+            }
+        }
+
+        private init(label: String, family: Family) {
+            self.label = label
+            self.family = family
+        }
+
+        @MainActor func colors(_ theme: ReaderTheme) -> (text: NSColor, fill: NSColor) {
+            switch family {
+            case .function: (theme.verifiedColor, theme.mossSoftColor)
+            case .type: (theme.inferredColor, theme.slateSoftColor)
+            case .trait: (theme.warningColor, theme.amberSoftColor)
+            case .container, .value: (theme.chipForegroundColor, theme.chipBackgroundColor)
+            }
+        }
+    }
+
     struct Row {
         let title: String
         let detail: String
         let shortcut: String
         let identity: String
         let payload: Payload?
+        var kind: KindTag? = nil
 
         var isSelectable: Bool { payload != nil }
     }
@@ -242,13 +294,36 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
         title.setContentCompressionResistancePriority(.defaultHigh, for: .horizontal)
         cell.textField = title
+        var titleLeading = cell.leadingAnchor
+        var titleInset: CGFloat = 12
+        if let kind = value.kind {
+            let colors = kind.colors(theme)
+            let tag = NSTextField(labelWithString: kind.label)
+            tag.font = .monospacedSystemFont(ofSize: 9.5, weight: .semibold)
+            tag.textColor = colors.text
+            tag.alignment = .center
+            tag.wantsLayer = true
+            tag.layer?.backgroundColor = colors.fill.cgColor
+            tag.layer?.cornerRadius = 4
+            tag.identifier = NSUserInterfaceItemIdentifier("PaletteKindTag")
+            tag.translatesAutoresizingMaskIntoConstraints = false
+            cell.addSubview(tag)
+            NSLayoutConstraint.activate([
+                tag.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+                tag.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+                tag.widthAnchor.constraint(equalToConstant: 22),
+                tag.heightAnchor.constraint(equalToConstant: 16),
+            ])
+            titleLeading = tag.trailingAnchor
+            titleInset = 8
+        }
         cell.toolTip = switch value.payload {
         case .file(let file): file.path
         case .location(let file, _, _): file.path + " · " + value.detail
         default: value.title
         }
         NSLayoutConstraint.activate([
-            title.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 12),
+            title.leadingAnchor.constraint(equalTo: titleLeading, constant: titleInset),
             title.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
         ])
 
@@ -586,7 +661,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                     root.appendingPathComponent(hit.path),
                     hit.facet.nameRange.lowerBound,
                     expectedContentID: appModel.indexedContentID(forPath: hit.path)
-                )
+                ),
+                kind: KindTag(hit.facet.kind)
             )
         }
         let placeholder = symbolModel.rows.compactMap { row -> String? in
@@ -837,7 +913,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
                 detail: localizedFormat("panel.palette.symbolLine", localized("panel.symbol.kind." + facet.kind.rawValue), Int64(line ?? 1)),
                 shortcut: "",
                 identity: "current:\(facet.kind.rawValue):\(facet.nameRange.lowerBound)",
-                payload: .location(file, facet.nameRange.lowerBound, expectedContentID: nil)
+                payload: .location(file, facet.nameRange.lowerBound, expectedContentID: nil),
+                kind: KindTag(facet.kind)
             )
         }
     }
