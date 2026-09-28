@@ -728,8 +728,39 @@ final class RelationWindowController: NSViewController,
         model.onNodeChange = { [weak self] node in
             guard let self else { return }
             reloadNode(node)
+            updateDirectionCount()
             onTreeChange?()
         }
+    }
+
+    private static let directionTitles = [
+        localized("relation.callers"), localized("relation.calls"),
+        localized("relation.implements"), localized("relation.references"),
+    ]
+
+    /// Result count of the direction on screen; other directions are not
+    /// queried, so they keep their plain titles rather than a guessed number.
+    private func updateDirectionCount() {
+        let active = segment(for: model.direction)
+        let count = model.root.map(Self.edgeCount(under:)) ?? 0
+        for (index, title) in Self.directionTitles.enumerated() {
+            let label = index == active && model.root != nil && count > 0
+                ? "\(title) \(count > 99 ? "99+" : String(count))"
+                : title
+            if directionControl.label(forSegment: index) != label {
+                directionControl.setLabel(label, forSegment: index)
+            }
+        }
+    }
+
+    private static func edgeCount(under node: RelationTreeModel.Node) -> Int {
+        (node.children ?? []).reduce(0) { total, child in
+            total + (child.kind == .edge ? 1 : 0) + (child.kind == .group ? edgeCount(under: child) : 0)
+        }
+    }
+
+    var selfTestDirectionLabels: [String] {
+        (0..<directionControl.segmentCount).compactMap { directionControl.label(forSegment: $0) }
     }
 
     required init?(coder: NSCoder) {
@@ -1393,6 +1424,7 @@ final class RelationWindowController: NSViewController,
             hideInspector()
         }
         directionControl.selectedSegment = segment(for: model.direction)
+        updateDirectionCount()
         readingSetButton.isEnabled = !readingSetNodes().isEmpty
         if model.root == nil {
             currentTarget = nil

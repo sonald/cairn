@@ -2740,3 +2740,16 @@ func relationRowsShowVisibleCertaintyStonesAndASerifRootTitle() async throws {
     })
     #expect(fixture.controller.selfTestRootTitleIsSerif)
 }
+
+@MainActor
+@Test
+func relationActiveDirectionShowsItsResultCountOnly() async throws {
+    let fixture = try await makeRelationUXFixture(expandPossible: false)
+    defer { fixture.close() }
+    let labels = fixture.controller.selfTestDirectionLabels
+    let titles = ["relation.callers", "relation.calls", "relation.implements", "relation.references"]
+        .map { CodeInsightApp.localized($0) }
+    // The fixture queries references: one exact edge plus one possible match.
+    #expect(labels[3] == "\(titles[3]) 2")
+    #expect(Array(labels[0..<3]) == Array(titles[0..<3]))
+}
