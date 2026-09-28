@@ -415,15 +415,19 @@ func commitPickerMarksOnlyCompletelyMaterializedCommits() async throws {
     model.commitPicker.load(repositoryURL: root)
     try #require(await mainWindowWaitUntil(model.commitPicker.commits.count == 2))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
-    defer { window.close() }
+    window.isReleasedWhenClosed = false
     window.orderFront(nil)
     let picker = CommitPickerPopover(appModel: model, selectedRevision: { nil }, onChoose: { _ in })
     picker.show(relativeTo: window.contentView!)
-    defer { picker.selfTestClose() }
 
     let materialized = CodeInsightApp.localized("panel.commit.materialized")
     #expect(picker.selfTestVisibleBadges(forCommit: first).contains(materialized))
     #expect(!picker.selfTestVisibleBadges(forCommit: second).contains(materialized))
+
+    // Let the popover finish closing before its anchor window goes away.
+    picker.selfTestClose()
+    _ = await mainWindowWaitUntil(!picker.selfTestGeometry.shown)
+    window.close()
 }
 
 @MainActor
