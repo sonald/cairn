@@ -294,6 +294,7 @@
 "panel.commit.empty" = "没有匹配的提交。";
 "panel.commit.loading" = "正在加载历史…";
 "panel.commit.materialized" = "已物化";
+"panel.commit.materialized.note" = "已物化：源码已在本地缓存（上限 %@）";
 "panel.commit.onDisk" = "磁盘上的当前文件";
 "panel.commit.search" = "搜索提交";
 "panel.commit.tag" = "标签 %@";

@@ -423,6 +423,9 @@ func commitPickerMarksOnlyCompletelyMaterializedCommits() async throws {
     let materialized = CodeInsightApp.localized("panel.commit.materialized")
     #expect(picker.selfTestVisibleBadges(forCommit: first).contains(materialized))
     #expect(!picker.selfTestVisibleBadges(forCommit: second).contains(materialized))
+    #expect(picker.selfTestMaterializedNote?.contains("2 GB") == true)
+    model.commitPicker.setQuery(String(second.prefix(12)))
+    #expect(await mainWindowWaitUntil(picker.selfTestMaterializedNote == nil))
 
     // Let the popover finish closing before its anchor window goes away.
     picker.selfTestClose()

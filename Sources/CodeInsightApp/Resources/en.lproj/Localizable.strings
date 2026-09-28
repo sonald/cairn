@@ -294,6 +294,7 @@
 "panel.commit.empty" = "No matching commits.";
 "panel.commit.loading" = "Loading history…";
 "panel.commit.materialized" = "Materialized";
+"panel.commit.materialized.note" = "Materialized: source already cached locally (limit %@)";
 "panel.commit.onDisk" = "Current files on disk";
 "panel.commit.search" = "Search commits";
 "panel.commit.tag" = "tag %@";
