@@ -242,6 +242,7 @@
 "main.show.or.hide.the.definition.context" = "Show or hide the definition context";
 "main.show.references" = "Show References";
 "main.signature" = "Signature";
+"main.snapshot.readonly" = "Read-only snapshot · worktree untouched";
 "main.static" = "Static";
 "main.struct" = "Struct";
 "main.structure.folds.function.bodies.and.keeps.signatures.visible" = "Structure folds function bodies and keeps signatures visible";

@@ -242,6 +242,7 @@
 "main.show.or.hide.the.definition.context" = "显示或隐藏定义上下文";
 "main.show.references" = "显示引用";
 "main.signature" = "签名";
+"main.snapshot.readonly" = "只读快照 · 工作区未改动";
 "main.static" = "静态项";
 "main.struct" = "结构体";
 "main.structure.folds.function.bodies.and.keeps.signatures.visible" = "结构视图折叠函数体，保留签名";

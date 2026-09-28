@@ -2056,6 +2056,12 @@ func readingAHistoricalCommitTurnsTheReaderAndCommitButtonSepia() async throws {
     }
     #expect(!controller.selfTestReaderHistorical.flag)
     #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFBFAF6)
+    let main = root.appendingPathComponent("main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+    #expect(!controller.selfTestSnapshotBadge.visible)
 
     model.switchToCommit(sha)
     #expect(await mainWindowWaitUntil(model.currentRevision != nil))
@@ -2063,12 +2069,17 @@ func readingAHistoricalCommitTurnsTheReaderAndCommitButtonSepia() async throws {
     #expect(controller.selfTestReaderHistorical.flag)
     #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFAF5EA)
     #expect(rgb(controller.selfTestCommitButtonBezel) == 0x7A5A2C)
+    let badge = controller.selfTestSnapshotBadge
+    #expect(badge.visible)
+    #expect(badge.style == .commit)
+    #expect(badge.text == CodeInsightApp.localized("main.snapshot.readonly"))
 
     model.switchToWorktree()
     #expect(await mainWindowWaitUntil(model.currentRevision == nil))
     controller.renderForSelfTest()
     #expect(!controller.selfTestReaderHistorical.flag)
     #expect(rgb(controller.selfTestReaderHistorical.background) == 0xFBFAF6)
+    #expect(!controller.selfTestSnapshotBadge.visible)
 }
 
 

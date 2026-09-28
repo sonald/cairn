@@ -1534,6 +1534,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     var selfTestReaderHistorical: (flag: Bool, background: NSColor?) {
         readerController.selfTestHistoricalSnapshot
     }
+    var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {
+        readerController.selfTestSnapshotBadge
+    }
     var selfTestCommitToolbarItemExistsAndVisible: Bool {
         selfTestToolbarItemExistsAndVisible(identifier: Self.commitItemIdentifier)
     }
@@ -5235,6 +5238,23 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let readerHeader = NSView()
     private let readerHeaderDivider = NSView()
     private let pathControl = NSPathControl()
+    /// A historical snapshot says so beside the path: the past is read-only.
+    private lazy var snapshotBadge = CairnBadgeView(
+        style: .commit,
+        text: localized("main.snapshot.readonly"),
+        theme: readerTheme
+    )
+    private lazy var pathRow: NSStackView = {
+        let row = NSStackView(views: [pathControl, snapshotBadge])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 10)
+        snapshotBadge.isHidden = true
+        snapshotBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        snapshotBadge.setContentHuggingPriority(.required, for: .horizontal)
+        return row
+    }()
     private let scopeHeader = NSView()
     private let scopeHeaderContent = NSStackView()
     private let scopeHeaderDivider = NSView()
@@ -5409,10 +5429,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             pathControl.isHidden = true
             configureScopeHeader()
             configureFindBar()
+            pathRow.isHidden = true
             let stack = NSStackView(views: [
                 readerHeader,
                 findBar,
-                pathControl,
+                pathRow,
                 readerArea,
             ])
             stack.orientation = .vertical
@@ -5423,8 +5444,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 readerArea.widthAnchor.constraint(equalTo: stack.widthAnchor),
                 readerHeader.heightAnchor.constraint(equalToConstant: 32),
                 findBar.heightAnchor.constraint(equalToConstant: 31),
-                pathControl.heightAnchor.constraint(equalToConstant: 24),
-                pathControl.widthAnchor.constraint(equalTo: stack.widthAnchor),
+                pathRow.heightAnchor.constraint(equalToConstant: 24),
+                pathRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
             ])
             view = stack
         }
@@ -5688,6 +5709,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private func updatePathControl() {
         guard !showsCompareControls else { return }
         pathControl.isHidden = displayedFile == nil
+        pathRow.isHidden = pathControl.isHidden
         guard let file = displayedFile else { pathControl.pathItems = []; return }
         pathControl.url = file
         pathControl.toolTip = file.path
@@ -6164,6 +6186,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     func setHistoricalSnapshot(_ historical: Bool) {
         textView.historicalSnapshot = historical
+        snapshotBadge.isHidden = !historical
+    }
+
+    var selfTestSnapshotBadge: (text: String, style: CairnBadgeView.Style, visible: Bool) {
+        view.layoutSubtreeIfNeeded()
+        return (
+            snapshotBadge.text,
+            snapshotBadge.style,
+            snapshotBadge.window != nil && !snapshotBadge.isHiddenOrHasHiddenAncestor
+                && snapshotBadge.frame.width > 0
+        )
     }
 
     var selfTestHistoricalSnapshot: (flag: Bool, background: NSColor?) {
@@ -6175,6 +6208,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         let previewWrapChanged = previewWrapLines != settings.wrapLines
         previewWrapLines = settings.wrapLines
         readerTheme = ReaderTheme(settings: settings)
+        snapshotBadge.update(style: .commit, text: localized("main.snapshot.readonly"), theme: readerTheme)
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)
         emptyStateView?.apply(theme: readerTheme)
@@ -6243,6 +6277,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     ) {
         loadViewIfNeeded()
         pathControl.isHidden = true
+        pathRow.isHidden = true
         readingHeightControl.isEnabled = false
         label.isHidden = true
         scrollView?.isHidden = true
