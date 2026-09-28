@@ -85,4 +85,7 @@
 
 - 三条滚轮测试在解锁后重跑全部通过（`ligaturePendingRestoreYieldsToUserScroll` 1.0s、`readonlyResizeUserScrollResizeUsesTheUsersNewPosition` 0.3s、`wrapToggleClampsLegallyAtDocumentEdges` 2.7s），证实失败源于锁屏。
 - 真实应用（`45573c1` 打包）computer-use 截图：路径栏为正常窗口底色，离屏图里的黑底确为渲染伪影；工具栏入口为「跳转 ⌘P」；Lens 位于阅读区与 Relations 下方、侧栏全高；状态栏显示堆石与琥珀色 Exact 状态；Python 注释为衬线斜体，`class` 名放大。
-- 未做：后台模式的点击只设置光标、不触发阅读器鼠标事件，Lens 的点击联动未在真实应用中目视（已有单元测试与离屏渲染覆盖）；历史着色需切换 commit，也未在真实应用中目视。
+- 经用户授权切到全屏控制后补看（深色主题）：
+  - 点击 `ColorfulLogger`：Lens 顶栏显示衬线符号名、`path:line`、4 块苔绿石头与「精确·直接」苔绿浅底徽章；阅读区选中符号为苔绿描边环。
+  - 点「固定」：Lens 顶栏与「固定」分段变琥珀色；切回「跟随」恢复。
+  - 提交选择器：工作区行苔绿勾选、分支徽章苔绿浅底；切到 `1bed65d` 后该行为褐黄浅底，提交按钮变褐黄色，阅读区底色变为偏暖的 `histReader`；切回工作区后恢复。
