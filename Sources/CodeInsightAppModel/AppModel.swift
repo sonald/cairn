@@ -264,7 +264,7 @@ public final class ProjectIndexService: IndexService, @unchecked Sendable {
             ]
         }
         let expectedSnapshotID = snapshot.snapshotID
-        let store = store
+        let store = lock.withLock { self.store }
         let indexer = ProjectIndexer()
         let expectedProfiles = try await detachedValue {
             if normalized.count > 1 {
