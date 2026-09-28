@@ -321,6 +321,7 @@
 "panel.palette.open" = "打开文件…";
 "panel.palette.pastEnd" = "第 %lld 行超出文件末尾 · 使用第 %lld 行";
 "panel.palette.positiveLine" = "请输入正整数行号";
+"panel.palette.preview" = "预览";
 "panel.palette.projectSymbol" = "查找项目符号…";
 "panel.palette.quickOpen" = "快速打开";
 "panel.palette.readingSetNoFile" = "阅读集没有当前文件";

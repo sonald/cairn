@@ -688,3 +688,42 @@ func paletteSymbolRowsCarryVisibleKindTagsColoredByFamily() throws {
     #expect(fill.map { Int(($0.redComponent * 255).rounded()) } == 0xDC)
     #expect(fill.map { Int(($0.greenComponent * 255).rounded()) } == 0xE7)
 }
+
+@MainActor
+@Test
+func seekPreviewShowsLinesAroundALocationAndHidesOtherwise() throws {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("SeekPreview-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("lib.rs")
+    let source = (1...20).map { "line \($0)" }.joined(separator: "\n") + "\n"
+    try source.write(to: file, atomically: true, encoding: .utf8)
+    let offset = UInt32(source[..<source.range(of: "line 10")!.lowerBound].utf8.count)
+
+    let panel = PalettePanel(appModel: AppModel(), settings: ReaderSettings(theme: .light), onOpen: { _, _, _ in })
+    defer { panel.close() }
+    let item = NSMenuItem(title: "x", action: #selector(NSText.selectAll(_:)), keyEquivalent: "")
+    let rows = [
+        PalettePanel.Row(title: "target", detail: "lib.rs:10", shortcut: "", identity: "a",
+                         payload: .location(file, offset, expectedContentID: nil)),
+        PalettePanel.Row(title: "command", detail: "", shortcut: "", identity: "b", payload: .command(item)),
+        PalettePanel.Row(title: "stale", detail: "lib.rs:10", shortcut: "", identity: "c",
+                         payload: .location(file, offset, expectedContentID: ContentID.sha256(of: Data("old".utf8)))),
+    ]
+    panel.prepareForTesting(prefill: ">", owner: nil, commands: rows)
+    let table = panel.tableViewForTesting
+    table.selectRowIndexes([0], byExtendingSelection: false)
+
+    let preview = panel.selfTestPreview
+    #expect(preview.visible)
+    #expect(preview.target?.hasSuffix("line 10") == true)
+    #expect(preview.text.contains("line 7") && preview.text.contains("line 18"))
+    #expect(!preview.text.contains("line 6\n") && !preview.text.contains("line 19"))
+
+    table.selectRowIndexes([1], byExtendingSelection: false)
+    #expect(!panel.selfTestPreview.visible)
+    // An indexed location whose file changed since indexing gets no preview.
+    table.selectRowIndexes([2], byExtendingSelection: false)
+    #expect(!panel.selfTestPreview.visible)
+}

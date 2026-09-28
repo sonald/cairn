@@ -116,7 +116,15 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     private let footerLabel = NSTextField(labelWithString: "")
     private var theme: ReaderTheme
     private var rows: [Row] = []
-    private var selectedIndex: Int?
+    private var selectedIndex: Int? {
+        didSet { updatePreview() }
+    }
+    /// Seek preview: a few lines around the selected location, read from the
+    /// snapshot being read; hidden for files and commands.
+    private let previewText = NSTextView()
+    private let previewScroll = NSScrollView()
+    private var resultsBesidePreview: NSLayoutConstraint?
+    private var resultsFullWidth: NSLayoutConstraint?
     private var capturedCommands: [Row] = []
     private weak var ownerWindow: NSWindow?
     private weak var originalResponder: NSResponder?
@@ -192,6 +200,8 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         emptyLabel.textColor = theme.chromeTertiaryColor
         modeLabel.textColor = theme.chromeTertiaryColor
         tableView.backgroundColor = theme.backgroundColor
+        previewScroll.backgroundColor = theme.chromeColor
+        updatePreview()
         tableView.reloadData()
     }
 
@@ -419,6 +429,77 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         openSelection()
     }
 
+    private func updatePreview() {
+        let lines = selectedIndex.flatMap { rows.indices.contains($0) ? rows[$0] : nil }
+            .flatMap(previewLines(for:))
+        let shows = lines != nil
+        previewScroll.isHidden = !shows
+        resultsFullWidth?.isActive = !shows
+        resultsBesidePreview?.isActive = shows
+        guard let lines else {
+            previewText.string = ""
+            return
+        }
+        let text = NSMutableAttributedString()
+        let width = String(lines.map(\.number).max() ?? 0).count
+        for line in lines {
+            let number = String(line.number)
+            let gutter = String(repeating: " ", count: width - number.count) + number + "  "
+            let row = NSMutableAttributedString(string: gutter, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .regular),
+                .foregroundColor: theme.chromeTertiaryColor,
+            ])
+            row.append(NSAttributedString(string: line.text + "\n", attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 11, weight: line.isTarget ? .semibold : .regular),
+                .foregroundColor: line.isTarget ? theme.foregroundColor : theme.chromeSecondaryColor,
+            ]))
+            if line.isTarget {
+                row.addAttribute(.backgroundColor, value: theme.amberSoftColor,
+                                 range: NSRange(location: 0, length: row.length))
+            }
+            text.append(row)
+        }
+        previewText.textStorage?.setAttributedString(text)
+    }
+
+    private struct PreviewLine {
+        let number: Int
+        let text: String
+        let isTarget: Bool
+    }
+
+    /// Lines around a location row's target in the snapshot being read. Nil for
+    /// files and commands, unreadable files, and indexed locations whose file
+    /// no longer matches the index (the offset would point at the wrong code).
+    private func previewLines(for row: Row) -> [PreviewLine]? {
+        guard case let .location(url, offset, expectedContentID) = row.payload else { return nil }
+        let read = appModel.documentSource ?? { url in Array(try Data(contentsOf: url)) }
+        guard let bytes = try? read(url),
+              bytes.count <= 4 * 1024 * 1024,
+              Int(offset) <= bytes.count
+        else { return nil }
+        if let expectedContentID, ContentID.sha256(of: bytes) != expectedContentID { return nil }
+        let targetLine = bytes[..<Int(offset)].reduce(0) { $1 == 0x0A ? $0 + 1 : $0 }
+        let all = String(decoding: bytes, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
+        guard all.indices.contains(targetLine) else { return nil }
+        let range = max(0, targetLine - 3)...min(all.count - 1, targetLine + 8)
+        return range.map {
+            PreviewLine(number: $0 + 1, text: String(all[$0]), isTarget: $0 == targetLine)
+        }
+    }
+
+    var selfTestPreview: (visible: Bool, text: String, target: String?) {
+        window?.contentView?.layoutSubtreeIfNeeded()
+        let visible = previewScroll.window != nil && !previewScroll.isHiddenOrHasHiddenAncestor
+            && previewScroll.frame.width > 0
+        let storage = previewText.textStorage
+        var target: String?
+        storage?.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: storage?.length ?? 0)) { value, range, _ in
+            if value != nil, target == nil { target = (storage!.string as NSString).substring(with: range) }
+        }
+        return (visible, previewText.string, target?.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     private func configureView() {
         guard let content = window?.contentView else { return }
         content.wantsLayer = true
@@ -484,9 +565,33 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         footerLabel.setAccessibilityLabel(localized("panel.palette.limit"))
         footerLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        for view in [modeLabel, input, separator, scrollView, emptyLabel, hintLabel, footerLabel] {
+        previewText.isEditable = false
+        previewText.isSelectable = false
+        previewText.drawsBackground = false
+        previewText.textContainerInset = NSSize(width: 6, height: 6)
+        previewText.textContainer?.lineFragmentPadding = 0
+        previewText.setAccessibilityLabel(localized("panel.palette.preview"))
+        previewScroll.documentView = previewText
+        previewScroll.hasVerticalScroller = false
+        previewScroll.drawsBackground = true
+        previewScroll.borderType = .noBorder
+        previewScroll.wantsLayer = true
+        previewScroll.layer?.cornerRadius = 6
+        previewScroll.isHidden = true
+        previewScroll.translatesAutoresizingMaskIntoConstraints = false
+
+        for view in [modeLabel, input, separator, scrollView, emptyLabel, hintLabel, footerLabel, previewScroll] {
             content.addSubview(view)
         }
+        resultsFullWidth = scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8)
+        resultsBesidePreview = scrollView.trailingAnchor.constraint(equalTo: previewScroll.leadingAnchor, constant: -8)
+        resultsFullWidth?.isActive = true
+        NSLayoutConstraint.activate([
+            previewScroll.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 8),
+            previewScroll.bottomAnchor.constraint(equalTo: hintLabel.topAnchor, constant: -8),
+            previewScroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
+            previewScroll.widthAnchor.constraint(equalTo: content.widthAnchor, multiplier: 0.42),
+        ])
         NSLayoutConstraint.activate([
             input.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 20),
             input.topAnchor.constraint(equalTo: content.topAnchor, constant: 11),
@@ -501,7 +606,6 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             separator.heightAnchor.constraint(equalToConstant: 1),
             scrollView.topAnchor.constraint(equalTo: separator.bottomAnchor, constant: 8),
             scrollView.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 8),
-            scrollView.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -8),
             scrollView.bottomAnchor.constraint(equalTo: hintLabel.topAnchor, constant: -8),
             emptyLabel.leadingAnchor.constraint(equalTo: input.leadingAnchor),
             emptyLabel.trailingAnchor.constraint(equalTo: input.trailingAnchor),

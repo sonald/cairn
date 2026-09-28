@@ -321,6 +321,7 @@
 "panel.palette.open" = "Open file…";
 "panel.palette.pastEnd" = "Line %lld is past the end · using %lld";
 "panel.palette.positiveLine" = "Enter a positive line number";
+"panel.palette.preview" = "Preview";
 "panel.palette.projectSymbol" = "Find project symbol…";
 "panel.palette.quickOpen" = "Quick Open";
 "panel.palette.readingSetNoFile" = "Reading Set has no active file";
