@@ -66,6 +66,10 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         breadcrumb.alignment = .centerY
         breadcrumb.spacing = 5
         breadcrumb.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // Above the bar's own edge preferences (just under 250) and the crumb
+        // labels' hugging (251), so the breadcrumb's size never ties either.
+        breadcrumb.setHuggingPriority(.defaultLow + 10, for: .horizontal)
+        breadcrumb.setHuggingPriority(.defaultLow + 10, for: .vertical)
         branchButton.bezelStyle = .accessoryBarAction
         branchButton.font = .systemFont(ofSize: 11, weight: .semibold)
         branchButton.toolTip = localized("trail.branchesHelp")
@@ -75,7 +79,12 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         branchButton.setContentHuggingPriority(.required, for: .horizontal)
         divider.wantsLayer = true
 
-        let bar = NSStackView(views: [titleLabel, breadcrumb, branchButton])
+        // The badge gets its own trailing gravity area. In one shared area the
+        // breadcrumb's hugging ties with the button's trailing-edge preference,
+        // leaving the slack to the solver.
+        let bar = NSStackView()
+        bar.setViews([titleLabel, breadcrumb], in: .leading)
+        bar.setViews([branchButton], in: .trailing)
         bar.translatesAutoresizingMaskIntoConstraints = false
         bar.orientation = .horizontal
         bar.alignment = .centerY
@@ -421,10 +430,17 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             empty.font = .systemFont(ofSize: 11)
             empty.textColor = theme.chromeTertiaryColor
             empty.lineBreakMode = .byTruncatingTail
+            empty.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             breadcrumb.addArrangedSubview(empty)
         } else {
+            // When space runs out, older crumbs truncate first (down to a
+            // stub), then the cause arrows, then the active crumb. Every label
+            // gets its own priority so the solver never picks which to squeeze:
+            // "…" 240, crumbs 241-243, arrows 246-248, active crumb 249.
             if titles.count > 4 {
-                breadcrumb.addArrangedSubview(crumbLabel("…", active: false))
+                breadcrumb.addArrangedSubview(crumbLabel(
+                    "…", active: false, compressionResistance: .defaultLow - 10
+                ))
             }
             let visibleIDs = Array(activePath.suffix(4))
             for (index, id) in visibleIDs.enumerated() {
@@ -436,12 +452,19 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
                     )
                     arrow.font = .monospacedSystemFont(ofSize: 9, weight: .regular)
                     arrow.textColor = theme.chromeSecondaryColor
+                    arrow.setContentCompressionResistancePriority(
+                        .defaultLow - 5 + Float(index), for: .horizontal
+                    )
                     breadcrumb.addArrangedSubview(arrow)
                 }
                 guard let node = trail?.nodes[id] else { continue }
+                let active = id == trail?.activeNodeID
                 breadcrumb.addArrangedSubview(crumbLabel(
                     displayName(node),
-                    active: id == trail?.activeNodeID
+                    active: active,
+                    compressionResistance: active
+                        ? .defaultLow - 1
+                        : .defaultLow - 9 + Float(index)
                 ))
             }
         }
@@ -456,7 +479,11 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         )
     }
 
-    private func crumbLabel(_ text: String, active: Bool) -> NSTextField {
+    private func crumbLabel(
+        _ text: String,
+        active: Bool,
+        compressionResistance: NSLayoutConstraint.Priority
+    ) -> NSTextField {
         let label = NSTextField(labelWithString: text)
         label.font = .monospacedSystemFont(
             ofSize: 10.5,
@@ -464,7 +491,14 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         )
         label.textColor = active ? theme.accentColor : theme.foregroundColor
         label.lineBreakMode = .byTruncatingMiddle
-        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        label.setContentCompressionResistancePriority(compressionResistance, for: .horizontal)
+        // A squeezed crumb keeps a short "a_…2" stub instead of vanishing
+        // between its arrows; it outranks the active crumb's resistance.
+        let stub = label.widthAnchor.constraint(
+            greaterThanOrEqualToConstant: min(label.intrinsicContentSize.width, 32)
+        )
+        stub.priority = .defaultLow - 0.5
+        stub.isActive = true
         return label
     }
 
@@ -574,6 +608,25 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         let range = (value.string as NSString).range(of: text)
         guard range.location != NSNotFound else { return nil }
         return value.attribute(.foregroundColor, at: range.location, effectiveRange: nil) as? NSColor
+    }
+
+    /// Bar frames in this view's coordinates, plus whether any bar item's
+    /// horizontal position is left to the solver.
+    var selfTestBarLayout: (breadcrumb: NSRect, badge: NSRect, ambiguous: Bool) {
+        let items: [NSView] = [titleLabel, breadcrumb, branchButton]
+        return (
+            convert(breadcrumb.bounds, from: breadcrumb),
+            convert(branchButton.bounds, from: branchButton),
+            items.contains(where: \.hasAmbiguousLayout)
+        )
+    }
+
+    /// Each breadcrumb label's text, laid-out width, natural width and
+    /// whether its position is left to the solver.
+    var selfTestCrumbs: [(text: String, width: CGFloat, natural: CGFloat, ambiguous: Bool)] {
+        breadcrumb.arrangedSubviews.compactMap { $0 as? NSTextField }.map {
+            ($0.stringValue, $0.frame.width, $0.intrinsicContentSize.width, $0.hasAmbiguousLayout)
+        }
     }
 
     /// Row order with each row's lane and branch flag, as drawn.
