@@ -3084,6 +3084,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .empty:
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
+                recentLanguages: recentLanguageLabels(),
                 failed: false,
                 onChooseProject: onChooseProject,
                 onOpenRecent: { [weak self] in self?.openRecentProject($0) },
@@ -3093,6 +3094,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         case .failed:
             readerController.showEmptyState(
                 recentPaths: recentProjectsStore.paths,
+                recentLanguages: recentLanguageLabels(),
                 failed: true,
                 failureReason: model.projectFailureReason,
                 onChooseProject: onChooseProject,
@@ -3298,6 +3300,25 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             store: model.resolutionExplanations
         )
         trailView.isHidden = model.readingTrail.nodes.isEmpty || contentSurfaceMode != .source
+    }
+
+    /// Short language labels for the welcome screen's recent projects.
+    private func recentLanguageLabels() -> [String: String] {
+        // Only recorded languages: an unrecorded project shows its folder icon
+        // rather than the Rust fallback presented as fact.
+        Dictionary(uniqueKeysWithValues: recentProjectsStore.paths.compactMap { path in
+            guard let languages = recentProjectsStore.storedLanguagesIfRecorded(for: path)
+            else { return nil }
+            let label = languages.map { language in
+                switch language {
+                case .rust: "RS"
+                case .python: "PY"
+                case .typescript: "TS"
+                case .javascript: "JS"
+                }
+            }.joined(separator: "·")
+            return (path, label)
+        })
     }
 
     private func renderCommitButton() {
@@ -6184,6 +6205,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
     func showEmptyState(
         recentPaths: [String],
+        recentLanguages: [String: String] = [:],
         failed: Bool,
         failureReason: String? = nil,
         onChooseProject: @escaping () -> Void,
@@ -6197,6 +6219,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         label.isHidden = true
         scrollView?.isHidden = true
         if let emptyStateView {
+            emptyStateView.updateRecentLanguages(recentLanguages)
             emptyStateView.update(
                 recentPaths: recentPaths,
                 failed: failed,
@@ -6212,6 +6235,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             onOpenDropped: onOpenDropped,
             onRetry: onRetry
         )
+        emptyStateView.updateRecentLanguages(recentLanguages)
         emptyStateView.update(
             recentPaths: recentPaths,
             failed: failed,

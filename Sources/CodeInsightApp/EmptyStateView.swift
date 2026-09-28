@@ -16,7 +16,10 @@ final class EmptyStateView: NSView {
     private let openButton = NSButton()
     private let chooseFolderButton = NSButton()
     private let recentStack = NSStackView()
+    private let columns = NSStackView()
     private var recentPaths: [String] = []
+    /// Short language labels (RS, PY, TS…) per recent path; empty when unknown.
+    private var recentLanguages: [String: String] = [:]
     private var isFailure = false
     private let dropHint = NSTextField(labelWithString: localized("welcome.dropHint"))
     private(set) var theme = ReaderTheme(settings: ReaderSettings())
@@ -49,12 +52,12 @@ final class EmptyStateView: NSView {
         markView.translatesAutoresizingMaskIntoConstraints = false
 
         titleLabel.font = cairnSerifFont(ofSize: 34)
-        titleLabel.alignment = .center
+        titleLabel.alignment = .left
         taglineLabel.font = cairnItalicSerifFont(ofSize: 19)
-        taglineLabel.alignment = .center
+        taglineLabel.alignment = .left
         // Short, bounded failure reason; selectable so it stays copyable.
         reasonLabel.font = .systemFont(ofSize: 13)
-        reasonLabel.alignment = .center
+        reasonLabel.alignment = .left
         reasonLabel.isSelectable = true
         reasonLabel.setContentHuggingPriority(
             .defaultLow,
@@ -77,7 +80,7 @@ final class EmptyStateView: NSView {
         chooseFolderButton.isHidden = true
 
         dropHint.font = .systemFont(ofSize: 11.5)
-        dropHint.alignment = .center
+        dropHint.alignment = .left
 
         recentStack.orientation = .vertical
         recentStack.alignment = .leading
@@ -91,10 +94,9 @@ final class EmptyStateView: NSView {
             openButton,
             chooseFolderButton,
             dropHint,
-            recentStack,
         ])
         stack.orientation = .vertical
-        stack.alignment = .centerX
+        stack.alignment = .leading
         stack.spacing = 0
         stack.setCustomSpacing(14, after: markView)
         stack.setCustomSpacing(2, after: titleLabel)
@@ -102,21 +104,26 @@ final class EmptyStateView: NSView {
         stack.setCustomSpacing(16, after: reasonLabel)
         stack.setCustomSpacing(8, after: openButton)
         stack.setCustomSpacing(24, after: chooseFolderButton)
-        stack.setCustomSpacing(32, after: dropHint)
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        // Welcome reads as two columns: the wordmark and actions on the left,
+        // recent projects on the right; narrow views stack them.
+        columns.setViews([stack, recentStack], in: .leading)
+        columns.orientation = .horizontal
+        columns.alignment = .centerY
+        columns.spacing = 72
+        columns.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(columns)
 
         NSLayoutConstraint.activate([
             markView.widthAnchor.constraint(equalToConstant: 48),
             markView.heightAnchor.constraint(equalToConstant: 48),
             openButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 180),
-            recentStack.widthAnchor.constraint(equalToConstant: 440),
-            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
-            stack.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
-            stack.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 24),
-            stack.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -24),
+            recentStack.widthAnchor.constraint(equalToConstant: 380),
+            columns.centerXAnchor.constraint(equalTo: centerXAnchor),
+            columns.centerYAnchor.constraint(equalTo: centerYAnchor),
+            columns.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 24),
+            columns.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+            columns.topAnchor.constraint(greaterThanOrEqualTo: topAnchor, constant: 24),
+            columns.bottomAnchor.constraint(lessThanOrEqualTo: bottomAnchor, constant: -24),
         ])
 
         update(recentPaths: recentPaths, failed: failed, reason: nil)
@@ -134,6 +141,31 @@ final class EmptyStateView: NSView {
     }
 
     var selfTestTaglineColor: NSColor? { taglineLabel.textColor }
+    var selfTestColumnsAreSideBySide: Bool { columns.orientation == .horizontal }
+    var selfTestRecentLanguageLabels: [String] {
+        recentStack.arrangedSubviews.compactMap { ($0 as? HoverButton)?.languageLabel }
+    }
+    var selfTestRecentFrames: (actions: NSRect, recents: NSRect) {
+        (columns.arrangedSubviews.first.map { $0.convert($0.bounds, to: nil) } ?? .zero,
+         recentStack.convert(recentStack.bounds, to: nil))
+    }
+
+    func updateRecentLanguages(_ languages: [String: String]) {
+        guard languages != recentLanguages else { return }
+        recentLanguages = languages
+        rebuildRecents()
+    }
+
+    override func layout() {
+        // Two columns need about 780pt; below that the recents move under the actions.
+        let horizontal = bounds.width >= 820
+        if (columns.orientation == .horizontal) != horizontal {
+            columns.orientation = horizontal ? .horizontal : .vertical
+            columns.alignment = horizontal ? .centerY : .leading
+            columns.spacing = horizontal ? 72 : 32
+        }
+        super.layout()
+    }
     var selfTestTitleFont: NSFont? { titleLabel.font }
 
     required init?(coder: NSCoder) {
@@ -274,16 +306,21 @@ final class EmptyStateView: NSView {
             button.alignment = .left
             button.attributedTitle = Self.recentTitle(path: path, theme: theme)
             button.hoverColor = theme.mossSoftColor
+            button.languageLabel = recentLanguages[path]
             button.toolTip = path
             button.setAccessibilityLabel(localizedFormat("welcome.openRecent", URL(fileURLWithPath: path).lastPathComponent))
             recentStack.addArrangedSubview(button)
             button.widthAnchor.constraint(equalTo: recentStack.widthAnchor).isActive = true
             button.heightAnchor.constraint(equalToConstant: 42).isActive = true
 
-            Task { @MainActor [weak button] in
-                let image = NSWorkspace.shared.icon(forFile: path)
-                image.size = NSSize(width: 28, height: 28)
-                button?.image = image
+            if let label = recentLanguages[path] {
+                button.image = Self.languageBadge(label, theme: theme)
+            } else {
+                Task { @MainActor [weak button] in
+                    let image = NSWorkspace.shared.icon(forFile: path)
+                    image.size = NSSize(width: 28, height: 28)
+                    button?.image = image
+                }
             }
         }
     }
@@ -308,6 +345,25 @@ final class EmptyStateView: NSView {
         layer?.borderWidth = highlighted ? 2 : 0
         layer?.borderColor = highlighted ? theme.accentColor.cgColor : nil
         layer?.cornerRadius = 14
+    }
+
+    /// A 28pt rounded block with the language's short label, like a file tag.
+    private static func languageBadge(_ label: String, theme: ReaderTheme) -> NSImage {
+        let size = NSSize(width: 28, height: 28)
+        let fill = theme.chipBackgroundColor
+        let ink = theme.warningColor
+        return NSImage(size: size, flipped: false) { rect in
+            fill.setFill()
+            NSBezierPath(roundedRect: rect, xRadius: 7, yRadius: 7).fill()
+            let text = NSAttributedString(string: label, attributes: [
+                .font: NSFont.monospacedSystemFont(ofSize: 10, weight: .bold),
+                .foregroundColor: ink,
+            ])
+            let textSize = text.size()
+            text.draw(at: NSPoint(x: (rect.width - textSize.width) / 2,
+                                  y: (rect.height - textSize.height) / 2))
+            return true
+        }
     }
 
     private static func recentTitle(path: String, theme: ReaderTheme) -> NSAttributedString {
@@ -338,6 +394,7 @@ final class EmptyStateView: NSView {
 private final class HoverButton: NSButton {
     private var hoverTrackingArea: NSTrackingArea?
     var hoverColor: NSColor = .clear
+    var languageLabel: String?
 
     override func updateTrackingAreas() {
         if let hoverTrackingArea {

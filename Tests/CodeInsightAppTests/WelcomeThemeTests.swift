@@ -80,3 +80,55 @@ func welcomeFollowsTheWindowThemeOnCreationAndChange() throws {
     #expect(welcome.theme.selection == .siClassic)
     #expect(welcomeRGB(welcome.selfTestTaglineColor) == 0x1D3A8F)
 }
+
+@MainActor
+@Test
+func welcomeSetsRecentsBesideTheActionsAndStacksThemWhenNarrow() {
+    let view = EmptyStateView(
+        recentPaths: ["/tmp/knuth-rs", "/tmp/rlm"], failed: false,
+        onChooseProject: {}, onOpenRecent: { _ in }, onOpenDropped: { _ in }, onRetry: {}
+    )
+    view.updateRecentLanguages(["/tmp/knuth-rs": "RS"])
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 1200, height: 700),
+        styleMask: [.titled], backing: .buffered, defer: false
+    )
+    window.contentView = view
+    defer { window.orderOut(nil) }
+    window.contentView?.layoutSubtreeIfNeeded()
+    #expect(view.selfTestColumnsAreSideBySide)
+    var frames = view.selfTestRecentFrames
+    #expect(frames.recents.minX >= frames.actions.maxX)
+    #expect(frames.recents.width > 0 && frames.recents.height > 0)
+    // Only a recorded language gets a label; the other keeps its folder icon.
+    #expect(view.selfTestRecentLanguageLabels == ["RS"])
+
+    window.setContentSize(NSSize(width: 700, height: 900))
+    window.contentView?.layoutSubtreeIfNeeded()
+    #expect(!view.selfTestColumnsAreSideBySide)
+    frames = view.selfTestRecentFrames
+    #expect(frames.recents.maxY <= frames.actions.minY + 1)
+}
+
+@MainActor
+@Test
+func welcomeShowsRecordedLanguagesFromTheRecentProjectsStore() throws {
+    let suite = "WelcomeLanguageTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = RecentProjectsStore(defaults: defaults)
+    store.record(URL(fileURLWithPath: "/tmp/cairn-welcome-py", isDirectory: true), language: .python)
+    let controller = MainWindowController(
+        model: AppModel(indexService: WelcomeIndexService()),
+        settings: ReaderSettings(theme: .light),
+        offscreen: true,
+        recentProjectsStore: store,
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    controller.renderForSelfTest()
+    controller.window?.contentView?.layoutSubtreeIfNeeded()
+    let reader = try #require(mirrored("readerController", of: controller, as: ReaderViewController.self))
+    let welcome = try #require(mirrored("emptyStateView", of: reader, as: EmptyStateView?.self) ?? nil)
+    #expect(welcome.selfTestRecentLanguageLabels == ["PY"])
+}
