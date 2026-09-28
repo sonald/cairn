@@ -305,7 +305,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         detail.attributedStringValue = styledDetail(
             path: record.path,
             snapshot: snapshotText(record),
-            status: status,
+            status: appModel.bookmarkModel.attemptMessage(for: record.id),
             statusColor: statusColor(appModel.bookmarkStatus(for: record)),
             historical: { if case .commit = record.snapshot { true } else { false } }()
         )
@@ -330,13 +330,27 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
                 localized("panel.bookmark.reanchor"), action: #selector(reanchorBookmark(_:)), record: record
             ))
         }
-        let stack = NSStackView(views: [title, detail, note])
+        // Status reads as a badge beside the title; the attempt message, when
+        // there is one, stays in the detail line.
+        let statusValue = appModel.bookmarkStatus(for: record)
+        let badge = CairnBadgeView(
+            style: Self.badgeStyle(for: statusValue),
+            text: statusValue.displayText,
+            theme: theme
+        )
+        badge.identifier = NSUserInterfaceItemIdentifier("BookmarkStatusBadge")
+        let titleRow = NSStackView(views: [title, badge])
+        titleRow.orientation = .horizontal
+        titleRow.alignment = .centerY
+        titleRow.spacing = 8
+        let stack = NSStackView(views: [titleRow, detail, note])
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 2
         stack.translatesAutoresizingMaskIntoConstraints = false
         actions.translatesAutoresizingMaskIntoConstraints = false
-        for label in [title, detail, note] {
+        title.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for label in [detail, note] {
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             label.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         }
@@ -606,6 +620,34 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         tableView.reloadData()
     }
 
+    static func badgeStyle(for status: BookmarkStatus) -> CairnBadgeView.Style {
+        switch status {
+        case .exactContent: .verified
+        case .drifted: .limited
+        case .revisionUnavailable, .fileAbsent, .offsetInvalid: .corrected
+        case .notEvaluated: .captured
+        }
+    }
+
+    func selfTestRowBadge(id: UUID) -> (text: String, style: CairnBadgeView.Style, visible: Bool, detail: String)? {
+        guard let row = rows.firstIndex(where: { $0.id == id }),
+              let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
+        else { return nil }
+        func find(_ view: NSView) -> CairnBadgeView? {
+            if let badge = view as? CairnBadgeView { return badge }
+            return view.subviews.lazy.compactMap(find).first
+        }
+        guard let badge = find(cell) else { return nil }
+        cell.layoutSubtreeIfNeeded()
+        func detail(_ view: NSView) -> NSTextField? {
+            if let field = view as? NSTextField, field.stringValue.hasPrefix(rows[row].path + " · ") { return field }
+            return view.subviews.lazy.compactMap(detail).first
+        }
+        return (badge.text, badge.style,
+                badge.window != nil && !badge.isHiddenOrHasHiddenAncestor && badge.frame.width > 0,
+                detail(cell)?.stringValue ?? "")
+    }
+
     func statusColor(_ status: BookmarkStatus) -> NSColor {
         switch status {
         case .exactContent: theme.verifiedColor
@@ -617,7 +659,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
 
     /// Keeps the plain text "path · snapshot · status" while coloring its parts.
     private func styledDetail(
-        path: String, snapshot: String, status: String,
+        path: String, snapshot: String, status: String?,
         statusColor: NSColor, historical: Bool
     ) -> NSAttributedString {
         let muted: [NSAttributedString.Key: Any] = [
@@ -628,6 +670,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         var snapshotAttributes = muted
         if historical { snapshotAttributes[.foregroundColor] = theme.histColor }
         text.append(NSAttributedString(string: snapshot, attributes: snapshotAttributes))
+        guard let status else { return text }
         text.append(NSAttributedString(string: " · ", attributes: muted))
         text.append(NSAttributedString(string: status, attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),

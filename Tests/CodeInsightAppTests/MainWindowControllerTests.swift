@@ -379,6 +379,48 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
 
 @MainActor
 @Test
+func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async throws {
+    _ = NSApplication.shared
+    let path = "src/main.rs"
+    let root = try mainWindowTemporaryGitProject([path: "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel()
+    try await model.openProject(root: root, languages: [.rust])
+    try #require(await mainWindowWaitUntil(
+        model.snapshotPhase == .fullReady && model.querySessions.count == 1
+    ))
+    let pending = BookmarkRecord(
+        id: UUID(), projectPath: root.path, snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
+        path: path, contentID: ContentID.sha256(of: Data("old\n".utf8)),
+        byteOffset: 0, line: 1, symbolName: nil, symbolKind: nil, note: "", updatedAt: .now
+    )
+    let drifted = BookmarkRecord(
+        id: UUID(), projectPath: root.path, snapshot: .worktree,
+        path: path, contentID: pending.contentID, byteOffset: 0, line: 1,
+        symbolName: nil, symbolKind: nil, note: "", updatedAt: Date(timeIntervalSince1970: 1)
+    )
+    #expect(model.bookmarkModel.toggle(pending) == .added)
+    #expect(model.bookmarkModel.toggle(drifted) == .added)
+    let panel = BookmarkPanel(appModel: model, onOpen: { _ in }, onLineOpen: { _, _ in })
+    defer { panel.closePanel() }
+    panel.show(relativeTo: nil)
+
+    let pendingBadge = try #require(panel.selfTestRowBadge(id: pending.id))
+    #expect(pendingBadge.text == BookmarkStatus.notEvaluated.displayText)
+    #expect(pendingBadge.style == .captured)
+    #expect(pendingBadge.visible)
+    #expect(!pendingBadge.detail.contains(BookmarkStatus.notEvaluated.displayText))
+
+    let driftedBadge = try #require(panel.selfTestRowBadge(id: drifted.id))
+    #expect(driftedBadge.text == BookmarkStatus.drifted.displayText)
+    #expect(driftedBadge.style == .limited)
+    #expect(driftedBadge.visible)
+    #expect(!driftedBadge.detail.contains(BookmarkStatus.drifted.displayText))
+    #expect(driftedBadge.detail.contains(path))
+}
+
+@MainActor
+@Test
 func recentProjectStoresTypeScriptRawValueTwoAndForwards() {
     let fixture = MainWindowIdentityFixture()
     defer { fixture.close() }
