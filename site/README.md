@@ -21,3 +21,5 @@ Workflow configuration follows [GitHub's Pages documentation](https://docs.githu
 ## Demo data
 
 The interactive reader and snapshot timeline use real results from [sonald/knuth-rs](https://github.com/sonald/knuth-rs) at `fac975a`: callers, resolutions and certainty from `codeinsight callers`/`resolve`, Exact targets from `codeinsight exact-def` (rust-analyzer, Safe mode), and the `HookContext` history from `git show <commit>:crates/knuth-agent/src/hooks/types.rs`. Re-run those commands against a clean checkout of that commit when updating the data.
+
+The screenshot (`assets/reader.png`) shows the packaged app reading a clean clone of knuth-rs at `fac975a` (`crates/knuth-agent/src/harness.rs`, Callers of `after_tool_use`), captured with the Light theme and English UI via launch arguments: `open -a Cairn.app <clone> --args -AppleLanguages '(en)' -reader.theme Light`, then `screencapture -o -l <window-id>` (no window shadow; the page adds its own).
