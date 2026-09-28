@@ -16,7 +16,8 @@ func pythonReaderIsKeyword(_ value: String) -> Bool {
 }
 
 func pythonReaderHighlightWithFolds(
-    bytes: [UInt8]
+    bytes: [UInt8],
+    shouldCancel: (() -> Bool)? = nil
 ) throws -> (
     spans: [HighlightSpan],
     outlineFacets: [OutlineFacet],
@@ -31,9 +32,7 @@ func pythonReaderHighlightWithFolds(
     #if DEBUG
     DocumentLoader.pythonParseObserver?()
     #endif
-    guard let tree = parser.parse(bytes) else {
-        throw RustHighlighterError.parseFailed
-    }
+    let tree = try parseReaderTree(parser, bytes, shouldCancel: shouldCancel)
 
     var spans: [HighlightSpan] = []
     var facets: [OutlineFacet] = []
@@ -47,11 +46,13 @@ func pythonReaderHighlightWithFolds(
         facets: &facets,
         candidates: &candidates
     )
+    try checkReaderCancellation(shouldCancel)
     let folds = candidates.resolve(
         outlineFacets: facets,
         observer: nil as (@Sendable (Double, Int, Int) -> Void)?
     )
     let refs = pythonLocalReferences(in: tree, bytes: bytes)
+    try checkReaderCancellation(shouldCancel)
     appendLocalBindingHighlights(
         bindings: refs.bindings,
         referencesByBinding: refs.referencesByBinding,

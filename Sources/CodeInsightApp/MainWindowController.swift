@@ -5339,6 +5339,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var loadGeneration: UInt64 = 0
     private var isClosing = false
     private var syntaxLoadPending = false
+    /// Large-file syntax work; cancelled whenever the displayed load changes.
+    /// Publication is still fenced by `loadGeneration`.
+    private var syntaxTask: Task<Void, Never>?
     private var pendingFocusNavigationOffset: UInt32?
     private var findTask: Task<Void, Never>?
     private var findWorker: Task<[ByteRange], Error>?
@@ -5372,11 +5375,17 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readerIdentifierPreparationNotice(textView.identifierPreparationState)
     }
 
+    private func cancelSyntaxLoad() {
+        syntaxLoadPending = false
+        syntaxTask?.cancel()
+        syntaxTask = nil
+    }
+
     /// Terminal window teardown, not a temporary pause. Preserve text for the final checkpoint.
     func cancelDerivedDataSubscription() {
         isClosing = true
         loadGeneration &+= 1
-        syntaxLoadPending = false
+        cancelSyntaxLoad()
         pendingFocusNavigationOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
@@ -7105,6 +7114,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         findWorker?.cancel()
         readingPositionTask?.cancel()
         loadGeneration &+= 1
+        cancelSyntaxLoad()
         displayedFile = nil
         updatePathControl()
         displayedSnapshotID = nil
@@ -7195,7 +7205,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readingHeightControl.isHidden = true
         readingHeightControl.isEnabled = false
         readingHeightShortcutLabel.isHidden = true
-        syntaxLoadPending = false
+        cancelSyntaxLoad()
         pendingFocusNavigationOffset = nil
         displayedDocument = nil
         onDocumentChange?(file, nil)
@@ -7704,7 +7714,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         contextMenuOffset = nil
         readingPositionTask?.cancel()
         readingPositionTask = nil
-        syntaxLoadPending = false
+        cancelSyntaxLoad()
         pendingFocusNavigationOffset = nil
         loadGeneration &+= 1
         let generation = loadGeneration
@@ -7755,7 +7765,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 .textViewportLayoutController.layoutViewport()
             if loaded.tier != .regular {
                 syntaxLoadPending = true
-                activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
+                syntaxTask = activeLoader.loadSyntax(for: loaded.document) { [weak self] result in
                     Task { @MainActor [weak self] in
                         guard let self,
                               self.loadGeneration == generation,

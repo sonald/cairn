@@ -20,7 +20,8 @@ func typeScriptReaderIsKeyword(_ value: String) -> Bool {
 
 func typeScriptReaderHighlightWithFolds(
     bytes: [UInt8],
-    mode: LanguageMode
+    mode: LanguageMode,
+    shouldCancel: (() -> Bool)? = nil
 ) throws -> (
     spans: [HighlightSpan],
     outlineFacets: [OutlineFacet],
@@ -37,9 +38,7 @@ func typeScriptReaderHighlightWithFolds(
     #if DEBUG
     TypeScriptExtractor.parseObserver?()
     #endif
-    guard let tree = parser.parse(bytes) else {
-        throw RustHighlighterError.parseFailed
-    }
+    let tree = try parseReaderTree(parser, bytes, shouldCancel: shouldCancel)
 
     var spans: [HighlightSpan] = []
     var facets: [OutlineFacet] = []
@@ -56,7 +55,9 @@ func typeScriptReaderHighlightWithFolds(
         outlineFacets: facets,
         observer: nil as (@Sendable (Double, Int, Int) -> Void)?
     )
+    try checkReaderCancellation(shouldCancel)
     let references = typeScriptLocalReferences(in: tree, bytes: bytes)
+    try checkReaderCancellation(shouldCancel)
     appendLocalBindingHighlights(
         bindings: references.bindings,
         referencesByBinding: references.referencesByBinding,

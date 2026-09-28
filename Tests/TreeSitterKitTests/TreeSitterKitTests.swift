@@ -162,3 +162,43 @@ private func text(of node: Node, in source: String) -> String {
         as: UTF8.self
     )
 }
+
+@Test
+func cancellableParseMatchesPlainParseWhenNotCancelled() throws {
+    let rust = try #require(makeRustParser())
+    let python = try #require(makePythonParser())
+    let inputs: [(Parser, String)] = [
+        (rust, ""),
+        (rust, "fn main() { let s = \"héllo — 你好 🎉\"; }\n"),
+        (rust, String(repeating: "fn f() { g(1, 2); }\n", count: 2_000)),
+        (python, "def f(x):\n    return x  # ünïcode\n"),
+    ]
+    for (parser, source) in inputs {
+        let bytes = Array(source.utf8)
+        let plain = try #require(parser.parse(bytes))
+        let cancellable = try #require(parser.parse(bytes, shouldCancel: { false }))
+        #expect(cancellable.rootNode.sExpression == plain.rootNode.sExpression)
+        #expect(cancellable.rootNode.byteRange == plain.rootNode.byteRange)
+    }
+}
+
+@Test
+func cancellableParseHaltsAtTheFirstCancelledPoll() throws {
+    let parser = try #require(makeRustParser())
+    let bytes = Array(String(repeating: "fn f() { g(1, 2); }\n", count: 20_000).utf8)
+
+    var completePolls = 0
+    _ = try #require(parser.parse(bytes, shouldCancel: {
+        completePolls += 1
+        return false
+    }))
+
+    var cancelledPolls = 0
+    let cancelled = parser.parse(bytes, shouldCancel: {
+        cancelledPolls += 1
+        return cancelledPolls == 3
+    })
+    #expect(cancelled == nil)
+    #expect(cancelledPolls == 3)
+    #expect(completePolls > 3, "a complete parse keeps polling beyond the cancelled point")
+}

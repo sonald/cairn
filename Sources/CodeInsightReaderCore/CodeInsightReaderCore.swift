@@ -403,6 +403,31 @@ public enum RustHighlighterError: Error, Sendable {
     case parseFailed
 }
 
+/// Parses for a Reader syntax pass. With `shouldCancel`, parsing halts early
+/// and a cancelled pass throws `CancellationError` instead of `parseFailed`.
+func parseReaderTree(
+    _ parser: Parser,
+    _ bytes: [UInt8],
+    shouldCancel: (() -> Bool)?
+) throws -> Tree {
+    guard let shouldCancel else {
+        guard let tree = parser.parse(bytes) else {
+            throw RustHighlighterError.parseFailed
+        }
+        return tree
+    }
+    guard let tree = parser.parse(bytes, shouldCancel: shouldCancel) else {
+        if shouldCancel() { throw CancellationError() }
+        throw RustHighlighterError.parseFailed
+    }
+    return tree
+}
+
+/// Checked between the phases of a Reader syntax pass.
+func checkReaderCancellation(_ shouldCancel: (() -> Bool)?) throws {
+    if shouldCancel?() == true { throw CancellationError() }
+}
+
 public struct RustHighlighter: Sendable {
     private static let keywords: Set<String> = [
         "as", "async", "await", "break", "const", "continue", "crate", "else",
@@ -446,7 +471,8 @@ public struct RustHighlighter: Sendable {
 
     package func highlightWithFolds(
         bytes: [UInt8],
-        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)? = nil
+        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)? = nil,
+        shouldCancel: (() -> Bool)? = nil
     ) throws -> (
         spans: [HighlightSpan],
         outlineFacets: [OutlineFacet],
@@ -461,9 +487,7 @@ public struct RustHighlighter: Sendable {
         #if DEBUG
         RustExtractor.parseObserver?()
         #endif
-        guard let tree = parser.parse(bytes) else {
-            throw RustHighlighterError.parseFailed
-        }
+        let tree = try parseReaderTree(parser, bytes, shouldCancel: shouldCancel)
 
         var spans: [HighlightSpan] = []
         var roles: [Range<UInt32>: HighlightKind] = [:]
@@ -603,10 +627,12 @@ public struct RustHighlighter: Sendable {
                 }
             }
         }
+        try checkReaderCancellation(shouldCancel)
         let references = RustExtractor().localReferences(
             tree: tree,
             bytes: bytes
         )
+        try checkReaderCancellation(shouldCancel)
         appendLocalBindingHighlights(
             bindings: references.bindings,
             referencesByBinding: references.referencesByBinding,
@@ -919,13 +945,15 @@ public struct DocumentLoader: Sendable {
     }
 
     package func loadSyntax(
-        for document: ReaderDocument
+        for document: ReaderDocument,
+        shouldCancel: (() -> Bool)? = nil
     ) throws -> ReaderDocument {
         try Self.requireSupported(document.languageMode)
         let highlighted = try Self.highlightWithFolds(
             bytes: document.bytes,
             languageMode: document.languageMode,
-            resolutionObserver: foldResolutionObserver
+            resolutionObserver: foldResolutionObserver,
+            shouldCancel: shouldCancel
         )
         return ReaderDocument(
             bytes: document.bytes,
@@ -945,7 +973,8 @@ public struct DocumentLoader: Sendable {
     private static func highlightWithFolds(
         bytes: [UInt8],
         languageMode: LanguageMode,
-        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)?
+        resolutionObserver: (@Sendable (Double, Int, Int) -> Void)?,
+        shouldCancel: (() -> Bool)? = nil
     ) throws -> (
         spans: [HighlightSpan],
         outlineFacets: [OutlineFacet],
@@ -957,36 +986,53 @@ public struct DocumentLoader: Sendable {
         case .rust:
             return try RustHighlighter().highlightWithFolds(
                 bytes: bytes,
-                resolutionObserver: resolutionObserver
+                resolutionObserver: resolutionObserver,
+                shouldCancel: shouldCancel
             )
         case .python:
             try Self.requireSupported(languageMode)
-            return try pythonReaderHighlightWithFolds(bytes: bytes)
+            return try pythonReaderHighlightWithFolds(
+                bytes: bytes,
+                shouldCancel: shouldCancel
+            )
         case .typescript:
             try Self.requireSupported(languageMode)
             return try typeScriptReaderHighlightWithFolds(
                 bytes: bytes,
-                mode: languageMode
+                mode: languageMode,
+                shouldCancel: shouldCancel
             )
         case .javascript:
             throw RustHighlighterError.unsupportedLanguage(languageMode.language)
         }
     }
 
+    /// Builds syntax off the caller's thread. Cancelling the returned task
+    /// stops the parse cooperatively and suppresses `completion`; callers
+    /// still fence publication by their own load generation.
+    @discardableResult
     public func loadSyntax(
         for document: ReaderDocument,
         completion: @escaping @Sendable (
             Result<ReaderDocument, RustHighlighterError>
         ) -> Void
-    ) {
+    ) -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) {
+            let result: Result<ReaderDocument, RustHighlighterError>
             do {
-                completion(.success(try loadSyntax(for: document)))
+                result = .success(try loadSyntax(
+                    for: document,
+                    shouldCancel: { Task.isCancelled }
+                ))
+            } catch is CancellationError {
+                return
             } catch let error as RustHighlighterError {
-                completion(.failure(error))
+                result = .failure(error)
             } catch {
-                completion(.failure(.parseFailed))
+                result = .failure(.parseFailed)
             }
+            guard !Task.isCancelled else { return }
+            completion(result)
         }
     }
 }

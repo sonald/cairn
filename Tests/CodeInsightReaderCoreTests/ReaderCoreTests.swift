@@ -1771,3 +1771,53 @@ private func permuted<T>(_ values: [T], seed: UInt64) -> [T] {
     }
     return result
 }
+
+@Test
+func cancellableSyntaxPassMatchesTheDefaultPassAndStopsWhenCancelled() throws {
+    let documents = [
+        ReaderDocument(
+            bytes: Array("struct S;\nimpl S {\n    fn run(&self, x: u8) -> u8 {\n        let y = x;\n        y\n    }\n}\n".utf8),
+            languageMode: LanguageMode(language: .rust)
+        ),
+        ReaderDocument(
+            bytes: Array("class C:\n    def run(self, x):\n        y = x\n        return y\n".utf8),
+            languageMode: LanguageMode(language: .python)
+        ),
+        ReaderDocument(
+            bytes: Array("export class C {\n  run(x: number) {\n    const y = x;\n    return y;\n  }\n}\n".utf8),
+            languageMode: LanguageMode(language: .typescript)
+        ),
+    ]
+    let loader = DocumentLoader()
+    for document in documents {
+        let plain = try loader.loadSyntax(for: document)
+        let cancellable = try loader.loadSyntax(for: document, shouldCancel: { false })
+        #expect(cancellable.highlightSpans == plain.highlightSpans)
+        #expect(cancellable.outlineFacets == plain.outlineFacets)
+        #expect(cancellable.foldRegions == plain.foldRegions)
+        #expect(cancellable.localBindings.map(\.declarationRange) == plain.localBindings.map(\.declarationRange))
+        #expect(cancellable.referencesByBinding == plain.referencesByBinding)
+
+        #expect(throws: CancellationError.self) {
+            try loader.loadSyntax(for: document, shouldCancel: { true })
+        }
+    }
+}
+
+@Test
+func cancelledAsyncSyntaxLoadNeverCompletes() async throws {
+    let source = String(repeating: "fn f(x: u8) -> u8 {\n    let y = x;\n    y\n}\n", count: 20_000)
+    let document = ReaderDocument(
+        bytes: Array(source.utf8),
+        languageMode: LanguageMode(language: .rust)
+    )
+    let completions = OSAllocatedUnfairLock(initialState: 0)
+
+    let task = DocumentLoader().loadSyntax(for: document) { _ in
+        completions.withLock { $0 += 1 }
+    }
+    task.cancel()
+    await task.value
+
+    #expect(completions.withLock { $0 } == 0)
+}

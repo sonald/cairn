@@ -46,6 +46,62 @@ public final class Parser {
         }
         return tree.map(Tree.init)
     }
+
+    /// Parses like `parse(_:)` but halts early, returning nil, once
+    /// `shouldCancel` reports true. Tree-sitter polls it periodically.
+    public func parse(_ bytes: [UInt8], shouldCancel: () -> Bool) -> Tree? {
+        guard let length = UInt32(exactly: bytes.count) else { return nil }
+        guard !bytes.isEmpty else { return shouldCancel() ? nil : parse(bytes) }
+        return withoutActuallyEscaping(shouldCancel) { shouldCancel in
+            let cancellation = ParseCancellation(shouldCancel)
+            return bytes.withUnsafeBytes { buffer in
+                var source = ParseSource(
+                    base: buffer.baseAddress!.assumingMemoryBound(to: CChar.self),
+                    length: length
+                )
+                return withUnsafeMutablePointer(to: &source) { sourcePointer in
+                    let input = TSInput(
+                        payload: UnsafeMutableRawPointer(sourcePointer),
+                        read: { payload, byteIndex, _, bytesRead in
+                            let source = payload!.assumingMemoryBound(to: ParseSource.self).pointee
+                            bytesRead!.pointee = byteIndex < source.length
+                                ? source.length - byteIndex
+                                : 0
+                            return source.base + Int(min(byteIndex, source.length))
+                        },
+                        encoding: TSInputEncodingUTF8,
+                        decode: nil
+                    )
+                    let options = TSParseOptions(
+                        payload: Unmanaged.passUnretained(cancellation).toOpaque(),
+                        progress_callback: { state in
+                            Unmanaged<ParseCancellation>
+                                .fromOpaque(state!.pointee.payload)
+                                .takeUnretainedValue()
+                                .shouldCancel()
+                        }
+                    )
+                    let tree = withExtendedLifetime(cancellation) {
+                        ts_parser_parse_with_options(raw, nil, input, options)
+                    }
+                    return tree.map(Tree.init)
+                }
+            }
+        }
+    }
+}
+
+private struct ParseSource {
+    let base: UnsafePointer<CChar>
+    let length: UInt32
+}
+
+private final class ParseCancellation {
+    let shouldCancel: () -> Bool
+
+    init(_ shouldCancel: @escaping () -> Bool) {
+        self.shouldCancel = shouldCancel
+    }
 }
 
 public final class Tree {
