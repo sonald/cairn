@@ -310,6 +310,7 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             historical: { if case .commit = record.snapshot { true } else { false } }()
         )
         detail.lineBreakMode = .byTruncatingMiddle
+        detail.maximumNumberOfLines = 1
         detail.toolTip = detail.stringValue
         let note = NSTextField(labelWithString: record.note.replacingOccurrences(of: "\n", with: " "))
         note.font = cairnSerifFont(ofSize: 12)
@@ -354,9 +355,16 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
             label.trailingAnchor.constraint(equalTo: stack.trailingAnchor).isActive = true
         }
+        // The actions keep their own width; the text column takes the rest.
         for action in actions.arrangedSubviews {
             action.setContentCompressionResistancePriority(.required, for: .horizontal)
+            action.setContentHuggingPriority(.required, for: .horizontal)
         }
+        actions.setHuggingPriority(.defaultHigh, for: .horizontal)
+        stack.setHuggingPriority(.defaultLow, for: .horizontal)
+        badge.setContentCompressionResistancePriority(.required, for: .horizontal)
+        badge.setContentHuggingPriority(.required, for: .horizontal)
+        titleRow.trailingAnchor.constraint(lessThanOrEqualTo: stack.trailingAnchor).isActive = true
         cell.addSubview(stack)
         cell.addSubview(actions)
         NSLayoutConstraint.activate([
@@ -629,7 +637,10 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         }
     }
 
-    func selfTestRowBadge(id: UUID) -> (text: String, style: CairnBadgeView.Style, visible: Bool, detail: String)? {
+    func selfTestRowBadge(id: UUID) -> (
+        text: String, style: CairnBadgeView.Style, visible: Bool,
+        detail: String, detailWidthFraction: CGFloat, detailLines: Int
+    )? {
         guard let row = rows.firstIndex(where: { $0.id == id }),
               let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: true)
         else { return nil }
@@ -643,9 +654,13 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
             if let field = view as? NSTextField, field.stringValue.hasPrefix(rows[row].path + " · ") { return field }
             return view.subviews.lazy.compactMap(detail).first
         }
+        let field = detail(cell)
+        let lineHeight = field.flatMap { NSLayoutManager().defaultLineHeight(for: $0.font ?? .systemFont(ofSize: 11)) } ?? 1
         return (badge.text, badge.style,
                 badge.window != nil && !badge.isHiddenOrHasHiddenAncestor && badge.frame.width > 0,
-                detail(cell)?.stringValue ?? "")
+                field?.stringValue ?? "",
+                (field?.frame.width ?? 0) / max(cell.bounds.width, 1),
+                Int(((field?.frame.height ?? 0) / lineHeight).rounded()))
     }
 
     func statusColor(_ status: BookmarkStatus) -> NSColor {
@@ -670,12 +685,21 @@ final class BookmarkPanel: NSWindowController, NSSearchFieldDelegate,
         var snapshotAttributes = muted
         if historical { snapshotAttributes[.foregroundColor] = theme.histColor }
         text.append(NSAttributedString(string: snapshot, attributes: snapshotAttributes))
-        guard let status else { return text }
+        guard let status else { return singleLine(text) }
         text.append(NSAttributedString(string: " · ", attributes: muted))
         text.append(NSAttributedString(string: status, attributes: [
             .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
             .foregroundColor: statusColor,
         ]))
+        return singleLine(text)
+    }
+
+    /// Attributed strings override the field's line break mode, so truncation
+    /// travels in the paragraph style.
+    private func singleLine(_ text: NSMutableAttributedString) -> NSAttributedString {
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byTruncatingMiddle
+        text.addAttribute(.paragraphStyle, value: style, range: NSRange(location: 0, length: text.length))
         return text
     }
 

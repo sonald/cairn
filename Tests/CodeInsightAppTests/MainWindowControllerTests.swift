@@ -381,8 +381,9 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
 @Test
 func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async throws {
     _ = NSApplication.shared
-    let path = "src/main.rs"
-    let root = try mainWindowTemporaryGitProject([path: "fn main() {}\n"])
+    let path = String(repeating: "nested-directory/", count: 8) + "main.rs"
+    let shortPath = "src/lib.rs"
+    let root = try mainWindowTemporaryGitProject([path: "fn main() {}\n", shortPath: "fn lib() {}\n"])
     defer { try? FileManager.default.removeItem(at: root) }
     let model = AppModel()
     try await model.openProject(root: root, languages: [.rust])
@@ -391,7 +392,7 @@ func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async thro
     ))
     let pending = BookmarkRecord(
         id: UUID(), projectPath: root.path, snapshot: .commit(fullOID: String(repeating: "a", count: 40)),
-        path: path, contentID: ContentID.sha256(of: Data("old\n".utf8)),
+        path: shortPath, contentID: ContentID.sha256(of: Data("old\n".utf8)),
         byteOffset: 0, line: 1, symbolName: nil, symbolKind: nil, note: "", updatedAt: .now
     )
     let drifted = BookmarkRecord(
@@ -410,6 +411,8 @@ func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async thro
     #expect(pendingBadge.style == .captured)
     #expect(pendingBadge.visible)
     #expect(!pendingBadge.detail.contains(BookmarkStatus.notEvaluated.displayText))
+    // A short detail still gets the row's width: the actions keep their own size.
+    #expect(pendingBadge.detailWidthFraction > 0.5)
 
     let driftedBadge = try #require(panel.selfTestRowBadge(id: drifted.id))
     #expect(driftedBadge.text == BookmarkStatus.drifted.displayText)
@@ -417,6 +420,8 @@ func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async thro
     #expect(driftedBadge.visible)
     #expect(!driftedBadge.detail.contains(BookmarkStatus.drifted.displayText))
     #expect(driftedBadge.detail.contains(path))
+    // A long path truncates on one line instead of wrapping.
+    #expect(driftedBadge.detailLines == 1)
 }
 
 @MainActor
