@@ -460,6 +460,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
             text.append(row)
         }
         previewText.textStorage?.setAttributedString(text)
+        previewText.scroll(.zero)
     }
 
     private struct PreviewLine {
@@ -482,22 +483,36 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         let targetLine = bytes[..<Int(offset)].reduce(0) { $1 == 0x0A ? $0 + 1 : $0 }
         let all = String(decoding: bytes, as: UTF8.self).split(separator: "\n", omittingEmptySubsequences: false)
         guard all.indices.contains(targetLine) else { return nil }
-        let range = max(0, targetLine - 3)...min(all.count - 1, targetLine + 8)
+        // One line of lead-in keeps the target near the top of a short panel.
+        let range = max(0, targetLine - 1)...min(all.count - 1, targetLine + 10)
         return range.map {
             PreviewLine(number: $0 + 1, text: String(all[$0]), isTarget: $0 == targetLine)
         }
     }
 
-    var selfTestPreview: (visible: Bool, text: String, target: String?) {
+    var selfTestPreview: (visible: Bool, text: String, target: String?, targetVisible: Bool, targetHeight: CGFloat) {
         window?.contentView?.layoutSubtreeIfNeeded()
         let visible = previewScroll.window != nil && !previewScroll.isHiddenOrHasHiddenAncestor
             && previewScroll.frame.width > 0
         let storage = previewText.textStorage
         var target: String?
+        var targetRange: NSRange?
         storage?.enumerateAttribute(.backgroundColor, in: NSRange(location: 0, length: storage?.length ?? 0)) { value, range, _ in
-            if value != nil, target == nil { target = (storage!.string as NSString).substring(with: range) }
+            if value != nil, target == nil {
+                target = (storage!.string as NSString).substring(with: range)
+                targetRange = range
+            }
         }
-        return (visible, previewText.string, target?.trimmingCharacters(in: .whitespacesAndNewlines))
+        var targetVisible = false
+        var targetHeight: CGFloat = 0
+        if let targetRange, let layout = previewText.layoutManager, let container = previewText.textContainer {
+            let glyphs = layout.glyphRange(forCharacterRange: targetRange, actualCharacterRange: nil)
+            let rect = layout.boundingRect(forGlyphRange: glyphs, in: container)
+                .offsetBy(dx: previewText.textContainerOrigin.x, dy: previewText.textContainerOrigin.y)
+            targetVisible = previewScroll.documentVisibleRect.contains(NSPoint(x: rect.minX + 1, y: rect.maxY - 1))
+            targetHeight = rect.height
+        }
+        return (visible, previewText.string, target?.trimmingCharacters(in: .whitespacesAndNewlines), targetVisible, targetHeight)
     }
 
     private func configureView() {
@@ -570,6 +585,13 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         previewText.drawsBackground = false
         previewText.textContainerInset = NSSize(width: 6, height: 6)
         previewText.textContainer?.lineFragmentPadding = 0
+        // Code keeps its lines: long ones run off the edge instead of wrapping.
+        previewText.isHorizontallyResizable = true
+        previewText.textContainer?.widthTracksTextView = false
+        previewText.textContainer?.containerSize = NSSize(
+            width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude
+        )
+        previewText.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         previewText.setAccessibilityLabel(localized("panel.palette.preview"))
         previewScroll.documentView = previewText
         previewScroll.hasVerticalScroller = false

@@ -697,9 +697,11 @@ func seekPreviewShowsLinesAroundALocationAndHidesOtherwise() throws {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let file = directory.appendingPathComponent("lib.rs")
-    let source = (1...20).map { "line \($0)" }.joined(separator: "\n") + "\n"
+    let long = String(repeating: "x", count: 300)
+    let source = (1...20).map { $0 == 10 ? "\(long) line 10" : "line \($0)" }
+        .joined(separator: "\n") + "\n"
     try source.write(to: file, atomically: true, encoding: .utf8)
-    let offset = UInt32(source[..<source.range(of: "line 10")!.lowerBound].utf8.count)
+    let offset = UInt32(source[..<source.range(of: long)!.lowerBound].utf8.count)
 
     let panel = PalettePanel(appModel: AppModel(), settings: ReaderSettings(theme: .light), onOpen: { _, _, _ in })
     defer { panel.close() }
@@ -718,8 +720,12 @@ func seekPreviewShowsLinesAroundALocationAndHidesOtherwise() throws {
     let preview = panel.selfTestPreview
     #expect(preview.visible)
     #expect(preview.target?.hasSuffix("line 10") == true)
-    #expect(preview.text.contains("line 7") && preview.text.contains("line 18"))
-    #expect(!preview.text.contains("line 6\n") && !preview.text.contains("line 19"))
+    #expect(preview.text.contains("line 9\n") && preview.text.contains("line 20"))
+    #expect(!preview.text.contains("line 8\n"))
+    // The target line sits near the top, visible even in a two-row panel.
+    #expect(preview.targetVisible)
+    // Code keeps its lines: the long target line does not wrap.
+    #expect(preview.targetHeight > 0 && preview.targetHeight < 20)
 
     table.selectRowIndexes([1], byExtendingSelection: false)
     #expect(!panel.selfTestPreview.visible)
