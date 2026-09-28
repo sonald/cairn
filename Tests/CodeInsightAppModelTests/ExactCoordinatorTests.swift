@@ -2,6 +2,7 @@ import CodeInsightCore
 import CodeInsightEngine
 import CodeInsightExact
 import CodeInsightGit
+import CodeInsightReaderCore
 import Dispatch
 import Foundation
 import Observation
@@ -2283,6 +2284,45 @@ func contextExactPinnedUpgradeUsesSelectionAfterVerification() async throws {
 
 @MainActor
 @Test
+func contextExactVerificationDoesNotBuildReaderDocuments() async throws {
+    let root = try exactTemporaryProject(["main.rs": twoCloseSource])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let gate = ContextExactGate()
+    let loads = ReaderDocumentLoadCounter()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        loader: { file, languageMode in await loads.load(file, languageMode: languageMode) },
+        exactResolver: gate.resolve
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "close();", in: twoCloseSource))
+    #expect(await testWaitUntil("fuzzy candidates pending exact") {
+        model.candidateCount == 2 && gate.count == 1
+    })
+    let loadsBeforeExact = await loads.count
+
+    let target = twoCloseSecondDefinition()
+    gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: target))
+    #expect(await testWaitUntil("target upgraded to Exact") {
+        contextCandidates(model).contains {
+            $0.targetByteOffset == target && $0.certainty == .exact
+        }
+    })
+
+    #expect(
+        await loads.count == loadsBeforeExact,
+        "verifying content identity must not build reader documents"
+    )
+}
+
+@MainActor
+@Test
 func contextExactInsertKeepsUserSelectionChangedDuringVerification() async throws {
     let root = try exactTemporaryProject(["main.rs": twoCloseSource])
     defer { try? FileManager.default.removeItem(at: root) }
@@ -3045,6 +3085,16 @@ private final class ContextExactGate {
         continuations.removeValue(forKey: id)?.resume(
             returning: .completed(entry.map { [$0] } ?? [])
         )
+    }
+}
+
+private actor ReaderDocumentLoadCounter {
+    private(set) var count = 0
+
+    func load(_ file: URL, languageMode: LanguageMode) -> ReaderDocument? {
+        count += 1
+        guard let data = try? Data(contentsOf: file) else { return nil }
+        return ReaderDocument(bytes: Array(data), languageMode: languageMode)
     }
 }
 

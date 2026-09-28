@@ -900,7 +900,7 @@ public final class ContextWindowModel {
     ) async -> Bool {
         guard exactLocationIsInDependency(path) == false,
               let pathID = pathID(path, in: session),
-              let (key, _) = session.content(at: pathID),
+              session.content(at: pathID) != nil,
               let expected = contentID(at: pathID, in: session),
               let root
         else { return true }
@@ -908,18 +908,18 @@ public final class ContextWindowModel {
         if let contentIdentityOverride {
             return await contentIdentityOverride(file) == expected
         }
-        let loaded: ReaderDocument?
-        if let contentSource {
-            loaded = await Task.detached(priority: .userInitiated) {
-                try? DocumentLoader(source: contentSource).load(
-                    file: file,
-                    languageMode: key.languageMode
-                ).document
-            }.value
-        } else {
-            loaded = await loader(file, key.languageMode)
-        }
-        return loaded?.contentID == expected
+        // Identity only needs the bytes; building a reader document here
+        // would run the full syntax pass for every verification.
+        let source = contentSource
+        let current = await Task.detached(priority: .userInitiated) {
+            let bytes: [UInt8]? = if let source {
+                try? source(file)
+            } else {
+                (try? Data(contentsOf: file, options: .mappedIfSafe)).map { [UInt8]($0) }
+            }
+            return bytes.map { ContentID.sha256(of: $0) }
+        }.value
+        return current == expected
     }
 
     private func dependencyDocument(

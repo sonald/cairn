@@ -146,8 +146,14 @@
 保留「依赖路径 / 无 pathID 时返回 true」的语义。现有 `loader` 注入（如 `AppModelTests.swift:2339`）仍只控制
 excerpt 文档加载。
 
-**测试**：`contextExactContentVerificationDoesNotParse`（DEBUG `RustExtractor.parseObserver` 计数，断言校验阶段解析
-次数为 0）；三个 drift 测试保持通过，证明身份判定语义不变。
+**测试**：`contextExactVerificationDoesNotBuildReaderDocuments`（计数 `loader`，断言 Exact 升级期间不构建阅读文档）；
+三个 drift 测试保持通过，证明身份判定语义不变。原计划用 DEBUG `RustExtractor.parseObserver` 计数，但它是
+`@TaskLocal`，不会进入校验所用的 `Task.detached`，因此改为观察 `loader` 调用。
+
+**已知差异**：旧实现遇到非 UTF-8 字节时 `DocumentLoader.load` 抛错，校验判为「已变化」，并通过
+`onStaleIndexContent` 报告一个实际上并未变化的文件；新实现只比较哈希，字节与索引一致即判为未变化。索引器不检查
+UTF-8（`ProjectIndexer`/`ProjectIndexStore` 中没有编码校验），所以这条路径理论上可达。新行为消除的是一次误报；
+需要构建阅读文档的插入分支仍会因加载失败而不插入候选。未为此单独加测试。
 
 #### R1c　混合准备路径在锁内读取 store（F3）
 
