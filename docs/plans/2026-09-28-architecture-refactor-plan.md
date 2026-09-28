@@ -170,14 +170,18 @@ UTF-8（`ProjectIndexer`/`ProjectIndexStore` 中没有编码校验），所以�
 1. `loadSyntax(for:completion:)` 返回 `@discardableResult Task<Void, Never>`；在解析前、解析后、回调前检查
    `Task.isCancelled`，取消时不调用 completion。现有 11 处 completion 形式调用方（生产 6、测试 5）编译不受影响；
    同步重载 `loadSyntax(for:) throws` 不变。
-2. `Parser` 增加 `parse(_:shouldContinue:)`，基于 v0.25.8 的 `ts_parser_parse_with_options` 与
-   `progress_callback`（`api.h:101`）协作取消；高亮遍历每 4,096 个节点检查一次。只在 large/huge 档传入取消条件，
-   regular 档路径不变。
+2. `Parser` 增加 `parse(_:shouldCancel:)`，基于 v0.25.8 的 `ts_parser_parse_with_options` 与
+   `progress_callback`（`api.h:101`）协作取消；解析之后、局部引用之前与之后各检查一次。只有异步
+   `loadSyntax(for:completion:)`（large/huge 档）传入取消条件，regular 档同步路径不变。
+   **实施偏离**：原计划的「遍历中每 4,096 个节点检查一次」未做——Python/TS 遍历器是递归实现，把取消条件穿进
+   递归会扩大改动面；解析是可以中途停止的主要成本，遍历只在阶段边界停止。
 3. `ReaderViewController` 保存句柄，在新加载、关闭、切换文件时取消；现有 `loadGeneration`/`displayedLanguageMode`
    发布栅栏**保留**（取消是省计算，栅栏是防误发布，二者不互相替代）。
 
-**测试**：`syntaxLoadCancelledBeforeStartNeverParsesOrCompletes`；`syntaxLoadCancelledDuringParseStopsPromptly`
-（huge 档输入，3 个样本记录中位数）；fold 自测与 fold 性能门禁不变。
+**测试**（实际）：`cancellableParseMatchesPlainParseWhenNotCancelled`、`cancellableParseHaltsAtTheFirstCancelledPoll`
+（TreeSitterKit）；`cancellableSyntaxPassMatchesTheDefaultPassAndStopsWhenCancelled`、`cancelledAsyncSyntaxLoadNeverCompletes`
+（ReaderCore）。原计划的「解析次数为 0」断言因 `parseObserver` 是 `@TaskLocal`、不进入 detached 任务而改为以上
+可确定的断言；「中途取消」由轮询计数确定性证明，不依赖计时。fold 自测与 fold 性能门禁由 R1 检查点的完整 CI 覆盖。
 
 **为后续功能准备的**：异步领域分析与高频语义交互需要「停止无用计算」与「不发布旧结果」两种能力各自存在。
 
