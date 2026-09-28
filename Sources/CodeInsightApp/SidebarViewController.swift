@@ -28,7 +28,7 @@ final class SidebarViewController: NSViewController,
     private var tree: FileTreeModel?
     private var facetRows: [NSNumber] = []
     private var outlineFile: URL?
-    private var collapsedOutlineOffsets: [URL: Set<UInt32>] = [:]
+    private var collapsedOutlineKeys: [URL: Set<UInt32>] = [:]
     private var isSynchronizingOutlineSelection = false
     private var setInitialDivider = false
     private var isSynchronizingFileSelection = false
@@ -480,24 +480,24 @@ final class SidebarViewController: NSViewController,
         return node.url
     }
 
-    func setOutline(_ facets: [OutlineFacet], file: URL? = nil) {
+    func setOutline(_ nodes: [OutlineNode], file: URL? = nil) {
         loadViewIfNeeded()
-        if let previous = outlineFile, !outlineModel.facets.isEmpty {
-            collapsedOutlineOffsets[previous] = Set(outlineModel.facets.indices.compactMap { index in
+        if let previous = outlineFile, !outlineModel.nodes.isEmpty {
+            collapsedOutlineKeys[previous] = Set(outlineModel.nodes.indices.compactMap { index in
                 !outlineModel.childIndices[index].isEmpty
                     && !symbolOutlineView.isItemExpanded(facetRows[index])
-                    ? outlineModel.facets[index].range.lowerBound : nil
+                    ? outlineModel.nodes[index].key : nil
             })
         }
         outlineFile = file
-        outlineModel.setDocument(facets)
-        facetRows = outlineModel.facets.indices.map { NSNumber(value: $0) }
+        outlineModel.setDocument(nodes)
+        facetRows = outlineModel.nodes.indices.map { NSNumber(value: $0) }
         isSynchronizingOutlineSelection = true
         symbolOutlineView.reloadData()
         symbolOutlineView.expandItem(nil, expandChildren: true)
-        if let file, let collapsed = collapsedOutlineOffsets[file] {
-            for index in outlineModel.facets.indices
-            where collapsed.contains(outlineModel.facets[index].range.lowerBound) {
+        if let file, let collapsed = collapsedOutlineKeys[file] {
+            for index in outlineModel.nodes.indices
+            where collapsed.contains(outlineModel.nodes[index].key) {
                 symbolOutlineView.collapseItem(facetRows[index])
             }
         }
@@ -578,9 +578,9 @@ final class SidebarViewController: NSViewController,
     ) -> NSView? {
         if outlineView === symbolOutlineView {
             guard let number = item as? NSNumber,
-                  outlineModel.facets.indices.contains(number.intValue)
+                  outlineModel.nodes.indices.contains(number.intValue)
             else { return nil }
-            return outlineCell(for: outlineModel.facets[number.intValue])
+            return outlineCell(for: outlineModel.nodes[number.intValue])
         }
         guard let node = item as? FileTreeNode else { return nil }
         let identifier = NSUserInterfaceItemIdentifier("FileTreeCell")
@@ -910,7 +910,7 @@ final class SidebarViewController: NSViewController,
         view.window?.makeFirstResponder(outline)
     }
 
-    private func outlineCell(for facet: OutlineFacet) -> NSView {
+    private func outlineCell(for node: OutlineNode) -> NSView {
         let identifier = NSUserInterfaceItemIdentifier("OutlineFacetCell")
         let cell: NSStackView
         if let reused = symbolOutlineView.makeView(withIdentifier: identifier, owner: self)
@@ -942,17 +942,17 @@ final class SidebarViewController: NSViewController,
         let image = cell.arrangedSubviews[0] as! NSImageView
         let label = cell.arrangedSubviews[1] as! NSTextField
         let detail = cell.arrangedSubviews[2] as! NSTextField
-        image.contentTintColor = symbolColor(for: facet.kind)
+        image.contentTintColor = symbolColor(for: node.kind)
         label.textColor = theme.foregroundColor
         image.image = NSImage(
-            systemSymbolName: symbolName(for: facet.kind),
+            systemSymbolName: symbolName(for: node.kind),
             accessibilityDescription: nil
         )
-        label.stringValue = facet.name
-        detail.stringValue = facet.detail
+        label.stringValue = node.title
+        detail.stringValue = node.detail
         detail.textColor = theme.chromeSecondaryColor
-        detail.isHidden = facet.detail.isEmpty
-        let kind = switch facet.kind {
+        detail.isHidden = node.detail.isEmpty
+        let kind = switch node.kind {
         case .fn: localized("main.function")
         case .method: localized("main.method")
         case .struct: localized("main.struct")
@@ -967,14 +967,14 @@ final class SidebarViewController: NSViewController,
         case .field: localized("main.field")
         case .enumMember: localized("main.enum.case")
         }
-        cell.toolTip = [kind, facet.name, facet.detail].filter { !$0.isEmpty }.joined(separator: " ")
+        cell.toolTip = [kind, node.title, node.detail].filter { !$0.isEmpty }.joined(separator: " ")
         image.setAccessibilityElement(false)
         label.setAccessibilityElement(false)
         detail.setAccessibilityElement(false)
         cell.setAccessibilityElement(true)
         cell.setAccessibilityChildren([])
-        cell.setAccessibilityLabel("\(kind) \(facet.name)")
-        cell.setAccessibilityValue(facet.detail)
+        cell.setAccessibilityLabel("\(kind) \(node.title)")
+        cell.setAccessibilityValue(node.detail)
         cell.edgeInsets = NSEdgeInsets(
             top: 0,
             left: 2,

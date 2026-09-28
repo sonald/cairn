@@ -468,7 +468,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
-            sidebarController.setOutline(facets, file: model.selectedFile)
+            sidebarController.setOutline(facets.map(OutlineNode.init(facet:)), file: model.selectedFile)
             if let offset = readerController.currentReadingPosition()?.byteOffset {
                 sidebarController.highlightOutline(at: offset)
             }

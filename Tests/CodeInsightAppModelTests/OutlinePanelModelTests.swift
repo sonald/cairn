@@ -12,9 +12,9 @@ func outlinePanelSortsLocatesInnermostAndOpensRows() {
         facet("nested", .method, 20, 30, 2),
         facet("outer", .mod, 0, 100, 0),
         facet("first", .impl, 10, 40, 1),
-    ])
+    ].map(OutlineNode.init(facet:)))
 
-    #expect(model.facets.map(\.name) == ["outer", "first", "nested", "second"])
+    #expect(model.nodes.map(\.title) == ["outer", "first", "nested", "second"])
     #expect(model.rootIndices == [0])
     #expect(model.parentIndices == [nil, 0, 1, 0])
     #expect(model.childIndices == [[1, 3], [2], [], []])
@@ -27,6 +27,24 @@ func outlinePanelSortsLocatesInnermostAndOpensRows() {
     #expect(model.open(2) == 21)
     #expect(model.selectedIndex == 2)
     #expect(model.open(4) == nil)
+}
+
+@Test
+func symbolOutlineNodesKeyByDeclarationStartAndOpenAtTheName() {
+    let source = OutlineFacet(
+        kind: .method,
+        name: "run",
+        range: ByteRange(lowerBound: 40, upperBound: 90),
+        nameRange: ByteRange(lowerBound: 47, upperBound: 50),
+        depth: 1,
+        detail: "(&self)"
+    )
+    let node = OutlineNode(facet: source)
+
+    #expect(node.key == 40, "collapsed state stays keyed by the declaration start")
+    #expect(node.navigationOffset == 47, "rows open at the declared name")
+    #expect(node.title == "run" && node.detail == "(&self)" && node.kind == .method)
+    #expect(node.range == source.range)
 }
 
 private func facet(

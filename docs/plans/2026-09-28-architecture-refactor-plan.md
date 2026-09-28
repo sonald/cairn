@@ -298,8 +298,9 @@ Palette 行标签与 Diff 显示名的现有测试保持通过。
   本轮不加无消费者的字段。
 - 不新增分段控件、不新增第二个生产者。
 
-**测试**：`OutlinePanelModelTests` 现有用例改为断言 `OutlineNode`；新增 `outlineNodesMatchFacetOrderAndHierarchy`；
-侧栏原生测试与一张原生截图（证明 outline 内容可见，非占位），与 R0 基线截图对比。
+**测试**：`OutlinePanelModelTests` 现有用例改为断言 `OutlineNode`；新增 `symbolOutlineNodesKeyByDeclarationStartAndOpenAtTheName`
+（实际名称，固定 key 与跳转偏移的来源）；侧栏原生测试（含 CI 独立批次的两条）全部通过。原生截图并入收尾验收一次完成，
+同时覆盖 R4–R6 的阅读器与侧栏（R0 未留截图基线，收尾截图对比的是重构前的打包应用）。
 
 **为后续功能准备的**：侧栏不再认识 `OutlineFacet`；Agent 领域 outline 只需新增一个 `OutlineNode` 生产者，
 并在那时为节点加上跨文件跳转目标。

@@ -1792,7 +1792,7 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     let (sidebar, window) = makeSidebar()
     defer { window.close() }
     sidebar.setSelectedFile(file)
-    sidebar.setOutline(document.outlineFacets, file: file)
+    sidebar.setOutline(document.outlineFacets.map(OutlineNode.init(facet:)), file: file)
     func outlines(_ view: NSView) -> [NSOutlineView] {
         (view as? NSOutlineView).map { [$0] } ?? view.subviews.flatMap(outlines)
     }
@@ -1806,7 +1806,7 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
     outline.collapseItem(item)
     #expect(outline.numberOfRows < expandedCount)
     sidebar.setOutline([], file: URL(fileURLWithPath: "/Other.rs"))
-    sidebar.setOutline(document.outlineFacets, file: file)
+    sidebar.setOutline(document.outlineFacets.map(OutlineNode.init(facet:)), file: file)
     #expect(!outline.isItemExpanded(outline.item(atRow: 0)))
     var opened: UInt32?
     sidebar.onOpenOutline = { opened = $0 }
@@ -1854,7 +1854,7 @@ func productPolishOutlineUsesNativeHierarchyAndPreservesCollapsedBranches() thro
         window.contentView?.layoutSubtreeIfNeeded()
         sidebar.display(tree())
         sidebar.setSelectedFile(firstFile)
-        sidebar.setOutline(document.outlineFacets, file: file)
+        sidebar.setOutline(document.outlineFacets.map(OutlineNode.init(facet:)), file: file)
         #expect(sidebar.synchronizeFileSelection(to: firstFile))
         window.contentView?.layoutSubtreeIfNeeded()
         #expect(defaults.object(forKey: "\(name).fraction") == nil,
