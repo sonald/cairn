@@ -13575,7 +13575,7 @@ private func runFoldPerformance(
     window.displayIfNeeded()
 
     let syntaxResult = OSAllocatedUnfairLock(
-        initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none
+        initialState: Optional<Result<ReaderDocument, ReaderSyntaxError>>.none
     )
     loader.loadSyntax(for: initial) { result in
         syntaxResult.withLock { $0 = result }
@@ -14170,7 +14170,7 @@ private func runWrapPerformance(_ request: WrapPerformanceRequest) -> Never {
         ], status: 1)
     }
     let syntaxResult = OSAllocatedUnfairLock(
-        initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none
+        initialState: Optional<Result<ReaderDocument, ReaderSyntaxError>>.none
     )
     loader.loadSyntax(for: initialDocument) { result in
         syntaxResult.withLock { $0 = result }

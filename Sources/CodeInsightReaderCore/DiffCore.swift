@@ -65,12 +65,7 @@ public struct DiffCore: Sendable {
         public let rightRange: CodeInsightCore.ByteRange?
 
         public var displayName: String {
-            switch declarationKind {
-            case .pythonFunction, .typescriptFunction:
-                return nameChain.joined(separator: ".")
-            case _:
-                return nameChain.joined(separator: "::")
-            }
+            nameChain.joined(separator: declarationKind.qualifiedNameSeparator)
         }
     }
 
@@ -330,21 +325,17 @@ public struct DiffCore: Sendable {
             interner: ExtractionInterners(names: names, strings: strings)
         )
         var result: [FunctionKey: [ExtractedFunction]] = [:]
-        for facet in contentIndex.symbols where isFunction(facet.kind) {
+        for facet in contentIndex.symbols where facet.kind.shape == .function {
             var chain = [names.resolve(facet.nameID)]
             var parent = facet.parentFacetIndex
             while let parentIndex = parent,
                   contentIndex.symbols.indices.contains(Int(parentIndex))
             {
                 let parentFacet = contentIndex.symbols[Int(parentIndex)]
-                if languageMode.language == .python {
-                    guard isFunction(parentFacet.kind) || parentFacet.kind == .pythonClass else {
-                        parent = parentFacet.parentFacetIndex
-                        continue
-                    }
-                    chain.append(names.resolve(parentFacet.nameID))
-                } else if languageMode.language == .typescript {
-                    guard isFunction(parentFacet.kind) || parentFacet.kind == .typescriptClass else {
+                if languageMode.language == .python || languageMode.language == .typescript {
+                    // Python and TypeScript paths name only enclosing
+                    // functions and classes.
+                    guard [.function, .class].contains(parentFacet.kind.shape) else {
                         parent = parentFacet.parentFacetIndex
                         continue
                     }
@@ -393,11 +384,6 @@ public struct DiffCore: Sendable {
         case .javascript:
             preconditionFailure("DiffCore requireSupported must reject \(languageMode.language)")
         }
-    }
-
-    private func isFunction(_ kind: DeclarationKind) -> Bool {
-        kind == .rustFn || kind == .rustMethod || kind == .pythonFunction
-            || kind == .typescriptFunction
     }
 
     private func change(

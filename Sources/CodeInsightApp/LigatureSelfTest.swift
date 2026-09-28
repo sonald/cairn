@@ -43,7 +43,7 @@ func runLigatureSelfTest(arguments: [String]) -> Never {
     let loader = DocumentLoader(source: { _ in Array(bytes) })
     let initial: ReaderDocument
     do { initial = try loader.load(file: fixture).document } catch { stop("Document load failed: \(error)") }
-    let syntax = OSAllocatedUnfairLock(initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none)
+    let syntax = OSAllocatedUnfairLock(initialState: Optional<Result<ReaderDocument, ReaderSyntaxError>>.none)
     loader.loadSyntax(for: initial) { result in syntax.withLock { $0 = result } }
     let deadline = Date(timeIntervalSinceNow: 30)
     while syntax.withLock({ $0 == nil }), Date() < deadline { RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.005)) }

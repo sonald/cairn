@@ -28,7 +28,7 @@ func pythonReaderHighlightWithFolds(
     guard
         let language = tree_sitter_python(),
         let parser = Parser(language: language)
-    else { throw RustHighlighterError.parserUnavailable }
+    else { throw ReaderSyntaxError.parserUnavailable }
     #if DEBUG
     DocumentLoader.pythonParseObserver?()
     #endif

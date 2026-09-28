@@ -424,3 +424,19 @@ func publicModelsCompose() {
     #expect(context.generation == 1)
     #expect(candidate.certainty > .possible)
 }
+
+@Test
+func everyDeclarationKindDerivesItsLanguageAndQualifiedNameSeparator() {
+    var seen = 0
+    for raw in UInt8.min...UInt8.max {
+        guard let kind = DeclarationKind(rawValue: raw) else { continue }
+        seen += 1
+        let name = "\(kind)"
+        let expected: LanguageID = name.hasPrefix("rust") ? .rust
+            : name.hasPrefix("python") ? .python : .typescript
+        #expect(name.hasPrefix("\(expected)"), "\(kind)")
+        #expect(kind.language == expected, "\(kind)")
+        #expect(kind.qualifiedNameSeparator == (expected == .rust ? "::" : "."), "\(kind)")
+    }
+    #expect(seen == 15)
+}

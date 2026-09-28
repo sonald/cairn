@@ -40,43 +40,31 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
 
     /// The design's symbol-kind block: a two-letter tag colored by family.
     struct KindTag: Equatable {
-        enum Family: Equatable { case function, type, trait, container, value }
+        typealias Family = DeclarationFamily
         let label: String
         let family: Family
 
         init?(_ kind: OutlineKind) {
-            switch kind {
-            case .fn, .method: self.init(label: "fn", family: .function)
-            case .struct: self.init(label: "st", family: .type)
-            case .enum: self.init(label: "en", family: .type)
-            case .class: self.init(label: "cl", family: .type)
-            case .typeAlias: self.init(label: "ty", family: .type)
-            case .trait: self.init(label: "tr", family: .trait)
-            case .impl: self.init(label: "im", family: .container)
-            case .mod: self.init(label: "md", family: .container)
-            case .const, .static, .field, .enumMember: self.init(label: "va", family: .value)
-            }
+            self.init(kind.shape)
         }
 
         init?(_ kind: DeclarationKind) {
-            switch kind {
-            case .rustFn, .rustMethod, .pythonFunction, .typescriptFunction:
-                self.init(label: "fn", family: .function)
-            case .rustStruct: self.init(label: "st", family: .type)
-            case .rustEnum: self.init(label: "en", family: .type)
-            case .rustTypeAlias: self.init(label: "ty", family: .type)
-            case .pythonClass, .typescriptClass: self.init(label: "cl", family: .type)
-            case .rustTrait: self.init(label: "tr", family: .trait)
-            case .rustImpl: self.init(label: "im", family: .container)
-            case .rustMod: self.init(label: "md", family: .container)
-            case .rustConst, .rustStatic, .rustField: self.init(label: "va", family: .value)
-            @unknown default: return nil
-            }
+            self.init(kind.shape)
         }
 
-        private init(label: String, family: Family) {
-            self.label = label
-            self.family = family
+        init(_ shape: DeclarationShape) {
+            label = switch shape {
+            case .function: "fn"
+            case .struct: "st"
+            case .enum: "en"
+            case .class: "cl"
+            case .typeAlias: "ty"
+            case .trait: "tr"
+            case .impl: "im"
+            case .module: "md"
+            case .value: "va"
+            }
+            family = shape.family
         }
 
         @MainActor func colors(_ theme: ReaderTheme) -> (text: NSColor, fill: NSColor) {

@@ -200,8 +200,12 @@ UTF-8（`ProjectIndexer`/`ProjectIndexStore` 中没有编码校验），所以�
   CLI `:413` **不改**（R0 盘点：CLI 无测试覆盖，且 `calls` 只索引 Rust）。`Resolver.swift:77` 的 `[.rustMethod, .rustFn]` 是 Rust 方法名兜底路径的候选过滤，属于解析策略而非
   分类，**不改**。`EngineSession.kindWeight` **保留逐 case 权重**（权重是搜索排序策略，不是分类；Python/TS 与 Rust 函数同为 24 是
   巧合而非规则），只加注释说明为何不用 family。
-- 顺带 S8：`RustHighlighterError` 更名为 `ReaderSyntaxError`，保留 `public typealias RustHighlighterError`；
-  `FileTreeModel` 的被忽略参数重载标 `@available(*, deprecated)`，生产调用方改用无语言参数版本（不删除公共 API）。
+- 顺带 S8：`RustHighlighterError` 更名为 `ReaderSyntaxError`；`FileTreeModel` 删除被忽略的 `language`/`languages`
+  参数重载，只保留 `init(root:)` 与 `init(root:snapshotPaths:)`。
+- **实施调整**：Palette 的两字母标签比「族」更细（st/en/ty/cl 同属 type 族），因此共享词汇落为
+  `DeclarationShape`（function/struct/enum/class/typeAlias/trait/impl/module/value），族由 `shape.family` 推出；
+  `DeclarationKind.shape/language/qualifiedNameSeparator` 与 `OutlineKind.shape` 为唯一映射。两处改名/删参
+  没有保留兼容别名：它们只有本仓库内的调用方，全部已同步，保留别名只会是无人使用的代码。
 
 **测试**：`declarationFamilyCoversEveryKind`（穷举 `DeclarationKind`/`OutlineKind`，对照旧 switch 的 oracle）；
 Palette 行标签与 Diff 显示名的现有测试保持通过。

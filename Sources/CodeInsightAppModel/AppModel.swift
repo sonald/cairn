@@ -362,40 +362,15 @@ public struct FileTreeModel: Sendable {
     public let children: [FileTreeNode]
     public let fileCount: Int
 
+    /// The tree lists every file; languages only decide which files are indexed.
     public init(root: URL) throws {
-        try self.init(root: root, language: .rust)
-    }
-
-    public init(root: URL, language: LanguageID) throws {
         self.root = root.standardizedFileURL
-        _ = language
         children = try Self.children(in: self.root)
         fileCount = Self.fileCount(in: children)
     }
 
     public init(root: URL, snapshotPaths: [String]) {
-        self.init(root: root, snapshotPaths: snapshotPaths, language: .rust)
-    }
-
-    public init(
-        root: URL,
-        snapshotPaths: [String],
-        language: LanguageID
-    ) {
         self.root = root.standardizedFileURL
-        _ = language
-        let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
-        children = Self.children(from: paths, under: self.root)
-        fileCount = Self.fileCount(in: children)
-    }
-
-    public init(
-        root: URL,
-        snapshotPaths: [String],
-        languages: [LanguageID]
-    ) {
-        self.root = root.standardizedFileURL
-        _ = languages
         let paths = snapshotPaths.map { $0.split(separator: "/").map(String.init) }
         children = Self.children(from: paths, under: self.root)
         fileCount = Self.fileCount(in: children)
@@ -1832,7 +1807,7 @@ public final class AppModel {
         snapshotTask = Task { [weak self, indexService] in
             do {
                 let fileTree = try await detachedValue {
-                    try FileTreeModel(root: root, language: language)
+                    try FileTreeModel(root: root)
                 }
                 try Task.checkCancellation()
                 guard let self,
@@ -2063,7 +2038,7 @@ public final class AppModel {
                     )
                     try Task.checkCancellation()
                     let tree = try await detachedValue {
-                        try FileTreeModel(root: root, language: language)
+                        try FileTreeModel(root: root)
                     }
                     try Task.checkCancellation()
                     guard let self,
@@ -2835,8 +2810,7 @@ public final class AppModel {
             self.commitPicker.setCurrentRevision(revision)
             self.fileTree = FileTreeModel(
                 root: root,
-                snapshotPaths: files.map(\.path),
-                languages: languages
+                snapshotPaths: files.map(\.path)
             )
             self.currentSnapshotID = snapshot.snapshotID
             self.snapshotDestinations[snapshot.snapshotID] = switch record.snapshot {
@@ -3578,8 +3552,7 @@ public final class AppModel {
         }
         fileTree = FileTreeModel(
             root: root,
-            snapshotPaths: paths,
-            languages: languages
+            snapshotPaths: paths
         )
         if let selectedPath, paths.contains(selectedPath) {
             selectedFile = root.appendingPathComponent(selectedPath)

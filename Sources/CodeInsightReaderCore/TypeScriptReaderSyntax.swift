@@ -34,7 +34,7 @@ func typeScriptReaderHighlightWithFolds(
     guard
         let language = typeScriptGrammar(for: mode),
         let parser = Parser(language: language)
-    else { throw RustHighlighterError.parserUnavailable }
+    else { throw ReaderSyntaxError.parserUnavailable }
     #if DEBUG
     TypeScriptExtractor.parseObserver?()
     #endif
@@ -74,7 +74,7 @@ func requireSupportedTypeScriptReaderMode(_ mode: LanguageMode) throws {
     guard mode.language == .typescript,
           mode.variant == nil || mode.variant == "tsx"
     else {
-        throw RustHighlighterError.unsupportedLanguage(mode.language)
+        throw ReaderSyntaxError.unsupportedLanguage(mode.language)
     }
 }
 

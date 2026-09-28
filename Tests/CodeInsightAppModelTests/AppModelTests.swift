@@ -1015,8 +1015,7 @@ func fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() throws {
         try write("", to: root.appendingPathComponent(skipped).appendingPathComponent("skip.rs"))
     }
 
-    let compatibility = try FileTreeModel(root: root)
-    let tree = try FileTreeModel(root: root, language: .rust)
+    let tree = try FileTreeModel(root: root)
 
     func relativeFiles(in nodes: [FileTreeNode]) -> Set<String> {
         Set(nodes.flatMap { node in
@@ -1046,13 +1045,10 @@ func fileTreeShowsRegularFilesAndExcludesMetadataAndSymlinks() throws {
     #expect(tree.selectionPath(for: root.appendingPathComponent("linked.md")) == nil)
     #expect(tree.selectionPath(for: root.appendingPathComponent(".DS_Store")) == nil)
     #expect(tree.selectionPath(for: nil) == nil)
-    #expect(tree.children.map(\.name) == compatibility.children.map(\.name))
-    #expect(tree.fileCount == compatibility.fileCount)
 
     let snapshot = FileTreeModel(
         root: root,
-        snapshotPaths: ["src/a.rs", "README.md"],
-        language: .rust
+        snapshotPaths: ["src/a.rs", "README.md"]
     )
     #expect(snapshot.children.map(\.name) == ["src", "README.md"])
     #expect(snapshot.children.first { $0.name == "src" }?.children.map(\.name)

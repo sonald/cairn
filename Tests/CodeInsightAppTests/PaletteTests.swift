@@ -733,3 +733,42 @@ func seekPreviewShowsLinesAroundALocationAndHidesOtherwise() throws {
     table.selectRowIndexes([2], byExtendingSelection: false)
     #expect(!panel.selfTestPreview.visible)
 }
+
+/// Frozen from the per-kind switches in `PalettePanel.KindTag` before the
+/// shared declaration vocabulary existed (`acb6dbb`).
+private let kindTagOracle: [String: (label: String, family: String)] = [
+    "fn": ("fn", "function"), "method": ("fn", "function"),
+    "struct": ("st", "type"), "enum": ("en", "type"), "class": ("cl", "type"),
+    "typeAlias": ("ty", "type"), "trait": ("tr", "trait"),
+    "impl": ("im", "container"), "mod": ("md", "container"),
+    "const": ("va", "value"), "static": ("va", "value"),
+    "field": ("va", "value"), "enumMember": ("va", "value"),
+    "rustFn": ("fn", "function"), "rustMethod": ("fn", "function"),
+    "pythonFunction": ("fn", "function"), "typescriptFunction": ("fn", "function"),
+    "rustStruct": ("st", "type"), "rustEnum": ("en", "type"),
+    "rustTypeAlias": ("ty", "type"),
+    "pythonClass": ("cl", "type"), "typescriptClass": ("cl", "type"),
+    "rustTrait": ("tr", "trait"), "rustImpl": ("im", "container"),
+    "rustMod": ("md", "container"),
+    "rustConst": ("va", "value"), "rustStatic": ("va", "value"),
+    "rustField": ("va", "value"),
+]
+
+@Test
+func paletteKindTagsMatchTheFrozenTableForEveryDeclarationAndOutlineKind() throws {
+    var checked = Set<String>()
+    for kind in OutlineKind.allCases {
+        let tag = try #require(PalettePanel.KindTag(kind))
+        let expected = try #require(kindTagOracle[kind.rawValue], "no oracle row for \(kind)")
+        #expect(tag.label == expected.label && String(describing: tag.family) == expected.family, "\(kind)")
+        checked.insert(kind.rawValue)
+    }
+    for raw in UInt8.min...UInt8.max {
+        guard let kind = DeclarationKind(rawValue: raw) else { continue }
+        let tag = try #require(PalettePanel.KindTag(kind))
+        let expected = try #require(kindTagOracle["\(kind)"], "no oracle row for \(kind)")
+        #expect(tag.label == expected.label && String(describing: tag.family) == expected.family, "\(kind)")
+        checked.insert("\(kind)")
+    }
+    #expect(checked == Set(kindTagOracle.keys), "every oracle row is still a real kind")
+}

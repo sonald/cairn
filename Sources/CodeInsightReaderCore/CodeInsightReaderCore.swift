@@ -95,7 +95,7 @@ public struct HighlightSpan: Equatable, Sendable {
     }
 }
 
-public enum OutlineKind: String, Hashable, Sendable {
+public enum OutlineKind: String, Hashable, Sendable, CaseIterable {
     case fn
     case method
     case `struct`
@@ -109,6 +109,20 @@ public enum OutlineKind: String, Hashable, Sendable {
     case `class`
     case field
     case enumMember
+
+    public var shape: DeclarationShape {
+        switch self {
+        case .fn, .method: .function
+        case .struct: .struct
+        case .enum: .enum
+        case .class: .class
+        case .typeAlias: .typeAlias
+        case .trait: .trait
+        case .impl: .impl
+        case .mod: .module
+        case .const, .static, .field, .enumMember: .value
+        }
+    }
 }
 
 public struct OutlineFacet: Equatable, Sendable {
@@ -397,7 +411,7 @@ func appendLocalBindingHighlights(
     }
 }
 
-public enum RustHighlighterError: Error, Sendable {
+public enum ReaderSyntaxError: Error, Sendable {
     case unsupportedLanguage(LanguageID)
     case parserUnavailable
     case parseFailed
@@ -412,13 +426,13 @@ func parseReaderTree(
 ) throws -> Tree {
     guard let shouldCancel else {
         guard let tree = parser.parse(bytes) else {
-            throw RustHighlighterError.parseFailed
+            throw ReaderSyntaxError.parseFailed
         }
         return tree
     }
     guard let tree = parser.parse(bytes, shouldCancel: shouldCancel) else {
         if shouldCancel() { throw CancellationError() }
-        throw RustHighlighterError.parseFailed
+        throw ReaderSyntaxError.parseFailed
     }
     return tree
 }
@@ -483,7 +497,7 @@ public struct RustHighlighter: Sendable {
         guard
             let language = tree_sitter_rust(),
             let parser = Parser(language: language)
-        else { throw RustHighlighterError.parserUnavailable }
+        else { throw ReaderSyntaxError.parserUnavailable }
         #if DEBUG
         RustExtractor.parseObserver?()
         #endif
@@ -940,7 +954,7 @@ public struct DocumentLoader: Sendable {
         case .typescript:
             try requireSupportedTypeScriptReaderMode(languageMode)
         case .javascript:
-            throw RustHighlighterError.unsupportedLanguage(languageMode.language)
+            throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }
 
@@ -1003,7 +1017,7 @@ public struct DocumentLoader: Sendable {
                 shouldCancel: shouldCancel
             )
         case .javascript:
-            throw RustHighlighterError.unsupportedLanguage(languageMode.language)
+            throw ReaderSyntaxError.unsupportedLanguage(languageMode.language)
         }
     }
 
@@ -1014,11 +1028,11 @@ public struct DocumentLoader: Sendable {
     public func loadSyntax(
         for document: ReaderDocument,
         completion: @escaping @Sendable (
-            Result<ReaderDocument, RustHighlighterError>
+            Result<ReaderDocument, ReaderSyntaxError>
         ) -> Void
     ) -> Task<Void, Never> {
         Task.detached(priority: .userInitiated) {
-            let result: Result<ReaderDocument, RustHighlighterError>
+            let result: Result<ReaderDocument, ReaderSyntaxError>
             do {
                 result = .success(try loadSyntax(
                     for: document,
@@ -1026,7 +1040,7 @@ public struct DocumentLoader: Sendable {
                 ))
             } catch is CancellationError {
                 return
-            } catch let error as RustHighlighterError {
+            } catch let error as ReaderSyntaxError {
                 result = .failure(error)
             } catch {
                 result = .failure(.parseFailed)

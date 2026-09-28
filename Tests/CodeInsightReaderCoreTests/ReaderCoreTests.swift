@@ -57,7 +57,7 @@ func javascriptAndInvalidTypeScriptVariantFailBeforeParsing() throws {
             )
         }
         Issue.record("DocumentLoader accepted JavaScript")
-    } catch RustHighlighterError.unsupportedLanguage(let language) {
+    } catch ReaderSyntaxError.unsupportedLanguage(let language) {
         #expect(language == .javascript)
     } catch {
         Issue.record("DocumentLoader returned the wrong error: \(error)")
@@ -76,7 +76,7 @@ func javascriptAndInvalidTypeScriptVariantFailBeforeParsing() throws {
             )
         }
         Issue.record("DocumentLoader accepted an invalid TypeScript variant")
-    } catch RustHighlighterError.unsupportedLanguage(let language) {
+    } catch ReaderSyntaxError.unsupportedLanguage(let language) {
         #expect(language == .typescript)
     } catch {
         Issue.record("DocumentLoader returned the wrong error: \(error)")

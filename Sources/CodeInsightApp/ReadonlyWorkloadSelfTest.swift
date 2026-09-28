@@ -48,7 +48,7 @@ func runReadonlyWorkloadSelfTest(arguments: [String]) -> Never {
         let language: LanguageID = url.pathExtension == "py" ? .python : ["ts", "tsx"].contains(url.pathExtension) ? .typescript : .rust
         let loader = DocumentLoader()
         let initial = try loader.load(file: url, languageMode: LanguageMode(language: language, variant: url.pathExtension == "tsx" ? "tsx" : nil)).document
-        let pending = OSAllocatedUnfairLock(initialState: Optional<Result<ReaderDocument, RustHighlighterError>>.none)
+        let pending = OSAllocatedUnfairLock(initialState: Optional<Result<ReaderDocument, ReaderSyntaxError>>.none)
         loader.loadSyntax(for: initial) { value in pending.withLock { $0 = value } }
         let deadline = Date(timeIntervalSinceNow: 30)
         while pending.withLock({ $0 == nil }), Date() < deadline {
