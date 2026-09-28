@@ -298,6 +298,14 @@ public final class ContextWindowModel {
         stage = .candidates(candidates, selected: (selected + 1) % candidates.count)
     }
 
+    public func select(at index: Int) {
+        guard case let .candidates(candidates, selected) = stage,
+              candidates.indices.contains(index),
+              index != selected
+        else { return }
+        stage = .candidates(candidates, selected: index)
+    }
+
     public func selectPrevious() {
         guard case let .candidates(candidates, selected) = stage,
               !candidates.isEmpty

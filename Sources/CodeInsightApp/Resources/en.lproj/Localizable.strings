@@ -170,6 +170,7 @@
 "main.its.note.will.be.removed" = "Its note will be removed.";
 "main.keep.open" = "Keep Open";
 "main.large.diff.side.by.side.only" = "Large diff — side-by-side only";
+"main.lens.candidates" = "Lens candidates";
 "main.limitations" = "Limitations: %@";
 "main.limited.analysis.detail" = "Limited analysis can omit dependency results. Restart Analysis retries the current provider without changing repository trust.";
 "main.line.breaks.are.not.supported" = "Line breaks are not supported";

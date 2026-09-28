@@ -170,6 +170,7 @@
 "main.its.note.will.be.removed" = "书签笔记也将删除。";
 "main.keep.open" = "保持打开";
 "main.large.diff.side.by.side.only" = "差异过大，仅支持并排显示";
+"main.lens.candidates" = "Lens 候选";
 "main.limitations" = "限制：%@";
 "main.limited.analysis.detail" = "受限分析可能遗漏依赖项结果。重启分析会重试当前分析服务，不改变仓库信任设置。";
 "main.line.breaks.are.not.supported" = "不支持换行符";

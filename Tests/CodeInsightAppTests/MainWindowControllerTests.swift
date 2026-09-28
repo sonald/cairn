@@ -1151,6 +1151,67 @@ private final class ContextExactBadgeGate {
 
 @MainActor
 @Test
+func lensListsEveryCandidateBesideTheExcerptAndClickingSelectsIt() async throws {
+    _ = NSApplication.shared
+    let main = "mod a;\nmod b;\nfn main() { target(); }\n"
+    let root = try mainWindowTemporaryProject([
+        "main.rs": main,
+        "a.rs": "pub fn target() -> i32 { 1 }\n",
+        "b.rs": "pub fn target() -> i32 { 2 }\n",
+        "one.rs": "pub fn only() {}\nfn call() { only(); }\n",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let context = QueryContext(
+        snapshotID: session.snapshotID,
+        analysisProfileID: session.analysisProfile.id,
+        generation: 1
+    )
+    let contextModel = ContextWindowModel { session, file, offset, context in
+        try session.resolve(file: file, offset: offset, context: context)
+    }
+    contextModel.updateProjectState(.ready(session, context), root: root)
+    let controller = ContextWindowViewController(model: contextModel)
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 900, height: 300),
+        styleMask: [.titled], backing: .buffered, defer: false
+    )
+    window.isReleasedWhenClosed = false
+    defer { window.close() }
+    window.contentView = controller.view
+
+    contextModel.tokenClicked(
+        file: "main.rs",
+        offset: UInt32(main[..<main.range(of: "target();")!.lowerBound].utf8.count)
+    )
+    #expect(await mainWindowWaitUntil(contextModel.candidateCount >= 2))
+    try await Task.sleep(for: .milliseconds(100))
+    let list = controller.selfTestCandidateList
+    #expect(list.visible)
+    #expect(list.rows.count == contextModel.candidateCount)
+    #expect(list.rows.contains { $0.hasPrefix("target") && $0.contains("a.rs:1") })
+    #expect(list.rows.contains { $0.hasPrefix("target") && $0.contains("b.rs:1") })
+    #expect(list.selected == contextModel.selectedIndex)
+    #expect(list.excerptLeading >= 240)
+
+    let other = (contextModel.selectedIndex ?? 0) == 0 ? 1 : 0
+    controller.selfTestClickCandidate(other)
+    #expect(contextModel.selectedIndex == other)
+    #expect(await mainWindowWaitUntil(controller.selfTestCandidateList.selected == other))
+
+    let one = "pub fn only() {}\nfn call() { only(); }\n"
+    contextModel.tokenClicked(
+        file: "one.rs",
+        offset: UInt32(one[..<one.range(of: "only();")!.lowerBound].utf8.count)
+    )
+    #expect(await mainWindowWaitUntil(
+        contextModel.candidateCount == 1 && !controller.selfTestCandidateList.visible
+    ))
+    #expect(controller.selfTestCandidateList.excerptLeading == 0)
+}
+
+@MainActor
+@Test
 func contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() async throws {
     _ = NSApplication.shared
     let source = "pub fn target() -> i32 { 42 }\npub fn main() { target(); }\n"

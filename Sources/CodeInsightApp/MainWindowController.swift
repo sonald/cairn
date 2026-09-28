@@ -7975,7 +7975,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 }
 
 @MainActor
-final class ContextWindowViewController: NSViewController {
+final class ContextWindowViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     var selfTestReaderDrawCount: Int { miniReader.backgroundDrawCount }
     var onOpen: ((ContextWindowModel.Candidate) -> Void)?
 
@@ -8006,6 +8006,15 @@ final class ContextWindowViewController: NSViewController {
     private let container = NSView()
     private let headerSurface = NSView()
     private var theme = ReaderTheme(settings: ReaderSettings())
+    /// The left column: every candidate, so choosing is a click rather than
+    /// stepping with ‹ ›. Shown only when there is more than one.
+    private let candidateTable = NSTableView()
+    private let candidateScroll = NSScrollView()
+    private var listedCandidates: [ContextWindowModel.Candidate] = []
+    private var excerptBesideList: NSLayoutConstraint?
+    private var excerptFullWidth: NSLayoutConstraint?
+    private var isSyncingListSelection = false
+    private static let candidateListWidth: CGFloat = 240
 
     init(model: ContextWindowModel, derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore()) {
         miniReader = ReaderTextView(derivedDataStore: derivedDataStore)
@@ -8203,6 +8212,25 @@ final class ContextWindowViewController: NSViewController {
         scrollView.borderType = .noBorder
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
+        let column = NSTableColumn(identifier: .init("candidate"))
+        column.resizingMask = .autoresizingMask
+        candidateTable.addTableColumn(column)
+        candidateTable.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
+        candidateTable.headerView = nil
+        candidateTable.style = .plain
+        candidateTable.rowSizeStyle = .custom
+        candidateTable.intercellSpacing = .zero
+        candidateTable.backgroundColor = .clear
+        candidateTable.dataSource = self
+        candidateTable.delegate = self
+        candidateTable.setAccessibilityLabel(localized("main.lens.candidates"))
+        candidateScroll.documentView = candidateTable
+        candidateScroll.hasVerticalScroller = true
+        candidateScroll.drawsBackground = false
+        candidateScroll.borderType = .noBorder
+        candidateScroll.isHidden = true
+        candidateScroll.translatesAutoresizingMaskIntoConstraints = false
+
         placeholderLabel.font = .systemFont(ofSize: 12)
         placeholderLabel.textColor = theme.chromeSecondaryColor
         placeholderLabel.alignment = .center
@@ -8213,9 +8241,17 @@ final class ContextWindowViewController: NSViewController {
         container.wantsLayer = true
         container.layer?.backgroundColor = theme.chromeColor.cgColor
         container.addSubview(headerSurface)
+        container.addSubview(candidateScroll)
         container.addSubview(scrollView)
         container.addSubview(placeholderLabel)
+        excerptBesideList = scrollView.leadingAnchor.constraint(equalTo: candidateScroll.trailingAnchor, constant: 1)
+        excerptFullWidth = scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor)
+        excerptFullWidth?.isActive = true
         NSLayoutConstraint.activate([
+            candidateScroll.topAnchor.constraint(equalTo: headerSurface.bottomAnchor),
+            candidateScroll.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            candidateScroll.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+            candidateScroll.widthAnchor.constraint(equalToConstant: Self.candidateListWidth),
             headerSurface.topAnchor.constraint(equalTo: container.topAnchor),
             headerSurface.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             headerSurface.trailingAnchor.constraint(equalTo: container.trailingAnchor),
@@ -8224,7 +8260,6 @@ final class ContextWindowViewController: NSViewController {
             header.trailingAnchor.constraint(equalTo: headerSurface.trailingAnchor, constant: -8),
             header.centerYAnchor.constraint(equalTo: headerSurface.centerYAnchor),
             scrollView.topAnchor.constraint(equalTo: headerSurface.bottomAnchor),
-            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
             placeholderLabel.centerXAnchor.constraint(equalTo: scrollView.centerXAnchor),
@@ -8345,6 +8380,7 @@ final class ContextWindowViewController: NSViewController {
         }
         previousButton.isEnabled = model.candidateCount > 1
         nextButton.isEnabled = model.candidateCount > 1
+        renderCandidateList()
         guard let document = readerDocument(
             text,
             languageMode: model.selectedLanguageMode,
@@ -8354,6 +8390,94 @@ final class ContextWindowViewController: NSViewController {
             return
         }
         miniReader.display(document: document)
+    }
+
+    private func renderCandidateList() {
+        if case let .candidates(candidates, _) = model.stage, candidates.count > 1 {
+            listedCandidates = candidates
+        } else {
+            listedCandidates = []
+        }
+        let showsList = !listedCandidates.isEmpty
+        candidateScroll.isHidden = !showsList
+        excerptFullWidth?.isActive = !showsList
+        excerptBesideList?.isActive = showsList
+        candidateTable.reloadData()
+        isSyncingListSelection = true
+        if let selected = model.selectedIndex, showsList {
+            candidateTable.selectRowIndexes([selected], byExtendingSelection: false)
+            candidateTable.scrollRowToVisible(selected)
+        } else {
+            candidateTable.deselectAll(nil)
+        }
+        isSyncingListSelection = false
+    }
+
+    func numberOfRows(in tableView: NSTableView) -> Int { listedCandidates.count }
+
+    func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 38 }
+
+    func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
+        guard listedCandidates.indices.contains(row) else { return nil }
+        let candidate = listedCandidates[row]
+        let stones = CertaintyStonesView(certainty: candidate.certainty, theme: theme, size: 12)
+        let name = NSTextField(labelWithString: Self.declaredName(in: candidate.excerpt) ?? candidate.label)
+        name.font = .monospacedSystemFont(ofSize: 12, weight: .semibold)
+        name.textColor = theme.foregroundColor
+        name.lineBreakMode = .byTruncatingTail
+        let location = NSTextField(
+            labelWithString: "\(URL(fileURLWithPath: candidate.path).lastPathComponent):\(candidate.line)"
+        )
+        location.font = .monospacedSystemFont(ofSize: 10.5, weight: .regular)
+        location.textColor = theme.chromeSecondaryColor
+        location.lineBreakMode = .byTruncatingMiddle
+        location.toolTip = "\(candidate.path):\(candidate.line)"
+        let labels = NSStackView(views: [name, location])
+        labels.orientation = .vertical
+        labels.alignment = .leading
+        labels.spacing = 1
+        let row = NSStackView(views: [stones, labels])
+        row.orientation = .horizontal
+        row.alignment = .centerY
+        row.spacing = 8
+        row.edgeInsets = NSEdgeInsets(top: 0, left: 10, bottom: 0, right: 8)
+        for label in [name, location] {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
+        let cell = NSTableCellView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        cell.addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: cell.leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: cell.trailingAnchor),
+            row.centerYAnchor.constraint(equalTo: cell.centerYAnchor),
+        ])
+        cell.setAccessibilityLabel("\(name.stringValue), \(location.toolTip ?? "")")
+        return cell
+    }
+
+    func tableViewSelectionDidChange(_ notification: Notification) {
+        guard !isSyncingListSelection, candidateTable.selectedRow >= 0 else { return }
+        model.select(at: candidateTable.selectedRow)
+    }
+
+    var selfTestCandidateList: (visible: Bool, rows: [String], selected: Int?, excerptLeading: CGFloat) {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        let rows = (0..<candidateTable.numberOfRows).compactMap {
+            candidateTable.view(atColumn: 0, row: $0, makeIfNecessary: true)?.accessibilityLabel()
+        }
+        return (
+            candidateScroll.window != nil && !candidateScroll.isHiddenOrHasHiddenAncestor
+                && candidateScroll.frame.width > 0,
+            rows,
+            candidateTable.selectedRow >= 0 ? candidateTable.selectedRow : nil,
+            scrollView.frame.minX
+        )
+    }
+
+    func selfTestClickCandidate(_ row: Int) {
+        candidateTable.selectRowIndexes([row], byExtendingSelection: false)
     }
 
     /// The name a definition excerpt declares on its first code line, or nil
