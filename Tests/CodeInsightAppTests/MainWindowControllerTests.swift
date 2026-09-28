@@ -1193,6 +1193,9 @@ func lensListsEveryCandidateBesideTheExcerptAndClickingSelectsIt() async throws 
     #expect(list.rows.contains { $0.hasPrefix("target") && $0.contains("b.rs:1") })
     #expect(list.selected == contextModel.selectedIndex)
     #expect(list.excerptLeading >= 240)
+    // The selected row uses the theme's selection color, not the system accent.
+    #expect(controller.selfTestCandidateSelectionColor?.usingColorSpace(.sRGB)
+        == ReaderTheme(settings: ReaderSettings()).chromeSelectionColor.usingColorSpace(.sRGB))
 
     let other = (contextModel.selectedIndex ?? 0) == 0 ? 1 : 0
     controller.selfTestClickCandidate(other)

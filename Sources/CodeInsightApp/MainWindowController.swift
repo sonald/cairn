@@ -8417,6 +8417,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat { 38 }
 
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? {
+        ThemedTableRowView(selectionColor: theme.chromeSelectionColor)
+    }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
         guard listedCandidates.indices.contains(row) else { return nil }
         let candidate = listedCandidates[row]
@@ -8474,6 +8478,12 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             candidateTable.selectedRow >= 0 ? candidateTable.selectedRow : nil,
             scrollView.frame.minX
         )
+    }
+
+    var selfTestCandidateSelectionColor: NSColor? {
+        guard candidateTable.selectedRow >= 0 else { return nil }
+        return (candidateTable.rowView(atRow: candidateTable.selectedRow, makeIfNecessary: true)
+            as? ThemedTableRowView)?.selectionColor
     }
 
     func selfTestClickCandidate(_ row: Int) {

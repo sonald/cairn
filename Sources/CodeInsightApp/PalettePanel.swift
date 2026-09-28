@@ -381,7 +381,7 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
         _ tableView: NSTableView,
         rowViewForRow row: Int
     ) -> NSTableRowView? {
-        PaletteTableRowView(selectionColor: theme.chromeSelectionColor)
+        ThemedTableRowView(selectionColor: theme.chromeSelectionColor)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) {
@@ -1228,8 +1228,9 @@ final class PalettePanel: NSWindowController, NSTextFieldDelegate,
     }
 }
 
-private final class PaletteTableRowView: NSTableRowView {
-    private let selectionColor: NSColor
+/// A table row whose selection uses a theme color instead of the system accent.
+final class ThemedTableRowView: NSTableRowView {
+    let selectionColor: NSColor
 
     init(selectionColor: NSColor) {
         self.selectionColor = selectionColor
