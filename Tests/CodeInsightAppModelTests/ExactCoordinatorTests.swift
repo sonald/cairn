@@ -2157,6 +2157,171 @@ func contextExactUpgradeSuspendsWhenSourceFileDrifts() async throws {
     #expect(staleReports.contains("caller.rs"))
 }
 
+private let twoCloseSource = """
+    struct A; impl A { fn close(&self) {} }
+    struct B; impl B { fn close(&self) {} }
+    fn f<T>(value: T) { value.close(); }
+    """
+
+private func twoCloseSecondDefinition() -> UInt32 {
+    exactByteOffset(of: "struct B", in: twoCloseSource) + exactByteOffset(
+        of: "close(&self)",
+        in: String(twoCloseSource[twoCloseSource.range(of: "struct B")!.lowerBound...])
+    )
+}
+
+@MainActor
+private func contextCandidates(_ model: ContextWindowModel) -> [ContextWindowModel.Candidate] {
+    guard case let .candidates(candidates, _) = model.stage else { return [] }
+    return candidates
+}
+
+/// Releases the source and target verification reads one at a time, so the
+/// caller can interleave user actions while the first read is suspended.
+@MainActor
+private func releaseExactVerification(_ identity: ContentIdentityGate) async -> Bool {
+    for expected in 1...2 {
+        let suspended = await testWaitUntil("verification read \(expected) suspended") {
+            identity.requestCount == expected && identity.pendingCount == 1
+        }
+        guard suspended else { return false }
+        identity.releaseAll()
+    }
+    return true
+}
+
+@MainActor
+@Test
+func contextExactUpgradeKeepsUserSelectionChangedDuringVerification() async throws {
+    let root = try exactTemporaryProject(["main.rs": twoCloseSource])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let gate = ContextExactGate()
+    let identity = ContentIdentityGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve,
+        contentIdentity: { file in await identity.read(file) }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "close();", in: twoCloseSource))
+    #expect(await testWaitUntil("fuzzy candidates pending exact") {
+        model.candidateCount == 2 && gate.count == 1
+    })
+    let target = twoCloseSecondDefinition()
+    let targetIndex = try #require(contextCandidates(model).firstIndex { $0.targetByteOffset == target })
+    let chosen = contextCandidates(model)[1 - targetIndex].targetByteOffset
+
+    gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: target))
+    #expect(await testWaitUntil("source verification suspended") { identity.pendingCount == 1 })
+    // The user explicitly settles on the other candidate while the reply is
+    // being verified.
+    model.selectNext()
+    if model.selectedCandidate?.targetByteOffset != chosen { model.selectNext() }
+    #expect(await releaseExactVerification(identity))
+    #expect(await testWaitUntil("target upgraded to Exact") {
+        contextCandidates(model).contains {
+            $0.targetByteOffset == target && $0.certainty == .exact
+        }
+    })
+
+    #expect(model.candidateCount == 2)
+    #expect(
+        model.selectedCandidate?.targetByteOffset == chosen,
+        "an Exact reply must not move an explicit user selection"
+    )
+}
+
+@MainActor
+@Test
+func contextExactPinnedUpgradeUsesSelectionAfterVerification() async throws {
+    let root = try exactTemporaryProject(["main.rs": twoCloseSource])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let gate = ContextExactGate()
+    let identity = ContentIdentityGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve,
+        contentIdentity: { file in await identity.read(file) }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "close();", in: twoCloseSource))
+    #expect(await testWaitUntil("fuzzy candidates pending exact") {
+        model.candidateCount == 2 && gate.count == 1
+    })
+    let target = twoCloseSecondDefinition()
+    let targetIndex = try #require(contextCandidates(model).firstIndex { $0.targetByteOffset == target })
+    model.select(at: targetIndex)
+    // Pinning restarts the upgrade for the displayed token.
+    model.setMode(.pinned)
+    #expect(await testWaitUntil("pinned upgrade requested") { gate.count == 2 })
+    gate.complete(0, with: nil)
+
+    gate.complete(1, with: exactEntry(file: "main.rs", byteOffset: target))
+    #expect(await testWaitUntil("source verification suspended") { identity.pendingCount == 1 })
+    model.select(at: 1 - targetIndex)
+    #expect(await releaseExactVerification(identity))
+    try await Task.sleep(for: .milliseconds(300))
+
+    #expect(model.selectedIndex == 1 - targetIndex)
+    #expect(
+        contextCandidates(model).allSatisfy { $0.certainty != .exact },
+        "a pinned upgrade applies only to the candidate selected after verification"
+    )
+}
+
+@MainActor
+@Test
+func contextExactInsertKeepsUserSelectionChangedDuringVerification() async throws {
+    let root = try exactTemporaryProject(["main.rs": twoCloseSource])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let gate = ContextExactGate()
+    let identity = ContentIdentityGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: gate.resolve,
+        contentIdentity: { file in await identity.read(file) }
+    )
+    model.updateProjectState(
+        .ready(session, exactQueryContext(for: session, generation: 1)),
+        root: root
+    )
+    model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "close();", in: twoCloseSource))
+    #expect(await testWaitUntil("fuzzy candidates pending exact") {
+        model.candidateCount == 2 && gate.count == 1
+    })
+
+    // The Exact reply names a definition the fuzzy list never produced.
+    let exactTarget = exactByteOffset(of: "f<T>", in: twoCloseSource)
+    gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: exactTarget))
+    #expect(await testWaitUntil("source verification suspended") { identity.pendingCount == 1 })
+    model.selectNext()
+    let chosen = try #require(model.selectedCandidate?.targetByteOffset)
+    #expect(await releaseExactVerification(identity))
+    #expect(await testWaitUntil("exact candidate inserted") { model.candidateCount == 3 })
+
+    #expect(contextCandidates(model).first?.targetByteOffset == exactTarget)
+    #expect(contextCandidates(model).first?.certainty == .exact)
+    #expect(
+        model.selectedCandidate?.targetByteOffset == chosen,
+        "inserting an Exact candidate must keep the explicit user selection"
+    )
+}
+
 @MainActor
 @Test
 func contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() async throws {
@@ -2880,6 +3045,30 @@ private final class ContextExactGate {
         continuations.removeValue(forKey: id)?.resume(
             returning: .completed(entry.map { [$0] } ?? [])
         )
+    }
+}
+
+/// Suspends Context Exact content verification until the test releases it;
+/// released reads report the file's current bytes.
+@MainActor
+private final class ContentIdentityGate {
+    private var pending: [(file: URL, continuation: CheckedContinuation<ContentID?, Never>)] = []
+    private(set) var requestCount = 0
+
+    var pendingCount: Int { pending.count }
+
+    func read(_ file: URL) async -> ContentID? {
+        requestCount += 1
+        return await withCheckedContinuation { pending.append((file, $0)) }
+    }
+
+    func releaseAll() {
+        let released = pending
+        pending = []
+        for entry in released {
+            let bytes = (try? Data(contentsOf: entry.file)).map { [UInt8]($0) }
+            entry.continuation.resume(returning: bytes.map { ContentID.sha256(of: $0) })
+        }
     }
 }
 

@@ -64,6 +64,9 @@ public final class ContextWindowModel {
         UInt64,
         ExactRequestBatch
     ) async -> ExactCoordinator.DefinitionResult?
+    /// Reads the current content identity of a project file for Exact
+    /// verification; nil when the file cannot be read.
+    typealias ContentIdentityReader = @Sendable (URL) async -> ContentID?
 
     public private(set) var mode: Mode = .follow
     public private(set) var stage: Stage = .idle
@@ -86,6 +89,11 @@ public final class ContextWindowModel {
     private var exactBatch: ExactRequestBatch?
     private var cancelExactBatch: (@MainActor (ExactRequestBatch) -> Void)?
     private var documentRecency: [DocumentKey] = []
+    private let contentIdentityOverride: ContentIdentityReader?
+    /// Advances on every explicit user selection change. An Exact reply
+    /// arriving after the user chose a candidate upgrades in place and never
+    /// moves that choice.
+    private var selectionEpoch: UInt64 = 0
 
     public init() {
         resolver = { session, file, offset, context in
@@ -93,16 +101,19 @@ public final class ContextWindowModel {
         }
         loader = loadReaderDocument
         exactResolver = nil
+        contentIdentityOverride = nil
     }
 
     init(
         _ resolver: @escaping Resolver,
         loader: @escaping Loader = loadReaderDocument,
-        exactResolver: ExactResolver? = nil
+        exactResolver: ExactResolver? = nil,
+        contentIdentity: ContentIdentityReader? = nil
     ) {
         self.resolver = resolver
         self.loader = loader
         self.exactResolver = exactResolver
+        contentIdentityOverride = contentIdentity
     }
 
     func attachExactCoordinator(_ coordinator: ExactCoordinator) {
@@ -295,6 +306,7 @@ public final class ContextWindowModel {
         guard case let .candidates(candidates, selected) = stage,
               !candidates.isEmpty
         else { return }
+        selectionEpoch &+= 1
         stage = .candidates(candidates, selected: (selected + 1) % candidates.count)
     }
 
@@ -303,6 +315,7 @@ public final class ContextWindowModel {
               candidates.indices.contains(index),
               index != selected
         else { return }
+        selectionEpoch &+= 1
         stage = .candidates(candidates, selected: index)
     }
 
@@ -310,6 +323,7 @@ public final class ContextWindowModel {
         guard case let .candidates(candidates, selected) = stage,
               !candidates.isEmpty
         else { return }
+        selectionEpoch &+= 1
         stage = .candidates(
             candidates,
             selected: (selected - 1 + candidates.count) % candidates.count
@@ -507,6 +521,7 @@ public final class ContextWindowModel {
         guard let exactResolver,
               let batch = makeUpgradeBatch()
         else { return }
+        let requestSelectionEpoch = selectionEpoch
         let result = await exactResolver(
             token.file,
             token.offset,
@@ -528,7 +543,8 @@ public final class ContextWindowModel {
                 token: token,
                 session: session,
                 context: context,
-                request: request
+                request: request,
+                selectionEpoch: requestSelectionEpoch
             )
         }
     }
@@ -559,15 +575,19 @@ public final class ContextWindowModel {
         token: Token,
         session: EngineSession,
         context: QueryContext,
-        request: UInt64
+        request: UInt64,
+        selectionEpoch requestSelectionEpoch: UInt64
     ) async {
+        // Candidates are identified by (path, targetByteOffset), never by a
+        // captured index: every await below may interleave with user
+        // selection, so the stage is re-read after each one.
         guard requestID == request,
               case let .ready(currentSession, currentContext) = projectState,
               currentContext.generation == context.generation,
               currentSession.snapshotID == session.snapshotID,
               currentSession.analysisProfile.id == session.analysisProfile.id,
-              case let .candidates(current, selected) = stage,
-              current.indices.contains(selected),
+              case let .candidates(entryCandidates, entrySelected) = stage,
+              entryCandidates.indices.contains(entrySelected),
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
         else { return }
         let targetPath = projectPath(exact.location.file)
@@ -588,7 +608,8 @@ public final class ContextWindowModel {
               latestContext.generation == context.generation,
               latestSession.snapshotID == session.snapshotID,
               latestSession.analysisProfile.id == session.analysisProfile.id,
-              case .candidates = stage
+              case let .candidates(current, selected) = stage,
+              current.indices.contains(selected)
         else { return }
         guard sourceIsCurrent && targetIsCurrent else {
             onStaleIndexContent?(
@@ -610,7 +631,7 @@ public final class ContextWindowModel {
                 guard index == selected else { return }
                 candidates[index] = upgraded
                 stage = .candidates(candidates, selected: selected)
-            } else if index == selected {
+            } else if index == selected || selectionEpoch != requestSelectionEpoch {
                 candidates[index] = upgraded
                 stage = .candidates(candidates, selected: selected)
             } else {
@@ -634,9 +655,14 @@ public final class ContextWindowModel {
               currentContext.generation == context.generation,
               currentSession.snapshotID == session.snapshotID,
               currentSession.analysisProfile.id == session.analysisProfile.id,
-              case let .candidates(latest, _) = stage
+              case let .candidates(latest, latestSelected) = stage
         else { return }
-        stage = .candidates([candidate] + latest, selected: 0)
+        let keepsUserChoice = selectionEpoch != requestSelectionEpoch
+            && latest.indices.contains(latestSelected)
+        stage = .candidates(
+            [candidate] + latest,
+            selected: keepsUserChoice ? latestSelected + 1 : 0
+        )
     }
 
     private func exactCandidate(
@@ -879,6 +905,9 @@ public final class ContextWindowModel {
               let root
         else { return true }
         let file = root.appendingPathComponent(path)
+        if let contentIdentityOverride {
+            return await contentIdentityOverride(file) == expected
+        }
         let loaded: ReaderDocument?
         if let contentSource {
             loaded = await Task.detached(priority: .userInitiated) {
