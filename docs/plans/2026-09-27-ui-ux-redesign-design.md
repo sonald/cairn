@@ -139,7 +139,7 @@ M0-B 探针关于可变字号成本的结论（§9.2）依然适用：字号是 
 ### 5.2 历史快照与对比
 
 - 切到历史 commit 时，阅读区整体使用褐黄 `histReader` 底色，标题显示「read-only snapshot · worktree untouched」。
-- 提交选择器：搜索、分支 / Tags 切换、每条提交标注「Exact cached」（已物化）；底部说明「Fuzzy 在任何提交都可用；Exact 需物化，2 GB 缓存」。
+- 提交选择器：搜索、分支 / Tags 切换、源码已物化的提交标注「已物化」（仅表示源码已在磁盘，不代表 rust-analyzer 索引已缓存）；底部说明「Fuzzy 在任何提交都可用；Exact 需物化，2 GB 缓存」。
 - 对比视图：顶部「Changed functions」条（Body / Added / Removed · 符号名），hunk 导航，左右对齐 diff，缺失侧用斜线填充。
 - 未物化快照的状态栏写明「fuzzy only · queries capped at Strong」。
 
@@ -149,11 +149,11 @@ M0-B 探针关于可变字号成本的结论（§9.2）依然适用：字号是 
 
 | 画板 | 覆盖的数据元素 | 现有来源 |
 |---|---|---|
-| Reader（三主题） | 文件树（含修改点）、大纲（种类 + 签名）、当前作用域、标签页（普通 / 预览 / Reading Set）、路径与作用域、阅读高度 Full/Structure/Overview、书签旗、折叠、作用域竖线、主选中 / occurrence、Relations 四方向与计数、可能匹配折叠、Freeze、Inspector 入口、查询完整度、Lens Follow/Pin、候选切换、确定性标签、来源徽章、DocumentID 类别、分层状态栏、Profile 芯片、Safe 印章、布局预设 | `TabStripModel`、`OutlinePanelModel`、`RelationTreeModel`、`ContextWindowModel`、`PanelPresetModel`、`ExactCoordinator`；`main.*`、`relation.*`、`reader.height.*` |
+| Reader（三主题） | 文件树（含修改点）、大纲（种类 + 签名）、当前作用域、标签页（普通 / 预览 / Reading Set）、路径与作用域、阅读高度 Full/Structure/Overview、书签旗、折叠、作用域竖线、主选中 / occurrence、Relations 四方向与当前方向计数、可能匹配折叠、Freeze、Inspector 入口、查询完整度、Lens Follow/Pin、候选切换、确定性标签、来源徽章、DocumentID 类别、分层状态栏、Profile 芯片、Safe 印章、布局预设 | `TabStripModel`、`OutlinePanelModel`、`RelationTreeModel`、`ContextWindowModel`、`PanelPresetModel`、`ExactCoordinator`；`main.*`、`relation.*`、`reader.height.*` |
 | Design language | 色板、字体、堆石、标签语法、徽章、符号种类、信任印章、gutter 词汇 | §3 |
 | Time travel | 提交列表（哈希 / 标题 / 日期 / HEAD / 物化状态）、分支与 Tags、Working Tree、对比左右栏、改动函数、hunk 导航、大 diff 仅左右并排 | `CommitPickerModel`、`CompareModel`、`DiffCore`；`panel.commit.*`、`main.large.diff.*` |
 | Resolution Inspector | Source / Verification / Verification availability / Analysis environment、Corrected candidates、Open former candidate、Full audit（certainty、dispatch、provenance、completeness、snapshot、profile、trust、captured at、evidence） | `relation.inspector.*`、`model.inspector.*`、`model.narrative.*` |
-| Reading Trail | 路径图、分支、快照边界、每站导航方式与徽章、CURRENT、节点详情（Snapshot、Navigated via、导航时证据 vs 当前证据、证据已变化提示）、Restore this node、Freeze Path、Project history | `NavigationHistory`；`trail.*` |
+| Reading Trail | 路径图、分支、快照边界、每站导航方式与徽章、CURRENT、节点详情（Snapshot、Navigated via、导航时证据 vs 当前证据、证据已变化提示）、Restore this node、Freeze Path | `NavigationHistory`；`trail.*` |
 | Reading Set | 标题、摘录数、冻结时间、tab lifetime、跳过数与原因、每条摘录的角色 / 名称 / 路径 / 徽章 / captured、Open File / Expand Context / View Evidence | `ReadingSet`；`readingSet.*`、`relation.skip.*` |
 | Seek | `>` 命令、`@` 文件符号、`#` 项目符号、`:` 行号（含超出末行提示）、种类、容器、位置、依赖标记、快捷键提示、预览 | `SymbolSearchPanelModel`；`panel.palette.*` |
 | Find in Project | 查询、正则 / 大小写、匹配统计、按文件分组、行号 + 片段高亮、快照标识、文件内查找条（计数、上下、大小写） | `SearchPanelModel`；`panel.search.*`、`main.find.*` |
@@ -188,3 +188,9 @@ M0-B 探针关于可变字号成本的结论（§9.2）依然适用：字号是 
 | D3 | 默认行高 | **1.3**（保持代码现状；`docs/design.md` §9.2 的 1.25 需同步更正） |
 | D4 | 函数名默认增量 | **+4.5pt** |
 | D5 | Lens 位置 | **底部横跨**阅读区与 Relations（§14 布局） |
+
+2026-09-28 用户裁决 D6（第三阶段收尾）。
+
+| 编号 | 问题 | 裁决 |
+|---|---|---|
+| D6 | 缺数据的四项是否补做 | 提交「已物化」标记与 Inspector 实时堆石**补做**；Reading Trail 历史会话卡片（Project history）与 Relations 其他方向计数**永久去除**：前者现有会话恢复、Reading Set 与书签已覆盖主要场景，却需另建会话历史存储；后者只省一次点击，却要每次选中多跑三次语言服务查询 |
