@@ -498,13 +498,11 @@ public final class AppModel {
     public private(set) var navigationGeneration: UInt64 = 0
     public private(set) var activeNavigationRequest: NavigationRequest?
     public private(set) var replayNotice: String?
-    /// Set when the latest session checkpoint write failed, e.g. because
-    /// the disk was full or the store directory was unwritable. The status
-    /// bar surfaces it; the next successful write clears it.
-    public private(set) var sessionSaveNotice: String?
-    /// Set when loading a saved session hit a recoverable problem (corrupt
-    /// data, newer schema, unavailable project directory).
-    public private(set) var sessionLoadNotice: String?
+    /// Set when the latest session checkpoint write failed; the status bar
+    /// surfaces it and the next successful write clears it.
+    public var sessionSaveNotice: String? { sessionStore?.saveNotice }
+    /// Set when loading a saved session hit a recoverable problem.
+    public var sessionLoadNotice: String? { sessionStore?.loadNotice }
     /// True while a saved reading session is being restored; the status
     /// bar shows the restoring hint instead of a modal.
     public private(set) var isRestoringSession = false
@@ -590,20 +588,12 @@ public final class AppModel {
     @ObservationIgnored private var sessionRestoreWriteSuspension: UInt64?
     @ObservationIgnored private var sessionRestoreOwner: UUID?
     @ObservationIgnored package var sessionFileResolutionWillBegin: (@MainActor (URL) async -> Void)?
-    /// Legacy single-file session store (v1/v2 data): the anchor whose
-    /// directory also holds the per-project `sessions/` store.
-    @ObservationIgnored private var sessionURL: URL?
+    /// Nil when this model persists no reading session.
+    @ObservationIgnored private var sessionStore: SessionCheckpointStore?
     /// Notified after a per-project checkpoint was successfully written.
     /// The launch restore pointer is application-owned state (§7.3): the
     /// model only reports the fact, it never writes the global pointer.
     @ObservationIgnored package var onSessionCheckpointWritten: (@MainActor (String) -> Void)?
-    /// Snapshots that cannot safely be read stay protected until a successful
-    /// retry or an explicit clear (including future schemas and I/O failures).
-    @ObservationIgnored private var sessionOverwriteBlockedKeys: Set<String> = []
-    /// Root of a legacy snapshot that was loaded for migration; the legacy
-    /// file is retired only after that exact project completes its first
-    /// per-project write.
-    @ObservationIgnored private var legacySessionRootPendingMigration: String?
     package private(set) var projectRoot: URL?
     private var lastInstalledProjectRoot: URL?
     private var lastInstalledRevision: String?
@@ -684,7 +674,10 @@ public final class AppModel {
             compare: compare,
             navigationSink: navigationSink
         )
-        self.sessionURL = sessionURL.standardizedFileURL
+        self.sessionStore = SessionCheckpointStore(
+            legacyURL: sessionURL.standardizedFileURL,
+            maximumTabCount: tabStrip.maximumCount
+        )
         // One shared records authority per process when the application
         // provides it; otherwise this model owns a private one (tests,
         // single-window paths) (§8.1).
@@ -709,7 +702,7 @@ public final class AppModel {
     }
 
     package func scheduleSessionCheckpoint(panelPreset: PanelPresetModel) {
-        guard sessionURL != nil, !isRefreshingIndex else { return }
+        guard sessionStore != nil, !isRefreshingIndex else { return }
         if sessionCheckpointTask == nil {
             sessionCheckpointDirtyAt = .now
         }
@@ -742,237 +735,25 @@ public final class AppModel {
         sessionCheckpointTask = nil
     }
 
-    package struct SessionLoadResult: Sendable {
-        package enum Problem: Equatable, Sendable {
-            /// Undecodable data; the file was quarantined as *.corrupt and
-            /// the project may record a fresh session.
-            case corruptFile
-            /// Temporary read/permission failure; preserve and block writes until a successful retry.
-            case readFailed
-            /// Written by a newer Cairn; the file is kept untouched and
-            /// must not be overwritten.
-            case unsupportedSchemaVersion(Int)
-            /// The snapshot's project directory does not currently exist
-            /// (e.g. an unmounted volume); data is kept for later.
-            case projectUnavailable
-        }
-
-        package let snapshot: SessionCodec.Snapshot?
-        package let problem: Problem?
-
-        package init(
-            snapshot: SessionCodec.Snapshot?,
-            problem: Problem? = nil
-        ) {
-            self.snapshot = snapshot
-            self.problem = problem
-        }
-    }
-
-    /// Stable per-project file name: SHA-256 of the standardized,
-    /// symlink-resolved absolute root path. Swift's Hasher is not stable
-    /// across processes and must never be used here.
-    nonisolated package static func sessionProjectKey(
-        for root: URL
-    ) -> String {
-        let path = root.standardizedFileURL.resolvingSymlinksInPath().path
-        return ContentID.sha256(of: Array(path.utf8)).bytes
-            .map { String(format: "%02x", $0) }
-            .joined()
-    }
-
-    nonisolated private static func isSameProjectRoot(
-        _ lhs: String,
-        _ rhs: URL
-    ) -> Bool {
-        URL(fileURLWithPath: lhs, isDirectory: true)
-            .resolvingSymlinksInPath()
-            .standardizedFileURL.path
-            == rhs.resolvingSymlinksInPath().standardizedFileURL.path
+    /// Stable per-project session file name.
+    nonisolated package static func sessionProjectKey(for root: URL) -> String {
+        SessionCheckpointStore.projectKey(for: root)
     }
 
     /// When the project was last read: its session checkpoint's modification
     /// time. Nil when the project has no saved session.
     package func lastSessionDate(forProjectRoot root: String) -> Date? {
-        guard let fileURL = sessionFileURL(forProjectRoot: root) else { return nil }
-        return (try? FileManager.default.attributesOfItem(atPath: fileURL.path))?[
-            .modificationDate
-        ] as? Date
+        sessionStore?.lastSessionDate(forProjectRoot: root)
     }
 
-    private func sessionFileURL(
-        forProjectRoot root: String
-    ) -> URL? {
-        guard let sessionURL else { return nil }
-        return sessionURL.deletingLastPathComponent()
-            .appendingPathComponent("sessions", isDirectory: true)
-            .appendingPathComponent(
-                Self.sessionProjectKey(
-                    for: URL(fileURLWithPath: root, isDirectory: true)
-                ) + ".json"
-            )
+    /// Loads the newest saved session for `root`; see `SessionCheckpointStore.load`.
+    package func loadSessionSnapshot(forProject root: URL) -> SessionLoadResult {
+        sessionStore?.load(forProject: root) ?? SessionLoadResult(snapshot: nil)
     }
 
-    /// Loads the newest saved session for `root` from the per-project
-    /// store. The snapshot's own `projectRoot` must match the requested
-    /// project; the file name alone is not trusted.
-    package func loadSessionSnapshot(
-        forProject root: URL
-    ) -> SessionLoadResult {
-        guard let fileURL = sessionFileURL(forProjectRoot: root.path)
-        else { return SessionLoadResult(snapshot: nil) }
-        let projectKey = Self.sessionProjectKey(for: root)
-        let data: Data
-        do {
-            data = try Data(contentsOf: fileURL)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            // Only absence permits fallback. fileExists also returns false
-            // for inaccessible parent directories, which must remain protected.
-            let legacy = loadLegacySessionSnapshot()
-            if let problem = legacy.problem {
-                sessionLoadNotice = Self.sessionLoadProblemText(problem)
-                switch problem {
-                case .readFailed, .unsupportedSchemaVersion:
-                    // The old root is unknown. Do not let a fresh checkpoint
-                    // hide this file from a later successful migration retry.
-                    sessionOverwriteBlockedKeys.insert(projectKey)
-                case .corruptFile, .projectUnavailable:
-                    sessionOverwriteBlockedKeys.remove(projectKey)
-                }
-                return legacy
-            }
-            sessionOverwriteBlockedKeys.remove(projectKey)
-            sessionLoadNotice = nil
-            guard let snapshot = legacy.snapshot,
-                  Self.isSameProjectRoot(snapshot.projectRoot, root)
-            else { return SessionLoadResult(snapshot: nil) }
-            return legacy
-        } catch {
-            sessionOverwriteBlockedKeys.insert(projectKey)
-            sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
-            return SessionLoadResult(snapshot: nil, problem: .readFailed)
-        }
-        do {
-            let snapshot = try SessionCodec.decode(
-                data,
-                maximumTabCount: tabStrip.maximumCount,
-                dependencyAllowed: exactLocationIsInDependency
-            )
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(
-                atPath: snapshot.projectRoot,
-                isDirectory: &isDirectory
-            ), isDirectory.boolValue else {
-                sessionLoadNotice = Self.sessionLoadProblemText(
-                    .projectUnavailable
-                )
-                return SessionLoadResult(
-                    snapshot: nil,
-                    problem: .projectUnavailable
-                )
-            }
-            guard Self.isSameProjectRoot(snapshot.projectRoot, root) else {
-                try quarantineCorruptSession(at: fileURL)
-                sessionLoadNotice = Self.sessionLoadProblemText(.corruptFile)
-                return SessionLoadResult(snapshot: nil, problem: .corruptFile)
-            }
-            sessionOverwriteBlockedKeys.remove(projectKey)
-            sessionLoadNotice = nil
-            return SessionLoadResult(snapshot: snapshot)
-        } catch SessionCodec.DecodeError.unsupportedSchemaVersion(let version) {
-            sessionOverwriteBlockedKeys.insert(
-                Self.sessionProjectKey(for: root)
-            )
-            sessionLoadNotice = Self.sessionLoadProblemText(
-                .unsupportedSchemaVersion(version)
-            )
-            return SessionLoadResult(
-                snapshot: nil,
-                problem: .unsupportedSchemaVersion(version)
-            )
-        } catch {
-            do {
-                try quarantineCorruptSession(at: fileURL)
-                sessionOverwriteBlockedKeys.remove(projectKey)
-            } catch {
-                sessionOverwriteBlockedKeys.insert(projectKey)
-                sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
-                return SessionLoadResult(snapshot: nil, problem: .readFailed)
-            }
-            sessionLoadNotice = Self.sessionLoadProblemText(.corruptFile)
-            return SessionLoadResult(snapshot: nil, problem: .corruptFile)
-        }
-    }
-
-    /// Loads the legacy single-file session (v1/v2 data) for one-time
-    /// migration at launch or when reopening its project without a new snapshot.
+    /// Loads the legacy single-file session for one-time migration.
     package func loadLegacySessionSnapshot() -> SessionLoadResult {
-        guard let sessionURL else { return SessionLoadResult(snapshot: nil) }
-        let data: Data
-        do {
-            data = try Data(contentsOf: sessionURL)
-        } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
-            return SessionLoadResult(snapshot: nil)
-        } catch {
-            sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
-            return SessionLoadResult(snapshot: nil, problem: .readFailed)
-        }
-        do {
-            let snapshot = try SessionCodec.decode(
-                data,
-                maximumTabCount: tabStrip.maximumCount,
-                dependencyAllowed: exactLocationIsInDependency
-            )
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(
-                atPath: snapshot.projectRoot,
-                isDirectory: &isDirectory
-            ), isDirectory.boolValue else {
-                return SessionLoadResult(
-                    snapshot: nil,
-                    problem: .projectUnavailable
-                )
-            }
-            legacySessionRootPendingMigration = snapshot.projectRoot
-            return SessionLoadResult(snapshot: snapshot)
-        } catch SessionCodec.DecodeError.unsupportedSchemaVersion(let version) {
-            return SessionLoadResult(
-                snapshot: nil,
-                problem: .unsupportedSchemaVersion(version)
-            )
-        } catch {
-            do {
-                try quarantineCorruptSession(at: sessionURL)
-            } catch {
-                sessionLoadNotice = Self.sessionLoadProblemText(.readFailed)
-                return SessionLoadResult(snapshot: nil, problem: .readFailed)
-            }
-            return SessionLoadResult(snapshot: nil, problem: .corruptFile)
-        }
-    }
-
-    private func quarantineCorruptSession(at fileURL: URL) throws {
-        let quarantineURL = URL(
-            fileURLWithPath: fileURL.path + ".corrupt",
-            isDirectory: false
-        )
-        try? FileManager.default.removeItem(at: quarantineURL)
-        try FileManager.default.moveItem(at: fileURL, to: quarantineURL)
-    }
-
-    nonisolated private static func sessionLoadProblemText(
-        _ problem: SessionLoadResult.Problem
-    ) -> String {
-        switch problem {
-        case .corruptFile:
-            localized("model.app.corruptSession")
-        case .readFailed:
-            localized("model.app.unreadableSession")
-        case .unsupportedSchemaVersion(let version):
-            localizedFormat("model.app.newerSession", version)
-        case .projectUnavailable:
-            localized("model.app.projectUnavailable")
-        }
+        sessionStore?.loadLegacy() ?? SessionLoadResult(snapshot: nil)
     }
 
     package func writeSessionCheckpoint(
@@ -991,64 +772,17 @@ public final class AppModel {
         allowsPendingTopology: Bool
     ) throws {
         guard sessionRestoreWriteSuspension != generation,
-              let sessionURL,
+              let sessionStore,
               let snapshot = makeSessionSnapshot(
                   panelPreset: panelPreset,
                   allowsPendingTopology: allowsPendingTopology
               )
         else { return }
-        let projectKey = Self.sessionProjectKey(
-            for: URL(fileURLWithPath: snapshot.projectRoot, isDirectory: true)
-        )
-        guard !sessionOverwriteBlockedKeys.contains(projectKey),
-              let targetURL = sessionFileURL(
-                  forProjectRoot: snapshot.projectRoot
-              )
-        else { return }
-        do {
-            let data = try SessionCodec.encode(
-                snapshot,
-                maximumTabCount: tabStrip.maximumCount,
-                dependencyAllowed: exactLocationIsInDependency
-            )
-            try FileManager.default.createDirectory(
-                at: targetURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            try data.write(to: targetURL, options: .atomic)
-            if sessionSaveNotice != nil { sessionSaveNotice = nil }
-            if sessionLoadNotice != nil { sessionLoadNotice = nil }
-            // Report the successful write; the application layer decides
-            // whether this project becomes the launch restore target
-            // (§7.3 — background checkpoints no longer move the pointer
-            // implicitly). A legacy file the snapshot was migrated from
-            // can now be retired (kept as a one-time backup).
-            onSessionCheckpointWritten?(snapshot.projectRoot)
-            retireLegacySessionIfPendingMigration(
-                for: snapshot.projectRoot
-            )
-        } catch {
-            sessionSaveNotice =
-                localizedFormat("model.app.sessionSaveFailed", Self.failureSummary(error))
-            throw error
+        try sessionStore.write(snapshot) { projectRoot in
+            onSessionCheckpointWritten?(projectRoot)
         }
     }
 
-    private func retireLegacySessionIfPendingMigration(
-        for projectRoot: String
-    ) {
-        guard let sessionURL,
-              legacySessionRootPendingMigration == projectRoot,
-              FileManager.default.fileExists(atPath: sessionURL.path)
-        else { return }
-        let backupURL = URL(
-            fileURLWithPath: sessionURL.path + ".migrated",
-            isDirectory: false
-        )
-        try? FileManager.default.removeItem(at: backupURL)
-        try? FileManager.default.moveItem(at: sessionURL, to: backupURL)
-        legacySessionRootPendingMigration = nil
-    }
 
     /// Clears the current project's saved reading session: removes its
     /// per-project snapshot, closes every tab, resets in-memory navigation
@@ -1060,9 +794,8 @@ public final class AppModel {
         panelPreset: PanelPresetModel
     ) throws {
         guard let root = projectRoot,
-              sessionURL != nil
+              let sessionStore
         else { return }
-        let projectKey = Self.sessionProjectKey(for: root)
         cancelPendingSessionCheckpoint()
         tabStrip.reset()
         navigationGeneration &+= 1
@@ -1073,21 +806,7 @@ public final class AppModel {
         selectedFile = nil
         selectedByteOffset = nil
         activeNavigationRequest = nil
-        sessionOverwriteBlockedKeys.remove(projectKey)
-        if let fileURL = sessionFileURL(forProjectRoot: root.path) {
-            try? FileManager.default.removeItem(at: fileURL)
-        }
-        if let sessionURL,
-           FileManager.default.fileExists(atPath: sessionURL.path)
-        {
-            let backupURL = URL(
-                fileURLWithPath: sessionURL.path + ".migrated",
-                isDirectory: false
-            )
-            try? FileManager.default.removeItem(at: backupURL)
-            try? FileManager.default.moveItem(at: sessionURL, to: backupURL)
-        }
-        legacySessionRootPendingMigration = nil
+        sessionStore.clear(projectRoot: root)
         // The empty snapshot is now the last valid state for this project.
         try writeSessionCheckpoint(panelPreset: panelPreset)
     }
@@ -1712,7 +1431,7 @@ public final class AppModel {
         // commit the first full snapshot for this project so the disk
         // reflects what was restored, not what the previous session left.
         sessionRestoreWriteSuspension = nil
-        if sessionURL != nil,
+        if sessionStore != nil,
            let preset = PanelPresetModel(rawValue: snapshot.panelPreset)
         {
             try? writeSessionCheckpointNow(

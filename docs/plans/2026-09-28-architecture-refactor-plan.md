@@ -320,9 +320,15 @@ Palette 行标签与 Diff 显示名的现有测试保持通过。
 - **线程与时序不变**：仍在主线程同步写入；`scheduleSessionCheckpoint` 的防抖与 `cancelPendingSessionCheckpoint`
   语义不变。
 
-**测试**：`SessionCodecTests`、`SessionRestoreTests`、`SessionOpenBoundaryTests` 全绿；新增 store 级单元测试覆盖
-「新版本不可覆盖」「恢复未完成不可写」「损坏文件隔离」三条保护规则（若 R0.2 盘点发现已有，则引用不新增）。
-写出的会话文件字节与重构前一致（固定输入比较）。
+**实施调整**：`sessionRestoreWriteSuspension` 与 AppModel 的恢复 generation 比较，属于 AppModel 状态，**留在 AppModel**；
+store 只持有磁盘层面的写保护（`overwriteBlockedKeys`）与旧版迁移标记。通知属性由 store 持有（`@Observable`），
+AppModel 的 `sessionSaveNotice`/`sessionLoadNotice` 改为转发的计算属性，App 层的 Observation 跟踪不变。AppModel 原有
+package API（`loadSessionSnapshot`、`loadLegacySessionSnapshot`、`lastSessionDate`、`sessionProjectKey`）保留为转发，
+App 层调用点零改动。
+
+**测试**：`SessionCodecTests`、`SessionRestoreTests`、`SessionOpenBoundaryTests`、多窗口与书签独立批次全绿。R0 盘点确认三条
+保护规则已有覆盖，不新增测试。原计划的「会话文件逐字节比较」未做：编码仍由未改动的 `SessionCodec.encode` 完成，
+路径计算原样搬移，逐字节测试只会重复这两点。
 
 **为后续功能准备的**：以后需要移出主线程时，只改 store 内部；AppModel 不再增长持久化逻辑。
 
