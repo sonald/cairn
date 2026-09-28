@@ -2090,6 +2090,26 @@ func materializerUsesCommitAndProfileLayoutAndSkipsSpecialFiles() throws {
 }
 
 @Test
+func materializerListsOnlyCommitsWithACompleteDirectory() throws {
+    let fixture = try simpleMaterializerFixture()
+    defer { fixture.remove() }
+    let snapshot = try CommitSnapshot(repositoryURL: fixture.root)
+    let profile = try ExactProfileKey(snapshot: snapshot)
+    let cache = fixture.root.appendingPathComponent("cache/materialized")
+    let materializer = Materializer(rootURL: cache)
+    #expect(materializer.materializedCommitOIDs().isEmpty)
+
+    try materializer.materialize(snapshot, configFingerprint: profile.configFingerprint)
+    let partial = String(repeating: "b", count: 40)
+    try FileManager.default.createDirectory(
+        at: cache.appendingPathComponent(partial).appendingPathComponent("config"),
+        withIntermediateDirectories: true
+    )
+
+    #expect(materializer.materializedCommitOIDs() == [snapshot.commitOID.hex.lowercased()])
+}
+
+@Test
 func materializerReusesACompleteDirectoryWithoutCopying() throws {
     let fixture = try simpleMaterializerFixture()
     defer { fixture.remove() }

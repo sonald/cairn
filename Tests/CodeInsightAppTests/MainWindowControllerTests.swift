@@ -379,6 +379,55 @@ func bookmarkPanelSelfTestActionsTargetRowsByUUIDAndExposeTheirStatus() async th
 
 @MainActor
 @Test
+func commitPickerMarksOnlyCompletelyMaterializedCommits() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryGitProject(["src/main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    func git(_ arguments: String...) throws -> String {
+        let process = Process()
+        let output = Pipe()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = ["-C", root.path, "-c", "user.name=T", "-c", "user.email=t@t"] + arguments
+        process.standardOutput = output
+        try process.run()
+        process.waitUntilExit()
+        return String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    _ = try git("add", "-A")
+    _ = try git("commit", "-q", "-m", "first")
+    let first = try git("rev-parse", "HEAD")
+    try "fn main() { }\n".write(to: root.appendingPathComponent("src/main.rs"), atomically: true, encoding: .utf8)
+    _ = try git("commit", "-q", "-am", "second")
+    let second = try git("rev-parse", "HEAD")
+
+    // `first` is complete; `second` only has a staging directory without the marker.
+    let cache = root.appendingPathComponent(".cache-materialized", isDirectory: true)
+    let complete = cache.appendingPathComponent(first).appendingPathComponent("config")
+    try FileManager.default.createDirectory(at: complete, withIntermediateDirectories: true)
+    try Data().write(to: complete.appendingPathComponent(".complete"))
+    try FileManager.default.createDirectory(
+        at: cache.appendingPathComponent(second).appendingPathComponent("config"),
+        withIntermediateDirectories: true
+    )
+
+    let model = AppModel(exactCoordinator: ExactCoordinator(materializer: Materializer(rootURL: cache)))
+    model.commitPicker.load(repositoryURL: root)
+    try #require(await mainWindowWaitUntil(model.commitPicker.commits.count == 2))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 300), styleMask: [.titled], backing: .buffered, defer: false)
+    defer { window.close() }
+    window.orderFront(nil)
+    let picker = CommitPickerPopover(appModel: model, selectedRevision: { nil }, onChoose: { _ in })
+    picker.show(relativeTo: window.contentView!)
+    defer { picker.selfTestClose() }
+
+    let materialized = CodeInsightApp.localized("panel.commit.materialized")
+    #expect(picker.selfTestVisibleBadges(forCommit: first).contains(materialized))
+    #expect(!picker.selfTestVisibleBadges(forCommit: second).contains(materialized))
+}
+
+@MainActor
+@Test
 func bookmarkRowsShowStatusAsAVisibleThemedBadgeInsteadOfDetailText() async throws {
     _ = NSApplication.shared
     let path = String(repeating: "nested-directory/", count: 8) + "main.rs"

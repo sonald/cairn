@@ -170,6 +170,24 @@ public final class Materializer: @unchecked Sendable {
         }
     }
 
+    /// Commits whose source is already on disk under some configuration:
+    /// `<root>/<commit>/<config>/.complete`. A read-only directory scan; it
+    /// says nothing about rust-analyzer's own index.
+    public func materializedCommitOIDs() -> Set<String> {
+        let fileManager = FileManager.default
+        guard let commits = try? fileManager.contentsOfDirectory(atPath: rootURL.path)
+        else { return [] }
+        return Set(commits.filter { commit in
+            let commitURL = rootURL.appendingPathComponent(commit, isDirectory: true)
+            let configs = (try? fileManager.contentsOfDirectory(atPath: commitURL.path)) ?? []
+            return configs.contains { config in
+                fileManager.fileExists(atPath: commitURL
+                    .appendingPathComponent(config, isDirectory: true)
+                    .appendingPathComponent(completeMarker).path)
+            }
+        }.map { $0.lowercased() })
+    }
+
     public func referenceCount(for url: URL) -> Int {
         lock.lock()
         defer { lock.unlock() }

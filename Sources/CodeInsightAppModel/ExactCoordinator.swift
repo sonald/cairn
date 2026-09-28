@@ -775,6 +775,11 @@ public final class ExactCoordinator {
         readiness = .off(localized("model.exact.cacheCleared"))
     }
 
+    /// Lowercased commit OIDs whose source is already materialized.
+    public func materializedCommitOIDs() -> Set<String> {
+        materializer.materializedCommitOIDs()
+    }
+
     public func clearMaterializedCache() async throws {
         epoch &+= 1
         let previousClose = closeTask

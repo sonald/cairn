@@ -242,12 +242,31 @@ final class CommitPickerPopover: NSViewController,
         )
     }
 
+    /// Badge texts on one commit's row, only when the row is actually shown.
+    func selfTestVisibleBadges(forCommit fullSHA: String) -> [String] {
+        guard let index = appModel.commitPicker.filteredCommits.firstIndex(where: { $0.fullSHA == fullSHA }),
+              let cell = tableView.view(atColumn: 0, row: index + (allowsWorktree ? 1 : 0), makeIfNecessary: true),
+              cell.window != nil
+        else { return [] }
+        cell.layoutSubtreeIfNeeded()
+        func labels(_ view: NSView) -> [NSTextField] {
+            ((view as? NSTextField).map { [$0] } ?? []) + view.subviews.flatMap(labels)
+        }
+        return labels(cell)
+            .filter { $0.drawsBackground && !$0.isHiddenOrHasHiddenAncestor && $0.frame.width > 0 }
+            .map { $0.stringValue.trimmingCharacters(in: .whitespaces) }
+    }
+
     private func choose(_ commit: CommitInfo?) {
         onChoose(commit)
     }
 
+    /// Commits whose source is already on disk; refreshed on each render.
+    private var materializedCommits: Set<String> = []
+
     private func render() {
         guard isViewLoaded else { return }
+        materializedCommits = appModel.exactCoordinator.materializedCommitOIDs()
         tableView.reloadData()
         let picker = appModel.commitPicker
         let row: Int
@@ -342,7 +361,10 @@ final class CommitPickerPopover: NSViewController,
         metadata.textColor = theme.chromeSecondaryColor
         metadata.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
-        let badges = commit.branchNames.map {
+        let materialized = materializedCommits.contains(commit.fullSHA.lowercased())
+            ? [badge(localized("panel.commit.materialized"), color: theme.inferredColor, fill: theme.slateSoftColor)]
+            : []
+        let badges = materialized + commit.branchNames.map {
             badge("⎇ \($0)", color: theme.verifiedColor, fill: theme.mossSoftColor)
         } + commit.tagNames.map {
             badge(localizedFormat("panel.commit.tag", $0), color: theme.histColor, fill: theme.histSoftColor)
