@@ -4251,6 +4251,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         row.alignment = .centerY
         row.spacing = 8
         row.edgeInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 10)
+        // Paint the chrome itself instead of letting the window background
+        // show through: offscreen captures have no window background.
+        row.wantsLayer = true
         snapshotBadge.isHidden = true
         snapshotBadge.setContentCompressionResistancePriority(.required, for: .horizontal)
         snapshotBadge.setContentHuggingPriority(.required, for: .horizontal)
@@ -5069,6 +5072,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         readerHeader.layer?.backgroundColor = readerTheme.chromeHeaderColor.cgColor
         readerHeaderDivider.layer?.backgroundColor =
             readerTheme.chromeDividerColor.cgColor
+        pathRow.layer?.backgroundColor = readerTheme.chromeColor.cgColor
         fileNameLabel.textColor = readerTheme.foregroundColor
         readingHeightShortcutLabel.textColor = readerTheme.chromeTertiaryColor
         readingHeightControl.apply(settings: settings)
@@ -5724,6 +5728,15 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             readingHeightControl.accessibilityLabel() ?? "",
             readingHeightControl.isHidden,
             readingHeightControl.isEnabled
+        )
+    }
+    var selfTestPathBar: (hidden: Bool, frame: NSRect, titles: [String]) {
+        loadViewIfNeeded()
+        view.layoutSubtreeIfNeeded()
+        return (
+            pathRow.isHidden,
+            pathRow.convert(pathRow.bounds, to: view),
+            pathControl.pathItems.map(\.title)
         )
     }
     var selfTestScopeHeader: (

@@ -895,6 +895,70 @@ func bookmarkVisualGateRejectsUniformBitmapsAndAcceptsVisibleChange() {
     ))
 }
 
+/// Offscreen captures have no window background behind the reader; the
+/// path bar must paint its own chrome so its text stays readable there.
+@MainActor
+@Test
+func pathBarPaintsThemedChromeBehindReadableText() throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["src/main.rs": "fn main() {}\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let controller = ReaderViewController()
+    controller.projectRoot = root
+    let window = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 640, height: 320),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    window.contentViewController = controller
+    controller.display(root.appendingPathComponent("src/main.rs"))
+
+    for theme in [ReaderSettings.Theme.light, .dark, .siClassic] {
+        let settings = ReaderSettings(theme: theme)
+        window.appearance = NSAppearance(named: theme == .dark ? .darkAqua : .aqua)
+        controller.apply(settings: settings)
+        let bar = controller.selfTestPathBar
+        #expect(!bar.hidden)
+        #expect(bar.titles.last == "main.rs")
+        let view = controller.view
+        view.layoutSubtreeIfNeeded()
+        let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: bar.frame))
+        view.cacheDisplay(in: bar.frame, to: bitmap)
+
+        let chromeRGB = ReaderTheme(settings: settings)
+            .chromeRGB(isDark: theme == .dark)
+        let chrome = (
+            CGFloat((chromeRGB >> 16) & 0xFF) / 255,
+            CGFloat((chromeRGB >> 8) & 0xFF) / 255,
+            CGFloat(chromeRGB & 0xFF) / 255
+        )
+        func luminance(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat) -> CGFloat {
+            0.2126 * r + 0.7152 * g + 0.0722 * b
+        }
+        let chromeLuminance = luminance(chrome.0, chrome.1, chrome.2)
+        var transparent = 0, chromeMatches = 0, contrasting = 0, total = 0
+        for y in 0..<bitmap.pixelsHigh {
+            for x in 0..<bitmap.pixelsWide {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
+                else { continue }
+                total += 1
+                if color.alphaComponent < 0.99 { transparent += 1; continue }
+                let (r, g, b) = (color.redComponent, color.greenComponent, color.blueComponent)
+                if abs(r - chrome.0) < 0.05, abs(g - chrome.1) < 0.05, abs(b - chrome.2) < 0.05 {
+                    chromeMatches += 1
+                }
+                if abs(luminance(r, g, b) - chromeLuminance) > 0.3 { contrasting += 1 }
+            }
+        }
+        // Every pixel is opaque, the bar is mostly the theme's chrome, and
+        // path text stands out from it.
+        #expect(transparent == 0, "\(theme.rawValue): \(transparent) transparent pixels")
+        #expect(chromeMatches * 2 > total, "\(theme.rawValue): \(chromeMatches)/\(total) chrome pixels")
+        #expect(contrasting >= 20, "\(theme.rawValue): \(contrasting) text pixels")
+    }
+}
+
 @MainActor
 private func mainWindowCapturePNG(_ view: NSView, at url: URL) throws {
     guard let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds)
