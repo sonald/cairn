@@ -471,11 +471,7 @@ public final class RenderingAttributesCoordinator {
     }
 }
 
-package enum ReadingHeightLevel: Int, CaseIterable, Sendable {
-    case full
-    case structure
-    case overview
-
+extension ReadingHeightLevel {
     package var title: String {
         switch self {
         case .full: localized("reader.height.full")
@@ -490,11 +486,6 @@ public final class ReaderTextView {
     private struct FoldScopeKey: Hashable {
         let file: URL
         let contentID: ContentID
-    }
-
-    private struct FoldOverrides {
-        var forcedFolded: Set<FoldID> = []
-        var forcedUnfolded: Set<FoldID> = []
     }
 
     private struct FocusState {
@@ -1055,17 +1046,17 @@ public final class ReaderTextView {
             contentID: document.contentID
         )
         activeFoldScope = scope
-        baselineFoldIDs = Self.baselineFoldIDs(
+        baselineFoldIDs = ReadingPlan.baselineFoldIDs(
             for: readingHeightLevel,
             in: document.foldRegions
         )
         let overrides = foldOverridesByScope[scope] ?? FoldOverrides()
         foldOverridesByScope[scope] = overrides
-        logicalFoldIDs = Self.logicalFoldIDs(
+        logicalFoldIDs = ReadingPlan.logicalFoldIDs(
             overrides: overrides,
             baseline: baselineFoldIDs
         )
-        renderedFoldIDs = Self.maximalFoldIDs(
+        renderedFoldIDs = ReadingPlan.maximalFoldIDs(
             logicalFoldIDs,
             in: document
         )
@@ -1200,7 +1191,7 @@ public final class ReaderTextView {
         else { return false }
         let shouldFold = !logicalFoldIDs.contains(id)
         return applyFoldMutation { overrides in
-            Self.setFold(
+            ReadingPlan.setFold(
                 id,
                 folded: shouldFold,
                 baseline: baselineFoldIDs,
@@ -1224,7 +1215,7 @@ public final class ReaderTextView {
         let affected = document.foldTopology?.recursiveSiblings(of: region.id) ?? []
         return applyFoldMutation { overrides in
             for id in affected {
-                Self.setFold(
+                ReadingPlan.setFold(
                     id,
                     folded: shouldFold,
                     baseline: baselineFoldIDs,
@@ -1294,7 +1285,7 @@ public final class ReaderTextView {
     package func focusCurrentScope(at byteOffset: UInt32) -> Bool {
         guard focusState == nil,
               let document = displayedDocument,
-              let target = Self.focusTarget(at: byteOffset, in: document)
+              let target = ReadingPlan.focusTarget(at: byteOffset, in: document)
         else { return false }
         let saved = FocusState(
             readingHeightLevel: readingHeightLevel,
@@ -1303,7 +1294,7 @@ public final class ReaderTextView {
             byteOffset: byteOffset
         )
         guard applyFoldProjection(
-            Self.focusFoldIDs(around: target.facet, in: document)
+            ReadingPlan.focusFoldIDs(around: target.facet, in: document)
         ) else { return false }
         focusState = saved
         return true
@@ -1311,7 +1302,7 @@ public final class ReaderTextView {
 
     package func scopeHeaderFacets(at byteOffset: UInt32) -> [OutlineFacet] {
         guard let document = displayedDocument else { return [] }
-        let facets = Self.enclosingAssociatedFacets(
+        let facets = ReadingPlan.enclosingAssociatedFacets(
             at: byteOffset,
             in: document
         )
@@ -1326,7 +1317,7 @@ public final class ReaderTextView {
     package func exitFocusMode() -> Bool {
         guard let focusState else { return false }
         let restoredBaseline = displayedDocument.map {
-            Self.baselineFoldIDs(
+            ReadingPlan.baselineFoldIDs(
                 for: focusState.readingHeightLevel,
                 in: $0.foldRegions
             )
@@ -1334,7 +1325,7 @@ public final class ReaderTextView {
         let restoredOverrides = activeFoldScope.flatMap {
             focusState.foldOverridesByScope[$0]
         } ?? FoldOverrides()
-        let restoredLogical = Self.logicalFoldIDs(
+        let restoredLogical = ReadingPlan.logicalFoldIDs(
             overrides: restoredOverrides,
             baseline: restoredBaseline
         )
@@ -1357,12 +1348,12 @@ public final class ReaderTextView {
         guard var focusState, let document = displayedDocument else {
             return false
         }
-        guard let target = Self.focusTarget(at: byteOffset, in: document) else {
+        guard let target = ReadingPlan.focusTarget(at: byteOffset, in: document) else {
             _ = exitFocusMode()
             return false
         }
         guard applyFoldProjection(
-            Self.focusFoldIDs(around: target.facet, in: document)
+            ReadingPlan.focusFoldIDs(around: target.facet, in: document)
         ) else { return false }
         markNavigationLanding(at: byteOffset)
         focusState.followsExplicitNavigation = true
@@ -1387,7 +1378,7 @@ public final class ReaderTextView {
         foldOverridesByScope.removeAll(keepingCapacity: true)
         baselineFoldIDs =
             displayedDocument.map {
-                Self.baselineFoldIDs(for: level, in: $0.foldRegions)
+                ReadingPlan.baselineFoldIDs(for: level, in: $0.foldRegions)
             } ?? []
 
         guard displayedDocument != nil else { return true }
@@ -1428,129 +1419,6 @@ public final class ReaderTextView {
         (lineNumbers, theme.selection)
     }
 
-    private static func logicalFoldIDs(
-        overrides: FoldOverrides,
-        baseline: Set<FoldID>
-    ) -> Set<FoldID> {
-        baseline.subtracting(overrides.forcedUnfolded)
-            .union(overrides.forcedFolded)
-    }
-
-    private static func baselineFoldIDs(
-        for level: ReadingHeightLevel,
-        in regions: [FoldRegion]
-    ) -> Set<FoldID> {
-        guard level != .full else { return [] }
-        return Set(
-            regions.compactMap { region in
-                guard region.summary.hiddenLineCount >= 2 else { return nil }
-                switch region.kind {
-                case .declaration, .imports, .cfgTest:
-                    return region.id
-                case .container:
-                    return level == .overview ? region.id : nil
-                case .comment:
-                    return region.id
-                case .block, .attributes:
-                    return nil
-                }
-            })
-    }
-
-    private static func focusTarget(
-        at byteOffset: UInt32,
-        in document: ReaderDocument
-    ) -> (facet: OutlineFacet, region: FoldRegion)? {
-        document.foldTopology?.focusTarget(at: byteOffset)
-    }
-
-    private static func enclosingAssociatedFacets(
-        at byteOffset: UInt32,
-        in document: ReaderDocument
-    ) -> [OutlineFacet] {
-        let result = (document.foldTopology?.associatedFacets ?? []).filter {
-            facetContainsCaret(byteOffset, facet: $0, in: document)
-        }
-        return result.sorted { lhs, rhs in
-            if lhs.depth != rhs.depth { return lhs.depth < rhs.depth }
-            if lhs.range.lowerBound != rhs.range.lowerBound {
-                return lhs.range.lowerBound < rhs.range.lowerBound
-            }
-            if lhs.range.upperBound != rhs.range.upperBound {
-                return lhs.range.upperBound > rhs.range.upperBound
-            }
-            if lhs.kind.rawValue != rhs.kind.rawValue {
-                return lhs.kind.rawValue < rhs.kind.rawValue
-            }
-            return lhs.name < rhs.name
-        }
-    }
-
-    private static func facetContainsCaret(
-        _ byteOffset: UInt32,
-        facet: OutlineFacet,
-        in document: ReaderDocument
-    ) -> Bool {
-        if facet.range.lowerBound <= byteOffset,
-           byteOffset < facet.range.upperBound
-        {
-            return true
-        }
-        guard let caretLine = document.lineTable.lineColumn(at: byteOffset)?.line,
-              let firstLine = document.lineTable.lineColumn(
-                  at: facet.range.lowerBound
-              )?.line
-        else { return false }
-        let finalByte = facet.range.upperBound > facet.range.lowerBound
-            ? facet.range.upperBound - 1
-            : facet.range.lowerBound
-        guard let lastLine = document.lineTable.lineColumn(at: finalByte)?.line
-        else { return false }
-        return firstLine <= caretLine && caretLine <= lastLine
-    }
-
-    private static func focusFoldIDs(
-        around facet: OutlineFacet,
-        in document: ReaderDocument
-    ) -> Set<FoldID> {
-        Set(document.foldRegions.compactMap { region in
-            guard region.summary.hiddenLineCount >= 2 else { return nil }
-            let intersects = region.bodyRange.lowerBound < facet.range.upperBound
-                && facet.range.lowerBound < region.bodyRange.upperBound
-            return intersects ? nil : region.id
-        })
-    }
-
-    private static func maximalFoldIDs(
-        _ logical: Set<FoldID>,
-        in document: ReaderDocument
-    ) -> Set<FoldID> {
-        document.foldTopology?.maximalFoldIDs(logical) ?? []
-    }
-
-    private static func setFold(
-        _ id: FoldID,
-        folded: Bool,
-        baseline: Set<FoldID>,
-        overrides: inout FoldOverrides
-    ) {
-        if folded {
-            overrides.forcedUnfolded.remove(id)
-            if baseline.contains(id) {
-                overrides.forcedFolded.remove(id)
-            } else {
-                overrides.forcedFolded.insert(id)
-            }
-        } else {
-            overrides.forcedFolded.remove(id)
-            if baseline.contains(id) {
-                overrides.forcedUnfolded.insert(id)
-            } else {
-                overrides.forcedUnfolded.remove(id)
-            }
-        }
-    }
-
     @discardableResult
     private func unfoldAncestors(containing byteOffset: UInt32) -> Bool {
         guard !isFocusMode, let document = displayedDocument else { return false }
@@ -1559,7 +1427,7 @@ public final class ReaderTextView {
         guard !ancestors.isEmpty else { return false }
         let unfolded = applyFoldMutation { overrides in
             for region in ancestors {
-                Self.setFold(
+                ReadingPlan.setFold(
                     region.id,
                     folded: false,
                     baseline: baselineFoldIDs,
@@ -1606,7 +1474,7 @@ public final class ReaderTextView {
 
         var overrides = foldOverridesByScope[scope] ?? FoldOverrides()
         mutate(&overrides)
-        let logical = Self.logicalFoldIDs(
+        let logical = ReadingPlan.logicalFoldIDs(
             overrides: overrides,
             baseline: baselineFoldIDs
         )
@@ -1632,7 +1500,7 @@ public final class ReaderTextView {
                 && theme == oldTheme && typographyKey == oldTypographyKey
                 && fontEnvironmentRevision == oldEnvironmentRevision
         }
-        let rendered = Self.maximalFoldIDs(logical, in: document)
+        let rendered = ReadingPlan.maximalFoldIDs(logical, in: document)
         // Logical child overrides may change while hidden by the same ancestor.
         if rendered == renderedFoldIDs {
             logicalFoldIDs = logical
@@ -2722,17 +2590,17 @@ public final class ReaderTextView {
         let projectionAffinity = view.selectionAffinity
         let previousDocument = displayedDocument
         let analysisChanged = displayedDocument?.analysisKey != document.analysisKey
-        baselineFoldIDs = Self.baselineFoldIDs(
+        baselineFoldIDs = ReadingPlan.baselineFoldIDs(
             for: readingHeightLevel,
             in: document.foldRegions
         )
         if var focusState,
-           let target = Self.focusTarget(
+           let target = ReadingPlan.focusTarget(
                at: focusByteOffset ?? focusState.byteOffset,
                in: document
            )
         {
-            logicalFoldIDs = Self.focusFoldIDs(
+            logicalFoldIDs = ReadingPlan.focusFoldIDs(
                 around: target.facet,
                 in: document
             )
@@ -2742,11 +2610,11 @@ public final class ReaderTextView {
         } else if let focusState {
             readingHeightLevel = focusState.readingHeightLevel
             foldOverridesByScope = focusState.foldOverridesByScope
-            baselineFoldIDs = Self.baselineFoldIDs(
+            baselineFoldIDs = ReadingPlan.baselineFoldIDs(
                 for: readingHeightLevel,
                 in: document.foldRegions
             )
-            logicalFoldIDs = Self.logicalFoldIDs(
+            logicalFoldIDs = ReadingPlan.logicalFoldIDs(
                 overrides: activeFoldScope.flatMap {
                     foldOverridesByScope[$0]
                 } ?? FoldOverrides(),
@@ -2754,7 +2622,7 @@ public final class ReaderTextView {
             )
             self.focusState = nil
         } else {
-            logicalFoldIDs = Self.logicalFoldIDs(
+            logicalFoldIDs = ReadingPlan.logicalFoldIDs(
                 overrides: activeFoldScope.flatMap {
                     foldOverridesByScope[$0]
                 } ?? FoldOverrides(),
@@ -2762,7 +2630,7 @@ public final class ReaderTextView {
             )
         }
         let previousRenderedFoldIDs = renderedFoldIDs
-        renderedFoldIDs = Self.maximalFoldIDs(
+        renderedFoldIDs = ReadingPlan.maximalFoldIDs(
             logicalFoldIDs,
             in: document
         )

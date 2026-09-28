@@ -245,8 +245,10 @@ Palette 行标签与 Diff 显示名的现有测试保持通过。
 - 不增加新的阅读模式或语义焦点入口。
 
 **测试**：
-- 新增 ReaderCore 纯测试：对 Rust/Python/TS fixture 与 `fixtures/fold_perf.rs`，三档阅读高度 × 若干焦点位置 ×
-  覆盖规则，断言 fold 集合与重构前 oracle 相等。
+- 新增 ReaderCore 纯测试（实际 3 条，`ReadingPlanTests.swift`）：三档阅读高度的基线与最外层渲染、覆盖规则双向抵消、
+  焦点只保留最小外围声明。**实施调整**：函数体是原样搬移（只改访问级别与调用限定），若再照旧代码写 oracle
+  只是自己与自己比较；等价性由未改动的 ReaderUI 折叠/焦点测试、fold 自测与 fold 性能门禁保证，新测试改为固定
+  具体行为并证明可脱离 AppKit 测试。
 - 现有 ReaderUI 折叠/焦点测试、`--self-test-fold`、`run-fold-perf.sh` 输出与 R0.3 基线一致。
 
 **为后续功能准备的**：语义焦点只需提供一组源范围给 `ReadingPlan`，不改渲染器。
