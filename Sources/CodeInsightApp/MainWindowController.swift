@@ -2339,6 +2339,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         statusBar.layer?.backgroundColor = theme.chromeColor.cgColor
         applyStatusTheme(theme)
         renderCommitButton()
+        renderTrustSeal()
         readerController.apply(settings: settings)
         secondaryReaderController.apply(settings: settings)
         sidebarController.apply(settings: settings)
@@ -2944,6 +2945,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             return
         }
         profileButton.title = profileTitle
+        renderTrustSeal()
         if toolbar.items.allSatisfy({
             $0.itemIdentifier != Self.profileItemIdentifier
         }) {
@@ -2959,6 +2961,32 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             $0.itemIdentifier == Self.profileItemIdentifier
         }) else { return }
         item.menuFormRepresentation = profileMenuItem()
+    }
+
+    /// The trust seal: a shield before the profile title, moss when Safe and
+    /// amber when Trusted, so trust stays visible when the title truncates.
+    private func renderTrustSeal() {
+        guard let trustMode = model.exactCoordinator.trustMode else {
+            profileButton.image = nil
+            return
+        }
+        let theme = ReaderTheme(settings: currentReaderSettings)
+        let trusted = trustMode == .trusted
+        let description = trusted ? localized("main.trusted") : localized("main.safe")
+        let symbol = NSImage(
+            systemSymbolName: trusted ? "exclamationmark.shield.fill" : "checkmark.shield.fill",
+            accessibilityDescription: description
+        )
+        profileButton.image = symbol?.withSymbolConfiguration(
+            NSImage.SymbolConfiguration(paletteColors: [trusted ? theme.warningColor : theme.verifiedColor])
+        )
+        profileButton.imagePosition = .imageLeading
+        trustSealColor = trusted ? theme.warningColor : theme.verifiedColor
+    }
+
+    private var trustSealColor: NSColor?
+    var selfTestTrustSeal: (description: String?, color: NSColor?) {
+        (profileButton.image?.accessibilityDescription, profileButton.image == nil ? nil : trustSealColor)
     }
 
     private func profileMenuItem() -> NSMenuItem {

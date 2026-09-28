@@ -1982,3 +1982,39 @@ func lensTitleReadsTheDeclaredNameOrNothing() {
     #expect(ContextWindowViewController.declaredName(in: "value + 1") == nil)
     #expect(ContextWindowViewController.declaredName(in: "") == nil)
 }
+
+@MainActor
+@Test
+func profileButtonCarriesAThemedTrustSeal() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject(["main.rs": "pub fn target() -> i32 { 42 }\n"])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "TrustSealTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel()
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(theme: .light),
+        offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    try model.openProject(root: root, language: .rust)
+    #expect(await mainWindowWaitUntil(model.fileTree != nil))
+    #expect(await mainWindowWaitUntil(model.exactCoordinator.trustMode != nil))
+    controller.renderForSelfTest()
+
+    func rgb(_ color: NSColor?) -> UInt32? {
+        guard let srgb = color?.usingColorSpace(.sRGB) else { return nil }
+        return UInt32((srgb.redComponent * 255).rounded()) << 16
+            | UInt32((srgb.greenComponent * 255).rounded()) << 8
+            | UInt32((srgb.blueComponent * 255).rounded())
+    }
+    #expect(controller.selfTestProfileTitle.hasSuffix(CodeInsightApp.localized("main.safe")))
+    #expect(controller.selfTestTrustSeal.description == CodeInsightApp.localized("main.safe"))
+    #expect(rgb(controller.selfTestTrustSeal.color) == 0x2B5849)
+    controller.applyReaderSettings(ReaderSettings(theme: .dark))
+    #expect(rgb(controller.selfTestTrustSeal.color) == 0x8CC6A9)
+}
