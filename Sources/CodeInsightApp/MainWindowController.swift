@@ -5233,6 +5233,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private let nextHunkButton = NSButton()
     private let functionSummaryStack = NSStackView()
     private var displayedFunctionChanges: [DiffCore.FunctionChange] = []
+    private var functionSummaryStatus: String?
     private let readerArea = NSView()
     private let tabStripView = TabStripView()
     private let readerHeader = NSView()
@@ -6209,6 +6210,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewWrapLines = settings.wrapLines
         readerTheme = ReaderTheme(settings: settings)
         snapshotBadge.update(style: .commit, text: localized("main.snapshot.readonly"), theme: readerTheme)
+        if showsCompareControls { renderFunctionSummary() }
         textView.apply(settings: settings)
         readingSetView.apply(settings: settings)
         emptyStateView?.apply(theme: readerTheme)
@@ -6767,31 +6769,62 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             nextHunkButton.title = "↓"
         }
         displayedFunctionChanges = functionChanges
+        functionSummaryStatus = errorMessage
+            ?? (truncated ? localized("main.large.diff.side.by.side.only") : nil)
+        renderFunctionSummary()
+    }
+
+    /// Changed functions as theme chips: the kind in its diff color, then the name.
+    private func renderFunctionSummary() {
         functionSummaryStack.arrangedSubviews.forEach {
             functionSummaryStack.removeArrangedSubview($0)
             $0.removeFromSuperview()
         }
-        let status = errorMessage
-            ?? (truncated ? localized("main.large.diff.side.by.side.only") : nil)
-        if let status {
-            let label = NSTextField(labelWithString: status)
-            label.textColor = .secondaryLabelColor
+        let message = functionSummaryStatus
+            ?? (displayedFunctionChanges.isEmpty ? localized("main.no.function.changes") : nil)
+        if let message {
+            let label = NSTextField(labelWithString: message)
+            label.textColor = readerTheme.chromeSecondaryColor
             functionSummaryStack.addArrangedSubview(label)
-        } else if functionChanges.isEmpty {
-            let label = NSTextField(labelWithString: localized("main.no.function.changes"))
-            label.textColor = .secondaryLabelColor
-            functionSummaryStack.addArrangedSubview(label)
-        } else {
-            for (index, change) in functionChanges.enumerated() {
-                let button = NSButton(
-                    title: "\(Self.title(change.kind)) · \(change.displayName)",
-                    target: self,
-                    action: #selector(openFunctionChange(_:))
-                )
-                button.bezelStyle = .inline
-                button.tag = index
-                functionSummaryStack.addArrangedSubview(button)
-            }
+            return
+        }
+        for (index, change) in displayedFunctionChanges.enumerated() {
+            let button = NSButton(title: "", target: self, action: #selector(openFunctionChange(_:)))
+            button.isBordered = false
+            button.attributedTitle = functionChangeTitle(change)
+            button.setAccessibilityLabel("\(Self.title(change.kind)) · \(change.displayName)")
+            button.wantsLayer = true
+            button.layer?.cornerRadius = 5
+            button.layer?.backgroundColor = readerTheme.chipBackgroundColor.cgColor
+            button.tag = index
+            functionSummaryStack.addArrangedSubview(button)
+        }
+    }
+
+    private func functionChangeTitle(_ change: DiffCore.FunctionChange) -> NSAttributedString {
+        let marker: DiffCore.MarkerKind = switch change.kind {
+        case .added: .added
+        case .removed: .removed
+        case .signatureChanged, .bodyChanged: .changed
+        }
+        let title = NSMutableAttributedString(string: "  \(Self.title(change.kind))", attributes: [
+            .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+            .foregroundColor: readerTheme.color(for: marker),
+        ])
+        title.append(NSAttributedString(string: "  \(change.displayName)  ", attributes: [
+            .font: NSFont.monospacedSystemFont(ofSize: 11, weight: .medium),
+            .foregroundColor: readerTheme.foregroundColor,
+        ]))
+        return title
+    }
+
+    var selfTestFunctionChips: [(title: String, kindColor: NSColor?, background: CGColor?)] {
+        functionSummaryStack.arrangedSubviews.compactMap { $0 as? NSButton }.map { button in
+            let title = button.attributedTitle
+            let color = title.length > 2
+                ? title.attribute(.foregroundColor, at: 2, effectiveRange: nil) as? NSColor
+                : nil
+            return (title.string.trimmingCharacters(in: .whitespaces), color, button.layer?.backgroundColor)
         }
     }
 

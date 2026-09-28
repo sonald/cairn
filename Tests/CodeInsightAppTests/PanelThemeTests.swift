@@ -126,3 +126,35 @@ func mainWindowThemesSearchBookmarksAndCommitPickerOnCreationAndChange() throws 
     #expect(panelRGB(bookmarks.window?.backgroundColor) == 0xEFEFEA)
     #expect(picker.selfTestTheme.selection == .siClassic)
 }
+
+@MainActor
+@Test
+func compareFunctionChangesRenderAsThemeChipsColoredByKind() throws {
+    let reader = ReaderViewController(showsCompareControls: true)
+    let settings = ReaderSettings(theme: .light)
+    reader.apply(settings: settings)
+    let theme = ReaderTheme(settings: settings)
+    let left = Array("fn keep() -> i32 { 1 }\nfn gone() {}\n".utf8)
+    let right = Array("fn keep() -> i32 { 2 }\nfn fresh() {}\n".utf8)
+    let changes = try DiffCore().functionChanges(left: left, right: right)
+    #expect(Set(changes.map(\.kind)) == [.added, .removed, .bodyChanged])
+
+    reader.configureCompareControls(
+        versionTitle: "abc1234", functionChanges: changes,
+        selectedHunkIndex: nil, hunkCount: 1, truncated: false, errorMessage: nil
+    )
+    let chips = reader.selfTestFunctionChips
+    #expect(chips.count == changes.count)
+    for change in changes {
+        let marker: DiffCore.MarkerKind = switch change.kind {
+        case .added: .added
+        case .removed: .removed
+        case .signatureChanged, .bodyChanged: .changed
+        }
+        let chip = try #require(chips.first { $0.title.hasSuffix(change.displayName) })
+        #expect(panelRGB(chip.kindColor) == panelRGB(theme.color(for: marker)))
+        #expect(panelRGB(chip.background) == panelRGB(theme.chipBackgroundColor))
+    }
+    // The three kinds stay distinguishable.
+    #expect(Set(chips.compactMap { panelRGB($0.kindColor) }).count == 3)
+}
