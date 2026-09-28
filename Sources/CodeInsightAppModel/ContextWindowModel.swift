@@ -14,19 +14,82 @@ public final class ContextWindowModel {
     }
 
     public struct Candidate: Sendable {
+        /// The structured facts a candidate stands on. Every label and badge
+        /// is derived from them; nothing reads a presented string back.
+        public enum Basis: Sendable {
+            case resolved(
+                certainty: Certainty,
+                dispatch: DispatchKind,
+                provenance: ResolutionProvenance
+            )
+            case exact(ExactAttribution, origin: ExactOrigin, language: LanguageID)
+            case dependencyExact(
+                crate: String,
+                ExactAttribution,
+                origin: ExactOrigin,
+                language: LanguageID
+            )
+        }
+
         public let symbol: SymbolOccurrenceID?
         public let path: String
         public let line: UInt32
         public let column: UInt32
-        public let label: String
         public let excerpt: String
         public let bindingKind: String?
         public let targetByteOffset: UInt32
-        public let certainty: Certainty
-        public let provenance: ResolutionProvenance
-        public let exactAttribution: ExactAttribution?
-        public let exactOrigin: ExactOrigin?
-        public let provenanceBadge: String
+        public let basis: Basis
+
+        public var certainty: Certainty {
+            if case let .resolved(certainty, _, _) = basis { return certainty }
+            return .exact
+        }
+
+        public var provenance: ResolutionProvenance {
+            if case let .resolved(_, _, provenance) = basis { return provenance }
+            return .lsp
+        }
+
+        public var exactAttribution: ExactAttribution? {
+            switch basis {
+            case .resolved: nil
+            case let .exact(attribution, _, _), let .dependencyExact(_, attribution, _, _): attribution
+            }
+        }
+
+        public var exactOrigin: ExactOrigin? {
+            switch basis {
+            case .resolved: nil
+            case let .exact(_, origin, _), let .dependencyExact(_, _, origin, _): origin
+            }
+        }
+
+        public var label: String {
+            switch basis {
+            case let .resolved(certainty, dispatch, _):
+                "\(resolutionCertaintyLabel(certainty))·\(resolutionDispatchLabel(dispatch))"
+            case .exact:
+                localized("model.context.exactDirect")
+            case .dependencyExact:
+                localized("model.context.external")
+            }
+        }
+
+        public var provenanceBadge: String {
+            switch basis {
+            case .resolved:
+                label
+            case let .exact(attribution, origin, language):
+                exactProvenanceBadge(label, attribution: attribution, origin: origin, language: language)
+            case let .dependencyExact(crate, attribution, origin, language):
+                "\(label) · \(crate) · " + exactProvenanceBadge(
+                    localized("model.context.exactDirect"),
+                    attribution: attribution,
+                    origin: origin,
+                    language: language
+                )
+            }
+        }
     }
 
     public enum Stage: Sendable {
@@ -294,10 +357,7 @@ public final class ContextWindowModel {
                   offset: offset,
                   context: context
               ),
-              case let .ready(currentSession, currentContext) = projectState,
-              currentContext.generation == context.generation,
-              currentSession.snapshotID == session.snapshotID,
-              currentSession.analysisProfile.id == session.analysisProfile.id
+              sessionIsCurrent(session, context)
         else { return nil }
         return candidates.first
     }
@@ -481,15 +541,14 @@ public final class ContextWindowModel {
                 path: path,
                 line: coordinate.line,
                 column: coordinate.column,
-                label: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))",
                 excerpt: text,
                 bindingKind: bindingKind,
                 targetByteOffset: targetOffset,
-                certainty: resolution.certainty,
-                provenance: resolution.provenance,
-                exactAttribution: nil,
-                exactOrigin: nil,
-                provenanceBadge: "\(resolutionCertaintyLabel(resolution.certainty))·\(resolutionDispatchLabel(resolution.dispatch))"
+                basis: .resolved(
+                    certainty: resolution.certainty,
+                    dispatch: resolution.dispatch,
+                    provenance: resolution.provenance
+                )
             ))
         }
         return candidates
@@ -531,10 +590,7 @@ public final class ContextWindowModel {
         defer { finishExactUpgrade(batch) }
         guard requestID == request,
               batch.isCurrent,
-              case let .ready(currentSession, currentContext) = projectState,
-              currentContext.generation == context.generation,
-              currentSession.snapshotID == session.snapshotID,
-              currentSession.analysisProfile.id == session.analysisProfile.id
+              sessionIsCurrent(session, context)
         else { return }
         guard case .completed(let entries) = result else { return }
         for exact in entries {
@@ -582,10 +638,7 @@ public final class ContextWindowModel {
         // captured index: every await below may interleave with user
         // selection, so the stage is re-read after each one.
         guard requestID == request,
-              case let .ready(currentSession, currentContext) = projectState,
-              currentContext.generation == context.generation,
-              currentSession.snapshotID == session.snapshotID,
-              currentSession.analysisProfile.id == session.analysisProfile.id,
+              sessionIsCurrent(session, context),
               case let .candidates(entryCandidates, entrySelected) = stage,
               entryCandidates.indices.contains(entrySelected),
               let targetOffset = UInt32(exactly: exact.location.byteOffset)
@@ -604,10 +657,7 @@ public final class ContextWindowModel {
             session: session
         )
         guard requestID == request,
-              case let .ready(latestSession, latestContext) = projectState,
-              latestContext.generation == context.generation,
-              latestSession.snapshotID == session.snapshotID,
-              latestSession.analysisProfile.id == session.analysisProfile.id,
+              sessionIsCurrent(session, context),
               case let .candidates(current, selected) = stage,
               current.indices.contains(selected)
         else { return }
@@ -651,10 +701,7 @@ public final class ContextWindowModel {
                   session: session
               ),
               requestID == request,
-              case let .ready(currentSession, currentContext) = projectState,
-              currentContext.generation == context.generation,
-              currentSession.snapshotID == session.snapshotID,
-              currentSession.analysisProfile.id == session.analysisProfile.id,
+              sessionIsCurrent(session, context),
               case let .candidates(latest, latestSelected) = stage
         else { return }
         let keepsUserChoice = selectionEpoch != requestSelectionEpoch
@@ -671,26 +718,15 @@ public final class ContextWindowModel {
         origin: ExactOrigin,
         language: LanguageID
     ) -> Candidate {
-        let label = localized("model.context.exactDirect")
-        return Candidate(
+        Candidate(
             symbol: candidate.symbol,
             path: candidate.path,
             line: candidate.line,
             column: candidate.column,
-            label: label,
             excerpt: candidate.excerpt,
             bindingKind: candidate.bindingKind,
             targetByteOffset: candidate.targetByteOffset,
-            certainty: .exact,
-            provenance: .lsp,
-            exactAttribution: attribution,
-            exactOrigin: origin,
-            provenanceBadge: exactBadge(
-                label,
-                attribution: attribution,
-                origin: origin,
-                language: language
-            )
+            basis: .exact(attribution, origin: origin, language: language)
         )
     }
 
@@ -724,7 +760,6 @@ public final class ContextWindowModel {
               )
         else { return nil }
         let facet = index.symbols[symbolIndex]
-        let label = localized("model.context.exactDirect")
         return Candidate(
             symbol: SymbolOccurrenceID(
                 snapshotID: session.snapshotID,
@@ -735,17 +770,11 @@ public final class ContextWindowModel {
             path: path,
             line: coordinate.line,
             column: coordinate.column,
-            label: label,
             excerpt: excerpt(for: facet.range, in: document, binding: false),
             bindingKind: nil,
             targetByteOffset: offset,
-            certainty: .exact,
-            provenance: .lsp,
-            exactAttribution: attribution,
-            exactOrigin: origin,
-            provenanceBadge: exactBadge(
-                label,
-                attribution: attribution,
+            basis: .exact(
+                attribution,
                 origin: origin,
                 language: session.analysisProfile.language
             )
@@ -771,28 +800,20 @@ public final class ContextWindowModel {
         let targetRange = document.outlineFacets.first {
             $0.nameRange.contains(offset) || $0.nameRange.lowerBound == offset
         }?.range ?? ByteRange(lowerBound: offset, upperBound: offset)
-        let label = localized("model.context.external")
-        let dependency = dependencyCrateName(path) ?? path
-        let exact = exactBadge(
-            localized("model.context.exactDirect"),
-            attribution: attribution,
-            origin: origin,
-            language: language
-        )
         return Candidate(
             symbol: nil,
             path: path,
             line: coordinate.line,
             column: coordinate.column,
-            label: label,
             excerpt: excerpt(for: targetRange, in: document, binding: false),
             bindingKind: nil,
             targetByteOffset: offset,
-            certainty: .exact,
-            provenance: .lsp,
-            exactAttribution: attribution,
-            exactOrigin: origin,
-            provenanceBadge: "\(label) · \(dependency) · \(exact)"
+            basis: .dependencyExact(
+                crate: dependencyCrateName(path) ?? path,
+                attribution,
+                origin: origin,
+                language: language
+            )
         )
     }
 
@@ -806,42 +827,15 @@ public final class ContextWindowModel {
             .joined(separator: "/")
     }
 
-    private func exactBadge(
-        _ label: String,
-        attribution: ExactAttribution,
-        origin: ExactOrigin,
-        language: LanguageID
-    ) -> String {
-        let trust = switch attribution.environment.trustMode {
-        case .safe: localized("model.context.safe")
-        case .trusted: localized("model.context.trusted")
+    /// Whether a result computed against `session`/`context` may still be
+    /// published: the same generation, snapshot and analysis profile.
+    private func sessionIsCurrent(_ session: EngineSession, _ context: QueryContext) -> Bool {
+        guard case let .ready(currentSession, currentContext) = projectState else {
+            return false
         }
-        let source = switch origin {
-        case .worktree:
-            ""
-        case .materialized(let commitOID):
-            localizedFormat("model.context.materialized", String(commitOID.prefix(7)))
-        }
-        let featureDetail: String? = if language == .python {
-            nil
-        } else {
-            switch attribution.featureSelection {
-            case .defaultFeatures: localized("model.context.default")
-            case .allFeatures: localized("model.context.all")
-            case .noDefaultFeatures: localized("model.context.noDefault")
-            }
-        }
-        let featureSuffix = featureDetail.map {
-            localizedFormat("model.context.features", $0)
-        } ?? ""
-        let limitations = attribution.environment.limitations
-            .sorted { $0.rawValue < $1.rawValue }
-            .map(localizedLimitation)
-            .joined(separator: "; ")
-        let environment = limitations.isEmpty
-            ? localized("model.context.unlimited")
-            : localizedFormat("model.context.limitations", limitations)
-        return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source)\(featureSuffix)"
+        return currentContext.generation == context.generation
+            && currentSession.snapshotID == session.snapshotID
+            && currentSession.analysisProfile.id == session.analysisProfile.id
     }
 
     private func pathID(_ path: String, in session: EngineSession) -> PathID? {
@@ -1027,6 +1021,44 @@ private func loadReaderDocument(
             languageMode: languageMode
         ).document
     }.value
+}
+
+private func exactProvenanceBadge(
+    _ label: String,
+    attribution: ExactAttribution,
+    origin: ExactOrigin,
+    language: LanguageID
+) -> String {
+    let trust = switch attribution.environment.trustMode {
+    case .safe: localized("model.context.safe")
+    case .trusted: localized("model.context.trusted")
+    }
+    let source = switch origin {
+    case .worktree:
+        ""
+    case .materialized(let commitOID):
+        localizedFormat("model.context.materialized", String(commitOID.prefix(7)))
+    }
+    let featureDetail: String? = if language == .python {
+        nil
+    } else {
+        switch attribution.featureSelection {
+        case .defaultFeatures: localized("model.context.default")
+        case .allFeatures: localized("model.context.all")
+        case .noDefaultFeatures: localized("model.context.noDefault")
+        }
+    }
+    let featureSuffix = featureDetail.map {
+        localizedFormat("model.context.features", $0)
+    } ?? ""
+    let limitations = attribution.environment.limitations
+        .sorted { $0.rawValue < $1.rawValue }
+        .map(localizedLimitation)
+        .joined(separator: "; ")
+    let environment = limitations.isEmpty
+        ? localized("model.context.unlimited")
+        : localizedFormat("model.context.limitations", limitations)
+    return "\(label) · \(attribution.provider) \(attribution.toolVersion) · \(trust) · \(environment)\(source)\(featureSuffix)"
 }
 
 package func resolutionCertaintyLabel(_ certainty: Certainty) -> String {

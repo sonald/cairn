@@ -216,10 +216,13 @@ Palette 行标签与 Diff 显示名的现有测试保持通过。
 
 ### R3 — Context 候选保留结构化事实，并收拢有效性检查（S2、S3）
 
-**实现**：
-1. `Candidate` 增加 `dispatch: DispatchKind?` 与 `evidence: [ResolutionEvidence]`（Exact 升级候选沿用其来源）。
-2. `label`、`provenanceBadge` 改为由一个私有 `CandidatePresentation` 函数从结构化字段生成；保留两个字段的存储
-   与文本，确保 UI 与测试看到的字符串逐字不变。
+**实现**（实际）：
+1. `Candidate` 只存一个结构化 `Basis`：`.resolved(certainty, dispatch, provenance)`、`.exact(attribution, origin, language)`、
+   `.dependencyExact(crate, attribution, origin, language)`；`label`、`provenanceBadge`、`certainty`、`provenance`、
+   `exactAttribution`、`exactOrigin` 都改为由 `Basis` 计算，UI 与测试看到的字符串逐字不变。`exactBadge` 改为文件内纯函数
+   `exactProvenanceBadge`。
+2. **实施调整**：原计划的 `evidence: [ResolutionEvidence]` 未加入——当前没有任何代码会读取它，违反 §3 第 5 条；
+   `Basis` 已是结构化来源，解释类功能立项时在 `.resolved` 上加一个关联值即可。
 3. 新增私有 `func isStillCurrent(request:session:context:) -> Bool`，替换 5 处重复条件；各分支需要的 `stage` 重新
    绑定留在调用点（R1a 已示范）。
 4. 不引入跨模型的通用「请求上下文」类型；若 `RelationTreeModel` 出现同样的重复，另立切片。

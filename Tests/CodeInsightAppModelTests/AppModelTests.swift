@@ -2803,6 +2803,60 @@ func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async thro
 
 @MainActor
 @Test
+func contextFuzzyCandidateLabelsComposeCertaintyAndDispatch() async throws {
+    let source = "fn target() {}\nfn main() { target(); }\n"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let certainties: [Certainty] = [.unresolved, .possible, .probable, .strong, .exact]
+    let dispatches: [DispatchKind] = [
+        .direct, .virtualDispatch, .traitDispatch, .interfaceDispatch,
+        .callback, .dynamicDispatch, .macroGenerated,
+    ]
+    let combinations = certainties.flatMap { certainty in
+        dispatches.map { (certainty, $0) }
+    }
+    let model = ContextWindowModel { session, pathID, _, _ in
+        combinations.map { certainty, dispatch in
+            ResolutionCandidate(
+                target: SymbolOccurrenceID(
+                    snapshotID: session.snapshotID,
+                    pathID: pathID,
+                    localKind: .declarationFacet,
+                    localIndex: 0
+                ),
+                certainty: certainty,
+                dispatch: dispatch,
+                provenance: .fuzzyResolver,
+                completeness: .complete,
+                evidence: []
+            )
+        }
+    }
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "target();", in: source))
+    #expect(await testWaitUntil("every combination presented") {
+        model.candidateCount == combinations.count
+    })
+    guard case let .candidates(candidates, _) = model.stage else {
+        Issue.record("no candidates")
+        return
+    }
+    for (candidate, (certainty, dispatch)) in zip(candidates, combinations) {
+        let expected = "\(resolutionCertaintyLabel(certainty))·\(resolutionDispatchLabel(dispatch))"
+        #expect(candidate.label == expected)
+        #expect(candidate.provenanceBadge == expected)
+        #expect(candidate.certainty == certainty)
+        guard case .fuzzyResolver = candidate.provenance else {
+            Issue.record("\(certainty) \(dispatch) lost its provenance")
+            continue
+        }
+        #expect(candidate.exactAttribution == nil && candidate.exactOrigin == nil)
+    }
+}
+
+@MainActor
+@Test
 func contextCandidateSelectionWraps() async throws {
     let source = """
         struct A; impl A { fn close(&self) {} }
