@@ -264,9 +264,13 @@ Palette 行标签与 Diff 显示名的现有测试保持通过。
 - 契约写入注释：层只允许颜色、背景、下划线等不影响布局的样式；字号/字重类变化必须走 S4 已有的 typography 事务。
 - 保留 `rangeCalculationCount`/`rangeCacheHitCount` 等计数语义与 128 范围 / 8,192 run 缓存上限。
 
+**实现**（实际）：`DecorationComposer.compose([DecorationLayer])` 为纯函数（`DecorationComposer.swift`），把原三路扫描
+推广为 N 层同一扫描；`DecorationRun` 替换元组；`RenderingAttributesCoordinator` 只负责收集三层的区间并提交属性。
+
 **测试**：
-- `decorationComposerMatchesLegacyRuns`：旧合成逻辑作为测试 oracle，对 Rust/Python/TS fixture 的多个视口、
-  有/无 occurrence、有/无参数引用组合，逐 run 比较范围与属性。
+- `decorationComposerMatchesTheLegacyThreeWaySweep`（实际）：旧三路扫描原样冻结在测试中作为 oracle，固定种子生成 2,000 组
+  输入（含同层重叠区间），逐 run 比较范围与三种属性。由于合成已是纯函数，比较直接在区间层面进行，不经 fixture 与视口。
+- reading 自测 4 个样式计数与 R0 相等；fold 性能门禁四个计数与 R0 相等。
 - 只读计划 S4 的 16 格矩阵、validator 回放、纯颜色不触发全文计算的测试全部保持通过。
 
 **为后续功能准备的**：语义高亮、搜索命中、解释引用区间都成为新增一层，而不是新增布尔位与分支。

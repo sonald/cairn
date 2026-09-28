@@ -162,10 +162,7 @@ public final class RenderingAttributesCoordinator {
     /// 输出计数会被 fragment 交集过滤，测不出 viewport 门控是否失效。
     public private(set) var referenceScannedCount = 0
 
-    private typealias StyledRange = (
-        range: NSRange, kind: HighlightKind?, occurrence: Bool, isParameterReference: Bool?
-    )
-    private var cachedRuns: [NSRange: [StyledRange]] = [:]
+    private var cachedRuns: [NSRange: [DecorationRun]] = [:]
     private var cachedRunCount = 0
     package private(set) var rangeCalculationCount = 0
     package private(set) var rangeCacheHitCount = 0
@@ -327,82 +324,17 @@ public final class RenderingAttributesCoordinator {
             visibleOccurrences.append(intersection)
         }
 
-        var styledRanges: [StyledRange] = []
-        styledRanges.reserveCapacity(
-            syntaxRanges.count
-                + visibleOccurrences.count
-                + referenceRanges.count
-        )
-        var spanIndex = 0
-        var occurrenceIndex = 0
-        var referenceIndex = 0
-        var location = min(
-            syntaxRanges.first?.range.location ?? Int.max,
-            visibleOccurrences.first?.location ?? Int.max,
-            referenceRanges.first?.range.location ?? Int.max
-        )
-        while location != Int.max {
-            while spanIndex < syntaxRanges.count,
-                  NSMaxRange(syntaxRanges[spanIndex].range) <= location
-            {
-                spanIndex += 1
-            }
-            while occurrenceIndex < visibleOccurrences.count,
-                  NSMaxRange(visibleOccurrences[occurrenceIndex]) <= location
-            {
-                occurrenceIndex += 1
-            }
-            while referenceIndex < referenceRanges.count,
-                  NSMaxRange(referenceRanges[referenceIndex].range) <= location
-            {
-                referenceIndex += 1
-            }
-
-            let syntax = syntaxRanges.indices.contains(spanIndex)
-                ? syntaxRanges[spanIndex]
-                : nil
-            let occurrence = visibleOccurrences.indices.contains(occurrenceIndex)
-                ? visibleOccurrences[occurrenceIndex]
-                : nil
-            let reference = referenceRanges.indices.contains(referenceIndex)
-                ? referenceRanges[referenceIndex]
-                : nil
-            let kind = syntax.flatMap {
-                $0.range.location <= location ? $0.kind : nil
-            }
-            let isOccurrence = occurrence.map {
-                $0.location <= location
-            } ?? false
-            let isParameterReference = reference.flatMap {
-                $0.range.location <= location ? $0.isParameter : nil
-            }
-            let nextSyntaxBoundary = syntax.map {
-                kind == nil ? $0.range.location : NSMaxRange($0.range)
-            } ?? Int.max
-            let nextOccurrenceBoundary = occurrence.map {
-                isOccurrence ? NSMaxRange($0) : $0.location
-            } ?? Int.max
-            let nextReferenceBoundary = reference.map {
-                isParameterReference == nil
-                    ? $0.range.location
-                    : NSMaxRange($0.range)
-            } ?? Int.max
-            let next = min(
-                nextSyntaxBoundary,
-                nextOccurrenceBoundary,
-                nextReferenceBoundary
-            )
-            guard next > location else { break }
-            if kind != nil || isOccurrence || isParameterReference != nil {
-                styledRanges.append((
-                    NSRange(location: location, length: next - location),
-                    kind,
-                    isOccurrence,
-                    isParameterReference
-                ))
-            }
-            location = next
-        }
+        let styledRanges = DecorationComposer.compose([
+            DecorationLayer(ranges: syntaxRanges.map(\.range)) { index, run in
+                run.syntax = syntaxRanges[index].kind
+            },
+            DecorationLayer(ranges: visibleOccurrences) { _, run in
+                run.occurrence = true
+            },
+            DecorationLayer(ranges: referenceRanges.map(\.range)) { index, run in
+                run.parameterReference = referenceRanges[index].isParameter
+            },
+        ])
 
         if styledRanges.count <= 8_192 {
             if cachedRuns.count >= 128 || cachedRunCount + styledRanges.count > 8_192 {
@@ -415,7 +347,7 @@ public final class RenderingAttributesCoordinator {
     }
 
     private func submit(
-        _ styledRanges: [StyledRange], for fragmentRange: NSRange,
+        _ styledRanges: [DecorationRun], for fragmentRange: NSRange,
         in manager: NSTextLayoutManager, content: NSTextContentManager
     ) {
         // Validator callbacks must always republish: TextKit may have discarded
@@ -430,10 +362,10 @@ public final class RenderingAttributesCoordinator {
             guard let textRange = textRange(styled.range, in: content) else {
                 continue
             }
-            var foregroundColor = styled.kind.map {
+            var foregroundColor = styled.syntax.map {
                 theme.color(for: $0)
             } ?? theme.foregroundColor
-            if styled.isParameterReference == true {
+            if styled.parameterReference == true {
                 foregroundColor = foregroundColor.withAlphaComponent(
                     theme.parameterReferenceAlpha
                 )
@@ -447,7 +379,7 @@ public final class RenderingAttributesCoordinator {
             ReaderWorkCounters.record(\.renderingAttributeUpdatedUTF16Units, styled.range.length)
             manager.setRenderingAttributes(attributes, for: textRange)
             wroteAttributes = true
-            if styled.isParameterReference != nil {
+            if styled.parameterReference != nil {
                 referenceAttributeRunCount += 1
                 wroteReferenceAttributes = true
             }
