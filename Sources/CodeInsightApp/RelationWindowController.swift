@@ -482,6 +482,10 @@ final class RelationWindowController: NSViewController,
         inspectorView.selfTestVisibleText
     }
 
+    var selfTestInspectorStones: (certainty: Certainty, visible: Bool)? {
+        inspectorView.selfTestStones
+    }
+
     var selfTestInspectorAuditVisible: Bool {
         inspectorView.selfTestAuditVisible
     }
@@ -1296,7 +1300,7 @@ final class RelationWindowController: NSViewController,
         inspectorView.isHidden = false
         view.layoutSubtreeIfNeeded()
         updateInspectorLayoutMode()
-        inspectorView.displayLive(display, theme: theme)
+        inspectorView.displayLive(display, certainty: node.certainty, theme: theme)
         updateInspectorLayoutMode()
     }
 
@@ -1746,6 +1750,11 @@ private final class ResolutionInspectorView: NSView {
     private let documentView = InspectorDocumentView()
     private let content = NSStackView()
     private let nodeTitle = NSTextField(labelWithString: "")
+    /// Certainty beside the title; only a live node carries one.
+    private let stones = CertaintyStonesView(
+        certainty: .possible,
+        theme: ReaderTheme(settings: ReaderSettings())
+    )
     private let badge = RelationChipView()
     private let why = NSTextField(wrappingLabelWithString: "")
     private let sourceTitle = NSTextField(labelWithString: localized("relation.inspector.source"))
@@ -1818,7 +1827,8 @@ private final class ResolutionInspectorView: NSView {
         nodeTitle.setContentHuggingPriority(.required, for: .horizontal)
         let identitySpacer = NSView()
         identitySpacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let identity = NSStackView(views: [nodeTitle, badge, identitySpacer])
+        stones.isHidden = true
+        let identity = NSStackView(views: [stones, nodeTitle, badge, identitySpacer])
         identity.orientation = .horizontal
         identity.alignment = .centerY
         identity.spacing = 8
@@ -1916,6 +1926,12 @@ private final class ResolutionInspectorView: NSView {
         fatalError("init(coder:) has not been implemented")
     }
 
+    var selfTestStones: (certainty: Certainty, visible: Bool)? {
+        guard !stones.isHiddenOrHasHiddenAncestor else { return nil }
+        layoutSubtreeIfNeeded()
+        return (stones.certainty, stones.window != nil && stones.frame.width > 0)
+    }
+
     var selfTestVisibleText: [String] {
         var values: [String] = [
             captureChip.isHidden ? nil : captureChip.text,
@@ -1967,6 +1983,7 @@ private final class ResolutionInspectorView: NSView {
         header.layer?.backgroundColor = theme.chromeHeaderColor.cgColor
         headerTitle.textColor = theme.foregroundColor
         nodeTitle.textColor = theme.foregroundColor
+        stones.update(certainty: stones.certainty, theme: theme)
         why.textColor = theme.foregroundColor
         correctionSection.layer?.backgroundColor = theme.rustSoftColor.cgColor
         for label in [
@@ -1994,8 +2011,13 @@ private final class ResolutionInspectorView: NSView {
 
     func displayLive(
         _ display: ReadingSetExcerpt.FrozenInspectorDisplay,
+        certainty: Certainty?,
         theme: ReaderTheme
     ) {
+        if let certainty {
+            stones.update(certainty: certainty, theme: theme)
+        }
+        stones.isHidden = certainty == nil
         displayNormalized(
             display,
             atCapture: false,
@@ -2009,6 +2031,8 @@ private final class ResolutionInspectorView: NSView {
         canOpenFormerCandidate: Bool,
         theme: ReaderTheme
     ) {
+        // A capture stores no certainty, so the stones stay hidden.
+        stones.isHidden = true
         displayNormalized(
             display,
             atCapture: true,

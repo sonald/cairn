@@ -167,6 +167,30 @@ struct RelationUXTests {
 
     @MainActor
     @Test
+    func inspectorShowsLiveCertaintyStonesAndHidesThemForACapture() async throws {
+        let fixture = try await makeRelationUXFixture()
+        defer { fixture.close() }
+        var captured: [ReadingSetExcerpt] = []
+        fixture.controller.onOpenReadingSet = { _, excerpts, _ in captured = excerpts }
+        let edgeCertainty = try #require(
+            fixture.controller.selfTestEdgeStones(inGroup: "").first { $0.0 == "first" }?.1
+        )
+
+        #expect(fixture.controller.selfTestClickBadge(titled: "first"))
+        await pumpRunLoop()
+        let live = try #require(fixture.controller.selfTestInspectorStones)
+        #expect(live.certainty == edgeCertainty)
+        #expect(live.visible)
+
+        fixture.controller.selfTestOpenAsReadingSet()
+        let display = try #require(captured.first?.inspector)
+        fixture.controller.showFrozenInspector(display)
+        #expect(fixture.controller.selfTestInspectorIsFrozen)
+        #expect(fixture.controller.selfTestInspectorStones == nil)
+    }
+
+    @MainActor
+    @Test
     func selectingRelationKeepsInspectorClosedUntilRequested() async throws {
         let fixture = try await makeRelationUXFixture()
         defer { fixture.close() }
