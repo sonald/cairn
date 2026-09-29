@@ -2296,6 +2296,10 @@ public final class ReaderTextView {
             for: state.anchor,
             in: document
         ) else { return }
+        // Rows between the viewport top and the anchor can still carry frames
+        // from before a typography change; relaying them later moves the anchor
+        // after this pass has already converged (macOS 15 does not compensate).
+        layoutViewportForCorrection()
         guard let rowRect = freshAnchorRowRect(
             containingDisplayLocation: location
         ) else {
@@ -2334,6 +2338,16 @@ public final class ReaderTextView {
         let clamped = clampVerticalScrollOrigin(desiredOriginY, clipView: clipView)
         clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: clamped))
         scrollView.reflectScrolledClipView(clipView)
+        // The scroll exposes rows that may relayout with current attributes.
+        // Settle them now so the last queued pass cannot leave a stale offset.
+        for _ in 0..<2 {
+            layoutViewportForCorrection()
+            guard let achieved = freshAnchorRowRect(containingDisplayLocation: location) else { break }
+            let settled = clampVerticalScrollOrigin(achieved.minY - state.offsetFromViewportTop, clipView: clipView)
+            guard abs(settled - clipView.bounds.minY) > 0.5 else { break }
+            clipView.scroll(to: NSPoint(x: clipView.bounds.minX, y: settled))
+            scrollView.reflectScrolledClipView(clipView)
+        }
         if let achieved = freshAnchorRowRect(
             containingDisplayLocation: location
         ) {
@@ -2350,6 +2364,13 @@ public final class ReaderTextView {
             remaining: remaining - 1,
             staleAttempts: staleAttempts
         )
+    }
+
+    private func layoutViewportForCorrection() {
+        let wasRestoring = isRestoringViewport
+        isRestoringViewport = true
+        view.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        isRestoringViewport = wasRestoring
     }
 
     /// Pre-change hook for width-driven reflows (D3.7). AppKit delivers

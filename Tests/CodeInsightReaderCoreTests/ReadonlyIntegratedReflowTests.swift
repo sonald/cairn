@@ -155,10 +155,6 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
             + "\(reader.lastViewportAnchorErrorPt.map { "\($0)" } ?? "nil")/"
             + (reader.lastViewportRestoreLimitation ?? "-")
         await reader.waitForIdentifierPreparation()
-        // macOS 15 applies deferred syntax fonts to a row above the anchor
-        // after the last viewport correction, leaving a stable 2.6–2.8pt
-        // offset (well under one 20.8pt row). Newer systems settle exactly.
-        let tolerance: CGFloat = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26 ? 2 : 3
         var trace: [String] = []
         for _ in 0..<24 {
             await readonlyIntegratedTurn([reader], windows: [window])
@@ -167,11 +163,11 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
             trace.append(String(format: "%.2f", Double(turnError ?? -1))
                 + "\(flags.widthPending ? "w" : "")\(flags.correctionPending ? "c" : "")")
             if !flags.widthPending, !flags.correctionPending,
-               let error = turnError, error <= tolerance, reader.backgroundDrawCount > draws { break }
+               let error = turnError, error <= 2, reader.backgroundDrawCount > draws { break }
         }
         let error = try #require(readonlyIntegratedAnchorError(reader, display: anchor.display, offset: anchor.offset))
         let row = ReaderViewportGeometry.rowRect(containingDisplayLocation: anchor.display, in: reader.view)
-        #expect(error <= tolerance, """
+        #expect(error <= 2, """
             entry=\(entry), source=\(anchor.byte), drift=\(error)pt, offset=\(anchor.offset), \
             row=\(String(describing: row)), draws=\(draws)->\(reader.backgroundDrawCount), \
             reflow=\(reader.reflowDiagnostics), limited=\(reader.lastViewportRestoreWasLimited), \
