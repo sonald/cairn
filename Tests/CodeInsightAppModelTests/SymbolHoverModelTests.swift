@@ -221,6 +221,81 @@ func hoverMarkdownSplitsLocationSignatureAndBody() {
     ))
 }
 
+@Test
+func hoverMarkdownSplitsPyrightAndTypeScriptServerShapes() {
+    // pyright: one signature fence with a declaration-kind prefix, then a
+    // `---` separator before the docstring body.
+    #expect(symbolDoc(
+        fromHoverMarkdown: """
+        ```python
+        (function) def format_name(
+            user: str,
+            greeting: str = "Hello"
+        ) -> str
+        ```
+        ---
+        Format a greeting for `user`.
+
+        Args:
+            user: the user name.
+        """,
+        language: .python
+    ) == SymbolDoc(
+        signature: """
+        def format_name(
+            user: str,
+            greeting: str = "Hello"
+        ) -> str
+        """,
+        signatureLanguage: "python",
+        markdown: """
+        Format a greeting for `user`.
+
+        Args:
+            user: the user name.
+        """,
+        source: .exact
+    ))
+    // A signature that merely opens with parentheses is not a kind prefix.
+    #expect(symbolDoc(
+        fromHoverMarkdown: "```python\n(...args) -> None\n```\n\nDocs.",
+        language: .python
+    ) == SymbolDoc(
+        signature: "(...args) -> None",
+        signatureLanguage: "python",
+        markdown: "Docs.",
+        source: .exact
+    ))
+    // typescript-language-server: no separator line, JSDoc already rendered.
+    #expect(symbolDoc(
+        fromHoverMarkdown: """
+        ```typescript
+        function loadStore(id: number): Promise<Store>
+        ```
+        Loads the store.
+
+        *@param* `id` — the store id
+        """,
+        language: .typescript
+    ) == SymbolDoc(
+        signature: "function loadStore(id: number): Promise<Store>",
+        signatureLanguage: "typescript",
+        markdown: """
+        Loads the store.
+
+        *@param* `id` — the store id
+        """,
+        source: .exact
+    ))
+    #expect(symbolDoc(
+        fromHoverMarkdown: "Plain docs only.",
+        language: .typescript
+    ) == SymbolDoc(
+        markdown: "Plain docs only.",
+        source: .exact
+    ))
+}
+
 // MARK: - Harness
 
 private let tokenA = SymbolHoverModel.Token(

@@ -273,7 +273,12 @@ public final class SymbolHoverModel {
         exactBatch = nil
         finish(
             token,
-            doc: merge(result, fallback: fallback, missingSource: missingSource),
+            doc: merge(
+                result,
+                fallback: fallback,
+                missingSource: missingSource,
+                language: token.document?.languageMode.language ?? .rust
+            ),
             request: request,
             cacheable: Self.isFinal(result)
         )
@@ -312,12 +317,13 @@ public final class SymbolHoverModel {
     private func merge(
         _ result: ExactCoordinator.HoverResult?,
         fallback: SymbolDoc?,
-        missingSource: Bool
+        missingSource: Bool,
+        language: LanguageID
     ) -> SymbolDoc? {
         let fallback = fallback.flatMap { $0.isEmpty ? nil : $0 }
         switch result {
         case .completed(let markdown?, let limitations):
-            var doc = symbolDoc(fromHoverMarkdown: markdown)
+            var doc = symbolDoc(fromHoverMarkdown: markdown, language: language)
             if doc.location == nil { doc.location = fallback?.location }
             if doc.isEmpty, let fallback { doc = fallback }
             doc.source = .exact
@@ -380,22 +386,28 @@ public final class SymbolHoverModel {
     }
 }
 
-/// Splits rust-analyzer hover Markdown into the card's parts. Leading fenced
-/// blocks are the module path (when two are present) and the signature; the
-/// rest, after `---` separators, is the body.
-public func symbolDoc(fromHoverMarkdown markdown: String) -> SymbolDoc {
+/// Splits a language server's hover Markdown into the card's parts.
+/// rust-analyzer leads with up to two fenced blocks — the module path and
+/// the signature — and separates the body with `---`. pyright and
+/// typescript-language-server lead with one fenced signature (pyright
+/// prefixes it with the declaration kind); the rest is the body.
+public func symbolDoc(
+    fromHoverMarkdown markdown: String,
+    language: LanguageID = .rust
+) -> SymbolDoc {
     var rest = Substring(markdown)
     var fences: [(language: String, body: String)] = []
-    while fences.count < 2 {
+    let maximumLeadingFences = language == .rust ? 2 : 1
+    while fences.count < maximumLeadingFences {
         let trimmed = rest.drop { $0 == "\n" || $0 == " " }
         guard trimmed.hasPrefix("```"),
               let infoEnd = trimmed.firstIndex(of: "\n")
         else { break }
-        let language = trimmed[trimmed.index(trimmed.startIndex, offsetBy: 3)..<infoEnd]
+        let info = trimmed[trimmed.index(trimmed.startIndex, offsetBy: 3)..<infoEnd]
             .trimmingCharacters(in: .whitespaces)
         let bodyStart = trimmed.index(after: infoEnd)
         guard let close = trimmed[bodyStart...].range(of: "\n```") else { break }
-        fences.append((language, String(trimmed[bodyStart..<close.lowerBound])))
+        fences.append((info, String(trimmed[bodyStart..<close.lowerBound])))
         rest = trimmed[close.upperBound...]
         if rest.hasPrefix("\n") || rest.isEmpty {
             continue
@@ -406,14 +418,54 @@ public func symbolDoc(fromHoverMarkdown markdown: String) -> SymbolDoc {
     while body.hasPrefix("---") {
         body = String(body.dropFirst(3)).trimmingCharacters(in: .whitespacesAndNewlines)
     }
-    let location = fences.count == 2 ? fences[0].body : nil
-    let signature = fences.last
+    let location: String?
+    let signature: (language: String, body: String)?
+    if language == .rust {
+        location = fences.count == 2 ? fences[0].body : nil
+        signature = fences.last
+    } else {
+        location = nil
+        signature = fences.first.map { fence in
+            (
+                fence.language,
+                language == .python
+                    ? strippingDeclarationKindPrefix(fence.body)
+                    : fence.body
+            )
+        }
+    }
     return SymbolDoc(
         location: location,
         signature: signature?.body,
-        signatureLanguage: signature.map { $0.language.isEmpty ? "rust" : $0.language },
-        markdown: linkingIntraDocReferences(body),
+        signatureLanguage: signature.map {
+            $0.language.isEmpty ? hoverSignatureLanguageHint(language) : $0.language
+        },
+        markdown: language == .rust ? linkingIntraDocReferences(body) : body,
         source: .exact
     )
+}
+
+/// pyright prefixes its signature fence with the declaration kind:
+/// `(function) def open()`, `(variable) path: Module`.
+private func strippingDeclarationKindPrefix(_ signature: String) -> String {
+    guard signature.hasPrefix("("),
+          let close = signature.firstIndex(of: ")")
+    else { return signature }
+    let kind = signature[signature.index(after: signature.startIndex)..<close]
+    guard !kind.isEmpty,
+          kind.allSatisfy { $0.isLetter && $0.isLowercase },
+          let space = signature.index(close, offsetBy: 1, limitedBy: signature.endIndex),
+          space < signature.endIndex,
+          signature[space] == " "
+    else { return signature }
+    return String(signature[signature.index(after: space)...])
+}
+
+private func hoverSignatureLanguageHint(_ language: LanguageID) -> String {
+    switch language {
+    case .rust: "rust"
+    case .python: "python"
+    case .typescript, .javascript: "typescript"
+    }
 }
 
