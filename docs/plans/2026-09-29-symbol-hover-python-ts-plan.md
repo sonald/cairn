@@ -112,8 +112,36 @@ docstring 各种引号/转义/缩进、非首语句字符串不算、类与方�
 - **TSX 文件**：`LanguageMode.language == .typescript` 覆盖 tsx variant，门控天然放行；
   provider 请求路径按现有 definition 管线处理。
 
+### 真实采样结论（2026-09-29，本机 pyright / typescript-language-server）
+
+- **pyright**：单一 ` ```python ` fence 是签名，且带声明种类前缀——`(function) def f()`、
+  `(method) def open()`、`(variable) path: Module(..)`；类没有前缀（`class Repository()`）。
+  fence 后有 `---` 分隔行，正文是 docstring 的 Markdown 渲染（`Args:` 段保留、内联代码
+  转反引号）。→ W3 拆分时对 python 剥离 `(小写单词) ` 前缀。
+- **typescript-language-server**：单一 ` ```typescript ` fence 是签名，无前缀、无 `---`
+  分隔行；JSDoc 标签已渲染为强调体（`*@param*` `id` — …）。无文档的符号 hover 返回
+  null（"hover empty"），与降级层组合的表现同 Rust。
+- 两者的正文前导 `---` 剥离逻辑通用（pyright 有、tsserver 无，剥不到也无害）。
+
 ## 验收
 
 - 单元测试全绿（看完整摘要），CI batch 计数同步。
 - 原生验收截图（两语言各至少三张：项目内、依赖、降级）。
 - Rust 行为零回归：现有 hover 测试与原验收抽查项不重跑全量，靠单测与 CI。
+
+### 进度（2026-09-29）
+
+W1–W4 已落地，逐片提交：
+
+- W1 `3f63c89`：`syntacticSymbolDoc` 按语言分派；声明头扫描器参数化
+  （`HeaderScanConfiguration`），Rust 行为由既有测试保护不变。Python：跳过装饰器行、
+  头部 `:` 终止、PEP 257 docstring（`inspect.cleandoc` 式去缩进、`\` 转义还原）。
+  TS：JSDoc（装饰器可夹层）、悬挂 `=>`/`=` 裁剪、短聚合体内联、`{@link}` 转
+  `cairn-symbol:` 链接。
+- W2 `da482bb`：两个 provider 协商并实现 `textDocument/hover`。
+- W3：`symbolDoc(fromHoverMarkdown:language:)` 按 P5 分派，pyright 前缀剥离。
+- W4：门控放开 rust/python/typescript（JavaScript 不开）；`symbolName(fromDocLink:)`
+  额外剥 `.`/`#` 段；CLI `exact-hover --language`。
+- 说明：`swift test --filter CodeInsightAppModelTests` 在并行模式下会挂在
+  `ProjectIndexer.completeSnapshot` 的信号量上（既有问题，干净树同样可复现并行挂起）；
+  CI 的 `--no-parallel` 批次 26.5 秒跑完 400 条全绿。

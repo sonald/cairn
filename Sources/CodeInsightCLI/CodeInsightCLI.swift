@@ -134,13 +134,16 @@ extension CodeInsight {
     struct ExactHover: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "exact-hover",
-            abstract: "Print rust-analyzer hover Markdown for a position."
+            abstract: "Print language-server hover Markdown for a position."
         )
 
         @Option(name: .long, help: "Git worktree root.")
         var project: String
 
-        @Option(name: .long, help: "Project-relative Rust file.")
+        @Option(name: .long, help: "Language: rust, python or typescript.")
+        var language: String = "rust"
+
+        @Option(name: .long, help: "Project-relative source file.")
         var file: String
 
         @Option(name: .long, help: "One-based source line.")
@@ -150,8 +153,6 @@ extension CodeInsight {
         var column: Int
 
         func run() throws {
-            guard let executableURL = RustAnalyzerProvider.findExecutable()
-            else { throw ValidationError("rust-analyzer not found") }
             let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
             let snapshot = try WorktreeSnapshot(repositoryURL: root)
             let bytes = try snapshot.readBytes(path: file)
@@ -159,8 +160,7 @@ extension CodeInsight {
                   let column = UInt32(exactly: column),
                   let byteOffset = LineTable(bytes: bytes).byteOffset(line: line, column: column)
             else { throw ValidationError("Position is outside \(file).") }
-            let session = try RustAnalyzerProvider(projectURL: root, executableURL: executableURL)
-                .prepare(snapshot: snapshot, profile: ExactProfileKey(projectURL: root), trustMode: .safe)
+            let session = try prepareHoverSession(root: root, snapshot: snapshot)
             defer { session.close() }
             switch try session.hover(file: file, byteOffset: Int(byteOffset), batch: ExactRequestBatch()) {
             case nil: print("hover unsupported")
@@ -171,6 +171,65 @@ extension CodeInsight {
             let limitations = session.attribution.environment.limitations
                 .map(\.rawValue).sorted().joined(separator: ",")
             print("limitations=\(limitations.isEmpty ? "none" : limitations)")
+        }
+
+        private func prepareHoverSession(
+            root: URL,
+            snapshot: any Snapshot
+        ) throws -> any ExactSession {
+            switch language {
+            case "rust":
+                guard let executableURL = RustAnalyzerProvider.findExecutable()
+                else { throw ValidationError("rust-analyzer not found") }
+                return try RustAnalyzerProvider(projectURL: root, executableURL: executableURL)
+                    .prepare(
+                        snapshot: snapshot,
+                        profile: ExactProfileKey(projectURL: root, language: .rust),
+                        trustMode: .safe
+                    )
+            case "python":
+                guard let executableURL = PyrightProvider.findExecutable(projectURL: root)
+                else { throw ValidationError("pyright-langserver not found") }
+                return try PyrightProvider(projectURL: root, executableURL: executableURL)
+                    .prepare(
+                        snapshot: snapshot,
+                        profile: ExactProfileKey(projectURL: root, language: .python),
+                        trustMode: .safe
+                    )
+            case "typescript":
+                guard let node = TypeScriptLanguageServerProvider.findExecutable(
+                    named: "node", projectURL: root
+                ),
+                    let languageServer = TypeScriptLanguageServerProvider.findExecutable(
+                        named: "typescript-language-server", projectURL: root
+                    )
+                else { throw ValidationError("typescript-language-server not found") }
+                let tsserver = TypeScriptLanguageServerProvider.findExecutable(
+                    named: "tsserver.js", projectURL: root
+                )
+                    ?? TypeScriptLanguageServerProvider.tsserverURL(fromLanguageServer: languageServer)
+                    ?? [
+                        "/opt/homebrew/lib/node_modules/typescript/lib/tsserver.js",
+                        "/usr/local/lib/node_modules/typescript/lib/tsserver.js",
+                    ].first { FileManager.default.isReadableFile(atPath: $0) }
+                    .map(URL.init(fileURLWithPath:))
+                guard let tsserver else {
+                    throw ValidationError("tsserver.js not found")
+                }
+                return try TypeScriptLanguageServerProvider(
+                    projectURL: root,
+                    nodeURL: node,
+                    languageServerURL: languageServer,
+                    tsserverURL: tsserver
+                )
+                    .prepare(
+                        snapshot: snapshot,
+                        profile: ExactProfileKey(projectURL: root, language: .typescript),
+                        trustMode: .safe
+                    )
+            default:
+                throw ValidationError("--language must be rust, python or typescript.")
+            }
         }
     }
 

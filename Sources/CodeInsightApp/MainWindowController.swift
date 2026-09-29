@@ -3672,10 +3672,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )
     }
 
-    /// Rust only for now (hover docs plan Q16); other languages open no card.
+    /// Languages with a hover docs layer (hover docs plans Q16, P1);
+    /// JavaScript and others open no card.
     private func hoverToken(for request: ReaderHoverRequest) -> SymbolHoverModel.Token? {
-        guard request.document.languageMode.language == .rust,
-              let path = projectPath(for: request.file)
+        switch request.document.languageMode.language {
+        case .rust, .python, .typescript:
+            break
+        case .javascript:
+            return nil
+        }
+        guard let path = projectPath(for: request.file)
         else { return nil }
         let token = SymbolHoverModel.Token(
             file: path,
@@ -3741,7 +3747,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private func symbolName(fromDocLink url: URL) -> String? {
         if url.scheme == symbolLinkScheme {
             let path = String(url.absoluteString.dropFirst(symbolLinkScheme.count + 1))
-            return path.components(separatedBy: "::").last
+            // Rust paths use `::`, JSDoc links also `.` and `#`.
+            return path.components(separatedBy: "::").last?
+                .components(separatedBy: ".").last?
+                .components(separatedBy: "#").last
         }
         // rustdoc pages: …/struct.Oid.html, …/fn.open.html#method.walk
         if let fragment = url.fragment, let dot = fragment.lastIndex(of: ".") {
