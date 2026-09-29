@@ -4504,7 +4504,10 @@ private final class FoldAttachment: NSTextAttachment, @unchecked Sendable {
             location: location
         )
         provider.tracksTextAttachmentViewBounds = true
-        activeProvider = provider
+        // AppKit invokes this nonisolated SDK hook on its main UI thread.
+        nonisolated(unsafe) let owner = self
+        nonisolated(unsafe) let created = provider
+        MainActor.assumeIsolated { owner.activeProvider = created }
         return provider
     }
 
