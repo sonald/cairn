@@ -145,6 +145,10 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
         let clipBefore = clip.bounds
         let capturesBefore = reader.viewportGeometryCaptureCount
         let passesBefore = reader.viewportRestorePassCount
+        let preUpdateDrift = readonlyIntegratedAnchorError(reader, display: anchor.display, offset: anchor.offset)
+        let preVisible = reader.view.visibleRect
+        let preProbe = reader.view.characterIndexForInsertion(
+            at: NSPoint(x: preVisible.midX, y: preVisible.minY + preVisible.height * 0.25))
         reader.updateSyntax(document: syntax)
         let clipAfterUpdate = clip.bounds
         let restoreAfterUpdate = "\(reader.viewportRestorePassCount - passesBefore)/"
@@ -168,6 +172,8 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
             row=\(String(describing: row)), draws=\(draws)->\(reader.backgroundDrawCount), \
             reflow=\(reader.reflowDiagnostics), limited=\(reader.lastViewportRestoreWasLimited), \
             scale=\(window.backingScaleFactor), trace=\(trace), \
+            preUpdateDrift=\(String(describing: preUpdateDrift)), \
+            probe=\(anchor.display)->\(preProbe), \
             clip=\(clipBefore)->\(clipAfterUpdate)->\(clip.bounds), doc=\(reader.view.frame.size), \
             captures=\(reader.viewportGeometryCaptureCount - capturesBefore), \
             restore(passes/error/limit) update=\(restoreAfterUpdate) final=\(reader.viewportRestorePassCount - passesBefore)/\
