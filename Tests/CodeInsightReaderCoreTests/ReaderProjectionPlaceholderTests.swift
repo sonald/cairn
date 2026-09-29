@@ -17,10 +17,13 @@ private func readonlyPlaceholderDocument(_ text: String, bodies: [ByteRange]) ->
 @Test
 func readonlyProjectionPlaceholderWindowsHaveBoundedActualRecordVisits() throws {
     let count = 2_048
-    let document = readonlyPlaceholderDocument(String(repeating: "abcd", count: count), bodies: (0..<count).map {
-        ByteRange(lowerBound: UInt32($0 * 4 + 1), upperBound: UInt32($0 * 4 + 3))
-    })
-    let projection = try #require(ReaderProjection(document: document, renderedFoldIDs: Set(document.foldRegions.map(\.id))))
+    let bodies = (0..<count).map { index -> ByteRange in
+        let start = UInt32(index * 4)
+        return ByteRange(lowerBound: start + 1, upperBound: start + 3)
+    }
+    let document = readonlyPlaceholderDocument(String(repeating: "abcd", count: count), bodies: bodies)
+    let foldIDs = Set(document.foldRegions.map { $0.id })
+    let projection = try #require(ReaderProjection(document: document, renderedFoldIDs: foldIDs))
     let all = projection.foldPlaceholders
     ReaderWorkCounters.setEnabled(true)
     defer { ReaderWorkCounters.setEnabled(false) }

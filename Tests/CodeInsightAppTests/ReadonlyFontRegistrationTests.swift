@@ -183,8 +183,8 @@ private func readonlyFontFacts(_ view: NSTextView) -> (name: String, url: String
     guard CTFontGetGlyphsForCharacters(font, &character, &glyph, 1) else { return nil }
     var advance = CGSize.zero
     CTFontGetAdvancesForGlyphs(font, .horizontal, &glyph, &advance, 1)
-    return (font.fontName, url.resolvingSymlinksInPath().path,
-            SHA256.hash(data: table as Data).map { String(format: "%02x", $0) }.joined(), advance.width)
+    let tableDigest = SHA256.hash(data: table as Data).map { String(format: "%02x", $0) }.joined()
+    return (font.fontName, url.resolvingSymlinksInPath().path, tableDigest, Double(advance.width))
 }
 
 @MainActor
