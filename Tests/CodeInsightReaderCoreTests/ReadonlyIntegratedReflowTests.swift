@@ -141,7 +141,15 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
         #expect(syntax.analysisKey.phase == .syntax)
         #expect(syntax.contentID == plain.contentID)
         #expect(reader.view.selectedRanges == selected)
+        let clip = try #require(reader.view.enclosingScrollView?.contentView)
+        let clipBefore = clip.bounds
+        let capturesBefore = reader.viewportGeometryCaptureCount
+        let passesBefore = reader.viewportRestorePassCount
         reader.updateSyntax(document: syntax)
+        let clipAfterUpdate = clip.bounds
+        let restoreAfterUpdate = "\(reader.viewportRestorePassCount - passesBefore)/"
+            + "\(reader.lastViewportAnchorErrorPt.map { "\($0)" } ?? "nil")/"
+            + (reader.lastViewportRestoreLimitation ?? "-")
         await reader.waitForIdentifierPreparation()
         var trace: [String] = []
         for _ in 0..<24 {
@@ -159,7 +167,11 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
             entry=\(entry), source=\(anchor.byte), drift=\(error)pt, offset=\(anchor.offset), \
             row=\(String(describing: row)), draws=\(draws)->\(reader.backgroundDrawCount), \
             reflow=\(reader.reflowDiagnostics), limited=\(reader.lastViewportRestoreWasLimited), \
-            scale=\(window.backingScaleFactor), trace=\(trace)
+            scale=\(window.backingScaleFactor), trace=\(trace), \
+            clip=\(clipBefore)->\(clipAfterUpdate)->\(clip.bounds), doc=\(reader.view.frame.size), \
+            captures=\(reader.viewportGeometryCaptureCount - capturesBefore), \
+            restore(passes/error/limit) update=\(restoreAfterUpdate) final=\(reader.viewportRestorePassCount - passesBefore)/\
+            \(reader.lastViewportAnchorErrorPt.map { "\($0)" } ?? "nil")/\(reader.lastViewportRestoreLimitation ?? "-")
             """)
         #expect(!reader.reflowDiagnostics.widthPending && !reader.reflowDiagnostics.correctionPending)
         #expect(!reader.lastViewportRestoreWasLimited)

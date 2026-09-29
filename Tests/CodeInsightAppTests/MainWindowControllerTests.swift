@@ -912,6 +912,10 @@ func pathBarPaintsThemedChromeBehindReadableText() throws {
         defer: false
     )
     window.contentViewController = controller
+    // Installing the controller shrinks the window to the stack's fitting
+    // size, which leaves a zero-height reader whose legacy scrollers (CI has
+    // no trackpad) draw over the path bar. Give the reader real height.
+    window.setContentSize(NSSize(width: 640, height: 320))
     controller.display(root.appendingPathComponent("src/main.rs"))
 
     for theme in [ReaderSettings.Theme.light, .dark, .siClassic] {
