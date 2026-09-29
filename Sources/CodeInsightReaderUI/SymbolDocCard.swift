@@ -23,6 +23,29 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
     /// The card's frame in screen coordinates while shown.
     public var frame: NSRect { panel.frame }
 
+    /// The card's rendered text (signature band + Markdown body), for
+    /// acceptance tests that check the real AppKit content.
+    public var textContent: String {
+        textView.string
+    }
+
+    /// The footer's current text (note lines), for acceptance tests.
+    public var footerText: String {
+        footer.stringValue
+    }
+
+    /// Every link URL in the rendered body.
+    public var links: [URL] {
+        var urls: [URL] = []
+        textView.textStorage?.enumerateAttribute(
+            .link,
+            in: NSRange(location: 0, length: textView.textStorage?.length ?? 0)
+        ) { value, _, _ in
+            if let url = value as? URL { urls.append(url) }
+        }
+        return urls
+    }
+
     /// Whether `window` is the card, e.g. for key events routed to it after
     /// a click inside.
     public func contains(_ window: NSWindow?) -> Bool { window === panel }
