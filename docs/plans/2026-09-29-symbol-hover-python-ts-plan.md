@@ -142,6 +142,9 @@ W1–W4 已落地，逐片提交：
 - W3：`symbolDoc(fromHoverMarkdown:language:)` 按 P5 分派，pyright 前缀剥离。
 - W4：门控放开 rust/python/typescript（JavaScript 不开）；`symbolName(fromDocLink:)`
   额外剥 `.`/`#` 段；CLI `exact-hover --language`。
+- W5 `66ba762`：卡片原生渲染测试（ReaderUI，真实 AppKit 层级）+ 验收记录
+  `2026-09-29-symbol-hover-python-ts-acceptance.md`。真实鼠标悬浮截图因本会话无
+  屏幕录制/辅助访问权限受阻，补拍方法已记录在验收文档。
 - 说明：`swift test --filter CodeInsightAppModelTests` 在并行模式下会挂在
   `ProjectIndexer.completeSnapshot` 的信号量上（既有问题，干净树同样可复现并行挂起）；
   CI 的 `--no-parallel` 批次 26.5 秒跑完 400 条全绿。
