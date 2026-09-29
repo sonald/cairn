@@ -142,3 +142,4 @@ jobs:
             .build/self-test-run-*/mixed.sample.txt
             .build/bookmark-gate-*
             .build/m11-fold-perf
+            .build/ci-diagnostics

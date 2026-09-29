@@ -938,6 +938,8 @@ func pathBarPaintsThemedChromeBehindReadableText() throws {
         }
         let chromeLuminance = luminance(chrome.0, chrome.1, chrome.2)
         var transparent = 0, chromeMatches = 0, contrasting = 0, total = 0
+        var histogram: [String: Int] = [:]
+        var rowMatches = [Int](repeating: 0, count: bitmap.pixelsHigh)
         for y in 0..<bitmap.pixelsHigh {
             for x in 0..<bitmap.pixelsWide {
                 guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB)
@@ -945,6 +947,10 @@ func pathBarPaintsThemedChromeBehindReadableText() throws {
                 total += 1
                 if color.alphaComponent < 0.99 { transparent += 1; continue }
                 let (r, g, b) = (color.redComponent, color.greenComponent, color.blueComponent)
+                histogram[String(format: "%02x%02x%02x", Int(r * 255), Int(g * 255), Int(b * 255)), default: 0] += 1
+                if abs(r - chrome.0) < 0.05, abs(g - chrome.1) < 0.05, abs(b - chrome.2) < 0.05 {
+                    rowMatches[y] += 1
+                }
                 if abs(r - chrome.0) < 0.05, abs(g - chrome.1) < 0.05, abs(b - chrome.2) < 0.05 {
                     chromeMatches += 1
                 }
@@ -954,6 +960,22 @@ func pathBarPaintsThemedChromeBehindReadableText() throws {
         // Every pixel is opaque, the bar is mostly the theme's chrome, and
         // path text stands out from it.
         #expect(transparent == 0, "\(theme.rawValue): \(transparent) transparent pixels")
+        if chromeMatches * 2 <= total {
+            // Diagnostic evidence for CI-only failures; the workflow uploads it.
+            let evidence = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build/ci-diagnostics", isDirectory: true)
+            try? FileManager.default.createDirectory(at: evidence, withIntermediateDirectories: true)
+            try? bitmap.representation(using: .png, properties: [:])?
+                .write(to: evidence.appendingPathComponent("path-bar-\(theme.rawValue).png"))
+            let top = histogram.sorted { $0.value > $1.value }.prefix(6)
+                .map { "\($0.key)×\($0.value)" }.joined(separator: " ")
+            print("""
+                PATH_BAR_DIAG \(theme.rawValue): chrome=\(String(format: "%06x", chromeRGB)) \
+                bar=\(bar.frame) view=\(view.bounds) window=\(window.frame) \
+                pixels=\(bitmap.pixelsWide)x\(bitmap.pixelsHigh) \
+                scale=\(window.backingScaleFactor) top=[\(top)] rows=\(rowMatches)
+                """)
+        }
         #expect(chromeMatches * 2 > total, "\(theme.rawValue): \(chromeMatches)/\(total) chrome pixels")
         #expect(contrasting >= 20, "\(theme.rawValue): \(contrasting) text pixels")
     }

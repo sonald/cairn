@@ -143,14 +143,24 @@ func readonlyIntegratedDeferredSyntaxKeepsMiddleAndEndSourceAnchors() async thro
         #expect(reader.view.selectedRanges == selected)
         reader.updateSyntax(document: syntax)
         await reader.waitForIdentifierPreparation()
+        var trace: [String] = []
         for _ in 0..<24 {
             await readonlyIntegratedTurn([reader], windows: [window])
-            if !reader.reflowDiagnostics.widthPending, !reader.reflowDiagnostics.correctionPending,
-               let error = readonlyIntegratedAnchorError(reader, display: anchor.display, offset: anchor.offset),
-               error <= 2, reader.backgroundDrawCount > draws { break }
+            let turnError = readonlyIntegratedAnchorError(reader, display: anchor.display, offset: anchor.offset)
+            let flags = reader.reflowDiagnostics
+            trace.append(String(format: "%.2f", Double(turnError ?? -1))
+                + "\(flags.widthPending ? "w" : "")\(flags.correctionPending ? "c" : "")")
+            if !flags.widthPending, !flags.correctionPending,
+               let error = turnError, error <= 2, reader.backgroundDrawCount > draws { break }
         }
         let error = try #require(readonlyIntegratedAnchorError(reader, display: anchor.display, offset: anchor.offset))
-        #expect(error <= 2, "entry=\(entry), source=\(anchor.byte), drift=\(error)pt")
+        let row = ReaderViewportGeometry.rowRect(containingDisplayLocation: anchor.display, in: reader.view)
+        #expect(error <= 2, """
+            entry=\(entry), source=\(anchor.byte), drift=\(error)pt, offset=\(anchor.offset), \
+            row=\(String(describing: row)), draws=\(draws)->\(reader.backgroundDrawCount), \
+            reflow=\(reader.reflowDiagnostics), limited=\(reader.lastViewportRestoreWasLimited), \
+            scale=\(window.backingScaleFactor), trace=\(trace)
+            """)
         #expect(!reader.reflowDiagnostics.widthPending && !reader.reflowDiagnostics.correctionPending)
         #expect(!reader.lastViewportRestoreWasLimited)
         #expect(reader.byteOffset(forCharacterIndex: anchor.display) == anchor.byte)
