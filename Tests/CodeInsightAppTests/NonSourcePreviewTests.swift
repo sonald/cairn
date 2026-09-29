@@ -51,8 +51,9 @@ func nonSourcePreviewMarkdownAndPlainTextStaySeparateFromSourceReader() throws {
     state = controller.selfTestPreviewState
     #expect(state.kind == "Markdown")
     #expect(state.renderedText?.contains("Title") == true)
-    #expect(state.renderedText?.contains("Title\n\ndisk bytes") == true)
-    #expect(state.renderedText?.contains("• first\n• second") == true)
+    // Blocks separate by paragraph spacing, not blank lines.
+    #expect(state.renderedText?.contains("Title\ndisk bytes") == true)
+    #expect(state.renderedText?.contains("•\tfirst\n•\tsecond") == true)
     #expect(state.renderedText?.contains("**") == false)
     #expect(state.linkCount == 1)
     let headingFont = try #require(controller.selfTestPreviewFont(at: "Title"))
@@ -361,14 +362,17 @@ func markdownPreviewPreservesListMarkersNestingAndInlineStyles() throws {
     let state = controller.selfTestPreviewState
     #expect(state.kind == "Markdown")
     let text = try #require(state.renderedText)
-    // Unordered markers and nesting survive.
-    #expect(text.contains("• first **bold** item".replacingOccurrences(of: "**", with: "")) || text.contains("• first"))
-    #expect(text.contains("• first bold item") || text.contains("• first **bold** item"))
-    #expect(text.contains("• second item with code") || text.contains("• second item with `code`"))
-    #expect(text.contains("  • nested bullet"))
+    // Unordered markers survive; nesting is a hanging indent, not spaces.
+    #expect(text.contains("•\tfirst bold item"))
+    #expect(text.contains("•\tsecond item with code"))
+    #expect(text.contains("◦\tnested bullet"))
+    let outer = try #require(controller.selfTestPreviewParagraphStyle(at: "first bold"))
+    let nested = try #require(controller.selfTestPreviewParagraphStyle(at: "nested bullet"))
+    #expect(nested.firstLineHeadIndent > outer.firstLineHeadIndent)
+    #expect(outer.headIndent > outer.firstLineHeadIndent)
     // Ordered numbering restarts per list.
-    #expect(text.contains("1. install"))
-    #expect(text.contains("2. run"))
+    #expect(text.contains("1.\tinstall"))
+    #expect(text.contains("2.\trun"))
     // Paragraph spacing separates blocks; code block stays monospaced.
     #expect(text.contains("fn code_block() {}"))
     let codeFont = try #require(controller.selfTestPreviewFont(at: "fn code_block"))
@@ -542,4 +546,195 @@ func plainTextPreviewResizePreservesVisibleCharacterAndSelection() throws {
         #expect(text.selectedRanges == selected)
         #expect(text.selectionAffinity == .upstream)
     }
+}
+
+@MainActor
+private func nonSourcePreviewRGB(_ value: Any?) -> UInt32? {
+    guard let color = value as? NSColor else { return nil }
+    var rgb: UInt32?
+    NSAppearance(named: .aqua)!.performAsCurrentDrawingAppearance {
+        guard let resolved = color.usingColorSpace(.sRGB) else { return }
+        rgb = UInt32((resolved.redComponent * 255).rounded()) << 16
+            | UInt32((resolved.greenComponent * 255).rounded()) << 8
+            | UInt32((resolved.blueComponent * 255).rounded())
+    }
+    return rgb
+}
+
+@MainActor
+@Test
+func markdownPreviewRendersFrontMatterTablesQuotesTasksImagesAndHighlightedCode() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    _ = try nonSourcePreviewFile(root: root, name: "docs/logo.png", bytes: try nonSourcePreviewPNG())
+    let file = try nonSourcePreviewFile(root: root, name: "docs/GUIDE.md", bytes: Array("""
+    ---
+    title: Guide
+    ---
+    # Guide
+
+    > Quoted *note*
+
+    | Key | Value |
+    |-----|:-----:|
+    | a   | `1`   |
+
+    - [ ] pending
+    - [x] shipped
+
+    ![Local logo](logo.png) ![Remote badge](https://example.com/badge.svg)
+
+    ```toml
+    [tool]
+    name = "cairn"
+    ```
+    """.utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = NSRect(x: 0, y: 0, width: 900, height: 600)
+    controller.display(file, languageMode: nil)
+    let theme = ReaderTheme(settings: ReaderSettings())
+    let text = try #require(controller.selfTestPreviewState.renderedText)
+
+    // Front matter reads as highlighted YAML instead of a rule and heading.
+    #expect(text.hasPrefix("title: Guide\n"))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "title"))
+        == theme.rgb(for: .declarationTitle, isDark: false))
+    let frontStyle = try #require(controller.selfTestPreviewParagraphStyle(at: "title: Guide"))
+    #expect(frontStyle.textBlocks.last?.backgroundColor != nil)
+    // Painted blocks carry no margin: TextKit fills margins with the background.
+    #expect(frontStyle.textBlocks.allSatisfy { $0.backgroundColor == nil || $0.width(for: .margin, edge: .maxY) == 0 })
+
+    // Quotes carry a leading bar; tables are real table cells.
+    let quote = try #require(controller.selfTestPreviewParagraphStyle(at: "Quoted"))
+    #expect(quote.textBlocks.first?.width(for: .border, edge: .minX) == 3)
+    let header = try #require(controller.selfTestPreviewParagraphStyle(at: "Key"))
+    let headerCell = try #require(header.textBlocks.last as? NSTextTableBlock)
+    #expect(headerCell.startingColumn == 0)
+    let valueStyle = try #require(controller.selfTestPreviewParagraphStyle(at: "Value"))
+    let valueCell = try #require(valueStyle.textBlocks.last as? NSTextTableBlock)
+    #expect(valueCell.table === headerCell.table)
+    #expect(valueCell.startingColumn == 1)
+    #expect(valueStyle.alignment == .center)
+    let headerFont = try #require(controller.selfTestPreviewFont(at: "Key"))
+    #expect(headerFont.fontDescriptor.symbolicTraits.contains(.bold))
+
+    // Task items replace the bracket syntax with check marks.
+    #expect(text.contains("☐\tpending"))
+    #expect(text.contains("☑︎\tshipped"))
+    #expect(!text.contains("[ ]"))
+
+    // Local images embed; remote images never load and keep their alt text.
+    let storage = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview")?.textStorage)
+    var attachments = 0
+    storage.enumerateAttribute(.attachment, in: NSRange(location: 0, length: storage.length)) { value, _, _ in
+        if value != nil { attachments += 1 }
+    }
+    #expect(attachments == 1)
+    #expect(text.contains("Remote badge"))
+    #expect(!text.contains("Local logo"))
+
+    // Blocks must lay out at the column width: a text block without an
+    // explicit width collapses to one glyph per line while every attribute
+    // assertion above still passes.
+    let textView = try #require(nonSourcePreviewTextView(in: controller.view, label: "Markdown preview"))
+    let layout = try #require(textView.layoutManager)
+    let container = try #require(textView.textContainer)
+    layout.ensureLayout(for: container)
+    #expect(container.size.width > 600)
+    let string = storage.string as NSString
+    for (fragment, options) in [
+        ("Guide", NSString.CompareOptions.backwards), ("title: Guide", []), ("Quoted note", []),
+        ("Key", []), ("name = \"cairn\"", []), ("pending", []),
+    ] {
+        let range = string.range(of: fragment, options: options)
+        #expect(range.location != NSNotFound, "\(fragment)")
+        let glyphs = layout.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        var lines = 0
+        layout.enumerateLineFragments(forGlyphRange: glyphs) { _, _, _, _, _ in lines += 1 }
+        #expect(lines == 1, "\(fragment) wraps across \(lines) lines")
+    }
+    #expect(layout.usedRect(for: container).width <= container.size.width + 1)
+
+    // Fenced code is highlighted by its language hint.
+    let codeFont = try #require(controller.selfTestPreviewFont(at: "name = "))
+    #expect(codeFont.fontDescriptor.symbolicTraits.contains(.monoSpace))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "name ="))
+        == theme.rgb(for: .property, isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "\"cairn\""))
+        == theme.rgb(for: .string, isDark: false))
+}
+
+@MainActor
+@Test
+func codeTextPreviewHighlightsConfigAndTemplatesAndRestylesWithTheme() throws {
+    _ = NSApplication.shared
+    let root = try nonSourcePreviewTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let toml = try nonSourcePreviewFile(root: root, name: "pyproject.toml", bytes: Array("""
+    [project]
+    name = "jaz-lang"
+    """.utf8))
+    let template = try nonSourcePreviewFile(root: root, name: "prompt.jinja2", bytes: Array("""
+    <repl_spec>
+    {{ repl_specific_instructions }}
+    </repl_spec>
+    """.utf8))
+    let source = try nonSourcePreviewFile(root: root, name: "main.c", bytes: Array("int main(void) {}\n".utf8))
+    let license = try nonSourcePreviewFile(root: root, name: "LICENSE", bytes: Array("Apache License\n".utf8))
+    let controller = ReaderViewController()
+    controller.loadViewIfNeeded()
+    var settings = ReaderSettings()
+    settings.theme = .light
+    controller.apply(settings: settings)
+
+    controller.display(toml, languageMode: nil)
+    var state = controller.selfTestPreviewState
+    #expect(state.kind == "TOML")
+    #expect(state.accessibilityLabel == "TOML preview")
+    #expect(state.renderedText == "[project]\nname = \"jaz-lang\"")
+    let keyFont = try #require(controller.selfTestPreviewFont(at: "name"))
+    #expect(keyFont.fontDescriptor.symbolicTraits.contains(.monoSpace))
+    let tableFont = try #require(controller.selfTestPreviewFont(at: "[project]"))
+    #expect(tableFont != keyFont)
+    var theme = ReaderTheme(settings: settings)
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "name"))
+        == theme.rgb(for: .property, isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "\"jaz-lang\""))
+        == theme.rgb(for: .string, isDark: false))
+
+    // A theme change recolors spans with the new palette instead of painting
+    // every run in the body color.
+    settings.theme = .siClassic
+    controller.apply(settings: settings)
+    theme = ReaderTheme(settings: settings)
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "\"jaz-lang\""))
+        == theme.rgb(for: .string, isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "name"))
+        == theme.rgb(for: .property, isDark: false))
+
+    controller.display(template, languageMode: nil)
+    state = controller.selfTestPreviewState
+    #expect(state.kind == "Jinja")
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "{{"))
+        == theme.rgb(for: .macro, isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "repl_specific"))
+        == theme.rgb(for: .parameter, isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.foregroundColor, at: "<repl_spec>"))
+        == theme.rgb(for: .typeName, isDark: false))
+    // Template holes carry a chip tint from delimiter to delimiter; host text does not.
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.backgroundColor, at: "repl_specific"))
+        == theme.chromeHeaderRGB(isDark: false))
+    #expect(nonSourcePreviewRGB(controller.selfTestPreviewAttribute(.backgroundColor, at: "}}"))
+        == theme.chromeHeaderRGB(isDark: false))
+    #expect(controller.selfTestPreviewAttribute(.backgroundColor, at: "<repl_spec>") == nil)
+
+    // Unsupported source still reads monospaced; prose keeps the text face.
+    controller.display(source, languageMode: nil)
+    state = controller.selfTestPreviewState
+    #expect(state.kind == "Plain text")
+    #expect(controller.selfTestPreviewFont(at: "int main")?.fontDescriptor.symbolicTraits.contains(.monoSpace) == true)
+    controller.display(license, languageMode: nil)
+    #expect(controller.selfTestPreviewFont(at: "Apache")?.fontDescriptor.symbolicTraits.contains(.monoSpace) == false)
 }

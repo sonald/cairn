@@ -203,6 +203,7 @@
 "main.pdf.preview" = "PDF preview";
 "main.pin" = "Pin";
 "main.plain.text.preview" = "Plain text preview";
+"main.code.text.preview" = "%@ preview";
 "main.preview.failure" = "%@ preview";
 "main.preview.suffix" = ", Preview";
 "main.preview.tip" = ". Preview tab; choose Keep Open to retain it.";

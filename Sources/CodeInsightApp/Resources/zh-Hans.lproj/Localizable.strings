@@ -203,6 +203,7 @@
 "main.pdf.preview" = "PDF 预览";
 "main.pin" = "固定";
 "main.plain.text.preview" = "纯文本预览";
+"main.code.text.preview" = "%@ 预览";
 "main.preview.failure" = "%@预览";
 "main.preview.suffix" = "，预览";
 "main.preview.tip" = "。预览标签页；选择“保持打开”以保留。";

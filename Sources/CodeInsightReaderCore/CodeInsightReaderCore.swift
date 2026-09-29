@@ -984,7 +984,7 @@ public struct DocumentLoader: Sendable {
         )
     }
 
-    private static func highlightWithFolds(
+    static func highlightWithFolds(
         bytes: [UInt8],
         languageMode: LanguageMode,
         resolutionObserver: (@Sendable (Double, Int, Int) -> Void)?,

@@ -4288,6 +4288,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var previewKind: String?
     private enum TextPreviewKind { case plainText, markdown }
     private var textPreviewKind: TextPreviewKind?
+    /// Rebuilds the text preview's attributes for a new theme; the string
+    /// itself never changes, so selection and scroll survive a restyle.
+    private var previewRestyle: ((ReaderTheme) -> NSAttributedString?)?
     private var previewWrapLines = ReaderSettings().wrapLines
     private var previewUnwrappedX: CGFloat = 0
     private var previewRenderedText: String?
@@ -5224,6 +5227,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         loadViewIfNeeded()
         let previewWrapChanged = previewWrapLines != settings.wrapLines
         previewWrapLines = settings.wrapLines
+        let previousTheme = readerTheme
         readerTheme = ReaderTheme(settings: settings)
         snapshotBadge.update(style: .commit, text: localized("main.snapshot.readonly"), theme: readerTheme)
         if showsCompareControls { renderFunctionSummary() }
@@ -5233,8 +5237,10 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewArea.layer?.backgroundColor = readerTheme.backgroundColor.cgColor
         if let previewTextView = (previewView as? NSScrollView)?.documentView as? NSTextView {
             previewTextView.backgroundColor = readerTheme.backgroundColor
-            previewTextView.textColor = readerTheme.foregroundColor
-            if textPreviewKind == .plainText, previewWrapChanged,
+            previewTextView.linkTextAttributes?[.foregroundColor] = readerTheme.accentColor
+            let restyled = previousTheme != readerTheme
+                && restylePreviewText(previewTextView)
+            if textPreviewKind == .plainText, previewWrapChanged || restyled,
                let previewScrollView = previewView as? NSScrollView {
                 configurePlainTextPreview(previewTextView, in: previewScrollView)
             }
@@ -5443,6 +5449,14 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         )
     }
     func selfTestPreviewFont(at substring: String) -> NSFont? {
+        selfTestPreviewAttribute(.font, at: substring) as? NSFont
+    }
+
+    func selfTestPreviewParagraphStyle(at substring: String) -> NSParagraphStyle? {
+        selfTestPreviewAttribute(.paragraphStyle, at: substring) as? NSParagraphStyle
+    }
+
+    func selfTestPreviewAttribute(_ key: NSAttributedString.Key, at substring: String) -> Any? {
         guard !substring.isEmpty,
               let previewTextView = (previewView as? NSScrollView)?
                   .documentView as? NSTextView,
@@ -5450,8 +5464,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         else { return nil }
         let range = (storage.string as NSString).range(of: substring)
         guard range.location != NSNotFound else { return nil }
-        return storage.attribute(.font, at: range.location, effectiveRange: nil)
-            as? NSFont
+        return storage.attribute(key, at: range.location, effectiveRange: nil)
     }
     var selfTestPlaceholderText: String? {
         label.isHidden ? nil : label.stringValue
@@ -6137,6 +6150,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         previewView = nil
         previewKind = nil
         textPreviewKind = nil
+        previewRestyle = nil
         previewUnwrappedX = 0
         previewRenderedText = nil
         previewLinkCount = 0
@@ -6247,179 +6261,66 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             displayPreviewError(localized("main.unsupported.binary"))
             return
         }
-        if extensionName == "md" || extensionName == "markdown" {
-            guard let markdown = try? AttributedString(
-                markdown: string,
-                options: .init(),
-                baseURL: file
-            ) else {
+        if extensionName == "md" || extensionName == "markdown" || extensionName == "mdx" {
+            let render = { (theme: ReaderTheme) in
+                MarkdownPreviewRenderer(theme: theme, baseURL: file).render(string)
+            }
+            guard let attributed = render(readerTheme) else {
                 displayPreviewError(localized("main.unsupported.binary"))
                 return
             }
-            let attributed = markdownPreviewAttributedString(markdown)
             displayPreviewText(
                 attributed,
                 kind: .markdown,
                 accessibilityLabel: localized("main.markdown.preview")
             )
+            previewRestyle = render
             return
         }
         if extensionName == "html" || extensionName == "htm" {
             displayPreviewHTML(string, file: file)
             return
         }
+        let firstLine = string.prefix(200).split(separator: "\n", maxSplits: 1).first.map(String.init)
+        let format = TextFormat.detect(fileName: file.lastPathComponent, firstLine: firstLine)
+        if format == nil, Self.isProsePreview(file) {
+            displayPreviewText(
+                NSAttributedString(string: string),
+                kind: .plainText,
+                accessibilityLabel: localized("main.plain.text.preview")
+            )
+            return
+        }
+        // Configuration, templates, scripts and unsupported source read as
+        // code: the reader's font, line height and syntax palette.
+        let render = { (theme: ReaderTheme) -> NSAttributedString? in
+            CodeTextPreviewStyler.attributedString(string, format: format, theme: theme)
+        }
         displayPreviewText(
-            NSAttributedString(string: string),
+            render(readerTheme) ?? NSAttributedString(string: string),
             kind: .plainText,
-            accessibilityLabel: localized("main.plain.text.preview")
+            kindName: format?.displayName,
+            accessibilityLabel: format.map {
+                localizedFormat("main.code.text.preview", $0.displayName)
+            } ?? localized("main.plain.text.preview")
         )
+        previewRestyle = render
     }
 
-    private func markdownPreviewAttributedString(
-        _ markdown: AttributedString
-    ) -> NSAttributedString {
-        let rendered = NSMutableAttributedString()
-        var previousComponents: [PresentationIntent.IntentType]?
-        var previousListItemIdentity: Int?
-        // Ordinal for the item currently open in each ordered list.
-        var orderedCounters: [Int: Int] = [:]
-        for run in markdown.runs {
-            let components = run.presentationIntent?.components ?? []
-            let leaf = components.first
-            let listItem = components.first {
-                if case .listItem = $0.kind { return true }
-                return false
-            }
-            let orderedList = components.first {
-                if case .orderedList = $0.kind { return true }
-                return false
-            }
-            let listContainer = orderedList ?? components.first {
-                if case .unorderedList = $0.kind { return true }
-                return false
-            }
-            if let previousComponents,
-               let previousLeaf = previousComponents.first,
-               let leaf,
-               previousLeaf.identity != leaf.identity,
-               rendered.length > 0,
-               !rendered.string.hasSuffix("\n")
-            {
-                let previousIsListItem = previousComponents.contains {
-                    if case .listItem = $0.kind { return true }
-                    return false
-                }
-                let isListItem = previousIsListItem && components.contains {
-                    if case .listItem = $0.kind { return true }
-                    return false
-                }
-                rendered.append(NSAttributedString(
-                    string: isListItem ? "\n" : "\n\n"
-                ))
-            }
-            // A new list item begins: emit its marker with nesting indent.
-            // Unordered items get a bullet; ordered items number within
-            // their list, restarting when the list changes (§S10a).
-            if let listItem,
-               listItem.identity != previousListItemIdentity
-            {
-                let nesting = components.reduce(0) { count, component in
-                    switch component.kind {
-                    case .orderedList, .unorderedList:
-                        count + 1
-                    default:
-                        count
-                    }
-                }
-                let indent = String(
-                    repeating: "  ",
-                    count: max(0, nesting - 1)
-                )
-                if let orderedList {
-                    let counter = (orderedCounters[orderedList.identity] ?? 0) + 1
-                    orderedCounters[orderedList.identity] = counter
-                    rendered.append(NSAttributedString(
-                        string: "\(indent)\(counter). "
-                    ))
-                } else {
-                    rendered.append(NSAttributedString(
-                        string: "\(indent)• "
-                    ))
-                }
-                previousListItemIdentity = listItem.identity
-            }
-            _ = listContainer
-            let attributed = NSMutableAttributedString(
-                attributedString: NSAttributedString(
-                    AttributedString(markdown[run.range])
-                )
-            )
-            if attributed.length > 0 {
-                let range = NSRange(location: 0, length: attributed.length)
-                let baseFont: NSFont = switch leaf?.kind {
-                case .header(let level):
-                    NSFont.systemFont(
-                        ofSize: max(16, 24 - CGFloat(min(level, 6)) * 1.5),
-                        weight: .semibold
-                    )
-                case .codeBlock:
-                    NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
-                default:
-                    NSFont.systemFont(ofSize: 14)
-                }
-                var font = baseFont
-                if run.inlinePresentationIntent?.contains(.code) == true {
-                    font = NSFont.monospacedSystemFont(
-                        ofSize: baseFont.pointSize,
-                        weight: .regular
-                    )
-                }
-                if run.inlinePresentationIntent?.contains(
-                    .stronglyEmphasized
-                ) == true {
-                    font = NSFontManager.shared.convert(
-                        font,
-                        toHaveTrait: .boldFontMask
-                    )
-                }
-                if run.inlinePresentationIntent?.contains(.emphasized) == true {
-                    font = NSFontManager.shared.convert(
-                        font,
-                        toHaveTrait: .italicFontMask
-                    )
-                }
-                attributed.addAttribute(
-                    NSAttributedString.Key.font,
-                    value: font,
-                    range: range
-                )
-                if run.inlinePresentationIntent?.contains(
-                    .strikethrough
-                ) == true {
-                    attributed.addAttribute(
-                        NSAttributedString.Key.strikethroughStyle,
-                        value: NSUnderlineStyle.single.rawValue,
-                        range: range
-                    )
-                }
-                if run.link != nil {
-                    attributed.addAttributes([
-                        NSAttributedString.Key.foregroundColor:
-                            readerTheme.accentColor,
-                        NSAttributedString.Key.underlineStyle:
-                            NSUnderlineStyle.single.rawValue,
-                    ], range: range)
-                }
-            }
-            rendered.append(attributed)
-            previousComponents = components
-        }
-        return rendered
+    /// Prose documents keep the proportional reading font.
+    private static func isProsePreview(_ file: URL) -> Bool {
+        let name = file.lastPathComponent
+        let extensionName = file.pathExtension.lowercased()
+        if ["txt", "text", "rst", "adoc", "asciidoc", "org"].contains(extensionName) { return true }
+        return extensionName.isEmpty
+            && name.contains(where: \.isLetter)
+            && name.allSatisfy { $0.isUppercase || $0 == "_" || $0 == "-" }
     }
 
     private func displayPreviewText(
         _ attributed: NSAttributedString,
         kind: TextPreviewKind,
+        kindName: String? = nil,
         accessibilityLabel: String
     ) {
         let styled = NSMutableAttributedString(attributedString: attributed)
@@ -6443,13 +6344,19 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 )
             }
         }
-        let textView = kind == .plainText ? PlainTextPreviewView() : NSTextView()
+        let textView = kind == .plainText ? PlainTextPreviewView() : MarkdownPreviewTextView()
+        textView.linkTextAttributes = [
+            .foregroundColor: readerTheme.accentColor,
+            .cursor: NSCursor.pointingHand,
+        ]
         textView.isEditable = false
         textView.isSelectable = true
         textView.isRichText = true
         textView.drawsBackground = true
         textView.backgroundColor = readerTheme.backgroundColor
-        textView.textContainerInset = NSSize(width: 24, height: 24)
+        if kind == .plainText {
+            textView.textContainerInset = NSSize(width: 24, height: 24)
+        }
         textView.textStorage?.setAttributedString(styled)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
@@ -6473,7 +6380,7 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             }
         }
         textPreviewKind = kind
-        previewKind = kind == .plainText ? "Plain text" : "Markdown"
+        previewKind = kindName ?? (kind == .plainText ? "Plain text" : "Markdown")
         previewRenderedText = textView.string
         previewLinkCount = linkCount
         previewAccessibilityLabel = accessibilityLabel
@@ -6486,6 +6393,23 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 self.configurePlainTextPreview(textView, in: scrollView, width: width)
             }
         }
+    }
+
+    private func restylePreviewText(_ textView: NSTextView) -> Bool {
+        guard let restyle = previewRestyle,
+              let storage = textView.textStorage,
+              let styled = restyle(readerTheme),
+              styled.string == storage.string
+        else { return false }
+        let selection = textView.selectedRanges
+        let origin = textView.enclosingScrollView?.contentView.bounds.origin
+        storage.setAttributedString(styled)
+        textView.setSelectedRanges(selection, affinity: textView.selectionAffinity, stillSelecting: false)
+        if let origin, let scrollView = textView.enclosingScrollView {
+            scrollView.contentView.scroll(to: origin)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+        return true
     }
 
     private func configurePlainTextPreview(
