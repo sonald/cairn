@@ -117,24 +117,243 @@ func syntacticSignatureInlinesShortAggregateBodiesOnly() {
 }
 
 @Test
-func syntacticDocFallsBackToFirstLineForOtherLanguages() {
-    let source = "def execute(steps):\n    \"\"\"Run all steps.\"\"\"\n    return steps"
+func syntacticDocFallsBackToFirstLineForJavaScript() {
+    let source = "export function execute(steps) {\n    return steps;\n}"
     let bytes = Array(source.utf8)
     let document = ReaderDocument(
         bytes: bytes,
-        languageMode: LanguageMode(language: .python),
+        languageMode: LanguageMode(language: .javascript),
         highlightSpans: [],
         outlineFacets: []
     )
     let doc = syntacticSymbolDoc(
         forDeclarationAt: ByteRange(lowerBound: 0, upperBound: UInt32(bytes.count)),
         in: document,
-        location: "run.py:1"
+        location: "run.js:1"
     )
-    #expect(doc.signature == "def execute(steps)")
-    #expect(doc.signatureLanguage == "python")
-    #expect(doc.location == "run.py:1")
+    #expect(doc.signature == "export function execute(steps)")
+    #expect(doc.signatureLanguage == "javascript")
+    #expect(doc.location == "run.js:1")
     #expect(doc.markdown.isEmpty)
+}
+
+@Test
+func pythonSyntacticDocSkipsDecoratorsAndReadsDocstrings() {
+    let doc = pythonDoc("""
+    @app.route("/view")
+    @cache(timeout=30)
+    def view(user: str = "nobody") -> str:
+        \"\"\"Render the user's page.
+
+        Longer detail with `code`.
+        \"\"\"
+        return user
+    """, declaration: "def view")
+
+    #expect(doc.source == .syntactic)
+    #expect(doc.signatureLanguage == "python")
+    #expect(doc.signature == #"def view(user: str = "nobody") -> str"#)
+    #expect(doc.markdown == """
+    Render the user's page.
+
+    Longer detail with `code`.
+    """)
+}
+
+@Test
+func pythonSyntacticDocDedentsMultiLineHeadersAndQuoteVariants() {
+    let multiline = pythonDoc("""
+    class Repo:
+        def process(
+            items: list[int],
+            separator: str = ", ",
+        ) -> dict[str, int]:
+            \"\"\"Map items to counts.\"\"\"
+            return {}
+    """, declaration: "def process")
+    #expect(multiline.signature == """
+    def process(
+        items: list[int],
+        separator: str = ", ",
+    ) -> dict[str, int]
+    """)
+    #expect(multiline.markdown == "Map items to counts.")
+
+    let lambdaDefault = pythonDoc(
+        #"def apply(g=lambda x: x): '#'"# + "\n    \"\"\"Apply g.\"\"\"\n    return g\n",
+        declaration: "def apply"
+    )
+    #expect(lambdaDefault.signature == "def apply(g=lambda x: x)")
+    // A single-quoted expression after the header is not a docstring.
+    #expect(lambdaDefault.markdown.isEmpty)
+
+    let singleQuotedDoc = pythonDoc("""
+    def teardown():
+        '''Tears down.'''
+        pass
+    """, declaration: "def teardown")
+    #expect(singleQuotedDoc.markdown == "Tears down.")
+
+    let escapedQuote = pythonDoc(
+        "def note():\n    \"\"\"Contains \\\"\"\" inside.\"\"\"\n",
+        declaration: "def note"
+    )
+    #expect(escapedQuote.markdown == #"Contains """ inside."#)
+}
+
+@Test
+func pythonSyntacticDocIgnoresBodiesWithoutLeadingDocstrings() {
+    for body in [
+        "    count = x + 1\n    return count\n",
+        "    'single quoted is not read'\n    return x\n",
+        "    # a comment\n    \"\"\"not the first statement\"\"\"\n",
+    ] {
+        let doc = pythonDoc(
+            "def plain(x):\n\(body)",
+            declaration: "def plain"
+        )
+        #expect(doc.markdown.isEmpty, "body: \(body)")
+        #expect(doc.signature == "def plain(x)")
+    }
+
+    let classDoc = pythonDoc("""
+    class Service:
+        \"\"\"A service.\"\"\"
+        def run(self):
+            \"\"\"Run once.\"\"\"
+    """, declaration: "class Service")
+    #expect(classDoc.signature == "class Service")
+    #expect(classDoc.markdown == "A service.")
+}
+
+@Test
+func typeScriptSyntacticDocReadsJSDocSignaturesAndAggregates() {
+    let function = typeScriptDoc("""
+    /**
+     * Fetches a user.
+     *
+     * @param id - the user id
+     */
+    export function fetchUser(
+        id: number,
+        options: Options = { retries: 1 },
+    ): Promise<User> {
+        return null;
+    }
+    """, declaration: "export function fetchUser")
+    #expect(function.source == .syntactic)
+    #expect(function.signatureLanguage == "typescript")
+    #expect(function.signature == """
+    export function fetchUser(
+        id: number,
+        options: Options = { retries: 1 },
+    ): Promise<User>
+    """)
+    #expect(function.markdown == """
+    Fetches a user.
+
+    @param id - the user id
+    """)
+
+    let arrow = typeScriptDoc(
+        "export const parse = (input: string): Result => {\n    return ok(input);\n};\n",
+        declaration: "export const parse"
+    )
+    #expect(arrow.signature == "export const parse = (input: string): Result")
+
+    let alias = typeScriptDoc(
+        "export type Options = {\n    retries: number;\n};\n",
+        declaration: "export type Options"
+    )
+    #expect(alias.signature == "export type Options")
+
+    let aggregate = typeScriptDoc("""
+    export interface Point<T extends object = {}> {
+        x: number;
+        y: number;
+    }
+    """, declaration: "export interface Point")
+    #expect(aggregate.signature == """
+    export interface Point<T extends object = {}> {
+        x: number;
+        y: number;
+    }
+    """)
+
+    let plain = typeScriptDoc(
+        "// ordinary comment\nfunction boot() {}\n",
+        declaration: "function boot"
+    )
+    #expect(plain.markdown.isEmpty)
+    #expect(plain.signature == "function boot()")
+}
+
+@Test
+func typeScriptSyntacticDocKeepsDecoratorsBetweenJSDocAndDeclaration() {
+    let doc = typeScriptDoc("""
+    /**
+     * A component.
+     */
+    @Component({ selector: "demo" })
+    export class Demo {
+        title = "hi";
+    }
+    """, declaration: "export class Demo")
+    #expect(doc.markdown == "A component.")
+    #expect(doc.signature == """
+    export class Demo {
+        title = "hi";
+    }
+    """)
+}
+
+@Test
+func typeScriptDocLinksJSDocReferencesOutsideCodeFences() {
+    let doc = typeScriptDoc("""
+    /**
+     * See {@link Store} and {@link Store#query the query method}.
+     *
+     * ```
+     * const s = "{@link NotALink}";
+     * ```
+     */
+    function boot() {}
+    """, declaration: "function boot")
+    #expect(doc.markdown == """
+    See [Store](cairn-symbol:Store) and \
+    [the query method](cairn-symbol:Store#query).
+
+    ```
+    const s = "{@link NotALink}";
+    ```
+    """)
+}
+
+private func pythonDoc(_ source: String, declaration: String) -> SymbolDoc {
+    syntacticDoc(source, language: .python, declaration: declaration)
+}
+
+private func typeScriptDoc(_ source: String, declaration: String) -> SymbolDoc {
+    syntacticDoc(source, language: .typescript, declaration: declaration)
+}
+
+private func syntacticDoc(
+    _ source: String,
+    language: LanguageID,
+    declaration: String
+) -> SymbolDoc {
+    let bytes = Array(source.utf8)
+    let start = UInt32(source[..<source.range(of: declaration)!.lowerBound].utf8.count)
+    let document = ReaderDocument(
+        bytes: bytes,
+        languageMode: LanguageMode(language: language),
+        highlightSpans: [],
+        outlineFacets: []
+    )
+    return syntacticSymbolDoc(
+        forDeclarationAt: ByteRange(lowerBound: start, upperBound: UInt32(bytes.count)),
+        in: document
+    )
 }
 
 private func rustDoc(_ source: String, declaration: String) -> SymbolDoc {

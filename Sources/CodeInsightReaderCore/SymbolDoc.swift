@@ -58,7 +58,22 @@ public func syntacticSymbolDoc(
     in document: ReaderDocument,
     location: String? = nil
 ) -> SymbolDoc {
-    guard document.languageMode.language == .rust else {
+    switch document.languageMode.language {
+    case .rust:
+        return SymbolDoc(
+            location: location,
+            signature: rustSignature(at: range, in: document),
+            signatureLanguage: "rust",
+            markdown: linkingIntraDocReferences(
+                hidingRustdocLines(rustDocComment(above: range, in: document))
+            ),
+            source: .syntactic
+        )
+    case .python:
+        return pythonSymbolDoc(at: range, in: document, location: location)
+    case .typescript:
+        return typescriptSymbolDoc(at: range, in: document, location: location)
+    case .javascript:
         return SymbolDoc(
             location: location,
             signature: firstLineSignature(at: range, in: document),
@@ -66,15 +81,6 @@ public func syntacticSymbolDoc(
             source: .syntactic
         )
     }
-    return SymbolDoc(
-        location: location,
-        signature: rustSignature(at: range, in: document),
-        signatureLanguage: "rust",
-        markdown: linkingIntraDocReferences(
-            hidingRustdocLines(rustDocComment(above: range, in: document))
-        ),
-        source: .syntactic
-    )
 }
 
 /// Drops the lines rustdoc hides in Rust code examples (`# setup`, a lone
@@ -318,7 +324,7 @@ private func docBlock(
 
 private func normalizedDocLines(_ lines: [String]) -> String {
     var lines = lines.map { line in
-        String(line.reversed().drop { $0 == " " || $0 == "\t" }.reversed())
+        String(line.reversed().drop { $0 == " " || $0 == "\t" || $0 == "\r" }.reversed())
     }
     while lines.first?.isEmpty == true { lines.removeFirst() }
     while lines.last?.isEmpty == true { lines.removeLast() }
@@ -329,10 +335,123 @@ private func normalizedDocLines(_ lines: [String]) -> String {
         .joined(separator: "\n")
 }
 
-// MARK: - Rust signatures
+// MARK: - Declaration headers
 
 private let maximumSignatureBytes = 4096
 private let maximumInlineBodyLines = 12
+private let maximumDocstringBytes = 16_384
+
+/// Per-language rules for finding where a declaration header ends.
+private struct HeaderScanConfiguration {
+    /// Python def/class headers end at the first `:` outside brackets.
+    var colonTerminates = false
+    /// `'…'` strings are scanned (Python, TypeScript).
+    var singleQuotes = false
+    /// Triple-quoted `"""`/`'''` strings are scanned (Python).
+    var tripleQuoted = false
+    /// `` `…` `` template literals are scanned (TypeScript).
+    var backticks = false
+    /// Generic `<…>` nesting keeps a `{` from ending the header (Rust, TS).
+    var angles = true
+
+    static let rust = HeaderScanConfiguration()
+    static let python = HeaderScanConfiguration(
+        colonTerminates: true,
+        singleQuotes: true,
+        tripleQuoted: true,
+        angles: false
+    )
+    static let typescript = HeaderScanConfiguration(
+        singleQuotes: true,
+        backticks: true
+    )
+}
+
+/// Scans the declaration header starting at `lower`: the bytes up to the
+/// terminating `;`, `{` or `:` at bracket depth zero, skipping strings.
+/// Returns the terminator offset and, for brace-delimited bodies, where the
+/// body opens. `nil` when no terminator appears within `limit`.
+private func scanHeader(
+    from lower: Int,
+    in bytes: [UInt8],
+    limit: Int,
+    configuration: HeaderScanConfiguration
+) -> (headerEnd: Int, bodyOpen: Int?)? {
+    var depth = 0
+    var angle = 0
+    var index = lower
+    while index < limit {
+        let byte = bytes[index]
+        if byte == 0x22
+            || (configuration.singleQuotes && byte == 0x27)
+            || (configuration.backticks && byte == 0x60)
+        {
+            guard let end = skipQuoted(
+                from: index,
+                in: bytes,
+                limit: limit,
+                tripleQuoted: configuration.tripleQuoted
+            ) else { return nil }
+            index = end
+            continue
+        }
+        switch byte {
+        case 0x28, 0x5B:
+            depth += 1
+        case 0x29, 0x5D:
+            depth = max(0, depth - 1)
+        case 0x3C where configuration.angles:
+            angle += 1
+        case 0x3E where configuration.angles:
+            let previous = index > lower ? bytes[index - 1] : 0
+            if previous != 0x2D, previous != 0x3D { angle = max(0, angle - 1) }
+        case 0x3B where depth == 0:
+            return (index, nil)
+        case 0x3A where configuration.colonTerminates && depth == 0:
+            return (index, nil)
+        case 0x7B where !configuration.colonTerminates && depth == 0 && angle == 0:
+            return (index, index)
+        default:
+            break
+        }
+        index += 1
+    }
+    return nil
+}
+
+/// Offset just past the quoted string opening at `index`, honouring `\`
+/// escapes (and triple quotes when asked). `nil` when unterminated.
+private func skipQuoted(
+    from index: Int,
+    in bytes: [UInt8],
+    limit: Int,
+    tripleQuoted: Bool
+) -> Int? {
+    let quote = bytes[index]
+    let triple = tripleQuoted
+        && index + 2 < limit
+        && bytes[index + 1] == quote
+        && bytes[index + 2] == quote
+    var cursor = triple ? index + 3 : index + 1
+    while cursor < limit {
+        let byte = bytes[cursor]
+        if byte == 0x5C {
+            cursor += 2
+            continue
+        }
+        if byte == quote {
+            if !triple { return cursor + 1 }
+            if cursor + 2 < limit,
+               bytes[cursor + 1] == quote,
+               bytes[cursor + 2] == quote
+            {
+                return cursor + 3
+            }
+        }
+        cursor += 1
+    }
+    return nil
+}
 
 private func rustSignature(
     at range: ByteRange,
@@ -340,50 +459,24 @@ private func rustSignature(
 ) -> String? {
     let bytes = document.bytes
     let lower = Int(range.lowerBound)
-    let upper = min(bytes.count, Int(range.upperBound), lower + maximumSignatureBytes)
-    guard lower < upper else { return nil }
+    let limit = min(
+        bytes.count,
+        Int(range.upperBound),
+        lower + maximumSignatureBytes
+    )
+    guard lower < limit,
+          let header = scanHeader(
+              from: lower,
+              in: bytes,
+              limit: limit,
+              configuration: .rust
+          )
+    else { return nil }
 
-    var depth = 0
-    var angle = 0
-    var inString = false
-    var index = lower
-    var headerEnd = upper
-    var bodyOpen: Int?
-    while index < upper {
-        let byte = bytes[index]
-        if inString {
-            if byte == 0x5C { index += 2; continue }
-            if byte == 0x22 { inString = false }
-            index += 1
-            continue
-        }
-        switch byte {
-        case 0x22: inString = true
-        case 0x28, 0x5B: depth += 1
-        case 0x29, 0x5D: depth = max(0, depth - 1)
-        case 0x3C: angle += 1
-        case 0x3E:
-            let previous = index > lower ? bytes[index - 1] : 0
-            if previous != 0x2D, previous != 0x3D { angle = max(0, angle - 1) }
-        case 0x3B where depth == 0:
-            headerEnd = index
-            index = upper
-            continue
-        case 0x7B where depth == 0 && angle == 0:
-            headerEnd = index
-            bodyOpen = index
-            index = upper
-            continue
-        default:
-            break
-        }
-        index += 1
-    }
-
-    let header = String(decoding: bytes[lower..<headerEnd], as: UTF8.self)
-    var signature = header.trimmingCharacters(in: .whitespacesAndNewlines)
+    let headerText = String(decoding: bytes[lower..<header.headerEnd], as: UTF8.self)
+    var signature = headerText.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !signature.isEmpty else { return nil }
-    if let bodyOpen, declaresAggregate(signature) {
+    if let bodyOpen = header.bodyOpen, declaresAggregate(signature) {
         signature += " " + aggregateBody(from: bodyOpen, in: document)
     }
     return dedentContinuationLines(signature, declarationStart: range.lowerBound, in: document)
@@ -431,6 +524,278 @@ private func dedentContinuationLines(
         guard offset > 0 else { return line }
         let leading = line.prefix { $0 == " " || $0 == "\t" }.count
         return String(line.dropFirst(min(indent, leading)))
+    }.joined(separator: "\n")
+}
+
+// MARK: - Python declarations
+
+private func pythonSymbolDoc(
+    at range: ByteRange,
+    in document: ReaderDocument,
+    location: String?
+) -> SymbolDoc {
+    let header = pythonSignature(at: range, in: document)
+    return SymbolDoc(
+        location: location,
+        signature: header?.signature,
+        signatureLanguage: "python",
+        markdown: header.map { pythonDocstring(after: $0.bodyStart, in: document) } ?? "",
+        source: .syntactic
+    )
+}
+
+private func pythonSignature(
+    at range: ByteRange,
+    in document: ReaderDocument
+) -> (signature: String, bodyStart: Int)? {
+    let bytes = document.bytes
+    // Facet ranges open on the decorated definition; the signature starts
+    // after the `@decorator` lines.
+    let lower = skipPythonDecorators(
+        from: Int(range.lowerBound),
+        in: bytes,
+        limit: min(bytes.count, Int(range.upperBound))
+    )
+    let limit = min(bytes.count, lower + maximumSignatureBytes)
+    guard let header = scanHeader(
+        from: lower,
+        in: bytes,
+        limit: limit,
+        configuration: .python
+    ) else { return nil }
+    let headerText = String(decoding: bytes[lower..<header.headerEnd], as: UTF8.self)
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !headerText.isEmpty else { return nil }
+    return (
+        dedentContinuationLines(
+            headerText,
+            declarationStart: UInt32(lower),
+            in: document
+        ),
+        header.headerEnd + 1
+    )
+}
+
+/// Advances past whole `@decorator` lines so the signature opens at
+/// `def`/`class`. Returns `start` when no decorator leads the declaration.
+private func skipPythonDecorators(
+    from start: Int,
+    in bytes: [UInt8],
+    limit: Int
+) -> Int {
+    var lineStart = start
+    while lineStart < limit {
+        var index = lineStart
+        while index < limit, bytes[index] == 0x20 || bytes[index] == 0x09 {
+            index += 1
+        }
+        guard index < limit, bytes[index] == 0x40 else { return lineStart }
+        while index < limit, bytes[index] != 0x0A { index += 1 }
+        lineStart = min(index + 1, limit)
+    }
+    return start
+}
+
+/// The docstring: the first statement of the body must be a triple-quoted
+/// string (PEP 257). Anything else — including single-quoted strings — is
+/// not treated as documentation.
+private func pythonDocstring(
+    after bodyStart: Int,
+    in document: ReaderDocument
+) -> String {
+    let bytes = document.bytes
+    let upper = min(bytes.count, bodyStart + maximumDocstringBytes)
+    var index = bodyStart
+    while index < upper {
+        let byte = bytes[index]
+        guard byte == 0x20 || byte == 0x09 || byte == 0x0A || byte == 0x0D
+        else { break }
+        index += 1
+    }
+    guard index + 2 < upper,
+          bytes[index] == 0x22 || bytes[index] == 0x27,
+          bytes[index + 1] == bytes[index],
+          bytes[index + 2] == bytes[index],
+          let close = skipQuoted(
+              from: index,
+              in: bytes,
+              limit: upper,
+              tripleQuoted: true
+          )
+    else { return "" }
+    let raw = unescapingStringLiterals(
+        String(decoding: bytes[(index + 3)..<(close - 3)], as: UTF8.self)
+    )
+    return normalizedPythonDocstring(raw.components(separatedBy: "\n"))
+}
+
+/// A docstring is a string literal, so `\\` escapes read back as the
+/// characters they name.
+private func unescapingStringLiterals(_ text: String) -> String {
+    var result = ""
+    var escaped = false
+    for character in text {
+        if escaped {
+            switch character {
+            case "n": result.append("\n")
+            case "t": result.append("\t")
+            case "r": result.append("\r")
+            default: result.append(character)
+            }
+            escaped = false
+        } else if character == "\\" {
+            escaped = true
+        } else {
+            result.append(character)
+        }
+    }
+    if escaped { result.append("\\") }
+    return result
+}
+
+/// PEP 257 trimming as `inspect.cleandoc` does it: the opening line shares
+/// the triple quote, so only the continuation lines' common indent is
+/// removed.
+private func normalizedPythonDocstring(_ lines: [String]) -> String {
+    var lines = lines.map { line in
+        String(line.reversed().drop { $0 == " " || $0 == "\t" || $0 == "\r" }.reversed())
+    }
+    while lines.first?.isEmpty == true { lines.removeFirst() }
+    while lines.last?.isEmpty == true { lines.removeLast() }
+    guard !lines.isEmpty else { return "" }
+    let indent = lines.dropFirst().filter { !$0.isEmpty }
+        .map { $0.prefix { $0 == " " || $0 == "\t" }.count }
+        .min() ?? 0
+    var result = [lines[0].trimmingCharacters(in: .whitespaces)]
+    for line in lines.dropFirst() {
+        let leading = line.prefix { $0 == " " || $0 == "\t" }.count
+        result.append(String(line.dropFirst(min(indent, leading))))
+    }
+    return result.joined(separator: "\n")
+}
+
+// MARK: - TypeScript declarations
+
+private func typescriptSymbolDoc(
+    at range: ByteRange,
+    in document: ReaderDocument,
+    location: String?
+) -> SymbolDoc {
+    return SymbolDoc(
+        location: location,
+        signature: typescriptSignature(at: range, in: document),
+        signatureLanguage: "typescript",
+        markdown: linkingTypeScriptDocReferences(
+            typeScriptDocComment(above: range, in: document)
+        ),
+        source: .syntactic
+    )
+}
+
+private func typescriptSignature(
+    at range: ByteRange,
+    in document: ReaderDocument
+) -> String? {
+    let bytes = document.bytes
+    let lower = Int(range.lowerBound)
+    let limit = min(
+        bytes.count,
+        Int(range.upperBound),
+        lower + maximumSignatureBytes
+    )
+    guard let header = scanHeader(
+        from: lower,
+        in: bytes,
+        limit: limit,
+        configuration: .typescript
+    ) else { return nil }
+
+    var signature = trimmingHangingTypeScriptOperators(
+        String(decoding: bytes[lower..<header.headerEnd], as: UTF8.self)
+    )
+    guard !signature.isEmpty else { return nil }
+    if let bodyOpen = header.bodyOpen, declaresTypeScriptAggregate(signature) {
+        signature += " " + aggregateBody(from: bodyOpen, in: document)
+    }
+    return dedentContinuationLines(signature, declarationStart: range.lowerBound, in: document)
+}
+
+/// Drops the `=>` of arrow functions and the `=` of type aliases left
+/// hanging when the header ends at their body's `{`.
+private func trimmingHangingTypeScriptOperators(_ header: String) -> String {
+    var trimmed = header.trimmingCharacters(in: .whitespacesAndNewlines)
+    if trimmed.hasSuffix("=>") {
+        trimmed.removeLast(2)
+    } else if trimmed.hasSuffix("="), !trimmed.hasSuffix("==") {
+        trimmed.removeLast()
+    }
+    return trimmed.trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
+private func declaresTypeScriptAggregate(_ header: String) -> Bool {
+    let words = header.split { !$0.isLetter && !$0.isNumber && $0 != "_" }
+    return words.contains {
+        $0 == "class" || $0 == "interface" || $0 == "enum"
+    }
+}
+
+/// JSDoc blocks above the declaration; decorators may sit between the docs
+/// and the declaration. Ordinary `//` comments end the search.
+private func typeScriptDocComment(
+    above range: ByteRange,
+    in document: ReaderDocument
+) -> String {
+    guard let start = document.lineTable.lineColumn(at: range.lowerBound) else {
+        return ""
+    }
+    var index = Int(start.line) - 2
+    var groups: [[String]] = []
+    while index >= 0 {
+        let trimmed = sourceLine(index, in: document)
+            .trimmingCharacters(in: .whitespaces)
+        if trimmed.hasSuffix("*/"),
+           let (block, opening) = docBlock(endingAt: index, in: document)
+        {
+            groups.append(block)
+            index = opening - 1
+        } else if trimmed.hasPrefix("@") {
+            index -= 1
+        } else {
+            break
+        }
+    }
+    let lines = groups.reversed().flatMap { $0 }
+    return normalizedDocLines(lines)
+}
+
+private let jsDocLinkWithLabel = try! NSRegularExpression(
+    pattern: #"\{@link\s+([A-Za-z_$][A-Za-z0-9_$#.]*)\s+([^}\s][^}]*)\}"#
+)
+private let jsDocLinkWithoutLabel = try! NSRegularExpression(
+    pattern: #"\{@link\s+([A-Za-z_$][A-Za-z0-9_$#.]*)\}"#
+)
+
+/// Turns JSDoc `{@link Target}` and `{@link Target label}` into links the
+/// card can resolve; fenced code is left untouched.
+func linkingTypeScriptDocReferences(_ markdown: String) -> String {
+    var inFence = false
+    return markdown.components(separatedBy: "\n").map { line in
+        if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            inFence.toggle()
+            return line
+        }
+        guard !inFence else { return line }
+        let range = NSRange(line.startIndex..., in: line)
+        let labeled = jsDocLinkWithLabel.stringByReplacingMatches(
+            in: line,
+            range: range,
+            withTemplate: "[$2](\(symbolLinkScheme):$1)"
+        )
+        return jsDocLinkWithoutLabel.stringByReplacingMatches(
+            in: labeled,
+            range: NSRange(labeled.startIndex..., in: labeled),
+            withTemplate: "[$1](\(symbolLinkScheme):$1)"
+        )
     }.joined(separator: "\n")
 }
 
