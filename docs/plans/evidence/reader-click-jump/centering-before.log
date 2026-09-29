@@ -1,0 +1,15 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() started.
+2026-09-28 20:33:48.847 swiftpm-testing-helper[38034:30014098] Error received in message reply handler: Connection invalid
+2026-09-28 20:33:48.847 swiftpm-testing-helper[38034:30014103] Connection Invalid error for service com.apple.hiservices-xpcservice.
+✘ Test contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() recorded an issue at MainWindowControllerTests.swift:1585:9: Expectation failed: abs(scroll.contentView.bounds.minY - centeredY) <= 2
+↳ Navigation must center the destination, clamped at the document edges
+↳ abs(scroll.contentView.bounds.minY - centeredY) <= 2 → false
+↳   abs(scroll.contentView.bounds.minY - centeredY) → 26.0
+↳   2 → 2.0
+✘ Test contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() failed after 4.231 seconds with 1 issue.
+✘ Test run with 1 test in 0 suites failed after 4.231 seconds with 1 issue.
+Note: Some test targets reported failures:
+  - CodeInsightAppTests (Swift Testing)

@@ -1,0 +1,10 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() started.
+2026-09-28 20:50:22.033 swiftpm-testing-helper[42581:30040860] Error received in message reply handler: Connection invalid
+2026-09-28 20:50:22.033 swiftpm-testing-helper[42581:30040867] Connection Invalid error for service com.apple.hiservices-xpcservice.
+✔ Test nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() passed after 0.586 seconds.
+◇ Test hiddenOutlineRemovesItsDividerAcrossThemeChanges() started.
+✔ Test hiddenOutlineRemovesItsDividerAcrossThemeChanges() passed after 1.589 seconds.
+✔ Test run with 2 tests in 0 suites passed after 2.176 seconds.

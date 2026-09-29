@@ -2843,7 +2843,11 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             truncated: model.compare.diff?.truncated ?? false,
             errorMessage: model.compare.errorMessage
         )
+        renderTrail()
         if displayedNavigationGeneration != model.navigationGeneration {
+            // Trail and file headers can resize the viewport on first navigation.
+            // Settle them before the reader computes its centered destination.
+            window?.contentView?.layoutSubtreeIfNeeded()
             if let restore = pendingTabRestore,
                let restoreFile = restore.fileURL,
                restoreFile.standardizedFileURL
@@ -2888,7 +2892,6 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         renderCommitButton()
         renderExactStatus()
         renderStatusBar()
-        renderTrail()
         relationController.refreshInspector()
         captureActiveTabState()
         model.scheduleSessionCheckpoint(panelPreset: panelPreset)

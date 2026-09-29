@@ -1,0 +1,8 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test nativeBlankClicksKeepTheReadingPositionAndFoldState() started.
+2026-09-28 20:58:58.714 swiftpm-testing-helper[44138:30051788] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-28 20:58:58.714 swiftpm-testing-helper[44138:30051782] Error received in message reply handler: Connection invalid
+✔ Test nativeBlankClicksKeepTheReadingPositionAndFoldState() passed after 3.360 seconds.
+✔ Test run with 1 test in 0 suites passed after 3.360 seconds.

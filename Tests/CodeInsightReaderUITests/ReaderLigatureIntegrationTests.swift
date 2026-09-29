@@ -411,3 +411,60 @@ private func ligatureWaitForWheelTarget(_ scroll: NSScrollView, expectedY: CGFlo
     }
     #expect(abs(scroll.contentView.bounds.minY - expectedY) <= 1)
 }
+
+@MainActor @Test
+func nativeBlankClicksKeepTheReadingPositionAndFoldState() async throws {
+    let source = (0..<160).map { index in
+        "fn item\(index)() {\n    let value = \(index);\n\n    // "
+            + String(repeating: "wrapped comment ", count: 16) + "\n    value;\n}\n"
+    }.joined()
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    let (reader, window) = ligatureReader(source, settings: settings)
+    defer { window.close() }
+    await reader.waitForIdentifierPreparation()
+    window.makeFirstResponder(reader.view)
+    let scroll = try #require(reader.view.enclosingScrollView)
+    let target = (source as NSString).range(of: "let value = 90;").location
+    reader.reveal(byteOffset: UInt32(target))
+    // Keep the previous caret offscreen, as after manually scrolling away.
+    reader.activate(atByteOffset: 4)
+    settleLigatureLayout(reader)
+    func click(_ point: NSPoint) throws {
+        let point = reader.view.convert(point, to: nil)
+        func event(_ type: NSEvent.EventType) throws -> NSEvent {
+            try #require(NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
+                timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 1, clickCount: 1, pressure: type == .leftMouseUp ? 0 : 1))
+        }
+        NSApp.postEvent(try event(.leftMouseUp), atStart: true)
+        reader.view.mouseDown(with: try event(.leftMouseDown))
+        settleLigatureLayout(reader)
+    }
+    let line = try #require(ReaderViewportGeometry.characterRect(displayLocation: target, in: reader.view))
+    let blankLine = try #require(ReaderViewportGeometry.characterRect(displayLocation: target + "let value = 90;\n".utf16.count, in: reader.view))
+    try #require(reader.view.visibleRect.contains(line))
+    try #require(reader.view.visibleRect.contains(blankLine))
+    for point in [NSPoint(x: reader.view.visibleRect.maxX - 20, y: line.midY),
+                  NSPoint(x: reader.view.visibleRect.maxX - 20, y: blankLine.midY),
+                  NSPoint(x: line.minX - 15, y: line.midY)] {
+        let before = try #require(ReaderViewportGeometry.characterRect(displayLocation: target, in: reader.view)).minY - scroll.contentView.bounds.minY
+        try click(point)
+        let after = try #require(ReaderViewportGeometry.characterRect(displayLocation: target, in: reader.view)).minY - scroll.contentView.bounds.minY
+        #expect(abs(after - before) <= 2, "Blank click at \(point) moved the reading anchor by \(after - before)")
+    }
+    let document = try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
+    let fold = try #require(document.foldRegions.first { $0.kind == .declaration })
+    #expect(reader.toggleFold(id: fold.id))
+    reader.view.scrollRangeToVisible(NSRange(location: 0, length: 0))
+    settleLigatureLayout(reader)
+    let placeholder = (reader.view.string as NSString).range(of: "\u{FFFC}")
+    let chip = try #require(ReaderViewportGeometry.characterRect(displayLocation: placeholder.location, in: reader.view))
+    let folded = reader.renderedFoldIDsForTesting
+    for x in [chip.maxX + 8, chip.maxX + 80, reader.view.visibleRect.maxX - 20] {
+        let point = NSPoint(x: x, y: chip.midY)
+        try #require(reader.view.visibleRect.contains(point))
+        try click(point)
+        #expect(reader.renderedFoldIDsForTesting == folded, "Blank space beside a fold must not expand it")
+    }
+}

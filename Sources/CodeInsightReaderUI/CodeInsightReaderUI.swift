@@ -2778,21 +2778,27 @@ public final class ReaderTextView {
             for: NSRange(location: location, length: 0)
         )
         updateCurrentLine(byteOffset: byteOffset)
-        revealLineRange(lineRange)
+        revealLineRange(lineRange, targetLocation: location)
     }
 
-    private func revealLineRange(_ range: NSRange) {
-        view.scrollRangeToVisible(range)
-        view.showFindIndicator(for: range)
+    private func revealLineRange(_ range: NSRange, targetLocation: Int) {
+        // A declaration can wrap across several rows. Center the requested
+        // source character, rather than only exposing part of its logical line.
+        view.scrollRangeToVisible(NSRange(location: targetLocation, length: 0))
         if let scrollView = view.enclosingScrollView {
+            view.textLayoutManager?.textViewportLayoutController.layoutViewport()
             let clipView = scrollView.contentView
+            let targetY = ReaderViewportGeometry.characterRect(
+                displayLocation: targetLocation, in: view
+            ).map { $0.midY - clipView.bounds.height / 2 } ?? clipView.bounds.minY
             // The ruler reserves a left inset; zero would hide code behind it.
             clipView.scroll(to: NSPoint(
                 x: -clipView.contentInsets.left,
-                y: clipView.bounds.origin.y
+                y: clampVerticalScrollOrigin(targetY, clipView: clipView)
             ))
             scrollView.reflectScrolledClipView(clipView)
         }
+        view.showFindIndicator(for: range)
     }
 
     public func restore(
@@ -2909,11 +2915,12 @@ public final class ReaderTextView {
     }
 
     public func setDiffMarkers(_ markers: [Int: DiffCore.MarkerKind]) {
-        if diffMarkers != markers {
-            diffMarkers = markers
-            refreshFoldedDiffMarkers()
-            refreshFoldExposures()
-        }
+        // Window renders resend markers on selection/Context changes. Retiling
+        // an unchanged gutter can move TextKit's wrapped viewport.
+        guard diffMarkers != markers else { return }
+        diffMarkers = markers
+        refreshFoldedDiffMarkers()
+        refreshFoldExposures()
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -2926,10 +2933,9 @@ public final class ReaderTextView {
             guard entry.key > 0, !entry.value.isEmpty else { return }
             result[entry.key] = entry.value.sorted()
         }
-        if bookmarkMarkers != markers {
-            bookmarkMarkers = markers
-            refreshVisibleBookmarkMarkers()
-        }
+        guard bookmarkMarkers != markers else { return }
+        bookmarkMarkers = markers
+        refreshVisibleBookmarkMarkers()
         if let scrollView = view.enclosingScrollView ?? scrollView {
             configureGutter(in: scrollView, lineNumbers: lineNumbers)
         }
@@ -3144,7 +3150,7 @@ public final class ReaderTextView {
         )
         view.setSelectedRange(range)
         updateCurrentLine(line: line)
-        revealLineRange(range)
+        revealLineRange(range, targetLocation: location)
         return true
     }
 

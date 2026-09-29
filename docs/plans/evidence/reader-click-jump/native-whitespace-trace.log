@@ -1,0 +1,6 @@
+Timestamp               Ty Process[PID:TID]
+2026-09-28 22:38:08.507 Df codeinsight-app[47181:1cbb549] [dev.cairn.reader-debug:blank] [DEBUG-jump] before-hit clip=20033.600000 fragment=20016.100000 selection=41686
+2026-09-28 22:38:08.507 Df codeinsight-app[47181:1cbb549] [dev.cairn.reader-debug:blank] [DEBUG-jump] after-hit clip=20033.600000 fragment=20016.100000 selection=41686
+2026-09-28 22:38:08.510 Df codeinsight-app[47181:1cbb549] [dev.cairn.reader-debug:blank] [DEBUG-jump] after-native clip=20033.600000 fragment=20016.100000 selection=41686
+2026-09-28 22:38:08.519 Df codeinsight-app[47181:1cbb549] [dev.cairn.reader-debug:blank] [DEBUG-jump] after-handler clip=20033.600000 fragment=20016.100000 selection=57026
+2026-09-28 22:38:08.728 Df codeinsight-app[47181:1cbb549] [dev.cairn.reader-debug:blank] [DEBUG-jump] settled clip=20033.600000 fragment=20016.100000 selection=57026

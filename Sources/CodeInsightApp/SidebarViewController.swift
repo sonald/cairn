@@ -691,6 +691,10 @@ final class SidebarViewController: NSViewController,
         return node.url
     }
 
+    func splitView(_ splitView: NSSplitView, shouldHideDividerAt dividerIndex: Int) -> Bool {
+        outlineSurfaceHidden
+    }
+
     func splitView(_ splitView: NSSplitView, canCollapseSubview subview: NSView) -> Bool {
         false
     }

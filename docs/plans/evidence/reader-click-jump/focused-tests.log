@@ -1,0 +1,46 @@
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test bookmarkMarkersAggregateLabelsProjectFoldedLinesAndClearWithDocument() started.
+✔ Test bookmarkMarkersAggregateLabelsProjectFoldedLinesAndClearWithDocument() passed after 0.141 seconds.
+◇ Test bookmarkMarkersDoNotCreateAGutterWhenLineNumbersAreDisabled() started.
+2026-09-28 19:42:15.926 swiftpm-testing-helper[33436:29958104] Connection Invalid error for service com.apple.hiservices-xpcservice.
+2026-09-28 19:42:15.926 swiftpm-testing-helper[33436:29958097] Error received in message reply handler: Connection invalid
+✔ Test bookmarkMarkersDoNotCreateAGutterWhenLineNumbersAreDisabled() passed after 0.104 seconds.
+◇ Test gutterRepaintsItsBackgroundWhenThemeChanges() started.
+✔ Test gutterRepaintsItsBackgroundWhenThemeChanges() passed after 0.001 seconds.
+✔ Test run with 3 tests in 0 suites passed after 0.247 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test diffGutterStoresMarkersAndHunkRevealSelectsTheLine() started.
+✔ Test diffGutterStoresMarkersAndHunkRevealSelectsTheLine() passed after 0.124 seconds.
+◇ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() started.
+2026-09-28 19:42:16.173 swiftpm-testing-helper[33437:29958110] Error received in message reply handler: Connection invalid
+2026-09-28 19:42:16.173 swiftpm-testing-helper[33437:29958113] Connection Invalid error for service com.apple.hiservices-xpcservice.
+✔ Test wrapWidthChangeKeepsAnchorOffsetAfterMergedReflow() passed after 1.977 seconds.
+◇ Test revealResetsHorizontalScrollAfterNavigation() started.
+✔ Test revealResetsHorizontalScrollAfterNavigation() passed after 0.062 seconds.
+◇ Test navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() started.
+✔ Test navigationUnfoldsManualAndBaselineAncestorsWithoutCrossingDirections() passed after 1.241 seconds.
+◇ Test foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() started.
+✔ Test foldedDiffIsExposedByTheChipAndMergedHeaderGutterMarker() passed after 0.028 seconds.
+◇ Test readonlyGutterWarmNativeDrawAndHoverReadPreparedData() started.
+✔ Test readonlyGutterWarmNativeDrawAndHoverReadPreparedData() passed after 0.014 seconds.
+◇ Test readonlyGutterMarkerRevisionsAndProjectionRefreshTheirSummaries() started.
+✔ Test readonlyGutterMarkerRevisionsAndProjectionRefreshTheirSummaries() passed after 0.009 seconds.
+◇ Test readonlyGutterSyntaxUpgradeNewDocumentAndClearInvalidatePreparedData() started.
+✔ Test readonlyGutterSyntaxUpgradeNewDocumentAndClearInvalidatePreparedData() passed after 0.007 seconds.
+◇ Test readonlyGutterStableNativeScrollDoesNotBuildDocumentDecorations() started.
+✔ Test readonlyGutterStableNativeScrollDoesNotBuildDocumentDecorations() passed after 0.074 seconds.
+◇ Test readonlyGutterCacheRollbackPreservesMarkersAndCountsItsWork() started.
+✔ Test readonlyGutterCacheRollbackPreservesMarkersAndCountsItsWork() passed after 0.005 seconds.
+✔ Test run with 10 tests in 0 suites passed after 3.545 seconds.
+◇ Test run started.
+↳ Testing Library Version: 2084
+↳ Target Platform: arm64e-apple-macos14.0
+◇ Test contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() started.
+2026-09-28 19:42:20.193 swiftpm-testing-helper[33497:29958293] Error received in message reply handler: Connection invalid
+2026-09-28 19:42:20.193 swiftpm-testing-helper[33497:29958303] Connection Invalid error for service com.apple.hiservices-xpcservice.
+✔ Test contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() passed after 4.397 seconds.
+✔ Test run with 1 test in 0 suites passed after 4.397 seconds.

@@ -1516,6 +1516,167 @@ func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
 
 @MainActor
 @Test
+func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws {
+    _ = NSApplication.shared
+    let repeatedLine = "    target(); // " + String(repeating: "wrapping description ", count: 12) + "\n"
+    let prefix = "pub fn target() {}\npub fn main() {\n"
+        + String(repeating: repeatedLine, count: 150)
+    let source = prefix + "    target(); // anchor\n    \n"
+        + String(repeating: repeatedLine, count: 250) + "}\n"
+    let target = prefix.utf16.count + 4
+    let empty = prefix.utf16.count + "    target(); // anchor\n".utf16.count + 2
+    let root = try mainWindowTemporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let suite = "ContextViewportTests-\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let model = AppModel(indexService: ProjectIndexService())
+    var settings = ReaderSettings()
+    settings.wrapLines = true
+    let controller = MainWindowController(
+        model: model, settings: settings, offscreen: true,
+        recentProjectsStore: RecentProjectsStore(defaults: defaults),
+        recordsRecentProjects: false
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    try #require(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.openFileForSelfTest(root.appendingPathComponent("main.rs"))
+    try #require(await mainWindowWaitUntil(controller.selfTestLeftReaderBytes == Array(source.utf8)))
+    controller.showWindow(nil)
+    let window = try #require(controller.window)
+    window.setContentSize(NSSize(width: 1200, height: 850))
+    controller.renderForSelfTest()
+    func descendants(_ view: NSView) -> [NSView] {
+        [view] + view.subviews.flatMap(descendants)
+    }
+    let content = try #require(window.contentView)
+    let reader = try #require(descendants(content).compactMap { $0 as? NSTextView }.first {
+        !$0.isFieldEditor && $0.string == source
+    })
+    let scroll = try #require(reader.enclosingScrollView)
+    func settle() async throws {
+        for _ in 0..<12 {
+            try await Task.sleep(for: .milliseconds(20))
+            content.layoutSubtreeIfNeeded()
+            reader.textLayoutManager?.textViewportLayoutController.layoutViewport()
+        }
+    }
+    func sourceRect(_ location: Int) -> NSRect {
+        let screen = reader.firstRect(forCharacterRange: NSRange(location: location, length: 1), actualRange: nil)
+        return reader.convert(window.convertFromScreen(screen), from: nil)
+    }
+    try await settle()
+    await controller.selfTestWaitForIdentifierPreparation()
+    try #require(controller.selfTestContextPaneCollapsed)
+    let firstTarget = "pub fn ".utf16.count
+    let lastTarget = (source as NSString).range(of: "target();", options: .backwards).location
+    for destination in [lastTarget, firstTarget, target, target - repeatedLine.utf16.count, lastTarget, target] {
+        controller.selfTestNavigate(
+            to: root.appendingPathComponent("main.rs"), byteOffset: UInt32(destination)
+        )
+        try await settle()
+        #expect(controller.selfTestPrimarySelectionRange?.length == "target".utf16.count)
+        #expect(scroll.contentView.bounds.contains(sourceRect(destination)),
+                "App navigation must leave destination \(destination) visible after primary selection activation")
+        let centeredY = min(max(-scroll.contentView.contentInsets.top,
+            sourceRect(destination).midY - scroll.contentView.bounds.height / 2),
+            max(0, reader.frame.height - scroll.contentView.bounds.height + scroll.contentView.contentInsets.bottom))
+        #expect(abs(scroll.contentView.bounds.minY - centeredY) <= 2,
+                "Navigation must center destination \(destination), clamped at the document edges")
+    }
+    reader.scrollRangeToVisible(NSRange(location: target, length: 6))
+    try await settle()
+    scroll.contentView.scroll(to: NSPoint(
+        x: scroll.contentView.bounds.minX, y: sourceRect(target).minY - 90
+    ))
+    scroll.reflectScrolledClipView(scroll.contentView)
+    try await settle()
+    let anchorY = sourceRect(target).minY - scroll.contentView.bounds.minY
+    let expandedHeight = scroll.contentView.bounds.height
+    let generation = model.navigationGeneration
+    try #require(scroll.contentView.bounds.contains(sourceRect(target)))
+    // Drive activation, caret/selection callbacks and Context lookup through
+    // the window controller. The target stays above the shrinking edge.
+    window.makeFirstResponder(reader)
+    for hasCandidate in [true, false, true, false] {
+        let clicked = hasCandidate ? target : empty
+        _ = controller.selfTestActivateReading(at: UInt32(clicked))
+        controller.selfTestReaderClick(offset: UInt32(clicked), commandClick: false)
+        try #require(await mainWindowWaitUntil(
+            (model.contextWindow.candidateCount > 0) == hasCandidate
+        ))
+        try await settle()
+        #expect(controller.selfTestContextPaneCollapsed == !hasCandidate)
+        #expect(model.navigationGeneration == generation)
+        if hasCandidate {
+            #expect(scroll.contentView.bounds.height < expandedHeight - 50,
+                    "Opening Context must actually exercise a Reader height change")
+        } else {
+            #expect(abs(scroll.contentView.bounds.height - expandedHeight) <= 2)
+        }
+        let actualY = sourceRect(target).minY - scroll.contentView.bounds.minY
+        #expect(abs(actualY - anchorY) <= 2,
+                "Context candidate=\(hasCandidate), source anchor moved from \(anchorY) to \(actualY), clip=\(scroll.contentView.bounds)")
+        #expect(scroll.contentView.bounds.contains(sourceRect(clicked)),
+                "Changing Context must keep the clicked source character visible")
+    }
+}
+
+@MainActor
+@Test
+func hiddenOutlineRemovesItsDividerAcrossThemeChanges() async throws {
+    _ = NSApplication.shared
+    let sidebar = SidebarViewController()
+    sidebar.setSplitAutosaveName("HiddenOutlineTests-\(UUID().uuidString)")
+    sidebar.loadViewIfNeeded()
+    let window = NSWindow(contentRect: NSRect(x: -10000, y: -10000, width: 260, height: 720),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+    window.isReleasedWhenClosed = false
+    window.contentViewController = sidebar
+    sidebar.view.frame = NSRect(x: 0, y: 0, width: 260, height: 720)
+    window.setContentSize(NSSize(width: 260, height: 720))
+    window.orderBack(nil)
+    defer { window.close() }
+    let split = try #require(sidebar.view.subviews.compactMap { $0 as? NSSplitView }.first)
+    let files = try #require(split.arrangedSubviews.first)
+    let outline = try #require(split.arrangedSubviews.last)
+    func settle() async throws {
+        for _ in 0..<5 {
+            try await Task.sleep(for: .milliseconds(20))
+            sidebar.view.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+        }
+        try #require(split.bounds.height > 300)
+    }
+    for theme in [ReaderSettings.Theme.dark, .siClassic, .dark, .siClassic] {
+        sidebar.apply(settings: ReaderSettings(theme: theme))
+        try await settle()
+        let oldDividerY = files.frame.maxY
+        sidebar.setOutlineHidden(true)
+        try await settle()
+        #expect(outline.isHiddenOrHasHiddenAncestor)
+        #expect(abs(files.frame.height - split.bounds.height) < 0.1,
+                "A hidden outline must leave no divider-sized gap")
+        let bitmap = try #require(split.bitmapImageRepForCachingDisplay(in: split.bounds))
+        split.cacheDisplay(in: split.bounds, to: bitmap)
+        let sampleX = 4
+        let reference = try #require(bitmap.colorAt(x: sampleX, y: bitmap.pixelsHigh - 5))
+        let oldDividerRow = Int(oldDividerY * CGFloat(bitmap.pixelsHigh) / split.bounds.height)
+        for row in [oldDividerRow, bitmap.pixelsHigh - 1] {
+            let pixel = try #require(bitmap.colorAt(x: sampleX, y: row))
+            #expect(pixel == reference, "Old divider and bottom edge must repaint as pane background")
+        }
+        sidebar.setOutlineHidden(false)
+        try await settle()
+        #expect(!outline.isHiddenOrHasHiddenAncestor)
+        #expect(files.frame.height > 100 && outline.frame.height > 100)
+        #expect(abs(outline.frame.minY - files.frame.maxY - split.dividerThickness) < 0.1)
+    }
+}
+
+@MainActor
+@Test
 func languagePreselectionMatchesContentAndStoredPreference() throws {
     var roots: [URL] = []
     defer {
