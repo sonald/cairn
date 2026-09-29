@@ -3589,6 +3589,8 @@ public final class ReaderTextView {
         NSFont.monospacedDigitSystemFont(ofSize: max(10, theme.fontSize - 2), weight: .regular)
     }
 
+    private let lineNumberLabels = LineNumberLabels()
+
     private var declarationColumnWidth: CGFloat {
         lineNumbers ? 7 : 0
     }
@@ -3738,8 +3740,6 @@ public final class ReaderTextView {
         dirtyRect.intersection(ruler.bounds).fill()
         var lines: [Int] = []
         let font = lineNumberFont
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .right
         let bookmarksByLine = lineNumbers ? visibleBookmarksByLine : [:]
         // First-row decoration observables (§7.1): what this pass actually
         // drew and where. Cleared per draw so stale rows never linger.
@@ -3772,13 +3772,9 @@ public final class ReaderTextView {
                     width: max(0, lineNumberColumnWidth - 6),
                     height: labelHeight
                 )
-                ("\(line)" as NSString).draw(
-                    in: labelRect,
-                    withAttributes: [
-                        .font: font,
-                        .foregroundColor: theme.lineNumberColor,
-                        .paragraphStyle: paragraph,
-                    ]
+                lineNumberLabels.draw(
+                    line, font: font, color: theme.lineNumberColor,
+                    rightAlignedIn: labelRect, flipped: ruler.isFlipped
                 )
                 lastRulerLabelDrawRectsForTesting[line] = ruler.convert(
                     labelRect,

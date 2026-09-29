@@ -190,3 +190,62 @@ func readonlyGutterCacheRollbackPreservesMarkersAndCountsItsWork() throws {
     #expect(ReaderWorkCounters.snapshot().decorationBuildCount > before.decorationBuildCount)
     #expect(ReaderWorkCounters.snapshot().drawGlobalRecordVisits > before.drawGlobalRecordVisits)
 }
+
+/// Flipped like the gutter ruler; drawn through the view path, whose text
+/// positioning differs from a bare bitmap context.
+private final class ReadonlyGutterLabelView: NSView {
+    var body: (NSRect) -> Void = { _ in }
+    var top: CGFloat = 0
+    override var isFlipped: Bool { true }
+    override func draw(_ dirtyRect: NSRect) {
+        NSColor.white.setFill()
+        bounds.fill()
+        // Wide enough for every label, as the gutter column always is.
+        body(NSRect(x: 2, y: top, width: 90, height: 30))
+    }
+}
+
+@MainActor
+private func readonlyGutterLabelPixels(
+    in view: ReadonlyGutterLabelView, top: CGFloat, _ draw: @escaping (NSRect) -> Void
+) -> Data {
+    view.top = top
+    view.body = draw
+    let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+    view.cacheDisplay(in: view.bounds, to: rep)
+    return Data(bytes: rep.bitmapData!, count: rep.bytesPerRow * rep.pixelsHigh)
+}
+
+@MainActor @Test
+func readonlyGutterCachedLabelsMatchStringDrawingPixelForPixel() {
+    let labels = LineNumberLabels()
+    let paragraph = NSMutableParagraphStyle()
+    paragraph.alignment = .right
+    let view = ReadonlyGutterLabelView(frame: NSRect(x: 0, y: 0, width: 100, height: 60))
+    let window = NSWindow(
+        contentRect: view.frame, styleMask: .borderless, backing: .buffered, defer: false
+    )
+    window.isReleasedWhenClosed = false
+    window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+    window.contentView = view
+    defer { window.close() }
+    // The gutter font spans 10...22pt; string drawing's baseline rule changes
+    // shape around 16pt, and row tops are fractional while scrolling.
+    for size in [10.0, 11, 15, 16, 22] {
+        let font = NSFont.monospacedDigitSystemFont(ofSize: size, weight: .regular)
+        for line in [7, 42, 1_234] {
+            for step in 0..<10 {
+                let top = 5 + CGFloat(step) / 10
+                let expected = readonlyGutterLabelPixels(in: view, top: top) { rect in
+                    ("\(line)" as NSString).draw(in: rect, withAttributes: [
+                        .font: font, .foregroundColor: NSColor.black, .paragraphStyle: paragraph,
+                    ])
+                }
+                let actual = readonlyGutterLabelPixels(in: view, top: top) { rect in
+                    labels.draw(line, font: font, color: .black, rightAlignedIn: rect, flipped: true)
+                }
+                #expect(actual == expected, "size \(size) line \(line) top \(top)")
+            }
+        }
+    }
+}
