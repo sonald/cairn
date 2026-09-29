@@ -3574,7 +3574,7 @@ public final class ReaderTextView {
     private var lineNumberColumnWidth: CGFloat {
         guard lineNumbers else { return 0 }
         let lineCount = displayedDocument?.lineTable.lineStarts.count ?? 1
-        let fontSize = max(10, theme.fontSize - 2)
+        let fontSize = CGFloat(max(10, theme.fontSize - 2))
         if let cache = lineNumberWidthCache, cache.lineCount == lineCount, cache.fontSize == fontSize {
             return cache.width
         }
