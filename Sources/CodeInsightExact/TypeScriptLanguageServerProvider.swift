@@ -8,6 +8,7 @@ public final class TypeScriptLanguageServerProvider: ExactProvider, @unchecked S
         .implementations,
         .callHierarchy,
         .references,
+        .hover,
     ]
 
     public let language: LanguageID = .typescript
@@ -526,6 +527,11 @@ final class TypeScriptLanguageServerSession: ExactSession, @unchecked Sendable {
         {
             negotiated.insert(.references)
         }
+        if let provider = capabilities["hoverProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.hover)
+        }
         return negotiated.intersection(
             TypeScriptLanguageServerProvider.supportedCapabilities
         )
@@ -623,6 +629,21 @@ final class TypeScriptLanguageServerSession: ExactSession, @unchecked Sendable {
             batch: batch,
             parse: parseLocations
         )
+    }
+
+    func hover(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactHoverQueryResult? {
+        guard negotiatedCapabilities.contains(.hover) else { return nil }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/hover",
+            batch: batch,
+            parse: { ExactHoverQueryResult.completed(exactHoverMarkdown($0)) }
+        ) ?? .cancelled
     }
 
     func prepareCallHierarchy(

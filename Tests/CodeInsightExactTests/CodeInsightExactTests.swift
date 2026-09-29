@@ -17,7 +17,7 @@ func exactReferencesCapabilityUsesTheNextUnusedBit() {
 func pyrightProviderCapabilitiesAreFixedMaximum() {
     #expect(
         PyrightProvider.supportedCapabilities
-            == [.definition, .references, .callHierarchy]
+            == [.definition, .references, .callHierarchy, .hover]
     )
     #expect(!PyrightProvider.supportedCapabilities.contains(.implementations))
 }
@@ -26,7 +26,7 @@ func pyrightProviderCapabilitiesAreFixedMaximum() {
 func typeScriptLanguageServerProviderNegotiatesMaximumIntersectionAndSafeOptions() throws {
     #expect(
         TypeScriptLanguageServerProvider.supportedCapabilities
-            == [.definition, .implementations, .callHierarchy, .references]
+            == [.definition, .implementations, .callHierarchy, .references, .hover]
     )
     let canonicalPath = "/opt/homebrew/lib/node_modules/typescript/bin/tsserver.js"
     let canonicalOptions = TypeScriptLanguageServerProvider.initializationOptions(
@@ -2652,6 +2652,264 @@ func hoverMarkdownFlattensEveryLSPContentShape() {
 }
 
 @Test
+func pyrightRequestsMarkdownHoverWhenNegotiated() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target():\n    \"\"\"Docs.\"\"\"\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let hover: [String: Any] = ["contents": [
+        "kind": "markdown",
+        "value": "```python\ndef target()\n```\n\nDocs.",
+    ]]
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        hoverProvider: true,
+        requestResponder: { method, _ in
+            method == "textDocument/hover" ? .result(hover) : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    #expect(session.negotiatedCapabilities.contains(.hover))
+    let result = try session.hover(
+        file: "main.py",
+        byteOffset: 4,
+        batch: ExactRequestBatch()
+    )
+    #expect(result == .completed("```python\ndef target()\n```\n\nDocs."))
+    #expect(server.requestMethods.contains("textDocument/hover"))
+}
+
+@Test
+func pyrightSkipsHoverWithoutProviderAndReportsEmptyHover() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("def target():\n    pass\n".utf8)
+        .write(to: root.appendingPathComponent("main.py"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.py"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        hoverProvider: nil,
+        requestResponder: { method, _ in
+            method == "textDocument/hover" ? .result(NSNull()) : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    #expect(!session.negotiatedCapabilities.contains(.hover))
+    try #expect(session.hover(
+        file: "main.py",
+        byteOffset: 4,
+        batch: ExactRequestBatch()
+    ) == nil)
+
+    // A server that advertises hover but answers null reports an empty
+    // result, not an unsupported one.
+    try withFakePyrightSession(
+        root: root,
+        snapshot: snapshot,
+        hoverProvider: true,
+        requestResponder: { method, _ in
+            method == "textDocument/hover" ? .result(NSNull()) : .useDefault
+        }
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.hover))
+        try #expect(session.hover(
+            file: "main.py",
+            byteOffset: 4,
+            batch: ExactRequestBatch()
+        ) == .completed(nil))
+    }
+}
+
+private func withFakePyrightSession<T>(
+    root: URL,
+    snapshot: any Snapshot,
+    hoverProvider: Any?,
+    requestResponder: @escaping (String, Int) -> PipeFakeRequestResponse,
+    body: (PyrightSession) throws -> T
+) throws -> T {
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = PyrightFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        implementationProvider: false,
+        hoverProvider: hoverProvider,
+        requestResponder: requestResponder,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try PyrightSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-pyright")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+    return try body(session)
+}
+
+@Test
+func typeScriptLanguageServerRequestsMarkdownHoverWhenNegotiated() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("// 你😀\nexport function target(): void {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let hover: [String: Any] = ["contents": [
+        "kind": "markdown",
+        "value": "```typescript\nexport function target(): void\n```\n\nDocs.",
+    ]]
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        hoverProvider: true,
+        requestResponder: { method, _ in
+            method == "textDocument/hover" ? .result(hover) : .useDefault
+        },
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
+            tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+        ),
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    #expect(session.negotiatedCapabilities.contains(.hover))
+    let result = try session.hover(
+        file: "main.ts",
+        byteOffset: 22,
+        batch: ExactRequestBatch()
+    )
+    #expect(result == .completed(
+        "```typescript\nexport function target(): void\n```\n\nDocs."
+    ))
+    #expect(server.requestMethods.contains("textDocument/hover"))
+}
+
+@Test
+func typeScriptLanguageServerSkipsHoverWithoutProvider() throws {
+    let root = try temporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try Data("export function target(): void {}\n".utf8)
+        .write(to: root.appendingPathComponent("main.ts"))
+    let snapshot = try DirectorySnapshot(root: root, files: ["main.ts"])
+    let clientToServer = Pipe()
+    let serverToClient = Pipe()
+    let done = DispatchSemaphore(value: 0)
+    let server = TypeScriptFakeServer(
+        input: clientToServer.fileHandleForReading,
+        output: serverToClient.fileHandleForWriting,
+        hoverProvider: nil,
+        done: { done.signal() }
+    )
+    server.start()
+    let client = LSPClient(
+        readHandle: serverToClient.fileHandleForReading,
+        writeHandle: clientToServer.fileHandleForWriting
+    )
+    let session = try TypeScriptLanguageServerSession.start(
+        client: client,
+        restartClient: { throw ExactError.unavailable("fake restart unavailable") },
+        projectURL: root,
+        snapshot: snapshot,
+        initializationOptions: TypeScriptLanguageServerProvider.initializationOptions(
+            tsserverPath: URL(fileURLWithPath: "/tmp/tsserver.js")
+        ),
+        requestTimeout: 5,
+        closeGrace: 5,
+        attribution: exactTestAttribution(provider: "fake-typescript")
+    )
+    defer {
+        session.close()
+        _ = done.wait(timeout: .now() + 5)
+    }
+
+    #expect(!session.negotiatedCapabilities.contains(.hover))
+    try #expect(session.hover(
+        file: "main.ts",
+        byteOffset: 22,
+        batch: ExactRequestBatch()
+    ) == nil)
+}
+
+@Test
 func rustAnalyzerNegotiatesReferenceOptionsProvider() throws {
     try withFakeRustAnalyzerSession(
         referencesProvider: [String: Any]()
@@ -4559,6 +4817,7 @@ private final class PyrightFakeServer: @unchecked Sendable {
     private let output: FileHandle
     private let done: () -> Void
     private let implementationProvider: Any?
+    private let hoverProvider: Any?
     private let incoming: Any
     private let outgoing: Any
     private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
@@ -4567,6 +4826,7 @@ private final class PyrightFakeServer: @unchecked Sendable {
     private var _receivedLanguageID: String?
     private var _receivedServerStatusCapability = false
     private var _serverStatusSent = 0
+    private var _requestMethods: [String] = []
     private var _error: Error?
 
     var receivedLanguageID: String? { locked { _receivedLanguageID } }
@@ -4576,12 +4836,14 @@ private final class PyrightFakeServer: @unchecked Sendable {
     var serverStatusSent: Int {
         locked { _serverStatusSent }
     }
+    var requestMethods: [String] { locked { _requestMethods } }
     var error: Error? { locked { _error } }
 
     init(
         input: FileHandle,
         output: FileHandle,
         implementationProvider: Any? = true,
+        hoverProvider: Any? = nil,
         incoming: Any = NSNull(),
         outgoing: Any = NSNull(),
         requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
@@ -4591,6 +4853,7 @@ private final class PyrightFakeServer: @unchecked Sendable {
         self.input = input
         self.output = output
         self.implementationProvider = implementationProvider
+        self.hoverProvider = hoverProvider
         self.incoming = incoming
         self.outgoing = outgoing
         self.requestResponder = requestResponder
@@ -4621,6 +4884,7 @@ private final class PyrightFakeServer: @unchecked Sendable {
     private func handle(_ message: [String: Any]) throws -> Bool {
         if let method = message["method"] as? String {
             if let id = (message["id"] as? NSNumber)?.intValue {
+                locked { _requestMethods.append(method) }
                 switch requestResponder?(method, id) ?? .useDefault {
                 case .result(let result):
                     try write([
@@ -4656,6 +4920,9 @@ private final class PyrightFakeServer: @unchecked Sendable {
                     if let implementationProvider {
                         serverCapabilities["implementationProvider"] =
                             implementationProvider
+                    }
+                    if let hoverProvider {
+                        serverCapabilities["hoverProvider"] = hoverProvider
                     }
                     try write([
                         "jsonrpc": "2.0", "id": id,
@@ -4761,6 +5028,7 @@ private final class TypeScriptFakeServer: @unchecked Sendable {
     private let done: () -> Void
     private let definitionProvider: Bool
     private let referencesProvider: Bool
+    private let hoverProvider: Any?
     private let closeOutputAfterInitialize: Bool
     private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
     private let lock = NSLock()
@@ -4787,6 +5055,7 @@ private final class TypeScriptFakeServer: @unchecked Sendable {
         output: FileHandle,
         definitionProvider: Bool = true,
         referencesProvider: Bool = true,
+        hoverProvider: Any? = nil,
         closeOutputAfterInitialize: Bool = false,
         requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
         done: @escaping () -> Void
@@ -4795,6 +5064,7 @@ private final class TypeScriptFakeServer: @unchecked Sendable {
         self.output = output
         self.definitionProvider = definitionProvider
         self.referencesProvider = referencesProvider
+        self.hoverProvider = hoverProvider
         self.closeOutputAfterInitialize = closeOutputAfterInitialize
         self.requestResponder = requestResponder
         self.done = done
@@ -4849,15 +5119,19 @@ private final class TypeScriptFakeServer: @unchecked Sendable {
                                 "initializationOptions"
                             ]
                     }
+                    var serverCapabilities: [String: Any] = [
+                        "definitionProvider": definitionProvider,
+                        "referencesProvider": referencesProvider,
+                        "implementationProvider": true,
+                        "callHierarchyProvider": true,
+                    ]
+                    if let hoverProvider {
+                        serverCapabilities["hoverProvider"] = hoverProvider
+                    }
                     try write([
                         "jsonrpc": "2.0", "id": id,
                         "result": [
-                            "capabilities": [
-                                "definitionProvider": definitionProvider,
-                                "referencesProvider": referencesProvider,
-                                "implementationProvider": true,
-                                "callHierarchyProvider": true,
-                            ],
+                            "capabilities": serverCapabilities,
                         ],
                     ])
                     if closeOutputAfterInitialize {

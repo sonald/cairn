@@ -7,6 +7,7 @@ public final class PyrightProvider: ExactProvider, @unchecked Sendable {
         .definition,
         .references,
         .callHierarchy,
+        .hover,
     ]
 
     public let language: LanguageID = .python
@@ -423,6 +424,11 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
         {
             negotiated.insert(.references)
         }
+        if let provider = capabilities["hoverProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.hover)
+        }
         return negotiated.intersection(PyrightProvider.supportedCapabilities)
     }
 
@@ -497,6 +503,21 @@ final class PyrightSession: ExactSession, @unchecked Sendable {
             batch: batch,
             parse: parseLocations
         )
+    }
+
+    func hover(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactHoverQueryResult? {
+        guard negotiatedCapabilities.contains(.hover) else { return nil }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/hover",
+            batch: batch,
+            parse: { ExactHoverQueryResult.completed(exactHoverMarkdown($0)) }
+        ) ?? .cancelled
     }
 
     func prepareCallHierarchy(
