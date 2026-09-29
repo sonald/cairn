@@ -11,3 +11,12 @@
 "reader.height.overview" = "概览";
 "reader.height.structure" = "结构";
 "reader.tests" = "⋯ 测试 · %@ · %@";
+
+/* 符号悬浮文档卡片。 */
+"reader.hover.card" = "符号文档";
+"reader.hover.noDocs" = "没有文档注释";
+"reader.hover.note.pending" = "语法级结果 · 精确分析未就绪";
+"reader.hover.note.unavailable" = "精确分析不可用：%@";
+"reader.hover.note.procMacros" = "过程宏已关闭（Safe 模式）：宏生成的内容可能缺失";
+"reader.hover.note.buildScripts" = "构建脚本已关闭（Safe 模式）：生成的代码可能缺失";
+"reader.hover.note.dependencySource" = "依赖源码不在本地缓存（不会联网下载）";

@@ -101,7 +101,9 @@ NSTableView ≤50 行（kind 图标 + 名字匹配段加粗 + 路径:行号）�
 底部固定面板（~180pt 可拖）：header（Follow|Pin、‹2/5› 候选切换 Cmd+Alt+←/→、
 路径:行号、certainty·dispatch 标签）+ mini reader（复用 ReaderUI，regular 档规格）。
 
-- 交互（F2.1）：hover 零查询（M1 连 tooltip 不做，Cmd-hover 仅变光标）；单击更新
+- 交互（F2.1）：hover 停留满 500ms 才查询（2026-09-29 起由符号悬浮文档取代 M1 的
+  "hover 零查询"，见 `2026-09-29-symbol-hover-docs-plan.md`；移走即取消，跟踪路径
+  不做全文档工作、不读文件；Context 仍只随单击更新）；单击更新
   Context；Cmd+单击主区跳转。点击链：characterIndex → ByteUTF16Map → byte offset
   → `ContextWindowModel.tokenClicked(file:offset:)`。
 - 去抖（F2.9）：引擎暴露 `tokenRange(file:offset:)`（包装 Resolver.locatedName 定位段），

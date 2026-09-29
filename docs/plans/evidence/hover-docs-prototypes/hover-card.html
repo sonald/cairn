@@ -1,0 +1,406 @@
+<title>Cairn 悬浮文档原型</title>
+<style>
+/* Layout: review frame (controls + notes) around one mock reader window; the card floats over the code. */
+:root {
+  --page-bg: #F1EFE9;
+  --page-fg: #1D2320;
+  --page-muted: #5E6661;
+  --page-line: #D7D2C6;
+  --page-panel: #FAF9F5;
+  --page-accent: #2B5849;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97;
+    --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97;
+  --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9;
+  color-scheme: dark;
+}
+body { background: var(--page-bg); color: var(--page-fg); font-family: var(--font-ui); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-inline: 20px; padding-block: 28px 48px; display: grid; gap: 20px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; text-wrap: balance; }
+.lede { margin: 4px 0 0; color: var(--page-muted); max-width: 68ch; line-height: 1.55; }
+.controls { display: flex; flex-wrap: wrap; gap: 14px 22px; align-items: center; padding: 12px 14px; background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; }
+.ctl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.ctl > span { color: var(--page-muted); letter-spacing: .02em; }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: 7px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: transparent; color: var(--page-fg); padding: 4px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--page-line); }
+.seg button[aria-pressed="true"] { background: var(--page-accent); color: var(--page-panel); }
+.seg button:focus-visible, .demo button:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 1px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 20px; align-items: start; }
+@media (max-width: 900px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.notes { background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; padding: 14px 16px; font-size: 12.5px; line-height: 1.55; display: grid; gap: 12px; min-width: 0; }
+.notes h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--page-muted); margin: 0; font-weight: 600; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.notes kbd { font-family: var(--font-code); font-size: 11px; border: 1px solid var(--page-line); border-radius: 4px; padding: 0 4px; }
+.demo { display: grid; gap: 6px; }
+.demo button { font: inherit; font-size: 12.5px; text-align: left; border: 1px solid var(--page-line); background: transparent; color: var(--page-fg); border-radius: 7px; padding: 6px 9px; cursor: pointer; }
+.demo button:hover { border-color: var(--page-accent); }
+.demo small { color: var(--page-muted); display: block; font-size: 11.5px; }
+.variant-note { color: var(--page-muted); }
+.variant-note b { color: var(--page-fg); font-weight: 600; }
+
+/* ---------- Mock reader: colors come from ReaderTheme (ReaderSettings.swift) ---------- */
+.win { --r-bg:#FBFAF6; --r-fg:#1B211F; --r-chrome:#F3F1EB; --r-header:#E7E3DA; --r-divider:#D5D1C6; --r-sec:#5C645F; --r-ter:#6E756F; --r-accent:#2B5849; --r-lineno:#7E847F; --r-occ:#ECE3C6; --r-sel:#DCE7E0;
+  --k:#8A3A28; --c:#5F665F; --s:#4D7030; --n:#8A5610; --fn:#111715; --t:#2D5D77; --fc:#24443B; --p:#4B544F; --m:#6A5594; --pr:#38403C;
+  --card-shadow: 0 10px 28px rgba(27,33,31,.16), 0 1px 3px rgba(27,33,31,.12);
+  --card-glass: rgba(251,250,246,.78);
+  border-radius: 10px; overflow: hidden; border: 1px solid var(--r-divider); background: var(--r-bg); color: var(--r-fg); position: relative; min-width: 0; }
+.win.th-dark { --r-bg:#121614; --r-fg:#E7E5DD; --r-chrome:#161A18; --r-header:#1D221F; --r-divider:#2B312D; --r-sec:#9BA29B; --r-ter:#858C85; --r-accent:#8CC6A9; --r-lineno:#6F766F; --r-occ:#2E2F21; --r-sel:#1D3A2F;
+  --k:#E89C80; --c:#99A198; --s:#AACB8C; --n:#E6AE5A; --fn:#F4F2EA; --t:#93C4DE; --fc:#CFE3D8; --p:#B9BDB5; --m:#BCA9E8; --pr:#C7C9C1;
+  --card-shadow: 0 12px 32px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+  --card-glass: rgba(29,34,31,.8); }
+.win.th-si { --r-bg:#FFFFFF; --r-fg:#111111; --r-chrome:#EFEFEA; --r-header:#E0E0DA; --r-divider:#C9C9C1; --r-sec:#555555; --r-ter:#6B6B6B; --r-accent:#1D3A8F; --r-lineno:#8A8A8A; --r-occ:#FFF1C2; --r-sel:#FFF1C2;
+  --k:#00008B; --c:#2E7D32; --s:#8B1A1A; --n:#A0522D; --fn:#000000; --t:#006A6A; --fc:#1A1A1A; --p:#3A3A3A; --m:#7A1F7A; --pr:#2E2E2E;
+  --card-shadow: 0 8px 24px rgba(0,0,0,.14), 0 1px 2px rgba(0,0,0,.14);
+  --card-glass: rgba(255,255,255,.82); }
+.titlebar { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--r-header); border-bottom: 1px solid var(--r-divider); font-size: 12px; color: var(--r-sec); }
+.dots { display: flex; gap: 6px; margin-right: 8px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--r-divider); display: block; }
+.path { background: var(--r-chrome); border-bottom: 1px solid var(--r-divider); height: 24px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; color: var(--r-ter); gap: 6px; }
+.status { height: 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; background: var(--r-chrome); border-top: 1px solid var(--r-divider); font-size: 11.5px; color: var(--r-ter); }
+.status .ex::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--r-accent); margin-right: 6px; vertical-align: 1px; }
+.status .ex.preparing::before { background: var(--n); }
+.code { height: 460px; overflow: auto; font-family: var(--font-code); font-size: 13px; line-height: 1.6; padding: 12px 0; position: relative; }
+.ln { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
+.ln > b { font-weight: 400; color: var(--r-lineno); text-align: right; padding-right: 16px; user-select: none; }
+.ln.flash { background: var(--r-occ); transition: background .6s; }
+.k{color:var(--k)} .c{color:var(--c);font-style:italic} .s{color:var(--s)} .n{color:var(--n)} .fn{color:var(--fn);font-weight:650} .t{color:var(--t)} .fc{color:var(--fc)} .p{color:var(--p)} .m{color:var(--m)} .pr{color:var(--pr)}
+[data-sym] { cursor: text; border-radius: 3px; }
+[data-sym].hot { background: var(--r-occ); }
+.win.opt [data-sym]:hover { text-decoration: underline; text-decoration-color: var(--r-ter); text-underline-offset: 3px; }
+
+/* ---------- The hover card (NSPanel stand-in) ---------- */
+.card { position: absolute; z-index: 5; width: max-content; max-width: min(560px, calc(100% - 24px)); max-height: 400px; display: flex; flex-direction: column;
+  background: var(--r-bg); color: var(--r-fg); border: 1px solid var(--r-divider); border-radius: 9px; box-shadow: var(--card-shadow); font-family: var(--font-ui); overflow: hidden; opacity: 0; transform: translateY(3px); transition: opacity .12s ease, transform .12s ease; }
+.card.show { opacity: 1; transform: none; }
+.card.shell-b { background: var(--card-glass); -webkit-backdrop-filter: blur(22px) saturate(1.4); backdrop-filter: blur(22px) saturate(1.4); }
+.card .scroll { overflow: auto; min-height: 0; }
+.card .loc { font-size: 11px; color: var(--r-ter); padding: 9px 14px 0; font-family: var(--font-code); letter-spacing: .01em; }
+.card .sig { font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; white-space: pre; overflow-x: auto; padding: 6px 14px 9px; }
+.card.sig-a .sig { background: var(--r-chrome); border-block: 1px solid var(--r-divider); margin-top: 7px; padding-top: 8px; }
+.card.sig-a .loc { padding-bottom: 0; }
+.card.sig-b .sig + .body { border-top: 1px solid var(--r-divider); }
+.card .body { padding: 10px 14px 12px; font-size: 12.5px; line-height: 1.55; max-width: 62ch; }
+.card .body > :first-child { margin-top: 0; } .card .body > :last-child { margin-bottom: 0; }
+.card .body p { margin: 0 0 8px; }
+.card .body h4 { font-size: 12px; margin: 12px 0 4px; font-weight: 650; }
+.card .body ul { margin: 0 0 8px; padding-left: 18px; }
+.card .body code { font-family: var(--font-code); font-size: 11.5px; background: var(--r-chrome); border: 1px solid var(--r-divider); border-radius: 4px; padding: 0 3px; }
+.card .body pre { font-family: var(--font-code); font-size: 11.5px; line-height: 1.5; background: var(--r-chrome); border-radius: 6px; padding: 8px 10px; margin: 6px 0 10px; overflow-x: auto; }
+.card .body a { color: var(--r-accent); text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--r-accent) 40%, transparent); text-underline-offset: 2px; cursor: pointer; }
+.card .body a code { color: var(--r-accent); }
+.card .empty { color: var(--r-ter); font-style: italic; }
+.card .foot { border-top: 1px solid var(--r-divider); padding: 5px 14px 6px; font-size: 11px; color: var(--r-sec); display: flex; gap: 6px; align-items: baseline; background: var(--r-chrome); }
+.card.shell-b .foot { background: transparent; }
+.card .foot .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--n); flex: none; transform: translateY(-1px); }
+.card .foot.url { font-family: var(--font-code); color: var(--r-ter); overflow-wrap: anywhere; }
+.card .foot.url .dot { background: var(--r-accent); }
+.card .swap { animation: swap .22s ease; }
+@keyframes swap { from { opacity: .35 } to { opacity: 1 } }
+.toast { position: absolute; left: 50%; bottom: 36px; transform: translateX(-50%); background: var(--r-fg); color: var(--r-bg); font-size: 12px; padding: 6px 12px; border-radius: 7px; opacity: 0; transition: opacity .15s; pointer-events: none; font-family: var(--font-ui); z-index: 9; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+.toast.show { opacity: .92; }
+@media (prefers-reduced-motion: reduce) { .card, .card .swap, .ln.flash { transition: none; animation: none; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>符号悬浮文档 · 可交互原型</h1>
+    <p class="lede">把鼠标停在代码里的标识符上 500ms 会弹出卡片。关键字、字符串和注释不触发。颜色取自应用 <code>ReaderTheme</code> 的真实色值；右侧可以直接跳到四种验收状态。</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="原型设置">
+    <div class="ctl"><span>阅读器主题</span><div class="seg" data-ctl="theme">
+      <button aria-pressed="true" data-v="light">Light</button><button aria-pressed="false" data-v="dark">Dark</button><button aria-pressed="false" data-v="si">SI Classic</button></div></div>
+    <div class="ctl"><span>精确分析</span><div class="seg" data-ctl="exact">
+      <button aria-pressed="true" data-v="ready">就绪</button><button aria-pressed="false" data-v="preparing">准备中</button></div></div>
+    <div class="ctl"><span>H1 签名区</span><div class="seg" data-ctl="sig">
+      <button aria-pressed="true" data-v="a">A 底色条</button><button aria-pressed="false" data-v="b">B 分隔线</button></div></div>
+    <div class="ctl"><span>H2 卡片外壳</span><div class="seg" data-ctl="shell">
+      <button aria-pressed="true" data-v="a">A 实色</button><button aria-pressed="false" data-v="b">B 半透明材质</button></div></div>
+    <div class="ctl"><span>H3 弹出方向</span><div class="seg" data-ctl="place">
+      <button aria-pressed="true" data-v="above">上方优先</button><button aria-pressed="false" data-v="below">下方优先</button></div></div>
+  </div>
+
+  <div class="main">
+    <div class="win th-light" id="win">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div>cairn-git — snapshot.rs</div>
+      <div class="path">cairn-git › src › snapshot.rs</div>
+      <div class="code" id="code" tabindex="0" aria-label="示例 Rust 代码"></div>
+      <div class="status"><span>Rust · UTF-8 · Safe 模式</span><span class="ex" id="exState">rust-analyzer 就绪</span></div>
+      <div class="card" id="card" role="dialog" aria-label="符号文档" hidden></div>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+
+    <aside class="notes">
+      <div>
+        <h2>四种验收状态</h2>
+        <div class="demo" id="demo">
+          <button data-go="Snapshot">项目内符号<small>Snapshot：签名、正文、intra-doc 链接、外链</small></button>
+          <button data-go="HashMap">外部依赖符号<small>HashMap：来自本地 rust-src，长文档在卡片内滚动</small></button>
+          <button data-go="open">降级 → 精确替换<small>open：先显示语法级结果，约 1.2s 后原地替换</small></button>
+          <button data-go="Oid">Safe 模式受限提示<small>Oid：过程宏关闭，结果可能不完整</small></button>
+          <button data-go="channel">依赖源码不在本地<small>mpsc::channel：tokio 没有本地缓存</small></button>
+          <button data-go="walk_tree">没有文档注释<small>walk_tree：只有签名</small></button>
+        </div>
+      </div>
+      <div>
+        <h2>交互</h2>
+        <ul>
+          <li>停留 500ms 弹出；同一个符号内移动不重新计时</li>
+          <li>从符号移向卡片的途中有 250ms 宽容区</li>
+          <li><kbd>⌥</kbd> + 点击立即弹出；<kbd>Esc</kbd> 关闭；滚动代码时关闭</li>
+          <li>卡片内可以滚动、选中复制；鼠标停在外链上时，底栏显示完整 URL</li>
+          <li>切到"准备中"：所有卡片只剩语法级结果</li>
+        </ul>
+      </div>
+      <div>
+        <h2>待你裁决</h2>
+        <p class="variant-note"><b>H1</b> 签名区用底色条还是只用分隔线。<br><b>H2</b> 卡片用实色还是 macOS 半透明材质（NSVisualEffectView）。<br><b>H3</b> 弹在符号上方（VSCode）还是下方；空间不够时都会翻转。</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const S = (sym, text, cls) => `<span class="${cls}" data-sym="${sym}">${text}</span>`;
+  const lines = [
+    `<span class="k">use</span> std::collections::${S('HashMap','HashMap','t')};`,
+    `<span class="k">use</span> tokio::sync::mpsc;`,
+    ``,
+    `<span class="k">use</span> <span class="k">crate</span>::oid::${S('Oid','Oid','t')};`,
+    ``,
+    `<span class="c">/// A read-only view of one repository revision.</span>`,
+    `<span class="c">///</span>`,
+    `<span class="c">/// A snapshot never touches the working tree. Every read goes</span>`,
+    `<span class="c">/// through the object database, so two snapshots of the same</span>`,
+    `<span class="c">/// [\`Oid\`] always return identical bytes.</span>`,
+    `<span class="k">pub struct</span> ${S('Snapshot','Snapshot','t')} {`,
+    `    <span class="pr">root</span>: ${S('Oid','Oid','t')},`,
+    `    <span class="pr">files</span>: ${S('HashMap','HashMap','t')}&lt;<span class="t">PathBuf</span>, <span class="t">ContentId</span>&gt;,`,
+    `}`,
+    ``,
+    `<span class="k">impl</span> ${S('Snapshot','Snapshot','t')} {`,
+    `    <span class="c">/// Opens the snapshot rooted at \`oid\` and indexes its tree.</span>`,
+    `    <span class="c">///</span>`,
+    `    <span class="c">/// # Errors</span>`,
+    `    <span class="c">/// Returns [\`GitError::MissingObject\`] if \`oid\` is absent.</span>`,
+    `    <span class="k">pub fn</span> ${S('open','open','fn')}(<span class="p">repo</span>: &amp;<span class="t">Repository</span>, <span class="p">oid</span>: ${S('Oid','Oid','t')}) -&gt; <span class="t">Result</span>&lt;<span class="k">Self</span>, <span class="t">GitError</span>&gt; {`,
+    `        <span class="k">let mut</span> files = ${S('HashMap','HashMap','t')}::<span class="fc">new</span>();`,
+    `        <span class="k">let</span> (tx, <span class="k">mut</span> rx) = mpsc::${S('channel','channel','fc')}(<span class="n">64</span>);`,
+    `        <span class="p">repo</span>.${S('walk_tree','walk_tree','fc')}(<span class="p">oid</span>, tx)?;`,
+    `        <span class="k">while let</span> <span class="t">Some</span>(entry) = rx.<span class="fc">blocking_recv</span>() {`,
+    `            files.<span class="fc">insert</span>(entry.<span class="pr">path</span>, entry.<span class="pr">content_id</span>);`,
+    `        }`,
+    `        <span class="t">Ok</span>(${S('Snapshot','Snapshot','t')} { <span class="pr">root</span>: <span class="p">oid</span>, files })`,
+    `    }`,
+    `}`,
+    ``,
+    `<span class="c">// Trees larger than this are walked lazily; see \`walk_tree\`.</span>`,
+    `<span class="k">const</span> <span class="t">EAGER_LIMIT</span>: <span class="t">usize</span> = <span class="n">4_096</span>;`,
+    `<span class="k">const</span> <span class="t">LABEL</span>: &amp;<span class="t">str</span> = <span class="s">"snapshot"</span>;`,
+  ];
+  const code = document.getElementById('code');
+  code.innerHTML = lines.map((l, i) => `<div class="ln" data-line="${i + 1}"><b>${i + 1}</b><span>${l || ' '}</span></div>`).join('');
+
+  const rs = src => src
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\b(pub|struct|fn|impl|let|mut|use|where|Self|self|enum|const)\b/g,'<span class="k">$1</span>')
+    .replace(/\b([A-Z][A-Za-z0-9_]*)\b(?![^<]*>)/g,'<span class="t">$1</span>')
+    .replace(/\b(\d+)\b(?![^<]*>)/g,'<span class="n">$1</span>');
+  const ext = url => `<a data-url="${url}">`;
+  const jump = target => `<a data-jump="${target}">`;
+
+  // Each entry: exact result and syntactic (fallback) result. null = layer yields nothing.
+  const DOCS = {
+    Snapshot: {
+      exact: { loc: 'cairn_git::snapshot', sig: 'pub struct Snapshot {\n    root: Oid,\n    files: HashMap<PathBuf, ContentId>,\n}',
+        body: `<p>A read-only view of one repository revision.</p><p>A snapshot never touches the working tree. Every read goes through the object database, so two snapshots of the same ${jump('Oid')}<code>Oid</code></a> always return identical bytes.</p>`,
+        notes: [] },
+      syn: { loc: 'snapshot.rs:11', sig: 'pub struct Snapshot {\n    root: Oid,\n    files: HashMap<PathBuf, ContentId>,\n}',
+        body: `<p>A read-only view of one repository revision.</p><p>A snapshot never touches the working tree. Every read goes through the object database, so two snapshots of the same <a data-jump="Oid"><code>Oid</code></a> always return identical bytes.</p>`,
+        notes: ['语法级结果 · 精确分析未就绪'] },
+    },
+    HashMap: {
+      exact: { loc: 'std::collections::hash::map · rust-src', sig: 'pub struct HashMap<K, V, S = RandomState> {\n    base: base::HashMap<K, V, S>,\n}',
+        body: `<p>A hash map with keys of type <code>K</code> and values of type <code>V</code>. By default it hashes with a randomly seeded function that resists collision attacks; pass your own ${jump('BuildHasher')}<code>BuildHasher</code></a> through <code>S</code> to trade that for speed.</p>
+          <h4>Key requirements</h4>
+          <ul><li>Keys implement <code>Eq</code> and <code>Hash</code>.</li><li>If <code>k1 == k2</code>, then their hashes must be equal.</li><li>Changing a key's hash while it is in the map is a logic error; the behavior is unspecified but never undefined.</li></ul>
+          <h4>Examples</h4>
+          <pre>${rs('let mut ages = HashMap::new();\nages.insert("ada", 36);\nages.insert("alan", 41);\n\nif let Some(age) = ages.get("ada") {\n    println!("{age}");\n}')}</pre>
+          <h4>Capacity</h4>
+          <p>The map grows when it is full. Call <code>with_capacity</code> when you know the final size, or <code>shrink_to_fit</code> after removing many entries. Iteration order is arbitrary and can change between runs.</p>
+          <p>See the ${ext('https://doc.rust-lang.org/std/collections/index.html')}collections overview</a> for choosing between <code>HashMap</code> and <code>BTreeMap</code>.</p>`,
+        notes: [] },
+      syn: { loc: 'std::collections::HashMap', sig: null, body: null, notes: ['外部符号需要精确分析 · 精确分析未就绪'] },
+    },
+    open: {
+      exact: { loc: 'cairn_git::snapshot::Snapshot', sig: 'pub fn open(repo: &Repository, oid: Oid) -> Result<Snapshot, GitError>',
+        body: `<p>Opens the snapshot rooted at <code>oid</code> and indexes its tree.</p><h4>Errors</h4><p>Returns ${jump('GitError::MissingObject')}<code>GitError::MissingObject</code></a> if <code>oid</code> is absent.</p>`,
+        notes: [], delay: 1200 },
+      syn: { loc: 'snapshot.rs:21', sig: 'pub fn open(repo: &Repository, oid: Oid) -> Result<Self, GitError>',
+        body: `<p>Opens the snapshot rooted at <code>oid</code> and indexes its tree.</p><h4>Errors</h4><p>Returns <a data-jump="GitError::MissingObject"><code>GitError::MissingObject</code></a> if <code>oid</code> is absent.</p>`,
+        notes: ['语法级结果 · 精确分析未就绪'] },
+    },
+    Oid: {
+      exact: { loc: 'cairn_git::oid', sig: '#[derive(ObjectId)]\npub struct Oid([u8; 20])',
+        body: `<p>A Git object id. Formatting, parsing and ordering come from <code>#[derive(ObjectId)]</code>.</p>`,
+        notes: ['过程宏已关闭（Safe 模式）：派生出的方法没有出现在结果里'] },
+      syn: { loc: 'oid.rs:7', sig: '#[derive(ObjectId)]\npub struct Oid([u8; 20])',
+        body: `<p>A Git object id. Formatting, parsing and ordering come from <code>#[derive(ObjectId)]</code>.</p>`,
+        notes: ['语法级结果 · 精确分析未就绪'] },
+    },
+    channel: {
+      exact: { loc: 'tokio::sync::mpsc', sig: null, body: null,
+        notes: ['依赖源码不在本地缓存：tokio 1.40（Safe 模式不联网获取）'] },
+      syn: { loc: 'tokio::sync::mpsc::channel', sig: null, body: null, notes: ['外部符号需要精确分析 · 精确分析未就绪'] },
+    },
+    walk_tree: {
+      exact: { loc: 'cairn_git::repo::Repository', sig: 'fn walk_tree(&self, oid: Oid, tx: Sender<TreeEntry>) -> Result<(), GitError>', body: '', notes: [] },
+      syn: { loc: 'repo.rs:88', sig: 'fn walk_tree(&self, oid: Oid, tx: Sender<TreeEntry>) -> Result<(), GitError>', body: '', notes: ['语法级结果 · 精确分析未就绪'] },
+    },
+  };
+
+  const state = { theme: 'light', exact: 'ready', sig: 'a', shell: 'a', place: 'above' };
+  const win = document.getElementById('win');
+  const card = document.getElementById('card');
+  const toast = document.getElementById('toast');
+  const exState = document.getElementById('exState');
+  let dwellTimer = 0, closeTimer = 0, exactTimer = 0, current = null, anchor = null, inCard = false;
+
+  document.querySelectorAll('[data-ctl]').forEach(group => {
+    group.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      state[group.dataset.ctl] = b.dataset.v;
+      apply();
+      if (current && anchor) render(current, anchor, false);
+    });
+  });
+  function apply() {
+    win.className = 'win th-' + state.theme;
+    card.className = card.className.replace(/\b(sig|shell)-[ab]\b/g, '').trim();
+    card.classList.add('card', 'sig-' + state.sig, 'shell-' + state.shell);
+    exState.textContent = state.exact === 'ready' ? 'rust-analyzer 就绪' : 'rust-analyzer 准备中…';
+    exState.classList.toggle('preparing', state.exact !== 'ready');
+  }
+
+  function cardHTML(d) {
+    let h = '<div class="scroll">';
+    if (d.loc) h += `<div class="loc">${d.loc}</div>`;
+    if (d.sig) h += `<div class="sig">${rs(d.sig)}</div>`;
+    if (d.body === '') h += `<div class="body"><p class="empty">没有文档注释</p></div>`;
+    else if (d.body) h += `<div class="body">${d.body}</div>`;
+    h += '</div>';
+    d.notes.forEach(n => { h += `<div class="foot"><span class="dot"></span><span>${n}</span></div>`; });
+    return h;
+  }
+  function position(el) {
+    const w = win.getBoundingClientRect(), r = el.getBoundingClientRect(), c = card.getBoundingClientRect();
+    const gap = 6, topBound = 56, bottomBound = w.height - 24;
+    let left = r.left - w.left - 4;
+    left = Math.max(12, Math.min(left, w.width - c.width - 12));
+    const above = r.top - w.top - c.height - gap, below = r.bottom - w.top + gap;
+    const fitsAbove = above >= topBound, fitsBelow = below + c.height <= bottomBound;
+    let top = state.place === 'above' ? (fitsAbove || !fitsBelow ? above : below) : (fitsBelow || !fitsAbove ? below : above);
+    top = Math.max(topBound, Math.min(top, bottomBound - c.height));
+    card.style.left = left + 'px'; card.style.top = top + 'px';
+  }
+  function render(sym, el, animateSwap) {
+    const entry = DOCS[sym];
+    const exactReady = state.exact === 'ready';
+    const useExact = exactReady && !(entry.exact.delay && !el._exactArrived);
+    const d = useExact ? entry.exact : entry.syn;
+    card.innerHTML = cardHTML(d);
+    if (animateSwap) card.querySelector('.scroll').classList.add('swap');
+    card.hidden = false;
+    position(el);
+    requestAnimationFrame(() => card.classList.add('show'));
+  }
+  function open(sym, el) {
+    clearTimeout(exactTimer);
+    document.querySelectorAll('[data-sym].hot').forEach(x => x.classList.remove('hot'));
+    current = sym; anchor = el; el._exactArrived = false;
+    el.classList.add('hot');
+    render(sym, el, false);
+    const entry = DOCS[sym];
+    if (state.exact === 'ready' && entry.exact.delay) {
+      exactTimer = setTimeout(() => { if (current === sym && anchor === el) { el._exactArrived = true; render(sym, el, true); } }, entry.exact.delay);
+    }
+  }
+  function close() {
+    clearTimeout(dwellTimer); clearTimeout(closeTimer); clearTimeout(exactTimer);
+    card.classList.remove('show'); card.hidden = true; current = null; anchor = null; inCard = false;
+    document.querySelectorAll('[data-sym].hot').forEach(x => x.classList.remove('hot'));
+  }
+  function scheduleClose() { clearTimeout(closeTimer); closeTimer = setTimeout(() => { if (!inCard) close(); }, 250); }
+
+  let dwellEl = null;
+  code.addEventListener('mouseover', e => {
+    const el = e.target.closest('[data-sym]');
+    if (!el) return;
+    clearTimeout(closeTimer);
+    if (anchor === el) return;
+    if (dwellEl && dwellEl.dataset.sym === el.dataset.sym && dwellEl === el) return;
+    dwellEl = el; clearTimeout(dwellTimer);
+    dwellTimer = setTimeout(() => open(el.dataset.sym, el), current ? 250 : 500);
+  });
+  code.addEventListener('mouseout', e => {
+    const el = e.target.closest('[data-sym]'); if (!el) return;
+    if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+    if (dwellEl === el) { clearTimeout(dwellTimer); dwellEl = null; }
+    if (anchor) scheduleClose();
+  });
+  code.addEventListener('click', e => {
+    const el = e.target.closest('[data-sym]');
+    if (el && e.altKey) { e.preventDefault(); clearTimeout(dwellTimer); open(el.dataset.sym, el); }
+  });
+  code.addEventListener('scroll', () => { if (current) close(); }, { passive: true });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && current) close(); if (e.key === 'Alt') win.classList.add('opt'); });
+  document.addEventListener('keyup', e => { if (e.key === 'Alt') win.classList.remove('opt'); });
+  card.addEventListener('mouseenter', () => { inCard = true; clearTimeout(closeTimer); });
+  card.addEventListener('mouseleave', () => { inCard = false; scheduleClose(); });
+
+  let urlFoot = null;
+  card.addEventListener('mouseover', e => {
+    const a = e.target.closest('a[data-url]'); if (!a) return;
+    if (!urlFoot) { urlFoot = document.createElement('div'); urlFoot.className = 'foot url'; urlFoot.innerHTML = '<span class="dot"></span><span></span>'; }
+    urlFoot.lastChild.textContent = a.dataset.url; card.appendChild(urlFoot);
+  });
+  card.addEventListener('mouseout', e => { const a = e.target.closest('a[data-url]'); if (a && urlFoot) urlFoot.remove(); });
+  card.addEventListener('click', e => {
+    const a = e.target.closest('a'); if (!a) return;
+    if (a.dataset.url) flashToast('在默认浏览器打开 ' + a.dataset.url);
+    else if (a.dataset.jump) {
+      const target = a.dataset.jump;
+      const line = target === 'Oid' ? 4 : null;
+      close();
+      if (line) { const ln = code.querySelector(`[data-line="${line}"]`); ln.classList.add('flash'); setTimeout(() => ln.classList.remove('flash'), 900); flashToast('跳转到 oid.rs:7（原型里高亮 import 行代替）'); }
+      else flashToast('跳转到 ' + target + ' 的定义');
+    }
+  });
+  let toastTimer = 0;
+  function flashToast(msg) { toast.textContent = msg; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 1800); }
+
+  document.getElementById('demo').addEventListener('click', e => {
+    const b = e.target.closest('button[data-go]'); if (!b) return;
+    const sym = b.dataset.go;
+    if (sym === 'open' && state.exact !== 'ready') { document.querySelector('[data-ctl="exact"] [data-v="ready"]').click(); }
+    const el = code.querySelector(`[data-sym="${sym}"]`);
+    const rect = el.getBoundingClientRect(), cr = code.getBoundingClientRect();
+    if (rect.top < cr.top || rect.bottom > cr.bottom) { code.scrollTop += rect.top - cr.top - 120; }
+    setTimeout(() => open(sym, el), 30);
+  });
+
+  apply();
+})();
+</script>

@@ -503,6 +503,7 @@ public final class LSPClient: @unchecked Sendable {
                 "textDocument": [
                     "callHierarchy": [String: Any](),
                     "definition": ["linkSupport": true],
+                    "hover": ["contentFormat": ["markdown", "plaintext"]],
                     "implementation": ["linkSupport": true],
                     "references": [String: Any](),
                 ],

@@ -34,7 +34,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     #expect(initialSliders.count == 1)
     #expect(initialSliders.first?.accessibilityLabel?() == CodeInsightApp.localized("settings.lineHeight"))
     // Serif comments sit beside wrap and line numbers, outside Advanced.
-    #expect(controller.selfTestReaderToggleCount == 3)
+    #expect(controller.selfTestReaderToggleCount == 4)
     // The declaration hierarchy is a primary control, not an advanced one.
     let steppers = controller.selfTestReaderAccessibilityElements.filter {
         $0.accessibilityRole?() == .incrementor
@@ -76,7 +76,7 @@ func readerVisualSettingControlsAreVisibleAndDoNotOverlap() throws {
     #expect(updatedSettings.functionDeclarationFontWeight > ReaderSettings().functionDeclarationFontWeight)
     #expect(updatedSettings.declarationEmphasisFontWeight > ReaderSettings().declarationEmphasisFontWeight)
 
-    #expect(controller.selfTestReaderToggleCount == 4)
+    #expect(controller.selfTestReaderToggleCount == 5)
 }
 
 @MainActor
@@ -112,7 +112,7 @@ func existingSettingsWindowAcceptsFreshSettingsWithoutObservableState() async th
     try await Task.sleep(for: .milliseconds(200))
 
     #expect(controller.currentSettings == changed)
-    #expect(controller.selfTestReaderToggleCount == 3)
+    #expect(controller.selfTestReaderToggleCount == 4)
     let originalText = preview.string
     #expect(originalText.contains("fn greet(name: &str"))
     #expect(preview.textStorage?.attribute(.font, at: 0, effectiveRange: nil)

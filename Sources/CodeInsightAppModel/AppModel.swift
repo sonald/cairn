@@ -528,6 +528,7 @@ public final class AppModel {
     public let readingTrail = ReadingTrail()
     public let resolutionExplanations = ResolutionExplanationStore()
     public let tabStrip = TabStripModel()
+    public let symbolHover = SymbolHoverModel()
     package var bookmarkModel = BookmarkModel()
 
     public var canTrustCurrentRepository: Bool {
@@ -634,6 +635,38 @@ public final class AppModel {
             self?.markStaleIndexContent()
         }
         relationTree.attachExactCoordinator(exactCoordinator)
+        symbolHover.attach(
+            syntactic: { [weak contextWindow] token in
+                await contextWindow?.hoverFallback(
+                    file: token.file,
+                    offset: token.lowerBound,
+                    contentID: token.contentID,
+                    document: token.document
+                )
+            },
+            exact: { [weak contextWindow] token, batch in
+                await contextWindow?.exactHover(
+                    file: token.file,
+                    offset: token.lowerBound,
+                    contentID: token.contentID,
+                    batch: batch
+                )
+            },
+            dependencyProbe: { [weak self] token in
+                guard let root = self?.projectRoot,
+                      let document = token.document,
+                      let pathRoot = rustPathRoot(endingAt: token.range, in: document)
+                else { return false }
+                let file = root.appendingPathComponent(token.file)
+                return await Task.detached(priority: .userInitiated) {
+                    DependencySourceProbe.standard().isMissingSource(
+                        pathRoot: pathRoot,
+                        file: file,
+                        projectRoot: root
+                    )
+                }.value
+            }
+        )
         relationTree.onContextsReset = { [weak self] in
             self?.contextWindow.cancelExactUpgrade()
             self?.retainTrailExplanations()

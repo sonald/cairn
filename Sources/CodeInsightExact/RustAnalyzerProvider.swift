@@ -5,7 +5,7 @@ import Foundation
 public final class RustAnalyzerProvider: ExactProvider, @unchecked Sendable {
     public let language: LanguageID = .rust
     public let capabilities: ExactCapabilities = [
-        .definition, .implementations, .callHierarchy, .references,
+        .definition, .implementations, .callHierarchy, .references, .hover,
     ]
     public let toolVersion: String
 
@@ -430,6 +430,11 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         {
             negotiated.insert(.references)
         }
+        if let provider = capabilities["hoverProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.hover)
+        }
         return negotiated
     }
 
@@ -525,6 +530,21 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             batch: batch,
             parse: parseLocations
         )
+    }
+
+    func hover(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactHoverQueryResult? {
+        guard negotiatedCapabilities.contains(.hover) else { return nil }
+        return try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/hover",
+            batch: batch,
+            parse: { ExactHoverQueryResult.completed(exactHoverMarkdown($0)) }
+        ) ?? .cancelled
     }
 
     private func requestLocations<Result>(

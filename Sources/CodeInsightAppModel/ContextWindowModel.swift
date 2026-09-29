@@ -142,6 +142,12 @@ public final class ContextWindowModel {
     private let resolver: Resolver
     private let loader: Loader
     private var exactResolver: ExactResolver?
+    private var hoverResolver: (@MainActor (
+        String,
+        UInt32,
+        UInt64,
+        ExactRequestBatch
+    ) async -> ExactCoordinator.HoverResult?)?
     private var projectState: ProjectState = .empty
     private var root: URL?
     private var contentSource: DocumentLoader.ContentSource?
@@ -191,6 +197,105 @@ public final class ContextWindowModel {
         cancelExactBatch = { [weak coordinator] batch in
             coordinator?.cancel(batch: batch)
         }
+        hoverResolver = { [weak coordinator] file, offset, generation, batch in
+            await coordinator?.hover(
+                file: file,
+                byteOffset: offset,
+                generation: generation,
+                batch: batch
+            )
+        }
+    }
+
+    /// Syntactic fallback for the hover card. A declaration name is read
+    /// straight from the displayed document; any other identifier resolves
+    /// like a click, without touching the panel's stage, and only when the
+    /// displayed bytes are the indexed ones.
+    package func hoverFallback(
+        file: String,
+        offset: UInt32,
+        contentID: ContentID,
+        document: ReaderDocument?
+    ) async -> SymbolDoc? {
+        // `impl Oid`'s name is a reference to `Oid`, not a declaration.
+        if let document,
+           let facet = document.outlineFacets.first(where: {
+               $0.kind != .impl && $0.nameRange.contains(offset)
+           })
+        {
+            let line = document.lineTable.lineColumn(at: facet.nameRange.lowerBound)?.line
+            return syntacticSymbolDoc(
+                forDeclarationAt: facet.range,
+                in: document,
+                location: line.map { "\(file):\($0)" } ?? file
+            )
+        }
+        guard case let .ready(session, context) = projectState,
+              let pathID = pathID(file, in: session),
+              self.contentID(at: pathID, in: session) == contentID,
+              let resolved = try? await resolver(session, pathID, offset, context),
+              sessionIsCurrent(session, context)
+        else { return nil }
+        for resolution in resolved
+            where resolution.target.localKind == .declarationFacet
+                && resolution.certainty != .unresolved
+        {
+            guard let (key, index) = session.content(at: resolution.target.pathID),
+                  index.symbols.indices.contains(Int(resolution.target.localIndex)),
+                  let targetContentID = self.contentID(at: resolution.target.pathID, in: session)
+            else { continue }
+            let facet = index.symbols[Int(resolution.target.localIndex)]
+            let path = session.paths.resolve(resolution.target.pathID)
+            guard let targetDocument = await self.document(
+                path: path,
+                contentID: targetContentID,
+                languageMode: key.languageMode
+            ) else { continue }
+            let location = index.lineTable.lineColumn(at: facet.nameRange.lowerBound)
+                .map { "\(path):\($0.line)" } ?? path
+            return syntacticSymbolDoc(
+                forDeclarationAt: facet.range,
+                in: targetDocument,
+                location: location
+            )
+        }
+        return nil
+    }
+
+    /// The project definition an intra-doc link names, preferring an exact
+    /// name match; used by links in the hover card.
+    package func definition(named name: String) -> (path: String, byteOffset: UInt32)? {
+        guard case let .ready(session, context) = projectState,
+              let hits = try? session.searchSymbols(
+                  query: name,
+                  limit: 50,
+                  boost: SearchBoost(),
+                  context: context
+              ),
+              let hit = hits.first(where: { session.names.resolve($0.nameID) == name })
+        else { return nil }
+        return (hit.path, hit.facet.nameRange.lowerBound)
+    }
+
+    /// Exact hover for the card, against the generation the panel queries.
+    /// Content the index never saw (another revision) is refused.
+    package func exactHover(
+        file: String,
+        offset: UInt32,
+        contentID: ContentID,
+        batch: ExactRequestBatch
+    ) async -> ExactCoordinator.HoverResult? {
+        guard let hoverResolver,
+              case let .ready(session, context) = projectState
+        else { return nil }
+        if let pathID = pathID(file, in: session) {
+            guard self.contentID(at: pathID, in: session) == contentID else {
+                return .unavailable(localized("model.hover.revisionNotIndexed"))
+            }
+        } else if !exactLocationIsInDependency(file) {
+            return .unavailable(localized("model.hover.revisionNotIndexed"))
+        }
+        return await hoverResolver(file, offset, context.generation, batch)
     }
 
     public var selectedCandidate: Candidate? {

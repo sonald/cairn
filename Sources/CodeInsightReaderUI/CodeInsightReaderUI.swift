@@ -429,6 +429,12 @@ extension ReadingHeightLevel {
     }
 }
 
+/// An identifier under the pointer and where it sits on screen.
+public struct ReaderHoverTarget: Equatable {
+    public let byteRange: ByteRange
+    public let screenRect: NSRect
+}
+
 @MainActor
 public final class ReaderTextView {
     private struct FoldScopeKey: Hashable {
@@ -453,6 +459,13 @@ public final class ReaderTextView {
     public let renderingCoordinator = RenderingAttributesCoordinator()
     public var onClick: ((Int, NSEvent.ModifierFlags) -> Void)?
     public var onContextMenu: ((Int) -> Void)?
+    /// The identifier under the pointer, or `nil` over anything else.
+    public var onHover: ((ReaderHoverTarget?) -> Void)?
+    /// Scrolling or Escape: the hover card must close.
+    public var onHoverDismiss: (() -> Void)?
+    /// Escape goes to an open hover card first; returns whether it closed one.
+    public var onHoverEscape: (() -> Bool)?
+    private var lastHoverTarget: ReaderHoverTarget?
     public var onViewportChange: (() -> Void)?
     package var onCaretChange: ((UInt32) -> Void)?
     private let backingTextStorage: NSTextStorage
@@ -656,8 +669,12 @@ public final class ReaderTextView {
                 }
             }
         }
+        textView.hoverHandler = { [weak self] point in
+            self?.handleHover(at: point)
+        }
         textView.escapeHandler = { [weak self] in
             guard let self else { return false }
+            if onHoverEscape?() == true { return true }
             if isFocusMode { return exitFocusMode() }
             guard occurrenceCount > 0 || pendingOccurrenceActivation != nil else { return false }
             clearOccurrences()
@@ -677,6 +694,8 @@ public final class ReaderTextView {
             self.processPendingViewportCorrection()
         }
         textView.userScrollHandler = { [weak self] in
+            self?.lastHoverTarget = nil
+            self?.onHoverDismiss?()
             guard let self, !self.readerWorkStopped else { return }
             self.invalidateReflowSequence()
             self.focusState?.followsExplicitNavigation = false
@@ -3215,6 +3234,71 @@ public final class ReaderTextView {
         ) as? NSFont
     }
 
+    private func handleHover(at point: NSPoint?) {
+        guard let onHover else { return }
+        guard let point, let target = hoverTarget(atViewPoint: point) else {
+            lastHoverTarget = nil
+            onHover(nil)
+            return
+        }
+        onHover(target)
+    }
+
+    private func hoverTarget(atViewPoint point: NSPoint) -> ReaderHoverTarget? {
+        guard !isCommittingProjection, let document = displayedDocument,
+              let window = view.window
+        else { return nil }
+        let screenPoint = window.convertPoint(toScreen: view.convert(point, to: nil))
+        let index = view.characterIndex(for: screenPoint)
+        guard index != NSNotFound, index < backingTextStorage.length else { return nil }
+        if let lastHoverTarget, lastHoverTarget.screenRect.contains(screenPoint),
+           let offset = sourceByteOffset(forDisplay: index),
+           lastHoverTarget.byteRange.contains(offset)
+        {
+            return lastHoverTarget
+        }
+        // `characterIndex(for:)` snaps to the nearest glyph; only a pointer
+        // actually over that glyph counts.
+        let glyph = view.firstRect(forCharacterRange: NSRange(location: index, length: 1), actualRange: nil)
+        guard glyph.insetBy(dx: -0.5, dy: -1).contains(screenPoint),
+              let offset = sourceByteOffset(forDisplay: index),
+              let range = hoverIdentifierRange(at: offset, in: document)
+        else { return nil }
+        let target = hoverTarget(for: range)
+        lastHoverTarget = target
+        return target
+    }
+
+    /// The hover target for the identifier at or just before `byteOffset`,
+    /// for keyboard and ⌥-click requests.
+    public func hoverTarget(atByteOffset byteOffset: UInt32) -> ReaderHoverTarget? {
+        guard !isCommittingProjection, let document = displayedDocument else { return nil }
+        let range = hoverIdentifierRange(at: byteOffset, in: document)
+            ?? (byteOffset > 0 ? hoverIdentifierRange(at: byteOffset - 1, in: document) : nil)
+        return range.flatMap(hoverTarget(for:))
+    }
+
+    /// The hover target at the caret or the start of the selection.
+    public func hoverTargetAtSelection() -> ReaderHoverTarget? {
+        guard let offset = sourceByteOffset(forDisplay: view.selectedRange().location) else {
+            return nil
+        }
+        return hoverTarget(atByteOffset: offset)
+    }
+
+    private func hoverTarget(for range: ByteRange) -> ReaderHoverTarget? {
+        guard let lower = visibleDisplayOffset(forByte: range.lowerBound),
+              let upper = visibleDisplayOffset(forByte: range.upperBound),
+              upper > lower
+        else { return nil }
+        let rect = view.firstRect(
+            forCharacterRange: NSRange(location: lower, length: upper - lower),
+            actualRange: nil
+        )
+        guard !rect.isEmpty else { return nil }
+        return ReaderHoverTarget(byteRange: range, screenRect: rect)
+    }
+
     public func byteOffset(forCharacterIndex index: Int) -> UInt32? {
         guard !isCommittingProjection else { return nil }
         return sourceByteOffset(forDisplay: index)
@@ -4889,7 +4973,33 @@ private final class ClickTextView: NSTextView, NSTextViewDelegate {
     /// after-the-fact (see the S0 resize-timing probe).
     var widthWillChange: ((CGFloat) -> Void)?
     var widthDidChange: ((CGFloat) -> Void)?
+    /// Pointer location in view coordinates, or `nil` when it left the text.
+    var hoverHandler: ((NSPoint?) -> Void)?
+    private var hoverTrackingArea: NSTrackingArea?
     private var viewportBounds: NSRect?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTrackingArea { removeTrackingArea(hoverTrackingArea) }
+        let area = NSTrackingArea(
+            rect: .zero,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        hoverHandler?(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        if event.trackingArea === hoverTrackingArea { hoverHandler?(nil) }
+    }
     fileprivate var viewportNeedsValidationAfterLayout = false
 
     override func setFrameSize(_ newSize: NSSize) {

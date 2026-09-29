@@ -15,7 +15,7 @@ struct CodeInsight: AsyncParsableCommand {
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
             Search.self, Symsearch.self, SnapshotCommand.self, SwitchStats.self,
-            Goldset.self, ExactDef.self,
+            Goldset.self, ExactDef.self, ExactHover.self,
         ]
     )
 }
@@ -128,6 +128,49 @@ extension CodeInsight {
                     + "generatedAt=\(ISO8601DateFormatter().string(from: attribution.generatedAt)) "
                     + "limitations=\(limitations.isEmpty ? "none" : limitations)"
             )
+        }
+    }
+
+    struct ExactHover: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "exact-hover",
+            abstract: "Print rust-analyzer hover Markdown for a position."
+        )
+
+        @Option(name: .long, help: "Git worktree root.")
+        var project: String
+
+        @Option(name: .long, help: "Project-relative Rust file.")
+        var file: String
+
+        @Option(name: .long, help: "One-based source line.")
+        var line: Int
+
+        @Option(name: .long, help: "One-based UTF-8 byte column.")
+        var column: Int
+
+        func run() throws {
+            guard let executableURL = RustAnalyzerProvider.findExecutable()
+            else { throw ValidationError("rust-analyzer not found") }
+            let root = URL(fileURLWithPath: project, isDirectory: true).standardizedFileURL
+            let snapshot = try WorktreeSnapshot(repositoryURL: root)
+            let bytes = try snapshot.readBytes(path: file)
+            guard let line = UInt32(exactly: line),
+                  let column = UInt32(exactly: column),
+                  let byteOffset = LineTable(bytes: bytes).byteOffset(line: line, column: column)
+            else { throw ValidationError("Position is outside \(file).") }
+            let session = try RustAnalyzerProvider(projectURL: root, executableURL: executableURL)
+                .prepare(snapshot: snapshot, profile: ExactProfileKey(projectURL: root), trustMode: .safe)
+            defer { session.close() }
+            switch try session.hover(file: file, byteOffset: Int(byteOffset), batch: ExactRequestBatch()) {
+            case nil: print("hover unsupported")
+            case .cancelled: print("hover cancelled")
+            case .completed(nil): print("hover empty")
+            case .completed(let markdown?): print(markdown)
+            }
+            let limitations = session.attribution.environment.limitations
+                .map(\.rawValue).sorted().joined(separator: ",")
+            print("limitations=\(limitations.isEmpty ? "none" : limitations)")
         }
     }
 

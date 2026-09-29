@@ -14,6 +14,7 @@ public struct ExactCapabilities: OptionSet, Sendable {
     public static let implementations = ExactCapabilities(rawValue: 1 << 1)
     public static let callHierarchy = ExactCapabilities(rawValue: 1 << 2)
     public static let references = ExactCapabilities(rawValue: 1 << 3)
+    public static let hover = ExactCapabilities(rawValue: 1 << 4)
 }
 
 public enum ExactReadiness: Equatable, Sendable {
@@ -49,6 +50,12 @@ public enum ExactDefinitionQueryResult: Sendable {
     case completed([ExactTarget])
     case cancelled
     case unavailable(String)
+}
+
+public enum ExactHoverQueryResult: Equatable, Sendable {
+    /// Markdown hover contents, or `nil` when the server has nothing to show.
+    case completed(String?)
+    case cancelled
 }
 
 public enum ExactAnalysisLimitation: String, Hashable, Sendable {
@@ -474,6 +481,12 @@ public protocol ExactSession: AnyObject, Sendable {
         item: ExactCallHierarchyItem,
         batch: ExactRequestBatch
     ) throws -> [ExactCallRelation]?
+    /// `nil` when the session does not support hover.
+    func hover(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactHoverQueryResult?
     func cancel(batch: ExactRequestBatch)
     func cancel()
     func close()
@@ -543,6 +556,14 @@ public extension ExactSession {
         batch: ExactRequestBatch
     ) throws -> [ExactCallRelation]? {
         try inBatch(batch) { try outgoingCalls(item: item) }
+    }
+
+    func hover(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactHoverQueryResult? {
+        nil
     }
 
     func cancel(batch: ExactRequestBatch) {
@@ -671,4 +692,32 @@ struct LSPPositionMap {
         default: preconditionFailure("validated UTF-8 contains an invalid lead byte")
         }
     }
+}
+
+/// Flattens an LSP `Hover` result (`MarkupContent`, `MarkedString` or an array
+/// of `MarkedString`) into Markdown. Returns `nil` for an empty hover.
+public func exactHoverMarkdown(_ value: Any) -> String? {
+    guard let hover = value as? [String: Any],
+          let contents = hover["contents"]
+    else { return nil }
+    func marked(_ item: Any) -> String? {
+        if let text = item as? String { return text }
+        guard let object = item as? [String: Any],
+              let value = object["value"] as? String
+        else { return nil }
+        if let language = object["language"] as? String {
+            return "```\(language)\n\(value)\n```"
+        }
+        return value
+    }
+    let markdown: String?
+    if let items = contents as? [Any] {
+        markdown = items.compactMap(marked).joined(separator: "\n\n")
+    } else {
+        markdown = marked(contents)
+    }
+    guard let markdown,
+          !markdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { return nil }
+    return markdown
 }

@@ -11479,6 +11479,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.showResolutionInspector()
     }
 
+    @objc private func showSymbolDocumentation(_ sender: Any?) {
+        projectCommandTarget()?.showSymbolDocumentationAtSelection()
+    }
+
     @objc private func showReadingTrail(_ sender: Any?) {
         projectCommandTarget()?.showReadingTrail()
     }
@@ -11595,6 +11599,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             return target?.canShowRelationsFromReaderSurface == true
         case #selector(showResolutionInspector(_:)):
             return target?.canShowResolutionInspector == true
+        case #selector(showSymbolDocumentation(_:)):
+            return target?.canShowSymbolDocumentation == true
         case #selector(showReadingTrail(_:)):
             return target?.canShowReadingTrail == true
         case #selector(toggleFold(_:)):
@@ -12137,6 +12143,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         implementationsItem.target = self
         relationsMenu.addItem(implementationsItem)
         relationsMenu.addItem(.separator())
+        let symbolDocItem = NSMenuItem(
+            title: localized("app.menu.show.symbol.documentation"),
+            action: #selector(showSymbolDocumentation(_:)),
+            keyEquivalent: " "
+        )
+        symbolDocItem.keyEquivalentModifierMask = [.control, .shift]
+        symbolDocItem.target = self
+        relationsMenu.addItem(symbolDocItem)
         let inspectorItem = NSMenuItem(
             title: localized("app.menu.show.resolution.inspector"),
             action: #selector(showResolutionInspector(_:)),

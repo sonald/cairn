@@ -1,0 +1,300 @@
+import CodeInsightCore
+import CodeInsightExact
+import CodeInsightReaderCore
+import Testing
+@testable import CodeInsightAppModel
+
+@MainActor
+@Test
+func hoverDwellShowsSyntacticDocThenExactReplacesItInPlace() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    await settle()
+    #expect(harness.model.phase == .dwelling(tokenA))
+    #expect(harness.syntacticCalls.isEmpty)
+    #expect(harness.clock.pending == [SymbolHoverModel.dwell])
+
+    await harness.clock.advance()
+    guard case let .showing(token, fallback) = harness.model.phase else {
+        Issue.record("expected fallback card, got \(harness.model.phase)")
+        return
+    }
+    #expect(token == tokenA)
+    #expect(fallback.source == .syntactic)
+    #expect(fallback.notes == [.exactPending])
+
+    await harness.releaseExact(.completed(
+        "```rust\ncairn_git::snapshot\n```\n\n```rust\npub fn open()\n```\n\n---\n\nOpens it.",
+        limitations: [.procMacrosDisabled]
+    ))
+    #expect(harness.model.phase == .showing(tokenA, SymbolDoc(
+        location: "cairn_git::snapshot",
+        signature: "pub fn open()",
+        signatureLanguage: "rust",
+        markdown: "Opens it.",
+        source: .exact
+    )))
+}
+
+@MainActor
+@Test
+func hoverMovesInsideOneTokenWithoutRestartingAndCancelsWhenLeavingEarly() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    harness.model.pointerMoved(over: tokenA)
+    await settle()
+    #expect(harness.clock.pending.count == 1)
+
+    harness.model.pointerMoved(over: nil)
+    await harness.clock.advance()
+    #expect(harness.model.phase == .idle)
+    #expect(harness.syntacticCalls.isEmpty)
+    #expect(harness.exactCalls.isEmpty)
+}
+
+@MainActor
+@Test
+func hoverSwitchingTokensCancelsTheInFlightExactRequest() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    await harness.clock.advance()
+    let firstBatch = try? #require(harness.exactCalls.first?.1)
+    #expect(firstBatch?.isCurrent == true)
+
+    harness.model.pointerMoved(over: tokenB)
+    await settle()
+    #expect(harness.clock.pending.sorted() == [SymbolHoverModel.grace, SymbolHoverModel.switchDwell])
+    await harness.clock.advance()
+    #expect(firstBatch?.isCurrent == false)
+    #expect(harness.model.shownToken == tokenB)
+}
+
+@MainActor
+@Test
+func hoverGracePeriodKeepsTheCardWhilePointerTravelsIntoIt() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    await harness.clock.advance()
+    await harness.releaseExact(.completed("Docs.", limitations: []))
+
+    harness.model.pointerExitedText()
+    harness.model.pointerEnteredCard()
+    await harness.clock.advance()
+    #expect(harness.model.shownToken == tokenA)
+
+    harness.model.pointerExitedCard()
+    await harness.clock.advance()
+    #expect(harness.model.phase == .idle)
+}
+
+@MainActor
+@Test
+func hoverDismissesOnEscapeAndServesRepeatsFromCache() async {
+    let harness = HoverHarness()
+    harness.model.pointerMoved(over: tokenA)
+    await harness.clock.advance()
+    await harness.releaseExact(.completed("Docs.", limitations: []))
+    harness.model.dismiss()
+    #expect(harness.model.phase == .idle)
+
+    harness.model.pointerMoved(over: tokenA)
+    await harness.clock.advance()
+    #expect(harness.model.shownToken == tokenA)
+    #expect(harness.syntacticCalls.count == 1)
+    #expect(harness.exactCalls.count == 1)
+
+    let otherRevision = SymbolHoverModel.Token(
+        file: tokenA.file,
+        contentID: ContentID(algorithm: 1, bytes: [2]),
+        range: tokenA.range
+    )
+    harness.model.dismiss()
+    harness.model.pointerMoved(over: otherRevision)
+    await harness.clock.advance()
+    #expect(harness.syntacticCalls.count == 2)
+}
+
+@MainActor
+@Test
+func hoverSettingOffIgnoresPointerButHonorsExplicitRequests() async {
+    let harness = HoverHarness()
+    harness.model.isHoverEnabled = false
+    harness.model.pointerMoved(over: tokenA)
+    await settle()
+    #expect(harness.model.phase == .idle)
+    #expect(harness.clock.pending.isEmpty)
+
+    harness.model.showNow(tokenA)
+    await settle()
+    #expect(harness.model.shownToken == tokenA)
+    #expect(harness.clock.pending.isEmpty)
+}
+
+@MainActor
+@Test
+func hoverNotesExplainMissingOrLimitedExactResults() async {
+    let missing = HoverHarness(fallback: nil)
+    missing.model.showNow(tokenA)
+    await settle()
+    #expect(missing.model.phase == .dwelling(tokenA))
+    await missing.releaseExact(.completed(nil, limitations: [.dependenciesUnavailableOffline]))
+    #expect(missing.model.phase == .showing(
+        tokenA,
+        SymbolDoc(source: .exact, notes: [.dependencySourceMissing])
+    ))
+
+    let limited = HoverHarness()
+    limited.model.showNow(tokenA)
+    await settle()
+    await limited.releaseExact(.completed(nil, limitations: [.procMacrosDisabled, .buildScriptsDisabled]))
+    guard case let .showing(_, doc) = limited.model.phase else {
+        Issue.record("expected limited card")
+        return
+    }
+    #expect(doc.source == .syntactic)
+    #expect(doc.notes == [.limitation("buildScriptsDisabled"), .limitation("procMacrosDisabled")])
+
+    let unavailable = HoverHarness()
+    unavailable.model.showNow(tokenA)
+    await settle()
+    await unavailable.releaseExact(.unavailable("off"))
+    guard case let .showing(_, fallback) = unavailable.model.phase else {
+        Issue.record("expected fallback card")
+        return
+    }
+    #expect(fallback.notes == [.exactUnavailable("off")])
+
+    let uncached = HoverHarness(fallback: nil, sourceMissing: true)
+    uncached.model.showNow(tokenA)
+    await settle()
+    // Known from local files before the language server answers.
+    #expect(uncached.model.phase == .showing(
+        tokenA,
+        SymbolDoc(source: .syntactic, notes: [.dependencySourceMissing])
+    ))
+    await uncached.releaseExact(.completed(nil, limitations: [.procMacrosDisabled]))
+    #expect(uncached.model.phase == .showing(
+        tokenA,
+        SymbolDoc(source: .exact, notes: [.dependencySourceMissing])
+    ))
+    #expect(uncached.probeCalls == 1)
+
+    let timedOut = HoverHarness(fallback: nil)
+    timedOut.model.showNow(tokenA)
+    await settle()
+    #expect(timedOut.model.phase == .dwelling(tokenA))
+    await timedOut.releaseExact(.unavailable("timeout(\"textDocument/hover\")"))
+    #expect(timedOut.model.phase == .showing(
+        tokenA,
+        SymbolDoc(source: .exact, notes: [.exactPending])
+    ))
+    // Not final: the next hover asks the language server again.
+    timedOut.model.dismiss()
+    timedOut.model.showNow(tokenA)
+    await settle()
+    #expect(timedOut.exactCalls.count == 2)
+
+    let nothing = HoverHarness(fallback: nil)
+    nothing.model.showNow(tokenA)
+    await settle()
+    await nothing.releaseExact(.completed(nil, limitations: []))
+    #expect(nothing.model.phase == .idle)
+}
+
+@Test
+func hoverMarkdownSplitsLocationSignatureAndBody() {
+    #expect(symbolDoc(fromHoverMarkdown: "```rust\npub struct Oid\n```") == SymbolDoc(
+        signature: "pub struct Oid",
+        signatureLanguage: "rust",
+        source: .exact
+    ))
+    #expect(symbolDoc(fromHoverMarkdown: "```rust\nstd::collections\n```\n\n```rust\npub struct HashMap<K, V>\n```\n\n---\n\nsize = 48\n\n---\n\nA hash map.\n\n```rust\nlet m = HashMap::new();\n```") == SymbolDoc(
+        location: "std::collections",
+        signature: "pub struct HashMap<K, V>",
+        signatureLanguage: "rust",
+        markdown: "size = 48\n\n---\n\nA hash map.\n\n```rust\nlet m = HashMap::new();\n```",
+        source: .exact
+    ))
+    #expect(symbolDoc(fromHoverMarkdown: "Plain docs only.") == SymbolDoc(
+        markdown: "Plain docs only.",
+        source: .exact
+    ))
+}
+
+// MARK: - Harness
+
+private let tokenA = SymbolHoverModel.Token(
+    file: "src/snapshot.rs",
+    contentID: ContentID(algorithm: 1, bytes: [1]),
+    range: ByteRange(lowerBound: 10, upperBound: 14)
+)
+private let tokenB = SymbolHoverModel.Token(
+    file: "src/snapshot.rs",
+    contentID: ContentID(algorithm: 1, bytes: [1]),
+    range: ByteRange(lowerBound: 30, upperBound: 37)
+)
+
+@MainActor
+private final class ManualClock {
+    private var waiters: [(Duration, CheckedContinuation<Void, Never>)] = []
+
+    var pending: [Duration] { waiters.map(\.0) }
+
+    func wait(_ duration: Duration) async {
+        await withCheckedContinuation { waiters.append((duration, $0)) }
+    }
+
+    func advance() async {
+        await settle()
+        let ready = waiters
+        waiters.removeAll()
+        for (_, continuation) in ready { continuation.resume() }
+        await settle()
+    }
+}
+
+@MainActor
+private final class HoverHarness {
+    let clock = ManualClock()
+    var syntacticCalls: [SymbolHoverModel.Token] = []
+    var exactCalls: [(SymbolHoverModel.Token, ExactRequestBatch)] = []
+    private var exactGates: [CheckedContinuation<ExactCoordinator.HoverResult?, Never>] = []
+    var probeCalls = 0
+    private(set) var model: SymbolHoverModel!
+
+    init(fallback: SymbolDoc? = SymbolDoc(
+        location: "snapshot.rs:21",
+        signature: "pub fn open()",
+        markdown: "Opens it.",
+        source: .syntactic
+    ), sourceMissing: Bool = false) {
+        let clock = clock
+        model = SymbolHoverModel(
+            syntactic: { [unowned self] token in
+                self.syntacticCalls.append(token)
+                return fallback
+            },
+            exact: { [unowned self] token, batch in
+                self.exactCalls.append((token, batch))
+                return await withCheckedContinuation { self.exactGates.append($0) }
+            },
+            dependencyProbe: { [unowned self] _ in
+                self.probeCalls += 1
+                return sourceMissing
+            },
+            sleep: { duration in await clock.wait(duration) }
+        )
+    }
+
+    func releaseExact(_ result: ExactCoordinator.HoverResult?) async {
+        await settle()
+        for gate in exactGates { gate.resume(returning: result) }
+        exactGates.removeAll()
+        await settle()
+    }
+}
+
+@MainActor
+private func settle() async {
+    for _ in 0..<40 { await Task.yield() }
+}

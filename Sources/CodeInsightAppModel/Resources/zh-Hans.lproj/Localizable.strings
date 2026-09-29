@@ -215,3 +215,6 @@
 "model.search.query" = "输入搜索内容。";
 "model.search.symbols" = "正在索引符号…";
 "model.search.truncated" = "显示 %lld / %lld 个匹配结果（已截断）";
+
+/* 符号悬浮文档卡片。 */
+"model.hover.revisionNotIndexed" = "当前显示的版本不是已索引的版本";

@@ -93,13 +93,26 @@ package final class MarkdownPreviewTextView: NSTextView {
 package struct MarkdownPreviewRenderer {
     package let theme: ReaderTheme
     package let baseURL: URL?
+    private let bodyPointSize: CGFloat?
+    private let compactHeadings: Bool
 
-    package init(theme: ReaderTheme, baseURL: URL?) {
+    /// `bodyPointSize` overrides the preview's reading size and
+    /// `compactHeadings` keeps headings near body size without rules, for
+    /// compact hosts such as the symbol documentation card, where rustdoc's
+    /// `# Examples` is a section label rather than a page title.
+    package init(
+        theme: ReaderTheme,
+        baseURL: URL?,
+        bodyPointSize: CGFloat? = nil,
+        compactHeadings: Bool = false
+    ) {
         self.theme = theme
         self.baseURL = baseURL
+        self.bodyPointSize = bodyPointSize
+        self.compactHeadings = compactHeadings
     }
 
-    private var body: CGFloat { max(14, CGFloat(theme.fontSize) + 2) }
+    private var body: CGFloat { bodyPointSize ?? max(14, CGFloat(theme.fontSize) + 2) }
 
     /// Text blocks have no intrinsic width: without one, TextKit lays their
     /// content out one glyph per line.
@@ -285,13 +298,20 @@ package struct MarkdownPreviewRenderer {
         style.lineHeightMultiple = 1.18
 
         if case .header(let level) = leaf {
-            let scale: [CGFloat] = [1.9, 1.5, 1.25, 1.08, 1.0, 0.92]
+            let scale: [CGFloat] = compactHeadings
+                ? [1.1, 1.05, 1.0, 1.0, 1.0, 0.92]
+                : [1.9, 1.5, 1.25, 1.08, 1.0, 0.92]
             baseFont = NSFont.systemFont(ofSize: body * scale[min(max(level, 1), 6) - 1], weight: .semibold)
             if level >= 6 { color = theme.chromeSecondaryColor }
             style.lineHeightMultiple = 1.05
-            style.paragraphSpacingBefore = output.length == 0 ? 0 : body * (level <= 2 ? 1.3 : 0.9)
-            style.paragraphSpacing = body * (level <= 2 ? 0.7 : 0.45)
-            if level <= 2 {
+            if compactHeadings {
+                style.paragraphSpacingBefore = output.length == 0 ? 0 : body * 0.5
+                style.paragraphSpacing = body * 0.3
+            } else {
+                style.paragraphSpacingBefore = output.length == 0 ? 0 : body * (level <= 2 ? 1.3 : 0.9)
+                style.paragraphSpacing = body * (level <= 2 ? 0.7 : 0.45)
+            }
+            if level <= 2, !compactHeadings {
                 let rule = Self.fullWidthBlock()
                 rule.setWidth(1, type: .absoluteValueType, for: .border, edge: .maxY)
                 rule.setBorderColor(theme.chromeDividerColor, for: .maxY)

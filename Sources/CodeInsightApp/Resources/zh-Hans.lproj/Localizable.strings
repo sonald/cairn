@@ -554,3 +554,9 @@
 
 "reader.identifiers.preparing" = "正在准备标识符高亮…";
 "reader.identifiers.unavailable" = "标识符高亮不可用";
+
+/* 符号悬浮文档卡片。 */
+"app.menu.show.symbol.documentation" = "显示符号文档";
+"settings.hoverDocs" = "悬浮显示文档";
+"settings.hoverDocs.help" = "鼠标停在 Rust 符号上时显示签名和文档。⌥+点击和 ⌃⇧Space 不受此开关影响。";
+"main.hover.symbolNotFound" = "项目中找不到名为 %@ 的定义";

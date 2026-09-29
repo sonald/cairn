@@ -11,3 +11,12 @@
 "reader.height.overview" = "Overview";
 "reader.height.structure" = "Structure";
 "reader.tests" = "⋯ tests · %@ · %@";
+
+/* Symbol documentation hover card. */
+"reader.hover.card" = "Symbol documentation";
+"reader.hover.noDocs" = "No documentation comment";
+"reader.hover.note.pending" = "Syntax-level result · exact analysis not ready";
+"reader.hover.note.unavailable" = "Exact analysis unavailable: %@";
+"reader.hover.note.procMacros" = "Proc macros are off (Safe mode); macro-generated items may be missing";
+"reader.hover.note.buildScripts" = "Build scripts are off (Safe mode); generated code may be missing";
+"reader.hover.note.dependencySource" = "Dependency source is not in the local cache; Cairn does not download it";

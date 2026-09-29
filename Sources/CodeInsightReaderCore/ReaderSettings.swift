@@ -117,6 +117,9 @@ public struct ReaderSettings: Equatable, Sendable {
     public var humanistComments: Bool
     public var lineNumbers: Bool
     package var wrapLines: Bool
+    /// Show the symbol documentation card when the pointer rests on a symbol.
+    /// Keyboard and ⌥-click requests work either way.
+    public var hoverDocs: Bool
 
     public init(
         lineHeightMultiple: Double = 1.3,
@@ -159,6 +162,7 @@ public struct ReaderSettings: Equatable, Sendable {
         self.humanistComments = humanistComments
         self.lineNumbers = lineNumbers
         wrapLines = false
+        hoverDocs = true
     }
 
     public init(defaults: UserDefaults) {
@@ -212,6 +216,9 @@ public struct ReaderSettings: Equatable, Sendable {
         wrapLines = (defaults.object(forKey: Keys.wrapLines) as? NSNumber)?
             .boolValue
             ?? false
+        hoverDocs = (defaults.object(forKey: Keys.hoverDocs) as? NSNumber)?
+            .boolValue
+            ?? true
         // Revision 2 (UI redesign): settings saved before it hold the old
         // defaults for every key; adopt the new ones once where unchanged.
         if defaults.integer(forKey: Keys.defaultsRevision) < 2 {
@@ -242,6 +249,7 @@ public struct ReaderSettings: Equatable, Sendable {
             codeLigatures: codeLigatures
         )
         validated.wrapLines = wrapLines
+        validated.hoverDocs = hoverDocs
         defaults.set(validated.lineHeightMultiple, forKey: Keys.lineHeightMultiple)
         defaults.set(validated.fontSize, forKey: Keys.fontSize)
         defaults.set(validated.functionNameDelta, forKey: Keys.functionNameDelta)
@@ -277,6 +285,7 @@ public struct ReaderSettings: Equatable, Sendable {
         defaults.set(validated.humanistComments, forKey: Keys.humanistComments)
         defaults.set(validated.lineNumbers, forKey: Keys.lineNumbers)
         defaults.set(validated.wrapLines, forKey: Keys.wrapLines)
+        defaults.set(validated.hoverDocs, forKey: Keys.hoverDocs)
     }
 
     private enum Keys {
@@ -299,6 +308,7 @@ public struct ReaderSettings: Equatable, Sendable {
         static let humanistComments = "reader.humanistComments"
         static let lineNumbers = "reader.lineNumbers"
         static let wrapLines = "reader.wrapLines"
+        static let hoverDocs = "reader.hoverDocs"
     }
 }
 

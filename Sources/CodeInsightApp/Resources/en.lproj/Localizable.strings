@@ -554,3 +554,9 @@
 
 "reader.identifiers.preparing" = "Preparing identifier highlights…";
 "reader.identifiers.unavailable" = "Identifier highlights unavailable";
+
+/* Symbol documentation hover card. */
+"app.menu.show.symbol.documentation" = "Show Symbol Documentation";
+"settings.hoverDocs" = "Show documentation on hover";
+"settings.hoverDocs.help" = "Rest the pointer on a Rust symbol to see its signature and docs. ⌥-click and ⌃⇧Space work either way.";
+"main.hover.symbolNotFound" = "No definition named %@ in this project";

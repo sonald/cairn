@@ -215,3 +215,6 @@
 "model.search.query" = "Enter a search query.";
 "model.search.symbols" = "Indexing symbols…";
 "model.search.truncated" = "Showing first %lld of %lld matches (truncated)";
+
+/* Symbol documentation hover card. */
+"model.hover.revisionNotIndexed" = "this revision is not the indexed one";

@@ -129,6 +129,13 @@ public final class ExactCoordinator {
         case unavailable(String)
     }
 
+    public enum HoverResult: Equatable, Sendable {
+        case completed(String?, limitations: Set<ExactAnalysisLimitation>)
+        case unsupported
+        case cancelled
+        case unavailable(String)
+    }
+
     struct Relation: Sendable {
         let name: String?
         let location: ExactLocation
@@ -869,6 +876,54 @@ public final class ExactCoordinator {
             if case .unavailable(let reason) = current.session.readiness {
                 readiness = .unavailable(reason)
             }
+            return .unavailable(exactFailureReason(error))
+        }
+    }
+
+    public func hover(
+        file: String,
+        byteOffset: UInt32,
+        generation: UInt64,
+        batch: ExactRequestBatch
+    ) async -> HoverResult? {
+        if let prepareTask { await prepareTask.value }
+        guard batch.isCurrent else { return .cancelled }
+        guard expectedGeneration == generation else { return nil }
+        guard let current = active else {
+            return .unavailable(String(describing: readiness))
+        }
+        guard current.generation == generation else { return nil }
+        guard current.session.negotiatedCapabilities.contains(.hover) else {
+            return .unsupported
+        }
+        guard let requestFile = providerRelativeRequestPath(
+            file: file,
+            source: current
+        ) else {
+            return .completed(nil, limitations: [])
+        }
+        let session = current.session
+        do {
+            let result = try await Task.detached(priority: .userInitiated) {
+                try session.hover(
+                    file: requestFile,
+                    byteOffset: Int(byteOffset),
+                    batch: batch
+                )
+            }.value
+            guard batch.isCurrent, isCurrent(current) else { return .cancelled }
+            switch result {
+            case nil:
+                return .unsupported
+            case .cancelled:
+                return .cancelled
+            case .completed(let markdown):
+                let environment = analysisEnvironment
+                    ?? session.attribution.environment
+                return .completed(markdown, limitations: environment.limitations)
+            }
+        } catch {
+            guard isCurrent(current) else { return nil }
             return .unavailable(exactFailureReason(error))
         }
     }

@@ -2590,6 +2590,68 @@ func rustAnalyzerRequestsReferencesWithoutTheDeclaration() throws {
 }
 
 @Test
+func rustAnalyzerRequestsMarkdownHoverWhenNegotiated() throws {
+    let hover: [String: Any] = ["contents": [
+        "kind": "markdown",
+        "value": "```rust\nfixture\n```\n\n```rust\npub fn target()\n```\n\n---\n\nDocs.",
+    ]]
+    try withFakeRustAnalyzerSession(
+        hoverProvider: true,
+        requestResponder: { method, _ in
+            method == "textDocument/hover" ? .result(hover) : .useDefault
+        },
+        serverCheck: { server in
+            #expect(server.receivedHoverContentFormat == ["markdown", "plaintext"])
+            #expect(server.requestMethods.contains("textDocument/hover"))
+        }
+    ) { session in
+        #expect(session.negotiatedCapabilities.contains(.hover))
+        let result = try session.hover(
+            file: "src/lib.rs",
+            byteOffset: 7,
+            batch: ExactRequestBatch()
+        )
+        #expect(result == .completed(
+            "```rust\nfixture\n```\n\n```rust\npub fn target()\n```\n\n---\n\nDocs."
+        ))
+    }
+}
+
+@Test
+func rustAnalyzerSkipsHoverWithoutProviderAndReportsEmptyHover() throws {
+    try withFakeRustAnalyzerSession(hoverProvider: nil) { session in
+        #expect(!session.negotiatedCapabilities.contains(.hover))
+        let result = try session.hover(
+            file: "src/lib.rs",
+            byteOffset: 7,
+            batch: ExactRequestBatch()
+        )
+        #expect(result == nil)
+    }
+    try withFakeRustAnalyzerSession(hoverProvider: [String: Any]()) { session in
+        let result = try session.hover(
+            file: "src/lib.rs",
+            byteOffset: 7,
+            batch: ExactRequestBatch()
+        )
+        #expect(result == .completed(nil))
+    }
+}
+
+@Test
+func hoverMarkdownFlattensEveryLSPContentShape() {
+    #expect(exactHoverMarkdown(NSNull()) == nil)
+    #expect(exactHoverMarkdown(["contents": ["kind": "markdown", "value": "  \n"]]) == nil)
+    #expect(exactHoverMarkdown(["contents": "plain"]) == "plain")
+    #expect(exactHoverMarkdown(["contents": ["language": "rust", "value": "fn a()"]])
+        == "```rust\nfn a()\n```")
+    #expect(exactHoverMarkdown(["contents": [
+        ["language": "rust", "value": "fn a()"],
+        "Docs.",
+    ]]) == "```rust\nfn a()\n```\n\nDocs.")
+}
+
+@Test
 func rustAnalyzerNegotiatesReferenceOptionsProvider() throws {
     try withFakeRustAnalyzerSession(
         referencesProvider: [String: Any]()
@@ -4222,6 +4284,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private var _receivedImplementationCapability = false
     private var _receivedCallHierarchyCapability = false
     private var _receivedReferencesCapability = false
+    private var _receivedHoverContentFormat: [String]?
     private var _receivedServerStatusCapability = false
     private var _referenceIncludeDeclarations: [Bool] = []
     private let implementationProvider: Any?
@@ -4232,6 +4295,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private let outgoingCallResult: Any
     private let referencesProvider: Any?
     private let referenceResult: Any
+    private let hoverProvider: Any?
     private let serverStatusQuiescent: Bool
     private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
     private var _error: Error?
@@ -4252,6 +4316,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     var receivedReferencesCapability: Bool {
         locked { _receivedReferencesCapability }
     }
+    var receivedHoverContentFormat: [String]? {
+        locked { _receivedHoverContentFormat }
+    }
     var receivedServerStatusCapability: Bool {
         locked { _receivedServerStatusCapability }
     }
@@ -4271,6 +4338,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         outgoingCallResult: Any = NSNull(),
         referencesProvider: Any? = true,
         referenceResult: Any = NSNull(),
+        hoverProvider: Any? = nil,
         serverStatusQuiescent: Bool = true,
         requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
         done: @escaping () -> Void
@@ -4285,6 +4353,7 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         self.outgoingCallResult = outgoingCallResult
         self.referencesProvider = referencesProvider
         self.referenceResult = referenceResult
+        self.hoverProvider = hoverProvider
         self.serverStatusQuiescent = serverStatusQuiescent
         self.requestResponder = requestResponder
         self.done = done
@@ -4349,6 +4418,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                             textDocument?["callHierarchy"] != nil
                         _receivedReferencesCapability =
                             textDocument?["references"] != nil
+                        _receivedHoverContentFormat = (
+                            textDocument?["hover"] as? [String: Any]
+                        )?["contentFormat"] as? [String]
                         _receivedServerStatusCapability =
                             experimental?["serverStatusNotification"] as? Bool
                                 == true
@@ -4378,6 +4450,9 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     if let referencesProvider {
                         serverCapabilities["referencesProvider"] =
                             referencesProvider
+                    }
+                    if let hoverProvider {
+                        serverCapabilities["hoverProvider"] = hoverProvider
                     }
                     try write([
                         "jsonrpc": "2.0", "id": id,
@@ -4909,6 +4984,7 @@ private func withFakeRustAnalyzerSession<T>(
     outgoingCallResult: Any = NSNull(),
     referencesProvider: Any? = true,
     referenceResult: Any = NSNull(),
+    hoverProvider: Any? = nil,
     serverStatusQuiescent: Bool = true,
     requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
     serverCheck: ((PipeFakeLSPServer) -> Void)? = nil,
@@ -4929,6 +5005,7 @@ private func withFakeRustAnalyzerSession<T>(
         outgoingCallResult: outgoingCallResult,
         referencesProvider: referencesProvider,
         referenceResult: referenceResult,
+        hoverProvider: hoverProvider,
         serverStatusQuiescent: serverStatusQuiescent,
         requestResponder: requestResponder,
         done: { done.signal() }

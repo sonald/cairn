@@ -364,6 +364,8 @@ private struct ReaderSettingsView: View {
                     Toggle(localized("settings.comments"), isOn: $settings.humanistComments)
                     Toggle(localized("settings.wrap"), isOn: $settings.wrapLines)
                     Toggle(localized("settings.lineNumbers"), isOn: $settings.lineNumbers)
+                    Toggle(localized("settings.hoverDocs"), isOn: $settings.hoverDocs)
+                        .help(localized("settings.hoverDocs.help"))
                     fontControls
 
                     DisclosureGroup(localized("settings.advanced"), isExpanded: $showsAdvancedTypography) {

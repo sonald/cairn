@@ -136,6 +136,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     private var sessionRestoreTask: Task<Void, Never>?
     private var outlineFollowArbitration = OutlineFollowArbitration()
     private var currentReaderSettings = ReaderSettings()
+    private let symbolDocCard = SymbolDocCard()
+    /// Screen rects of recently hovered tokens, so the card anchors to the
+    /// token it shows even after the pointer moved on.
+    private var symbolHoverAnchors: [SymbolHoverModel.Token: NSRect] = [:]
     private let layoutDefaults: UserDefaults?
     private var contextVisibilityOverride: Bool?
     /// Per-window frame autosave: project windows derive it from the project
@@ -413,10 +417,15 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         refreshIndexButton.action = #selector(refreshProjectIndex(_:))
         escapeMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) {
             [weak self, weak window] event in
-            guard event.keyCode == 53,
-                  event.window === window,
-                  let self
-            else { return event }
+            guard event.keyCode == 53, let self else { return event }
+            // The card closes first, whichever view holds focus, including
+            // the card itself after a click inside it.
+            if event.window === window || self.symbolDocCard.contains(event.window),
+               self.escapeSymbolDocumentation()
+            {
+                return nil
+            }
+            guard event.window === window else { return event }
             if self.isFindBarVisible {
                 _ = self.closeFindBar()
                 return nil
@@ -466,6 +475,25 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
         }
+        for reader in [readerController, secondaryReaderController] {
+            reader.onHover = { [weak self] request in self?.handleHover(request) }
+            reader.onHoverRequest = { [weak self] request in
+                self?.showSymbolDocumentation(for: request)
+            }
+            reader.onHoverDismiss = { [weak self] in self?.model.symbolHover.dismiss() }
+            reader.onHoverEscape = { [weak self] in self?.escapeSymbolDocumentation() ?? false }
+        }
+        symbolDocCard.onPointerEntered = { [weak self] in
+            self?.model.symbolHover.pointerEnteredCard()
+        }
+        symbolDocCard.onPointerExited = { [weak self] in
+            self?.model.symbolHover.pointerExitedCard()
+        }
+        symbolDocCard.onEscape = { [weak self] in self?.model.symbolHover.dismiss() }
+        secondaryReaderController.onDocumentChange = { [weak self] _, _ in
+            self?.model.symbolHover.dismiss()
+        }
+        symbolDocCard.onOpenLink = { [weak self] url in self?.openSymbolDocLink(url) }
         readerController.onOutlineChange = { [weak self] facets in
             guard let self else { return }
             sidebarController.setOutline(facets.map(OutlineNode.init(facet:)), file: model.selectedFile)
@@ -507,6 +535,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onDocumentChange = { [weak self] file, document in
             guard let self else { return }
+            model.symbolHover.dismiss()
             model.tabStrip.setActiveDocument(document, for: file)
             captureActiveTabState()
             model.scheduleSessionCheckpoint(panelPreset: panelPreset)
@@ -656,6 +685,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         render()
         applyPanelPreset(.reading, restoring: true)
         observe()
+        observeSymbolHover()
     }
 
     deinit {
@@ -2117,6 +2147,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     func beginTeardown(runFinalCheckpoint: Bool) {
         guard !isClosing else { return }
         isClosing = true
+        model.symbolHover.dismiss()
+        symbolDocCard.hide()
         readerController.cancelDerivedDataSubscription()
         secondaryReaderController.cancelDerivedDataSubscription()
         contextController.cancelDerivedDataSubscription()
@@ -2330,6 +2362,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func applyReaderSettings(_ settings: ReaderSettings) {
         currentReaderSettings = settings
+        model.symbolHover.isHoverEnabled = settings.hoverDocs
+        if symbolDocCard.isShown { renderSymbolHover() }
         window?.appearance = switch settings.theme {
         case .dark: NSAppearance(named: .darkAqua)
         case .light, .siClassic: NSAppearance(named: .aqua)
@@ -3605,6 +3639,120 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
     }
 
+    // MARK: - Symbol documentation card
+
+    private func observeSymbolHover() {
+        guard !isClosing else { return }
+        withObservationTracking {
+            _ = model.symbolHover.phase
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, !self.isClosing else { return }
+                self.renderSymbolHover()
+                self.observeSymbolHover()
+            }
+        }
+    }
+
+    private func renderSymbolHover() {
+        guard case let .showing(token, doc) = model.symbolHover.phase,
+              let window, window.isVisible,
+              let anchor = symbolHoverAnchors[token]
+        else {
+            symbolDocCard.hide()
+            if model.symbolHover.phase == .idle { symbolHoverAnchors.removeAll() }
+            return
+        }
+        symbolDocCard.show(
+            doc,
+            notes: doc.notes.map(symbolDocNoteText),
+            anchor: anchor,
+            in: window,
+            theme: ReaderTheme(settings: currentReaderSettings)
+        )
+    }
+
+    /// Rust only for now (hover docs plan Q16); other languages open no card.
+    private func hoverToken(for request: ReaderHoverRequest) -> SymbolHoverModel.Token? {
+        guard request.document.languageMode.language == .rust,
+              let path = projectPath(for: request.file)
+        else { return nil }
+        let token = SymbolHoverModel.Token(
+            file: path,
+            contentID: request.document.contentID,
+            range: request.target.byteRange,
+            document: request.document
+        )
+        if symbolHoverAnchors.count > 16, model.symbolHover.phase == .idle {
+            symbolHoverAnchors.removeAll()
+        }
+        symbolHoverAnchors[token] = request.target.screenRect
+        return token
+    }
+
+    private func handleHover(_ request: ReaderHoverRequest?) {
+        model.symbolHover.pointerMoved(over: request.flatMap(hoverToken(for:)))
+    }
+
+    private func showSymbolDocumentation(for request: ReaderHoverRequest) {
+        guard let token = hoverToken(for: request) else { return }
+        model.symbolHover.showNow(token)
+    }
+
+    var canShowSymbolDocumentation: Bool {
+        focusedReader.hoverRequestAtSelection().flatMap(hoverToken(for:)) != nil
+    }
+
+    func showSymbolDocumentationAtSelection() {
+        guard let request = focusedReader.hoverRequestAtSelection() else { return }
+        showSymbolDocumentation(for: request)
+    }
+
+    private var focusedReader: ReaderViewController {
+        secondaryReaderController.hasFocusedText ? secondaryReaderController : readerController
+    }
+
+    private func escapeSymbolDocumentation() -> Bool {
+        guard model.symbolHover.phase != .idle else { return false }
+        model.symbolHover.dismiss()
+        return true
+    }
+
+    /// Intra-doc and rustdoc links jump to a project definition when one
+    /// matches; anything else opens in the default browser, because the user
+    /// clicked it.
+    private func openSymbolDocLink(_ url: URL) {
+        let name = symbolName(fromDocLink: url)
+        if let name, let target = model.contextWindow.definition(named: name) {
+            model.symbolHover.dismiss()
+            open(path: target.path, byteOffset: target.byteOffset)
+            return
+        }
+        if url.scheme == symbolLinkScheme {
+            focusNotice = localizedFormat("main.hover.symbolNotFound", name ?? url.absoluteString)
+            renderStatusBar()
+            return
+        }
+        guard url.scheme == "http" || url.scheme == "https" else { return }
+        model.symbolHover.dismiss()
+        NSWorkspace.shared.open(url)
+    }
+
+    private func symbolName(fromDocLink url: URL) -> String? {
+        if url.scheme == symbolLinkScheme {
+            let path = String(url.absoluteString.dropFirst(symbolLinkScheme.count + 1))
+            return path.components(separatedBy: "::").last
+        }
+        // rustdoc pages: …/struct.Oid.html, …/fn.open.html#method.walk
+        if let fragment = url.fragment, let dot = fragment.lastIndex(of: ".") {
+            return String(fragment[fragment.index(after: dot)...])
+        }
+        let page = url.lastPathComponent
+        let parts = page.split(separator: ".")
+        guard parts.count == 3, parts[2] == "html" else { return nil }
+        return String(parts[1])
+    }
+
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
         guard let file = model.selectedFile,
               let path = projectPath(for: file)
@@ -4197,11 +4345,25 @@ private final class PlainTextPreviewView: NSTextView {
     }
 }
 
+/// An identifier under the pointer in one reader, with the document it was
+/// read from.
+struct ReaderHoverRequest {
+    let file: URL
+    let document: ReaderDocument
+    let target: ReaderHoverTarget
+}
+
 @MainActor
 final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     NSTextViewDelegate, WKNavigationDelegate
 {
     var onTokenClick: ((UInt32, Bool) -> Void)?
+    /// The identifier under the pointer, or `nil` over anything else.
+    var onHover: ((ReaderHoverRequest?) -> Void)?
+    /// ⌥-click: show documentation now.
+    var onHoverRequest: ((ReaderHoverRequest) -> Void)?
+    var onHoverDismiss: (() -> Void)?
+    var onHoverEscape: (() -> Bool)?
     var onShowRelation: ((UInt32, RelationTreeModel.Direction) -> Void)?
     var onOutlineChange: (([OutlineFacet]) -> Void)?
     var onReadingPositionChange: ((UInt32) -> Void)?
@@ -4283,6 +4445,23 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var displayedSnapshotID: SnapshotID?
     private var displayedLanguageMode: LanguageMode?
     private var displayedDocument: ReaderDocument?
+
+    var hasFocusedText: Bool {
+        view.window?.firstResponder === textView.view
+    }
+
+    /// The identifier at the caret or the start of the selection.
+    func hoverRequestAtSelection() -> ReaderHoverRequest? {
+        hoverRequest(textView.hoverTargetAtSelection())
+    }
+
+    private func hoverRequest(_ target: ReaderHoverTarget?) -> ReaderHoverRequest? {
+        guard let target, let file = displayedFile, let document = displayedDocument,
+              previewView == nil
+        else { return nil }
+        return ReaderHoverRequest(file: file, document: document, target: target)
+    }
+
     private var displayedReadingSetKey: String?
     private var previewView: NSView?
     private var previewKind: String?
@@ -4476,12 +4655,23 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             else { return }
             self.onSelectionChange?(offset)
             let meaningful = modifiers.intersection([.command, .option, .control, .shift])
+            if meaningful != .option { self.onHoverDismiss?() }
             if meaningful.isEmpty {
                 self.onTokenClick?(offset, false)
             } else if meaningful == .command {
                 self.onTokenClick?(offset, true)
+            } else if meaningful == .option,
+                      let request = self.hoverRequest(self.textView.hoverTarget(atByteOffset: offset))
+            {
+                self.onHoverRequest?(request)
             }
         }
+        textView.onHover = { [weak self] target in
+            guard let self else { return }
+            self.onHover?(self.hoverRequest(target))
+        }
+        textView.onHoverDismiss = { [weak self] in self?.onHoverDismiss?() }
+        textView.onHoverEscape = { [weak self] in self?.onHoverEscape?() ?? false }
         textView.onViewportChange = { [weak self] in
             self?.scheduleReadingPositionChange()
         }
