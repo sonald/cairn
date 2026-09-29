@@ -167,9 +167,21 @@ public final class RenderingAttributesCoordinator {
     package private(set) var rangeCalculationCount = 0
     package private(set) var rangeCacheHitCount = 0
 
+    /// Fragments that received this generation's attributes. TextKit may call
+    /// the validator for a fragment outside the buffered viewport; `style`
+    /// skips it there, so scrolling must style it once it becomes visible.
+    private let styledFragments = NSHashTable<NSTextLayoutFragment>(
+        options: [.weakMemory, .objectPointerPersonality]
+    )
+
     private func clearRangeCache() {
         cachedRuns.removeAll(keepingCapacity: true)
         cachedRunCount = 0
+        styledFragments.removeAllObjects()
+    }
+
+    func needsStyle(_ fragment: NSTextLayoutFragment) -> Bool {
+        !styledFragments.contains(fragment)
     }
 
     private var spans: [HighlightSpan] = []
@@ -254,6 +266,7 @@ public final class RenderingAttributesCoordinator {
         if let runs = cachedRuns[fragmentNSRange] {
             rangeCacheHitCount += 1
             submit(runs, for: fragmentNSRange, in: manager, content: content)
+            styledFragments.add(fragment)
             return
         }
         rangeCalculationCount += 1
@@ -338,12 +351,15 @@ public final class RenderingAttributesCoordinator {
 
         if styledRanges.count <= 8_192 {
             if cachedRuns.count >= 128 || cachedRunCount + styledRanges.count > 8_192 {
-                clearRangeCache()
+                // Capacity eviction only; published fragments stay valid.
+                cachedRuns.removeAll(keepingCapacity: true)
+                cachedRunCount = 0
             }
             cachedRuns[fragmentNSRange] = styledRanges
             cachedRunCount += styledRanges.count
         }
         submit(styledRanges, for: fragmentNSRange, in: manager, content: content)
+        styledFragments.add(fragment)
     }
 
     private func submit(
@@ -657,7 +673,7 @@ public final class ReaderTextView {
             guard let self, !self.readerWorkStopped, !self.isCommittingProjection, !self.isRestoringViewport,
                   self.renderingCoordinator.hasRenderingAttributes,
                   let manager = self.view.textLayoutManager else { return }
-            self.validateVisibleRenderingAttributes(in: manager, updateLayout: false)
+            self.styleUnstyledVisibleFragments(in: manager)
             self.processPendingViewportCorrection()
         }
         textView.userScrollHandler = { [weak self] in
@@ -677,8 +693,9 @@ public final class ReaderTextView {
             // validates and publishes once at its end (D3.4).
             if self.isRestoringViewport { return }
             // Bounds changes may come from TextKit layout. Only explicit user
-            // input clears the anchor; still refresh visible rendering here.
-            self.validateVisibleRenderingAttributes(in: layoutManager)
+            // input clears the anchor. Scrolling does not change style data:
+            // style only fragments that lack this generation's attributes.
+            self.styleUnstyledVisibleFragments(in: layoutManager, updateLayout: true)
             self.ruler?.needsDisplay = true
             self.onViewportChange?()
         }
@@ -3550,12 +3567,22 @@ public final class ReaderTextView {
         scrollView?.tile()
     }
 
+    /// Read several times per gutter row while drawing; measure only when the
+    /// digit count or number font changes.
+    private var lineNumberWidthCache: (lineCount: Int, fontSize: CGFloat, width: CGFloat)?
+
     private var lineNumberColumnWidth: CGFloat {
         guard lineNumbers else { return 0 }
         let lineCount = displayedDocument?.lineTable.lineStarts.count ?? 1
-        return ceil((String(lineCount) as NSString).size(
+        let fontSize = max(10, theme.fontSize - 2)
+        if let cache = lineNumberWidthCache, cache.lineCount == lineCount, cache.fontSize == fontSize {
+            return cache.width
+        }
+        let width = ceil((String(lineCount) as NSString).size(
             withAttributes: [.font: lineNumberFont]
         ).width) + 12
+        lineNumberWidthCache = (lineCount, fontSize, width)
+        return width
     }
 
     private var lineNumberFont: NSFont {
@@ -4363,6 +4390,51 @@ public final class ReaderTextView {
                 apply(span)
             }
         }
+    }
+
+    /// Scroll-time counterpart of `validateVisibleRenderingAttributes`: style
+    /// data is unchanged, so republishing every visible fragment would only
+    /// force TextKit to redraw text that already has current attributes.
+    private func styleUnstyledVisibleFragments(
+        in layoutManager: NSTextLayoutManager, updateLayout: Bool = false
+    ) {
+        guard !isCommittingProjection, !isValidatingVisibleRenderingAttributes,
+              renderingCoordinator.hasRenderingAttributes,
+              layoutManager.renderingAttributesValidator != nil
+        else { return }
+        isValidatingVisibleRenderingAttributes = true
+        defer { isValidatingVisibleRenderingAttributes = false }
+        let controller = layoutManager.textViewportLayoutController
+        if updateLayout {
+            // Same native layout as the full pass (see there): TextKit does not
+            // reliably re-run the validator for fragments this layout brings in.
+            let wasRestoring = isRestoringViewport
+            isRestoringViewport = true
+            controller.layoutViewport()
+            isRestoringViewport = wasRestoring
+        }
+        guard let viewportRange = controller.viewportRange else { return }
+        let origin = view.textContainerOrigin
+        let visible = view.visibleRect.offsetBy(dx: -origin.x, dy: -origin.y)
+        var restyled = NSRect.null
+        layoutManager.enumerateTextLayoutFragments(
+            from: viewportRange.location,
+            options: []
+        ) { fragment in
+            // Same bounds as the full pass: never walk an unlaid tail.
+            guard fragment.rangeInElement.location.compare(viewportRange.endLocation) == .orderedAscending
+            else { return false }
+            let frame = fragment.layoutFragmentFrame
+            guard frame.minY <= visible.maxY else { return false }
+            guard frame.intersects(visible), renderingCoordinator.needsStyle(fragment) else { return true }
+            renderingCoordinator.style(fragment: fragment, in: layoutManager)
+            restyled = restyled.union(frame)
+            return true
+        }
+        if !restyled.isNull {
+            view.setNeedsDisplay(restyled.offsetBy(dx: origin.x, dy: origin.y))
+        }
+        captureVisibleDecorationState()
     }
 
     private func validateVisibleRenderingAttributes(

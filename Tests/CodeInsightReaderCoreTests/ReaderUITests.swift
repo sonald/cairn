@@ -50,7 +50,9 @@ func scrollingRendersNewlyVisibleSyntaxColors() throws {
     reader.view.textLayoutManager?.textViewportLayoutController.layoutViewport()
     window.displayIfNeeded()
 
-    #expect(reader.renderingCoordinator.styledFragmentCount > before)
+    // Fragments may already carry current attributes from earlier validation;
+    // scrolling republishes only fragments that lack them, so assert the
+    // visible result rather than a republish count.
     #expect(renderedColors(in: reader, intersecting: lastKeyword).contains { colorsEqual(
         $0,
         ReaderTheme(settings: ReaderSettings()).color(for: .keyword)

@@ -315,3 +315,69 @@ func readonlyInvalidationReorderedFoldMetadataPreservesTheVisibleProjection() th
     #expect(reader.view.string == text)
     #expect(reader.projectionInstallCount == installs)
 }
+
+private func readonlyScrollDocument() throws -> ReaderDocument {
+    let source = (0..<400).map { "fn item\($0)(value: i32) -> i32 {\n    value + \($0)\n}\n" }.joined()
+    return try DocumentLoader(source: { _ in Array(source.utf8) })
+        .load(file: URL(fileURLWithPath: "/readonly-scroll.rs")).document
+}
+
+@MainActor
+private func readonlyScroll(_ reader: ReaderTextView, window: NSWindow, to y: CGFloat) throws {
+    let clipView = try #require(reader.view.enclosingScrollView?.contentView)
+    clipView.scroll(to: NSPoint(x: 0, y: y))
+    window.contentView?.layoutSubtreeIfNeeded()
+    window.displayIfNeeded()
+}
+
+@MainActor @Test
+func readonlyScrollRepublishesOnlyNewlyVisibleFragments() throws {
+    let document = try readonlyScrollDocument()
+    let (reader, window) = readonlyInvalidationReader(document)
+    defer { window.close() }
+    try readonlyScroll(reader, window: window, to: 600)
+    let manager = try #require(reader.view.textLayoutManager)
+    let lineHeight = try #require(manager.textLayoutFragment(for: manager.documentRange.location))
+        .layoutFragmentFrame.height
+    ReaderWorkCounters.setEnabled(true)
+    defer { ReaderWorkCounters.setEnabled(false) }
+    let before = ReaderWorkCounters.snapshot().renderingAttributeUpdatedUTF16Units
+    let steps = 20
+    for step in 1...steps {
+        try readonlyScroll(reader, window: window, to: 600 + CGFloat(step) * lineHeight)
+    }
+    // A one-line scroll brings in about one short line; republishing the
+    // whole viewport on every scroll is the regression this guards against.
+    let perStep = (ReaderWorkCounters.snapshot().renderingAttributeUpdatedUTF16Units - before) / steps
+    #expect(perStep < 120, "republished \(perStep) UTF-16 units per one-line scroll")
+}
+
+@MainActor @Test
+func readonlyScrollStylesFragmentsTextKitValidatedOutsideTheViewport() throws {
+    let document = try readonlyScrollDocument()
+    let (reader, window) = readonlyInvalidationReader(document)
+    defer { window.close() }
+    let manager = try #require(reader.view.textLayoutManager)
+    let content = try #require(manager.textContentManager)
+    let targetLine = 901
+    let lineStart = document.lineTable.lineStarts[targetLine - 1]
+    let target = try #require(content.location(
+        content.documentRange.location,
+        offsetBy: Int(lineStart)
+    ))
+    manager.ensureLayout(for: NSTextRange(location: target))
+    let fragment = try #require(manager.textLayoutFragment(for: target))
+    #expect(fragment.layoutFragmentFrame.minY > 10_000)
+    // TextKit may validate far-away fragments during layout. The coordinator
+    // skips them there, and TextKit will not ask again when they scroll in.
+    let validator = try #require(manager.renderingAttributesValidator)
+    validator(manager, fragment)
+    try readonlyScroll(reader, window: window, to: fragment.layoutFragmentFrame.minY)
+    let span = try #require(document.highlightSpans.first {
+        $0.kind == .functionName && $0.range.lowerBound >= lineStart
+    })
+    #expect(document.lineTable.lineColumn(at: span.range.lowerBound).map { Int($0.line) } == targetLine)
+    let color = try #require(readonlyForeground(at: Int(span.range.lowerBound), reader: reader))
+    let expected = ReaderTheme(settings: ReaderSettings()).color(for: .functionName)
+    #expect(readonlyRGBA(color) == readonlyRGBA(expected))
+}
