@@ -2722,6 +2722,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 menuItem.applyKeyChord(chord)
             }
             menuItem.target = self
+            seekMenuFormItem = menuItem
             item.menuFormRepresentation = menuItem
         case Self.settingsItemIdentifier:
             item.label = localized("main.settings")
@@ -2748,6 +2749,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
                 menuItem.applyKeyChord(chord)
             }
             menuItem.target = self
+            settingsMenuFormItem = menuItem
             item.menuFormRepresentation = menuItem
         case Self.profileItemIdentifier:
             item.label = localized("main.profile")
@@ -3826,6 +3828,40 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// Shared key binding table (K-R3.7): every window reads the app-wide
     /// table; the default scheme stands in when no delegate is installed.
     var keyBindings: KeyBindingTable { appKeyBindingTable() }
+
+    /// Toolbar menu-form items whose keycaps mirror the shared table.
+    private var seekMenuFormItem: NSMenuItem?
+    private var settingsMenuFormItem: NSMenuItem?
+
+    /// K-R3.6: after an override commit, re-apply the toolbar menu-form
+    /// keycaps. (The main menu is rebuilt by the application delegate.)
+    func applyKeyBindings() {
+        if let item = seekMenuFormItem,
+           case let .keyboard(chord)? = keyBindings.bindings(for: .fileQuickOpen).first
+        {
+            item.applyKeyChord(chord)
+        }
+        if let item = settingsMenuFormItem,
+           case let .keyboard(chord)? = keyBindings.bindings(for: .appSettings).first
+        {
+            item.applyKeyChord(chord)
+        }
+    }
+
+    /// Self-test access to a toolbar item's menu-form representation: returns
+    /// the stored live item when available so override tests can observe the
+    /// in-place update instead of a freshly built one.
+    func selfTestToolbarMenuFormItem(identifier: String) -> NSMenuItem? {
+        if identifier == "Symbols", let item = seekMenuFormItem { return item }
+        if identifier == "Settings", let item = settingsMenuFormItem { return item }
+        let toolbar = NSToolbar(identifier: "self-test")
+        toolbar.delegate = self
+        return self.toolbar(
+            toolbar,
+            itemForItemIdentifier: NSToolbarItem.Identifier(identifier),
+            willBeInsertedIntoToolbar: false
+        )?.menuFormRepresentation
+    }
 
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
         guard let file = model.selectedFile,

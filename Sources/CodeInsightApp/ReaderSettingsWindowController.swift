@@ -48,6 +48,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
     private let hostingController: NSHostingController<SettingsView>
     private let derivedDataStore: ReaderDerivedDataStore
     private let trustModel: TrustListModel
+    let keyBindingsModel: KeyBindingSettingsModel
     private let onRevoke: @MainActor (URL) async -> Void
     private let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
     private let onChange: @MainActor (ReaderSettings) -> Void
@@ -59,6 +60,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         settings: ReaderSettings,
         derivedDataStore: ReaderDerivedDataStore = ReaderDerivedDataStore(),
         trustModel: TrustListModel,
+        keyBindingsModel: KeyBindingSettingsModel? = nil,
         onRevoke: @escaping @MainActor (URL) async -> Void,
         onClearCache: @escaping @MainActor () async -> MaterializedCacheClearOutcome,
         onChange: @escaping @MainActor (ReaderSettings) -> Void
@@ -66,6 +68,9 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         currentSettings = settings
         self.derivedDataStore = derivedDataStore
         self.trustModel = trustModel
+        let bindingsModel = keyBindingsModel
+            ?? KeyBindingSettingsModel(table: KeyBindingTable(scheme: .default)) { _ in }
+        self.keyBindingsModel = bindingsModel
         self.onRevoke = onRevoke
         self.onClearCache = onClearCache
         self.onChange = onChange
@@ -74,6 +79,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
                 settings: settings,
                 derivedDataStore: derivedDataStore,
                 trustModel: trustModel,
+                keyBindingsModel: bindingsModel,
                 onRevoke: onRevoke,
                 onClearCache: onClearCache,
                 onChange: onChange
@@ -101,6 +107,7 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
         self.init(
             settings: settings,
             trustModel: trustModel,
+            keyBindingsModel: KeyBindingSettingsModel(table: KeyBindingTable(scheme: .default)) { _ in },
             onRevoke: { url in
                 await onRevoke(url)
                 await trustModel.refresh(from: exactCoordinator.trustRegistry)
@@ -163,10 +170,25 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
             settings: settings,
             derivedDataStore: derivedDataStore,
             trustModel: trustModel,
+            keyBindingsModel: keyBindingsModel,
             onRevoke: onRevoke,
             onClearCache: onClearCache,
             onChange: onChange
         )
+    }
+
+    // MARK: Key bindings self-test read points (K0b)
+
+    var selfTestKeybindingsSelectedTab: String { keyBindingsModel.selectedTab.rawValue }
+
+    var selfTestKeybindingVisibleRowCount: Int { keyBindingsModel.visibleCommandCount }
+
+    func selfTestKeycapTexts(commandID: String) -> [String] {
+        keyBindingsModel.keycapTexts(commandID: commandID)
+    }
+
+    var selfTestKeybindingConflictVisible: Bool {
+        keyBindingsModel.pendingConflict != nil
     }
 
     var selfTestVisualControlGeometry: (
@@ -255,6 +277,7 @@ private struct SettingsView: View {
     let settings: ReaderSettings
     let derivedDataStore: ReaderDerivedDataStore
     let trustModel: TrustListModel
+    @Bindable var keyBindingsModel: KeyBindingSettingsModel
     let onRevoke: @MainActor (URL) async -> Void
     let onClearCache: @MainActor () async -> MaterializedCacheClearOutcome
     let onChange: @MainActor (ReaderSettings) -> Void
@@ -262,9 +285,10 @@ private struct SettingsView: View {
     @State private var confirmsCacheClear = false
 
     var body: some View {
-        TabView {
+        TabView(selection: $keyBindingsModel.selectedTab) {
             ReaderSettingsView(settings: settings, derivedDataStore: derivedDataStore, onChange: onChange)
                 .tabItem { Label(localized("settings.reader"), systemImage: "textformat") }
+                .tag(KeyBindingSettingsModel.Tab.reader)
             VStack(spacing: 12) {
                 TrustSettingsView(
                     trustModel: trustModel,
@@ -299,9 +323,13 @@ private struct SettingsView: View {
                 }
             }
             .tabItem { Label(localized("settings.exact"), systemImage: "checkmark.shield") }
+            .tag(KeyBindingSettingsModel.Tab.exact)
+            KeybindingsSettingsView(model: keyBindingsModel)
+                .tabItem { Label(localized("settings.keybindings"), systemImage: "keyboard") }
+                .tag(KeyBindingSettingsModel.Tab.keybindings)
         }
         .padding()
-        .frame(width: 600, height: 620)
+        .frame(width: 640, height: 640)
     }
 }
 

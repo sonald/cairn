@@ -751,6 +751,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         self.sharedTrustRegistry = sharedTrustRegistry
         self.sharedMaterializer = sharedMaterializer
         super.init()
+        loadKeyBindingOverrides()
         NotificationCenter.default.addObserver(self,
             selector: #selector(readerFontEnvironmentChanged),
             name: .readerFontEnvironmentDidChange, object: ReaderFontResolver.shared)
@@ -5776,6 +5777,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let settingsController = ReaderSettingsWindowController(
             settings: readerSettings,
             trustModel: settingsTrustModel,
+            keyBindingsModel: KeyBindingSettingsModel(table: keyBindingTable) { [weak self] table in
+                self?.applyKeyBindings(table)
+            },
             onRevoke: { repositoryURL in
                 try? await trustModel.revokeRepositoryTrust(repositoryURL)
                 await settingsTrustModel.refresh(from: coordinator.trustRegistry)
@@ -11173,6 +11177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
                 settings: readerSettings,
                 derivedDataStore: readerDerivedDataStore,
                 trustModel: trustListModel,
+                keyBindingsModel: keyBindingSettingsModel,
                 onRevoke: { [weak self] repositoryURL in
                     await self?.revokeRepositoryTrustAppLevel(repositoryURL)
                 },
@@ -11666,8 +11671,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     /// Effective bindings: the default scheme plus the user override layer.
     /// Every menu item, hidden alternate, toolbar menu representation, reader
     /// gesture, and option-only key monitor resolves through this table.
-    /// K0b replaces wholesale assignment with override-layer APIs.
     var keyBindingTable = KeyBindingTable(scheme: .default)
+    /// K-R1.4/K-R3.7: overrides persist globally and every window shares the
+    /// committed table.
+    private let keyBindingStore = KeyBindingStore(defaults: .standard)
+
+    /// Loads persisted overrides into the effective table at init.
+    private func loadKeyBindingOverrides() {
+        var table = keyBindingTable
+        for (id, bindings) in keyBindingStore.load() {
+            table.setBindings(bindings, for: id)
+        }
+        keyBindingTable = table
+    }
+
+    /// K-R3.6: applies a new table everywhere — persists the override layer,
+    /// rebuilds the main menu (hidden alternates included), and refreshes
+    /// every window's gesture/toolbar references and the settings page.
+    func applyKeyBindings(_ table: KeyBindingTable) {
+        keyBindingTable = table
+        keyBindingStore.save(table.overrides)
+        keyBindingSettingsModel.applyCommitted(table)
+        NSApplication.shared.mainMenu = makeMainMenu()
+        for controller in projectWindows {
+            controller.applyKeyBindings()
+        }
+    }
+
+    /// Settings-page state for the key bindings tab; commits flow back
+    /// through `applyKeyBindings`.
+    private(set) lazy var keyBindingSettingsModel = KeyBindingSettingsModel(
+        table: keyBindingTable,
+        onCommit: { [weak self] table in
+            self?.applyKeyBindings(table)
+        }
+    )
 
     /// One command's dispatch: the selector plus where the action goes. The
     /// key monitor (`handleMonitoredKeyEquivalent`) uses the same mapping as

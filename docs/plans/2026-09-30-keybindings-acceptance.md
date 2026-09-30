@@ -67,7 +67,9 @@
 ### CI
 
 - `expected_main_test_count` 1247 → 1255（新增 8 条测试：模型 3 + App 菜单 4 + 手势 1）。
-- 完整 CI（`CODEX_SANDBOX=1 bash scripts/ci.sh`，含新门禁）：见下文结果记录。
+- 完整 CI（`CODEX_SANDBOX=1 bash scripts/ci.sh`）通过，exit 0；
+  `PASS: swift test total=1263 (main=1255 isolated=2 panels=2 mouse=2 fonts=2)`，
+  新增门禁输出 `PASS: App 层快捷键全部来自定义表`。
 
 ### 原生验证
 
@@ -83,3 +85,70 @@
   - `optionOnlyBindingDispatchesThroughMonitor`：合成 ⌥Z 事件实际切换了自动换行偏好；
   - `mainMenuKeyEquivalentsMatchKeyBindingTable`：菜单 ↔ 定义表双向一致。
   实按与视觉抽查留给统一验收。
+
+---
+
+## K0b 用户覆盖与设置页
+
+日期：2026-09-30
+
+### 做了什么
+
+- 模型层（`KeyBindings.swift`）：
+  - 覆盖层 `setBindings(_:for:)` / `reset(_:)` / `resetAll()`；覆盖只在与默认不同时保留，
+    设回默认即删除（K-R1.4）；`modifiedCommands` 供"已修改 N"筛选。
+  - `validate(_:for:) -> KeyBindingValidation`：`.locked`（⌘Q/⌘W/⌘C/⌘V/⌘A/⌘X/⌘,）、
+    `.needsModifier`（K-R2.1 / K-R2.4）、`.duplicateOnSameCommand`、`.conflict(with:)`、`.ok`
+    （K-R2.1–K-R2.4）。语义注记：计划测试表里"⌥Z → .ok"按"⌥ 组合本身合法（未被占用时）"落实。
+  - `replace(_:for:takingFrom:)` 原子地把绑定从原命令移除并加到新命令，两条命令都进覆盖层
+    （失去全部绑定的命令记录为空数组覆盖，即"未设置"）。
+  - `KeyBindingStore`：UserDefaults 持久化，键 `keyBindings.v1.overrides`，
+    JSON `[CommandID: [规范串]]`；未知命令 ID 整条丢弃、坏字符串丢弃保留其余；支持注入独立 suite。
+- 应用层：`AppDelegate.loadKeyBindingOverrides()` 启动时装载覆盖；`applyKeyBindings(_:)`
+  保存 → 更新设置页模型 → 重建主菜单（`NSApplication.shared.mainMenu = makeMainMenu()` 先例）→
+  逐窗口刷新（K-R3.6/K-R3.7）；`MainWindowController.applyKeyBindings()` 原地更新工具栏
+  Seek/Settings 菜单表示的键帽。
+- 设置页（新文件 `KeyBindingSettings.swift` + `ReaderSettingsWindowController` 接线）：
+  - TabView 新增"快捷键"页（`keyboard` 图标，K-R3.1），TabView 选择改为状态驱动（self-test 读取口）。
+  - 单列列表按 `CommandGroup` 分组、`LazyVStack(pinnedViews: [.sectionHeaders])` 吸顶分组标题（K1=A）；
+    行内：修改圆点、标题、键帽（多组并排）、悬停"+"（再加一组）、已修改"恢复"、锁定行锁形图标、
+    固定键只读填充键帽（K-R3.2）。ForEach 全部用 `CommandID` / `KeyBinding` 的稳定 ID。
+  - 录制：`KeyChordRecordingSession` 用 `NSEvent.addLocalMonitorForEvents` 截获 `keyDown`/
+    `leftMouseDown`；修饰键单独按忽略、Esc 取消、⌫ 清除这一组；手势行读点击修饰键；
+    录制期间事件被吞掉，菜单快捷键不触发（K-R3.3）。
+  - 冲突行内黄色提示条 + 替换/取消（K2=A）；锁定与缺修饰键的红字显示在行下。
+  - 顶部搜索框、"按键搜索"按钮（一次性录制 → 键帽胶囊，再点清除）、"全部 / 已修改 N"胶囊（K-R3.4）。
+  - 底部说明 + "全部恢复默认"（确认弹层，K-R3.5）。
+  - self-test 读取口：当前页、可见行数、某命令键帽文字、冲突提示可见性。
+- 新增中英双语本地化键 35 条（`settings.keybindings`、`keybinding.*`），
+  `python3 scripts/check-localizations.py` 通过。
+
+### 测试与注入证据
+
+| 测试 | 注入方法 | 变红输出 |
+|---|---|---|
+| `overridesStoreOnlyDifferencesFromDefaults` | `setBindings` 改为始终保存覆盖 | `table.overrides[.fileQuickOpen] == nil` 失败 |
+| `validationRejectsLockedAndModifierlessChords` | 删除 `.locked` 分支 | ⌘Q / ⌘, 两条 validate 断言失败 |
+| `replaceMovesBindingAtomically` | `replace` 不从原命令移除绑定 | `!bindings(findInProject).contains(...)` 等三条失败 |
+| `clickGestureRequiresModifierAndChecksConflicts` | 手势分支直接返回 `.ok`（跳过冲突检查） | `redefined.validate(...) == .conflict(...)` 失败 |
+| `keyBindingStoreDropsUnknownCommandsAndKeepsTheRest` | load() 发现任一坏字符串就丢弃整个存储 | viewWrapLines / fileQuickOpen / readerGestureDefinition 三条加载断言失败 |
+| `overrideRebuildsMenusInEveryWindow` | `applyKeyBindings` 只刷新 `projectWindows.prefix(1)` | `itemsAfter.allSatisfy { keyEquivalent == "b" }` 失败 |
+| `commandPaletteShowsOverriddenShortcut` | `applyKeyBindings` 不重建主菜单 | `after.shortcut == "⌘B"` 失败（面板仍是 ⌘N） |
+| `recorderSwallowsMenuKeyEquivalentsWhileRecording` | 录制会话对 ⌘R 事件直接放行 | `!probe.hit` 失败且冲突未出现 |
+
+注：测试 6/7/8 触碰 `NSApp` 全局状态（delegate / mainMenu / 标准偏好），已放入
+`@Suite(.serialized)`；`NSApp` 全局变量需先访问一次 `NSApplication.shared` 才非 nil。
+
+### CI
+
+- `expected_main_test_count` 1255 → 1263（新增 8 条：模型 5 + App 3）。
+- 完整 CI（`CODEX_SANDBOX=1 bash scripts/ci.sh`）通过，exit 0；
+  `PASS: swift test total=1271 (main=1263 isolated=2 panels=2 mouse=2 fonts=2)`，
+  含 AppKit/SwiftUI 禁令检查与全部 app self-test。
+
+### 原生验证
+
+**受限记录**：与 K0a 相同，宿主未授予屏幕录制与辅助访问权限，设置页浅色/深色截图
+（验收清单 1–6）无法在本环境完成；SwiftUI 页面的实渲染走查留待统一验收。
+模型与刷新链路由上表 8 条测试覆盖（覆盖持久化、菜单/工具栏/命令面板同步、录制吞键）。
+

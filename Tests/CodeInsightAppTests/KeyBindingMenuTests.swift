@@ -291,3 +291,164 @@ func optionOnlyBindingDispatchesThroughMonitor() throws {
     // ⌥⇧Z no longer matches the ⌥Z chord (⇧ alone is not a valid recording).
     #expect(!delegate.handleMonitoredKeyEquivalent(try event([.option, .shift], character: "z")))
 }
+
+// MARK: K0b — overrides applied everywhere, palette sync, recording swallow
+
+
+/// K-R3.6/K-R3.7: an override commit rebuilds the main menu and refreshes
+/// every window's toolbar menu-form keycaps — not just the active window.
+@Suite(.serialized)
+    @MainActor
+    struct KeyBindingOverrideTests {
+        @Test
+        func overrideRebuildsMenusInEveryWindow() throws {
+        let delegate = AppDelegate(startedAt: .now)
+        NSApplication.shared.delegate = delegate
+        defer { NSApplication.shared.delegate = nil }
+        NSApplication.shared.mainMenu = delegate.makeMainMenu()
+        defer { NSApplication.shared.mainMenu = nil }
+        let originalOverrides = UserDefaults.standard.object(
+            forKey: KeyBindingStore.overridesKey)
+        defer {
+            if let originalOverrides {
+                UserDefaults.standard.set(
+                    originalOverrides, forKey: KeyBindingStore.overridesKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: KeyBindingStore.overridesKey)
+            }
+        }
+        #expect(NSApplication.shared.sendAction(
+            NSSelectorFromString("newWindow:"), to: delegate, from: nil
+        ))
+        #expect(NSApplication.shared.sendAction(
+            NSSelectorFromString("newWindow:"), to: delegate, from: nil
+        ))
+        let first = try #require(delegate.selfTestProjectWindow(0))
+        let second = try #require(delegate.selfTestProjectWindow(1))
+        defer { first.close(); second.close() }
+
+        // The live toolbar menu-form items carry ⌘P before the override.
+        let itemsBefore = [first, second].map {
+            $0.selfTestToolbarMenuFormItem(identifier: "Symbols")
+        }
+        #expect(itemsBefore.allSatisfy { $0?.keyEquivalent == "p" })
+
+        var table = delegate.keyBindingTable
+        table.setBindings(
+            [.keyboard(KeyChord(modifiers: [.command], key: .character("b")))],
+            for: .fileQuickOpen
+        )
+        delegate.applyKeyBindings(table)
+
+        // The rebuilt main menu carries the new chord.
+        func descendants(_ m: NSMenu) -> [NSMenuItem] {
+            m.items.flatMap { [$0] + ($0.submenu.map(descendants) ?? []) }
+        }
+        let mainMenu = try #require(NSApp.mainMenu)
+        let quickOpenItems = descendants(mainMenu)
+            .filter { $0.action == NSSelectorFromString("quickOpen:") }
+        #expect(quickOpenItems.count == 1)
+        #expect(quickOpenItems.first?.keyEquivalent == "b")
+
+        // Every window's toolbar reference was updated in place.
+        let itemsAfter = [first, second].map {
+            $0.selfTestToolbarMenuFormItem(identifier: "Symbols")
+        }
+        #expect(itemsAfter.allSatisfy { $0?.keyEquivalent == "b" })
+    }
+
+    /// The command palette reads the live main menu, so an override shows up in
+    /// the palette's shortcut column without extra wiring. New Window stays
+    /// enabled without a project, so the palette lists it in this test.
+    @Test
+    func commandPaletteShowsOverriddenShortcut() throws {
+        let delegate = AppDelegate(startedAt: .now)
+        NSApplication.shared.delegate = delegate
+        defer { NSApplication.shared.delegate = nil }
+        NSApplication.shared.mainMenu = delegate.makeMainMenu()
+        defer { NSApplication.shared.mainMenu = nil }
+        let originalOverrides = UserDefaults.standard.object(
+            forKey: KeyBindingStore.overridesKey
+        )
+        defer {
+            if let originalOverrides {
+                UserDefaults.standard.set(
+                    originalOverrides, forKey: KeyBindingStore.overridesKey)
+            } else {
+                UserDefaults.standard.removeObject(forKey: KeyBindingStore.overridesKey)
+            }
+        }
+
+        func newRow() -> PalettePanel.Row? {
+            PalettePanel.commandRows(in: NSApp.mainMenu)
+                .first { $0.title.hasSuffix(localized("app.menu.new.window")) }
+        }
+        let before = try #require(newRow())
+        #expect(before.shortcut == "⌘N")
+
+        var table = delegate.keyBindingTable
+        table.setBindings(
+            [.keyboard(KeyChord(modifiers: [.command], key: .character("b")))],
+            for: .fileNewWindow
+        )
+        delegate.applyKeyBindings(table)
+
+        let after = try #require(newRow())
+        #expect(after.shortcut == "⌘B")
+    }
+
+    /// While a recorder is active it swallows key events before menu dispatch:
+    /// a ⌘R probe command does not fire, the chord is captured, and the model
+    /// surfaces the conflict against Refresh Index.
+        @Test
+        func recorderSwallowsMenuKeyEquivalentsWhileRecording() throws {
+        // NSApp the global is only populated after NSApplication.shared runs.
+        _ = NSApplication.shared
+        final class Probe: NSObject {
+            var hit = false
+            @objc func fire(_ sender: Any?) { hit = true }
+        }
+        let probe = Probe()
+        let probeItem = NSMenuItem(
+            title: "probe", action: #selector(Probe.fire(_:)), keyEquivalent: "r"
+        )
+        probeItem.target = probe
+        let probeMenu = NSMenu()
+        probeMenu.addItem(probeItem)
+        let probeRoot = NSMenuItem()
+        probeRoot.submenu = probeMenu
+        let menu = NSMenu()
+        menu.addItem(probeRoot)
+        NSApp.mainMenu = menu
+        defer { NSApp.mainMenu = nil }
+
+        let delegate = AppDelegate(startedAt: .now)
+        let model = KeyBindingSettingsModel(table: delegate.keyBindingTable) { _ in }
+        model.beginRecording(command: .findInFile, slot: nil)
+        defer { model.endRecording() }
+
+        func commandR() throws -> NSEvent {
+            try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: .command,
+                timestamp: 0, windowNumber: 0, context: nil, characters: "r",
+                charactersIgnoringModifiers: "r", isARepeat: false, keyCode: 15
+            ))
+        }
+
+        // Recording: ⌘R is swallowed and captured; the conflict surfaces.
+        NSApp.sendEvent(try commandR())
+        #expect(!probe.hit)
+        #expect(model.pendingConflict?.command == .findInFile)
+        #expect(
+            model.pendingConflict?.binding
+                == .keyboard(KeyChord(modifiers: [.command], key: .character("r")))
+        )
+        #expect(model.pendingConflict?.other == .fileRefreshIndex)
+        #expect(model.rowError == nil)
+
+        // Control: without an active recorder the same event reaches the menu.
+        model.cancelConflict()
+        NSApp.sendEvent(try commandR())
+        #expect(probe.hit)
+    }
+}

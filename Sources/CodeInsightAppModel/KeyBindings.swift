@@ -420,13 +420,26 @@ public extension KeyBindingScheme {
     }()
 }
 
+/// K-R2.1–K-R2.4 validation result for a recorded binding.
+public enum KeyBindingValidation: Equatable, Sendable {
+    case ok
+    /// No ⌘/⌃/⌥ modifier (K-R2.1) or a modifier-less click (K-R2.4).
+    case needsModifier
+    /// Occupies a locked system chord (K-R2.2).
+    case locked
+    /// The command already carries this exact binding.
+    case duplicateOnSameCommand
+    /// Another command already carries the binding.
+    case conflict(with: CommandID)
+}
+
 /// Effective bindings for a scheme: defaults plus the override layer. The
 /// model stays AppKit-free; NSEvent conversion lives in the App target.
 public struct KeyBindingTable: Sendable {
     public var displayString: @Sendable (KeyBinding) -> String
 
     private let scheme: KeyBindingScheme
-    private var overrides: [CommandID: [KeyBinding]]
+    public private(set) var overrides: [CommandID: [KeyBinding]]
     private let definitionsByID: [CommandID: CommandDefinition]
 
     public init(scheme: KeyBindingScheme, overrides: [CommandID: [KeyBinding]] = [:]) {
@@ -452,6 +465,90 @@ public struct KeyBindingTable: Sendable {
     /// Effective bindings: the override when present, otherwise the defaults.
     public func bindings(for id: CommandID) -> [KeyBinding] {
         overrides[id] ?? definitionsByID[id]?.defaults ?? []
+    }
+
+    /// Commands whose effective bindings differ from the scheme defaults.
+    public var modifiedCommands: [CommandID] {
+        scheme.commands
+            .filter { command in overrides[command.id] != nil }
+            .map(\.id)
+    }
+
+    /// K-R1.4: an override is only kept while it differs from the defaults;
+    /// setting bindings back to the default deletes the override.
+    public mutating func setBindings(_ bindings: [KeyBinding], for id: CommandID) {
+        if bindings.isEmpty, definitionsByID[id]?.defaults.isEmpty ?? true {
+            overrides[id] = nil
+        } else if bindings == definitionsByID[id]?.defaults {
+            overrides[id] = nil
+        } else {
+            overrides[id] = bindings
+        }
+    }
+
+    /// Drops one command's override (K-R2.3 "恢复").
+    public mutating func reset(_ id: CommandID) {
+        overrides[id] = nil
+    }
+
+    /// Restores every command to the scheme defaults.
+    public mutating func resetAll() {
+        overrides = [:]
+    }
+
+    /// K-R2.3 "替换": removes `binding` from `other` and adds it to `id` as
+    /// one atomic step, so both commands end up in the override layer.
+    public mutating func replace(
+        _ binding: KeyBinding, for id: CommandID, takingFrom other: CommandID
+    ) {
+        var otherBindings = bindings(for: other).filter { $0 != binding }
+        setBindings(otherBindings, for: other)
+        var ownBindings = bindings(for: id)
+        ownBindings.append(binding)
+        setBindings(ownBindings, for: id)
+    }
+
+    /// Locked system chords (K-R2.2): occupying commands cannot be rebound
+    /// and no other command may record them.
+    public static let lockedKeyboardChords: Set<KeyChord> = [
+        KeyChord(modifiers: [.command], key: .character("q")),
+        KeyChord(modifiers: [.command], key: .character("w")),
+        KeyChord(modifiers: [.command], key: .character("c")),
+        KeyChord(modifiers: [.command], key: .character("v")),
+        KeyChord(modifiers: [.command], key: .character("a")),
+        KeyChord(modifiers: [.command], key: .character("x")),
+        KeyChord(modifiers: [.command], key: .character(",")),
+    ]
+
+    public func isLocked(_ binding: KeyBinding) -> Bool {
+        guard let chord = binding.chord, case .keyboard = binding else { return false }
+        return Self.lockedKeyboardChords.contains(chord)
+    }
+
+    /// Recording validation (K-R2.1–K-R2.4). Keyboard chords need ⌘/⌃/⌥;
+    /// click gestures need at least one modifier and conflict only among
+    /// themselves.
+    public func validate(_ binding: KeyBinding, for id: CommandID) -> KeyBindingValidation {
+        switch binding {
+        case let .keyboard(chord):
+            if Self.lockedKeyboardChords.contains(chord) { return .locked }
+            if !chord.modifiers.contains(.command)
+                && !chord.modifiers.contains(.control)
+                && !chord.modifiers.contains(.option)
+            {
+                return .needsModifier
+            }
+        case let .click(modifiers):
+            if modifiers.isEmpty { return .needsModifier }
+        case .fixed:
+            // Fixed panel keys are read-only and never re-recorded.
+            return .locked
+        }
+        if bindings(for: id).contains(binding) { return .duplicateOnSameCommand }
+        if let other = commands(boundTo: binding).first(where: { $0 != id }) {
+            return .conflict(with: other)
+        }
+        return .ok
     }
 
     /// Every command whose effective bindings contain `binding`, in scheme order.
@@ -533,5 +630,80 @@ public struct KeyBindingTable: Sendable {
             case .tab: "⇥"
             }
         }
+    }
+}
+
+/// K-R1.4 persistence: the override layer as JSON
+/// `[CommandID.rawValue: [canonical chord strings]]` in UserDefaults.
+/// Unknown command IDs and unparseable strings are dropped individually so
+/// one bad entry never discards the rest of the user's customizations.
+public struct KeyBindingStore: Sendable {
+    public static let overridesKey = "keyBindings.v1.overrides"
+
+    private let defaults: @Sendable () -> UserDefaults
+
+    public init(defaults: @autoclosure @escaping @Sendable () -> UserDefaults) {
+        self.defaults = defaults
+    }
+
+    private var userDefaults: UserDefaults { defaults() }
+
+    public func load() -> [CommandID: [KeyBinding]] {
+        guard let raw = userDefaults.string(forKey: Self.overridesKey),
+              let data = raw.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else { return [:] }
+        var result: [CommandID: [KeyBinding]] = [:]
+        for (rawID, rawBindings) in decoded {
+            let id = CommandID(rawValue: rawID)
+            guard KeyBindingScheme.default.commands.contains(where: { $0.id == id }) else {
+                continue
+            }
+            var bindings: [KeyBinding] = []
+            for rawBinding in rawBindings {
+                if let chord = KeyChord(canonicalString: rawBinding) {
+                    bindings.append(.keyboard(chord))
+                } else if let click = Self.parseClick(rawBinding) {
+                    bindings.append(.click(click))
+                }
+                // Unparseable strings are dropped; the rest survive.
+            }
+            result[id] = bindings
+        }
+        return result
+    }
+
+    public func save(_ overrides: [CommandID: [KeyBinding]]) {
+        let encoded: [String: [String]] = Dictionary(
+            uniqueKeysWithValues: overrides.map { id, bindings in
+                (
+                    id.rawValue,
+                    bindings.map { binding -> String in
+                        switch binding {
+                        case let .keyboard(chord), let .fixed(chord): chord.canonicalString
+                        case let .click(modifiers):
+                            modifiers.map(\.rawValue).sorted().joined(separator: "+") + "+click"
+                        }
+                    }
+                )
+            }
+        )
+        guard let data = try? JSONEncoder().encode(encoded),
+              let raw = String(data: data, encoding: .utf8)
+        else { return }
+        userDefaults.set(raw, forKey: Self.overridesKey)
+    }
+
+    private static func parseClick(_ raw: String) -> Set<KeyChord.Modifier>? {
+        guard raw.hasSuffix("+click") else { return nil }
+        let parts = raw.dropLast("+click".count)
+            .components(separatedBy: "+")
+            .filter { !$0.isEmpty }
+        var modifiers: Set<KeyChord.Modifier> = []
+        for part in parts {
+            guard let modifier = KeyChord.Modifier(rawValue: part) else { return nil }
+            modifiers.insert(modifier)
+        }
+        return modifiers
     }
 }
