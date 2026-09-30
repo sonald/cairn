@@ -62,7 +62,7 @@ CI：见文末"CI"一节。
 - **Safe 模式受限提示没有做原生截图。** 说明行只在精确层返回空结果、同时有降级结果时出现，这个组合在测试项目里没有自然出现过。该路径由单元测试覆盖（`hoverNotesExplainMissingOrLimitedExactResults`）。
 - **悬浮跟踪的性能样本没有采。** 每个鼠标移动事件做的工作是：一次 `characterIndex(for:)`，一次单字形的 `firstRect`，按字节扫描单词边界，再对 highlight span 做一次二分查找。同一个符号内会命中缓存，不做全文档的工作，也不读文件。这是按代码推断的结论，没有实测数据。
 - **⌘+点击依赖符号不跳转（不是精确层卡住，不是本次引入）。** 验收时曾记为"rust-analyzer 一直不上报空闲，hover 和 ⌘+点击等满 30 秒超时"。这个结论是推断，后来实测推翻了。复查时用包装脚本记录 rust-analyzer 的全部 LSP 收发，在打包应用里开了 11 个会话（重启并恢复会话、隐藏启动、真实鼠标悬浮和 ⌘+点击）。每个会话都在启动后约 2 秒上报 `quiescent: true`，hover 都立即返回。截图 10 的现象另有原因：对 `u8::from_str_radix` 这类 std 方法 ⌘+点击时，应用根本没有发出 `textDocument/definition`。`ContextWindowModel.lookup` 在本地索引找不到候选时直接返回，精确升级在这之后才启动，而 std 不在本地索引里。对项目内符号（如 `Oid`）⌘+点击，会发出 definition 请求并立即跳转，候选显示"精确 · 直接"。依赖符号能否跳转是另一个待定的行为问题。当天 hover 超时的现象没有再出现，原因未知。
-- **仍然只开放 Rust（Q16）。** Python / TypeScript 未验收。
+- **本次验收只覆盖 Rust（Q16）。** Python / TypeScript 后来单独开放并验收，见 [2026-09-29-symbol-hover-python-ts-acceptance.md](2026-09-29-symbol-hover-python-ts-acceptance.md)。
 
 ## CI
 
