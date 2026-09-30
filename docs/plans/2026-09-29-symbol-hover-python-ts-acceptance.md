@@ -65,7 +65,7 @@
   所以打开文件一律走 ⌘P 快速打开；窗口位置用 System Events 调整。首次在阅读区悬浮前需要让
   Cairn 成为活跃应用（鼠标跟踪是 `.activeInActiveApp`，与 Rust 验收修复 3 一致）。
 
-  **补拍中发现的问题（未修复，记录待定）：**
+  **补拍中发现的问题（2026-09-30 已修复，见下方"修复"）：**
 
   - **A. 语法级正文不做 Markdown 转换，换行被吞。** `SymbolDoc.swift` 把 PEP 257 去缩进后的
     docstring、去掉 `*` 前缀的 JSDoc 原样当 Markdown 用，单个换行在 Markdown 里是软换行：
@@ -78,6 +78,40 @@
   - **C. TypeScript 保留 `(property)` / `(alias)` 这类前缀，Python 的 `(function)` / `(method)`
     会剥掉。** 与 VS Code 显示一致，可以接受；记录下来是因为两种语言的卡片风格不统一，是否统一
     待定。
+
+  **修复（2026-09-30）：**
+
+  - **A**：ReaderCore 新增 `markdownFromPythonDocstring`，按 pyright 的规则转换语法级
+    docstring：缩进行前面的换行改为硬换行，缩进保留为 `&nbsp;`，同一缩进的折行正文照常重排，
+    围栏代码不动。新增 `markdownFromJSDoc`，按 tsserver 的形态渲染块标签：描述在前，每个标签
+    单独成段，`*@param* \`id\` — …`；参数标签去掉 `{type}`、`[name=default]` 的方括号和默认值、
+    `- ` 分隔符；标签正文可跨行；围栏里的 `@` 不算标签。
+  - **B**：签名条改为按词折行（`.byWordWrapping`），软折行的续行加悬挂缩进，与服务器自己给的
+    换行区分开。
+  - **C**：声明种类前缀剥离对所有语言生效，种类允许含空格（`local var`、`enum member`）；
+    `(...args)` 这类以括号开头的签名仍不剥。`(alias)` 悬浮第二行的 `import readFileSync`
+    保留，它说明这是导入别名。
+
+  新增 3 条测试（CI 主批次期望数 1244 → 1247），另在已有的拆分测试里加了 TS 前缀用例：
+  `pythonSyntacticDocKeepsIndentedSectionLinesApartLikePyright`、
+  `typeScriptSyntacticDocRendersBlockTagsLikeTheLanguageServer`（期望值取自 2026-09-30 的真实
+  pyright / tsserver 输出）、`symbolDocCardWrapsLongSignaturesBetweenTokens`（真实 AppKit
+  排版，逐行检查折行点不在标识符中间）。原 `typeScriptSyntacticDocReadsJSDocSignaturesAndAggregates`
+  的 JSDoc 期望值改为新形态。故障注入：把签名条改回 `.byCharWrapping`，卡片折行测试变红，
+  报错指出 `ReadFileSyncOptio | nsWithBufferEncoding`。
+
+  修复后 `CODEX_SANDBOX=1 bash scripts/ci.sh` 全部通过（2026-09-30）：Swift 测试共 1255 条
+  （主批次 1247，isolated / panels / mouse / fonts 各 2），app 自检各通道 exit=0，折叠性能门槛
+  pass。昨天失败的 3 条滚动位置测试这次在完整 CI 里也通过了。
+
+  修复后重新打包，真实鼠标复验：
+
+  | # | 验证 | 结果 | 截图 |
+  |---|---|---|---|
+  | 8 | TS 降级态 `loadStore` | 通过。`@param` / `@deprecated` 分段，与精确层卡片（截图 04）排版一致 | 08 |
+  | 9 | TS 依赖 `readFileSync` 长签名 | 通过。在 `options?:` 与 `Buffer` 之后按词折行，续行悬挂缩进；`(alias)` 前缀已去掉 | 09 |
+  | 10 | TS 接口成员 `Store.id` | 通过。签名条显示 `Store.id: number` | 10 |
+  | 11 | Python 降级态 `format_name` | 通过。`Args:` / `Returns:` 下的条目分行缩进，与精确层（截图 01）一致 | 11 |
 
 - **打包应用冒烟（通过）**：`CAIRN_LIBGIT2=brew bash scripts/make-app.sh` 打包并启动
   成功（pid 可见、窗口进程在 System Events 进程列表中）。
@@ -101,7 +135,6 @@
 
 ## 遗留
 
-- 补拍中发现的 A / B / C 三个展示问题（见"原生验收"），未修复。
 - tsserver 对无文档成员返回空 hover、卡片回退语法层并显示限制说明的路径，只有 CLI 采样和单元测试，
   没有原生截图（测试项目里的成员都带文档注释）。
 - 滚动位置类测试在当前环境的不稳定需要单独排查（不在本计划范围）。2026-09-30 用
