@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn 上下文窗口类型直达原型</title>
+<style>
+/* Review frame (controls + notes) around one mock main window: reader on top, context window (Lens) docked below. */
+:root {
+  --page-bg: #F1EFE9; --page-fg: #1D2320; --page-muted: #5E6661; --page-line: #D7D2C6; --page-panel: #FAF9F5; --page-accent: #2B5849;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-serif: "New York", "Iowan Old Style", "Songti SC", Georgia, serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97; --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97; --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page-bg); color: var(--page-fg); font-family: var(--font-ui); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 16px 48px; display: grid; gap: 18px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; text-wrap: balance; }
+.lede { margin: 4px 0 0; color: var(--page-muted); max-width: 76ch; line-height: 1.55; font-size: 13.5px; }
+.lede code, .notes code { font-family: var(--font-code); font-size: 12px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 14px; background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; }
+.ctl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; flex-wrap: wrap; }
+.ctl > span { color: var(--page-muted); }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: 7px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: transparent; color: var(--page-fg); padding: 4px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--page-line); }
+.seg button[aria-pressed="true"] { background: var(--page-accent); color: var(--page-panel); }
+button:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 1px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+@media (max-width: 940px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.notes { background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; padding: 14px 16px; font-size: 12.5px; line-height: 1.55; display: grid; gap: 14px; min-width: 0; }
+.notes h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--page-muted); margin: 0 0 6px; font-weight: 600; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.notes kbd { font-family: var(--font-code); font-size: 11px; border: 1px solid var(--page-line); border-radius: 4px; padding: 0 4px; }
+.demo { display: grid; gap: 5px; }
+.demo button { font: inherit; font-size: 12.5px; text-align: left; border: 1px solid var(--page-line); background: transparent; color: var(--page-fg); border-radius: 7px; padding: 5px 9px; cursor: pointer; }
+.demo button:hover { border-color: var(--page-accent); }
+.demo small { color: var(--page-muted); display: block; font-size: 11.5px; }
+.log { font-family: var(--font-code); font-size: 11px; color: var(--page-muted); display: grid; gap: 2px; min-height: 90px; }
+.log div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log b { color: var(--page-fg); font-weight: 500; }
+.decide p { margin: 0 0 6px; color: var(--page-muted); }
+.decide b { color: var(--page-fg); font-weight: 600; }
+
+/* ---------- Mock window: colors from ReaderTheme (ReaderSettings.swift) ---------- */
+.win { --r-bg:#FBFAF6; --r-fg:#1B211F; --r-chrome:#F3F1EB; --r-header:#E7E3DA; --r-divider:#D5D1C6; --r-sec:#5C645F; --r-ter:#6E756F; --r-accent:#2B5849; --r-lineno:#7E847F; --r-occ:#ECE3C6; --r-sel:#DCE7E0; --amber:#C98A2E; --amber-soft:#F3E5CA;
+  --k:#8A3A28; --c:#5F665F; --s:#4D7030; --n:#8A5610; --fn:#111715; --t:#2D5D77; --fc:#24443B; --p:#4B544F; --pr:#38403C;
+  border-radius: 10px; overflow: hidden; border: 1px solid var(--r-divider); background: var(--r-bg); color: var(--r-fg); position: relative; min-width: 0; display: flex; flex-direction: column; }
+.win.th-dark { --r-bg:#121614; --r-fg:#E7E5DD; --r-chrome:#161A18; --r-header:#1D221F; --r-divider:#2B312D; --r-sec:#9BA29B; --r-ter:#858C85; --r-accent:#8CC6A9; --r-lineno:#6F766F; --r-occ:#2E2F21; --r-sel:#1D3A2F; --amber:#E6AE5A; --amber-soft:#3A2D18;
+  --k:#E89C80; --c:#99A198; --s:#AACB8C; --n:#E6AE5A; --fn:#F4F2EA; --t:#93C4DE; --fc:#CFE3D8; --p:#B9BDB5; --pr:#C7C9C1; }
+.win.th-si { --r-bg:#FFFFFF; --r-fg:#111111; --r-chrome:#EFEFEA; --r-header:#E0E0DA; --r-divider:#C9C9C1; --r-sec:#555555; --r-ter:#6B6B6B; --r-accent:#1D3A8F; --r-lineno:#8A8A8A; --r-occ:#FFF1C2; --r-sel:#FFF1C2; --amber:#C9A227; --amber-soft:#FFF1C2;
+  --k:#00008B; --c:#2E7D32; --s:#8B1A1A; --n:#A0522D; --fn:#000000; --t:#006A6A; --fc:#1A1A1A; --p:#3A3A3A; --pr:#2E2E2E; }
+.titlebar { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: var(--r-header); border-bottom: 1px solid var(--r-divider); font-size: 12px; color: var(--r-sec); }
+.dots { display: flex; gap: 6px; margin-right: 8px; }
+.dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--r-divider); display: block; }
+.path { background: var(--r-chrome); border-bottom: 1px solid var(--r-divider); height: 24px; display: flex; align-items: center; padding: 0 12px; font-size: 11.5px; color: var(--r-ter); gap: 6px; }
+.status { height: 24px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; background: var(--r-chrome); border-top: 1px solid var(--r-divider); font-size: 11.5px; color: var(--r-ter); }
+.status .ex::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--r-accent); margin-right: 6px; vertical-align: 1px; }
+.status .ex.preparing::before { background: var(--n); }
+.code { height: 330px; overflow: auto; font-family: var(--font-code); font-size: 13px; line-height: 1.6; padding: 10px 0; outline: none; }
+.code:focus-visible { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--r-accent) 45%, transparent); }
+.ln { display: grid; grid-template-columns: 48px 1fr; white-space: pre; }
+.ln > b { font-weight: 400; color: var(--r-lineno); text-align: right; padding-right: 16px; user-select: none; }
+.ln.cur { background: color-mix(in srgb, var(--r-sel) 55%, transparent); }
+.ln.flash { background: var(--r-occ); }
+.tx { position: relative; }
+.caret { position: absolute; top: 2px; bottom: 2px; width: 2px; background: var(--r-accent); left: 0; animation: blink 1.1s steps(1) infinite; }
+.code:not(:focus) .caret { animation: none; opacity: .55; }
+@keyframes blink { 50% { opacity: 0; } }
+.tok { border-radius: 3px; }
+.tok.hot { background: var(--r-occ); }
+.k{color:var(--k)} .c{color:var(--c);font-style:italic} .s{color:var(--s)} .n{color:var(--n)} .fn{color:var(--fn);font-weight:650} .t{color:var(--t)} .fc{color:var(--fc)} .p{color:var(--p)} .pr{color:var(--pr)}
+
+/* ---------- Lens (ContextWindowViewController) ---------- */
+.lens { border-top: 1px solid var(--r-divider); background: var(--r-chrome); display: flex; flex-direction: column; height: 236px; }
+.lhead { height: 34px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 8px; background: var(--r-header); font-size: 12px; color: var(--r-sec); min-width: 0; transition: background .15s; }
+.lens.pinned .lhead { background: var(--amber-soft); }
+.lseg { display: inline-flex; border: 1px solid var(--r-divider); border-radius: 6px; overflow: hidden; flex: none; background: var(--r-bg); }
+.lseg button { font: inherit; font-size: 11.5px; border: 0; background: transparent; color: var(--r-fg); padding: 2px 9px; cursor: pointer; }
+.lseg button + button { border-left: 1px solid var(--r-divider); }
+.lseg button[aria-pressed="true"] { background: var(--r-accent); color: var(--r-bg); }
+.lens.pinned .lseg button[aria-pressed="true"].pin { background: var(--amber); color: #1b1407; }
+.pinbtn { flex: none; width: 24px; height: 22px; border: 1px solid var(--r-divider); border-radius: 6px; background: var(--r-bg); color: var(--r-sec); display: grid; place-items: center; cursor: pointer; padding: 0; }
+.pinbtn svg { width: 13px; height: 13px; }
+.pinbtn[aria-pressed="true"] { background: var(--amber); border-color: var(--amber); color: #1b1407; }
+.popup { flex: none; font: inherit; font-size: 11.5px; border: 1px solid var(--r-divider); border-radius: 6px; background: var(--r-bg); color: var(--r-fg); padding: 2px 8px; cursor: pointer; }
+.sym { font-family: var(--font-serif); font-size: 15px; font-weight: 500; color: var(--r-fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.hop { display: flex; align-items: baseline; gap: 6px; min-width: 0; white-space: nowrap; }
+.hop .via { font-family: var(--font-code); font-size: 12px; color: var(--r-sec); cursor: pointer; border-radius: 4px; padding: 1px 4px; overflow: hidden; text-overflow: ellipsis; }
+.hop .via:hover, .hop .tgt:hover { background: color-mix(in srgb, var(--r-accent) 12%, transparent); }
+.hop .arrow { color: var(--r-ter); font-size: 12px; }
+.hop .tgt { cursor: pointer; border-radius: 4px; padding: 0 4px; }
+.hop .cur-v { color: var(--r-fg); font-weight: 600; }
+.hop .dim { font-family: var(--font-code); font-size: 12px; color: var(--r-ter); font-weight: 400; }
+.pending { font-size: 12px; color: var(--r-ter); display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-ui); }
+.spin { width: 10px; height: 10px; border: 1.5px solid var(--r-divider); border-top-color: var(--r-accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.pills { display: inline-flex; gap: 4px; min-width: 0; }
+.pill { font: inherit; font-size: 12px; border: 1px solid var(--r-divider); border-radius: 999px; padding: 1px 9px; background: transparent; color: var(--r-sec); cursor: pointer; white-space: nowrap; display: inline-flex; gap: 5px; align-items: center; }
+.pill b { font-family: var(--font-code); font-weight: 500; color: var(--r-fg); }
+.pill[aria-pressed="true"] { background: var(--r-bg); border-color: var(--r-accent); color: var(--r-fg); box-shadow: inset 0 0 0 1px var(--r-accent); }
+.pill[disabled] { cursor: default; opacity: .8; }
+.lpath { font-family: var(--font-code); font-size: 11px; color: var(--r-sec); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 40px; flex: 1 1 auto; direction: rtl; text-align: left; }
+.stones { display: inline-flex; gap: 2px; flex: none; }
+.stones i { width: 7px; height: 7px; border-radius: 50%; border: 1px solid var(--r-accent); display: block; }
+.stones i.on { background: var(--r-accent); }
+.badge { flex: none; font-size: 11.5px; font-weight: 500; padding: 1px 6px; border-radius: 4px; background: color-mix(in srgb, var(--r-accent) 14%, transparent); color: var(--r-fg); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.badge.ext { background: color-mix(in srgb, var(--n) 16%, transparent); }
+.badge.here { background: color-mix(in srgb, var(--r-sec) 14%, transparent); }
+.strip { height: 22px; flex: none; display: flex; align-items: center; gap: 6px; padding: 0 12px; font-size: 11.5px; color: var(--r-sec); background: color-mix(in srgb, var(--r-header) 55%, var(--r-chrome)); border-top: 1px solid var(--r-divider); }
+.strip code { font-family: var(--font-code); font-size: 11px; color: var(--r-fg); }
+.strip a { color: var(--r-accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; text-decoration-color: color-mix(in srgb, var(--r-accent) 45%, transparent); }
+.lbody { flex: 1; min-height: 0; position: relative; background: var(--r-bg); border-top: 1px solid var(--r-divider); display: flex; flex-direction: column; }
+.mini { flex: 1; min-height: 0; overflow: auto; font-family: var(--font-code); font-size: 12.5px; line-height: 1.55; padding: 8px 0; }
+.mini .ln > b { padding-right: 14px; }
+.mini .ln.target { background: color-mix(in srgb, var(--r-occ) 70%, transparent); }
+.mini .ln.stale { opacity: .5; }
+.mini.swap { animation: swap .22s ease; }
+@keyframes swap { from { opacity: .35 } to { opacity: 1 } }
+.fade { position: relative; }
+.fade::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.55em; background: linear-gradient(to bottom, transparent, var(--r-bg)); }
+.more { flex: none; font-size: 11.5px; color: var(--r-ter); padding: 3px 12px 5px 48px; display: flex; gap: 8px; align-items: center; }
+.where { flex: none; display: flex; align-items: center; gap: 8px; padding: 4px 12px 6px 48px; font-size: 11.5px; color: var(--r-sec); border-top: 1px dashed var(--r-divider); }
+.where .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--r-divider); position: relative; max-width: 260px; }
+.where .bar i { position: absolute; top: -2px; width: 8px; height: 8px; border-radius: 50%; background: var(--r-accent); transform: translateX(-50%); }
+.placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--r-sec); font-size: 12px; text-align: center; padding: 16px; }
+.kept-note { position: absolute; right: 10px; top: 6px; font-size: 11px; color: var(--r-ter); background: var(--r-chrome); border: 1px solid var(--r-divider); border-radius: 4px; padding: 0 5px; }
+.toast { position: absolute; left: 50%; bottom: 34px; transform: translateX(-50%); background: var(--r-fg); color: var(--r-bg); font-size: 12px; padding: 6px 12px; border-radius: 7px; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; z-index: 5; }
+.toast.show { opacity: .92; }
+@media (prefers-reduced-motion: reduce) { .caret, .spin, .mini.swap { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>上下文窗口 · 类型直达、跟踪光标、所在函数 · 可交互原型</h1>
+    <p class="lede">点击代码，或者先点一下代码区再用方向键移动光标，下方的上下文窗口会跟着变。<code>made</code> 和 <code>buf</code> 没写类型，要等精确分析（模拟 1.2 秒）。<kbd>⌘</kbd>+点击跳到声明，<kbd>⌘⇧</kbd>+点击或 <kbd>⌃⌘J</kbd> 跳到类型定义。颜色取自应用 <code>ReaderTheme</code> 的真实色值。</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="原型设置">
+    <div class="ctl"><span>主题</span><div class="seg" data-ctl="theme"><button aria-pressed="true" data-v="light">Light</button><button aria-pressed="false" data-v="dark">Dark</button><button aria-pressed="false" data-v="si">SI Classic</button></div></div>
+    <div class="ctl"><span>精确分析</span><div class="seg" data-ctl="exact"><button aria-pressed="true" data-v="ready">就绪</button><button aria-pressed="false" data-v="preparing">准备中</button></div></div>
+    <div class="ctl"><span>T1 模式控件</span><div class="seg" data-ctl="t1"><button aria-pressed="true" data-v="a">A 三段</button><button aria-pressed="false" data-v="b">B 两段+图钉</button><button aria-pressed="false" data-v="c">C 下拉+图钉</button></div></div>
+    <div class="ctl"><span>T2 一跳标签</span><div class="seg" data-ctl="t2"><button aria-pressed="true" data-v="a">A 头部内联</button><button aria-pressed="false" data-v="b">B 声明/类型胶囊</button><button aria-pressed="false" data-v="c">C 经由条</button></div></div>
+    <div class="ctl"><span>T3 所在函数</span><div class="seg" data-ctl="t3"><button aria-pressed="true" data-v="a">A 渐隐+行数</button><button aria-pressed="false" data-v="b">B 签名+位置条</button></div></div>
+    <div class="ctl"><span>T4 光标离开名字</span><div class="seg" data-ctl="t4"><button aria-pressed="true" data-v="keep">保留上次</button><button aria-pressed="false" data-v="clear">清空</button></div></div>
+  </div>
+
+  <div class="main">
+    <div class="win th-light" id="win">
+      <div class="titlebar"><div class="dots"><i></i><i></i><i></i></div>objhdr — object.rs</div>
+      <div class="path">objhdr › src › object.rs</div>
+      <div class="code" id="code" tabindex="0" aria-label="示例 Rust 代码，方向键移动光标"></div>
+      <div class="lens" id="lens" aria-label="上下文窗口">
+        <div class="lhead" id="lhead"></div>
+        <div id="strip"></div>
+        <div class="lbody" id="lbody"></div>
+      </div>
+      <div class="status"><span>Rust · UTF-8 · 安全模式</span><span class="ex" id="exState">精确分析：rust-analyzer 就绪</span></div>
+      <div class="toast" id="toast" role="status"></div>
+    </div>
+
+    <aside class="notes">
+      <div>
+        <h2>场景（点一下把光标放过去）</h2>
+        <div class="demo" id="demo">
+          <button data-go="20:25">形参 <code>ps: &amp;S</code><small>剥掉 &amp; → S，句法层直接给出</small></button>
+          <button data-go="21:13">局部 <code>local: Box&lt;S&gt;</code><small>剥掉 Box → S</small></button>
+          <button data-go="24:9"><code>self</code><small>落到所在 impl 的类型 S</small></button>
+          <button data-go="22:13">没写类型 <code>made</code><small>先显示声明 + 解析中，1.2s 后换成 S</small></button>
+          <button data-go="23:13">别名 <code>h: Handle</code><small>停在别名，不穿透到 Inner</small></button>
+          <button data-go="7:9">字段 <code>inner: Inner</code><small>字段也跳类型</small></button>
+          <button data-go="6:9">字段 <code>n: u32</code><small>原始类型不跳，显示声明</small></button>
+          <button data-go="37:22">泛型 <code>r: T</code>，<code>T: Read</code><small>单一约束 → trait Read；在标准库里，要等精确层</small></button>
+          <button data-go="38:13">没写类型 <code>buf</code><small>精确层给出 Vec（标准库）</small></button>
+          <button data-go="32:4">函数 <code>make_s</code><small>不是值，照旧显示定义</small></button>
+        </div>
+      </div>
+      <div>
+        <h2>事件（验证防抖与精确请求时机）</h2>
+        <div class="log" id="log"></div>
+      </div>
+      <div>
+        <h2>交互</h2>
+        <ul>
+          <li>点击立即查询；方向键移动 150ms 防抖后做句法查询</li>
+          <li>精确请求：点击立即发；方向键停留 400ms 才发</li>
+          <li>点一跳标签的前半段看声明；看过声明后，晚到的精确结果不再自动切换</li>
+          <li>固定时点击代码只更新关系，窗口不变（头部变琥珀色）</li>
+          <li>所在函数模式：同一函数内移动不刷新；函数外退到 impl/结构体</li>
+        </ul>
+      </div>
+      <div class="decide">
+        <h2>待你裁决</h2>
+        <p><b>T1</b> 模式控件：三段式；两段+独立图钉（固定和“看什么”正交）；还是下拉+图钉（头部最省空间）。</p>
+        <p><b>T2</b> 一跳怎么表达：头部内联 <code>ps: &amp;S → S</code>；两个胶囊“声明/类型”；还是头部下方加一条“经由”说明条（多占 22pt）。</p>
+        <p><b>T3</b> 所在函数只看签名：函数体渐隐加“⋯ N 行”；还是签名下加“光标在第几行”的位置条。</p>
+        <p><b>T4</b> 原型里暴露出的新问题：键盘光标移到空白、关键字、原始类型上时，窗口保留上一次内容（SI 的做法）还是清空。</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  const SRC = [
+    'use std::io::Read;',
+    'use std::sync::Arc;',
+    '',
+    '/// A parsed object header.',
+    'pub struct S {',
+    '    pub n: u32,',
+    '    pub inner: Inner,',
+    '}',
+    '',
+    'pub struct Inner {',
+    '    pub id: u64,',
+    '}',
+    '',
+    'pub type Handle = Arc<Inner>;',
+    '',
+    'impl S {',
+    '    /// Sums this header with a boxed copy of `ps`.',
+    '    ///',
+    '    /// Never allocates more than one `S`.',
+    '    pub fn use_it(&self, ps: &S) -> u32 {',
+    '        let local: Box<S> = Box::new(S { n: 1, inner: Inner { id: 0 } });',
+    '        let made = make_s();',
+    '        let h: Handle = Arc::new(Inner { id: 7 });',
+    '        self.n + ps.n + local.n + made.n + h.id as u32',
+    '    }',
+    '',
+    '    pub fn is_empty(&self) -> bool {',
+    '        self.n == 0',
+    '    }',
+    '}',
+    '',
+    'fn make_s() -> S {',
+    '    S { n: 2, inner: Inner { id: 1 } }',
+    '}',
+    '',
+    '/// Reads everything from `r`.',
+    'fn drain<T: Read>(mut r: T) -> usize {',
+    '    let mut buf = Vec::new();',
+    '    r.read_to_end(&mut buf).unwrap_or(0)',
+    '}',
+  ];
+  const FILE = 'src/object.rs';
+  const STD_IO = '~/.rustup/…/library/std/src/io/mod.rs';
+  const STD_VEC = '~/.rustup/…/library/alloc/src/vec/mod.rs';
+  const EXT = {
+    Read: { path: STD_IO, line: 760, lines: ['/// A source of bytes.', 'pub trait Read {', '    fn read(&mut self, buf: &mut [u8]) -> Result<usize>;', '    …', '}'], target: 1 },
+    Vec: { path: STD_VEC, line: 397, lines: ['/// A contiguous growable array type.', 'pub struct Vec<T, A: Allocator = Global> {', '    buf: RawVec<T, A>,', '    len: usize,', '}'], target: 1 },
+  };
+
+  // ----- syntax -----
+  const KW = new Set(['use','pub','struct','type','impl','fn','let','mut','self','Self','as','return','for','in','if','else','while','match','crate','trait']);
+  const PRIM = new Set(['u32','u64','usize','bool','u8','str']);
+  const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function hl(text) {
+    const ci = text.indexOf('//');
+    const code = ci >= 0 ? text.slice(0, ci) : text;
+    const com = ci >= 0 ? text.slice(ci) : '';
+    let out = '', prev = '';
+    code.replace(/[A-Za-z_][A-Za-z0-9_]*|\d+|[^A-Za-z_0-9]+/g, m => {
+      if (/^\d/.test(m)) out += `<span class="n">${m}</span>`;
+      else if (/^[A-Za-z_]/.test(m)) {
+        if (prev === 'fn') out += `<span class="fn">${m}</span>`;
+        else if (KW.has(m)) out += `<span class="k">${m}</span>`;
+        else if (PRIM.has(m) || /^[A-Z]/.test(m)) out += `<span class="t">${m}</span>`;
+        else out += esc(m);
+        prev = m;
+      } else { out += esc(m); if (m.trim()) prev = ''; }
+      return m;
+    });
+    if (com) out += `<span class="c">${esc(com)}</span>`;
+    return out;
+  }
+
+  // ----- facts the mock engine answers from -----
+  const DEF = {
+    S: { name: 'S', line: 5, from: 4, to: 8, kind: '结构体' },
+    Inner: { name: 'Inner', line: 10, from: 10, to: 12, kind: '结构体' },
+    Handle: { name: 'Handle', line: 14, from: 14, to: 14, kind: '类型别名' },
+    make_s: { name: 'make_s', line: 32, from: 32, to: 34, kind: '函数' },
+    use_it: { name: 'use_it', line: 20, from: 17, to: 25, kind: '方法' },
+    is_empty: { name: 'is_empty', line: 27, from: 27, to: 29, kind: '方法' },
+    drain: { name: 'drain', line: 37, from: 36, to: 40, kind: '函数' },
+  };
+  const strong = { cert: 3, badge: '强·直接' };
+  const exact = { cert: 4, badge: '精确·直接 · rust-analyzer' };
+  const local = (name, line, via, kindLabel) => ({ name, line, via, kindLabel });
+  // A value binding either hops by its written type, waits for Exact, or stays on its declaration.
+  const BIND = {
+    ps: { decl: local('ps', 20, 'ps: &S', '形参'), hop: { def: 'S', source: 'annotation' } },
+    local: { decl: local('local', 21, 'local: Box<S>', '局部变量'), hop: { def: 'S', source: 'annotation' } },
+    self: { decl: local('self', 20, '&self', '接收者 · impl S'), hop: { def: 'S', source: 'annotation' } },
+    made: { decl: local('made', 22, 'made', '局部变量'), hop: { def: 'S', source: 'exact' } },
+    h: { decl: local('h', 23, 'h: Handle', '局部变量'), hop: { def: 'Handle', source: 'annotation' } },
+    inner: { decl: local('inner', 7, 'inner: Inner', '字段'), hop: { def: 'Inner', source: 'annotation' } },
+    n: { decl: local('n', 6, 'n: u32', '字段'), hop: null, why: 'u32 是原始类型，不跳' },
+    id: { decl: local('id', 11, 'id: u64', '字段'), hop: null, why: 'u64 是原始类型，不跳' },
+    r: { decl: local('r', 37, 'r: T', '形参'), hop: { ext: 'Read', source: 'exact', note: 'T: Read' } },
+    buf: { decl: local('buf', 38, 'buf', '局部变量'), hop: { ext: 'Vec', source: 'exact' } },
+  };
+  const PLAIN = { S: 'S', Inner: 'Inner', Handle: 'Handle', make_s: 'make_s', use_it: 'use_it', is_empty: 'is_empty', drain: 'drain', Read: 'ext:Read', Vec: 'ext:Vec' };
+  // Outline facets for the enclosing mode, innermost wins; functions outrank types.
+  const FACETS = [
+    { name: 'S', kind: '结构体', from: 4, to: 8, sig: 5, fn: false },
+    { name: 'Inner', kind: '结构体', from: 10, to: 12, sig: 10, fn: false },
+    { name: 'Handle', kind: '类型别名', from: 14, to: 14, sig: 14, fn: false },
+    { name: 'impl S', kind: 'impl', from: 16, to: 30, sig: 16, fn: false, children: '2 个方法' },
+    { name: 'use_it', kind: '方法', from: 17, to: 25, sig: 20, fn: true },
+    { name: 'is_empty', kind: '方法', from: 27, to: 29, sig: 27, fn: true },
+    { name: 'make_s', kind: '函数', from: 32, to: 34, sig: 32, fn: true },
+    { name: 'drain', kind: '函数', from: 36, to: 40, sig: 37, fn: true },
+  ];
+
+  // ----- state -----
+  const st = { theme: 'light', exact: 'ready', t1: 'a', t2: 'a', t3: 'a', t4: 'keep' };
+  const lensState = { mode: 'symbol', pinned: false, view: null, kept: false, exactTimer: 0, dwellTimer: 0, debounce: 0, epoch: 0, facetKey: null, tokenKey: null };
+  let caret = { line: 20, col: 25, want: 25 };
+  const win = document.getElementById('win'), code = document.getElementById('code'), lens = document.getElementById('lens');
+  const lhead = document.getElementById('lhead'), strip = document.getElementById('strip'), lbody = document.getElementById('lbody');
+  const logEl = document.getElementById('log'), toast = document.getElementById('toast'), exState = document.getElementById('exState');
+  const t0 = performance.now();
+  function log(msg) {
+    const d = document.createElement('div');
+    d.innerHTML = `${((performance.now() - t0) / 1000).toFixed(2).padStart(6)}s  ${msg}`;
+    logEl.prepend(d);
+    while (logEl.children.length > 8) logEl.lastChild.remove();
+  }
+  let toastTimer = 0;
+  function flash(msg) { toast.textContent = msg; toast.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.classList.remove('show'), 1900); }
+
+  // ----- reader -----
+  function renderCode() {
+    code.innerHTML = SRC.map((l, i) => `<div class="ln${i + 1 === caret.line ? ' cur' : ''}" data-line="${i + 1}"><b>${i + 1}</b><span class="tx">${hl(l) || ' '}${i + 1 === caret.line ? `<i class="caret" style="left:${caret.col}ch"></i>` : ''}</span></div>`).join('');
+  }
+  function wordAt(line, col) {
+    const text = SRC[line - 1] || '';
+    const isId = ch => /[A-Za-z0-9_]/.test(ch || '');
+    let s = col;
+    if (!isId(text[s]) && isId(text[s - 1])) s -= 1;
+    if (!isId(text[s])) return null;
+    let a = s, b = s;
+    while (a > 0 && isId(text[a - 1])) a--;
+    while (b < text.length && isId(text[b])) b++;
+    const w = text.slice(a, b);
+    if (/^\d/.test(w) || KW.has(w) && w !== 'self') return null;
+    return { word: w, from: a, to: b };
+  }
+  function lineFlash(line) {
+    const el = code.querySelector(`[data-line="${line}"]`);
+    if (!el) return;
+    el.scrollIntoView({ block: 'nearest' });
+    el.classList.add('flash'); setTimeout(() => el.classList.remove('flash'), 800);
+  }
+
+  // ----- lookup (mock engine) -----
+  function lookup(w) {
+    if (!w) return null;
+    if (BIND[w.word]) return { kind: 'bind', key: w.word, ...BIND[w.word] };
+    const p = PLAIN[w.word];
+    if (!p) return null;
+    return p.startsWith('ext:') ? { kind: 'ext', key: p.slice(4) } : { kind: 'def', key: p };
+  }
+  function typeTargetOf(r) {
+    if (!r || r.kind !== 'bind' || !r.hop) return null;
+    return r.hop.def ? { local: DEF[r.hop.def] } : { ext: r.hop.ext };
+  }
+
+  function caretMoved(source) {
+    renderCode();
+    clearTimeout(lensState.debounce);
+    if (lensState.pinned) return;
+    if (lensState.mode === 'enclosing') { updateEnclosing(); return; }
+    if (source === 'click') querySymbol('click');
+    else lensState.debounce = setTimeout(() => querySymbol('key'), 150);
+  }
+
+  let current = null; // the lookup result the lens shows
+  function querySymbol(trigger) {
+    const w = wordAt(caret.line, caret.col);
+    const key = w ? `${caret.line}:${w.from}` : null;
+    if (key && key === lensState.tokenKey) return; // same token range: no new query
+    const r = lookup(w);
+    clearTimeout(lensState.exactTimer); clearTimeout(lensState.dwellTimer);
+    if (!r) {
+      lensState.tokenKey = null;
+      log(`句法查询 ${w ? '<b>' + esc(w.word) + '</b>' : '（空白/关键字）'} → 无结果`);
+      if (st.t4 === 'clear') { current = null; lensState.kept = false; }
+      else lensState.kept = !!current;
+      renderLens(); return;
+    }
+    lensState.tokenKey = key; lensState.kept = false;
+    lensState.epoch++;
+    current = { ...r, arrived: false, userToggled: false };
+    lensState.view = r.kind === 'bind' && r.hop && r.hop.source === 'annotation' ? 'type' : 'decl';
+    log(`句法查询 <b>${esc(w.word)}</b>（${trigger === 'click' ? '点击' : '方向键'}）`);
+    renderLens(false);
+    const needsExact = r.kind === 'bind' && r.hop && r.hop.source === 'exact';
+    if (!needsExact) return;
+    if (st.exact !== 'ready') { log('精确分析未就绪 → 停在声明'); return; }
+    const epoch = lensState.epoch;
+    const send = () => {
+      log(`发出 definition + typeDefinition（${trigger === 'click' ? '点击立即' : '停留 400ms'}）`);
+      lensState.exactTimer = setTimeout(() => {
+        if (epoch !== lensState.epoch) return;
+        current.arrived = true;
+        if (!current.userToggled) { lensState.view = 'type'; log('精确结果到达 → 原地换成类型'); }
+        else log('精确结果到达 → 用户看过声明，不自动切换');
+        renderLens(true);
+      }, 1200);
+    };
+    if (trigger === 'click') send();
+    else lensState.dwellTimer = setTimeout(() => { if (epoch === lensState.epoch) send(); }, 400);
+  }
+
+  function updateEnclosing() {
+    const hits = FACETS.filter(f => caret.line >= f.from && caret.line <= f.to);
+    const fn = hits.filter(f => f.fn).sort((a, b) => (a.to - a.from) - (b.to - b.from))[0];
+    const ty = hits.filter(f => !f.fn).sort((a, b) => (a.to - a.from) - (b.to - b.from))[0];
+    const f = fn || ty || null;
+    const key = f ? f.name : null;
+    if (key !== lensState.facetKey) {
+      log(`所在作用域 → ${f ? '<b>' + esc(f.name) + '</b>' : '无'}`);
+      lensState.facetKey = key;
+    }
+    renderLens(false);
+  }
+
+  // ----- lens rendering -----
+  const PIN_SVG = '<svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M10.6 1.3a.75.75 0 0 1 1.06 0l3.04 3.04a.75.75 0 0 1 0 1.06l-1.4 1.4a.75.75 0 0 1-.7.2l-1.3-.33-2.24 2.24.43 2.14a.75.75 0 0 1-.2.68l-.9.9a.75.75 0 0 1-1.06 0L4.9 10.2l-3.1 3.1a.6.6 0 0 1-.85-.85l3.1-3.1L1.9 7.2a.75.75 0 0 1 0-1.06l.9-.9a.75.75 0 0 1 .68-.2l2.14.43 2.24-2.24-.33-1.3a.75.75 0 0 1 .2-.7z"/></svg>';
+  function modeControl() {
+    const m = lensState.mode, p = lensState.pinned;
+    if (st.t1 === 'a') {
+      const cur = p ? 'pin' : m;
+      return `<div class="lseg" data-lens="mode3"><button data-v="symbol" aria-pressed="${cur === 'symbol'}">符号</button><button data-v="enclosing" aria-pressed="${cur === 'enclosing'}">所在函数</button><button class="pin" data-v="pin" aria-pressed="${cur === 'pin'}">固定</button></div>`;
+    }
+    const pin = `<button class="pinbtn" data-lens="pin" aria-pressed="${p}" aria-label="固定" title="固定（点击代码只更新关系）">${PIN_SVG}</button>`;
+    if (st.t1 === 'b') return `<div class="lseg" data-lens="mode2"><button data-v="symbol" aria-pressed="${m === 'symbol'}">符号</button><button data-v="enclosing" aria-pressed="${m === 'enclosing'}">所在函数</button></div>${pin}`;
+    return `<button class="popup" data-lens="popup" title="切换跟踪对象">跟踪：${m === 'symbol' ? '光标下的符号' : '所在函数'} ▾</button>${pin}`;
+  }
+  const stones = n => `<span class="stones" aria-label="确定性 ${n}/4">${[1, 2, 3, 4].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</span>`;
+
+  function excerptHTML(lines, firstLine, targetIdx, opts = {}) {
+    return lines.map((l, i) => `<div class="ln${i === targetIdx ? ' target' : ''}${opts.stale ? ' stale' : ''}"><b>${firstLine + i}</b><span>${hl(l) || ' '}</span></div>`).join('');
+  }
+  function defExcerpt(d) {
+    return { html: excerptHTML(SRC.slice(d.from - 1, d.to), d.from, d.line - d.from), path: `${FILE}:${d.line}` };
+  }
+  function extExcerpt(k) {
+    const e = EXT[k];
+    return { html: excerptHTML(e.lines, e.line - e.target, e.target), path: `${e.path}:${e.line}` };
+  }
+  function declExcerpt(decl) {
+    return { html: excerptHTML([SRC[decl.line - 1]], decl.line, 0), path: `${FILE}:${decl.line}` };
+  }
+
+  function renderLens(swap) {
+    lens.classList.toggle('pinned', lensState.pinned);
+    strip.innerHTML = '';
+    let head = modeControl();
+    let body = '';
+    let parts = null; // {label, path, cert, badge, badgeClass, html, after}
+    if (lensState.mode === 'enclosing' && !lensState.pinned || lensState.mode === 'enclosing' && lensState.pinned && lensState.facetKey) {
+      parts = enclosingParts();
+    } else if (current) {
+      parts = symbolParts();
+    }
+    if (!parts) {
+      const ph = lensState.mode === 'enclosing'
+        ? '光标不在任何函数或类型里'
+        : '点击或用方向键把光标移到一个符号上，这里显示它的定义；变量显示它的类型定义';
+      lhead.innerHTML = head + '<span class="lpath"></span>';
+      lbody.innerHTML = `<div class="placeholder">${ph}</div>`;
+      return;
+    }
+    head += parts.label;
+    head += `<span class="lpath" title="${esc(parts.path)}">${esc(parts.path)}</span>`;
+    if (parts.cert) head += stones(parts.cert);
+    if (parts.badge) head += `<span class="badge ${parts.badgeClass || ''}" title="${esc(parts.badge)}">${esc(parts.badge)}</span>`;
+    lhead.innerHTML = head;
+    if (parts.strip) strip.innerHTML = `<div class="strip">${parts.strip}</div>`;
+    body = `<div class="mini${swap ? ' swap' : ''}${parts.fade ? ' fade' : ''}">${parts.html}</div>${parts.after || ''}`;
+    if (lensState.kept && st.t4 === 'keep') body += `<span class="kept-note">光标不在符号上 · 保留上一次</span>`;
+    lbody.innerHTML = body;
+  }
+
+  function symbolParts() {
+    const r = current;
+    if (r.kind === 'def') {
+      const d = DEF[r.key], ex = defExcerpt(d);
+      return { label: `<span class="sym">${esc(d.name)}</span>`, path: ex.path, cert: 3, badge: strong.badge, html: ex.html };
+    }
+    if (r.kind === 'ext') {
+      const ex = extExcerpt(r.key);
+      return { label: `<span class="sym">${esc(r.key)}</span>`, path: ex.path, cert: 4, badge: '外部 · std · rust-analyzer', badgeClass: 'ext', html: ex.html };
+    }
+    // value binding
+    const decl = r.decl;
+    const dex = declExcerpt(decl);
+    if (!r.hop) {
+      return { label: `<span class="sym">${esc(decl.name)}</span>`, path: dex.path, cert: 3, badge: `${decl.kindLabel} · ${r.why}`, badgeClass: 'here', html: dex.html };
+    }
+    const tgt = typeTargetOf(r);
+    const pending = r.hop.source === 'exact' && !r.arrived;
+    const unavailable = pending && st.exact !== 'ready';
+    const tex = tgt.local ? defExcerpt(tgt.local) : extExcerpt(tgt.ext);
+    const tname = tgt.local ? tgt.local.name : tgt.ext;
+    const viewType = lensState.view === 'type' && !pending;
+    const tBadge = tgt.ext ? '外部 · std · rust-analyzer' : (r.hop.source === 'exact' ? exact.badge : strong.badge);
+    const tCert = tgt.ext || r.hop.source === 'exact' ? 4 : 3;
+    const pendingText = unavailable ? '类型需要精确分析 · 未就绪' : '类型解析中…';
+    const bound = r.hop.note ? ` <span class="dim">(${esc(r.hop.note)})</span>` : '';
+    let label = '', stripHTML = '';
+    if (st.t2 === 'a') {
+      const via = `<span class="via${viewType ? '' : ' cur-v'}" data-lens="toDecl" title="${esc(decl.kindLabel)} · 点击查看声明">${esc(decl.via)}</span>`;
+      let right;
+      if (pending) right = `<span class="pending">${unavailable ? '' : '<span class="spin"></span>'}${pendingText}</span>`;
+      else right = `<span class="sym tgt${viewType ? '' : ' dim'}" data-lens="toType" title="点击查看类型定义">${esc(tname)}</span>${bound}`;
+      label = `<span class="hop">${via}<span class="arrow">→</span>${right}</span>`;
+    } else if (st.t2 === 'b') {
+      const declPill = `<button class="pill" data-lens="toDecl" aria-pressed="${!viewType}">声明 <b>${esc(decl.name)}</b></button>`;
+      const typePill = pending
+        ? `<button class="pill" disabled aria-pressed="false">类型 ${unavailable ? '<span>未就绪</span>' : '<span class="spin"></span>'}</button>`
+        : `<button class="pill" data-lens="toType" aria-pressed="${viewType}">类型 <b>${esc(tname)}</b></button>`;
+      label = `<span class="pills">${declPill}${typePill}</span>`;
+    } else {
+      label = `<span class="sym">${esc(viewType ? tname : decl.name)}</span>`;
+      if (pending) stripHTML = `${unavailable ? '' : '<span class="spin"></span>'}<span>${esc(decl.kindLabel)} <code>${esc(decl.via)}</code> · ${pendingText}</span>`;
+      else if (viewType) stripHTML = `<span>经由${esc(decl.kindLabel)} <code>${esc(decl.via)}</code>${r.hop.note ? ' · 约束 <code>' + esc(r.hop.note) + '</code>' : ''}</span><a data-lens="toDecl">查看声明</a>`;
+      else stripHTML = `<span>显示的是 ${esc(decl.kindLabel)} <code>${esc(decl.via)}</code> 的声明</span><a data-lens="toType">查看类型 ${esc(tname)} →</a>`;
+    }
+    if (viewType) return { label, strip: stripHTML, path: tex.path, cert: tCert, badge: tBadge, badgeClass: tgt.ext ? 'ext' : '', html: tex.html };
+    return { label, strip: stripHTML, path: dex.path, cert: 3, badge: `${decl.kindLabel} · 强·直接`, badgeClass: 'here', html: dex.html };
+  }
+
+  function enclosingParts() {
+    const f = FACETS.find(x => x.name === lensState.facetKey);
+    if (!f) return null;
+    // Header lines only: doc comments + the signature line; bodies are what the main reader already shows.
+    const headFrom = f.from, headTo = f.sig;
+    const lines = SRC.slice(headFrom - 1, headTo);
+    const bodyLines = f.to - f.sig;
+    const label = `<span class="badge here">${esc(f.kind)}</span><span class="sym">${esc(f.name)}</span>`;
+    let html, after = '', fade = false;
+    if (st.t3 === 'a') {
+      const extra = bodyLines > 0 ? SRC[f.sig] : null;
+      html = excerptHTML(lines, headFrom, headTo - headFrom) + (extra != null ? excerptHTML([extra], f.sig + 1, -1) : '');
+      fade = extra != null;
+      if (bodyLines > 0) after = `<div class="more">⋯ ${f.children ? f.children + ' · ' : ''}${f.fn ? '函数体' : '主体'} ${bodyLines} 行 · 双击打开</div>`;
+    } else {
+      html = excerptHTML(lines, headFrom, headTo - headFrom);
+      if (bodyLines > 0) {
+        const inBody = Math.max(0, Math.min(bodyLines, caret.line - f.sig));
+        const pct = bodyLines ? (inBody / bodyLines) * 100 : 0;
+        after = `<div class="where"><span>${caret.line <= f.sig ? '光标在签名处' : `光标在第 ${inBody} / ${bodyLines} 行`}</span><span class="bar"><i style="left:${pct}%"></i></span></div>`;
+      }
+    }
+    return { label, path: `${FILE}:${f.sig}`, cert: 0, badge: lensState.pinned ? '已固定' : '', html, after, fade };
+  }
+
+  // ----- lens interactions -----
+  lens.addEventListener('click', e => {
+    const t = e.target.closest('[data-lens], [data-v]');
+    if (!t) return;
+    const kind = t.dataset.lens || t.parentElement.dataset.lens;
+    if (kind === 'mode3') {
+      const v = t.dataset.v;
+      if (v === 'pin') lensState.pinned = !lensState.pinned;
+      else { lensState.pinned = false; setMode(v); return; }
+      log(lensState.pinned ? '固定' : '取消固定'); renderLens(); return;
+    }
+    if (kind === 'mode2') { setMode(t.dataset.v); return; }
+    if (kind === 'popup') { setMode(lensState.mode === 'symbol' ? 'enclosing' : 'symbol'); return; }
+    if (kind === 'pin') { lensState.pinned = !lensState.pinned; log(lensState.pinned ? '固定' : '取消固定'); renderLens(); return; }
+    if (kind === 'toDecl' && current) { current.userToggled = true; lensState.view = 'decl'; renderLens(true); return; }
+    if (kind === 'toType' && current) { current.userToggled = true; lensState.view = 'type'; renderLens(true); }
+  });
+  function setMode(m) {
+    lensState.mode = m; lensState.tokenKey = null; lensState.facetKey = null;
+    log(`模式 → ${m === 'symbol' ? '符号' : '所在函数'}`);
+    if (m === 'enclosing') updateEnclosing(); else querySymbol('click');
+  }
+  lbody.addEventListener('dblclick', () => {
+    const p = lhead.querySelector('.lpath');
+    if (p && p.textContent) flash('打开 ' + p.textContent);
+  });
+
+  // ----- reader interactions -----
+  function colFromPoint(e, lineEl) {
+    const tx = lineEl.querySelector('.tx');
+    let range = document.caretRangeFromPoint ? document.caretRangeFromPoint(e.clientX, e.clientY) : null;
+    if (!range && document.caretPositionFromPoint) { const p = document.caretPositionFromPoint(e.clientX, e.clientY); if (p) { range = document.createRange(); range.setStart(p.offsetNode, p.offset); } }
+    if (!range || !tx.contains(range.startContainer)) return SRC[+lineEl.dataset.line - 1].length;
+    const pre = document.createRange(); pre.setStart(tx, 0); pre.setEnd(range.startContainer, range.startOffset);
+    return pre.toString().length;
+  }
+  code.addEventListener('mousedown', e => {
+    const lineEl = e.target.closest('.ln'); if (!lineEl) return;
+    e.preventDefault(); code.focus();
+    const line = +lineEl.dataset.line, col = colFromPoint(e, lineEl);
+    caret = { line, col, want: col };
+    const w = wordAt(line, col);
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) { renderCode(); jumpToType(w); return; }
+    if (e.metaKey) { renderCode(); jumpToDecl(w); return; }
+    if (lensState.pinned) { renderCode(); if (w) flash(`已固定：只更新关系 → ${w.word}`); return; }
+    caretMoved('click');
+  });
+  code.addEventListener('keydown', e => {
+    if (e.ctrlKey && e.metaKey && (e.key === 'j' || e.key === 'J')) { e.preventDefault(); jumpToType(wordAt(caret.line, caret.col)); return; }
+    const len = l => (SRC[l - 1] || '').length;
+    let { line, col, want } = caret;
+    if (e.key === 'ArrowLeft') { if (col > 0) col--; else if (line > 1) { line--; col = len(line); } want = col; }
+    else if (e.key === 'ArrowRight') { if (col < len(line)) col++; else if (line < SRC.length) { line++; col = 0; } want = col; }
+    else if (e.key === 'ArrowUp') { if (line > 1) { line--; col = Math.min(want, len(line)); } }
+    else if (e.key === 'ArrowDown') { if (line < SRC.length) { line++; col = Math.min(want, len(line)); } }
+    else if (e.key === 'Home') { col = 0; want = 0; }
+    else if (e.key === 'End') { col = len(line); want = col; }
+    else return;
+    e.preventDefault();
+    caret = { line, col, want };
+    caretMoved('key');
+    const el = code.querySelector(`[data-line="${line}"]`); if (el) el.scrollIntoView({ block: 'nearest' });
+  });
+  function jumpToDecl(w) {
+    const r = lookup(w);
+    if (!r) { flash('这里没有可跳转的符号'); return; }
+    if (r.kind === 'bind') { flash(`⌘+点击 → 声明 ${r.decl.via}（${FILE}:${r.decl.line}）`); lineFlash(r.decl.line); return; }
+    if (r.kind === 'def') { flash(`⌘+点击 → ${r.key}（${FILE}:${DEF[r.key].line}）`); lineFlash(DEF[r.key].line); return; }
+    flash(`⌘+点击 → 打开 ${r.key}（标准库源码）`);
+  }
+  function jumpToType(w) {
+    const r = lookup(w);
+    if (!r || r.kind !== 'bind') { flash('跳到类型定义：光标不在变量、形参或字段上'); return; }
+    if (!r.hop) { flash(`跳到类型定义：${r.why}`); return; }
+    if (r.hop.source === 'exact' && st.exact !== 'ready') { flash('跳到类型定义：需要精确分析，尚未就绪'); return; }
+    const tgt = typeTargetOf(r);
+    if (tgt.local) { flash(`跳到类型定义 → ${tgt.local.name}（${FILE}:${tgt.local.line}）`); lineFlash(tgt.local.line); }
+    else flash(`跳到类型定义 → 打开 ${tgt.ext}（标准库源码）`);
+  }
+
+  // ----- controls -----
+  document.querySelectorAll('[data-ctl]').forEach(group => {
+    group.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      st[group.dataset.ctl] = b.dataset.v;
+      win.className = 'win th-' + st.theme;
+      exState.textContent = st.exact === 'ready' ? '精确分析：rust-analyzer 就绪' : '精确分析：rust-analyzer 准备中…';
+      exState.classList.toggle('preparing', st.exact !== 'ready');
+      if (group.dataset.ctl === 'exact') { lensState.tokenKey = null; if (lensState.mode === 'symbol' && !lensState.pinned) querySymbol('click'); }
+      else renderLens();
+    });
+  });
+  document.getElementById('demo').addEventListener('click', e => {
+    const b = e.target.closest('button[data-go]'); if (!b) return;
+    const [line, col] = b.dataset.go.split(':').map(Number);
+    if (lensState.pinned) { lensState.pinned = false; }
+    if (lensState.mode !== 'symbol') lensState.mode = 'symbol';
+    lensState.tokenKey = null; // a scenario button always starts a fresh lookup
+    caret = { line, col, want: col };
+    code.focus();
+    caretMoved('click');
+    const el = code.querySelector(`[data-line="${line}"]`); if (el) el.scrollIntoView({ block: 'center' });
+  });
+
+  renderCode();
+  querySymbol('click');
+})();
+</script>
+</body>
+</html>

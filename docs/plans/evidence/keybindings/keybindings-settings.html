@@ -1,0 +1,472 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cairn 快捷键设置原型</title>
+<style>
+/* Review frame around a mock Settings window (SwiftUI TabView) with the new Keyboard tab, plus a live command palette preview. */
+:root {
+  --page-bg: #F1EFE9; --page-fg: #1D2320; --page-muted: #5E6661; --page-line: #D7D2C6; --page-panel: #FAF9F5; --page-accent: #2B5849;
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  --font-code: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97; --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9; color-scheme: dark; }
+}
+:root[data-theme="dark"] { --page-bg: #0E1110; --page-fg: #E4E2DA; --page-muted: #979E97; --page-line: #2A302C; --page-panel: #151917; --page-accent: #8CC6A9; color-scheme: dark; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--page-bg); color: var(--page-fg); font-family: var(--font-ui); }
+.wrap { max-width: 1240px; margin: 0 auto; padding: 28px 16px 48px; display: grid; gap: 18px; }
+h1 { font-size: 20px; margin: 0; font-weight: 650; }
+.lede { margin: 4px 0 0; color: var(--page-muted); max-width: 78ch; line-height: 1.55; font-size: 13.5px; }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: center; padding: 12px 14px; background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; }
+.ctl { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+.ctl > span { color: var(--page-muted); }
+.seg { display: inline-flex; border: 1px solid var(--page-line); border-radius: 7px; overflow: hidden; }
+.seg button { font: inherit; font-size: 12px; border: 0; background: transparent; color: var(--page-fg); padding: 4px 10px; cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--page-line); }
+.seg button[aria-pressed="true"] { background: var(--page-accent); color: var(--page-panel); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--page-accent); outline-offset: 1px; }
+.main { display: grid; grid-template-columns: minmax(0, 1fr) 310px; gap: 18px; align-items: start; }
+@media (max-width: 960px) { .main { grid-template-columns: minmax(0, 1fr); } }
+.notes { background: var(--page-panel); border: 1px solid var(--page-line); border-radius: 10px; padding: 14px 16px; font-size: 12.5px; line-height: 1.55; display: grid; gap: 14px; min-width: 0; }
+.notes h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--page-muted); margin: 0 0 6px; font-weight: 600; }
+.notes ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.notes kbd { font-family: var(--font-code); font-size: 11px; border: 1px solid var(--page-line); border-radius: 4px; padding: 0 4px; }
+.notes p { margin: 0 0 6px; color: var(--page-muted); }
+.notes b { color: var(--page-fg); font-weight: 600; }
+.demo { display: grid; gap: 5px; }
+.demo button { font: inherit; font-size: 12.5px; text-align: left; border: 1px solid var(--page-line); background: transparent; color: var(--page-fg); border-radius: 7px; padding: 5px 9px; cursor: pointer; }
+.demo button:hover { border-color: var(--page-accent); }
+.demo small { color: var(--page-muted); display: block; font-size: 11.5px; }
+
+/* ---------- macOS Settings window (system appearance, not the reader theme) ---------- */
+.mac { --w-bg:#ECECEC; --w-fg:#1D1D1F; --w-sec:#6E6E73; --w-ter:#8E8E93; --w-line:#D1D1D6; --w-card:#FFFFFF; --w-row-alt:#F5F5F7; --w-accent:#2B5849; --w-accent-soft:#DCE7E0; --w-warn:#B25000; --w-warn-soft:#FFF1DE; --w-err:#C0392B; --w-sel:#E3ECE7; --w-shadow: 0 18px 40px rgba(0,0,0,.18), 0 0 0 .5px rgba(0,0,0,.2);
+  background: var(--w-bg); color: var(--w-fg); border-radius: 11px; box-shadow: var(--w-shadow); overflow: hidden; min-width: 0; font-size: 13px; position: relative; }
+.mac.dark { --w-bg:#232325; --w-fg:#F2F2F7; --w-sec:#A1A1A6; --w-ter:#7C7C82; --w-line:#3A3A3C; --w-card:#1C1C1E; --w-row-alt:#262628; --w-accent:#8CC6A9; --w-accent-soft:#1D3A2F; --w-warn:#F0A650; --w-warn-soft:#3A2C18; --w-err:#FF6B5E; --w-sel:#23392F; --w-shadow: 0 18px 40px rgba(0,0,0,.5), 0 0 0 .5px rgba(255,255,255,.12); }
+.tb { display: grid; grid-template-rows: 28px auto; background: color-mix(in srgb, var(--w-bg) 80%, var(--w-card)); border-bottom: 1px solid var(--w-line); }
+.tb .title { display: flex; align-items: center; justify-content: center; position: relative; font-weight: 600; font-size: 13px; }
+.tb .dots { position: absolute; left: 12px; display: flex; gap: 8px; }
+.tb .dots i { width: 12px; height: 12px; border-radius: 50%; background: var(--w-line); display: block; }
+.tabs { display: flex; justify-content: center; gap: 4px; padding: 2px 0 8px; }
+.tab { display: grid; justify-items: center; gap: 2px; width: 72px; padding: 5px 0 4px; border-radius: 6px; color: var(--w-sec); font-size: 11px; cursor: default; }
+.tab svg { width: 20px; height: 20px; }
+.tab.on { background: color-mix(in srgb, var(--w-fg) 9%, transparent); color: var(--w-accent); }
+.pane { padding: 14px 18px 16px; display: grid; gap: 10px; }
+.bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.search { flex: 1 1 220px; display: flex; align-items: center; gap: 6px; background: var(--w-card); border: 1px solid var(--w-line); border-radius: 7px; padding: 0 8px; height: 28px; min-width: 0; }
+.search svg { width: 13px; height: 13px; color: var(--w-ter); flex: none; }
+.search input { border: 0; outline: 0; background: transparent; color: var(--w-fg); font: inherit; font-size: 13px; flex: 1; min-width: 0; }
+.search .keyq { font-family: var(--font-code); font-size: 12px; background: var(--w-accent-soft); border-radius: 4px; padding: 0 5px; white-space: nowrap; }
+.btn { font: inherit; font-size: 12.5px; border: 1px solid var(--w-line); background: var(--w-card); color: var(--w-fg); border-radius: 6px; padding: 3px 10px; cursor: pointer; white-space: nowrap; }
+.btn[aria-pressed="true"] { background: var(--w-accent); border-color: var(--w-accent); color: var(--w-card); }
+.btn.primary { background: var(--w-accent); border-color: var(--w-accent); color: var(--w-card); }
+.btn.link { border: 0; background: transparent; color: var(--w-accent); padding: 2px 4px; }
+.chips { display: inline-flex; gap: 4px; }
+.chip { font: inherit; font-size: 12px; border: 1px solid var(--w-line); background: transparent; color: var(--w-sec); border-radius: 999px; padding: 2px 10px; cursor: pointer; }
+.chip[aria-pressed="true"] { background: var(--w-card); color: var(--w-fg); border-color: var(--w-accent); }
+.chip .n { font-variant-numeric: tabular-nums; color: var(--w-ter); margin-left: 3px; }
+.body { display: grid; gap: 0; min-height: 0; }
+.body.split { grid-template-columns: 170px minmax(0, 1fr); gap: 10px; }
+.cats { background: var(--w-card); border: 1px solid var(--w-line); border-radius: 8px; padding: 4px; display: grid; align-content: start; gap: 1px; height: 430px; overflow: auto; }
+.cat { display: flex; justify-content: space-between; padding: 4px 8px; border-radius: 5px; cursor: pointer; font-size: 12.5px; }
+.cat span:last-child { color: var(--w-ter); font-variant-numeric: tabular-nums; }
+.cat.on { background: var(--w-accent); color: var(--w-card); }
+.cat.on span:last-child { color: inherit; opacity: .8; }
+.list { background: var(--w-card); border: 1px solid var(--w-line); border-radius: 8px; height: 430px; overflow: auto; }
+.grp { position: sticky; top: 0; z-index: 1; background: color-mix(in srgb, var(--w-card) 92%, var(--w-bg)); backdrop-filter: blur(8px); font-size: 11px; font-weight: 600; color: var(--w-sec); letter-spacing: .03em; padding: 6px 12px 4px; border-bottom: 1px solid var(--w-line); display: flex; justify-content: space-between; }
+.grp small { font-weight: 400; color: var(--w-ter); letter-spacing: 0; }
+.row { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 5px 12px; min-height: 32px; border-bottom: 1px solid color-mix(in srgb, var(--w-line) 55%, transparent); }
+.row:nth-child(even of .row) { background: var(--w-row-alt); }
+.row .mod { width: 7px; height: 7px; border-radius: 50%; background: var(--w-accent); justify-self: center; visibility: hidden; }
+.row.modified .mod { visibility: visible; }
+.row .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .name small { color: var(--w-ter); margin-left: 6px; font-size: 11.5px; }
+.row .keys { display: flex; gap: 5px; align-items: center; justify-content: flex-end; flex-wrap: wrap; }
+.row .rowact { visibility: hidden; }
+.row:hover .rowact, .row.modified .rowact.reset, .row.recording .rowact { visibility: visible; }
+.kbd { font-family: var(--font-code); font-size: 12px; min-width: 44px; text-align: center; border: 1px solid var(--w-line); border-bottom-width: 2px; background: var(--w-card); color: var(--w-fg); border-radius: 5px; padding: 1px 7px; cursor: pointer; white-space: nowrap; }
+.kbd:hover { border-color: var(--w-accent); }
+.kbd.none { color: var(--w-ter); font-family: var(--font-ui); font-size: 11.5px; border-style: dashed; border-bottom-width: 1px; }
+.kbd.rec { border-color: var(--w-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--w-accent) 25%, transparent); color: var(--w-accent); font-family: var(--font-ui); font-size: 11.5px; animation: pulse 1.2s ease-in-out infinite; }
+.kbd.locked, .kbd.fixed { cursor: default; color: var(--w-sec); background: transparent; }
+.kbd.locked:hover, .kbd.fixed:hover { border-color: var(--w-line); }
+@keyframes pulse { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--w-accent) 12%, transparent); } }
+.lock { width: 12px; height: 12px; color: var(--w-ter); }
+.hint { grid-column: 2 / -1; font-size: 11.5px; color: var(--w-sec); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 2px 0 2px; }
+.hint kbd { font-family: var(--font-code); font-size: 11px; border: 1px solid var(--w-line); border-radius: 4px; padding: 0 4px; }
+.conflict { grid-column: 2 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; background: var(--w-warn-soft); color: var(--w-fg); border-radius: 6px; padding: 5px 8px; margin: 2px 0 3px; }
+.conflict b { color: var(--w-warn); }
+.err { grid-column: 2 / -1; font-size: 12px; color: var(--w-err); padding: 2px 0; }
+.gest { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--w-accent); border: 1px dashed var(--w-accent); border-radius: 6px; padding: 2px 8px; cursor: crosshair; user-select: none; }
+.foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 12px; color: var(--w-sec); }
+.sheet-veil { position: absolute; inset: 0; background: rgba(0,0,0,.18); display: grid; place-items: start center; padding-top: 110px; z-index: 5; }
+.sheet { width: min(380px, calc(100% - 32px)); background: var(--w-card); border-radius: 10px; box-shadow: 0 16px 40px rgba(0,0,0,.3); padding: 16px 18px 14px; display: grid; gap: 10px; font-size: 13px; }
+.sheet h3 { margin: 0; font-size: 13.5px; }
+.sheet p { margin: 0; color: var(--w-sec); line-height: 1.5; }
+.sheet .acts { display: flex; justify-content: flex-end; gap: 8px; }
+.empty { padding: 40px 16px; text-align: center; color: var(--w-ter); }
+
+/* ---------- command palette preview ---------- */
+.pal { margin-top: 14px; background: var(--w-card); color: var(--w-fg); border-radius: 10px; box-shadow: var(--w-shadow); overflow: hidden; max-width: 520px; }
+.mac.dark + .pal, .pal.dark { --w-card:#1C1C1E; --w-fg:#F2F2F7; --w-line:#3A3A3C; --w-ter:#7C7C82; --w-sel:#23392F; --w-shadow: 0 18px 40px rgba(0,0,0,.5); }
+.pal .q { padding: 9px 12px; border-bottom: 1px solid var(--w-line); font-size: 14px; color: var(--w-ter); }
+.pal .it { display: flex; justify-content: space-between; padding: 6px 12px; font-size: 13px; }
+.pal .it.sel { background: var(--w-sel); }
+.pal .it span:last-child { font-family: var(--font-code); font-size: 11px; color: var(--w-ter); }
+.cap { font-size: 11px; color: var(--page-muted); margin: 14px 0 4px; letter-spacing: .06em; text-transform: uppercase; }
+.toast { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%); background: var(--w-fg); color: var(--w-card); font-size: 12px; padding: 6px 12px; border-radius: 7px; opacity: 0; transition: opacity .15s; pointer-events: none; white-space: nowrap; z-index: 6; }
+.toast.show { opacity: .92; }
+@media (prefers-reduced-motion: reduce) { .kbd.rec { animation: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>设置 · 快捷键页 · 可交互原型</h1>
+    <p class="lede">点任意一个快捷键开始录制，按下新组合键即可替换；<kbd>Esc</kbd> 取消，<kbd>⌫</kbd> 清除。按 <kbd>⌘⇧F</kbd> 这类已被占用的组合会提示冲突；<kbd>⌘Q</kbd>、<kbd>⌘C</kbd> 等系统通用组合键锁定。鼠标手势行要按住修饰键再点录制区。下方的命令面板读的是同一张定义表，会实时反映改动。</p>
+  </header>
+
+  <div class="controls" role="group" aria-label="原型设置">
+    <div class="ctl"><span>外观</span><div class="seg" data-ctl="theme"><button aria-pressed="true" data-v="light">浅色</button><button aria-pressed="false" data-v="dark">深色</button></div></div>
+    <div class="ctl"><span>K1 布局</span><div class="seg" data-ctl="k1"><button aria-pressed="true" data-v="a">A 单列分组</button><button aria-pressed="false" data-v="b">B 左分类右列表</button></div></div>
+    <div class="ctl"><span>K2 冲突提示</span><div class="seg" data-ctl="k2"><button aria-pressed="true" data-v="a">A 行内</button><button aria-pressed="false" data-v="b">B 确认框</button></div></div>
+  </div>
+
+  <div class="main">
+    <div>
+      <div class="mac" id="mac">
+        <div class="tb">
+          <div class="title"><div class="dots"><i></i><i></i><i></i></div>设置</div>
+          <div class="tabs">
+            <div class="tab"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M4 15 8.5 4h1L14 15M5.6 11h6.8"/><path d="M15 9v6"/></svg>阅读器</div>
+            <div class="tab"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M10 2.5 3.5 5v5c0 4 3 6.5 6.5 7.5 3.5-1 6.5-3.5 6.5-7.5V5z"/><path d="m7 10 2 2 4-4"/></svg>精确分析</div>
+            <div class="tab on"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="2" y="5" width="16" height="10" rx="2"/><path d="M5 8h1M8 8h1M11 8h1M14 8h1M6 12h8"/></svg>快捷键</div>
+          </div>
+        </div>
+        <div class="pane">
+          <div class="bar">
+            <label class="search" id="searchBox"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg><input id="q" type="search" placeholder="搜索命令或分组" aria-label="搜索命令"><span class="keyq" id="keyq" hidden></span></label>
+            <button class="btn" id="byKey" aria-pressed="false" title="按下组合键，列出用到它的命令">按键搜索</button>
+            <div class="chips" id="filters"><button class="chip" data-f="all" aria-pressed="true">全部</button><button class="chip" data-f="mod" aria-pressed="false">已修改<span class="n" id="modN">0</span></button></div>
+          </div>
+          <div class="body" id="body"></div>
+          <div class="foot"><span>快捷键对所有窗口生效。面板里的方向键、回车、Esc 固定不可改。</span><button class="btn" id="resetAll">全部恢复默认</button></div>
+        </div>
+        <div class="toast" id="toast" role="status"></div>
+      </div>
+
+      <div class="cap">命令面板（⌘⇧P）预览 · 读同一张定义表</div>
+      <div class="pal" id="pal"></div>
+    </div>
+
+    <aside class="notes">
+      <div>
+        <h2>试一试</h2>
+        <div class="demo" id="demo">
+          <button data-try="typeDef">改“跳到类型定义”<small>录制 ⌘⇧F → 冲突 → 替换或取消</small></button>
+          <button data-try="quit">改“退出 Cairn”<small>系统通用组合键锁定</small></button>
+          <button data-try="back">“后退”有两个快捷键<small>一条命令可以绑多组；点 + 再加一组</small></button>
+          <button data-try="gesture">改鼠标手势<small>按住修饰键点录制区</small></button>
+          <button data-try="search">按键搜索 ⌃⌘J<small>列出用到这个组合键的命令</small></button>
+        </div>
+      </div>
+      <div>
+        <h2>规则</h2>
+        <ul>
+          <li>菜单命令至少带 <kbd>⌘</kbd> <kbd>⌃</kbd> <kbd>⌥</kbd> 之一；单独 <kbd>⇧</kbd> 或无修饰键会被拒绝</li>
+          <li>锁定：<kbd>⌘Q</kbd> <kbd>⌘W</kbd> <kbd>⌘C</kbd> <kbd>⌘V</kbd> <kbd>⌘A</kbd> <kbd>⌘X</kbd> <kbd>⌘,</kbd>，既不能改，也不能分配给别的命令</li>
+          <li>冲突时“替换”：原来那条命令变成未设置，两条都标记为已修改</li>
+          <li>只保存和默认值不同的覆盖项；“恢复”删掉该条覆盖项</li>
+          <li>鼠标手势只录修饰键组合；阅读器单击本身不可改</li>
+        </ul>
+      </div>
+      <div>
+        <h2>待你裁决</h2>
+        <p><b>K1</b> 单列按菜单分组（像 Xcode 的 Key Bindings），还是左侧分类、右侧列表。命令约 50 条，单列加搜索够用；分类栏以后命令更多时更好找。</p>
+        <p><b>K2</b> 冲突在行内提示并给出“替换 / 取消”，还是弹出确认框。行内不打断录制；确认框更醒目。</p>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<script>
+(() => {
+  // Canonical form: modifiers in macOS display order (ctrl, opt, shift, cmd), then the key.
+  function norm(b) {
+    const key = b.endsWith('++') ? '+' : b.split('+').pop();
+    const mods = b.slice(0, b.length - key.length).split('+').filter(Boolean);
+    return [...['ctrl', 'opt', 'shift', 'cmd'].filter(m => mods.includes(m)), key].join('+');
+  }
+  // One registry drives the settings list, the palette preview and (in the app) the menu key equivalents.
+  // Each command: id, group, title, default bindings. A binding is a canonical string like "cmd+shift+f".
+  const G = [
+    ['app', 'Cairn'], ['file', '文件'], ['edit', '编辑'], ['find', '查找'], ['go', '导航'], ['view', '视图'], ['rel', '关系'],
+    ['lens', '上下文窗口'], ['mouse', '阅读器鼠标手势'], ['panel', '面板内按键（只读）'],
+  ];
+  const C = [
+    ['settings', 'app', '设置…', ['cmd+,']], ['quit', 'app', '退出 Cairn', ['cmd+q']],
+    ['openProject', 'file', '打开项目…', ['cmd+o']], ['newWindow', 'file', '新建窗口', ['cmd+n']], ['quickOpen', 'file', '快速打开…', ['cmd+p']],
+    ['openNewTab', 'file', '在新标签页中打开', ['cmd+shift+enter']], ['closeTab', 'file', '关闭标签页', ['cmd+w']], ['closeWindow', 'file', '关闭窗口', ['cmd+shift+w']], ['refresh', 'file', '刷新索引', ['cmd+r']],
+    ['cut', 'edit', '剪切', ['cmd+x']], ['copy', 'edit', '复制', ['cmd+c']], ['paste', 'edit', '粘贴', ['cmd+v']], ['selectAll', 'edit', '全选', ['cmd+a']],
+    ['find', 'find', '在文件中查找…', ['cmd+f']], ['findNext', 'find', '查找下一个', ['cmd+g']], ['findPrev', 'find', '查找上一个', ['cmd+shift+g']], ['findProject', 'find', '在项目中查找…', ['cmd+shift+f']],
+    ['palette', 'go', '命令面板…', ['cmd+shift+p']], ['openSymbol', 'go', '打开符号…', ['cmd+t']], ['goLine', 'go', '跳转到行…', ['cmd+l']],
+    ['back', 'go', '后退', ['ctrl+cmd+left', 'cmd+[']], ['forward', 'go', '前进', ['ctrl+cmd+right', 'cmd+]']],
+    ['prevTab', 'go', '上一个标签页', ['cmd+shift+[']], ['nextTab', 'go', '下一个标签页', ['cmd+shift+]']],
+    ['typeDef', 'go', '跳到类型定义', ['ctrl+cmd+j'], true],
+    ['prevHunk', 'go', '上一个差异块', ['opt+cmd+up']], ['nextHunk', 'go', '下一个差异块', ['opt+cmd+down']],
+    ['preset1', 'view', '布局：阅读', ['cmd+1']], ['preset2', 'view', '布局：关系', ['cmd+2']], ['preset3', 'view', '布局：比较', ['cmd+3']], ['preset4', 'view', '布局：专注', ['cmd+4']],
+    ['closeCompare', 'view', '关闭比较', ['ctrl+cmd+w']], ['toggleFold', 'view', '展开或折叠', ['ctrl+cmd+[']],
+    ['hFull', 'view', '阅读高度：完整', ['opt+cmd+0']], ['hStruct', 'view', '阅读高度：结构', ['opt+cmd+1']], ['hOverview', 'view', '阅读高度：概览', ['opt+cmd+2']],
+    ['focusScope', 'view', '聚焦当前作用域', ['opt+cmd+f']], ['toggleBookmark', 'view', '添加或移除书签', ['cmd+shift+m']], ['showBookmarks', 'view', '显示书签', ['opt+cmd+b']],
+    ['fontUp', 'view', '增大字号', ['cmd++']], ['fontDown', 'view', '减小字号', ['cmd+-']], ['wrap', 'view', '自动换行', ['opt+z']], ['trail', 'view', '显示阅读轨迹', ['opt+cmd+t']],
+    ['toggleRel', 'rel', '显示或隐藏关系', ['ctrl+cmd+r']], ['callers', 'rel', '显示调用方', ['cmd+shift+h']], ['calls', 'rel', '显示调用', []], ['impls', 'rel', '显示实现', []],
+    ['symbolDoc', 'rel', '显示符号文档', ['ctrl+shift+space']], ['inspector', 'rel', '显示解析检查器', ['cmd+i']],
+    ['lensSymbol', 'lens', '跟踪光标下的符号', [], true], ['lensEnclosing', 'lens', '跟踪所在函数', [], true], ['lensPin', 'lens', '固定 / 取消固定', [], true],
+    ['prevCand', 'lens', '上一个候选', ['opt+cmd+left']], ['nextCand', 'lens', '下一个候选', ['opt+cmd+right']],
+    ['gJump', 'mouse', '跳到定义', ['cmd+click']], ['gTypeDef', 'mouse', '跳到类型定义', ['cmd+shift+click'], true], ['gHover', 'mouse', '立即显示符号文档', ['opt+click']],
+    ['pMove', 'panel', '上下移动选择', ['up', 'down']], ['pOpen', 'panel', '打开选中项', ['enter']], ['pNewTab', 'panel', '在新标签页中打开', ['cmd+shift+enter']], ['pClose', 'panel', '关闭面板', ['esc']],
+  ].map(([id, group, title, def, isNew]) => ({ id, group, title, def: def.map(norm), isNew: !!isNew }));
+  const LOCKED = new Set(['cmd+q', 'cmd+w', 'cmd+c', 'cmd+v', 'cmd+a', 'cmd+x', 'cmd+,']);
+  const byId = Object.fromEntries(C.map(c => [c.id, c]));
+  const overrides = {}; // id -> bindings array; only entries that differ from defaults
+  const bindingsOf = c => overrides[c.id] ?? c.def;
+  const isGesture = c => c.group === 'mouse';
+  const isFixed = c => c.group === 'panel';
+
+  const SYM = { cmd: '⌘', shift: '⇧', opt: '⌥', ctrl: '⌃' };
+  const ORDER = ['ctrl', 'opt', 'shift', 'cmd'];
+  const KEYSYM = { left: '←', right: '→', up: '↑', down: '↓', enter: '↩', esc: 'Esc', space: 'Space', click: '点击' };
+  function pretty(b) {
+    const parts = b.split('+').filter((p, i, a) => !(p === '' && a[i + 1] === ''));
+    const key = b.endsWith('++') ? '+' : parts[parts.length - 1];
+    const mods = ORDER.filter(m => parts.includes(m)).map(m => SYM[m]).join('');
+    const k = KEYSYM[key] || key.toUpperCase();
+    return key === 'click' ? `${mods} + 点击` : mods + k;
+  }
+  function canonical(e) {
+    const mods = [];
+    if (e.ctrlKey) mods.push('ctrl'); if (e.altKey) mods.push('opt'); if (e.shiftKey) mods.push('shift'); if (e.metaKey) mods.push('cmd');
+    const map = { ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down', Enter: 'enter', ' ': 'space' };
+    let k = map[e.key] || (e.code && e.code.startsWith('Key') ? e.code.slice(3).toLowerCase() : e.code && e.code.startsWith('Digit') ? e.code.slice(5) : e.key.toLowerCase());
+    if (e.code === 'BracketLeft') k = '['; if (e.code === 'BracketRight') k = ']'; if (e.code === 'Comma') k = ','; if (e.code === 'Minus') k = '-'; if (e.code === 'Equal') k = '+';
+    return [...mods, k].join('+');
+  }
+  const owners = (b, exceptId) => C.filter(c => c.id !== exceptId && bindingsOf(c).includes(b));
+
+  // ----- state -----
+  const st = { theme: 'light', k1: 'a', k2: 'a', filter: 'all', q: '', keyQ: null, cat: 'go' };
+  let rec = null;        // { id, index } index = -1 means "add another"
+  let pending = null;    // { id, index, binding, other } conflict awaiting a choice
+  let error = null;      // { id, text }
+  let keySearch = false;
+
+  const mac = document.getElementById('mac'), body = document.getElementById('body'), pal = document.getElementById('pal'), toastEl = document.getElementById('toast');
+  const q = document.getElementById('q'), keyq = document.getElementById('keyq'), byKeyBtn = document.getElementById('byKey');
+  let toastTimer = 0;
+  const toast = m => { toastEl.textContent = m; toastEl.classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1800); };
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const LOCK_SVG = '<svg class="lock" viewBox="0 0 16 16" fill="currentColor" aria-label="锁定"><path d="M5 7V5a3 3 0 0 1 6 0v2h.5A1.5 1.5 0 0 1 13 8.5v5a1.5 1.5 0 0 1-1.5 1.5h-7A1.5 1.5 0 0 1 3 13.5v-5A1.5 1.5 0 0 1 4.5 7zm1.5 0h3V5a1.5 1.5 0 0 0-3 0z"/></svg>';
+
+  function visible(c) {
+    if (st.filter === 'mod' && !(c.id in overrides)) return false;
+    if (st.keyQ) return bindingsOf(c).includes(st.keyQ);
+    if (st.q) {
+      const t = st.q.toLowerCase();
+      const g = G.find(x => x[0] === c.group)[1];
+      return c.title.toLowerCase().includes(t) || g.includes(st.q) || bindingsOf(c).some(b => pretty(b).toLowerCase().includes(t));
+    }
+    return true;
+  }
+
+  function rowHTML(c) {
+    const bs = bindingsOf(c);
+    const locked = bs.some(b => LOCKED.has(b));
+    const fixed = isFixed(c);
+    let keys = '';
+    bs.forEach((b, i) => {
+      if (rec && rec.id === c.id && rec.index === i) keys += recChip(c);
+      else keys += `<span class="kbd${locked ? ' locked' : ''}${fixed ? ' fixed' : ''}" data-edit="${c.id}" data-i="${i}" title="${locked ? '系统通用快捷键，不可修改' : fixed ? '面板内按键固定' : '点击录制新的组合键'}">${esc(pretty(b))}</span>`;
+    });
+    if (rec && rec.id === c.id && rec.index === -1) keys += recChip(c);
+    if (!bs.length && !(rec && rec.id === c.id)) keys += `<span class="kbd none" data-edit="${c.id}" data-i="-1" title="点击录制">未设置</span>`;
+    if (locked) keys += LOCK_SVG;
+    else if (!fixed) {
+      if (bs.length && !(rec && rec.id === c.id)) keys += `<button class="btn link rowact" data-add="${c.id}" title="再加一组快捷键" aria-label="再加一组快捷键">+</button>`;
+      if (c.id in overrides) keys += `<button class="btn link rowact reset" data-reset="${c.id}">恢复</button>`;
+    }
+    let extra = '';
+    if (rec && rec.id === c.id) {
+      extra = isGesture(c)
+        ? `<div class="hint">按住修饰键（例如 <kbd>⌘⇧</kbd>）并点击上面的虚线框 · <kbd>Esc</kbd> 取消</div>`
+        : `<div class="hint">按下新的组合键 · <kbd>Esc</kbd> 取消 · <kbd>⌫</kbd> 清除这一组</div>`;
+    }
+    if (pending && pending.id === c.id && st.k2 === 'a') {
+      extra = `<div class="conflict"><span><b>${esc(pretty(pending.binding))}</b> 已分配给「${esc(pending.other.title)}」</span><button class="btn primary" data-replace>替换</button><button class="btn" data-cancel>取消</button></div>`;
+    }
+    if (error && error.id === c.id) extra += `<div class="err">${esc(error.text)}</div>`;
+    const newTag = c.isNew ? '<small>新增</small>' : '';
+    return `<div class="row${c.id in overrides ? ' modified' : ''}${rec && rec.id === c.id ? ' recording' : ''}" data-row="${c.id}"><span class="mod" title="已修改"></span><span class="name" title="${esc(c.title)}">${esc(c.title)}${newTag}</span><span class="keys">${keys}</span>${extra}</div>`;
+  }
+  function recChip(c) {
+    return isGesture(c) ? `<span class="gest" data-gesture="${c.id}">按住修饰键点这里</span>` : `<span class="kbd rec">按下组合键…</span>`;
+  }
+
+  function render() {
+    mac.classList.toggle('dark', st.theme === 'dark');
+    pal.classList.toggle('dark', st.theme === 'dark');
+    document.getElementById('modN').textContent = Object.keys(overrides).length;
+    const groups = G.map(([gid, gname]) => ({ gid, gname, items: C.filter(c => c.group === gid && visible(c)) }));
+    if (st.k1 === 'a') {
+      body.className = 'body';
+      const html = groups.filter(g => g.items.length).map(g => `<div class="grp"><span>${g.gname}</span><small>${g.items.length}</small></div>${g.items.map(rowHTML).join('')}`).join('');
+      body.innerHTML = `<div class="list" id="list">${html || '<div class="empty">没有匹配的命令</div>'}</div>`;
+    } else {
+      body.className = 'body split';
+      const searching = st.q || st.keyQ || st.filter === 'mod';
+      const cats = groups.map(g => `<div class="cat${!searching && g.gid === st.cat ? ' on' : ''}" data-cat="${g.gid}"><span>${g.gname}</span><span>${g.items.length}</span></div>`).join('');
+      const shown = searching ? groups.filter(g => g.items.length) : groups.filter(g => g.gid === st.cat);
+      const html = shown.map(g => `${searching ? `<div class="grp"><span>${g.gname}</span><small>${g.items.length}</small></div>` : ''}${g.items.map(rowHTML).join('')}`).join('');
+      body.innerHTML = `<div class="cats">${cats}</div><div class="list" id="list">${html || '<div class="empty">没有匹配的命令</div>'}</div>`;
+    }
+    const old = mac.querySelector('.sheet-veil'); if (old) old.remove();
+    if (pending && st.k2 === 'b') {
+      const veil = document.createElement('div');
+      veil.className = 'sheet-veil';
+      veil.innerHTML = `<div class="sheet" role="alertdialog" aria-label="快捷键冲突"><h3>“${esc(pretty(pending.binding))}”已被使用</h3><p>它现在分配给「${esc(pending.other.title)}」。替换后，「${esc(pending.other.title)}」将没有这组快捷键。</p><div class="acts"><button class="btn" data-cancel>取消</button><button class="btn primary" data-replace>替换</button></div></div>`;
+      mac.appendChild(veil);
+    }
+    renderPalette();
+  }
+  function renderPalette() {
+    const ids = ['typeDef', 'findProject', 'back', 'callers', 'symbolDoc', 'lensEnclosing'];
+    pal.innerHTML = `<div class="q">› 命令</div>` + ids.map((id, i) => {
+      const c = byId[id], b = bindingsOf(c);
+      return `<div class="it${i === 0 ? ' sel' : ''}"><span>${esc(c.title)}</span><span>${b.length ? esc(b.map(pretty).join('  ')) : ''}</span></div>`;
+    }).join('');
+  }
+
+  function setBinding(id, index, binding) {
+    const c = byId[id];
+    const next = [...bindingsOf(c)];
+    if (binding === null) { if (index >= 0) next.splice(index, 1); }
+    else if (index === -1) next.push(binding);
+    else next[index] = binding;
+    const same = next.length === c.def.length && next.every((b, i) => b === c.def[i]);
+    if (same) delete overrides[id]; else overrides[id] = next;
+  }
+  function commit(id, index, binding) {
+    error = null;
+    const c = byId[id];
+    if (!isGesture(c)) {
+      const parts = binding.split('+');
+      const hasMod = parts.some(p => p === 'cmd' || p === 'ctrl' || p === 'opt');
+      if (!hasMod) { error = { id, text: `${pretty(binding)} 需要带 ⌘、⌃ 或 ⌥ 之一` }; rec = { id, index }; render(); return; }
+    }
+    if (LOCKED.has(binding)) { error = { id, text: `${pretty(binding)} 是系统通用快捷键，不能分配` }; rec = { id, index }; render(); return; }
+    if (bindingsOf(c).includes(binding) && bindingsOf(c).indexOf(binding) !== index) { error = { id, text: '这条命令已经有这组快捷键' }; rec = { id, index }; render(); return; }
+    const others = owners(binding, id);
+    if (others.length) { pending = { id, index, binding, other: others[0] }; rec = null; render(); return; }
+    setBinding(id, index, binding); rec = null; render();
+    toast(`「${c.title}」→ ${pretty(binding)}`);
+  }
+
+  // ----- events -----
+  document.addEventListener('keydown', e => {
+    if (keySearch) {
+      if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
+      e.preventDefault();
+      if (e.key === 'Escape') { keySearch = false; byKeyBtn.setAttribute('aria-pressed', 'false'); return; }
+      st.keyQ = canonical(e); keySearch = false; byKeyBtn.setAttribute('aria-pressed', 'true');
+      keyq.hidden = false; keyq.textContent = pretty(st.keyQ); q.value = ''; st.q = ''; q.disabled = true; render(); return;
+    }
+    if (!rec) return;
+    if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
+    e.preventDefault();
+    if (e.key === 'Escape') { rec = null; error = null; render(); return; }
+    const c = byId[rec.id];
+    if (isGesture(c)) return;
+    if (e.key === 'Backspace' && !e.metaKey && !e.ctrlKey && !e.altKey) { setBinding(rec.id, rec.index, null); rec = null; error = null; render(); return; }
+    commit(rec.id, rec.index, canonical(e));
+  }, true);
+
+  body.addEventListener('mousedown', e => {
+    const g = e.target.closest('[data-gesture]');
+    if (!g) return;
+    e.preventDefault();
+    const mods = [];
+    if (e.ctrlKey) mods.push('ctrl'); if (e.altKey) mods.push('opt'); if (e.shiftKey) mods.push('shift'); if (e.metaKey) mods.push('cmd');
+    if (!mods.length) { error = { id: rec.id, text: '要按住至少一个修饰键；单独点击留给定位光标' }; render(); return; }
+    commit(rec.id, rec.index, [...mods, 'click'].join('+'));
+  });
+  mac.addEventListener('click', e => {
+    const t = e.target;
+    const edit = t.closest('[data-edit]');
+    if (edit) {
+      const c = byId[edit.dataset.edit];
+      if (isFixed(c)) { toast('面板内按键固定不可改'); return; }
+      if (bindingsOf(c).some(b => LOCKED.has(b))) { toast('系统通用快捷键，不可修改'); return; }
+      rec = { id: c.id, index: +edit.dataset.i }; pending = null; error = null; render(); return;
+    }
+    const add = t.closest('[data-add]');
+    if (add) { rec = { id: add.dataset.add, index: -1 }; pending = null; error = null; render(); return; }
+    const reset = t.closest('[data-reset]');
+    if (reset) { delete overrides[reset.dataset.reset]; render(); toast('已恢复默认'); return; }
+    if (t.closest('[data-replace]') && pending) {
+      const o = pending.other;
+      setBinding(o.id, bindingsOf(o).indexOf(pending.binding), null);
+      setBinding(pending.id, pending.index, pending.binding);
+      toast(`「${byId[pending.id].title}」→ ${pretty(pending.binding)}；「${o.title}」改为未设置`);
+      pending = null; render(); return;
+    }
+    if (t.closest('[data-cancel]')) { pending = null; render(); return; }
+    const cat = t.closest('[data-cat]');
+    if (cat) { st.cat = cat.dataset.cat; st.q = ''; q.value = ''; render(); }
+  });
+  q.addEventListener('input', () => { st.q = q.value.trim(); render(); });
+  byKeyBtn.addEventListener('click', () => {
+    if (st.keyQ) { st.keyQ = null; keyq.hidden = true; q.disabled = false; byKeyBtn.setAttribute('aria-pressed', 'false'); render(); return; }
+    keySearch = true; byKeyBtn.setAttribute('aria-pressed', 'true'); toast('按下要查找的组合键 · Esc 取消');
+  });
+  document.getElementById('filters').addEventListener('click', e => {
+    const b = e.target.closest('[data-f]'); if (!b) return;
+    st.filter = b.dataset.f;
+    document.querySelectorAll('#filters .chip').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    render();
+  });
+  document.getElementById('resetAll').addEventListener('click', () => {
+    for (const k of Object.keys(overrides)) delete overrides[k];
+    rec = null; pending = null; error = null; render(); toast('全部恢复默认');
+  });
+  document.querySelectorAll('[data-ctl]').forEach(group => group.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return;
+    group.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    st[group.dataset.ctl] = b.dataset.v; render();
+  }));
+  function reveal(id) {
+    const row = body.querySelector(`[data-row="${id}"]`);
+    if (row) row.scrollIntoView({ block: 'center' });
+  }
+  document.getElementById('demo').addEventListener('click', e => {
+    const b = e.target.closest('[data-try]'); if (!b) return;
+    const k = b.dataset.try;
+    st.keyQ = null; keyq.hidden = true; q.disabled = false; byKeyBtn.setAttribute('aria-pressed', 'false'); st.q = ''; q.value = '';
+    pending = null; error = null;
+    if (k === 'typeDef') { st.cat = 'go'; rec = { id: 'typeDef', index: 0 }; render(); reveal('typeDef'); toast('现在按 ⌘⇧F 试试冲突'); }
+    if (k === 'quit') { st.cat = 'app'; rec = null; render(); reveal('quit'); toast('系统通用快捷键，不可修改'); }
+    if (k === 'back') { st.cat = 'go'; rec = { id: 'back', index: -1 }; render(); reveal('back'); }
+    if (k === 'gesture') { st.cat = 'mouse'; rec = { id: 'gTypeDef', index: 0 }; render(); reveal('gTypeDef'); }
+    if (k === 'search') { st.keyQ = 'ctrl+cmd+j'; keyq.hidden = false; keyq.textContent = pretty(st.keyQ); q.disabled = true; byKeyBtn.setAttribute('aria-pressed', 'true'); render(); }
+  });
+
+  // The default table itself must be conflict-free (the CI check the plan asks for).
+  const seen = {};
+  for (const c of C) for (const b of c.def) { if (c.group === 'panel') continue; (seen[b] = seen[b] || []).push(c.id); }
+  const dupes = Object.entries(seen).filter(([, ids]) => ids.length > 1);
+  if (dupes.length) console.warn('default conflicts', dupes);
+  render();
+})();
+</script>
+</body>
+</html>
