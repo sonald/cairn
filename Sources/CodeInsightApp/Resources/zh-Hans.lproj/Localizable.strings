@@ -560,3 +560,9 @@
 "settings.hoverDocs" = "悬浮显示文档";
 "settings.hoverDocs.help" = "鼠标停在 Rust 符号上时显示签名和文档。⌥+点击和 ⌃⇧Space 不受此开关影响。";
 "main.hover.symbolNotFound" = "项目中找不到名为 %@ 的定义";
+
+/* 快捷键定义表：阅读器手势与面板内固定键（K0a）。 */
+"keybinding.gesture.definition" = "跳到定义";
+"keybinding.panel.move" = "上下移动选择";
+"keybinding.panel.open" = "打开选中项";
+"keybinding.panel.close" = "关闭面板";

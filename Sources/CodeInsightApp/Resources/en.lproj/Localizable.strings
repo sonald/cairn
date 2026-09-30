@@ -560,3 +560,9 @@
 "settings.hoverDocs" = "Show documentation on hover";
 "settings.hoverDocs.help" = "Rest the pointer on a Rust symbol to see its signature and docs. ⌥-click and ⌃⇧Space work either way.";
 "main.hover.symbolNotFound" = "No definition named %@ in this project";
+
+/* Key bindings table: reader gestures and read-only panel keys (K0a). */
+"keybinding.gesture.definition" = "Jump to Definition";
+"keybinding.panel.move" = "Move Selection Up or Down";
+"keybinding.panel.open" = "Open Selection";
+"keybinding.panel.close" = "Close Panel";

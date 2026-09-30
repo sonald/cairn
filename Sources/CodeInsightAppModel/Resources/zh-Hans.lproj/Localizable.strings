@@ -218,3 +218,6 @@
 
 /* 符号悬浮文档卡片。 */
 "model.hover.revisionNotIndexed" = "当前显示的版本不是已索引的版本";
+
+/* 快捷键：鼠标手势的展示词。 */
+"keybinding.click.word" = "点击";

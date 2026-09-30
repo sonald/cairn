@@ -835,7 +835,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         if wrapKeyMonitor == nil {
             wrapKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
                 let handled = MainActor.assumeIsolated {
-                    self?.handleWrapKeyEquivalent(event) == true
+                    self?.handleMonitoredKeyEquivalent(event) == true
                 }
                 return handled ? nil : event
             }
@@ -11544,16 +11544,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         commitReaderSettings(settings)
     }
 
-    // Option-only key equivalents can be consumed by NSTextView's text input
-    // before reaching the menu. Handle this application preference once,
-    // before responder dispatch, including while Settings owns the key window.
-    func handleWrapKeyEquivalent(_ event: NSEvent) -> Bool {
-        guard event.type == .keyDown,
-              event.modifierFlags.intersection([.command, .option, .control, .shift]) == .option,
-              event.charactersIgnoringModifiers?.lowercased() == "z" else { return false }
-        if !event.isARepeat { toggleWrapLines(nil) }
-        return true
-    }
+    // Option-only key equivalents are consumed by NSTextView's text input
+    // before reaching the menu; `handleMonitoredKeyEquivalent` (key binding
+    // table, K0a) handles every option-only chord, ⌥Z included.
 
     private func commitReaderSettings(_ settings: ReaderSettings) {
         readerSettings = settings
@@ -11668,76 +11661,248 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         }
     }
 
+    // MARK: Key binding table (K0a)
+
+    /// Effective bindings: the default scheme plus the user override layer.
+    /// Every menu item, hidden alternate, toolbar menu representation, reader
+    /// gesture, and option-only key monitor resolves through this table.
+    /// K0b replaces wholesale assignment with override-layer APIs.
+    var keyBindingTable = KeyBindingTable(scheme: .default)
+
+    /// One command's dispatch: the selector plus where the action goes. The
+    /// key monitor (`handleMonitoredKeyEquivalent`) uses the same mapping as
+    /// the menu factory so a recorded ⌥-only chord dispatches identically.
+    private struct CommandAction {
+        enum Target {
+            case delegate
+            case responderChain
+            case application
+        }
+
+        let selector: Selector?
+        let target: Target
+        let representedObject: String?
+
+        init(
+            _ selector: Selector?,
+            _ target: Target = .delegate,
+            representedObject: String? = nil
+        ) {
+            self.selector = selector
+            self.target = target
+            self.representedObject = representedObject
+        }
+    }
+
+    private static let commandActions: [CommandID: CommandAction] = [
+        .appAbout: CommandAction(#selector(AppDelegate.showAbout(_:))),
+        .appSettings: CommandAction(#selector(AppDelegate.showSettings(_:))),
+        .appQuit: CommandAction(#selector(NSApplication.terminate(_:)), .application),
+        .fileOpenProject: CommandAction(#selector(AppDelegate.openProject(_:))),
+        .fileNewWindow: CommandAction(#selector(AppDelegate.newWindow(_:))),
+        .fileQuickOpen: CommandAction(#selector(AppDelegate.quickOpen(_:))),
+        .fileOpenPythonProject: CommandAction(#selector(AppDelegate.openPythonProject(_:))),
+        .fileOpenTypeScriptProject: CommandAction(#selector(AppDelegate.openTypeScriptProject(_:))),
+        .fileOpenInNewTab: CommandAction(#selector(AppDelegate.openSelectedFileInNewTab(_:))),
+        .fileCloseTab: CommandAction(#selector(AppDelegate.closeActiveTab(_:))),
+        .fileCloseWindow: CommandAction(#selector(AppDelegate.closeProjectWindow(_:))),
+        .fileClearReadingSession: CommandAction(#selector(AppDelegate.clearReadingSession(_:))),
+        .fileRefreshIndex: CommandAction(#selector(AppDelegate.refreshProjectIndex(_:))),
+        .fileTrustRepository: CommandAction(#selector(AppDelegate.trustThisRepository(_:))),
+        .editCut: CommandAction(#selector(NSText.cut(_:)), .responderChain),
+        .editCopy: CommandAction(#selector(NSText.copy(_:)), .responderChain),
+        .editPaste: CommandAction(#selector(NSText.paste(_:)), .responderChain),
+        .editSelectAll: CommandAction(#selector(NSText.selectAll(_:)), .responderChain),
+        .findInFile: CommandAction(#selector(AppDelegate.findInFile(_:))),
+        .findNext: CommandAction(#selector(AppDelegate.findNext(_:))),
+        .findPrevious: CommandAction(#selector(AppDelegate.findPrevious(_:))),
+        .findInProject: CommandAction(#selector(AppDelegate.findInProject(_:))),
+        .goCommandPalette: CommandAction(#selector(AppDelegate.openCommandPalette(_:))),
+        .goOpenSymbol: CommandAction(#selector(AppDelegate.openSymbol(_:))),
+        .goToLine: CommandAction(#selector(AppDelegate.goToLine(_:))),
+        .goBack: CommandAction(#selector(AppDelegate.goBack(_:))),
+        .goForward: CommandAction(#selector(AppDelegate.goForward(_:))),
+        .goPreviousTab: CommandAction(#selector(AppDelegate.selectPreviousTab(_:))),
+        .goNextTab: CommandAction(#selector(AppDelegate.selectNextTab(_:))),
+        .goPreviousDiffHunk: CommandAction(#selector(AppDelegate.previousDiffHunk(_:))),
+        .goNextDiffHunk: CommandAction(#selector(AppDelegate.nextDiffHunk(_:))),
+        .viewPresetReading: CommandAction(
+            #selector(AppDelegate.applyPanelPreset(_:)),
+            representedObject: PanelPresetModel.reading.rawValue
+        ),
+        .viewPresetRelations: CommandAction(
+            #selector(AppDelegate.applyPanelPreset(_:)),
+            representedObject: PanelPresetModel.relations.rawValue
+        ),
+        .viewPresetCompare: CommandAction(
+            #selector(AppDelegate.applyPanelPreset(_:)),
+            representedObject: PanelPresetModel.compare.rawValue
+        ),
+        .viewPresetFocus: CommandAction(
+            #selector(AppDelegate.applyPanelPreset(_:)),
+            representedObject: PanelPresetModel.focus.rawValue
+        ),
+        .viewCloseComparison: CommandAction(#selector(AppDelegate.closeComparison(_:))),
+        .viewToggleFold: CommandAction(#selector(AppDelegate.toggleFold(_:))),
+        .viewReadingHeightFull: CommandAction(#selector(AppDelegate.useFullReadingHeight(_:))),
+        .viewReadingHeightStructure: CommandAction(
+            #selector(AppDelegate.useStructureReadingHeight(_:))
+        ),
+        .viewReadingHeightOverview: CommandAction(
+            #selector(AppDelegate.useOverviewReadingHeight(_:))
+        ),
+        .viewFocusCurrentScope: CommandAction(#selector(AppDelegate.focusCurrentScope(_:))),
+        .viewToggleBookmark: CommandAction(#selector(AppDelegate.toggleBookmark(_:))),
+        .viewShowBookmarks: CommandAction(#selector(AppDelegate.showBookmarks(_:))),
+        .viewHideBookmarks: CommandAction(#selector(AppDelegate.closeBookmarks(_:))),
+        .viewIncreaseFontSize: CommandAction(#selector(AppDelegate.increaseReaderFontSize(_:))),
+        .viewDecreaseFontSize: CommandAction(#selector(AppDelegate.decreaseReaderFontSize(_:))),
+        .viewWrapLines: CommandAction(#selector(AppDelegate.toggleWrapLines(_:))),
+        .viewShowReadingTrail: CommandAction(#selector(AppDelegate.showReadingTrail(_:))),
+        .relationsToggle: CommandAction(#selector(AppDelegate.toggleRelations(_:))),
+        .relationsShowCallers: CommandAction(#selector(AppDelegate.showCallers(_:))),
+        .relationsShowCalls: CommandAction(#selector(AppDelegate.showCalls(_:))),
+        .relationsShowImplementations: CommandAction(
+            #selector(AppDelegate.showImplementations(_:))
+        ),
+        .relationsShowSymbolDocumentation: CommandAction(
+            #selector(AppDelegate.showSymbolDocumentation(_:))
+        ),
+        .relationsShowResolutionInspector: CommandAction(
+            #selector(AppDelegate.showResolutionInspector(_:))
+        ),
+        .lensPreviousCandidate: CommandAction(
+            #selector(AppDelegate.previousContextCandidate(_:))
+        ),
+        .lensNextCandidate: CommandAction(#selector(AppDelegate.nextContextCandidate(_:))),
+    ]
+
+    /// Menu item whose title and first keyboard binding come from the key
+    /// binding table (K0a).
+    private func menuItem(for id: CommandID) -> NSMenuItem? {
+        guard let definition = keyBindingTable.definition(for: id),
+              let action = Self.commandActions[id]
+        else { return nil }
+        let item = NSMenuItem(
+            title: localized(definition.titleKey),
+            action: action.selector,
+            keyEquivalent: ""
+        )
+        if case let .keyboard(chord)? = keyBindingTable.bindings(for: id).first {
+            item.applyKeyChord(chord)
+        }
+        switch action.target {
+        case .delegate: item.target = self
+        case .application: item.target = NSApplication.shared
+        case .responderChain: break
+        }
+        item.representedObject = action.representedObject
+        return item
+    }
+
+    /// Hidden carriers for a command's second and later keyboard bindings
+    /// (⌘[ / ⌘] for Back/Forward): `isHidden` plus
+    /// `allowsKeyEquivalentWhenHidden`, matching the pre-migration approach.
+    private func hiddenAlternateMenuItems(for id: CommandID) -> [NSMenuItem] {
+        guard let definition = keyBindingTable.definition(for: id),
+              let action = Self.commandActions[id]
+        else { return [] }
+        return keyBindingTable.bindings(for: id).dropFirst().compactMap { binding in
+            guard case let .keyboard(chord) = binding else { return nil }
+            let item = NSMenuItem(
+                title: localized(definition.titleKey),
+                action: action.selector,
+                keyEquivalent: ""
+            )
+            item.applyKeyChord(chord)
+            switch action.target {
+            case .delegate: item.target = self
+            case .application: item.target = NSApplication.shared
+            case .responderChain: break
+            }
+            item.representedObject = action.representedObject
+            item.isHidden = true
+            item.allowsKeyEquivalentWhenHidden = true
+            return item
+        }
+    }
+
+    private func appendMenuItem(for id: CommandID, to menu: NSMenu) {
+        if let item = menuItem(for: id) { menu.addItem(item) }
+        for alternate in hiddenAlternateMenuItems(for: id) { menu.addItem(alternate) }
+    }
+
+    /// Dispatches a command outside menu matching — the option-only key
+    /// monitor path. Validation mirrors menu activation.
+    func performCommand(_ id: CommandID) -> Bool {
+        guard let action = Self.commandActions[id], let selector = action.selector else {
+            return false
+        }
+        let sender = NSMenuItem()
+        sender.action = selector
+        sender.representedObject = action.representedObject
+        switch action.target {
+        case .delegate:
+            sender.target = self
+            guard validateMenuItem(sender) else { return false }
+            perform(selector, with: sender)
+        case .application:
+            NSApplication.shared.perform(selector, with: sender)
+        case .responderChain:
+            NSApp.sendAction(selector, to: nil, from: sender)
+        }
+        return true
+    }
+
+    /// Option-only chords (⌥ or ⌥⇧, never ⌘/⌃) never match a menu item
+    /// because Option changes the typed character (⌥Z → Ω). Handle them here,
+    /// before responder dispatch, including while Settings owns the key
+    /// window. Every option-only keyboard binding in the table dispatches,
+    /// not just ⌥Z (K0a generalizes `handleWrapKeyEquivalent`).
+    func handleMonitoredKeyEquivalent(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown else { return false }
+        let flags = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        guard flags.contains(.option), flags.isDisjoint(with: [.command, .control]) else {
+            return false
+        }
+        for command in keyBindingTable.commands {
+            for binding in keyBindingTable.bindings(for: command.id) {
+                guard case let .keyboard(chord) = binding,
+                      chord.modifiers.contains(.option),
+                      chord.modifiers.isDisjoint(with: [.command, .control]),
+                      chord.matches(event)
+                else { continue }
+                if !event.isARepeat { _ = performCommand(command.id) }
+                return true
+            }
+        }
+        return false
+    }
+
     /// Internal for the menu wiring tests: the wrap command must stay
     /// reachable and checkable without any project window (D1.1).
+    /// Item titles and keyboard bindings all come from the key binding table
+    /// (K0a); second bindings become hidden alternate items.
     func makeMainMenu() -> NSMenu {
         let mainMenu = NSMenu()
 
         let appItem = NSMenuItem()
         let appMenu = NSMenu(title: "Cairn")
-        let aboutItem = NSMenuItem(
-            title: localized("app.menu.about.cairn"),
-            action: #selector(showAbout(_:)),
-            keyEquivalent: ""
-        )
-        aboutItem.target = self
-        appMenu.addItem(aboutItem)
+        appendMenuItem(for: .appAbout, to: appMenu)
         appMenu.addItem(.separator())
-        let settingsItem = NSMenuItem(
-            title: localized("app.menu.settings"),
-            action: #selector(showSettings(_:)),
-            keyEquivalent: ","
-        )
-        settingsItem.target = self
-        appMenu.addItem(settingsItem)
+        appendMenuItem(for: .appSettings, to: appMenu)
         appMenu.addItem(.separator())
-        let quitItem = NSMenuItem(
-            title: localized("app.menu.quit.cairn"),
-            action: #selector(NSApplication.terminate(_:)),
-            keyEquivalent: "q"
-        )
-        quitItem.target = NSApplication.shared
-        appMenu.addItem(quitItem)
+        appendMenuItem(for: .appQuit, to: appMenu)
         appItem.submenu = appMenu
         mainMenu.addItem(appItem)
 
         let fileItem = NSMenuItem()
         let fileMenu = NSMenu(title: localized("app.menu.file"))
-        let openItem = NSMenuItem(
-            title: localized("app.menu.open.project"),
-            action: #selector(openProject(_:)),
-            keyEquivalent: "o"
-        )
-        openItem.target = self
-        fileMenu.addItem(openItem)
-        let newWindowItem = NSMenuItem(
-            title: localized("app.menu.new.window"),
-            action: #selector(newWindow(_:)),
-            keyEquivalent: "n"
-        )
-        newWindowItem.target = self
-        fileMenu.addItem(newWindowItem)
-        let openPythonItem = NSMenuItem(
-            title: localized("app.menu.open.python.project"),
-            action: #selector(openPythonProject(_:)),
-            keyEquivalent: ""
-        )
-        openPythonItem.target = self
-        fileMenu.addItem(openPythonItem)
-        let openTypeScriptItem = NSMenuItem(
-            title: localized("app.menu.open.typescript.project"),
-            action: #selector(openTypeScriptProject(_:)),
-            keyEquivalent: ""
-        )
-        openTypeScriptItem.target = self
-        fileMenu.addItem(openTypeScriptItem)
-        let quickOpenItem = NSMenuItem(
-            title: localized("app.menu.quick.open"),
-            action: #selector(quickOpen(_:)),
-            keyEquivalent: "p"
-        )
-        quickOpenItem.target = self
-        fileMenu.addItem(quickOpenItem)
+        appendMenuItem(for: .fileOpenProject, to: fileMenu)
+        appendMenuItem(for: .fileNewWindow, to: fileMenu)
+        appendMenuItem(for: .fileOpenPythonProject, to: fileMenu)
+        appendMenuItem(for: .fileOpenTypeScriptProject, to: fileMenu)
+        appendMenuItem(for: .fileQuickOpen, to: fileMenu)
         let recentItem = NSMenuItem(
             title: localized("app.menu.open.recent"),
             action: nil,
@@ -11748,52 +11913,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         rebuildOpenRecentMenu(recentMenu)
         recentItem.submenu = recentMenu
         fileMenu.addItem(recentItem)
-        let openInNewTabItem = NSMenuItem(
-            title: localized("app.menu.open.in.new.tab"),
-            action: #selector(openSelectedFileInNewTab(_:)),
-            keyEquivalent: "\r"
-        )
-        openInNewTabItem.keyEquivalentModifierMask = [.command, .shift]
-        openInNewTabItem.target = self
-        fileMenu.addItem(openInNewTabItem)
-        let closeTabItem = NSMenuItem(
-            title: localized("app.menu.close.tab"),
-            action: #selector(closeActiveTab(_:)),
-            keyEquivalent: "w"
-        )
-        closeTabItem.target = self
-        fileMenu.addItem(closeTabItem)
-        let closeWindowItem = NSMenuItem(
-            title: localized("app.menu.close.window"),
-            action: #selector(closeProjectWindow(_:)),
-            keyEquivalent: "w"
-        )
-        closeWindowItem.keyEquivalentModifierMask = [.command, .shift]
-        closeWindowItem.target = self
-        fileMenu.addItem(closeWindowItem)
-        let clearSessionItem = NSMenuItem(
-            title: localized("app.menu.clear.reading.session"),
-            action: #selector(clearReadingSession(_:)),
-            keyEquivalent: ""
-        )
-        clearSessionItem.target = self
-        fileMenu.addItem(clearSessionItem)
+        appendMenuItem(for: .fileOpenInNewTab, to: fileMenu)
+        appendMenuItem(for: .fileCloseTab, to: fileMenu)
+        appendMenuItem(for: .fileCloseWindow, to: fileMenu)
+        appendMenuItem(for: .fileClearReadingSession, to: fileMenu)
         fileMenu.addItem(.separator())
-        let refreshIndexItem = NSMenuItem(
-            title: localized("app.menu.refresh.index"),
-            action: #selector(refreshProjectIndex(_:)),
-            keyEquivalent: "r"
-        )
-        refreshIndexItem.target = self
-        fileMenu.addItem(refreshIndexItem)
+        appendMenuItem(for: .fileRefreshIndex, to: fileMenu)
         fileMenu.addItem(.separator())
-        let trustItem = NSMenuItem(
-            title: localized("app.menu.trust.this.repository"),
-            action: #selector(trustThisRepository(_:)),
-            keyEquivalent: ""
-        )
-        trustItem.target = self
-        fileMenu.addItem(trustItem)
+        appendMenuItem(for: .fileTrustRepository, to: fileMenu)
         fileItem.submenu = fileMenu
         mainMenu.addItem(fileItem)
 
@@ -11803,177 +11930,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         // field) handles them.
         let editItem = NSMenuItem()
         let editMenu = NSMenu(title: localized("app.menu.edit"))
-        editMenu.addItem(NSMenuItem(
-            title: localized("app.menu.cut"),
-            action: #selector(NSText.cut(_:)),
-            keyEquivalent: "x"
-        ))
-        editMenu.addItem(NSMenuItem(
-            title: localized("app.menu.copy"),
-            action: #selector(NSText.copy(_:)),
-            keyEquivalent: "c"
-        ))
-        editMenu.addItem(NSMenuItem(
-            title: localized("app.menu.paste"),
-            action: #selector(NSText.paste(_:)),
-            keyEquivalent: "v"
-        ))
+        appendMenuItem(for: .editCut, to: editMenu)
+        appendMenuItem(for: .editCopy, to: editMenu)
+        appendMenuItem(for: .editPaste, to: editMenu)
         editMenu.addItem(.separator())
-        editMenu.addItem(NSMenuItem(
-            title: localized("app.menu.select.all"),
-            action: #selector(NSText.selectAll(_:)),
-            keyEquivalent: "a"
-        ))
+        appendMenuItem(for: .editSelectAll, to: editMenu)
         editItem.submenu = editMenu
         mainMenu.addItem(editItem)
 
         let findItem = NSMenuItem()
         let findMenu = NSMenu(title: localized("app.menu.find"))
-        let findInFileItem = NSMenuItem(
-            title: localized("app.menu.find.in.file"),
-            action: #selector(findInFile(_:)),
-            keyEquivalent: "f"
-        )
-        findInFileItem.target = self
-        findMenu.addItem(findInFileItem)
-        let findNextItem = NSMenuItem(
-            title: localized("app.menu.find.next"),
-            action: #selector(findNext(_:)),
-            keyEquivalent: "g"
-        )
-        findNextItem.target = self
-        findMenu.addItem(findNextItem)
-        let findPreviousItem = NSMenuItem(
-            title: localized("app.menu.find.previous"),
-            action: #selector(findPrevious(_:)),
-            keyEquivalent: "g"
-        )
-        findPreviousItem.keyEquivalentModifierMask = [.command, .shift]
-        findPreviousItem.target = self
-        findMenu.addItem(findPreviousItem)
+        appendMenuItem(for: .findInFile, to: findMenu)
+        appendMenuItem(for: .findNext, to: findMenu)
+        appendMenuItem(for: .findPrevious, to: findMenu)
         findMenu.addItem(.separator())
-        let findInProjectItem = NSMenuItem(
-            title: localized("app.menu.find.in.project"),
-            action: #selector(findInProject(_:)),
-            keyEquivalent: "f"
-        )
-        findInProjectItem.keyEquivalentModifierMask = [.command, .shift]
-        findInProjectItem.target = self
-        findMenu.addItem(findInProjectItem)
+        appendMenuItem(for: .findInProject, to: findMenu)
         findItem.submenu = findMenu
         mainMenu.addItem(findItem)
 
         let goItem = NSMenuItem()
         let goMenu = NSMenu(title: localized("app.menu.go"))
-        let commandPaletteItem = NSMenuItem(
-            title: localized("app.menu.command.palette"),
-            action: #selector(openCommandPalette(_:)),
-            keyEquivalent: "p"
-        )
-        commandPaletteItem.keyEquivalentModifierMask = [.command, .shift]
-        commandPaletteItem.target = self
-        goMenu.addItem(commandPaletteItem)
-        let symbolItem = NSMenuItem(
-            title: localized("app.menu.open.symbol"),
-            action: #selector(openSymbol(_:)),
-            keyEquivalent: "t"
-        )
-        symbolItem.target = self
-        goMenu.addItem(symbolItem)
-        let lineItem = NSMenuItem(
-            title: localized("app.menu.go.to.line"),
-            action: #selector(goToLine(_:)),
-            keyEquivalent: "l"
-        )
-        lineItem.target = self
-        goMenu.addItem(lineItem)
+        appendMenuItem(for: .goCommandPalette, to: goMenu)
+        appendMenuItem(for: .goOpenSymbol, to: goMenu)
+        appendMenuItem(for: .goToLine, to: goMenu)
         goMenu.addItem(.separator())
-        let backItem = NSMenuItem(
-            title: localized("app.menu.back"),
-            action: #selector(goBack(_:)),
-            keyEquivalent: "\u{F702}"
-        )
-        backItem.keyEquivalentModifierMask = [.command, .control]
-        backItem.target = self
-        goMenu.addItem(backItem)
-        let forwardItem = NSMenuItem(
-            title: localized("app.menu.forward"),
-            action: #selector(goForward(_:)),
-            keyEquivalent: "\u{F703}"
-        )
-        forwardItem.keyEquivalentModifierMask = [.command, .control]
-        forwardItem.target = self
-        goMenu.addItem(forwardItem)
-        let alternateBackItem = NSMenuItem(
-            title: localized("app.menu.back"),
-            action: #selector(goBack(_:)),
-            keyEquivalent: "["
-        )
-        alternateBackItem.keyEquivalentModifierMask = .command
-        alternateBackItem.target = self
-        alternateBackItem.isHidden = true
-        alternateBackItem.allowsKeyEquivalentWhenHidden = true
-        goMenu.addItem(alternateBackItem)
-        let alternateForwardItem = NSMenuItem(
-            title: localized("app.menu.forward"),
-            action: #selector(goForward(_:)),
-            keyEquivalent: "]"
-        )
-        alternateForwardItem.keyEquivalentModifierMask = .command
-        alternateForwardItem.target = self
-        alternateForwardItem.isHidden = true
-        alternateForwardItem.allowsKeyEquivalentWhenHidden = true
-        goMenu.addItem(alternateForwardItem)
-        let previousTabItem = NSMenuItem(
-            title: localized("app.menu.previous.tab"),
-            action: #selector(selectPreviousTab(_:)),
-            keyEquivalent: "["
-        )
-        previousTabItem.keyEquivalentModifierMask = [.command, .shift]
-        previousTabItem.target = self
-        goMenu.addItem(previousTabItem)
-        let nextTabItem = NSMenuItem(
-            title: localized("app.menu.next.tab"),
-            action: #selector(selectNextTab(_:)),
-            keyEquivalent: "]"
-        )
-        nextTabItem.keyEquivalentModifierMask = [.command, .shift]
-        nextTabItem.target = self
-        goMenu.addItem(nextTabItem)
+        // Back/Forward keep the migrated menu order: both visible items
+        // first, then both hidden alternate items (⌘[ / ⌘]).
+        if let backItem = menuItem(for: .goBack) { goMenu.addItem(backItem) }
+        if let forwardItem = menuItem(for: .goForward) { goMenu.addItem(forwardItem) }
+        for alternate in hiddenAlternateMenuItems(for: .goBack) { goMenu.addItem(alternate) }
+        for alternate in hiddenAlternateMenuItems(for: .goForward) { goMenu.addItem(alternate) }
+        appendMenuItem(for: .goPreviousTab, to: goMenu)
+        appendMenuItem(for: .goNextTab, to: goMenu)
         goMenu.addItem(.separator())
-        let previousCandidate = NSMenuItem(
-            title: localized("app.menu.previous.context.candidate"),
-            action: #selector(previousContextCandidate(_:)),
-            keyEquivalent: "\u{F702}"
-        )
-        previousCandidate.keyEquivalentModifierMask = [.command, .option]
-        previousCandidate.target = self
-        goMenu.addItem(previousCandidate)
-        let nextCandidate = NSMenuItem(
-            title: localized("app.menu.next.context.candidate"),
-            action: #selector(nextContextCandidate(_:)),
-            keyEquivalent: "\u{F703}"
-        )
-        nextCandidate.keyEquivalentModifierMask = [.command, .option]
-        nextCandidate.target = self
-        goMenu.addItem(nextCandidate)
+        appendMenuItem(for: .lensPreviousCandidate, to: goMenu)
+        appendMenuItem(for: .lensNextCandidate, to: goMenu)
         goMenu.addItem(.separator())
-        let previousHunk = NSMenuItem(
-            title: localized("app.menu.previous.diff.hunk"),
-            action: #selector(previousDiffHunk(_:)),
-            keyEquivalent: "\u{F700}"
-        )
-        previousHunk.keyEquivalentModifierMask = [.command, .option]
-        previousHunk.target = self
-        goMenu.addItem(previousHunk)
-        let nextHunk = NSMenuItem(
-            title: localized("app.menu.next.diff.hunk"),
-            action: #selector(nextDiffHunk(_:)),
-            keyEquivalent: "\u{F701}"
-        )
-        nextHunk.keyEquivalentModifierMask = [.command, .option]
-        nextHunk.target = self
-        goMenu.addItem(nextHunk)
+        appendMenuItem(for: .goPreviousDiffHunk, to: goMenu)
+        appendMenuItem(for: .goNextDiffHunk, to: goMenu)
         goItem.submenu = goMenu
         mainMenu.addItem(goItem)
 
@@ -11981,33 +11975,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let viewMenu = NSMenu(title: localized("app.menu.view"))
         let presetItem = NSMenuItem(title: localized("app.menu.preset"), action: nil, keyEquivalent: "")
         let presetMenu = NSMenu(title: localized("app.menu.preset"))
-        let presets: [(PanelPresetModel, String, String)] = [
-            (.reading, localized("app.menu.reading"), "1"),
-            (.relations, localized("app.menu.relations"), "2"),
-            (.compare, localized("app.menu.compare"), "3"),
-            (.focus, localized("app.menu.focus"), "4"),
+        let presets: [(PanelPresetModel, CommandID)] = [
+            (.reading, .viewPresetReading),
+            (.relations, .viewPresetRelations),
+            (.compare, .viewPresetCompare),
+            (.focus, .viewPresetFocus),
         ]
-        for (preset, title, key) in presets {
-            let item = NSMenuItem(
-                title: title,
-                action: #selector(applyPanelPreset(_:)),
-                keyEquivalent: key
-            )
-            item.keyEquivalentModifierMask = .command
-            item.target = self
-            item.representedObject = preset.rawValue
-            presetMenu.addItem(item)
+        for (_, id) in presets {
+            if let item = menuItem(for: id) { presetMenu.addItem(item) }
         }
         presetItem.submenu = presetMenu
         viewMenu.addItem(presetItem)
-        let closeComparisonItem = NSMenuItem(
-            title: localized("app.menu.close.comparison"),
-            action: #selector(closeComparison(_:)),
-            keyEquivalent: "w"
-        )
-        closeComparisonItem.keyEquivalentModifierMask = [.control, .command]
-        closeComparisonItem.target = self
-        viewMenu.addItem(closeComparisonItem)
+        appendMenuItem(for: .viewCloseComparison, to: viewMenu)
         viewMenu.addItem(.separator())
         let foldingItem = NSMenuItem(
             title: localized("app.menu.folding"),
@@ -12015,150 +11994,39 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             keyEquivalent: ""
         )
         let foldingMenu = NSMenu(title: localized("app.menu.folding"))
-        let toggleFoldItem = NSMenuItem(
-            title: localized("app.menu.toggle.fold"),
-            action: #selector(toggleFold(_:)),
-            keyEquivalent: "["
-        )
         // ⌘⇧[ is already Previous Tab. P0 explicitly permits a non-conflicting
         // replacement, so keep the bracket mnemonic with ⌃⌘[.
-        toggleFoldItem.keyEquivalentModifierMask = [.command, .control]
-        toggleFoldItem.target = self
-        foldingMenu.addItem(toggleFoldItem)
-        let levels: [(String, Selector, String)] = [
-            (localized("app.menu.full"), #selector(useFullReadingHeight(_:)), "0"),
-            (localized("app.menu.structure"), #selector(useStructureReadingHeight(_:)), "1"),
-            (localized("app.menu.overview"), #selector(useOverviewReadingHeight(_:)), "2"),
-        ]
-        for (title, action, key) in levels {
-            let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
-            item.keyEquivalentModifierMask = [.command, .option]
-            item.target = self
-            foldingMenu.addItem(item)
-        }
+        appendMenuItem(for: .viewToggleFold, to: foldingMenu)
+        appendMenuItem(for: .viewReadingHeightFull, to: foldingMenu)
+        appendMenuItem(for: .viewReadingHeightStructure, to: foldingMenu)
+        appendMenuItem(for: .viewReadingHeightOverview, to: foldingMenu)
         foldingMenu.addItem(.separator())
-        let focusItem = NSMenuItem(
-            title: localized("app.menu.focus.current.scope"),
-            action: #selector(focusCurrentScope(_:)),
-            keyEquivalent: "f"
-        )
-        focusItem.keyEquivalentModifierMask = [.command, .option]
-        focusItem.target = self
-        foldingMenu.addItem(focusItem)
+        appendMenuItem(for: .viewFocusCurrentScope, to: foldingMenu)
         foldingItem.submenu = foldingMenu
         viewMenu.addItem(foldingItem)
         viewMenu.addItem(.separator())
-        let toggleBookmarkItem = NSMenuItem(
-            title: localized("app.menu.toggle.bookmark"),
-            action: #selector(toggleBookmark(_:)),
-            keyEquivalent: "m"
-        )
-        toggleBookmarkItem.keyEquivalentModifierMask = [.command, .shift]
-        toggleBookmarkItem.target = self
-        viewMenu.addItem(toggleBookmarkItem)
-        let showBookmarksItem = NSMenuItem(
-            title: localized("app.menu.show.bookmarks"),
-            action: #selector(showBookmarks(_:)),
-            keyEquivalent: "b"
-        )
-        showBookmarksItem.keyEquivalentModifierMask = [.command, .option]
-        showBookmarksItem.target = self
-        viewMenu.addItem(showBookmarksItem)
-        let closeBookmarksItem = NSMenuItem(
-            title: localized("app.menu.hide.bookmarks"),
-            action: #selector(closeBookmarks(_:)),
-            keyEquivalent: ""
-        )
-        closeBookmarksItem.target = self
-        viewMenu.addItem(closeBookmarksItem)
+        appendMenuItem(for: .viewToggleBookmark, to: viewMenu)
+        appendMenuItem(for: .viewShowBookmarks, to: viewMenu)
+        appendMenuItem(for: .viewHideBookmarks, to: viewMenu)
         viewMenu.addItem(.separator())
-        let increaseFontItem = NSMenuItem(
-            title: localized("app.menu.increase.font.size"),
-            action: #selector(increaseReaderFontSize(_:)),
-            keyEquivalent: "+"
-        )
-        increaseFontItem.keyEquivalentModifierMask = .command
-        increaseFontItem.target = self
-        viewMenu.addItem(increaseFontItem)
-        let decreaseFontItem = NSMenuItem(
-            title: localized("app.menu.decrease.font.size"),
-            action: #selector(decreaseReaderFontSize(_:)),
-            keyEquivalent: "-"
-        )
-        decreaseFontItem.keyEquivalentModifierMask = .command
-        decreaseFontItem.target = self
-        viewMenu.addItem(decreaseFontItem)
-        let wrapLinesItem = NSMenuItem(
-            title: localized("app.menu.wrap.lines"),
-            action: #selector(toggleWrapLines(_:)),
-            keyEquivalent: "z"
-        )
-        // ⌥Z (decision C1), grouped with the global reader settings.
-        wrapLinesItem.keyEquivalentModifierMask = .option
-        wrapLinesItem.target = self
-        viewMenu.addItem(wrapLinesItem)
+        appendMenuItem(for: .viewIncreaseFontSize, to: viewMenu)
+        appendMenuItem(for: .viewDecreaseFontSize, to: viewMenu)
+        appendMenuItem(for: .viewWrapLines, to: viewMenu)
         viewMenu.addItem(.separator())
-        let trailItem = NSMenuItem(
-            title: localized("app.menu.show.reading.trail"),
-            action: #selector(showReadingTrail(_:)),
-            keyEquivalent: "t"
-        )
-        trailItem.keyEquivalentModifierMask = [.command, .option]
-        trailItem.target = self
-        viewMenu.addItem(trailItem)
+        appendMenuItem(for: .viewShowReadingTrail, to: viewMenu)
         viewItem.submenu = viewMenu
         mainMenu.addItem(viewItem)
 
         let relationsItem = NSMenuItem()
         let relationsMenu = NSMenu(title: localized("app.menu.relations"))
-        let toggleItem = NSMenuItem(
-            title: localized("app.menu.show.hide.relations"),
-            action: #selector(toggleRelations(_:)),
-            keyEquivalent: "r"
-        )
-        toggleItem.keyEquivalentModifierMask = [.command, .control]
-        toggleItem.target = self
-        relationsMenu.addItem(toggleItem)
+        appendMenuItem(for: .relationsToggle, to: relationsMenu)
         relationsMenu.addItem(.separator())
-        let callersItem = NSMenuItem(
-            title: localized("app.menu.show.callers"),
-            action: #selector(showCallers(_:)),
-            keyEquivalent: "h"
-        )
-        callersItem.keyEquivalentModifierMask = [.command, .shift]
-        callersItem.target = self
-        relationsMenu.addItem(callersItem)
-        let callsItem = NSMenuItem(
-            title: localized("app.menu.show.calls"),
-            action: #selector(showCalls(_:)),
-            keyEquivalent: ""
-        )
-        callsItem.target = self
-        relationsMenu.addItem(callsItem)
-        let implementationsItem = NSMenuItem(
-            title: localized("app.menu.show.implementations"),
-            action: #selector(showImplementations(_:)),
-            keyEquivalent: ""
-        )
-        implementationsItem.target = self
-        relationsMenu.addItem(implementationsItem)
+        appendMenuItem(for: .relationsShowCallers, to: relationsMenu)
+        appendMenuItem(for: .relationsShowCalls, to: relationsMenu)
+        appendMenuItem(for: .relationsShowImplementations, to: relationsMenu)
         relationsMenu.addItem(.separator())
-        let symbolDocItem = NSMenuItem(
-            title: localized("app.menu.show.symbol.documentation"),
-            action: #selector(showSymbolDocumentation(_:)),
-            keyEquivalent: " "
-        )
-        symbolDocItem.keyEquivalentModifierMask = [.control, .shift]
-        symbolDocItem.target = self
-        relationsMenu.addItem(symbolDocItem)
-        let inspectorItem = NSMenuItem(
-            title: localized("app.menu.show.resolution.inspector"),
-            action: #selector(showResolutionInspector(_:)),
-            keyEquivalent: "i"
-        )
-        inspectorItem.keyEquivalentModifierMask = .command
-        inspectorItem.target = self
-        relationsMenu.addItem(inspectorItem)
+        appendMenuItem(for: .relationsShowSymbolDocumentation, to: relationsMenu)
+        appendMenuItem(for: .relationsShowResolutionInspector, to: relationsMenu)
         relationsItem.submenu = relationsMenu
         mainMenu.addItem(relationsItem)
 

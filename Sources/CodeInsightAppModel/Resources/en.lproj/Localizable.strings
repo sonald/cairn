@@ -218,3 +218,6 @@
 
 /* Symbol documentation hover card. */
 "model.hover.revisionNotIndexed" = "this revision is not the indexed one";
+
+/* Key bindings: click gesture display word. */
+"keybinding.click.word" = "click";

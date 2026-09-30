@@ -195,8 +195,10 @@ final class EmptyStateView: NSView {
         isFailure = failed
         titleLabel.stringValue = failed ? localized("welcome.failed") : "Cairn"
         openButton.title = failed ? localized("welcome.retry") : localized("welcome.openShortcut")
-        openButton.keyEquivalent = "\r"
-        openButton.keyEquivalentModifierMask = []
+        // Fixed ⏎ keycap, registered as panel.openSelection in the key
+        // binding table (K0a); the chord application goes through the
+        // KeyBindings+AppKit adapter.
+        openButton.applyKeyChord(KeyChord(modifiers: [], key: .special(.return)))
         let trimmedReason = reason?.trimmingCharacters(in: .whitespacesAndNewlines)
         reasonLabel.stringValue = failed ? (trimmedReason ?? "") : ""
         reasonLabel.isHidden = !failed || trimmedReason == nil

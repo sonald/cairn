@@ -114,12 +114,12 @@ func wrapKeyEquivalentWorksWithSettingsTextFocusWithoutStealingUndo() throws {
             timestamp: 0, windowNumber: window.windowNumber, context: nil,
             characters: "Ω", charactersIgnoringModifiers: "z", isARepeat: repeatKey, keyCode: 6))
     }
-    #expect(delegate.handleWrapKeyEquivalent(try event(.option)))
+    #expect(delegate.handleMonitoredKeyEquivalent(try event(.option)))
     #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
-    #expect(delegate.handleWrapKeyEquivalent(try event(.option, repeatKey: true)))
+    #expect(delegate.handleMonitoredKeyEquivalent(try event(.option, repeatKey: true)))
     #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
-    #expect(!delegate.handleWrapKeyEquivalent(try event(.command)))
-    #expect(!delegate.handleWrapKeyEquivalent(try event([.option, .shift])))
+    #expect(!delegate.handleMonitoredKeyEquivalent(try event(.command)))
+    #expect(!delegate.handleMonitoredKeyEquivalent(try event([.option, .shift])))
     #expect(delegate.settingsWindowController?.currentSettings.wrapLines == !initial)
     #expect(window.firstResponder === text)
 }

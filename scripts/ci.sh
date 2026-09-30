@@ -38,7 +38,7 @@ panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPr
 # each finish in their own SwiftPM process. Mixing the rebuild pair with a later
 # async inspector test can exit 0 before the Swift Testing summary. Never accept
 # that exit code alone. Every test must report completion exactly once.
-expected_main_test_count=1247
+expected_main_test_count=1255
 expected_isolated_test_count=2
 expected_panel_test_count=2
 
@@ -128,6 +128,38 @@ else
         echo "PASS: ReaderUI ByteUTF16Map 引用仅限 DisplayMap.swift"
     else
         echo "FAIL: rg 基础设施错误 rc=$reader_map_rc" >&2
+        exit 1
+    fi
+fi
+
+# K0a: key equivalents come from the key binding table (KeyBindings.swift).
+# Outside the AppKit adapter, no literal key equivalent or direct
+# keyEquivalentModifierMask write may appear; chords are applied through the
+# adapter (KeyBindings+AppKit.swift).
+keybinding_gate_regex='keyEquivalent:[[:space:]]*"[^"]+"|keyEquivalentModifierMask[[:space:]]*=[[:space:]]*[^=]|\.keyEquivalent[[:space:]]*=[[:space:]]*"'
+keybinding_gate_samples=(
+    'NSMenuItem(title: "X", action: nil, keyEquivalent: "p")'
+    'menuItem.keyEquivalentModifierMask = .command'
+    'openButton.keyEquivalent = "\r"'
+)
+for sample in "${keybinding_gate_samples[@]}"; do
+    if ! grep -Eq "$keybinding_gate_regex" <<<"$sample"; then
+        echo "快捷键门禁 regex 覆盖不全: $sample" >&2
+        exit 1
+    fi
+done
+if keybinding_hits=$(rg -n "$keybinding_gate_regex" \
+    Sources/CodeInsightApp \
+    --glob '!Sources/CodeInsightApp/KeyBindings+AppKit.swift' 2>&1); then
+    echo "$keybinding_hits"
+    echo "FAIL: 快捷键必须来自 KeyBindings.swift 定义表（适配文件除外）" >&2
+    exit 1
+else
+    keybinding_rc=$?
+    if [[ $keybinding_rc -eq 1 ]]; then
+        echo "PASS: App 层快捷键全部来自定义表"
+    else
+        echo "FAIL: rg 基础设施错误 rc=$keybinding_rc" >&2
         exit 1
     fi
 fi

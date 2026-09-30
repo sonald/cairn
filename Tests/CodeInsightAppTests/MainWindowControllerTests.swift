@@ -2447,3 +2447,25 @@ func profileButtonCarriesAThemedTrustSeal() async throws {
     controller.applyReaderSettings(ReaderSettings(theme: .dark))
     #expect(rgb(controller.selfTestTrustSeal.color) == 0x8CC6A9)
 }
+
+/// K0a: reader click gestures resolve through the key binding table instead
+/// of hardcoded modifier checks. Empty modifiers stay the plain click, and
+/// modifier combinations no gesture is bound to do nothing.
+@MainActor
+@Test
+func readerClickGestureResolvesThroughTable() {
+    let table = KeyBindingTable(scheme: .default)
+    #expect(ReaderClickGesture.action(for: [.command], table: table) == .definition)
+    #expect(ReaderClickGesture.action(for: [.option], table: table) == .symbolDoc)
+    #expect(ReaderClickGesture.action(for: [], table: table) == .plain)
+    #expect(ReaderClickGesture.action(for: [.control], table: table) == nil)
+    #expect(ReaderClickGesture.action(for: [.command, .option], table: table) == nil)
+
+    // The lookup is the dispatch path: a table without gesture commands
+    // resolves nothing, so redefining a gesture redefines the behavior.
+    let withoutGestures = KeyBindingTable(
+        scheme: KeyBindingScheme(id: "no-gestures", commands: [])
+    )
+    #expect(ReaderClickGesture.action(for: [.command], table: withoutGestures) == nil)
+    #expect(ReaderClickGesture.action(for: [.option], table: withoutGestures) == nil)
+}

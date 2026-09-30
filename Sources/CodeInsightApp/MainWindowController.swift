@@ -23,6 +23,59 @@ func provenanceBadgeStyle(for certainty: Certainty?) -> ProvenanceBadgeStyle {
     }
 }
 
+/// The app-wide key binding table (K-R3.7). Every surface — menus, toolbar
+/// menu representations, reader gestures, the key monitor — reads this one
+/// table; the default scheme stands in when no delegate is installed (tests).
+/// Main-actor only, like the UI that consumes it.
+@MainActor
+private func appKeyBindingTable() -> KeyBindingTable {
+    (NSApp.delegate as? AppDelegate)?.keyBindingTable ?? KeyBindingTable(scheme: .default)
+}
+
+/// Reader click gesture dispatch through the key binding table (K0a) instead
+/// of hardcoded modifier checks. Empty modifiers are the plain click;
+/// combinations no gesture is bound to do nothing (pre-table behavior for
+/// e.g. ⌃+click).
+enum ReaderClickGesture {
+    enum Action: Equatable {
+        case plain
+        case definition
+        case symbolDoc
+    }
+
+    static func action(
+        for modifiers: NSEvent.ModifierFlags,
+        table: KeyBindingTable
+    ) -> Action? {
+        if modifiers.isEmpty { return .plain }
+        let chordModifiers = Set<KeyChord.Modifier>(modifiers)
+        let bound = table.commands(boundTo: .click(chordModifiers))
+        switch bound.first {
+        case .readerGestureDefinition: return .definition
+        case .readerGestureSymbolDoc: return .symbolDoc
+        default: return nil
+        }
+    }
+}
+
+extension KeyBindingTable {
+    /// Flags of the `reader.gesture.symbolDoc` click gesture (⌥ by default).
+    var symbolDocClickFlags: NSEvent.ModifierFlags {
+        if case let .click(modifiers)? = bindings(for: .readerGestureSymbolDoc).first {
+            return modifiers.eventFlags
+        }
+        return [.option]
+    }
+
+    /// Flags of the `reader.gesture.definition` click gesture (⌘ by default).
+    var definitionClickFlags: NSEvent.ModifierFlags {
+        if case let .click(modifiers)? = bindings(for: .readerGestureDefinition).first {
+            return modifiers.eventFlags
+        }
+        return [.command]
+    }
+}
+
 @MainActor
 final class MainWindowController: NSWindowController, NSToolbarDelegate,
     NSToolbarItemValidation, NSWindowDelegate
@@ -2661,9 +2714,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             let menuItem = NSMenuItem(
                 title: localized("main.seek"),
                 action: #selector(showSeekFromToolbar(_:)),
-                keyEquivalent: "p"
+                keyEquivalent: ""
             )
-            menuItem.keyEquivalentModifierMask = .command
+            // ⌘P comes from the shared key binding table (K0a); it is the
+            // same command as Quick Open, not a second definition.
+            if case let .keyboard(chord)? = keyBindings.bindings(for: .fileQuickOpen).first {
+                menuItem.applyKeyChord(chord)
+            }
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.settingsItemIdentifier:
@@ -2683,9 +2740,13 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             let menuItem = NSMenuItem(
                 title: localized("main.settings.menu"),
                 action: #selector(showSettingsFromToolbar(_:)),
-                keyEquivalent: ","
+                keyEquivalent: ""
             )
-            menuItem.keyEquivalentModifierMask = .command
+            // ⌘, comes from the shared key binding table (K0a); same command
+            // as the Settings menu item.
+            if case let .keyboard(chord)? = keyBindings.bindings(for: .appSettings).first {
+                menuItem.applyKeyChord(chord)
+            }
             menuItem.target = self
             item.menuFormRepresentation = menuItem
         case Self.profileItemIdentifier:
@@ -3762,6 +3823,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         return String(parts[1])
     }
 
+    /// Shared key binding table (K-R3.7): every window reads the app-wide
+    /// table; the default scheme stands in when no delegate is installed.
+    var keyBindings: KeyBindingTable { appKeyBindingTable() }
+
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
         guard let file = model.selectedFile,
               let path = projectPath(for: file)
@@ -4664,15 +4729,21 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
             else { return }
             self.onSelectionChange?(offset)
             let meaningful = modifiers.intersection([.command, .option, .control, .shift])
-            if meaningful != .option { self.onHoverDismiss?() }
-            if meaningful.isEmpty {
+            // The symbol-documentation gesture keeps hover alive; anything
+            // else dismisses it (same condition as the pre-table dispatch).
+            let table = appKeyBindingTable()
+            if meaningful != table.symbolDocClickFlags { self.onHoverDismiss?() }
+            switch ReaderClickGesture.action(for: meaningful, table: table) {
+            case .plain:
                 self.onTokenClick?(offset, false)
-            } else if meaningful == .command {
+            case .definition:
                 self.onTokenClick?(offset, true)
-            } else if meaningful == .option,
-                      let request = self.hoverRequest(self.textView.hoverTarget(atByteOffset: offset))
-            {
-                self.onHoverRequest?(request)
+            case .symbolDoc:
+                if let request = self.hoverRequest(self.textView.hoverTarget(atByteOffset: offset)) {
+                    self.onHoverRequest?(request)
+                }
+            case nil:
+                break
             }
         }
         textView.onHover = { [weak self] target in
@@ -7385,9 +7456,11 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         ])
         view = container
         miniReader.onClick = { [weak self] _, modifiers in
-            guard modifiers.intersection([.command, .option, .control, .shift]) == .command,
-                  let self
-            else { return }
+            guard let self else { return }
+            // ⌘+click opens (K0a: resolved through reader.gesture.definition,
+            // not a hardcoded modifier check).
+            let meaningful = modifiers.intersection([.command, .option, .control, .shift])
+            guard meaningful == appKeyBindingTable().definitionClickFlags else { return }
             self.openSelection()
         }
         let doubleClick = NSClickGestureRecognizer(
