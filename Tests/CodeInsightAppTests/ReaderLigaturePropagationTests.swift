@@ -38,7 +38,7 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
     first.applyPanelPreset(.compare)
     try #require(await waitForLigatureSurface { first.selfTestRightReaderBytes == Array(source.utf8) })
     model.contextWindow.tokenClicked(file: "main.rs", offset: UInt32("pub fn ".utf8.count))
-    try #require(await waitForLigatureSurface { model.contextWindow.selectedCandidate != nil })
+    try #require(await waitForLigatureSurface { model.contextWindow.displayedCandidate != nil })
     model.contextWindow.setMode(.pinned)
     first.renderForSelfTest()
     let rootController = try #require(first.window?.contentViewController)
@@ -75,8 +75,8 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
             #expect(pasteboard.string(forType: .string) == "=")
             let isContext = surfaceIndex == readers.count
             let role = isContext ? "context" : readers[surfaceIndex].canFindInFile ? "main" : "secondary"
-            let expectedSource = isContext ? (model.contextWindow.selectedCandidate?.excerpt ?? "") : source
-            let snapshot = isContext ? model.contextWindow.selectedCandidate?.symbol?.snapshotID
+            let expectedSource = isContext ? (model.contextWindow.displayedCandidate?.excerpt ?? "") : source
+            let snapshot = isContext ? model.contextWindow.displayedCandidate?.symbol?.snapshotID
                 : role == "secondary" ? model.compare.rightSnapshotID : model.currentSnapshotID
             try readonlyCaptureSurfaceEvidence(role + "-" + mode.rawValue, textView: view,
                 expectedSource: expectedSource, provenance: [
@@ -106,7 +106,7 @@ func readerFontsPropagateToComparisonContextAndNewWindowsWithoutChangingPlainTex
     second.applyPanelPreset(.compare)
     try #require(await waitForLigatureSurface { second.selfTestRightReaderBytes == Array(source.utf8) })
     secondModel.contextWindow.tokenClicked(file: "main.rs", offset: UInt32("pub fn ".utf8.count))
-    try #require(await waitForLigatureSurface { secondModel.contextWindow.selectedCandidate != nil })
+    try #require(await waitForLigatureSurface { secondModel.contextWindow.displayedCandidate != nil })
     second.renderForSelfTest()
     let secondRoot = try #require(second.window?.contentViewController)
     let secondContext = try #require(ligatureControllers(secondRoot).compactMap { $0 as? ContextWindowViewController }.first)

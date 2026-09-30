@@ -1973,28 +1973,28 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
     model.tokenClicked(file: "main.rs", offset: callOffset)
     #expect(await testWaitUntil("model.candidateCount == 2 && gate.count == 1") { model.candidateCount == 2 && gate.count == 1 })
     let fuzzySymbols = exactSymbols(model)
-    #expect(model.selectedCandidate?.provenanceBadge.contains("Exact") == false)
+    #expect(model.displayedCandidate?.provenanceBadge.contains("Exact") == false)
 
     gate.complete(0, with: exactEntry(
         file: "main.rs",
         byteOffset: secondDefinition
     ))
 
-    #expect(await testWaitUntil("model.selectedCandidate?.provenanceBadge.contains(\"Exact\") == true") {
-        model.selectedCandidate?.provenanceBadge.contains("Exact") == true
+    #expect(await testWaitUntil("model.displayedCandidate?.provenanceBadge.contains(\"Exact\") == true") {
+        model.displayedCandidate?.provenanceBadge.contains("Exact") == true
     })
     #expect(model.candidateCount == 2)
     #expect(Set(exactSymbols(model)) == Set(fuzzySymbols))
-    #expect(model.selectedCandidate?.targetByteOffset == secondDefinition)
-    #expect(model.selectedCandidate?.certainty == .exact)
-    #expect(model.selectedCandidate?.exactAttribution?.environment.limitations
+    #expect(model.displayedCandidate?.targetByteOffset == secondDefinition)
+    #expect(model.displayedCandidate?.certainty == .exact)
+    #expect(model.displayedCandidate?.exactAttribution?.environment.limitations
         == [.buildScriptsDisabled, .procMacrosDisabled])
-    #expect(model.selectedCandidate?.exactOrigin == .worktree)
-    #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == false)
-    #expect(model.selectedCandidate?.provenanceBadge.contains(
+    #expect(model.displayedCandidate?.exactOrigin == .worktree)
+    #expect(model.displayedCandidate?.provenanceBadge.contains("materialized") == false)
+    #expect(model.displayedCandidate?.provenanceBadge.contains(
         "features: default"
     ) == true)
-    guard case .lsp = model.selectedCandidate?.provenance else {
+    guard case .lsp = model.displayedCandidate?.provenance else {
         Issue.record("exact candidate did not carry LSP provenance")
         return
     }
@@ -2007,13 +2007,13 @@ func contextExactUpgradeKeepsEveryFuzzyCandidateAndSelectsExact() async throws {
         byteOffset: secondDefinition,
         origin: .materialized(commitOID: commitOID)
     ))
-    #expect(await testWaitUntil("model.selectedCandidate?.provenanceBadge.contains(\"@0123456\") == true") {
-        model.selectedCandidate?.provenanceBadge.contains("@0123456") == true
+    #expect(await testWaitUntil("model.displayedCandidate?.provenanceBadge.contains(\"@0123456\") == true") {
+        model.displayedCandidate?.provenanceBadge.contains("@0123456") == true
     })
-    #expect(model.selectedCandidate?.exactOrigin == .materialized(
+    #expect(model.displayedCandidate?.exactOrigin == .materialized(
         commitOID: commitOID
     ))
-    #expect(model.selectedCandidate?.provenanceBadge.contains("materialized") == true)
+    #expect(model.displayedCandidate?.provenanceBadge.contains("materialized") == true)
 }
 
 @MainActor
@@ -2057,11 +2057,11 @@ func contextExactUpgradeSuspendsWhenTargetContentDriftsBehindTheIndex() async th
     try await Task.sleep(for: .milliseconds(300))
 
     #expect(
-        model.selectedCandidate?.certainty != .exact,
+        model.displayedCandidate?.certainty != .exact,
         "a drifted target must not be upgraded to Exact"
     )
     #expect(
-        model.selectedCandidate?.provenanceBadge.contains("Exact") != true
+        model.displayedCandidate?.provenanceBadge.contains("Exact") != true
     )
     #expect(model.candidateCount == 2, "index-consistent fuzzy candidates stay")
     #expect(staleReports.contains("main.rs"))
@@ -2107,7 +2107,7 @@ func contextExactInsertRequiresMatchingTargetBytes() async throws {
     try await Task.sleep(for: .milliseconds(300))
 
     #expect(model.candidateCount == candidateCountBeforeExact)
-    #expect(model.selectedCandidate?.certainty != .exact)
+    #expect(model.displayedCandidate?.certainty != .exact)
     #expect(staleReports.contains("main.rs"))
 }
 
@@ -2152,7 +2152,7 @@ func contextExactUpgradeSuspendsWhenSourceFileDrifts() async throws {
     try await Task.sleep(for: .milliseconds(300))
 
     #expect(
-        model.selectedCandidate?.certainty != .exact,
+        model.displayedCandidate?.certainty != .exact,
         "a drifted query source must suspend the Exact upgrade"
     )
     #expect(staleReports.contains("caller.rs"))
@@ -2223,7 +2223,7 @@ func contextExactUpgradeKeepsUserSelectionChangedDuringVerification() async thro
     // The user explicitly settles on the other candidate while the reply is
     // being verified.
     model.selectNext()
-    if model.selectedCandidate?.targetByteOffset != chosen { model.selectNext() }
+    if model.displayedCandidate?.targetByteOffset != chosen { model.selectNext() }
     #expect(await releaseExactVerification(identity))
     #expect(await testWaitUntil("target upgraded to Exact") {
         contextCandidates(model).contains {
@@ -2233,7 +2233,7 @@ func contextExactUpgradeKeepsUserSelectionChangedDuringVerification() async thro
 
     #expect(model.candidateCount == 2)
     #expect(
-        model.selectedCandidate?.targetByteOffset == chosen,
+        model.displayedCandidate?.targetByteOffset == chosen,
         "an Exact reply must not move an explicit user selection"
     )
 }
@@ -2350,14 +2350,14 @@ func contextExactInsertKeepsUserSelectionChangedDuringVerification() async throw
     gate.complete(0, with: exactEntry(file: "main.rs", byteOffset: exactTarget))
     #expect(await testWaitUntil("source verification suspended") { identity.pendingCount == 1 })
     model.selectNext()
-    let chosen = try #require(model.selectedCandidate?.targetByteOffset)
+    let chosen = try #require(model.displayedCandidate?.targetByteOffset)
     #expect(await releaseExactVerification(identity))
     #expect(await testWaitUntil("exact candidate inserted") { model.candidateCount == 3 })
 
     #expect(contextCandidates(model).first?.targetByteOffset == exactTarget)
     #expect(contextCandidates(model).first?.certainty == .exact)
     #expect(
-        model.selectedCandidate?.targetByteOffset == chosen,
+        model.displayedCandidate?.targetByteOffset == chosen,
         "inserting an Exact candidate must keep the explicit user selection"
     )
 }
@@ -2385,9 +2385,9 @@ func contextFuzzyCandidatesDoNotMixExcerptsFromDriftedBytes() async throws {
     model.tokenClicked(file: "main.rs", offset: exactByteOffset(of: "target", in: source))
     try await Task.sleep(for: .milliseconds(300))
 
-    #expect(model.selectedCandidate?.excerpt.isEmpty == true,
+    #expect(model.displayedCandidate?.excerpt.isEmpty == true,
             "excerpt must not mix drifted disk bytes with indexed offsets")
-    #expect(model.selectedCandidate?.line == 1)
+    #expect(model.displayedCandidate?.line == 1)
 }
 
 @MainActor
@@ -2418,14 +2418,14 @@ func pythonContextExactBadgeOmitsCargoFeatureDetail() async throws {
             + UInt32("def ".utf8.count),
         featureSelection: .allFeatures
     ))
-    #expect(await testWaitUntil("model.selectedCandidate?.certainty == .exact") {
-        model.selectedCandidate?.certainty == .exact
+    #expect(await testWaitUntil("model.displayedCandidate?.certainty == .exact") {
+        model.displayedCandidate?.certainty == .exact
     })
-    #expect(model.selectedCandidate?.provenanceBadge.contains("Exact") == true)
-    #expect(model.selectedCandidate?.provenanceBadge.contains(
+    #expect(model.displayedCandidate?.provenanceBadge.contains("Exact") == true)
+    #expect(model.displayedCandidate?.provenanceBadge.contains(
         "features:"
     ) == false)
-    #expect(model.selectedCandidate?.provenanceBadge.contains(
+    #expect(model.displayedCandidate?.provenanceBadge.contains(
         "fake-exact"
     ) == true)
 }
@@ -2464,10 +2464,10 @@ func contextExactDependencyTargetProducesAnHonestCardAndExcerpt() async throws {
             in: dependencySource
         )
     ))
-    #expect(await testWaitUntil("model.selectedCandidate?.path == dependency.path") {
-        model.selectedCandidate?.path == dependency.path
+    #expect(await testWaitUntil("model.displayedCandidate?.path == dependency.path") {
+        model.displayedCandidate?.path == dependency.path
     })
-    let candidate = try #require(model.selectedCandidate)
+    let candidate = try #require(model.displayedCandidate)
 
     #expect(model.candidateCount == 2)
     #expect(Array(candidate.excerpt.utf8) == dependencyExcerptBytes)
@@ -2510,8 +2510,8 @@ func contextExactUpgradeRejectsStaleRequestAndGeneration() async throws {
         byteOffset: alphaDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
-    #expect(model.selectedCandidate?.targetByteOffset == betaDefinition)
-    #expect(model.selectedCandidate?.certainty != .exact)
+    #expect(model.displayedCandidate?.targetByteOffset == betaDefinition)
+    #expect(model.displayedCandidate?.certainty != .exact)
 
     model.updateProjectState(
         .ready(session, exactQueryContext(for: session, generation: 2)),
@@ -2522,8 +2522,8 @@ func contextExactUpgradeRejectsStaleRequestAndGeneration() async throws {
         byteOffset: betaDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
-    #expect(model.selectedCandidate?.targetByteOffset == betaDefinition)
-    #expect(model.selectedCandidate?.certainty != .exact)
+    #expect(model.displayedCandidate?.targetByteOffset == betaDefinition)
+    #expect(model.displayedCandidate?.certainty != .exact)
 }
 
 @MainActor
@@ -2552,7 +2552,7 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
     )
     model.tokenClicked(file: "main.rs", offset: alphaCall)
     #expect(await testWaitUntil("model.candidateCount == 1 && gate.count == 1") { model.candidateCount == 1 && gate.count == 1 })
-    let original = try #require(model.selectedCandidate)
+    let original = try #require(model.displayedCandidate)
 
     model.setMode(.pinned)
     #expect(await testWaitUntil("gate.count == 2") { gate.count == 2 })
@@ -2561,10 +2561,10 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
         byteOffset: dependencyDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
-    #expect(model.selectedCandidate?.symbol == original.symbol)
-    #expect(model.selectedCandidate?.targetByteOffset == original.targetByteOffset)
+    #expect(model.displayedCandidate?.symbol == original.symbol)
+    #expect(model.displayedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
-    #expect(model.selectedCandidate?.certainty != .exact)
+    #expect(model.displayedCandidate?.certainty != .exact)
 
     model.setMode(.follow)
     model.setMode(.pinned)
@@ -2573,9 +2573,9 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
         file: "main.rs",
         byteOffset: alphaDefinition
     ))
-    #expect(await testWaitUntil("model.selectedCandidate?.certainty == .exact") { model.selectedCandidate?.certainty == .exact })
-    #expect(model.selectedCandidate?.symbol == original.symbol)
-    #expect(model.selectedCandidate?.targetByteOffset == original.targetByteOffset)
+    #expect(await testWaitUntil("model.displayedCandidate?.certainty == .exact") { model.displayedCandidate?.certainty == .exact })
+    #expect(model.displayedCandidate?.symbol == original.symbol)
+    #expect(model.displayedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
 
     gate.complete(0, with: exactEntry(
@@ -2583,8 +2583,8 @@ func pinnedContextOnlyUpgradesItsDisplayedTargetInPlace() async throws {
         byteOffset: dependencyDefinition
     ))
     for _ in 0..<10 { await Task.yield() }
-    #expect(model.selectedCandidate?.symbol == original.symbol)
-    #expect(model.selectedCandidate?.targetByteOffset == original.targetByteOffset)
+    #expect(model.displayedCandidate?.symbol == original.symbol)
+    #expect(model.displayedCandidate?.targetByteOffset == original.targetByteOffset)
     #expect(model.candidateCount == 1)
 }
 
@@ -2628,11 +2628,11 @@ func dependencyCardFallsBackToTheAbsolutePathWhenCrateNameIsUnknown()
         file: "main.rs",
         offset: exactByteOffset(of: "target();", in: source)
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.path == dependency.path") {
-        model.selectedCandidate?.path == dependency.path
+    #expect(await testWaitUntil("model.displayedCandidate?.path == dependency.path") {
+        model.displayedCandidate?.path == dependency.path
     })
 
-    #expect(model.selectedCandidate?.provenanceBadge.contains(dependency.path) == true)
+    #expect(model.displayedCandidate?.provenanceBadge.contains(dependency.path) == true)
 }
 
 final class ExactTestProvider: ExactProvider, @unchecked Sendable {

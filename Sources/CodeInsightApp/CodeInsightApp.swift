@@ -5987,7 +5987,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         let providerRootIsMaterialized = providerRoot?.path.contains(
             "/materialized/\(snapshot.commitOID.hex)/"
         ) == true
-        let uiPath = historyModel.contextWindow.selectedCandidate?.path
+        let uiPath = historyModel.contextWindow.displayedCandidate?.path
         let uiPathIsRepoRelative = uiPath == "src/lib.rs"
             && uiPath?.hasPrefix("/") == false
         let provenance = controller.selfTestContextProvenance
@@ -6860,7 +6860,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
     }
 
     private var pinContextSummary: String? {
-        model.contextWindow.selectedCandidate.map { "\($0.path):\($0.line)" }
+        model.contextWindow.displayedCandidate.map { "\($0.path):\($0.line)" }
     }
 
     private var pinRelationRootSummary: String? {
@@ -7231,7 +7231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
             offset: hierarchyOffset
         )
         let contextSymbolReady = await pythonWait(timeout: 5) {
-            if pythonModel.contextWindow.selectedCandidate?.symbol
+            if pythonModel.contextWindow.symbolCandidate?.symbol
                 == hierarchySymbol
             {
                 return true

@@ -298,15 +298,23 @@ public final class ContextWindowModel {
         return await hoverResolver(file, offset, context.generation, batch)
     }
 
-    public var selectedCandidate: Candidate? {
+    /// 用户指向的符号（R2.2）：⌘+单击、查看引用/调用方/实现、悬停文档等
+    /// "对符号做事"的入口只读它；类型直达（P1）下它仍是那个绑定。
+    public var symbolCandidate: Candidate? {
         guard case let .candidates(candidates, selected) = stage,
               candidates.indices.contains(selected)
         else { return nil }
         return candidates[selected]
     }
 
+    /// 窗口显示的内容（R2.3）：正文、路径、徽章、双击打开读它。
+    /// P0 里恒等于 `symbolCandidate`；P1 起类型直达会让它显示类型。
+    public var displayedCandidate: Candidate? {
+        symbolCandidate
+    }
+
     package var selectedLanguageMode: LanguageMode? {
-        guard let candidate = selectedCandidate,
+        guard let candidate = symbolCandidate,
               case let .ready(session, _) = projectState
         else { return nil }
         if exactLocationIsInDependency(candidate.path) {
@@ -353,7 +361,7 @@ public final class ContextWindowModel {
         if enteringPin,
            let displayedToken,
            case let .ready(session, context) = projectState,
-           selectedCandidate != nil
+           symbolCandidate != nil
         {
             startExactUpgrade(
                 displayedToken,
@@ -453,7 +461,7 @@ public final class ContextWindowModel {
            locatedToken.file == file,
            locatedToken.range.contains(offset)
         {
-            return selectedCandidate
+            return symbolCandidate
         }
         guard let pathID = pathID(file, in: session) else { return nil }
         guard let candidates = try? await resolveCandidates(
@@ -505,7 +513,7 @@ public final class ContextWindowModel {
            locatedToken.file == token.file,
            locatedToken.range.contains(token.offset)
         {
-            return selectedCandidate
+            return symbolCandidate
         }
         requestID &+= 1
         cancelExactUpgrade()
@@ -528,7 +536,7 @@ public final class ContextWindowModel {
            locatedToken.file == token.file,
            locatedToken.range == range
         {
-            return selectedCandidate
+            return symbolCandidate
         }
 
         locatedToken = LocatedToken(file: token.file, range: range)

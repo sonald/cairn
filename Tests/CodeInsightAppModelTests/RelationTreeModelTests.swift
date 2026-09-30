@@ -2991,8 +2991,8 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
         root: fixture.root
     )
     contextModel.tokenClicked(file: "main.rs", offset: 9)
-    #expect(await testWaitUntil("contextModel.selectedCandidate?.path == dependency.path") {
-        contextModel.selectedCandidate?.path == dependency.path
+    #expect(await testWaitUntil("contextModel.displayedCandidate?.path == dependency.path") {
+        contextModel.displayedCandidate?.path == dependency.path
     })
 
     let methodName = fixture.session.names.intern("method")
@@ -3030,7 +3030,7 @@ func dependencyPathDoesNotTriggerDefaultRelationPromotion() async throws {
     let possible = try relationPossibleRows(in: relationModel.root)
 
     #expect(exactLocationIsInDependency(dependency.path))
-    #expect(contextModel.selectedCandidate?.label == "External · in dependency")
+    #expect(contextModel.displayedCandidate?.label == "External · in dependency")
     #expect(definitionRequests == 0)
     #expect(
         possible.first?.subtitle == "dynamic · name match only"

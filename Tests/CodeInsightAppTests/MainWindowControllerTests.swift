@@ -1386,7 +1386,7 @@ func contextHeaderLongProvenanceStaysShortAndDoesNotWidenTheWindow() async throw
     ))
     #expect(
         await mainWindowWaitUntil(
-            contextModel.selectedCandidate?.certainty == .exact
+            contextModel.displayedCandidate?.certainty == .exact
         )
     )
     try await Task.sleep(for: .milliseconds(150))
@@ -1509,7 +1509,7 @@ func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {
         offset: targetOffset
     )
     #expect(await mainWindowWaitUntil(
-        model.contextWindow.selectedCandidate != nil
+        model.contextWindow.displayedCandidate != nil
     ))
     model.contextWindow.setMode(.pinned)
 
@@ -1953,7 +1953,7 @@ func productPolishRestoresUserPanelWidthsAcrossWindowRebuild() async throws {
     first.toggleRelations()
     #expect(abs(first.selfTestRelationsPaneWidth - width) <= 2)
     first.model.contextWindow.tokenClicked(file: "main.rs", offset: UInt32("pub fn ".utf8.count))
-    try #require(await mainWindowWaitUntil(first.model.contextWindow.selectedCandidate != nil))
+    try #require(await mainWindowWaitUntil(first.model.contextWindow.displayedCandidate != nil))
     first.model.contextWindow.setMode(.pinned)
     first.renderForSelfTest()
     window.center()
@@ -2208,13 +2208,13 @@ func lensShowsSerifSymbolStonesThemedBadgeAndAPinnedTint() async throws {
             | UInt32((srgb.greenComponent * 255).rounded()) << 8
             | UInt32((srgb.blueComponent * 255).rounded())
     }
-    let certainty = try #require(contextModel.selectedCandidate?.certainty)
+    let certainty = try #require(contextModel.displayedCandidate?.certainty)
     var style = controller.selfTestLensStyle
     #expect(style.stones == certainty)
     #expect(style.stonesVisible)
     // The title is the declared name, never the provenance label.
     #expect(style.symbol == "target")
-    #expect(style.symbol != contextModel.selectedCandidate?.label)
+    #expect(style.symbol != contextModel.displayedCandidate?.label)
     #expect(style.symbolFont?.fontName.contains("NewYork") == true)
     // Fuzzy resolution in this project is Strong: the inferred slate fill.
     #expect(certainty == .strong)

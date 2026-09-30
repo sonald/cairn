@@ -1517,10 +1517,10 @@ func staleRustContextCompletionDoesNotPublishAfterPythonRoute() async throws {
             context: pythonContext
         )
     )
-    #expect(await testWaitUntil("model.contextWindow.selectedCandidate != nil") {
-        model.contextWindow.selectedCandidate != nil
+    #expect(await testWaitUntil("model.contextWindow.displayedCandidate != nil") {
+        model.contextWindow.displayedCandidate != nil
     })
-    #expect(model.contextWindow.selectedCandidate?.path == "lib.py")
+    #expect(model.contextWindow.displayedCandidate?.path == "lib.py")
 }
 
 
@@ -1544,12 +1544,12 @@ func crossLanguageSameNameContextStaysInActivePythonSession() async throws {
     model.navigate(to: root.appendingPathComponent("lib.py"))
     let offset = byteOffset(of: "shared()\n", in: pySource)
     model.contextWindow.tokenClicked(file: "lib.py", offset: offset)
-    #expect(await testWaitUntil("model.contextWindow.selectedCandidate != nil") {
-        model.contextWindow.selectedCandidate != nil
+    #expect(await testWaitUntil("model.contextWindow.displayedCandidate != nil") {
+        model.contextWindow.displayedCandidate != nil
     })
-    #expect(model.contextWindow.selectedCandidate?.path == "lib.py")
-    #expect(model.contextWindow.selectedCandidate?.excerpt.isEmpty != true)
-    #expect(model.contextWindow.selectedCandidate?.symbol?.snapshotID == model.currentSnapshotID)
+    #expect(model.contextWindow.displayedCandidate?.path == "lib.py")
+    #expect(model.contextWindow.displayedCandidate?.excerpt.isEmpty != true)
+    #expect(model.contextWindow.displayedCandidate?.symbol?.snapshotID == model.currentSnapshotID)
     let pythonSession = try #require(model.querySessions.first {
         $0.0.analysisProfile.language == .python
     }.map(\.0))
@@ -2304,8 +2304,8 @@ func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
         file: "main.rs",
         offset: byteOffset(of: "set(ConfigKey", in: source)
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"set() {}\", in: source)") {
-        model.selectedCandidate?.targetByteOffset
+    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset == byteOffset(of: \"set() {}\", in: source)") {
+        model.displayedCandidate?.targetByteOffset
             == byteOffset(of: "set() {}", in: source)
     })
 
@@ -2313,8 +2313,8 @@ func contextWindowUpdatesForASecondSymbolInsideTheSameCall() async throws {
         file: "main.rs",
         offset: byteOffset(of: "ConfigKey::Backend", in: source)
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"ConfigKey {\", in: source)") {
-        model.selectedCandidate?.targetByteOffset
+    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset == byteOffset(of: \"ConfigKey {\", in: source)") {
+        model.displayedCandidate?.targetByteOffset
             == byteOffset(of: "ConfigKey {", in: source)
     })
 }
@@ -2401,14 +2401,14 @@ func contextWindowDiscardsOutOfOrderRequests() async throws {
         beta,
         with: try session.resolve(file: path, offset: beta, context: context)
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.line == 2") { model.selectedCandidate?.line == 2 })
+    #expect(await testWaitUntil("model.displayedCandidate?.line == 2") { model.displayedCandidate?.line == 2 })
     gate.complete(
         alpha,
         with: try session.resolve(file: path, offset: alpha, context: context)
     )
     for _ in 0..<10 { await Task.yield() }
 
-    #expect(model.selectedCandidate?.line == 2)
+    #expect(model.displayedCandidate?.line == 2)
 }
 
 @MainActor
@@ -2457,8 +2457,8 @@ func contextWindowDiscardsFuzzyResultFromAnOlderProfileGeneration()
             context: secondContext
         )
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset == byteOffset(of: \"beta() {}\", in: source)") {
-        model.selectedCandidate?.targetByteOffset
+    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset == byteOffset(of: \"beta() {}\", in: source)") {
+        model.displayedCandidate?.targetByteOffset
             == byteOffset(of: "beta() {}", in: source)
     })
 }
@@ -2508,8 +2508,8 @@ func contextWindowDiscardsResultAfterProfileChangeAtSameGeneration() async throw
             context: secondProfile
         )
     )
-    #expect(await testWaitUntil("model.selectedCandidate?.targetByteOffset != nil") {
-        model.selectedCandidate?.targetByteOffset != nil
+    #expect(await testWaitUntil("model.displayedCandidate?.targetByteOffset != nil") {
+        model.displayedCandidate?.targetByteOffset != nil
     })
 }
 
@@ -2571,7 +2571,7 @@ func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
     let first = try #require(await model.explicitJump(file: "main.rs", offset: alpha))
     model.setMode(.pinned)
     let pinnedStage = model.stage
-    let pinnedCandidate = try #require(model.selectedCandidate)
+    let pinnedCandidate = try #require(model.displayedCandidate)
     let pinnedRequestID = model.requestID
 
     model.tokenClicked(file: "main.rs", offset: beta)
@@ -2584,14 +2584,14 @@ func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
     #expect(model.requestID == pinnedRequestID)
     #expect(model.selectedIndex == 0)
     #expect(model.candidateCount == 1)
-    #expect(model.selectedCandidate?.symbol == pinnedCandidate.symbol)
-    #expect(model.selectedCandidate?.path == pinnedCandidate.path)
-    #expect(model.selectedCandidate?.line == pinnedCandidate.line)
-    #expect(model.selectedCandidate?.column == pinnedCandidate.column)
-    #expect(model.selectedCandidate?.label == pinnedCandidate.label)
-    #expect(model.selectedCandidate?.excerpt == pinnedCandidate.excerpt)
-    #expect(model.selectedCandidate?.bindingKind == pinnedCandidate.bindingKind)
-    #expect(model.selectedCandidate?.targetByteOffset == pinnedCandidate.targetByteOffset)
+    #expect(model.displayedCandidate?.symbol == pinnedCandidate.symbol)
+    #expect(model.displayedCandidate?.path == pinnedCandidate.path)
+    #expect(model.displayedCandidate?.line == pinnedCandidate.line)
+    #expect(model.displayedCandidate?.column == pinnedCandidate.column)
+    #expect(model.displayedCandidate?.label == pinnedCandidate.label)
+    #expect(model.displayedCandidate?.excerpt == pinnedCandidate.excerpt)
+    #expect(model.displayedCandidate?.bindingKind == pinnedCandidate.bindingKind)
+    #expect(model.displayedCandidate?.targetByteOffset == pinnedCandidate.targetByteOffset)
     guard case let .candidates(pinnedCandidates, pinnedSelected) = pinnedStage,
           case let .candidates(currentCandidates, currentSelected) = model.stage
     else {
@@ -2603,12 +2603,12 @@ func pinnedContextIgnoresClickButExplicitJumpStillResolves() async throws {
 
     model.setMode(.follow)
     #expect(await model.explicitJump(file: "main.rs", offset: beta) != nil)
-    #expect(model.selectedCandidate?.symbol == target.symbol)
+    #expect(model.displayedCandidate?.symbol == target.symbol)
 
     let followedRequestID = model.requestID
     #expect(await model.resolvedCandidate(file: "main.rs", offset: alpha) != nil)
     #expect(model.requestID == followedRequestID)
-    #expect(model.selectedCandidate?.symbol == target.symbol)
+    #expect(model.displayedCandidate?.symbol == target.symbol)
 }
 
 @MainActor
@@ -2691,12 +2691,12 @@ func relationSelectionUpdatesContextOnConsecutiveCallerRows() async throws {
     let second = try #require(edges.first { $0.title == "second" })
 
     model.relationTree.select(first)
-    #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
-    let firstCandidate = try #require(contextWindow.selectedCandidate)
+    #expect(await testWaitUntil("contextWindow.displayedCandidate != nil") { contextWindow.displayedCandidate != nil })
+    let firstCandidate = try #require(contextWindow.displayedCandidate)
 
     model.relationTree.select(second)
-    #expect(await testWaitUntil("contextWindow.selectedCandidate?.symbol != firstCandidate.symbol") {
-        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
+    #expect(await testWaitUntil("contextWindow.displayedCandidate?.symbol != firstCandidate.symbol") {
+        contextWindow.displayedCandidate?.symbol != firstCandidate.symbol
     })
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
     #expect(requests.map(\.offset) == [
@@ -2741,11 +2741,11 @@ func relationSelectionUpdatesContextOnConsecutiveCallRows() async throws {
     let second = try #require(edges.first { $0.title == "second" })
 
     model.relationTree.select(first)
-    #expect(await testWaitUntil("contextWindow.selectedCandidate != nil") { contextWindow.selectedCandidate != nil })
-    let firstCandidate = try #require(contextWindow.selectedCandidate)
+    #expect(await testWaitUntil("contextWindow.displayedCandidate != nil") { contextWindow.displayedCandidate != nil })
+    let firstCandidate = try #require(contextWindow.displayedCandidate)
     model.relationTree.select(second)
-    #expect(await testWaitUntil("contextWindow.selectedCandidate?.symbol != firstCandidate.symbol") {
-        contextWindow.selectedCandidate?.symbol != firstCandidate.symbol
+    #expect(await testWaitUntil("contextWindow.displayedCandidate?.symbol != firstCandidate.symbol") {
+        contextWindow.displayedCandidate?.symbol != firstCandidate.symbol
     })
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
     #expect(requests.map(\.offset) == [
@@ -2793,10 +2793,10 @@ func relationSelectionUpdatesContextOnConsecutiveImplementationRows() async thro
 
     model.relationTree.select(first)
     #expect(await testWaitUntil("!requests.isEmpty") { !requests.isEmpty })
-    let firstCandidate = contextWindow.selectedCandidate
+    let firstCandidate = contextWindow.displayedCandidate
     model.relationTree.select(second)
     #expect(await testWaitUntil("requests.count == 2") { requests.count == 2 })
-    #expect(contextWindow.selectedCandidate?.symbol != firstCandidate?.symbol)
+    #expect(contextWindow.displayedCandidate?.symbol != firstCandidate?.symbol)
     #expect(requests.map(\.path) == ["main.rs", "main.rs"])
     #expect(requests[0].offset != requests[1].offset)
 }
@@ -2924,7 +2924,7 @@ func contextWindowResolvesUseAliasFixtureWithPresentationLabel() async throws {
         offset: byteOffset(of: "open_db();", in: source)
     )
     #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
-    let candidate = try #require(model.selectedCandidate)
+    let candidate = try #require(model.displayedCandidate)
 
     #expect(candidate.label.lowercased().contains("strong"))
     #expect(candidate.path == "db.rs")
@@ -2946,8 +2946,8 @@ func contextWindowPresentsLocalBindingKind() async throws {
     )
     #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
-    #expect(model.selectedCandidate?.bindingKind == "letBinding")
-    #expect(model.selectedCandidate?.line == 2)
+    #expect(model.displayedCandidate?.bindingKind == "letBinding")
+    #expect(model.displayedCandidate?.line == 2)
 }
 
 @MainActor
@@ -2966,7 +2966,7 @@ func contextWindowExplainsUnresolvedImport() async throws {
         model.tokenClicked(file: file, offset: byteOffset(of: usage, in: source))
         #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
-        #expect(model.selectedCandidate?.excerpt == "Import target could not be resolved.")
+        #expect(model.displayedCandidate?.excerpt == "Import target could not be resolved.")
     }
 }
 
@@ -3497,4 +3497,29 @@ func sameProjectRevisionsDoNotAccumulateInServiceStore() async throws {
     }
     let hits = try await original.searchSymbols(query: "revision_0", limit: 10, boost: SearchBoost(), context: QueryContext(snapshotID: original.snapshotID, analysisProfileID: original.analysisProfile.id, generation: 1))
     #expect(hits.count == 1)
+}
+
+/// P0 baseline (R2): before the type hop lands, the lens displays the very
+/// symbol the user pointed at; navigation keeps acting on it. In P1 the two
+/// concepts diverge for value bindings — this locks the pre-hop behavior.
+@MainActor
+@Test
+func contextWindowDisplayedCandidateMatchesSymbolCandidateBeforeTypeHop() async throws {
+    let source = "fn greet() {}\nfn main() {\n    greet();\n}"
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "greet();", in: source)
+    )
+    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
+
+    let displayed = try #require(model.displayedCandidate)
+    let symbol = try #require(model.symbolCandidate)
+    #expect(displayed.path == symbol.path)
+    #expect(displayed.targetByteOffset == symbol.targetByteOffset)
 }

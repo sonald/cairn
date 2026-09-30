@@ -7518,7 +7518,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     }
 
     private func openSelection() {
-        guard let candidate = model.selectedCandidate else { return }
+        guard let candidate = model.displayedCandidate else { return }
         onOpen?(candidate)
     }
 
@@ -7554,7 +7554,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         applyHeaderStyle()
         let text: String
         let highlightsSyntax: Bool
-        if let candidate = model.selectedCandidate {
+        if let candidate = model.displayedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
             let name = Self.declaredName(in: candidate.excerpt) ?? ""
             symbolLabel.stringValue = name
@@ -7747,7 +7747,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     private func applyBadgeStyle() {
         let colors: (background: NSColor, foreground: NSColor) =
-            switch provenanceBadgeStyle(for: model.selectedCandidate?.certainty) {
+            switch provenanceBadgeStyle(for: model.displayedCandidate?.certainty) {
             case .exact:
                 (theme.mossSoftColor, theme.verifiedColor)
             case .strong:

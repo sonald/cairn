@@ -1211,9 +1211,9 @@ func rightClickRelationsUsePagedContextCandidateInAllDirections() async throws {
     try #require(await relationTestWaitUntil("fixture.model.contextWindow.candidateCount == 2") {
         fixture.model.contextWindow.candidateCount == 2
     })
-    let first = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    let first = try #require(fixture.model.contextWindow.symbolCandidate?.symbol)
     fixture.model.contextWindow.selectNext()
-    let selected = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    let selected = try #require(fixture.model.contextWindow.symbolCandidate?.symbol)
     #expect(selected != first)
 
     for direction in [
@@ -1256,7 +1256,7 @@ func rightClickRelationReparsesAStaleContextSelection() async throws {
         fixture.model.contextWindow.candidateCount == 2
     })
     fixture.model.contextWindow.selectNext()
-    let stale = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    let stale = try #require(fixture.model.contextWindow.symbolCandidate?.symbol)
     guard case let .ready(session, context) = fixture.model.projectState else {
         Issue.record("project is not ready")
         return
@@ -1297,7 +1297,7 @@ func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
         fixture.model.contextWindow.candidateCount == 2
     })
     fixture.model.contextWindow.selectNext()
-    let pinned = try #require(fixture.model.contextWindow.selectedCandidate?.symbol)
+    let pinned = try #require(fixture.model.contextWindow.symbolCandidate?.symbol)
     fixture.controller.selfTestSetContextPinned(true)
     guard case let .ready(session, context) = fixture.model.projectState else {
         Issue.record("project is not ready")
@@ -1326,7 +1326,7 @@ func pinnedRightClickReparsesNewTokenAndReusesDisplayedToken() async throws {
     })
     #expect(fixture.model.relationTree.root?.symbol == pinned)
     #expect(fixture.model.contextWindow.mode == .pinned)
-    #expect(fixture.model.contextWindow.selectedCandidate?.symbol == pinned)
+    #expect(fixture.model.contextWindow.symbolCandidate?.symbol == pinned)
 }
 
 @MainActor
@@ -1348,9 +1348,9 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
         offset: byteOffset(of: "target();", in: fixture.mainSource),
         commandClick: false
     )
-    try #require(await relationTestWaitUntil("fixture.model.contextWindow.selectedCandidate != nil") { fixture.model.contextWindow.selectedCandidate != nil })
+    try #require(await relationTestWaitUntil("fixture.model.contextWindow.symbolCandidate != nil") { fixture.model.contextWindow.symbolCandidate != nil })
     fixture.controller.selfTestSetContextPinned(true)
-    let pinnedCandidate = try #require(fixture.model.contextWindow.selectedCandidate)
+    let pinnedCandidate = try #require(fixture.model.contextWindow.symbolCandidate)
     let pinnedRequest = fixture.model.contextWindow.requestID
 
     fixture.controller.selfTestReaderRelation(
@@ -1376,10 +1376,10 @@ func relationReferenceSingleClickNavigatesWhileContextIsPinned() async throws {
 
     #expect(fixture.model.contextWindow.mode == .pinned)
     #expect(fixture.model.contextWindow.requestID == pinnedRequest)
-    #expect(fixture.model.contextWindow.selectedCandidate?.symbol == pinnedCandidate.symbol)
-    #expect(fixture.model.contextWindow.selectedCandidate?.path == pinnedCandidate.path)
+    #expect(fixture.model.contextWindow.symbolCandidate?.symbol == pinnedCandidate.symbol)
+    #expect(fixture.model.contextWindow.symbolCandidate?.path == pinnedCandidate.path)
     #expect(
-        fixture.model.contextWindow.selectedCandidate?.targetByteOffset
+        fixture.model.contextWindow.symbolCandidate?.targetByteOffset
             == pinnedCandidate.targetByteOffset
     )
 }
@@ -2513,7 +2513,7 @@ func keyboardRelationCommandsFollowTheReaderSelection() async throws {
     })
     // No Context candidate exists (nothing was ever clicked), matching the
     // review repro: a caret or selection in the Reader must be enough.
-    #expect(fixture.model.contextWindow.selectedCandidate == nil)
+    #expect(fixture.model.contextWindow.symbolCandidate == nil)
     #expect(
         fixture.controller.canShowRelationsFromReaderSurface,
         "a caret in a project source file must enable the commands"
@@ -2552,10 +2552,10 @@ func pinnedContextDoesNotStealRelationCommandTargets() async throws {
         + UInt32("fn ".utf8.count)
     fixture.model.contextWindow.tokenClicked(file: "main.rs", offset: firstDefinition)
     try #require(await relationTestWaitUntil("first candidate shown") {
-        fixture.model.contextWindow.selectedCandidate != nil
+        fixture.model.contextWindow.symbolCandidate != nil
     })
     fixture.model.contextWindow.setMode(.pinned)
-    let pinnedPath = fixture.model.contextWindow.selectedCandidate?.path
+    let pinnedPath = fixture.model.contextWindow.symbolCandidate?.path
 
     // The Reader caret moves to a call of `second`; the global command must
     // query second, leaving the pinned preview untouched.
@@ -2572,7 +2572,7 @@ func pinnedContextDoesNotStealRelationCommandTargets() async throws {
         "the pinned preview's target must not steal the command"
     )
     #expect(fixture.model.contextWindow.mode == .pinned)
-    #expect(fixture.model.contextWindow.selectedCandidate?.path == pinnedPath)
+    #expect(fixture.model.contextWindow.symbolCandidate?.path == pinnedPath)
 }
 
 @MainActor
