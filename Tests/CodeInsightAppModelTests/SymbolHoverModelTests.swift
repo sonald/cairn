@@ -256,6 +256,18 @@ func hoverMarkdownSplitsPyrightAndTypeScriptServerShapes() {
         """,
         source: .exact
     ))
+    // typescript-language-server prefixes most kinds too, some with spaces.
+    for (fenced, expected) in [
+        ("(property) Store.id: number", "Store.id: number"),
+        ("(local var) retries: number", "retries: number"),
+        ("(alias) readFileSync(path: string): Buffer\nimport readFileSync",
+         "readFileSync(path: string): Buffer\nimport readFileSync"),
+    ] {
+        #expect(symbolDoc(
+            fromHoverMarkdown: "```typescript\n\(fenced)\n```\nDocs.",
+            language: .typescript
+        ).signature == expected)
+    }
     // A signature that merely opens with parentheses is not a kind prefix.
     #expect(symbolDoc(
         fromHoverMarkdown: "```python\n(...args) -> None\n```\n\nDocs.",

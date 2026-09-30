@@ -161,6 +161,45 @@ func pythonSyntacticDocSkipsDecoratorsAndReadsDocstrings() {
 }
 
 @Test
+func pythonSyntacticDocKeepsIndentedSectionLinesApartLikePyright() {
+    let doc = pythonDoc("""
+    def format_name(user: str) -> str:
+        \"\"\"Format a greeting for ``user``.
+
+        Longer description that wraps
+        onto a second line.
+
+        Args:
+            user: the user name.
+            greeting: the greeting word.
+
+        Returns:
+            The formatted line.
+        \"\"\"
+    """, declaration: "def format_name")
+    // pyright's own rendering of the same docstring (sampled 2026-09-30):
+    // hard breaks before indented lines, the indent kept as `&nbsp;`, wrapped
+    // prose at one indent left to reflow.
+    #expect(doc.markdown == """
+    Format a greeting for ``user``.
+
+    Longer description that wraps
+    onto a second line.
+
+    Args:\u{20}\u{20}
+    &nbsp;&nbsp;&nbsp;&nbsp;user: the user name.\u{20}\u{20}
+    &nbsp;&nbsp;&nbsp;&nbsp;greeting: the greeting word.
+
+    Returns:\u{20}\u{20}
+    &nbsp;&nbsp;&nbsp;&nbsp;The formatted line.
+    """)
+
+    // Fenced examples are code, not docstring text.
+    #expect(markdownFromPythonDocstring("Example:\n```\n    run()\n```") ==
+        "Example:\n```\n    run()\n```")
+}
+
+@Test
 func pythonSyntacticDocDedentsMultiLineHeadersAndQuoteVariants() {
     let multiline = pythonDoc("""
     class Repo:
@@ -252,7 +291,7 @@ func typeScriptSyntacticDocReadsJSDocSignaturesAndAggregates() {
     #expect(function.markdown == """
     Fetches a user.
 
-    @param id - the user id
+    *@param* `id` — the user id
     """)
 
     let arrow = typeScriptDoc(
@@ -286,6 +325,55 @@ func typeScriptSyntacticDocReadsJSDocSignaturesAndAggregates() {
     )
     #expect(plain.markdown.isEmpty)
     #expect(plain.signature == "function boot()")
+}
+
+@Test
+func typeScriptSyntacticDocRendersBlockTagsLikeTheLanguageServer() {
+    // typescript-language-server's rendering of the same tags (sampled
+    // 2026-09-30): each tag its own paragraph, parameter names as code.
+    #expect(markdownFromJSDoc("""
+    Loads the store.
+    @param id - the store id
+    @deprecated use openStore
+    """) == """
+    Loads the store.
+
+    *@param* `id` — the store id
+
+    *@deprecated* — use openStore
+    """)
+    // Types, optional names and defaults are dropped from parameter tags;
+    // tag text may continue on following lines; bare tags stay bare.
+    #expect(markdownFromJSDoc("""
+    @param {number} [retries=3] how many
+      attempts to make
+    @returns the result
+    @internal
+    """) == """
+    *@param* `retries` — how many
+      attempts to make
+
+    *@returns* — the result
+
+    *@internal*
+    """)
+    // A tag whose text starts on the next line keeps it as its own block,
+    // and `@` inside a fenced example is not a tag.
+    #expect(markdownFromJSDoc("""
+    @example
+    ```ts
+    @Component()
+    class A {}
+    ```
+    """) == """
+    *@example*
+
+    ```ts
+    @Component()
+    class A {}
+    ```
+    """)
+    #expect(markdownFromJSDoc("No tags here.") == "No tags here.")
 }
 
 @Test

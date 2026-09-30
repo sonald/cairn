@@ -138,3 +138,48 @@ func symbolDocCardShowsSyntacticFallbackWithPendingNote() throws {
     }
     card.hide()
 }
+
+@MainActor
+@Test
+func symbolDocCardWrapsLongSignaturesBetweenTokens() throws {
+    _ = NSApplication.shared
+    // typescript-language-server answers overloaded dependency functions
+    // with one long line (sampled 2026-09-30 from @types/node).
+    let signature = "readFileSync(path: PathOrFileDescriptor, options?: "
+        + "ReadFileSyncOptionsWithBufferEncoding | null | undefined): Buffer "
+        + "(+3 overloads)"
+    let doc = SymbolDoc(
+        signature: signature,
+        signatureLanguage: "typescript",
+        markdown: "Returns the contents of the `path`.",
+        source: .exact
+    )
+    let card = SymbolDocCard()
+    let parent = NSWindow(
+        contentRect: NSRect(x: 0, y: 0, width: 900, height: 600),
+        styleMask: [.titled],
+        backing: .buffered,
+        defer: false
+    )
+    parent.contentView = NSView()
+    card.show(
+        doc,
+        notes: [],
+        anchor: NSRect(x: 200, y: 300, width: 80, height: 16),
+        in: parent,
+        theme: ReaderTheme(settings: ReaderSettings())
+    )
+    withExtendedLifetime(parent) {
+        let signatureLines = card.renderedLines.prefix { !$0.contains("Returns the contents") }
+        #expect(signatureLines.count > 1, "the signature should need wrapping: \(signatureLines)")
+        // Every soft wrap falls between tokens: no line ends in the middle
+        // of an identifier that the next line continues.
+        for (line, next) in zip(signatureLines, signatureLines.dropFirst()) {
+            let splitsWord = line.last.map { $0.isLetter || $0.isNumber } == true
+                && next.first.map { $0.isLetter || $0.isNumber } == true
+            #expect(!splitsWord, "wrapped inside a word: \(line.debugDescription) | \(next.debugDescription)")
+        }
+        #expect(signatureLines.joined() == signature + "\n")
+    }
+    card.hide()
+}

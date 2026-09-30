@@ -539,7 +539,9 @@ private func pythonSymbolDoc(
         location: location,
         signature: header?.signature,
         signatureLanguage: "python",
-        markdown: header.map { pythonDocstring(after: $0.bodyStart, in: document) } ?? "",
+        markdown: header.map {
+            markdownFromPythonDocstring(pythonDocstring(after: $0.bodyStart, in: document))
+        } ?? "",
         source: .syntactic
     )
 }
@@ -674,6 +676,44 @@ private func normalizedPythonDocstring(_ lines: [String]) -> String {
     return result.joined(separator: "\n")
 }
 
+/// Docstrings are plain text, not Markdown: a line break before an indented
+/// line (`Args:` entries, wrapped field descriptions) is meaningful. Like
+/// pyright's conversion, such breaks become hard breaks and the indent is
+/// kept as non-breaking spaces, so the syntactic card reads like the exact
+/// one; wrapped prose at the same indent still reflows.
+func markdownFromPythonDocstring(_ docstring: String) -> String {
+    let lines = docstring.components(separatedBy: "\n")
+    let indents = lines.map { line in
+        line.prefix { $0 == " " || $0 == "\t" }
+            .reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+    }
+    var inFence = false
+    var result: [String] = []
+    for (index, line) in lines.enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("```") {
+            inFence.toggle()
+            result.append(line)
+            continue
+        }
+        guard !inFence, !trimmed.isEmpty else {
+            result.append(line)
+            continue
+        }
+        var converted = String(repeating: "&nbsp;", count: indents[index]) + trimmed
+        let next = index + 1 < lines.count ? lines[index + 1] : ""
+        let nextTrimmed = next.trimmingCharacters(in: .whitespaces)
+        if !nextTrimmed.isEmpty,
+           !nextTrimmed.hasPrefix("```"),
+           indents[index] > 0 || indents[index + 1] > 0
+        {
+            converted += "  "
+        }
+        result.append(converted)
+    }
+    return result.joined(separator: "\n")
+}
+
 // MARK: - TypeScript declarations
 
 private func typescriptSymbolDoc(
@@ -686,7 +726,7 @@ private func typescriptSymbolDoc(
         signature: typescriptSignature(at: range, in: document),
         signatureLanguage: "typescript",
         markdown: linkingTypeScriptDocReferences(
-            typeScriptDocComment(above: range, in: document)
+            markdownFromJSDoc(typeScriptDocComment(above: range, in: document))
         ),
         source: .syntactic
     )
@@ -774,6 +814,72 @@ private let jsDocLinkWithLabel = try! NSRegularExpression(
 private let jsDocLinkWithoutLabel = try! NSRegularExpression(
     pattern: #"\{@link\s+([A-Za-z_$][A-Za-z0-9_$#.]*)\}"#
 )
+
+/// JSDoc tags that name a parameter or member before their description.
+private let jsDocNamedTags: Set<String> = [
+    "param", "arg", "argument", "property", "prop", "template",
+]
+
+/// Renders JSDoc block tags as typescript-language-server does: the
+/// description first, then each tag as its own paragraph —
+/// `*@param* \`id\` — text`, `*@deprecated* — text`. Without this the raw
+/// comment lines collapse into one Markdown paragraph.
+func markdownFromJSDoc(_ comment: String) -> String {
+    var description: [String] = []
+    var tags: [(name: String, lines: [String])] = []
+    var inFence = false
+    for line in comment.components(separatedBy: "\n") {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("```") { inFence.toggle() }
+        if !inFence, trimmed.hasPrefix("@"),
+           let name = trimmed.dropFirst().split(separator: " ", maxSplits: 1).first,
+           name.allSatisfy({ $0.isLetter })
+        {
+            let rest = trimmed.dropFirst(name.count + 1)
+                .trimmingCharacters(in: .whitespaces)
+            tags.append((String(name), [rest]))
+        } else if tags.isEmpty {
+            description.append(line)
+        } else {
+            tags[tags.count - 1].lines.append(line)
+        }
+    }
+    guard !tags.isEmpty else { return comment }
+    var blocks: [String] = []
+    let head = description.joined(separator: "\n")
+        .trimmingCharacters(in: .whitespacesAndNewlines)
+    if !head.isEmpty { blocks.append(head) }
+    for tag in tags {
+        var first = tag.lines[0]
+        var label = "*@\(tag.name)*"
+        if jsDocNamedTags.contains(tag.name) {
+            if first.hasPrefix("{"), let close = first.firstIndex(of: "}") {
+                first = first[first.index(after: close)...]
+                    .trimmingCharacters(in: .whitespaces)
+            }
+            let parts = first.split(separator: " ", maxSplits: 1)
+            if let rawName = parts.first {
+                // `[name]` and `[name=default]` mark optional parameters.
+                let name = rawName.hasPrefix("[")
+                    ? rawName.dropFirst().prefix { $0 != "]" && $0 != "=" }
+                    : rawName
+                label += " `\(name)`"
+                first = parts.count > 1 ? String(parts[1]) : ""
+                if first.hasPrefix("- ") { first.removeFirst(2) }
+            }
+        }
+        let text = ([first] + tag.lines.dropFirst()).joined(separator: "\n")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.isEmpty {
+            blocks.append(label)
+        } else if first.isEmpty {
+            blocks.append(label + "\n\n" + text)
+        } else {
+            blocks.append(label + " — " + text)
+        }
+    }
+    return blocks.joined(separator: "\n\n")
+}
 
 /// Turns JSDoc `{@link Target}` and `{@link Target label}` into links the
 /// card can resolve; fenced code is left untouched.

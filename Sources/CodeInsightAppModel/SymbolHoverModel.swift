@@ -389,8 +389,8 @@ public final class SymbolHoverModel {
 /// Splits a language server's hover Markdown into the card's parts.
 /// rust-analyzer leads with up to two fenced blocks — the module path and
 /// the signature — and separates the body with `---`. pyright and
-/// typescript-language-server lead with one fenced signature (pyright
-/// prefixes it with the declaration kind); the rest is the body.
+/// typescript-language-server lead with one fenced signature, often
+/// prefixed with the declaration kind; the rest is the body.
 public func symbolDoc(
     fromHoverMarkdown markdown: String,
     language: LanguageID = .rust
@@ -426,12 +426,7 @@ public func symbolDoc(
     } else {
         location = nil
         signature = fences.first.map { fence in
-            (
-                fence.language,
-                language == .python
-                    ? strippingDeclarationKindPrefix(fence.body)
-                    : fence.body
-            )
+            (fence.language, strippingDeclarationKindPrefix(fence.body))
         }
     }
     return SymbolDoc(
@@ -445,15 +440,18 @@ public func symbolDoc(
     )
 }
 
-/// pyright prefixes its signature fence with the declaration kind:
-/// `(function) def open()`, `(variable) path: Module`.
+/// pyright and typescript-language-server prefix the signature with the
+/// declaration kind: `(function) def open()`, `(property) Store.id: number`,
+/// `(local var) x: number`. The card shows the signature alone for every
+/// language.
 private func strippingDeclarationKindPrefix(_ signature: String) -> String {
     guard signature.hasPrefix("("),
           let close = signature.firstIndex(of: ")")
     else { return signature }
     let kind = signature[signature.index(after: signature.startIndex)..<close]
     guard !kind.isEmpty,
-          kind.allSatisfy { $0.isLetter && $0.isLowercase },
+          kind.first?.isLetter == true,
+          kind.allSatisfy { ($0.isLetter && $0.isLowercase) || $0 == " " },
           let space = signature.index(close, offsetBy: 1, limitedBy: signature.endIndex),
           space < signature.endIndex,
           signature[space] == " "

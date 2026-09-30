@@ -29,6 +29,24 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
         textView.string
     }
 
+    /// The laid-out visual lines of the card's text, for tests that check
+    /// where AppKit wraps.
+    var renderedLines: [String] {
+        guard let layoutManager = textView.layoutManager,
+              let container = textView.textContainer
+        else { return [] }
+        layoutManager.ensureLayout(for: container)
+        let text = textView.string as NSString
+        var lines: [String] = []
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: layoutManager.glyphRange(for: container)
+        ) { _, _, _, glyphRange, _ in
+            let range = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+            lines.append(text.substring(with: range))
+        }
+        return lines
+    }
+
     /// The footer's current text (note lines), for acceptance tests.
     public var footerText: String {
         footer.stringValue
@@ -234,7 +252,12 @@ public final class SymbolDocCard: NSObject, NSTextViewDelegate {
             band.setWidth(doc.location == nil ? 0 : 7, type: .absoluteValueType, for: .margin, edge: .minY)
             let style = NSMutableParagraphStyle()
             style.textBlocks = [band]
-            style.lineBreakMode = .byCharWrapping
+            // Break long one-line signatures (typescript-language-server's)
+            // between tokens, never inside an identifier; the hanging indent
+            // marks soft-wrapped continuations apart from the server's own
+            // line breaks.
+            style.lineBreakMode = .byWordWrapping
+            style.headIndent = 2 * horizontalPadding
             style.lineHeightMultiple = 1.12
             let resolved = ReaderFontResolver.shared.resolve(theme: theme, size: 12.5)
             var attributes = resolved.attributes
