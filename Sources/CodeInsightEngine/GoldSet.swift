@@ -212,6 +212,53 @@ private func evaluate(
             message: "\(assertion), got \(actual)"
         )
 
+    case "type":
+        // `type <position> -> <position>` — the type hop lands on the type
+        // definition; `-> primitive <name>` / `-> generic <name>` / `-> none`
+        // assert the stay-put outcomes (R8.1).
+        let pair = try split(body, separator: "->")
+        let source = try parsePosition(pair.0)
+        let expected = pair.1.trimmingCharacters(in: .whitespaces)
+        let pathID = try requirePath(source.file, session: session)
+        guard let index = session.content(at: pathID)?.1,
+              let offset = index.lineTable.byteOffset(
+                line: source.line, column: source.column
+              )
+        else {
+            throw GoldSetError("source position is outside file: \(source)")
+        }
+        let hop = try session.typeHop(file: pathID, offset: offset, context: context)
+        let actual: String
+        let passed: Bool
+        switch hop {
+        case let .targets(candidates, _):
+            let positions = try candidates.map {
+                try targetPosition(of: $0, session: session)
+            }
+            actual = positions.map(\.description).joined(separator: ",")
+            if let expectedPosition = try? parsePosition(expected) {
+                passed = positions.contains(expectedPosition)
+            } else {
+                passed = false
+            }
+        case let .primitive(name):
+            actual = "primitive \(name)"
+            passed = expected == actual
+        case let .genericUnbounded(name):
+            actual = "generic \(name)"
+            passed = expected == actual
+        case .none:
+            actual = "none"
+            passed = expected == actual
+        }
+        return AssertionResult(
+            operation: operation,
+            passed: passed,
+            noResult: actual == "none" && expected != "none",
+            noStrongViolation: false,
+            message: "\(assertion), got \(actual)"
+        )
+
     case "unresolved", "nostrong", "strong":
         let source = try parsePosition(body)
         let candidates = try resolve(source, session: session, context: context)

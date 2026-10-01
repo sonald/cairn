@@ -741,6 +741,10 @@ extension CodeInsight {
         @Argument(help: "Position as file:line:column (UTF-8 byte column).")
         var position: String
 
+        /// R8.1: append the type hop line for value bindings and fields.
+        @Flag(name: .long, help: "Follow the spelled type to its definition.")
+        var typeHop = false
+
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
@@ -782,6 +786,38 @@ extension CodeInsight {
                     print("\(candidate.certainty) \(candidate.dispatch) [\(candidate.evidence.joined(separator: ", "))] -> \(candidate.target.text)")
                 }
             }
+            if typeHop {
+                let hop = try session.typeHop(
+                    file: pathID,
+                    offset: offset,
+                    context: queryContext(for: session)
+                )
+                print(CodeInsight.codeinsightTypeHopLine(hop, session: session))
+            }
+        }
+    }
+
+static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession) -> String {
+        switch hop {
+        case let .targets(candidates, certainty):
+            let targets = candidates.compactMap { candidate -> String? in
+                guard let index = session.contentForCLI(at: candidate.target.pathID),
+                      index.symbols.indices.contains(Int(candidate.target.localIndex))
+                else { return nil }
+                let facet = index.symbols[Int(candidate.target.localIndex)]
+                guard let coordinate = index.lineTable.lineColumn(
+                    at: facet.nameRange.lowerBound
+                ) else { return nil }
+                return "\(session.paths.resolve(candidate.target.pathID)):\(coordinate.line):\(coordinate.column)"
+            }
+            if targets.isEmpty { return "type -> none" }
+            return "type -> \(targets.joined(separator: ", ")) (\(certainty))"
+        case let .primitive(name):
+            return "type -> primitive \(name)"
+        case let .genericUnbounded(name):
+            return "type -> generic \(name)"
+        case .none:
+            return "type -> none"
         }
     }
 

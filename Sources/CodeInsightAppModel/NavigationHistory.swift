@@ -531,6 +531,7 @@ public enum NavigationCause: Equatable, Sendable {
     case search
     case historyReplay
     case tabActivation
+    case typeDefinition
 }
 
 public extension NavigationCause {
@@ -544,6 +545,7 @@ public extension NavigationCause {
         case .search: "search"
         case .historyReplay: "historyReplay"
         case .tabActivation: "tabActivation"
+        case .typeDefinition: "typeDefinition"
         }
     }
 
@@ -555,6 +557,7 @@ public extension NavigationCause {
         case "search": self = .search
         case "historyReplay": self = .historyReplay
         case "tabActivation": self = .tabActivation
+        case "typeDefinition": self = .typeDefinition
         default: return nil
         }
     }

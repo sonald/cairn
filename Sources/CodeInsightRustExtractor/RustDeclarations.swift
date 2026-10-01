@@ -5,11 +5,13 @@ struct RustDeclarationSite {
     let facetIndex: UInt32?
     let initializerRange: CodeInsightCore.ByteRange?
     let implTypeNameID: NameID?
+    let implTypeRange: CodeInsightCore.ByteRange?
 
     static let none = RustDeclarationSite(
         facetIndex: nil,
         initializerRange: nil,
-        implTypeNameID: nil
+        implTypeNameID: nil,
+        implTypeRange: nil
     )
 }
 
@@ -91,6 +93,18 @@ struct RustDeclarations {
             kind: kind,
             byteOffset: byteOffset
         )
+        let fieldTypeRef: TypeRef?
+        if kind == .rustField,
+           let type = RustTypeHead.annotatedType(in: node),
+           let head = RustTypeHead.head(
+               in: type, bytes: bytes, byteOffset: byteOffset
+           ) {
+            fieldTypeRef = head.kind == "primitive_type"
+                ? .primitive(head.coreByteRange(byteOffset: byteOffset))
+                : .named(head.coreByteRange(byteOffset: byteOffset))
+        } else {
+            fieldTypeRef = nil
+        }
         facets.append(DeclarationFacet(
             symbolGroupID: SymbolGroupID(rawValue: facetIndex),
             space: space,
@@ -100,10 +114,12 @@ struct RustDeclarations {
             nameRange: nameNode.coreByteRange(byteOffset: byteOffset),
             parentFacetIndex: parentFacetIndex(for: kind),
             signatureFingerprint: fingerprints.signature,
-            bodyFingerprint: fingerprints.body
+            bodyFingerprint: fingerprints.body,
+            typeRef: fieldTypeRef
         ))
 
         var implTypeNameID: NameID?
+        var implTypeRange: CodeInsightCore.ByteRange?
         if kind == .rustImpl,
            let implementation = implementationNames(in: node),
            let typeName = implementation.type.text(
@@ -125,6 +141,9 @@ struct RustDeclarations {
                     typeNameID: typeNameID
                 ))
                 implTypeNameID = typeNameID
+                implTypeRange = implementation.type.coreByteRange(
+                    byteOffset: byteOffset
+                )
             }
         }
 
@@ -141,7 +160,8 @@ struct RustDeclarations {
             initializerRange: initializer(in: node)?.coreByteRange(
                 byteOffset: byteOffset
             ),
-            implTypeNameID: implTypeNameID
+            implTypeNameID: implTypeNameID,
+            implTypeRange: implTypeRange
         )
     }
 

@@ -142,6 +142,8 @@ public struct DeclarationFacet: Codable, Sendable {
     public let parentFacetIndex: UInt32?
     public let signatureFingerprint: ContentID?
     public let bodyFingerprint: ContentID?
+    /// Where a field's type is spelled (only fields carry it today).
+    public let typeRef: TypeRef?
 
     public init(
         symbolGroupID: SymbolGroupID,
@@ -152,7 +154,8 @@ public struct DeclarationFacet: Codable, Sendable {
         nameRange: ByteRange,
         parentFacetIndex: UInt32?,
         signatureFingerprint: ContentID?,
-        bodyFingerprint: ContentID?
+        bodyFingerprint: ContentID?,
+        typeRef: TypeRef? = nil
     ) {
         self.symbolGroupID = symbolGroupID
         self.space = space
@@ -163,6 +166,7 @@ public struct DeclarationFacet: Codable, Sendable {
         self.parentFacetIndex = parentFacetIndex
         self.signatureFingerprint = signatureFingerprint
         self.bodyFingerprint = bodyFingerprint
+        self.typeRef = typeRef
     }
 }
 

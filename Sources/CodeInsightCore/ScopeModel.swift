@@ -78,6 +78,7 @@ public struct BindingRecord: Codable, Sendable {
     public let kind: BindingKind
     public let declarationRange: ByteRange
     public let targetHint: UnresolvedSymbolRef?
+    public let typeRef: TypeRef?
 
     public init(
         scopeID: ScopeID,
@@ -85,7 +86,8 @@ public struct BindingRecord: Codable, Sendable {
         space: SymbolSpace,
         kind: BindingKind,
         declarationRange: ByteRange,
-        targetHint: UnresolvedSymbolRef?
+        targetHint: UnresolvedSymbolRef?,
+        typeRef: TypeRef? = nil
     ) {
         self.scopeID = scopeID
         self.localNameID = localNameID
@@ -93,6 +95,31 @@ public struct BindingRecord: Codable, Sendable {
         self.kind = kind
         self.declarationRange = declarationRange
         self.targetHint = targetHint
+        self.typeRef = typeRef
+    }
+}
+
+/// Where a binding's or field's type is spelled, already reduced to its
+/// head name (wrappers stripped at extraction time).
+public enum TypeRef: Codable, Hashable, Sendable {
+    case named(ByteRange)                       // `S` in `ps: &Box<S>`
+    case primitive(ByteRange)                   // `u32`
+    case selfType(ByteRange)                    // the impl's / class's type name
+    case constructed(ByteRange)                 // `S` in `S::new()` / `S { .. }`
+    case genericBound(parameter: ByteRange, bound: ByteRange)
+    case genericUnbounded(parameter: ByteRange)
+
+    /// Every byte range the reference points through.
+    public var ranges: [ByteRange] {
+        switch self {
+        case let .named(range), let .primitive(range), let .selfType(range),
+             let .constructed(range):
+            [range]
+        case let .genericBound(parameter, bound):
+            [parameter, bound]
+        case let .genericUnbounded(parameter):
+            [parameter]
+        }
     }
 }
 

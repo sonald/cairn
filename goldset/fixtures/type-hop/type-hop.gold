@@ -1,0 +1,17 @@
+# R1 probe set (requirements §2.1): the type hop lands on the head type.
+# The probes use free functions, matching the requirements' probe layout;
+# method-body references resolve without lexical-binding evidence today.
+# ps usage in ps.n + ... resolves through &S to the struct name.
+type main.rs:16:5 -> main.rs:1:12
+# local follows std::boxed::Box<S> through the strip list to S.
+type main.rs:16:20 -> main.rs:1:12
+# &self maps to the impl's type S (impl Trait for S takes the type).
+type main.rs:8:13 -> main.rs:1:12
+# The primitive-typed field n does not hop (Q3).
+type main.rs:9:14 -> primitive u32
+# The field access inner resolves through the field's type to Inner.
+type main.rs:20:7 -> main.rs:2:12
+# A use of the annotated let h: Handle stops at the alias (Q10).
+type main.rs:16:30 -> main.rs:4:10
+# A generic parameter with a single constraint hops to the bound (Q7).
+type main.rs:13:32 -> main.rs:5:11

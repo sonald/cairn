@@ -479,6 +479,275 @@ public final class EngineSession: Sendable {
         )
     }
 
+    /// The second hop of the lens type follow (P1): for a value binding or a
+    /// field under `offset`, resolve the head type its `typeRef` spells.
+    /// `.none` leaves the door open for the Exact layer (P2).
+    public func typeHop(
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) throws -> TypeHopResult {
+        try validate(context)
+        guard let candidates = try? resolve(
+            file: file, offset: offset, context: context
+        ) else { return .none }
+
+        // Only value bindings and rust fields carry a spelled type today.
+        guard let firstHop = try firstTypeHopCandidate(
+            file: file, candidates: candidates
+        ) else { return .none }
+
+        let typeRef: TypeRef?
+        if let bindingIndex = firstHop.evidence.compactMap({
+            if case let .lexicalBinding(bindingIndex) = $0 { return bindingIndex }
+            return nil
+        }).first,
+           let key = contentKeysByPath[file],
+           let index = contentIndexes[key],
+           index.bindings.indices.contains(Int(bindingIndex))
+        {
+            typeRef = index.bindings[Int(bindingIndex)].typeRef
+        } else if firstHop.target.localKind == .declarationFacet,
+                  let index = content(at: firstHop.target.pathID)?.1,
+                  index.symbols.indices.contains(Int(firstHop.target.localIndex))
+        {
+            typeRef = index.symbols[Int(firstHop.target.localIndex)].typeRef
+        } else {
+            typeRef = nil
+        }
+        guard let typeRef else { return .none }
+
+        let sourceName: (ByteRange) -> String = { [weak self] range in
+            guard let self, let bytes = self.sourceBytes(at: file) else { return "" }
+            let slice = bytes[Int(range.lowerBound)..<Int(range.upperBound)]
+            return String(decoding: slice, as: UTF8.self)
+        }
+
+        switch typeRef {
+        case let .primitive(range):
+            return .primitive(name: sourceName(range))
+        case let .genericUnbounded(parameter):
+            return .genericUnbounded(name: sourceName(parameter))
+        case let .named(range), let .selfType(range):
+            return try hopToType(
+                spelling: range,
+                file: file,
+                firstHop: firstHop,
+                context: context,
+                capAtProbable: false
+            )
+        case let .constructed(range):
+            return try hopToType(
+                spelling: range,
+                file: file,
+                firstHop: firstHop,
+                context: context,
+                capAtProbable: true
+            )
+        case let .genericBound(_, bound):
+            return try hopToType(
+                spelling: bound,
+                file: file,
+                firstHop: firstHop,
+                context: context,
+                capAtProbable: false
+            )
+        }
+    }
+
+    /// The first-hop candidate for a type hop: a lexical binding or a rust
+    /// field (P1.3).
+    private func firstTypeHopCandidate(
+        file: PathID,
+        candidates: [ResolutionCandidate]
+    ) throws -> ResolutionCandidate? {
+        candidates.first { candidate in
+            candidate.evidence.contains {
+                if case .lexicalBinding = $0 { return true }
+                return false
+            }
+        } ?? candidates.first { candidate in
+            guard candidate.target.localKind == .declarationFacet,
+                  let index = content(at: candidate.target.pathID)?.1,
+                  index.symbols.indices.contains(Int(candidate.target.localIndex))
+            else { return false }
+            return index.symbols[Int(candidate.target.localIndex)].kind == .rustField
+        }
+    }
+
+    /// R7.1: the spelled source text of the binding or field under the first
+    /// hop — `ps: &S`, `&self`, `made`, `inner: Inner` — plus its kind.
+    public func bindingSpelling(
+        file: PathID,
+        offset: UInt32,
+        context: QueryContext
+    ) throws -> (text: String, kind: TypeHopViaKind, boundNote: String?)? {
+        try validate(context)
+        guard let candidates = try? resolve(
+            file: file, offset: offset, context: context
+        ) else { return nil }
+        guard let firstHop = try firstTypeHopCandidate(
+            file: file, candidates: candidates
+        ) else { return nil }
+
+        if let bindingIndex = firstHop.evidence.compactMap({
+            if case let .lexicalBinding(bindingIndex) = $0 { return bindingIndex }
+            return nil
+        }).first,
+           let key = contentKeysByPath[file],
+           let index = contentIndexes[key],
+           index.bindings.indices.contains(Int(bindingIndex))
+        {
+            let binding = index.bindings[Int(bindingIndex)]
+            guard let bytes = sourceBytes(at: file) else { return nil }
+            let text = Self.bindingSpellingText(
+                bytes: bytes, nameRange: binding.declarationRange
+            )
+            let kind: TypeHopViaKind
+            if binding.kind == .param,
+               text == "self" || text.hasSuffix("self") && text.contains("&")
+            {
+                kind = .receiver
+            } else if binding.kind == .param {
+                kind = .parameter
+            } else {
+                kind = .letBinding
+            }
+            let boundNote: String?
+            if case let .genericBound(parameter, bound) = binding.typeRef {
+                boundNote = Self.spelledRange(
+                    parameter, bytes: bytes
+                ) + ":" + Self.spelledRange(bound, bytes: bytes)
+            } else {
+                boundNote = nil
+            }
+            return (text, kind, boundNote)
+        }
+
+        guard firstHop.target.localKind == .declarationFacet,
+              let index = content(at: firstHop.target.pathID)?.1,
+              index.symbols.indices.contains(Int(firstHop.target.localIndex)),
+              index.symbols[Int(firstHop.target.localIndex)].kind == .rustField,
+              let bytes = sourceBytes(at: firstHop.target.pathID)
+        else { return nil }
+        let facet = index.symbols[Int(firstHop.target.localIndex)]
+        return (
+            Self.bindingSpellingText(bytes: bytes, nameRange: facet.nameRange),
+            .field,
+            nil
+        )
+    }
+
+    private static func spelledRange(
+        _ range: ByteRange, bytes: [UInt8]
+    ) -> String {
+        guard Int(range.lowerBound) < bytes.count else { return "" }
+        let upper = min(Int(range.upperBound), bytes.count)
+        return String(
+            decoding: bytes[Int(range.lowerBound)..<upper], as: UTF8.self
+        )
+    }
+
+    /// Expands a declaration name range to the full binding spelling: a
+    /// leading `&`/`mut` for receivers and, when a `: type` annotation
+    /// follows, the type up to the first top-level separator.
+    private static func bindingSpellingText(
+        bytes: [UInt8], nameRange: ByteRange
+    ) -> String {
+        var start = Int(nameRange.lowerBound)
+        while true {
+            var probe = start
+            while probe > 0,
+                  bytes[probe - 1] == UInt8(ascii: " ")
+                  || bytes[probe - 1] == UInt8(ascii: "\t")
+            { probe -= 1 }
+            if probe > 0, bytes[probe - 1] == UInt8(ascii: "&") {
+                start = probe - 1
+                continue
+            }
+            if probe >= 3,
+               bytes[probe - 1] == UInt8(ascii: "t"),
+               bytes[probe - 2] == UInt8(ascii: "u"),
+               bytes[probe - 3] == UInt8(ascii: "m")
+            {
+                start = probe - 3
+                continue
+            }
+            break
+        }
+        var end = Int(nameRange.upperBound)
+        var index = end
+        while index < bytes.count,
+              bytes[index] == UInt8(ascii: " ")
+              || bytes[index] == UInt8(ascii: "\t")
+        { index += 1 }
+        if index + 1 < bytes.count,
+           bytes[index] == UInt8(ascii: ":"),
+           bytes[index + 1] != UInt8(ascii: ":")
+        {
+            var depth = 0
+            var scan = index
+            var stop: Int? = nil
+            while scan < bytes.count, stop == nil {
+                let byte = bytes[scan]
+                if byte == UInt8(ascii: "<") || byte == UInt8(ascii: "(") {
+                    depth += 1
+                } else if byte == UInt8(ascii: ">") || byte == UInt8(ascii: ")") {
+                    if depth == 0 {
+                        stop = scan
+                        break
+                    }
+                    depth -= 1
+                } else if depth == 0,
+                          byte == UInt8(ascii: ",")
+                          || byte == UInt8(ascii: "=")
+                          || byte == UInt8(ascii: ";")
+                          || byte == UInt8(ascii: "{")
+                          || byte == UInt8(ascii: "}")
+                {
+                    stop = scan
+                    break
+                }
+                scan += 1
+            }
+            end = stop ?? bytes.count
+        }
+        let slice = bytes[start..<end]
+        return String(decoding: slice, as: UTF8.self)
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Resolves the type spelled at `spelling` and keeps type-kind facets.
+    /// The result certainty is the weaker of the two hops; constructed heads
+    /// (inferred from `S::new()` / `S { .. }`) cap at `.probable` (R1.2).
+    private func hopToType(
+        spelling: ByteRange,
+        file: PathID,
+        firstHop: ResolutionCandidate,
+        context: QueryContext,
+        capAtProbable: Bool
+    ) throws -> TypeHopResult {
+        let secondHop = try resolve(
+            file: file, offset: spelling.lowerBound, context: context
+        ).filter { candidate in
+            guard candidate.target.localKind == .declarationFacet,
+                  let index = content(at: candidate.target.pathID)?.1,
+                  index.symbols.indices.contains(Int(candidate.target.localIndex))
+            else { return false }
+            return Self.typeKinds.contains(
+                index.symbols[Int(candidate.target.localIndex)].kind
+            )
+        }
+        guard !secondHop.isEmpty else { return .none }
+        var certainty = min(firstHop.certainty, secondHop[0].certainty)
+        if capAtProbable { certainty = min(certainty, .probable) }
+        return .targets(secondHop, certainty: certainty)
+    }
+
+    static let typeKinds: Set<DeclarationKind> = [
+        .rustStruct, .rustEnum, .rustTrait, .rustTypeAlias,
+    ]
+
     public func tokenRange(
         file: PathID,
         offset: UInt32,
@@ -493,6 +762,11 @@ public final class EngineSession: Sendable {
               let index = contentIndexes[key]
         else { return nil }
         return (key, index)
+    }
+
+    /// CLI read access to a file's content index (type hop output, R8.1).
+    public func contentForCLI(at pathID: PathID) -> ContentIndex? {
+        content(at: pathID)?.1
     }
 
     func definitionOccurrences(
@@ -647,4 +921,21 @@ public final class EngineSession: Sendable {
         case .typescriptClass: 22
         }
     }
+}
+
+/// Result of the syntactic type hop (P1.3).
+public enum TypeHopResult: Sendable {
+    case targets([ResolutionCandidate], certainty: Certainty)
+    case primitive(name: String)
+    case genericUnbounded(name: String)
+    /// Nothing spelled at the syntax level; the Exact layer may still answer.
+    case none
+}
+
+/// What the first hop of a type hop points at (R7.1).
+public enum TypeHopViaKind: Sendable {
+    case parameter
+    case letBinding
+    case receiver
+    case field
 }

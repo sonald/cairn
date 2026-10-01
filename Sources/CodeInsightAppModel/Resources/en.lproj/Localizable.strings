@@ -221,3 +221,18 @@
 
 /* Key bindings: click gesture display word. */
 "keybinding.click.word" = "click";
+
+/* Context window type hop (P1). */
+"model.typehop.parameter" = "parameter";
+"model.typehop.letBinding" = "local";
+"model.typehop.receiver" = "receiver";
+"model.typehop.field" = "field";
+"model.typehop.primitiveNote" = "%@ is a primitive type; staying on the declaration";
+"model.typehop.genericNote" = "generic %@ stays on the declaration";
+"model.typehop.noType" = "No type to jump to";
+"model.typehop.needsExact" = "Type needs exact analysis";
+"model.typehop.showTypeHint" = "Click to show the type definition";
+"model.typehop.showDeclarationHint" = "Click to show the declaration";
+"model.typehop.resolving" = "Resolving type…";
+"model.typehop.pendingExact" = "Type needs exact analysis · not ready";
+"model.typehop.accessibility" = "%1$@, %2$@, type %3$@";

@@ -161,6 +161,7 @@ extension CommandID {
     public static let goNextTab = CommandID(rawValue: "go.nextTab")
     public static let goPreviousDiffHunk = CommandID(rawValue: "go.previousDiffHunk")
     public static let goNextDiffHunk = CommandID(rawValue: "go.nextDiffHunk")
+    public static let navigateTypeDefinition = CommandID(rawValue: "navigate.typeDefinition")
 
     public static let viewPresetReading = CommandID(rawValue: "view.preset.reading")
     public static let viewPresetRelations = CommandID(rawValue: "view.preset.relations")
@@ -194,6 +195,8 @@ extension CommandID {
 
     public static let readerGestureDefinition = CommandID(rawValue: "reader.gesture.definition")
     public static let readerGestureSymbolDoc = CommandID(rawValue: "reader.gesture.symbolDoc")
+    public static let readerGestureTypeDefinition =
+        CommandID(rawValue: "reader.gesture.typeDefinition")
 
     public static let panelMoveSelection = CommandID(rawValue: "panel.moveSelection")
     public static let panelOpenSelection = CommandID(rawValue: "panel.openSelection")
@@ -331,6 +334,10 @@ public extension KeyBindingScheme {
             def(.goNextDiffHunk, .go, "app.menu.next.diff.hunk", [
                 keyboard([.option, .command], .special(.down)),
             ]),
+            // K-R4 (P1): 跳到类型定义 — menu ⌃⌘J and the ⌘⇧+click gesture.
+            def(.navigateTypeDefinition, .go, "app.menu.type.definition", [
+                keyboard([.control, .command], .character("j")),
+            ]),
 
             def(.viewPresetReading, .view, "app.menu.reading",
                 [keyboard([.command], .character("1"))]),
@@ -404,6 +411,9 @@ public extension KeyBindingScheme {
             ]),
             def(.readerGestureSymbolDoc, .readerGestures, "app.menu.show.symbol.documentation", [
                 .click([.option]),
+            ]),
+            def(.readerGestureTypeDefinition, .readerGestures, "app.menu.type.definition", [
+                .click([.command, .shift]),
             ]),
 
             def(.panelMoveSelection, .panels, "keybinding.panel.move", [

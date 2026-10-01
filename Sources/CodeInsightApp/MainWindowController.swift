@@ -40,6 +40,7 @@ enum ReaderClickGesture {
     enum Action: Equatable {
         case plain
         case definition
+        case typeDefinition
         case symbolDoc
     }
 
@@ -52,6 +53,7 @@ enum ReaderClickGesture {
         let bound = table.commands(boundTo: .click(chordModifiers))
         switch bound.first {
         case .readerGestureDefinition: return .definition
+        case .readerGestureTypeDefinition: return .typeDefinition
         case .readerGestureSymbolDoc: return .symbolDoc
         default: return nil
         }
@@ -527,6 +529,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         readerController.onTokenClick = { [weak self] offset, commandClick in
             self?.handleReaderClick(offset: offset, commandClick: commandClick)
+        }
+        readerController.onTypeDefinitionClick = { [weak self] offset in
+            self?.handleReaderTypeDefinition(offset: offset)
+        }
+        secondaryReaderController.onTypeDefinitionClick = { [weak self] offset in
+            self?.handleReaderTypeDefinition(offset: offset)
         }
         for reader in [readerController, secondaryReaderController] {
             reader.onHover = { [weak self] request in self?.handleHover(request) }
@@ -1213,6 +1221,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.selfTestCandidateCount
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
+    var selfTestTypeHop: (via: String, target: String?, showing: String)? {
+        contextController.selfTestTypeHop
+    }
     var selfTestFilesPlaceholderText: String? {
         sidebarController.selfTestFilesPlaceholderText
     }
@@ -3387,6 +3398,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             for: model.snapshotPhase ?? .firstPaint
         )
         let indexStatus = [
+            transientStatusNotice,
             focusNotice,
             model.isRestoringSession ? localized("main.restoring.reading.session") : nil,
             initialIndexStatus,
@@ -3863,6 +3875,58 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )?.menuFormRepresentation
     }
 
+    /// P1.6: ⌘⇧+click / ⌃⌘J / context menu — jump to the type definition of
+    /// the binding under the position; failures surface as a brief status.
+    private func handleReaderTypeDefinition(offset: UInt32) {
+        guard let file = model.selectedFile,
+              let path = projectPath(for: file)
+        else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            let result = await self.model.contextWindow.typeDefinitionTarget(
+                file: path,
+                offset: offset
+            )
+            await MainActor.run {
+                switch result {
+                case let .target(candidate):
+                    self.open(
+                        path: candidate.path,
+                        byteOffset: candidate.targetByteOffset,
+                        cause: .typeDefinition
+                    )
+                case let .failed(reason):
+                    self.showTransientStatus(reason)
+                }
+            }
+        }
+    }
+
+    func jumpToTypeDefinitionAtCaret() {
+        guard let offset = model.tabStrip.activeTab?.selectionByteOffset else {
+            showTransientStatus(localized("model.typehop.noType"))
+            return
+        }
+        handleReaderTypeDefinition(offset: offset)
+    }
+
+    /// Brief status-line notice for navigation failures (R3.4).
+    private var transientStatusNotice: String?
+    private var transientStatusTask: Task<Void, Never>?
+    func showTransientStatus(_ message: String) {
+        transientStatusNotice = message
+        renderStatusBar()
+        transientStatusTask?.cancel()
+        transientStatusTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.transientStatusNotice = nil
+                self?.renderStatusBar()
+            }
+        }
+    }
+
     private func handleReaderClick(offset: UInt32, commandClick: Bool) {
         guard let file = model.selectedFile,
               let path = projectPath(for: file)
@@ -3946,7 +4010,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         path: String,
         byteOffset: UInt32,
         explanation: NavigationExplanation? = nil,
-        symbolAnchor: String? = nil
+        symbolAnchor: String? = nil,
+        cause: NavigationCause = .relation
     ) {
         guard let root = model.fileTree?.root else { return }
         let file = exactLocationIsInDependency(path)
@@ -3955,7 +4020,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         navigate(
             to: file,
             byteOffset: byteOffset,
-            cause: .relation,
+            cause: cause,
             explanation: explanation,
             symbolAnchor: symbolAnchor,
             expectedContentID: exactLocationIsInDependency(path)
@@ -4468,6 +4533,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     NSTextViewDelegate, WKNavigationDelegate
 {
     var onTokenClick: ((UInt32, Bool) -> Void)?
+    /// ⌘⇧+click: jump to the type definition of the binding under the click.
+    var onTypeDefinitionClick: ((UInt32) -> Void)?
     /// The identifier under the pointer, or `nil` over anything else.
     var onHover: ((ReaderHoverRequest?) -> Void)?
     /// ⌥-click: show documentation now.
@@ -4610,6 +4677,11 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var findScanDelayForTesting = Duration.zero
     private(set) var findCancelledWorkerCountForTesting = 0
     private var contextMenuOffset: UInt32?
+
+    @objc private func jumpToTypeDefinitionFromMenu(_ sender: Any?) {
+        guard let offset = contextMenuOffset else { return }
+        onTypeDefinitionClick?(offset)
+    }
     private var readingPositionTask: Task<Void, Never>?
     private var emptyStateView: EmptyStateView?
     private var readerTheme = ReaderTheme(settings: ReaderSettings())
@@ -4774,6 +4846,8 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
                 self.onTokenClick?(offset, false)
             case .definition:
                 self.onTokenClick?(offset, true)
+            case .typeDefinition:
+                self.onTypeDefinitionClick?(offset)
             case .symbolDoc:
                 if let request = self.hoverRequest(self.textView.hoverTarget(atByteOffset: offset)) {
                     self.onHoverRequest?(request)
@@ -4798,6 +4872,12 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 
         let relationMenu = NSMenu(title: localized("main.relations"))
         relationMenu.autoenablesItems = false
+        relationMenu.addItem(NSMenuItem(
+            title: localized("main.type.definition"),
+            action: #selector(jumpToTypeDefinitionFromMenu(_:)),
+            keyEquivalent: ""
+        ))
+        relationMenu.addItem(.separator())
         relationMenu.addItem(NSMenuItem(
             title: localized("main.show.callers"),
             action: #selector(showCallers(_:)),
@@ -7208,6 +7288,13 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     private let nextButton = NSButton(title: "›", target: nil, action: nil)
     private let pathLabel = NSTextField(labelWithString: "")
     private let symbolLabel = NSTextField(labelWithString: "")
+    private let typeHopViaButton = NSButton(title: "", target: nil, action: nil)
+    private let typeHopArrowLabel = NSTextField(labelWithString: "→")
+    private let typeHopTargetButton = NSButton(title: "", target: nil, action: nil)
+    private let typeHopBoundLabel = NSTextField(labelWithString: "")
+    private lazy var typeHopLabel: NSStackView = NSStackView(views: [
+        typeHopViaButton, typeHopArrowLabel, typeHopTargetButton, typeHopBoundLabel,
+    ])
     private let stones = CertaintyStonesView(
         certainty: .possible, theme: ReaderTheme(settings: ReaderSettings()), size: 14
     )
@@ -7365,6 +7452,31 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         symbolLabel.font = cairnSerifFont(ofSize: 15, weight: .medium)
         symbolLabel.lineBreakMode = .byTruncatingTail
         symbolLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
+        // One-hop label (P1.5): `viaText → TypeName (T: Read)`, both ends
+        // clickable to switch the displayed side.
+        typeHopViaButton.isBordered = false
+        typeHopViaButton.imagePosition = .noImage
+        typeHopViaButton.setButtonType(.momentaryChange)
+        typeHopViaButton.contentTintColor = nil
+        typeHopViaButton.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        typeHopViaButton.lineBreakMode = .byTruncatingTail
+        typeHopViaButton.target = self
+        typeHopViaButton.action = #selector(showTypeHopDeclaration(_:))
+        typeHopTargetButton.isBordered = false
+        typeHopTargetButton.imagePosition = .noImage
+        typeHopTargetButton.setButtonType(.momentaryChange)
+        typeHopTargetButton.font = cairnSerifFont(ofSize: 15, weight: .medium)
+        typeHopTargetButton.lineBreakMode = .byTruncatingTail
+        typeHopTargetButton.target = self
+        typeHopTargetButton.action = #selector(showTypeHopType(_:))
+        typeHopArrowLabel.font = .systemFont(ofSize: 12, weight: .regular)
+        typeHopArrowLabel.textColor = theme.chromeTertiaryColor
+        typeHopBoundLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
+        typeHopBoundLabel.textColor = theme.chromeTertiaryColor
+        typeHopLabel.orientation = .horizontal
+        typeHopLabel.alignment = .firstBaseline
+        typeHopLabel.spacing = 4
+        typeHopLabel.setContentCompressionResistancePriority(.defaultLow + 1, for: .horizontal)
         stones.isHidden = true
         countLabel.font = .monospacedDigitSystemFont(ofSize: 11, weight: .regular)
 
@@ -7410,6 +7522,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             countLabel,
             nextButton,
             symbolLabel,
+            typeHopLabel,
             pathLabel,
             stones,
             candidateBadge,
@@ -7554,11 +7667,12 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         applyHeaderStyle()
         let text: String
         let highlightsSyntax: Bool
+        renderTypeHopLabel()
         if let candidate = model.displayedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
             let name = Self.declaredName(in: candidate.excerpt) ?? ""
             symbolLabel.stringValue = name
-            symbolLabel.isHidden = name.isEmpty
+            symbolLabel.isHidden = name.isEmpty || model.activeTypeHop != nil
             stones.update(certainty: candidate.certainty, theme: theme)
             stones.isHidden = false
             let fullProvenance = [
@@ -7586,6 +7700,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             pathLabel.stringValue = ""
             symbolLabel.stringValue = ""
             symbolLabel.isHidden = true
+            typeHopLabel.isHidden = true
             stones.isHidden = true
             candidateLabel.stringValue = ""
             candidateLabel.toolTip = nil
@@ -7611,9 +7726,95 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         miniReader.display(document: document)
     }
 
+    /// P1.5: the inline one-hop label — `ps: &S → S (T: Read)`. The side the
+    /// window displays is bold; the other side dims and stays clickable.
+    /// P1.5 self-test readout: the one-hop label's via text, the displayed
+    /// type name, and the current showing side.
+    var selfTestTypeHop: (via: String, target: String?, showing: String)? {
+        guard let hop = model.activeTypeHop else { return nil }
+        let target: String?
+        if hop.showing == .type, let displayed = model.displayedCandidate,
+           displayed.targetByteOffset != hop.via.targetByteOffset
+        {
+            target = Self.declaredName(in: displayed.excerpt)
+        } else {
+            target = hop.targets.first.flatMap { Self.declaredName(in: $0.excerpt) }
+        }
+        return (
+            via: hop.viaText,
+            target: target,
+            showing: hop.showing == .type ? "type" : "declaration"
+        )
+    }
+
+    private func renderTypeHopLabel() {
+        guard let hop = model.activeTypeHop else {
+            typeHopLabel.isHidden = true
+            return
+        }
+        typeHopLabel.isHidden = false
+        let showingType = hop.showing == .type
+        let targetShownName: String
+        if showingType {
+            targetShownName = Self.declaredName(
+                in: model.displayedCandidate?.excerpt ?? ""
+            ) ?? ""
+        } else {
+            targetShownName = hop.targets.first.flatMap {
+                Self.declaredName(in: $0.excerpt)
+            } ?? ""
+        }
+
+        typeHopViaButton.attributedStringValue = NSAttributedString(
+            string: hop.viaText,
+            attributes: [
+                .font: showingType
+                    ? NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
+                    : NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold),
+                .foregroundColor: showingType
+                    ? theme.chromeSecondaryColor
+                    : theme.foregroundColor,
+            ]
+        )
+        typeHopViaButton.toolTip = hop.viaKind + " · "
+            + localized("model.typehop.showDeclarationHint")
+        typeHopTargetButton.attributedStringValue = NSAttributedString(
+            string: targetShownName.isEmpty ? "…" : targetShownName,
+            attributes: [
+                .font: showingType
+                    ? cairnSerifFont(ofSize: 15, weight: .semibold)
+                    : cairnSerifFont(ofSize: 15, weight: .medium),
+                .foregroundColor: showingType
+                    ? theme.foregroundColor
+                    : theme.chromeTertiaryColor,
+            ]
+        )
+        typeHopTargetButton.toolTip = localized("model.typehop.showTypeHint")
+        typeHopBoundLabel.stringValue = hop.boundNote.map { "(\($0))" } ?? ""
+        typeHopBoundLabel.isHidden = hop.boundNote == nil
+        typeHopLabel.setAccessibilityLabel(localizedFormat(
+            "model.typehop.accessibility",
+            hop.viaText,
+            hop.viaKind,
+            targetShownName
+        ))
+    }
+
+    @objc private func showTypeHopDeclaration(_ sender: Any?) {
+        model.showTypeHop(.declaration)
+        render()
+    }
+
+    @objc private func showTypeHopType(_ sender: Any?) {
+        model.showTypeHop(.type)
+        render()
+    }
+
     private func renderCandidateList() {
         if case let .candidates(candidates, _) = model.stage, candidates.count > 1 {
             listedCandidates = candidates
+        } else if case let .typeHop(hop, _) = model.stage, hop.targets.count > 1 {
+            listedCandidates = hop.targets
         } else {
             listedCandidates = []
         }

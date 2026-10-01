@@ -2,6 +2,8 @@ import CodeInsightCore
 import CodeInsightRustExtractor
 import Foundation
 import Testing
+import TreeSitterKit
+import CTreeSitterRust
 
 @Test
 func languageExtractorExistentialMatchesRustExtractionContracts() throws {
@@ -616,7 +618,7 @@ private func extract(_ source: String) throws -> ExtractionResult {
     )
 }
 
-private func text(in source: String, range: ByteRange?) -> String? {
+private func text(in source: String, range: CodeInsightCore.ByteRange?) -> String? {
     guard let range else { return nil }
     let bytes = Array(source.utf8)
     return String(
@@ -633,3 +635,140 @@ private func facetIndex(
         result.names.resolve($0.nameID) == name
     }
 }
+
+// MARK: P1 — typeRef extraction (R1.4 stripping table)
+
+/// Byte range of the `occurrence`-th instance of `needle` on a 1-based line.
+private func lineRange(
+    of needle: String, line number: Int, in source: String, occurrence: Int = 1
+) -> CodeInsightCore.ByteRange {
+    let lines = source.components(separatedBy: "\n")
+    let needleBytes = Array(needle.utf8)
+    var offset: UInt32 = 0
+    for (index, line) in lines.enumerated() {
+        if index + 1 == number {
+            let lineBytes = Array(line.utf8)
+            var hits = 0
+            for start in 0...(lineBytes.count - needleBytes.count) {
+                if Array(lineBytes[start..<start + needleBytes.count]) == needleBytes {
+                    hits += 1
+                    if hits == occurrence {
+                        let lower = offset + UInt32(start)
+                        return ByteRange(
+                            lowerBound: lower,
+                            upperBound: lower + UInt32(needleBytes.count)
+                        )
+                    }
+                }
+            }
+            precondition(false, "missing \(needle) on line \(number)")
+        }
+        offset += UInt32(line.utf8.count + 1)
+    }
+    precondition(false, "no line \(number)")
+}
+
+@Test
+func rustTypeRefStripsReferencesAndSmartPointers() throws {
+    let source = """
+        struct S;
+        mod a { pub struct S; }
+        fn f(
+            ps: &S,
+            w: &mut Box<S>,
+            d: Option<Arc<a::S>>,
+        ) {
+            let _ = (ps, w, d);
+        }
+        """
+    let result = try extract(source)
+    let bindings = result.index.bindings
+
+    let ps = try #require(bindings.first { result.names.resolve($0.localNameID) == "ps" })
+    let w = try #require(bindings.first { result.names.resolve($0.localNameID) == "w" })
+    let d = try #require(bindings.first { result.names.resolve($0.localNameID) == "d" })
+
+    // Wrappers reduce to the head name `S` at its spelled range; the path
+    // `a::S` peels to its last segment.
+    #expect(ps.typeRef == .named(lineRange(of: "S", line: 4, in: source)))
+    #expect(w.typeRef == .named(lineRange(of: "S", line: 5, in: source)))
+    #expect(d.typeRef == .named(lineRange(of: "S", line: 6, in: source)))
+}
+
+@Test
+func rustTypeRefMarksPrimitivesAndGenerics() throws {
+    let source = """
+        fn read(r: u32) {
+            let _ = r;
+        }
+        fn bounded<T: Read>(t: T) {
+            let _ = t;
+        }
+        fn multi<A, B>(m: A) where A: B {
+            let _ = m;
+        }
+        fn free<G>(g: G) {
+            let _ = g;
+        }
+        """
+    let result = try extract(source)
+
+    let r = try #require(result.index.bindings.first { result.names.resolve($0.localNameID) == "r" })
+    #expect(r.typeRef == .primitive(lineRange(of: "u32", line: 1, in: source)))
+
+    let t = try #require(result.index.bindings.first { result.names.resolve($0.localNameID) == "t" })
+    #expect(t.typeRef == .genericBound(
+        parameter: lineRange(of: "T", line: 4, in: source, occurrence: 2),
+        bound: lineRange(of: "Read", line: 4, in: source)
+    ))
+
+    // `where A: B` is a single constraint for A.
+    let m = try #require(result.index.bindings.first { result.names.resolve($0.localNameID) == "m" })
+    #expect(m.typeRef == .genericBound(
+        parameter: lineRange(of: "A", line: 7, in: source, occurrence: 2),
+        bound: lineRange(of: "B", line: 7, in: source, occurrence: 2)
+    ))
+
+    // Unbounded generic parameters stay put.
+    let g = try #require(result.index.bindings.first { result.names.resolve($0.localNameID) == "g" })
+    #expect(g.typeRef == .genericUnbounded(
+        parameter: lineRange(of: "G", line: 10, in: source, occurrence: 2)
+    ))
+}
+
+@Test
+func rustSelfParameterTypeRefPointsAtImplType() throws {
+    let source = """
+        struct S;
+        trait Tr { }
+        impl Tr for S {
+            fn f(&self) { }
+        }
+        """
+    let result = try extract(source)
+    let selfBinding = try #require(
+        result.index.bindings.first { result.names.resolve($0.localNameID) == "self" }
+    )
+    // `impl Tr for S` — the receiver's type is `S`, not the trait.
+    #expect(selfBinding.typeRef == .selfType(lineRange(of: "S", line: 3, in: source)))
+}
+
+@Test
+func rustFieldFacetCarriesTypeRef() throws {
+    let source = """
+        struct Inner;
+        struct Outer {
+            pub inner: Inner,
+            count: u32,
+        }
+        """
+    let result = try extract(source)
+    let facets = result.index.symbols
+    let inner = try #require(facets.first { result.names.resolve($0.nameID) == "inner" })
+    let count = try #require(facets.first { result.names.resolve($0.nameID) == "count" })
+
+    #expect(inner.kind == .rustField)
+    #expect(inner.typeRef == .named(lineRange(of: "Inner", line: 3, in: source)))
+    #expect(count.typeRef == .primitive(lineRange(of: "u32", line: 4, in: source)))
+}
+

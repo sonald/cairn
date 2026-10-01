@@ -221,3 +221,18 @@
 
 /* 快捷键：鼠标手势的展示词。 */
 "keybinding.click.word" = "点击";
+
+/* 上下文窗口类型直达（P1）。 */
+"model.typehop.parameter" = "形参";
+"model.typehop.letBinding" = "局部变量";
+"model.typehop.receiver" = "接收者";
+"model.typehop.field" = "字段";
+"model.typehop.primitiveNote" = "%@ 是原始类型，不跳";
+"model.typehop.genericNote" = "泛型 %@，停在声明";
+"model.typehop.noType" = "没有可跳转的类型";
+"model.typehop.needsExact" = "类型需要精确分析";
+"model.typehop.showTypeHint" = "点击查看类型定义";
+"model.typehop.showDeclarationHint" = "点击查看声明";
+"model.typehop.resolving" = "类型解析中…";
+"model.typehop.pendingExact" = "类型需要精确分析 · 未就绪";
+"model.typehop.accessibility" = "%1$@，%2$@，类型 %3$@";

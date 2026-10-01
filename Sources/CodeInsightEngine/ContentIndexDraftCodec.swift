@@ -1,9 +1,9 @@
 import CodeInsightCore
 import Foundation
 
-enum ContentIndexDraftCodec {
-    private static let formatVersion: UInt32 = 2
-    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x02])
+package enum ContentIndexDraftCodec {
+    private static let formatVersion: UInt32 = 3
+    private static let magic = Data([0x43, 0x49, 0x44, 0x58, 0x03])
 
     private struct Payload: Codable {
         let formatVersion: UInt32
@@ -13,7 +13,7 @@ enum ContentIndexDraftCodec {
         let containsErrorNodes: Bool
     }
 
-    static func encode(_ draft: ExtractionDraft) throws -> Data {
+    package static func encode(_ draft: ExtractionDraft) throws -> Data {
         let encoded = try JSONEncoder().encode(Payload(
             formatVersion: formatVersion,
             index: draft.index,
@@ -26,7 +26,7 @@ enum ContentIndexDraftCodec {
         return result
     }
 
-    static func decode(
+    package static func decode(
         _ data: Data,
         order: Int,
         bytes: [UInt8],
@@ -84,6 +84,9 @@ enum ContentIndexDraftCodec {
                 && valid($0.localNameID, count: nameCount)
                 && valid($0.declarationRange, byteCount: byteCount)
                 && $0.targetHint.map { valid($0.nameID, count: nameCount) } != false
+                && $0.typeRef.map { typeRef in
+                    typeRef.ranges.allSatisfy { valid($0, byteCount: byteCount) }
+                } != false
         }), index.executableRegions.allSatisfy({
             valid($0.range, byteCount: byteCount)
                 && scopes.contains($0.enclosingScopeID)
@@ -93,6 +96,9 @@ enum ContentIndexDraftCodec {
                 && valid($0.range, byteCount: byteCount)
                 && valid($0.nameRange, byteCount: byteCount)
                 && valid($0.parentFacetIndex, count: index.symbols.count)
+                && $0.typeRef.map { typeRef in
+                    typeRef.ranges.allSatisfy { valid($0, byteCount: byteCount) }
+                } != false
         }), index.implRelations.allSatisfy({
             valid($0.implFacetIndex, count: index.symbols.count)
                 && $0.traitNameID.map { valid($0, count: nameCount) } != false
@@ -139,6 +145,6 @@ enum ContentIndexDraftCodec {
     }
 }
 
-private enum DraftCodecError: Error {
+package enum DraftCodecError: Error {
     case invalidPayload
 }

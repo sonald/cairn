@@ -603,3 +603,15 @@
 "keybinding.resetAll.confirm" = "将所有快捷键恢复为默认？";
 "keybinding.empty.title" = "没有匹配的命令";
 "keybinding.empty.hint" = "请调整搜索、按键搜索或筛选条件。";
+
+/* 上下文窗口一跳标签（P1.5）。 */
+"model.typehop.showTypeHint" = "点击查看类型定义";
+"model.typehop.showDeclarationHint" = "点击查看声明";
+"model.typehop.accessibility" = "%1$@，%2$@，类型 %3$@";
+
+/* 跳到类型定义（P1.6）。 */
+"app.menu.type.definition" = "跳到类型定义";
+"main.type.definition" = "跳到类型定义";
+"trail.typeDefinition" = "类型";
+"model.typehop.noType" = "没有可跳转的类型";
+"model.typehop.needsExact" = "类型需要精确分析";

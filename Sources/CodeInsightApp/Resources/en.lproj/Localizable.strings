@@ -603,3 +603,15 @@
 "keybinding.resetAll.confirm" = "Restore every shortcut to its default?";
 "keybinding.empty.title" = "No matching commands";
 "keybinding.empty.hint" = "Adjust the search, the key search, or the filter.";
+
+/* Context window one-hop label (P1.5). */
+"model.typehop.showTypeHint" = "Click to show the type definition";
+"model.typehop.showDeclarationHint" = "Click to show the declaration";
+"model.typehop.accessibility" = "%1$@, %2$@, type %3$@";
+
+/* Jump to type definition (P1.6). */
+"app.menu.type.definition" = "Jump to Type Definition";
+"main.type.definition" = "Jump to Type Definition";
+"trail.typeDefinition" = "type";
+"model.typehop.noType" = "No type to jump to";
+"model.typehop.needsExact" = "Type needs exact analysis";

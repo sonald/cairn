@@ -7,6 +7,8 @@ struct RustScopeBuilder {
         let id: ScopeID
         let genericTypeNames: Set<NameID>
         let implTypeNameID: NameID?
+        let implTypeRange: CodeInsightCore.ByteRange?
+        let genericBounds: [NameID: CodeInsightCore.ByteRange]
         var bindingsByName: [NameID: Int]
     }
 
@@ -15,6 +17,7 @@ struct RustScopeBuilder {
         let scopeID: ScopeID
         let bindingKind: BindingKind
         let targetHint: UnresolvedSymbolRef?
+        let typeRef: TypeRef?
         let activationOwner: RustNodeKey?
     }
 
@@ -62,6 +65,7 @@ struct RustScopeBuilder {
                     byteOffset: byteOffset
                 ) ?? node.coreByteRange(byteOffset: byteOffset),
                 implTypeNameID: declaration.implTypeNameID,
+                implTypeRange: declaration.implTypeRange,
                 byteOffset: byteOffset
             )
         }
@@ -88,7 +92,8 @@ struct RustScopeBuilder {
                 space: .value,
                 kind: plan.bindingKind,
                 declarationRange: node.coreByteRange(byteOffset: byteOffset),
-                targetHint: plan.targetHint
+                targetHint: plan.targetHint,
+                typeRef: plan.typeRef
             ))
             declaredBinding = true
             if collectReferences {
@@ -164,6 +169,7 @@ struct RustScopeBuilder {
         kind: ScopeKind,
         range: CodeInsightCore.ByteRange,
         implTypeNameID: NameID?,
+        implTypeRange: CodeInsightCore.ByteRange?,
         byteOffset: UInt32
     ) {
         guard let rawID = UInt32(exactly: scopes.count) else {
@@ -177,11 +183,16 @@ struct RustScopeBuilder {
             range: range
         ))
         var genericTypeNames = activeScopes.last?.genericTypeNames ?? []
+        var genericBounds = activeScopes.last?.genericBounds ?? [:]
         if !collectReferences {
             genericTypeNames.formUnion(genericTypeParameterNames(
                 in: owner,
                 byteOffset: byteOffset
             ))
+            genericBounds.merge(genericSingleConstraintBounds(
+                in: owner,
+                byteOffset: byteOffset
+            )) { _, new in new }
         }
         activeScopes.append(ActiveScope(
             owner: RustNodeKey(owner, byteOffset: byteOffset),
@@ -189,6 +200,9 @@ struct RustScopeBuilder {
             genericTypeNames: genericTypeNames,
             implTypeNameID: implTypeNameID
                 ?? activeScopes.last?.implTypeNameID,
+            implTypeRange: implTypeRange
+                ?? activeScopes.last?.implTypeRange,
+            genericBounds: genericBounds,
             bindingsByName: [:]
         ))
     }
@@ -250,6 +264,9 @@ struct RustScopeBuilder {
                 targetHint: collectReferences ? nil : annotatedTargetHint(
                     in: node, byteOffset: byteOffset
                 ),
+                typeRef: collectReferences ? nil : annotatedTypeRef(
+                    in: node, byteOffset: byteOffset
+                ),
                 byteOffset: byteOffset
             )
         case "self_parameter":
@@ -265,6 +282,9 @@ struct RustScopeBuilder {
                             hintKind: .unqualified
                         )
                     },
+                typeRef: collectReferences
+                    ? nil
+                    : activeScopes.last?.implTypeRange.map { TypeRef.selfType($0) },
                 byteOffset: byteOffset
             )
         case "closure_parameters":
@@ -288,6 +308,10 @@ struct RustScopeBuilder {
                 targetHint: collectReferences ? nil : (
                     annotatedTargetHint(in: node, byteOffset: byteOffset)
                         ?? constructedTargetHint(in: node, byteOffset: byteOffset)
+                ),
+                typeRef: collectReferences ? nil : (
+                    annotatedTypeRef(in: node, byteOffset: byteOffset)
+                        ?? constructedTypeRef(in: node, byteOffset: byteOffset)
                 ),
                 activationOwner: RustNodeKey(node, byteOffset: byteOffset),
                 byteOffset: byteOffset
@@ -329,16 +353,19 @@ struct RustScopeBuilder {
         scopeID: ScopeID,
         kind: BindingKind,
         targetHint: UnresolvedSymbolRef?,
+        typeRef: TypeRef? = nil,
         activationOwner: RustNodeKey? = nil,
         byteOffset: UInt32
     ) {
         guard let node else { return }
         let key = RustNodeKey(node, byteOffset: byteOffset)
+        let isSimple = isSimpleBindingPattern(node)
         pendingPatterns[key] = PatternPlan(
             root: key,
             scopeID: scopeID,
             bindingKind: kind,
-            targetHint: isSimpleBindingPattern(node) ? targetHint : nil,
+            targetHint: isSimple ? targetHint : nil,
+            typeRef: isSimple ? typeRef : nil,
             activationOwner: activationOwner
         )
     }
@@ -456,6 +483,136 @@ struct RustScopeBuilder {
             return nil
         }
         return UnresolvedSymbolRef(nameID: nameID, hintKind: .member)
+    }
+
+    /// R1.2/R1.4: the TypeRef spelled in a `:` type annotation, wrappers
+    /// stripped to the head name. `Self` maps to the enclosing impl's type.
+    private func annotatedTypeRef(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> TypeRef? {
+        guard let type = RustTypeHead.annotatedType(in: node) else { return nil }
+        return headTypeRef(in: type, byteOffset: byteOffset)
+    }
+
+    /// R1.2 item 3: an un-annotated `let` initialized from `S::new()` or
+    /// `S { .. }` records the constructed head (same recognition as
+    /// `constructedTargetHint`), one certainty notch weaker downstream.
+    private func constructedTypeRef(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> TypeRef? {
+        guard let value = initializer(in: node) else { return nil }
+        let head: Node?
+        switch value.kind {
+        case "call_expression":
+            guard let callee = value.namedChildren.first,
+                  callee.kind == "scoped_identifier",
+                  callee.namedChildren.last?.text(
+                      in: bytes,
+                      byteOffset: byteOffset
+                  ) == "new"
+            else { return nil }
+            head = callee.namedChildren.first
+        case "struct_expression":
+            head = value.namedChildren.first
+        default:
+            return nil
+        }
+        guard let head else { return nil }
+        return .constructed(head.coreByteRange(byteOffset: byteOffset))
+    }
+
+    /// Reduces a spelled type node to a TypeRef: primitives, generic
+    /// parameters (with their single bound when there is exactly one), the
+    /// enclosing impl's type for `Self`, otherwise the named head.
+    private func headTypeRef(
+        in type: Node,
+        byteOffset: UInt32
+    ) -> TypeRef? {
+        if type.kind == "type_identifier",
+           type.text(in: bytes, byteOffset: byteOffset) == "Self",
+           let implRange = activeScopes.last?.implTypeRange
+        {
+            return .selfType(implRange)
+        }
+        guard let head = RustTypeHead.head(
+            in: type, bytes: bytes, byteOffset: byteOffset
+        ) else { return nil }
+        if head.kind == "primitive_type" {
+            return .primitive(head.coreByteRange(byteOffset: byteOffset))
+        }
+        guard let text = head.text(in: bytes, byteOffset: byteOffset) else {
+            return nil
+        }
+        let nameID = names.intern(text)
+        if let bound = activeScopes.last?.genericBounds[nameID] {
+            return .genericBound(
+                parameter: head.coreByteRange(byteOffset: byteOffset),
+                bound: bound
+            )
+        }
+        if activeScopes.last?.genericTypeNames.contains(nameID) == true {
+            return .genericUnbounded(
+                parameter: head.coreByteRange(byteOffset: byteOffset)
+            )
+        }
+        return .named(head.coreByteRange(byteOffset: byteOffset))
+    }
+
+    /// K-R1.5: the single bound of each generic parameter that has exactly
+    /// one constraint across `<T: Read>` and `where T: Read`.
+    private func genericSingleConstraintBounds(
+        in node: Node,
+        byteOffset: UInt32
+    ) -> [NameID: CodeInsightCore.ByteRange] {
+        var bounds: [NameID: [CodeInsightCore.ByteRange]] = [:]
+        if let parameters = node.directNamedChild(where: {
+            $0.kind == "type_parameters"
+        }) {
+            // tree-sitter-rust v0.24 names the bounded form `type_parameter`
+            // (with a trait_bounds child); accept both spellings.
+            for child in parameters.namedChildren
+                where child.kind == "type_parameter"
+                    || child.kind == "bounded_type_parameter"
+            {
+                guard let name = child.directNamedChild(where: {
+                    $0.kind == "type_identifier"
+                })?.text(in: bytes, byteOffset: byteOffset),
+                    let traitBounds = child.directNamedChild(where: {
+                        $0.kind == "trait_bounds"
+                    })
+                else { continue }
+                for bound in traitBounds.namedChildren {
+                    bounds[names.intern(name), default: []]
+                        .append(bound.coreByteRange(byteOffset: byteOffset))
+                }
+            }
+        }
+        if let whereClause = node.directNamedChild(where: {
+            $0.kind == "where_clause"
+        }) {
+            for predicate in whereClause.namedChildren
+                where predicate.kind == "where_predicate"
+            {
+                guard let left = predicate.namedChildren.first,
+                      left.kind == "type_identifier",
+                      let name = left.text(in: bytes, byteOffset: byteOffset),
+                      let traitBounds = predicate.directNamedChild(where: {
+                          $0.kind == "trait_bounds"
+                      })
+                else { continue }
+                for bound in traitBounds.namedChildren {
+                    bounds[names.intern(name), default: []]
+                        .append(bound.coreByteRange(byteOffset: byteOffset))
+                }
+            }
+        }
+        var result: [NameID: CodeInsightCore.ByteRange] = [:]
+        for (nameID, ranges) in bounds where ranges.count == 1 {
+            result[nameID] = ranges[0]
+        }
+        return result
     }
 
     private func annotatedType(in node: Node) -> Node? {

@@ -371,7 +371,7 @@ package enum SessionCodec {
     /// Causes that may appear on a persisted trail edge.
     private static let trailCauses: Set<String> = [
         "fileSelection", "outline", "relation", "search",
-        "historyReplay", "tabActivation",
+        "historyReplay", "tabActivation", "typeDefinition",
     ]
 
     /// Bounded, loss-tolerant normalization of a decoded trail: unknown

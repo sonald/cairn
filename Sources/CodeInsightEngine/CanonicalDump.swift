@@ -1,6 +1,24 @@
 import CodeInsightCore
 
 public enum CanonicalDump {
+    /// R8.3: the dump rendering of a typeRef (`named@3:16`,
+    /// `genericBound@3:9+3:12`).
+    static func formatTypeRef(_ typeRef: TypeRef, table: LineTable) -> String {
+        func at(_ range: ByteRange) -> String {
+            format(range, table: table)
+        }
+        return switch typeRef {
+        case let .named(range): "named@\(at(range))"
+        case let .primitive(range): "primitive@\(at(range))"
+        case let .selfType(range): "selfType@\(at(range))"
+        case let .constructed(range): "constructed@\(at(range))"
+        case let .genericBound(parameter, bound):
+            "genericBound@\(at(parameter))+\(at(bound))"
+        case let .genericUnbounded(parameter):
+            "genericUnbounded@\(at(parameter))"
+        }
+    }
+
     public static func render(
         _ index: ContentIndex,
         names: Interner<NameID>,
@@ -24,7 +42,11 @@ public enum CanonicalDump {
         for (bindingIndex, binding) in index.bindings.enumerated().sorted(by: {
             ordered($0.element.declarationRange, $0.offset, $1.element.declarationRange, $1.offset)
         }) {
-            lines.append("  - #\(bindingIndex) scope=#\(binding.scopeID.rawValue) kind=\(binding.kind) name=\(names.resolve(binding.localNameID)) at=\(format(binding.declarationRange, table: index.lineTable))")
+            var line = "  - #\(bindingIndex) scope=#\(binding.scopeID.rawValue) kind=\(binding.kind) name=\(names.resolve(binding.localNameID)) at=\(format(binding.declarationRange, table: index.lineTable))"
+            if let typeRef = binding.typeRef {
+                line += " typeRef=\(formatTypeRef(typeRef, table: index.lineTable))"
+            }
+            lines.append(line)
         }
         appendNoneIfNeeded(to: &lines, count: index.bindings.count)
 
@@ -42,7 +64,11 @@ public enum CanonicalDump {
             ordered($0.element.range, $0.offset, $1.element.range, $1.offset)
         }) {
             let parent = parentChain(of: facet, in: index.symbols, names: names)
-            lines.append("  - #\(facetIndex) kind=\(facet.kind) space=\(facet.space) name=\(names.resolve(facet.nameID)) parent=\(parent) nameAt=\(format(facet.nameRange, table: index.lineTable)) range=\(format(facet.range, table: index.lineTable))")
+            var line = "  - #\(facetIndex) kind=\(facet.kind) space=\(facet.space) name=\(names.resolve(facet.nameID)) parent=\(parent) nameAt=\(format(facet.nameRange, table: index.lineTable)) range=\(format(facet.range, table: index.lineTable))"
+            if let typeRef = facet.typeRef {
+                line += " typeRef=\(formatTypeRef(typeRef, table: index.lineTable))"
+            }
+            lines.append(line)
         }
         appendNoneIfNeeded(to: &lines, count: index.symbols.count)
 

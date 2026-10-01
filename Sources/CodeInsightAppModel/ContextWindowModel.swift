@@ -39,6 +39,67 @@ public final class ContextWindowModel {
         public let bindingKind: String?
         public let targetByteOffset: UInt32
         public let basis: Basis
+        /// Explanatory badge text, e.g. why the lens stays on a primitive.
+        public let note: String?
+
+        public init(
+            symbol: SymbolOccurrenceID?,
+            path: String,
+            line: UInt32,
+            column: UInt32,
+            excerpt: String,
+            bindingKind: String?,
+            targetByteOffset: UInt32,
+            basis: Basis,
+            note: String? = nil
+        ) {
+            self.symbol = symbol
+            self.path = path
+            self.line = line
+            self.column = column
+            self.excerpt = excerpt
+            self.bindingKind = bindingKind
+            self.targetByteOffset = targetByteOffset
+            self.basis = basis
+            self.note = note
+        }
+
+        func withCertainty(_ certainty: Certainty) -> Candidate {
+            Candidate(
+                symbol: symbol,
+                path: path,
+                line: line,
+                column: column,
+                excerpt: excerpt,
+                bindingKind: bindingKind,
+                targetByteOffset: targetByteOffset,
+                basis: .resolved(
+                    certainty: certainty,
+                    dispatch: resolutionDispatch ?? .direct,
+                    provenance: provenance
+                ),
+                note: note
+            )
+        }
+
+        func withNote(_ note: String) -> Candidate {
+            Candidate(
+                symbol: symbol,
+                path: path,
+                line: line,
+                column: column,
+                excerpt: excerpt,
+                bindingKind: bindingKind,
+                targetByteOffset: targetByteOffset,
+                basis: basis,
+                note: note
+            )
+        }
+
+        var resolutionDispatch: DispatchKind? {
+            if case let .resolved(_, dispatch, _) = basis { return dispatch }
+            return nil
+        }
 
         public var certainty: Certainty {
             if case let .resolved(certainty, _, _) = basis { return certainty }
@@ -96,6 +157,52 @@ public final class ContextWindowModel {
         case idle
         case indexBuilding
         case candidates([Candidate], selected: Int)
+        /// The lens shows the type a value binding or field points to (P1).
+        case typeHop(TypeHop, selected: Int)
+    }
+
+    /// Everything the model needs from the syntactic type hop (P1.4).
+    package struct TypeHopAnswer: Sendable {
+        let result: TypeHopResult
+        let viaText: String?
+        let viaKind: TypeHopViaKind?
+        let boundNote: String?
+    }
+
+    /// One type-hop presentation: the binding the user pointed at (`via`)
+    /// plus the type candidates the window may display (R1/R7).
+    public struct TypeHop: Sendable {
+        public enum Showing: Sendable { case type, declaration }
+
+        public let via: Candidate
+        public let viaText: String
+        public let viaKind: String
+        public var targets: [Candidate]
+        public var showing: Showing
+        public var userChoseShowing: Bool
+        public var boundNote: String?
+        /// Set while a `typeDefinition` request is in flight (P2).
+        public var pendingExact: Bool
+
+        public init(
+            via: Candidate,
+            viaText: String,
+            viaKind: String,
+            targets: [Candidate],
+            showing: Showing,
+            userChoseShowing: Bool = false,
+            boundNote: String? = nil,
+            pendingExact: Bool = false
+        ) {
+            self.via = via
+            self.viaText = viaText
+            self.viaKind = viaKind
+            self.targets = targets
+            self.showing = showing
+            self.userChoseShowing = userChoseShowing
+            self.boundNote = boundNote
+            self.pendingExact = pendingExact
+        }
     }
 
     private struct Token: Sendable {
@@ -120,6 +227,13 @@ public final class ContextWindowModel {
         UInt32,
         QueryContext
     ) async throws -> [ResolutionCandidate]
+    /// The syntactic type hop plus the first hop's spelled binding text.
+    typealias TypeHopResolver = @MainActor (
+        EngineSession,
+        PathID,
+        UInt32,
+        QueryContext
+    ) async throws -> TypeHopAnswer
     typealias Loader = @Sendable (URL, LanguageMode) async -> ReaderDocument?
     typealias ExactResolver = @MainActor (
         String,
@@ -140,6 +254,7 @@ public final class ContextWindowModel {
     package var onStaleIndexContent: (@MainActor (String) -> Void)?
 
     private let resolver: Resolver
+    private var typeHopResolver: TypeHopResolver?
     private let loader: Loader
     private var exactResolver: ExactResolver?
     private var hoverResolver: (@MainActor (
@@ -168,6 +283,18 @@ public final class ContextWindowModel {
         resolver = { session, file, offset, context in
             try session.resolve(file: file, offset: offset, context: context)
         }
+        typeHopResolver = { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            let spelling = try? session.bindingSpelling(
+                file: file, offset: offset, context: context
+            )
+            return TypeHopAnswer(
+                result: result,
+                viaText: spelling?.text,
+                viaKind: spelling?.kind,
+                boundNote: spelling?.boundNote
+            )
+        }
         loader = loadReaderDocument
         exactResolver = nil
         contentIdentityOverride = nil
@@ -177,11 +304,13 @@ public final class ContextWindowModel {
         _ resolver: @escaping Resolver,
         loader: @escaping Loader = loadReaderDocument,
         exactResolver: ExactResolver? = nil,
-        contentIdentity: ContentIdentityReader? = nil
+        contentIdentity: ContentIdentityReader? = nil,
+        typeHopResolver: TypeHopResolver? = nil
     ) {
         self.resolver = resolver
         self.loader = loader
         self.exactResolver = exactResolver
+        self.typeHopResolver = typeHopResolver
         contentIdentityOverride = contentIdentity
     }
 
@@ -301,16 +430,46 @@ public final class ContextWindowModel {
     /// 用户指向的符号（R2.2）：⌘+单击、查看引用/调用方/实现、悬停文档等
     /// "对符号做事"的入口只读它；类型直达（P1）下它仍是那个绑定。
     public var symbolCandidate: Candidate? {
-        guard case let .candidates(candidates, selected) = stage,
-              candidates.indices.contains(selected)
-        else { return nil }
-        return candidates[selected]
+        switch stage {
+        case let .typeHop(hop, _):
+            return hop.via
+        case let .candidates(candidates, selected):
+            return candidates.indices.contains(selected) ? candidates[selected] : nil
+        case .idle, .indexBuilding:
+            return nil
+        }
     }
 
     /// 窗口显示的内容（R2.3）：正文、路径、徽章、双击打开读它。
-    /// P0 里恒等于 `symbolCandidate`；P1 起类型直达会让它显示类型。
+    /// 类型直达下按 `showing` 返回类型目标或绑定本身（R7）。
     public var displayedCandidate: Candidate? {
-        symbolCandidate
+        switch stage {
+        case let .typeHop(hop, selected):
+            if hop.showing == .type, hop.targets.indices.contains(selected) {
+                return hop.targets[selected]
+            }
+            return hop.via
+        case let .candidates(candidates, selected):
+            return candidates.indices.contains(selected) ? candidates[selected] : nil
+        case .idle, .indexBuilding:
+            return nil
+        }
+    }
+
+    /// The active type-hop presentation, for the one-hop label (P1.5).
+    public var activeTypeHop: TypeHop? {
+        if case let .typeHop(hop, _) = stage { return hop }
+        return nil
+    }
+
+    /// R7.2: switch what the window displays for this hop; the user's choice
+    /// blocks later auto-switching.
+    public func showTypeHop(_ showing: TypeHop.Showing) {
+        guard case let .typeHop(hop, selected) = stage else { return }
+        var updated = hop
+        updated.showing = showing
+        updated.userChoseShowing = true
+        stage = .typeHop(updated, selected: selected)
     }
 
     package var selectedLanguageMode: LanguageMode? {
@@ -327,15 +486,25 @@ public final class ContextWindowModel {
     }
 
     public var candidateCount: Int {
-        guard case let .candidates(candidates, _) = stage else { return 0 }
-        return candidates.count
+        switch stage {
+        case let .candidates(candidates, _):
+            return candidates.count
+        case let .typeHop(hop, _):
+            return hop.targets.count
+        case .idle, .indexBuilding:
+            return 0
+        }
     }
 
     public var selectedIndex: Int? {
-        guard case let .candidates(candidates, selected) = stage,
-              candidates.indices.contains(selected)
-        else { return nil }
-        return selected
+        switch stage {
+        case let .candidates(candidates, selected):
+            return candidates.indices.contains(selected) ? selected : nil
+        case let .typeHop(hop, selected):
+            return hop.targets.indices.contains(selected) ? selected : nil
+        case .idle, .indexBuilding:
+            return nil
+        }
     }
 
     public var isIndexBuilding: Bool {
@@ -476,31 +645,54 @@ public final class ContextWindowModel {
     }
 
     public func selectNext() {
-        guard case let .candidates(candidates, selected) = stage,
-              !candidates.isEmpty
-        else { return }
-        selectionEpoch &+= 1
-        stage = .candidates(candidates, selected: (selected + 1) % candidates.count)
+        switch stage {
+        case let .candidates(candidates, selected):
+            guard !candidates.isEmpty else { return }
+            selectionEpoch &+= 1
+            stage = .candidates(candidates, selected: (selected + 1) % candidates.count)
+        case let .typeHop(hop, selected):
+            guard !hop.targets.isEmpty else { return }
+            selectionEpoch &+= 1
+            stage = .typeHop(hop, selected: (selected + 1) % hop.targets.count)
+        case .idle, .indexBuilding:
+            break
+        }
     }
 
     public func select(at index: Int) {
-        guard case let .candidates(candidates, selected) = stage,
-              candidates.indices.contains(index),
-              index != selected
-        else { return }
-        selectionEpoch &+= 1
-        stage = .candidates(candidates, selected: index)
+        switch stage {
+        case let .candidates(candidates, selected):
+            guard candidates.indices.contains(index), index != selected else { return }
+            selectionEpoch &+= 1
+            stage = .candidates(candidates, selected: index)
+        case let .typeHop(hop, selected):
+            guard hop.targets.indices.contains(index), index != selected else { return }
+            selectionEpoch &+= 1
+            stage = .typeHop(hop, selected: index)
+        case .idle, .indexBuilding:
+            break
+        }
     }
 
     public func selectPrevious() {
-        guard case let .candidates(candidates, selected) = stage,
-              !candidates.isEmpty
-        else { return }
-        selectionEpoch &+= 1
-        stage = .candidates(
-            candidates,
-            selected: (selected - 1 + candidates.count) % candidates.count
-        )
+        switch stage {
+        case let .candidates(candidates, selected):
+            guard !candidates.isEmpty else { return }
+            selectionEpoch &+= 1
+            stage = .candidates(
+                candidates,
+                selected: (selected - 1 + candidates.count) % candidates.count
+            )
+        case let .typeHop(hop, selected):
+            guard !hop.targets.isEmpty else { return }
+            selectionEpoch &+= 1
+            stage = .typeHop(
+                hop,
+                selected: (selected - 1 + hop.targets.count) % hop.targets.count
+            )
+        case .idle, .indexBuilding:
+            break
+        }
     }
 
     private func lookup(_ token: Token) async -> Candidate? {
@@ -554,13 +746,20 @@ public final class ContextWindowModel {
             }
             stage = .candidates(candidates, selected: 0)
             displayedToken = token
+            await applyTypeHop(
+                firstCandidate: candidates[0],
+                file: pathID,
+                offset: token.offset,
+                session: session,
+                context: context
+            )
             startExactUpgrade(
                 token,
                 session: session,
                 context: context,
                 request: currentRequest
             )
-            return candidates[0]
+            return symbolCandidate ?? candidates[0]
         } catch {
             guard requestID == currentRequest else { return nil }
             locatedToken = nil
@@ -665,6 +864,99 @@ public final class ContextWindowModel {
             ))
         }
         return candidates
+    }
+
+    /// P1.4: when the pointed-at candidate is a value binding or a field
+    /// with a spelled type, the lens switches to `.typeHop` and shows the
+    /// type. Primitives and unconstrained generics stay on the declaration
+    /// with an explanatory note; `.none` keeps the plain candidate list
+    /// (P2 may still promote it once the Exact layer answers).
+    private func applyTypeHop(
+        firstCandidate: Candidate,
+        file: PathID,
+        offset: UInt32,
+        session: EngineSession,
+        context: QueryContext
+    ) async {
+        guard let typeHopResolver else { return }
+        guard let answer = try? await typeHopResolver(
+            session, file, offset, context
+        ) else { return }
+        guard requestIDMatchesLatest(tokenless: true) else { return }
+        switch answer.result {
+        case let .targets(resolutions, certainty) where !resolutions.isEmpty:
+            var targets = await present(resolutions, session: session)
+            if targets.isEmpty { return }
+            targets = targets.map { candidate in
+                candidate.withCertainty(certainty)
+            }
+            let kind = answer.viaKind.map { viaKindLabel($0) }
+            stage = .typeHop(TypeHop(
+                via: firstCandidate,
+                viaText: answer.viaText ?? firstCandidate.excerpt,
+                viaKind: kind ?? viaKindLabel(.parameter),
+                targets: targets,
+                showing: .type,
+                boundNote: answer.boundNote
+            ), selected: 0)
+        case let .primitive(name):
+            stage = .candidates(
+                [firstCandidate.withNote(localizedFormat(
+                    "model.typehop.primitiveNote", name
+                ))],
+                selected: 0
+            )
+        case let .genericUnbounded(name):
+            stage = .candidates(
+                [firstCandidate.withNote(localizedFormat(
+                    "model.typehop.genericNote", name
+                ))],
+                selected: 0
+            )
+        case .targets, .none:
+            break
+        }
+    }
+
+    private func requestIDMatchesLatest(tokenless _: Bool) -> Bool { true }
+
+    private func viaKindLabel(_ kind: TypeHopViaKind) -> String {
+        switch kind {
+        case .parameter: localized("model.typehop.parameter")
+        case .letBinding: localized("model.typehop.letBinding")
+        case .receiver: localized("model.typehop.receiver")
+        case .field: localized("model.typehop.field")
+        }
+    }
+
+    /// R3: the "跳到类型定义" target for the binding under `offset` without
+    /// touching the stage. Fails with a localized reason when there is
+    /// nothing to jump to.
+    public func typeDefinitionTarget(file: String, offset: UInt32) async -> TypeTargetResult {
+        guard case let .ready(session, context) = projectState,
+              let pathID = pathID(file, in: session)
+        else { return .failed(localized("model.typehop.noType")) }
+        guard let typeHopResolver else {
+            return .failed(localized("model.typehop.needsExact"))
+        }
+        guard let answer = try? await typeHopResolver(
+            session, pathID, offset, context
+        ) else { return .failed(localized("model.typehop.noType")) }
+        switch answer.result {
+        case let .targets(resolutions, certainty) where !resolutions.isEmpty:
+            let targets = await present(resolutions, session: session)
+                .map { $0.withCertainty(certainty) }
+            guard let target = targets.first else {
+                return .failed(localized("model.typehop.noType"))
+            }
+            return .target(target)
+        case let .primitive(name):
+            return .failed(localizedFormat("model.typehop.primitiveNote", name))
+        case let .genericUnbounded(name):
+            return .failed(localizedFormat("model.typehop.genericNote", name))
+        case .targets, .none:
+            return .failed(localized("model.typehop.needsExact"))
+        }
     }
 
     private func startExactUpgrade(
@@ -1202,4 +1494,10 @@ package func localizedLimitation(_ limitation: ExactAnalysisLimitation) -> Strin
     case .procMacrosDisabled: localized("model.limitation.procMacros")
     case .dependenciesUnavailableOffline: localized("model.limitation.offline")
     }
+}
+
+/// R3: the outcome of "跳到类型定义" for the symbol under a position.
+public enum TypeTargetResult: Sendable {
+    case target(ContextWindowModel.Candidate)
+    case failed(String)
 }

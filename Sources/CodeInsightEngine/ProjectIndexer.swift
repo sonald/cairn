@@ -823,7 +823,8 @@ public struct ProjectIndexer: Sendable {
                             nameID: name($0.nameID),
                             hintKind: $0.hintKind
                         )
-                    }
+                    },
+                    typeRef: $0.typeRef
                 )
             },
             executableRegions: index.executableRegions,
@@ -837,7 +838,8 @@ public struct ProjectIndexer: Sendable {
                     nameRange: $0.nameRange,
                     parentFacetIndex: $0.parentFacetIndex,
                     signatureFingerprint: $0.signatureFingerprint,
-                    bodyFingerprint: $0.bodyFingerprint
+                    bodyFingerprint: $0.bodyFingerprint,
+                    typeRef: $0.typeRef
                 )
             },
             implRelations: index.implRelations.map {
@@ -897,13 +899,29 @@ public struct ProjectIndexer: Sendable {
 
 }
 
-struct ExtractionDraft: Sendable {
+package struct ExtractionDraft: Sendable {
     let order: Int
     let bytes: [UInt8]
     let index: ContentIndex
     let names: Interner<NameID>
     let strings: Interner<StringID>
     let containsErrorNodes: Bool
+
+    package init(
+        order: Int,
+        bytes: [UInt8],
+        index: ContentIndex,
+        names: Interner<NameID>,
+        strings: Interner<StringID>,
+        containsErrorNodes: Bool
+    ) {
+        self.order = order
+        self.bytes = bytes
+        self.index = index
+        self.names = names
+        self.strings = strings
+        self.containsErrorNodes = containsErrorNodes
+    }
 }
 
 private final class BlockingResult<Value>: @unchecked Sendable {

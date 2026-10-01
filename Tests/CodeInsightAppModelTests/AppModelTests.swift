@@ -3523,3 +3523,112 @@ func contextWindowDisplayedCandidateMatchesSymbolCandidateBeforeTypeHop() async 
     #expect(displayed.path == symbol.path)
     #expect(displayed.targetByteOffset == symbol.targetByteOffset)
 }
+
+// MARK: P1 — lens type hop
+
+/// R1.1/R2: clicking a value binding shows its type in the window, while the
+/// pointed-at symbol (and every "act on the symbol" entry point) stays the
+/// binding itself.
+@MainActor
+@Test
+func lensShowsTypeForValueBindingButJumpsToDeclaration() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+
+        fn use_it(ps: &S) -> u32 {
+            let local: Box<S> = Box::new(S { n: 1 });
+            ps.n + local.n
+        }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
+    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
+
+    // The window displays the type S (its struct declaration)…
+    let displayed = try #require(model.displayedCandidate)
+    #expect(displayed.targetByteOffset
+        == byteOffset(of: "pub struct S {", in: source) + UInt32("pub struct ".utf8.count))
+    // …while the pointed-at symbol and the ⌘+click jump stay the binding.
+    let symbol = try #require(model.symbolCandidate)
+    #expect(symbol.targetByteOffset == byteOffset(of: "ps: &S", in: source))
+    let jump = try #require(
+        await model.explicitJump(
+            file: "main.rs",
+            offset: byteOffset(of: "ps.n", in: source)
+        )
+    )
+    #expect(jump.targetByteOffset == symbol.targetByteOffset)
+    #expect(model.activeTypeHop?.showing == .type)
+}
+
+/// R7.2: toggling the displayed side sticks and blocks later auto-switching.
+@MainActor
+@Test
+func lensTypeHopToggleSticks() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+
+        fn use_it(ps: &S) -> u32 {
+            let local: Box<S> = Box::new(S { n: 1 });
+            ps.n + local.n
+        }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
+    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
+
+    model.showTypeHop(.declaration)
+    let hop = try #require(model.activeTypeHop)
+    #expect(hop.showing == .declaration)
+    #expect(hop.userChoseShowing)
+    // The window shows the binding's own declaration again.
+    #expect(model.displayedCandidate?.targetByteOffset
+        == model.symbolCandidate?.targetByteOffset)
+}
+
+/// Q3: a primitive-typed field does not hop; the lens stays on the
+/// declaration with an explanatory note.
+@MainActor
+@Test
+func lensPrimitiveFieldStaysOnDeclarationWithNote() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        impl S {
+            fn get(&self) -> u32 {
+                self.n
+            }
+        }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    // Click the field name `n` (not the receiver `self`).
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "self.n", in: source) + UInt32("self.".utf8.count)
+    )
+    #expect(await testWaitUntil("model.displayedCandidate != nil") {
+        model.displayedCandidate != nil
+    })
+    // Stage stays a plain candidate list (no type hop) and the candidate
+    // carries the primitive-type note.
+    guard case .candidates = model.stage else {
+        Issue.record("stage should stay .candidates for a primitive field")
+        return
+    }
+    #expect(model.displayedCandidate?.note != nil)
+}
+

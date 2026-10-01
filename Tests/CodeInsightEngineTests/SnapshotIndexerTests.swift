@@ -1074,8 +1074,9 @@ func persistentDraftRoundTripMatchesDirectExtractionFieldForField() throws {
     ).index(root: fixture.root)
 
     #expect(first.stats.extractedCount == 2)
+    // Draft format v3 (typeRef fields, P1) bumps the magic's version byte.
     #expect(cache.payload(for: cacheKey(for: storedKey))?
-        .starts(with: Data([0x43, 0x49, 0x44, 0x58, 0x02])) == true)
+        .starts(with: Data([0x43, 0x49, 0x44, 0x58, 0x03])) == true)
     #expect(reloaded.stats.extractedCount == 0)
     #expect(reloaded.stats.reusedCount == 2)
     try expectEquivalentContent(direct, reloaded)

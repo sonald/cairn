@@ -11383,6 +11383,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.showPalette(prefill: ">")
     }
 
+    @objc private func jumpToTypeDefinition(_ sender: Any?) {
+        projectCommandTarget()?.jumpToTypeDefinitionAtCaret()
+    }
+
     @objc private func goToLine(_ sender: Any?) {
         projectCommandTarget()?.showPalette(prefill: ":")
     }
@@ -11764,6 +11768,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .goNextTab: CommandAction(#selector(AppDelegate.selectNextTab(_:))),
         .goPreviousDiffHunk: CommandAction(#selector(AppDelegate.previousDiffHunk(_:))),
         .goNextDiffHunk: CommandAction(#selector(AppDelegate.nextDiffHunk(_:))),
+        .navigateTypeDefinition: CommandAction(#selector(AppDelegate.jumpToTypeDefinition(_:))),
         .viewPresetReading: CommandAction(
             #selector(AppDelegate.applyPanelPreset(_:)),
             representedObject: PanelPresetModel.reading.rawValue
@@ -11991,6 +11996,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         appendMenuItem(for: .goCommandPalette, to: goMenu)
         appendMenuItem(for: .goOpenSymbol, to: goMenu)
         appendMenuItem(for: .goToLine, to: goMenu)
+        appendMenuItem(for: .navigateTypeDefinition, to: goMenu)
         goMenu.addItem(.separator())
         // Back/Forward keep the migrated menu order: both visible items
         // first, then both hidden alternate items (⌘[ / ⌘]).

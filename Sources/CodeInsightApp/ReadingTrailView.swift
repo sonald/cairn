@@ -775,6 +775,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
         case .search: localized("trail.search")
         case .historyReplay: localized("trail.history")
         case .tabActivation: localized("trail.tab")
+        case .typeDefinition: localized("trail.typeDefinition")
         }
     }
 

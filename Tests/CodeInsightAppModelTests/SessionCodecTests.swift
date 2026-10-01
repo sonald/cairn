@@ -1169,3 +1169,76 @@ func sessionCodecDecodesV2WithoutPreviewOrRankAsPinnedInSavedOrder() throws {
     #expect(a.activationRank == 0)
     #expect(b.activationRank == 1)
 }
+
+/// R3.3: the "类型" cause persists through the session codec.
+@Test
+func typeDefinitionNavigationCauseRoundTrips() throws {
+    let nodeA = UUID()
+    let nodeB = UUID()
+    let jumpA = SessionCodec.Jump(
+        path: "a.rs",
+        contentID: ContentID.sha256(of: [1]),
+        byteOffset: 4,
+        line: 1,
+        column: 5,
+        symbolAnchor: "alpha",
+        revision: "abc123"
+    )
+    let jumpB = SessionCodec.Jump(
+        path: "b.rs",
+        contentID: nil,
+        byteOffset: 9,
+        line: 2,
+        column: 3,
+        symbolAnchor: nil,
+        revision: nil
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: "abc123",
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: SessionCodec.NavigationState(
+            records: [
+                .init(jump: jumpA, trailNodeID: nodeA),
+                .init(jump: jumpB, trailNodeID: nodeB),
+            ],
+            cursor: 1,
+            forwardRecord: nil
+        ),
+        readingTrail: SessionCodec.TrailState(
+            nodes: [
+                .init(id: nodeA, jump: jumpA),
+                .init(id: nodeB, jump: jumpB),
+            ],
+            edges: [
+                .init(
+                    from: nodeA,
+                    to: nodeB,
+                    cause: "typeDefinition",
+                    frozenInspectorDisplay: nil,
+                    readingSetRole: nil
+                ),
+            ],
+            activeNodeID: nodeB
+        )
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let trail = try #require(decoded.readingTrail)
+    #expect(trail.edges.count == 1)
+    #expect(trail.edges[0].cause == "typeDefinition")
+    // The model-side cause enum round-trips through its persistence key.
+    #expect(NavigationCause.typeDefinition.persistenceKey == "typeDefinition")
+    #expect(NavigationCause(persistenceKey: "typeDefinition") == .typeDefinition)
+}

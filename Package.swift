@@ -305,7 +305,9 @@ let package = Package(
             dependencies: [
                 "CodeInsightCore",
                 "CodeInsightEngine",
+                "CodeInsightCLI",
                 "CodeInsightGit",
+                "CodeInsightRustExtractor",
                 "CodeInsightPythonExtractor",
                 "CodeInsightTypeScriptExtractor",
             ]

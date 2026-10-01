@@ -1,4 +1,4 @@
-public struct ByteRange: Codable, Comparable, Sendable {
+public struct ByteRange: Codable, Comparable, Hashable, Sendable {
     public let lowerBound: UInt32
     public let upperBound: UInt32
 
