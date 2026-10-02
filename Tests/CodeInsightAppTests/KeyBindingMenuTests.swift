@@ -164,6 +164,92 @@ import Testing
         NSApp.sendEvent(try commandR())
         #expect(probe.hit)
     }
+        /// K-R3.3: a recording belongs to the settings window. A key pressed in
+        /// another window (Settings closed or left mid-recording) ends the
+        /// recording and reaches its menu; it is never captured as a binding.
+        /// Leaving the shortcuts tab ends the recording too.
+        @Test
+        func recorderEndsInsteadOfCapturingKeysFromAnotherWindow() throws {
+        _ = NSApplication.shared
+        final class Probe: NSObject {
+            var hit = false
+            @objc func fire(_ sender: Any?) { hit = true }
+        }
+        let probe = Probe()
+        let probeItem = NSMenuItem(
+            title: "probe", action: #selector(Probe.fire(_:)), keyEquivalent: "u"
+        )
+        probeItem.target = probe
+        let probeMenu = NSMenu()
+        probeMenu.addItem(probeItem)
+        let probeRoot = NSMenuItem()
+        probeRoot.submenu = probeMenu
+        let menu = NSMenu()
+        menu.addItem(probeRoot)
+        NSApp.mainMenu = menu
+        defer { NSApp.mainMenu = nil }
+
+        func window() -> NSWindow {
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: 100, height: 100),
+                styleMask: [.titled], backing: .buffered, defer: false
+            )
+            window.isReleasedWhenClosed = false
+            return window
+        }
+        let settingsWindow = window()
+        let mainWindow = window()
+        defer { settingsWindow.close(); mainWindow.close() }
+
+        let delegate = AppDelegate(startedAt: .now)
+        let before = delegate.keyBindingTable
+        let model = KeyBindingSettingsModel(table: before) { _ in
+            Issue.record("a key from another window must not commit a binding")
+        }
+        model.beginRecording(command: .findInFile, slot: nil, in: settingsWindow)
+        defer { model.endRecording() }
+
+        let commandU = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: mainWindow.windowNumber, context: nil,
+            characters: "u", charactersIgnoringModifiers: "u",
+            isARepeat: false, keyCode: 32
+        ))
+        NSApp.sendEvent(commandU)
+        #expect(probe.hit, "the key reaches the other window's menu")
+        #expect(model.recording == nil)
+        #expect(model.pendingConflict == nil)
+
+        // Switching away from the shortcuts tab ends a recording as well.
+        model.selectedTab = .keybindings
+        model.beginRecording(command: .findInFile, slot: nil, in: settingsWindow)
+        model.selectedTab = .reader
+        #expect(model.recording == nil)
+
+        // "按键搜索" is one-shot: after it captures a chord, keys flow again.
+        let search = model.makeKeySearchSession(in: settingsWindow)
+        search.start()
+        defer { search.stop() }
+        let commandBracket = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: settingsWindow.windowNumber, context: nil,
+            characters: "[", charactersIgnoringModifiers: "[",
+            isARepeat: false, keyCode: 33
+        ))
+        NSApp.sendEvent(commandBracket)
+        #expect(model.keySearchChord == KeyChord(modifiers: [.command], key: .character("[")))
+        probe.hit = false
+        let settingsCommandU = try #require(NSEvent.keyEvent(
+            with: .keyDown, location: .zero, modifierFlags: .command,
+            timestamp: 0, windowNumber: settingsWindow.windowNumber, context: nil,
+            characters: "u", charactersIgnoringModifiers: "u",
+            isARepeat: false, keyCode: 32
+        ))
+        NSApp.sendEvent(settingsCommandU)
+        #expect(probe.hit, "the finished key search no longer swallows keys")
+        #expect(model.keySearchChord == KeyChord(modifiers: [.command], key: .character("[")))
+    }
+
     /// K0a menu wiring: every menu key equivalent comes from the key binding
     /// table, and the migration left the menu byte-identical to the pre-table
     /// menu (snapshot of 2026-09-30).

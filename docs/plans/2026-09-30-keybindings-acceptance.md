@@ -152,3 +152,19 @@
 （验收清单 1–6）无法在本环境完成；SwiftUI 页面的实渲染走查留待统一验收。
 模型与刷新链路由上表 8 条测试覆盖（覆盖持久化、菜单/工具栏/命令面板同步、录制吞键）。
 
+
+---
+
+## 独立评审与修复
+
+日期：2026-10-02
+
+| # | 问题 | 修复 | 回归测试 |
+|---|---|---|---|
+| 2 | 录制会话装的是**整个应用**的按键监听，并吞掉所有 keyDown；关窗、切页、切到别的窗口都不会结束录制。设置窗口关闭后，主窗口按下的下一个组合键（例如 ⌘F）会被悄悄记成正在录制的那条命令的新快捷键 | 会话记下发起录制的窗口编号：来自其他窗口的事件结束录制并原样放行，不会被捕获；离开“快捷键”页（`selectedTab` 的 didSet）和 `windowWillClose` 也会结束录制 | `recorderEndsInsteadOfCapturingKeysFromAnotherWindow` |
+| 2′ | 评审中新发现，比 #2 更严重：“按键搜索”的录制会话**从不停止**。捕获一次之后，监听仍在吞掉整个应用的所有按键，连 Esc 都结束不了，只能重启应用 | 抽成 `makeKeySearchSession`：第一次捕获、Esc、⌫ 或来自其他窗口的事件都会停止会话 | 同上测试的最后一段 |
+| — | 需求 K-R3.2 的“新增”小标从未出现：`isNew` 写死为 `false`，P1 和 P3 新增命令后没有更新 | 新命令集合：`navigate.typeDefinition`、`reader.gesture.typeDefinition`、`lens.trackSymbol`、`lens.trackEnclosing`、`lens.togglePin` | 无（只是查一个集合，按 AGENTS.md 不写复述实现的测试） |
+
+注入（逐条单独执行）：去掉窗口编号检查 → 菜单探针没有触发（`Issue recorded`：被当作绑定提交了）；去掉切页结束录制 → `model.recording == nil` 失败；去掉按键搜索的停止 → `probe.hit` 失败。
+
+原生走查：设置页仍没有截图（同上，缺桌面授权）。

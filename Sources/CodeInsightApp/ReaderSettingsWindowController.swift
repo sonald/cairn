@@ -137,6 +137,8 @@ final class ReaderSettingsWindowController: NSWindowController, NSWindowDelegate
     }
 
     func windowWillClose(_ notification: Notification) {
+        // A recording must not outlive its window (K-R3.3).
+        keyBindingsModel.endRecording()
         previewActive = false
         forEachReaderPreview { $0.cancelDerivedDataSubscription() }
     }

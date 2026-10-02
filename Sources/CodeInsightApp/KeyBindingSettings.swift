@@ -23,9 +23,19 @@ final class KeyChordRecordingSession {
     private let isGesture: Bool
     private let onDecision: @MainActor (Decision) -> Void
     private var monitor: Any?
+    /// The window the recording belongs to. The local monitor sees every
+    /// window's events; one from another window (Settings closed or left
+    /// mid-recording) ends the recording and passes through untouched, so
+    /// it can never be captured as a binding. Nil accepts any window.
+    private let windowNumber: Int?
 
-    init(isGesture: Bool, onDecision: @escaping @MainActor (Decision) -> Void) {
+    init(
+        isGesture: Bool,
+        windowNumber: Int? = nil,
+        onDecision: @escaping @MainActor (Decision) -> Void
+    ) {
         self.isGesture = isGesture
+        self.windowNumber = windowNumber
         self.onDecision = onDecision
     }
 
@@ -43,6 +53,10 @@ final class KeyChordRecordingSession {
     /// Consumes an event while recording; true means the event was swallowed
     /// before it could reach menus or the responder chain.
     private func consume(_ event: NSEvent) -> Bool {
+        if let windowNumber, event.windowNumber != windowNumber {
+            onDecision(Decision(cancelled: true))
+            return false
+        }
         let decision = evaluate(event)
         guard decision.swallow else { return false }
         captured = decision
@@ -111,7 +125,11 @@ final class KeyBindingSettingsModel {
     }
 
     private(set) var table: KeyBindingTable
-    var selectedTab: Tab = .reader
+    var selectedTab: Tab = .reader {
+        didSet {
+            if selectedTab != .keybindings { endRecording() }
+        }
+    }
     private(set) var recording: (command: CommandID, slot: Int?)?
     private(set) var pendingConflict: PendingConflict?
     private(set) var rowError: RowError?
@@ -149,9 +167,14 @@ final class KeyBindingSettingsModel {
         table.bindings(for: id).contains { table.isLocked($0) }
     }
 
-    /// New commands arrive with later phases (P1 / P3) and carry the "新增"
-    /// tag until the next release. K0b ships none.
-    func isNew(_ id: CommandID) -> Bool { false }
+    /// Commands added by the lens type-follow work (P1 / P3) carry the
+    /// "新增" tag until the next release (K-R3.2).
+    static let newCommands: Set<CommandID> = [
+        .navigateTypeDefinition, .readerGestureTypeDefinition,
+        .lensTrackSymbol, .lensTrackEnclosing, .lensTogglePin,
+    ]
+
+    func isNew(_ id: CommandID) -> Bool { Self.newCommands.contains(id) }
 
     // MARK: Search & filter (K-R3.4)
 
@@ -190,15 +213,17 @@ final class KeyBindingSettingsModel {
     // MARK: Mutations
 
     /// Begins recording for a command; `slot` nil means "add a new binding".
-    func beginRecording(command: CommandID, slot: Int?) {
+    func beginRecording(command: CommandID, slot: Int?, in window: NSWindow? = nil) {
         guard pendingConflict == nil else { return }
         endRecording()
         rowError = nil
         recording = (command, slot)
         let commandID = command
         let slotValue = slot
-        let session = KeyChordRecordingSession(isGesture: isGestureCommand(commandID)) {
-            [weak self] decision in
+        let session = KeyChordRecordingSession(
+            isGesture: isGestureCommand(commandID),
+            windowNumber: window?.windowNumber
+        ) { [weak self] decision in
             self?.handle(decision, command: commandID, slot: slotValue)
         }
         recordingSession = session
@@ -310,6 +335,28 @@ final class KeyBindingSettingsModel {
         keySearchChord = nil
     }
 
+    /// The one-shot recorder behind "按键搜索" (K-R3.4): the first chord,
+    /// Esc, or a key from another window ends it — it must never keep
+    /// swallowing the application's keys.
+    func makeKeySearchSession(in window: NSWindow?) -> KeyChordRecordingSession {
+        var session: KeyChordRecordingSession?
+        let created = KeyChordRecordingSession(
+            isGesture: false,
+            windowNumber: window?.windowNumber
+        ) { [weak self] decision in
+            guard decision.recorded != nil || decision.cancelled || decision.cleared
+            else { return }
+            session?.stop()
+            session = nil
+            guard let self, let binding = decision.recorded,
+                  case let .keyboard(chord) = binding
+            else { return }
+            self.keySearchChord = chord
+        }
+        session = created
+        return created
+    }
+
     private func commit(_ mutate: (inout KeyBindingTable) -> Void) {
         var table = self.table
         mutate(&table)
@@ -408,13 +455,8 @@ struct KeybindingsSettingsView: View {
 
     private func startKeySearch() {
         keySearchSession?.stop()
-        let session = KeyChordRecordingSession(isGesture: false) { [weak model] decision in
-            guard let model, let binding = decision.recorded, case let .keyboard(chord) = binding
-            else { return }
-            model.keySearchChord = chord
-        }
-        keySearchSession = session
-        session.start()
+        keySearchSession = model.makeKeySearchSession(in: NSApp.keyWindow)
+        keySearchSession?.start()
     }
 
     private func filterChip(
@@ -597,12 +639,12 @@ private struct KeyBindingRow: View {
                         guard !isFixedRow, !isLockedRow,
                               let slot = bindings.firstIndex(of: binding)
                         else { return }
-                        model.beginRecording(command: definition.id, slot: slot)
+                        model.beginRecording(command: definition.id, slot: slot, in: NSApp.keyWindow)
                     }
                 }
                 if hovering, !isFixedRow, !isLockedRow {
                     Button {
-                        model.beginRecording(command: definition.id, slot: nil)
+                        model.beginRecording(command: definition.id, slot: nil, in: NSApp.keyWindow)
                     } label: {
                         Image(systemName: "plus")
                     }
