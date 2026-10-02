@@ -15,6 +15,7 @@ public struct ExactCapabilities: OptionSet, Sendable {
     public static let callHierarchy = ExactCapabilities(rawValue: 1 << 2)
     public static let references = ExactCapabilities(rawValue: 1 << 3)
     public static let hover = ExactCapabilities(rawValue: 1 << 4)
+    public static let typeDefinition = ExactCapabilities(rawValue: 1 << 5)
 }
 
 public enum ExactReadiness: Equatable, Sendable {
@@ -433,6 +434,12 @@ public protocol ExactSession: AnyObject, Sendable {
         file: String,
         byteOffset: Int
     ) throws -> ExactDefinitionQueryResult
+    /// `textDocument/typeDefinition` (P2); defaults to unavailable so test
+    /// doubles that predate it keep compiling.
+    func typeDefinition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult
     func implementations(
         file: String,
         byteOffset: Int
@@ -453,6 +460,11 @@ public protocol ExactSession: AnyObject, Sendable {
         item: ExactCallHierarchyItem
     ) throws -> [ExactCallRelation]?
     func definition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactDefinitionQueryResult
+    func typeDefinition(
         file: String,
         byteOffset: Int,
         batch: ExactRequestBatch
@@ -507,6 +519,24 @@ public extension ExactSession {
         defer { batch.release() }
         guard batch.isCurrent else { return .cancelled }
         return try definition(file: file, byteOffset: byteOffset)
+    }
+
+    func typeDefinition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
+        .unavailable("typeDefinition unsupported")
+    }
+
+    func typeDefinition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactDefinitionQueryResult {
+        guard batch.acquire() else { return .cancelled }
+        defer { batch.release() }
+        guard batch.isCurrent else { return .cancelled }
+        return try typeDefinition(file: file, byteOffset: byteOffset)
     }
 
     func implementations(

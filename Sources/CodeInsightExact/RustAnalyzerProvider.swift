@@ -420,6 +420,11 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
         {
             negotiated.insert(.implementations)
         }
+        if let provider = capabilities["typeDefinitionProvider"],
+           (provider as? Bool) == true || provider is [String: Any]
+        {
+            negotiated.insert(.typeDefinition)
+        }
         if let provider = capabilities["callHierarchyProvider"],
            (provider as? Bool) == true || provider is [String: Any]
         {
@@ -459,6 +464,32 @@ final class RustAnalyzerSession: ExactSession, @unchecked Sendable {
             file: file,
             byteOffset: byteOffset,
             method: "textDocument/definition",
+            batch: batch,
+            parse: parseDefinition
+        ) ?? .cancelled
+    }
+
+    func typeDefinition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/typeDefinition",
+            parse: parseDefinition
+        ) ?? .cancelled
+    }
+
+    func typeDefinition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactDefinitionQueryResult {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/typeDefinition",
             batch: batch,
             parse: parseDefinition
         ) ?? .cancelled

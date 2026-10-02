@@ -3400,3 +3400,50 @@ private enum ExactTestError: Error {
     case missing(String)
     case git(String)
 }
+
+/// P2: definition and typeDefinition caches never shadow each other, even
+/// for the same reuse key and position.
+@Test
+func coordinatorKeepsTypeDefinitionCacheSeparate() {
+    var overlay = ExactOverlay()
+    let key = ExactOverlay.ReuseKey(
+        versionIdentity: "worktree",
+        language: .rust,
+        analysisProfileID: AnalysisProfileID(rawValue: UUID()),
+        configFingerprint: "config",
+        environmentFingerprint: "",
+        featureSelection: .defaultFeatures,
+        trustMode: .safe,
+        toolVersion: "test"
+    )
+    let definitionEntry = ExactOverlay.Entry(
+        location: ExactLocation(file: "def.rs", byteOffset: 10, line: 1, column: 11),
+        attribution: ExactAttribution(
+            provider: "fake",
+            toolVersion: "test",
+            configFingerprint: "config",
+            environmentFingerprint: "",
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: []
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
+        ),
+        origin: .worktree
+    )
+    let typeDefinitionEntry = ExactOverlay.Entry(
+        location: ExactLocation(file: "type.rs", byteOffset: 20, line: 2, column: 3),
+        attribution: definitionEntry.attribution,
+        origin: .worktree
+    )
+    overlay.store([definitionEntry], for: key, file: "main.rs", byteOffset: 0)
+    overlay.storeTypeDefinition([typeDefinitionEntry], for: key, file: "main.rs", byteOffset: 0)
+
+    #expect(overlay.definition(for: key, file: "main.rs", byteOffset: 0)?
+        .first?.location.file == "def.rs")
+    #expect(overlay.typeDefinition(for: key, file: "main.rs", byteOffset: 0)?
+        .first?.location.file == "type.rs")
+    // Storing one does not evict the other.
+    overlay.storeTypeDefinition([], for: key, file: "main.rs", byteOffset: 0)
+    #expect(overlay.definition(for: key, file: "main.rs", byteOffset: 0) != nil)
+}

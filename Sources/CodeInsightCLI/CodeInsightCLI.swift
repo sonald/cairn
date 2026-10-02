@@ -15,7 +15,7 @@ struct CodeInsight: AsyncParsableCommand {
             Parse.self, Index.self, Dump.self, Defs.self, Callers.self,
             Calls.self, Impls.self, Overrides.self, Resolve.self,
             Search.self, Symsearch.self, SnapshotCommand.self, SwitchStats.self,
-            Goldset.self, ExactDef.self, ExactHover.self,
+            Goldset.self, ExactDef.self, ExactTypeDef.self, ExactHover.self,
         ]
     )
 }
@@ -93,17 +93,112 @@ extension CodeInsight {
                 trustMode: .safe
             )
             defer { session.close() }
-            let result = try session.definition(
+            let result = try session.typeDefinition(
                 file: relative,
                 byteOffset: Int(byteOffset)
             )
             let locations: [ExactTarget] = switch result {
             case .completed(let targets): targets
-            case .cancelled: throw ValidationError("definition query cancelled")
+            case .cancelled: throw ValidationError("typeDefinition query cancelled")
             case .unavailable(let reason): throw ValidationError(reason)
             }
             guard !locations.isEmpty else {
-                throw ValidationError("definition not found")
+                throw ValidationError("type definition not found")
+            }
+
+            for target in locations {
+                let location = target.location
+                print("\(location.file):\(location.line):\(location.column)")
+            }
+            let attribution = session.attribution
+            let limitations = attribution.environment.limitations
+                .map(\.rawValue)
+                .sorted()
+                .joined(separator: ",")
+            let trustMode = switch attribution.environment.trustMode {
+            case .safe: "safe"
+            case .trusted: "trusted"
+            }
+            print(
+                "attribution provider=\(attribution.provider) "
+                    + "toolVersion=\(attribution.toolVersion) "
+                    + "configFingerprint=\(attribution.configFingerprint) "
+                    + "environmentFingerprint=\(attribution.environmentFingerprint) "
+                    + "trustMode=\(trustMode) "
+                    + "generatedAt=\(ISO8601DateFormatter().string(from: attribution.generatedAt)) "
+                    + "limitations=\(limitations.isEmpty ? "none" : limitations)"
+            )
+        }
+    }
+
+    struct ExactTypeDef: ParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "exact-typedef",
+            abstract: "Resolve the type definition with rust-analyzer (R8.2)."
+        )
+
+        @Option(name: .long, help: "Git worktree root.")
+        var project: String
+
+        @Option(name: .long, help: "Project-relative Rust file.")
+        var file: String
+
+        @Option(name: .long, help: "One-based source line.")
+        var line: Int
+
+        @Option(name: .long, help: "One-based UTF-8 byte column.")
+        var column: Int
+
+        func validate() throws {
+            guard line > 0, column > 0 else {
+                throw ValidationError("--line and --column must be positive.")
+            }
+        }
+
+        func run() throws {
+            guard let executableURL = RustAnalyzerProvider.findExecutable()
+            else { throw ValidationError("rust-analyzer not found") }
+
+            let root = URL(fileURLWithPath: project, isDirectory: true)
+                .standardizedFileURL
+            let relative = file.hasPrefix("./")
+                ? String(file.dropFirst(2)) : file
+            guard !relative.hasPrefix("/") else {
+                throw ValidationError("--file must be project-relative.")
+            }
+            let snapshot = try WorktreeSnapshot(repositoryURL: root)
+            let bytes = try snapshot.readBytes(path: relative)
+            guard let line = UInt32(exactly: line),
+                  let column = UInt32(exactly: column),
+                  let byteOffset = LineTable(bytes: bytes).byteOffset(
+                    line: line,
+                    column: column
+                  )
+            else {
+                throw ValidationError("Position is outside \(relative).")
+            }
+
+            let provider = try RustAnalyzerProvider(
+                projectURL: root,
+                executableURL: executableURL
+            )
+            let session = try provider.prepare(
+                snapshot: snapshot,
+                profile: ExactProfileKey(projectURL: root),
+                trustMode: .safe
+            )
+            defer { session.close() }
+            let result = try session.typeDefinition(
+                file: relative,
+                byteOffset: Int(byteOffset)
+            )
+            let locations: [ExactTarget] = switch result {
+            case .completed(let targets): targets
+            case .cancelled: throw ValidationError("typeDefinition query cancelled")
+            case .unavailable(let reason): throw ValidationError(reason)
+            }
+            guard !locations.isEmpty else {
+                throw ValidationError("type definition not found")
             }
 
             for target in locations {

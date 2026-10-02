@@ -4554,6 +4554,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
     private let referencesProvider: Any?
     private let referenceResult: Any
     private let hoverProvider: Any?
+    private let typeDefinitionProvider: Any?
+    private let typeDefinitionResult: Any
     private let serverStatusQuiescent: Bool
     private let requestResponder: ((String, Int) -> PipeFakeRequestResponse)?
     private var _error: Error?
@@ -4597,6 +4599,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         referencesProvider: Any? = true,
         referenceResult: Any = NSNull(),
         hoverProvider: Any? = nil,
+        typeDefinitionProvider: Any? = nil,
+        typeDefinitionResult: Any = NSNull(),
         serverStatusQuiescent: Bool = true,
         requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
         done: @escaping () -> Void
@@ -4612,6 +4616,8 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
         self.referencesProvider = referencesProvider
         self.referenceResult = referenceResult
         self.hoverProvider = hoverProvider
+        self.typeDefinitionProvider = typeDefinitionProvider
+        self.typeDefinitionResult = typeDefinitionResult
         self.serverStatusQuiescent = serverStatusQuiescent
         self.requestResponder = requestResponder
         self.done = done
@@ -4712,6 +4718,10 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                     if let hoverProvider {
                         serverCapabilities["hoverProvider"] = hoverProvider
                     }
+                    if let typeDefinitionProvider {
+                        serverCapabilities["typeDefinitionProvider"] =
+                            typeDefinitionProvider
+                    }
                     try write([
                         "jsonrpc": "2.0", "id": id,
                         "result": [
@@ -4731,6 +4741,11 @@ private final class PipeFakeLSPServer: @unchecked Sendable {
                                 "end": ["line": 0, "character": 13],
                             ],
                         ],
+                    ])
+                case "textDocument/typeDefinition":
+                    try write([
+                        "jsonrpc": "2.0", "id": id,
+                        "result": typeDefinitionResult,
                     ])
                 case "textDocument/implementation":
                     try write([
@@ -5259,6 +5274,8 @@ private func withFakeRustAnalyzerSession<T>(
     referencesProvider: Any? = true,
     referenceResult: Any = NSNull(),
     hoverProvider: Any? = nil,
+    typeDefinitionProvider: Any? = nil,
+    typeDefinitionResult: Any = NSNull(),
     serverStatusQuiescent: Bool = true,
     requestResponder: ((String, Int) -> PipeFakeRequestResponse)? = nil,
     serverCheck: ((PipeFakeLSPServer) -> Void)? = nil,
@@ -5280,6 +5297,8 @@ private func withFakeRustAnalyzerSession<T>(
         referencesProvider: referencesProvider,
         referenceResult: referenceResult,
         hoverProvider: hoverProvider,
+        typeDefinitionProvider: typeDefinitionProvider,
+        typeDefinitionResult: typeDefinitionResult,
         serverStatusQuiescent: serverStatusQuiescent,
         requestResponder: requestResponder,
         done: { done.signal() }
@@ -5474,4 +5493,65 @@ private struct DirectorySnapshot: Snapshot {
             options: .mappedIfSafe
         ))
     }
+}
+
+// MARK: P2 — typeDefinition capability and method
+
+@Test
+func rustAnalyzerNegotiatesTypeDefinition() throws {
+    try withFakeRustAnalyzerSession(typeDefinitionProvider: true) { session in
+        #expect(session.negotiatedCapabilities.contains(.typeDefinition))
+    }
+    // Servers that do not advertise it keep the capability off.
+    try withFakeRustAnalyzerSession { session in
+        #expect(!session.negotiatedCapabilities.contains(.typeDefinition))
+    }
+}
+
+@Test
+func exactTypeDefinitionSendsTypeDefinitionMethod() throws {
+    final class MethodLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var methods: [String] = []
+        func append(_ method: String) {
+            lock.lock()
+            methods.append(method)
+            lock.unlock()
+        }
+        var recorded: [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return methods
+        }
+    }
+    let log = MethodLog()
+    let fixtureURI = exactFixtureURL()
+        .appendingPathComponent("src/lib.rs")
+        .absoluteString
+    let location: [String: Any] = [
+        "uri": fixtureURI,
+        "range": [
+            "start": ["line": 0, "character": 7],
+            "end": ["line": 0, "character": 13],
+        ],
+    ]
+    try withFakeRustAnalyzerSession(
+        typeDefinitionProvider: true,
+        typeDefinitionResult: location,
+        requestResponder: { method, _ in
+            if method.contains("typeDefinition") || method.contains("definition") {
+                log.append(method)
+            }
+            return .useDefault
+        }
+    ) { session in
+        let result = try session.typeDefinition(file: "src/lib.rs", byteOffset: 7)
+        guard case .completed(let targets) = result else {
+            Issue.record("typeDefinition did not complete")
+            return
+        }
+        #expect(targets.count == 1)
+        #expect(targets.first?.location.file.hasSuffix("src/lib.rs") == true)
+    }
+    #expect(log.recorded == ["textDocument/typeDefinition"])
 }

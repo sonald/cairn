@@ -563,6 +563,32 @@ final class TypeScriptLanguageServerSession: ExactSession, @unchecked Sendable {
         ) ?? .cancelled
     }
 
+    func typeDefinition(
+        file: String,
+        byteOffset: Int
+    ) throws -> ExactDefinitionQueryResult {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/typeDefinition",
+            parse: parseDefinition
+        ) ?? .cancelled
+    }
+
+    func typeDefinition(
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch
+    ) throws -> ExactDefinitionQueryResult {
+        try requestLocations(
+            file: file,
+            byteOffset: byteOffset,
+            method: "textDocument/typeDefinition",
+            batch: batch,
+            parse: parseDefinition
+        ) ?? .cancelled
+    }
+
     func implementations(
         file: String,
         byteOffset: Int

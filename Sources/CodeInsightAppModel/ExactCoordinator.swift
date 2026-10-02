@@ -70,8 +70,31 @@ public struct ExactOverlay: Sendable {
     }
 
     private var definitions: [ReuseKey: [Position: [Entry]]] = [:]
+    /// typeDefinition replies live in their own mapping so they can never
+    /// evict or shadow a definition entry for the same position (P2).
+    private var typeDefinitions: [ReuseKey: [Position: [Entry]]] = [:]
 
     public init() {}
+
+    public func typeDefinition(
+        for key: ReuseKey,
+        file: String,
+        byteOffset: Int
+    ) -> [Entry]? {
+        typeDefinitions[key]?[Position(file: file, byteOffset: byteOffset)]
+    }
+
+    public mutating func storeTypeDefinition(
+        _ entries: [Entry],
+        for key: ReuseKey,
+        file: String,
+        byteOffset: Int
+    ) {
+        typeDefinitions[key, default: [:]][Position(
+            file: file,
+            byteOffset: byteOffset
+        )] = entries
+    }
 
     public func definition(
         for key: ReuseKey,
@@ -126,6 +149,13 @@ public final class ExactCoordinator {
     public enum DefinitionResult: Sendable {
         case completed([ExactOverlay.Entry])
         case cancelled
+        case unavailable(String)
+    }
+
+    public enum TypeDefinitionResult: Sendable {
+        case completed([ExactOverlay.Entry])
+        case cancelled
+        case unsupported
         case unavailable(String)
     }
 
@@ -880,6 +910,63 @@ public final class ExactCoordinator {
         }
     }
 
+    /// P2: `textDocument/typeDefinition` with the same generation checks,
+    /// batching, and drift admissions as `definition`, but its own cache.
+    public func typeDefinition(
+        file: String,
+        byteOffset: UInt32,
+        generation: UInt64,
+        batch: ExactRequestBatch? = nil
+    ) async -> TypeDefinitionResult? {
+        if let prepareTask { await prepareTask.value }
+        guard batch?.isCurrent != false else { return .cancelled }
+        guard expectedGeneration == generation else { return nil }
+        guard let current = active else {
+            return .unavailable(String(describing: readiness))
+        }
+        guard current.generation == generation else { return nil }
+        guard current.session.negotiatedCapabilities.contains(.typeDefinition)
+        else {
+            return .unsupported
+        }
+        guard let requestFile = providerRelativeRequestPath(
+            file: file,
+            source: current
+        ) else {
+            return .completed([])
+        }
+        let offset = Int(byteOffset)
+        if let cached = overlay.typeDefinition(
+            for: current.key,
+            file: file,
+            byteOffset: offset
+        ) {
+            return .completed(cached)
+        }
+
+        do {
+            let result = try await requestTypeDefinition(
+                session: current.session,
+                file: requestFile,
+                byteOffset: offset,
+                batch: batch
+            )
+            guard batch?.isCurrent != false else { return .cancelled }
+            return publishTypeDefinition(
+                result,
+                from: current,
+                file: file,
+                byteOffset: offset
+            )
+        } catch {
+            guard isCurrent(current) else { return nil }
+            if case .unavailable(let reason) = current.session.readiness {
+                readiness = .unavailable(reason)
+            }
+            return .unavailable(exactFailureReason(error))
+        }
+    }
+
     public func hover(
         file: String,
         byteOffset: UInt32,
@@ -1065,6 +1152,25 @@ public final class ExactCoordinator {
                 )
             } else {
                 try session.definition(file: file, byteOffset: byteOffset)
+            }
+        }.value
+    }
+
+    private func requestTypeDefinition(
+        session: any ExactSession,
+        file: String,
+        byteOffset: Int,
+        batch: ExactRequestBatch?
+    ) async throws -> ExactDefinitionQueryResult {
+        try await Task.detached(priority: .userInitiated) {
+            if let batch {
+                try session.typeDefinition(
+                    file: file,
+                    byteOffset: byteOffset,
+                    batch: batch
+                )
+            } else {
+                try session.typeDefinition(file: file, byteOffset: byteOffset)
             }
         }.value
     }
@@ -1269,6 +1375,48 @@ public final class ExactCoordinator {
             )
         }
         overlay.store(entries, for: source.key, file: file, byteOffset: byteOffset)
+        return .completed(entries)
+    }
+
+    private func publishTypeDefinition(
+        _ result: ExactDefinitionQueryResult,
+        from source: Active,
+        file: String,
+        byteOffset: Int
+    ) -> TypeDefinitionResult? {
+        guard isCurrent(source) else { return nil }
+        if case .cancelled = result { return .cancelled }
+        if case .unavailable(let reason) = result { return .unavailable(reason) }
+        readiness = .ready
+        analysisEnvironment = analysisEnvironment
+            ?? source.session.attribution.environment
+        guard case .completed(let targets) = result else { return nil }
+        let entries = targets.compactMap { target -> ExactOverlay.Entry? in
+            guard let workspaceLocation = providerAdmissibleLocation(
+                location: target.location,
+                source: source
+            ) else { return nil }
+            guard supportedTarget(
+                file: workspaceLocation.file,
+                language: source.profile.language
+            )
+            else { return nil }
+            // rust-analyzer answers primitive types with toolchain
+            // primitive_docs.rs positions; they are not jump targets.
+            if workspaceLocation.file.contains("primitive_docs.rs") {
+                return nil
+            }
+            return ExactOverlay.Entry(
+                location: workspaceLocation,
+                attribution: source.session.attribution,
+                origin: source.materializedRoot != nil
+                    ? .materialized(commitOID: source.key.versionIdentity)
+                    : .worktree
+            )
+        }
+        overlay.storeTypeDefinition(
+            entries, for: source.key, file: file, byteOffset: byteOffset
+        )
         return .completed(entries)
     }
 
