@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 1
+    public static let extractorVersion: UInt32 = 2
 
     public init() {}
 
@@ -90,6 +90,52 @@ public struct PythonExtractor: LanguageExtractor, Sendable {
         }
     }
 }
+
+/// R1.4 (P4) Python head-type stripping: Optional[T], T | None, and the
+/// builtin containers peel to their element; string annotations unwrap their
+/// quotes (the range points inside the quotes); paths peel to the last
+/// segment; everything else (user generics like dict[K, V]) is its own head.
+func pythonTypeHead(_ node: Node, bytes: [UInt8]) -> Node? {
+    switch node.kind {
+    case "identifier", "type_identifier":
+        return node
+    case "type", "type_parameter":
+        // Annotation wrappers; the expression is inside.
+        return node.namedChildren.first.flatMap { pythonTypeHead($0, bytes: bytes) }
+    case "string":
+        // `Optional["Repository"]` — the annotation inside the quotes. The
+        // range must point inside the quote characters (R1.4).
+        return node
+    case "subscript", "generic_type":
+        // tree-sitter-python spells `Optional[T]` / `list[T]` as
+        // generic_type with the head name first and the argument last.
+        let headName = node.namedChildren.first.flatMap { text($0, in: bytes) }
+        if let headName,
+           ["Optional", "List", "list", "Sequence", "sequence", "Iterable",
+            "Iterable", "Set", "set", "FrozenSet"].contains(headName),
+           node.namedChildren.count > 1
+        {
+            return node.namedChildren.last.flatMap { pythonTypeHead($0, bytes: bytes) }
+        }
+        return node.namedChildren.first.flatMap { pythonTypeHead($0, bytes: bytes) }
+    case "union_type", "binary_operator":
+        // `T | None` — the non-None member.
+        let members = node.namedChildren.filter { member in
+            text(member, in: bytes) != "None"
+        }
+        return members.first.flatMap { pythonTypeHead($0, bytes: bytes) }
+    case "attribute":
+        // `module.Type` — the last segment.
+        return childField(node, "attribute").flatMap { pythonTypeHead($0, bytes: bytes) }
+    default:
+        return nil
+    }
+}
+
+/// Python primitive types never hop (R1.5).
+let pythonPrimitiveNames: Set<String> = [
+    "int", "str", "float", "bool", "bytes", "None", "object",
+]
 
 private func childField(_ node: Node, _ name: String) -> Node? {
     node.child(namedField: name)
@@ -201,7 +247,8 @@ private func buildIndex(
     func appendBinding(
         _ nameNode: Node,
         scopeID: ScopeID,
-        kind: BindingKind
+        kind: BindingKind,
+        typeRef: TypeRef? = nil
     ) {
         guard let name = text(nameNode, in: bytes) else { return }
         bindings.append(BindingRecord(
@@ -210,8 +257,56 @@ private func buildIndex(
             space: .value,
             kind: kind,
             declarationRange: coreRange(nameNode),
-            targetHint: nil
+            targetHint: nil,
+            typeRef: typeRef
         ))
+    }
+
+    /// R1.2 (P4): a parameter's annotation → TypeRef.
+    func parameterTypeRef(_ parameter: Node) -> TypeRef? {
+        // Annotated parameters parse as `typed_parameter` (name + annotation
+        // children); plain `parameter` exposes the annotation via `type`.
+        let annotation: Node?
+        if parameter.kind == "typed_parameter" {
+            annotation = parameter.namedChildren.count > 1
+                ? parameter.namedChildren.last : nil
+        } else {
+            annotation = childField(parameter, "type")
+                ?? childField(parameter, "annotation")
+        }
+        guard let annotation else { return nil }
+        if let name = text(annotation, in: bytes), name == "Self" {
+            return classTypeRef()
+        }
+        guard let head = pythonTypeHead(annotation, bytes: bytes) else { return nil }
+        if let name = text(head, in: bytes), name == "Self" {
+            return classTypeRef()
+        }
+        if let name = text(head, in: bytes), pythonPrimitiveNames.contains(name) {
+            return .primitive(coreRange(head))
+        }
+        if head.kind == "string" {
+            // Point inside the quote characters.
+            let range = coreRange(head)
+            guard range.upperBound - range.lowerBound > 2 else { return nil }
+            return .named(CodeInsightCore.ByteRange(
+                lowerBound: range.lowerBound + 1,
+                upperBound: range.upperBound - 1
+            ))
+        }
+        return .named(coreRange(head))
+    }
+
+    /// `self` / `cls` → the enclosing class (Q6/Q11).
+    func selfParameterTypeRef() -> TypeRef? {
+        classTypeRef()
+    }
+
+    func classTypeRef() -> TypeRef? {
+        facetStack
+            .compactMap { symbols.indices.contains(Int($0)) ? symbols[Int($0)] : nil }
+            .last { $0.kind == .pythonClass }
+            .map { .selfType($0.nameRange) }
     }
 
     func appendImport(
@@ -362,11 +457,35 @@ private func buildIndex(
         case "parameters", "lambda_parameters":
             if let scopeID = functionScopes.last {
                 for child in node.namedChildren {
-                    appendBinding(parameterName(child) ?? child, scopeID: scopeID, kind: .param)
+                    // `self` / `cls` map to the enclosing class (Q6/Q11);
+                    // annotated parameters carry their TypeRef (P4).
+                    let typeRef: TypeRef?
+                    if let name = parameterName(child).flatMap({ text($0, in: bytes) }),
+                       name == "self" || name == "cls"
+                    {
+                        typeRef = selfParameterTypeRef()
+                    } else {
+                        typeRef = parameterTypeRef(child)
+                    }
+                    appendBinding(
+                        parameterName(child) ?? child,
+                        scopeID: scopeID,
+                        kind: .param,
+                        typeRef: typeRef
+                    )
                 }
             } else if let scopeID = currentScope() {
                 for child in node.namedChildren {
-                    appendBinding(parameterName(child) ?? child, scopeID: scopeID, kind: .param)
+                    let typeRef: TypeRef? = (text(child, in: bytes) == "self"
+                        || parameterName(child).flatMap({ text($0, in: bytes) }) == "cls")
+                        ? selfParameterTypeRef()
+                        : parameterTypeRef(child)
+                    appendBinding(
+                        parameterName(child) ?? child,
+                        scopeID: scopeID,
+                        kind: .param,
+                        typeRef: typeRef
+                    )
                 }
             }
         default:
@@ -445,7 +564,13 @@ private func buildIndex(
     func bindParameters(_ parameters: Node, scopeID: ScopeID) {
         for child in parameters.namedChildren {
             if let name = parameterName(child) {
-                appendBinding(name, scopeID: scopeID, kind: .param)
+                // `self`/`cls` → the enclosing class; annotations carry
+                // their TypeRef (P4).
+                let typeRef: TypeRef? = (text(name, in: bytes) == "self"
+                    || text(name, in: bytes) == "cls")
+                    ? selfParameterTypeRef()
+                    : parameterTypeRef(child)
+                appendBinding(name, scopeID: scopeID, kind: .param, typeRef: typeRef)
             }
         }
     }
@@ -578,6 +703,40 @@ private func buildIndex(
     )
 }
 
+/// Annotated-parameter TypeRef for the reference walker (no class context:
+/// `Self` yields nil there; the index layer handles it with the facet).
+func pythonParameterTypeRef(_ parameter: Node, bytes: [UInt8]) -> TypeRef? {
+    let annotation: Node?
+    if parameter.kind == "typed_parameter" {
+        annotation = parameter.namedChildren.count > 1
+            ? parameter.namedChildren.last : nil
+    } else {
+        annotation = childField(parameter, "type")
+            ?? childField(parameter, "annotation")
+    }
+    guard let annotation else { return nil }
+    guard let head = pythonTypeHead(annotation, bytes: bytes) else { return nil }
+    if let name = text(head, in: bytes), pythonPrimitiveNames.contains(name) {
+        return .primitive(coreRangeOf(head))
+    }
+    if head.kind == "string" {
+        let range = coreRangeOf(head)
+        guard range.upperBound - range.lowerBound > 2 else { return nil }
+        return .named(CodeInsightCore.ByteRange(
+            lowerBound: range.lowerBound + 1,
+            upperBound: range.upperBound - 1
+        ))
+    }
+    return .named(coreRangeOf(head))
+}
+
+private func coreRangeOf(_ node: Node) -> CodeInsightCore.ByteRange {
+    CodeInsightCore.ByteRange(
+        lowerBound: node.byteRange.lowerBound,
+        upperBound: node.byteRange.upperBound
+    )
+}
+
 private func parameterName(_ node: Node) -> Node? {
     if node.kind == "identifier" { return node }
     if node.kind == "list_splat_pattern" || node.kind == "dictionary_splat_pattern" {
@@ -646,6 +805,7 @@ package func pythonLocalReferences(
     var scopeKinds: [ScopeKind] = []
     var scopeParents: [Int?] = []
     var scopeBindings: [[String: Int]] = []
+    var classStack: [CodeInsightCore.ByteRange] = []
 
     func enterScope(_ kind: ScopeKind) -> Int {
         let parent: Int?
@@ -669,7 +829,7 @@ package func pythonLocalReferences(
         }
     }
 
-    func appendBinding(_ nameNode: Node, kind: BindingKind) {
+    func appendBinding(_ nameNode: Node, kind: BindingKind, typeRef: TypeRef? = nil) {
         guard let scopeID = scopeStack.last,
               let name = text(nameNode, in: bytes)
         else { return }
@@ -680,7 +840,8 @@ package func pythonLocalReferences(
             space: .value,
             kind: kind,
             declarationRange: coreRange(nameNode),
-            targetHint: nil
+            targetHint: nil,
+            typeRef: typeRef
         ))
         referencesByBinding.append([])
         scopeBindings[scopeID][name] = index
@@ -715,7 +876,15 @@ package func pythonLocalReferences(
         if let nameNode = parameterName(node)
             ?? (node.kind == "identifier" ? node : nil)
         {
-            appendBinding(nameNode, kind: .param)
+            // `self`/`cls` → the enclosing class; annotated params carry
+            // their TypeRef (P4).
+            let typeRef: TypeRef?
+            if let name = text(nameNode, in: bytes), name == "self" || name == "cls" {
+                typeRef = classStack.last.map(TypeRef.selfType)
+            } else {
+                typeRef = pythonParameterTypeRef(node, bytes: bytes)
+            }
+            appendBinding(nameNode, kind: .param, typeRef: typeRef)
         }
     }
 
@@ -754,12 +923,14 @@ package func pythonLocalReferences(
             else { return }
             appendBinding(name, kind: .letBinding)
             let scopeID = enterScope(.class)
+            classStack.append(coreRange(name))
             for child in node.namedChildren where child.byteRange != name.byteRange
                 && child.byteRange != body.byteRange
             {
                 walk(child)
             }
             walk(body)
+            classStack.removeLast()
             leaveScope(scopeID)
             return
         case "lambda":
@@ -781,7 +952,15 @@ package func pythonLocalReferences(
             if let left = childField(node, "left"),
                let name = simpleIdentifier(left)
             {
-                appendBinding(name, kind: .assignment)
+                // `x: S = …` — the annotation rides the left's type field.
+                let typeRef = childField(left, "type")
+                    .flatMap { pythonTypeHead($0, bytes: bytes) }
+                    .map { head in
+                        text(head, in: bytes).map(pythonPrimitiveNames.contains) == true
+                            ? TypeRef.primitive(coreRange(head))
+                            : TypeRef.named(coreRange(head))
+                    }
+                appendBinding(name, kind: .assignment, typeRef: typeRef)
             }
             return
         case "import_statement", "import_from_statement",

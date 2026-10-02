@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct TypeScriptExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 1
+    public static let extractorVersion: UInt32 = 2
 
     #if DEBUG
     @TaskLocal
@@ -250,7 +250,12 @@ private func buildIndex(
         regionStack.last
     }
 
-    func appendBinding(_ nameNode: Node, scopeID: ScopeID, kind: BindingKind) {
+    func appendBinding(
+        _ nameNode: Node,
+        scopeID: ScopeID,
+        kind: BindingKind,
+        typeRef: TypeRef? = nil
+    ) {
         guard let name = text(nameNode, in: bytes) else { return }
         bindings.append(BindingRecord(
             scopeID: scopeID,
@@ -258,9 +263,67 @@ private func buildIndex(
             space: .value,
             kind: kind,
             declarationRange: coreRange(nameNode),
-            targetHint: nil
+            targetHint: nil,
+            typeRef: typeRef
         ))
     }
+
+    /// R1.2/R1.4 (P4): a `: type` annotation's head TypeRef.
+    func annotationTypeRef(_ annotation: Node) -> TypeRef? {
+        if let head = tsTypeHead(annotation) {
+            if let name = text(head, in: bytes), tsPrimitiveNames.contains(name) {
+                return .primitive(coreRange(head))
+            }
+            return .named(coreRange(head))
+        }
+        return nil
+    }
+
+    /// The `this` receiver → the enclosing class (Q6).
+    func thisParameterTypeRef() -> TypeRef? {
+        facetStack
+            .compactMap { symbols.indices.contains(Int($0)) ? symbols[Int($0)] : nil }
+            .last { $0.kind == .typescriptClass }
+            .map { .selfType($0.nameRange) }
+    }
+
+    func tsTypeHead(_ node: Node) -> Node? {
+        switch node.kind {
+        case "type_identifier", "identifier", "generic_type", "predefined_type", "builtin_type":
+            if node.kind == "generic_type" {
+                // Array<T> / Promise<T> / Readonly<T> peel to the element;
+                // user generics (HashMap<K, V>) keep their own head.
+                if let name = childField(node, "name").flatMap({ text($0, in: bytes) }),
+                   ["Array", "Readonly", "Promise", "Set"].contains(name),
+                   let arguments = childField(node, "type_arguments")
+                {
+                    return arguments.namedChildren.first.flatMap(tsTypeHead)
+                }
+                return childField(node, "name")
+            }
+            return node
+        case "union_type":
+            // `T | undefined | null` — the informative member.
+            let members = node.namedChildren.filter { member in
+                !["undefined", "null"].contains(text(member, in: bytes) ?? "")
+            }
+            return members.first.flatMap(tsTypeHead)
+        case "array_type":
+            // `T[]` → T.
+            return node.namedChildren.first.flatMap(tsTypeHead)
+        case "nested_type_identifier", "qualified_type_name?":
+            return childField(node, "identifier") ?? node.namedChildren.last.flatMap(tsTypeHead)
+        default:
+            return node.namedChildren.count == 1
+                ? node.namedChildren.first.flatMap(tsTypeHead)
+                : nil
+        }
+    }
+
+let tsPrimitiveNames: Set<String> = [
+    "string", "number", "boolean", "any", "unknown", "void", "never",
+    "object", "bigint", "symbol", "undefined", "null",
+]
 
     func declarationRange(_ node: Node, body: Node) -> CodeInsightCore.ByteRange {
         CodeInsightCore.ByteRange(
@@ -275,10 +338,21 @@ private func buildIndex(
             return
         }
         for child in parameters.namedChildren {
+            // `this` maps to the enclosing class; annotated parameters carry
+            // their TypeRef (P4).
+            let typeRef: TypeRef?
+            if text(child, in: bytes) == "this"
+                || childField(child, "pattern").flatMap({ text($0, in: bytes) }) == "this"
+            {
+                typeRef = thisParameterTypeRef()
+            } else {
+                typeRef = (childField(child, "type") ?? childField(child, "annotation"))
+                    .flatMap(annotationTypeRef)
+            }
             if let name = childField(child, "name"), name.kind == "identifier" {
-                appendBinding(name, scopeID: scopeID, kind: .param)
+                appendBinding(name, scopeID: scopeID, kind: .param, typeRef: typeRef)
             } else if let pattern = childField(child, "pattern"), pattern.kind == "identifier" {
-                appendBinding(pattern, scopeID: scopeID, kind: .param)
+                appendBinding(pattern, scopeID: scopeID, kind: .param, typeRef: typeRef)
             }
         }
     }
@@ -448,7 +522,11 @@ private func buildIndex(
                   let name = text(nameNode, in: bytes)
             else { continue }
             let scopeID = currentScope() ?? moduleScopeID
-            appendBinding(nameNode, scopeID: scopeID, kind: .letBinding)
+            // `const s: Snapshot[] | undefined = …` — the declarator's
+            // annotation rides its type field (P4).
+            let typeRef = (childField(child, "type") ?? childField(child, "annotation"))
+                .flatMap(annotationTypeRef)
+            appendBinding(nameNode, scopeID: scopeID, kind: .letBinding, typeRef: typeRef)
             if let value = childField(child, "value"),
                value.kind == "arrow_function" || value.kind == "function_expression"
             {

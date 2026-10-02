@@ -1,4 +1,6 @@
 import CodeInsightCore
+import TreeSitterKit
+import CTreeSitterTypeScript
 import CodeInsightTypeScriptExtractor
 import Foundation
 import Testing
@@ -634,4 +636,85 @@ private enum CanonicalDumperProvider {
         }
         return lines.joined(separator: "\n") + "\n"
     }
+}
+
+// MARK: P4 — typeRef extraction
+
+private func tsLineRange(of needle: String, line number: Int, in source: String, occurrence: Int = 1) -> CodeInsightCore.ByteRange {
+    let lines = source.components(separatedBy: "\n")
+    var offset: UInt32 = 0
+    for (index, line) in lines.enumerated() {
+        if index + 1 == number {
+            let lineBytes = Array(line.utf8)
+            let needleBytes = Array(needle.utf8)
+            var hits = 0
+            for start in 0...(max(0, lineBytes.count - needleBytes.count)) {
+                if Array(lineBytes[start..<start + needleBytes.count]) == needleBytes {
+                    hits += 1
+                    if hits == occurrence {
+                        let lower = offset + UInt32(start)
+                        return CodeInsightCore.ByteRange(lowerBound: lower, upperBound: lower + UInt32(needleBytes.count))
+                    }
+                }
+            }
+            precondition(false, "missing \(needle) on line \(number)")
+        }
+        offset += UInt32(line.utf8.count + 1)
+    }
+    precondition(false, "no line \(number)")
+}
+
+@Test
+func tsTypeRefStripsArraysUnionsAndWrappers() throws {
+    let source = """
+        class Snapshot {}
+
+        function f(
+            a: Snapshot[] | undefined,
+            b: Promise<Snapshot>,
+            c: Readonly<Snapshot>,
+            d: Map<string, Snapshot>,
+        ): void {}
+        """
+    let result = try extract(source, mode: LanguageMode(language: .typescript))
+    func typeRef(_ name: String) -> TypeRef? {
+        result.index.bindings.first { result.names.resolve($0.localNameID) == name }?.typeRef
+    }
+    // `Snapshot[] | undefined` → Snapshot.
+    #expect(typeRef("a") == .named(tsLineRange(of: "Snapshot", line: 4, in: source)))
+    // Promise<T> peels to the element.
+    #expect(typeRef("b") == .named(tsLineRange(of: "Snapshot", line: 5, in: source)))
+    // Readonly<T> peels to the element.
+    #expect(typeRef("c") == .named(tsLineRange(of: "Snapshot", line: 6, in: source)))
+    // Wrappers outside the strip list keep their own head.
+    #expect(typeRef("d") == .named(tsLineRange(of: "Map", line: 7, in: source)))
+}
+
+@Test
+func tsVariableDeclaratorAnnotationCarriesTypeRef() throws {
+    // `this` parameters are not named nodes in tree-sitter-typescript's
+    // formal_parameters, so no binding site exists for them; the declarator
+    // annotation is the third observable path (see the P4 acceptance note).
+    let source = """
+        class Service {}
+        const s: Service | undefined = undefined;
+        """
+    let result = try extract(source, mode: LanguageMode(language: .typescript))
+    #expect(result.index.bindings.contains { binding in
+        result.names.resolve(binding.localNameID) == "s"
+            && binding.typeRef == .named(tsLineRange(of: "Service", line: 2, in: source, occurrence: 1))
+    })
+}
+
+@Test
+func tsPrimitiveAnnotationStaysPut() throws {
+    let source = """
+        function f(label: string, count: number): void {}
+        """
+    let result = try extract(source, mode: LanguageMode(language: .typescript))
+    func typeRef(_ name: String) -> TypeRef? {
+        result.index.bindings.first { result.names.resolve($0.localNameID) == name }?.typeRef
+    }
+    #expect(typeRef("label") == .primitive(tsLineRange(of: "string", line: 1, in: source)))
+    #expect(typeRef("count") == .primitive(tsLineRange(of: "number", line: 1, in: source)))
 }

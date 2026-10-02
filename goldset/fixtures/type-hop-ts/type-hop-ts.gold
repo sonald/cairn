@@ -1,0 +1,6 @@
+# A use of the annotated parameter peels the union to the class (P4).
+type index.ts:5:15 -> index.ts:1:7
+# A use of the primitive-typed declarator stays put (Q3).
+type index.ts:6:16 -> primitive string
+# The declaration-position probe mirrors the usage probe.
+type index.ts:5:15 -> index.ts:1:7

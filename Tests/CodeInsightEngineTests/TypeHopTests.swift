@@ -11,7 +11,8 @@ private let repositoryRoot = URL(fileURLWithPath: #filePath)
     .deletingLastPathComponent()
 
 private func makeSession(
-    _ files: [String: String]
+    _ files: [String: String],
+    language: LanguageID = .rust
 ) throws -> EngineSession {
     let root = FileManager.default.temporaryDirectory
         .appendingPathComponent("TypeHopTests-\(UUID().uuidString)")
@@ -24,7 +25,7 @@ private func makeSession(
         )
         try contents.write(to: fileURL, atomically: true, encoding: .utf8)
     }
-    return try ProjectIndexer().index(root: root)
+    return try ProjectIndexer().index(root: root, language: language)
 }
 
 private func pathID(
@@ -349,5 +350,81 @@ func debugGoldFailures() throws {
         at: fixture.appendingPathComponent("type-hop.gold"),
         corpus: fixture
     )
-    for f in report.failures { print("DBGOLD \(f)") }
+}
+
+// MARK: P4 — Python / TypeScript type hops
+
+@Test
+func pythonTypeHopResolvesAnnotatedParameterToClass() throws {
+    let session = try makeSession([
+        "src/lib.py": """
+        class Repository:
+            pass
+
+        def f(repo: Optional["Repository"]):
+            return repo
+        """,
+    ], language: .python)
+    // The `repo` usage on line 5, column 12.
+    let hop = try session.typeHop(
+        file: try pathID("src/lib.py", in: session),
+        offset: try offset(line: 5, column: 12, in: session, path: "src/lib.py"),
+        context: queryContext(for: session)
+    )
+    guard case let .targets(targets, _) = hop else {
+        Issue.record("python hop returned \\(hop)")
+        return
+    }
+    #expect(targets.contains { candidate in
+        facet(named: "Repository", at: candidate, in: session)?.kind == .pythonClass
+    })
+}
+
+@Test
+func typescriptTypeHopResolvesAnnotatedParameterToClass() throws {
+    let session = try makeSession([
+        "src/index.ts": """
+        class Snapshot {}
+
+        export function f(s: Snapshot): void {
+            const _ = s;
+        }
+        """,
+    ], language: .typescript)
+    let hop = try session.typeHop(
+        file: try pathID("src/index.ts", in: session),
+        offset: try offset(line: 4, column: 15, in: session, path: "src/index.ts"),
+        context: queryContext(for: session)
+    )
+    guard case let .targets(targets, _) = hop else {
+        Issue.record("typescript hop returned \(hop)")
+        return
+    }
+    #expect(targets.contains { candidate in
+        facet(named: "Snapshot", at: candidate, in: session)?.kind == .typescriptClass
+    })
+}
+
+@Test
+func typeHopPythonProbesResolveThroughGoldSet() throws {
+    let fixture = repositoryRoot.appendingPathComponent("goldset/fixtures/type-hop-py")
+    let report = try evaluateGoldSet(
+        at: fixture.appendingPathComponent("type-hop-py.gold"),
+        corpus: fixture,
+        language: .python
+    )
+    #expect(report.total == 3)
+    #expect(report.failures.isEmpty)
+}
+
+@Test
+func typeHopTypeScriptProbesResolveThroughGoldSet() throws {
+    let fixture = repositoryRoot.appendingPathComponent("goldset/fixtures/type-hop-ts")
+    let report = try evaluateGoldSet(
+        at: fixture.appendingPathComponent("type-hop-ts.gold"),
+        corpus: fixture,
+        language: .typescript
+    )
+    #expect(report.total == 3)
+    #expect(report.failures.isEmpty)
 }

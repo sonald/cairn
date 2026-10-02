@@ -1,4 +1,6 @@
 import CodeInsightCore
+import TreeSitterKit
+import CTreeSitterPython
 import CodeInsightPythonExtractor
 import Foundation
 import Testing
@@ -461,4 +463,83 @@ private func bindingRange(
         result.names.resolve($0.localNameID) == name
     }?.declarationRange
         ?? ByteRange(lowerBound: 0, upperBound: 0)
+}
+
+// MARK: P4 — typeRef extraction
+
+private func pyLineRange(of needle: String, line number: Int, in source: String, occurrence: Int = 1) -> CodeInsightCore.ByteRange {
+    let lines = source.components(separatedBy: "\n")
+    var offset: UInt32 = 0
+    for (index, line) in lines.enumerated() {
+        if index + 1 == number {
+            let lineBytes = Array(line.utf8)
+            let needleBytes = Array(needle.utf8)
+            var hits = 0
+            for start in 0...(max(0, lineBytes.count - needleBytes.count)) {
+                if Array(lineBytes[start..<start + needleBytes.count]) == needleBytes {
+                    hits += 1
+                    if hits == occurrence {
+                        let lower = offset + UInt32(start)
+                        return CodeInsightCore.ByteRange(lowerBound: lower, upperBound: lower + UInt32(needleBytes.count))
+                    }
+                }
+            }
+            precondition(false, "missing \(needle) on line \(number)")
+        }
+        offset += UInt32(line.utf8.count + 1)
+    }
+    precondition(false, "no line \(number)")
+}
+
+@Test
+func pythonTypeRefStripsOptionalsAndContainers() throws {
+    let source = """
+        class Repository: pass
+
+        def f(
+            repo: Optional["Repository"],
+            items: list[Repository],
+            maybe: Repository | None,
+        ): pass
+        """
+    let result = try extract(source)
+    func binding(_ name: String) -> BindingRecord? {
+        result.index.bindings.first { result.names.resolve($0.localNameID) == name }
+    }
+    // Optional["Repository"] unwraps the quotes and peels to Repository.
+    #expect(binding("repo")?.typeRef
+        == .named(pyLineRange(of: "Repository", line: 4, in: source)))
+    // list[T] peels to the element.
+    #expect(binding("items")?.typeRef
+        == .named(pyLineRange(of: "Repository", line: 5, in: source)))
+    // T | None keeps the informative member.
+    #expect(binding("maybe")?.typeRef
+        == .named(pyLineRange(of: "Repository", line: 6, in: source)))
+}
+
+@Test
+func pythonSelfParameterMapsToEnclosingClass() throws {
+    let source = """
+        class Service:
+            def work(self, count: int): pass
+        """
+    let result = try extract(source)
+    let selfBinding = try #require(
+        result.index.bindings.first { result.names.resolve($0.localNameID) == "self" }
+    )
+    #expect(selfBinding.typeRef
+        == .selfType(pyLineRange(of: "Service", line: 1, in: source)))
+}
+
+@Test
+func pythonPrimitiveAnnotationStaysPut() throws {
+    let source = """
+        def f(count: int, label: str): pass
+        """
+    let result = try extract(source)
+    func typeRef(_ name: String) -> TypeRef? {
+        result.index.bindings.first { result.names.resolve($0.localNameID) == name }?.typeRef
+    }
+    #expect(typeRef("count") == .primitive(pyLineRange(of: "int", line: 1, in: source)))
+    #expect(typeRef("label") == .primitive(pyLineRange(of: "str", line: 1, in: source)))
 }

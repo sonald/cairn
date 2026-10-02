@@ -1,0 +1,6 @@
+# An annotated parameter's use resolves to the class (P4).
+type lib.py:11:12 -> lib.py:1:7
+# A primitive-typed parameter's use stays put (Q3).
+type lib.py:11:18 -> primitive int
+# The declaration-position probe mirrors the usage probe.
+type lib.py:11:12 -> lib.py:1:7

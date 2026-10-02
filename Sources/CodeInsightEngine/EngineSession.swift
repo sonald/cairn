@@ -727,7 +727,7 @@ public final class EngineSession: Sendable {
         context: QueryContext,
         capAtProbable: Bool
     ) throws -> TypeHopResult {
-        let secondHop = try resolve(
+        var secondHop = try resolve(
             file: file, offset: spelling.lowerBound, context: context
         ).filter { candidate in
             guard candidate.target.localKind == .declarationFacet,
@@ -738,14 +738,43 @@ public final class EngineSession: Sendable {
                 index.symbols[Int(candidate.target.localIndex)].kind
             )
         }
+        var nameOnlyFallback = false
+        if secondHop.isEmpty, let bytes = sourceBytes(at: file) {
+            // Some grammars do not index annotation positions (TS type
+            // annotations, quoted Python annotations), so `resolve` answers
+            // nothing there. Fall back to the head name's definition
+            // occurrences at name-only certainty.
+            let upper = min(Int(spelling.upperBound), bytes.count)
+            guard Int(spelling.lowerBound) < upper else { return .none }
+            let name = String(
+                decoding: bytes[Int(spelling.lowerBound)..<upper], as: UTF8.self
+            )
+            let nameID = names.intern(name)
+            secondHop = definitionOccurrences(named: nameID)
+                .filter { _, facet, _ in Self.typeKinds.contains(facet.kind) }
+                .map { occurrence, _, _ in
+                    ResolutionCandidate(
+                        target: occurrence,
+                        certainty: .possible,
+                        dispatch: .direct,
+                        provenance: .fuzzyResolver,
+                        completeness: .complete,
+                        evidence: [.nameOnly(nameID: nameID)]
+                    )
+                }
+            nameOnlyFallback = !secondHop.isEmpty
+        }
         guard !secondHop.isEmpty else { return .none }
-        var certainty = min(firstHop.certainty, secondHop[0].certainty)
+        var certainty = nameOnlyFallback
+            ? min(firstHop.certainty, .possible)
+            : min(firstHop.certainty, secondHop[0].certainty)
         if capAtProbable { certainty = min(certainty, .probable) }
         return .targets(secondHop, certainty: certainty)
     }
 
     static let typeKinds: Set<DeclarationKind> = [
         .rustStruct, .rustEnum, .rustTrait, .rustTypeAlias,
+        .pythonClass, .typescriptClass,
     ]
 
     public func tokenRange(
