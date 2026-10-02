@@ -427,3 +427,56 @@ $ codeinsight resolve goldset/fixtures/type-hop-py/../main.rs  # 探针见 golds
   interface（精确层）实机走查留待统一验收。rust-analyzer 之外未装 pyright/tsserver，
   精确层在这两种语言上的原生验收（按计划本就归 P4）只能在有工具链的机器上进行，
   单测已用 LSP 替身覆盖协商与方法。
+
+---
+
+## 独立评审与修复
+
+日期：2026-10-02
+
+评审方法：在 `main`（7407133）上完整跑 CI，用 CLI 探针项目实测，再逐段读 P0–P4 的改动。完整 CI 通过（main=1309，exit 0），P2 记录里的“环境漂移”这次没有复现。原生走查仍未完成：宿主拒绝了对 Cairn 的桌面控制授权，见文末。
+
+### 发现并已修复
+
+| # | 问题 | 证据 | 修复 | 回归测试 |
+|---|---|---|---|---|
+| 1 | 字段声明在另一个文件时，类型直达读错文件：`typeRef` 的区间来自字段声明所在的文件，却拿去当前文件里解析和取字 | 探针（`Outer` 在 `types.rs`）：`o.inner` → `type -> none`，`o.inner.id` → `primitive r, `，`o.count` → `primitive imp` | `EngineSession.typeHop` 记下 `typeRef` 所属的文件（`typeFile`），第二跳和取名都在这个文件里做；取名改为带越界保护的 `spelledRange`（旧代码在短文件上可能越界崩溃） | `typeHopReadsFieldTypeFromTheFieldsOwnFile` |
+| 3 | 所在函数模式选中了最外层函数：`enclosingAssociatedFacets` 按外到内排序，代码却取 `.first` | 临时测试：光标在 `fn outer` 内嵌的 `fn inner` 里，显示 `fn outer` | 改取 `.last` | `enclosingPicksTheInnermostOfNestedFunctions` |
+| 4 | 所在函数模式下单击仍做符号查询并发精确请求，覆盖所在函数的显示（违反 R5.3） | 测试复现：单击另一个符号后 stage 被替换，精确请求多发一次 | `tokenClicked` 只在符号模式生效；`setTracking` 切换时作废进行中的查询、精确请求和停留任务 | `enclosingModeIgnoresSymbolClicksAndRestoresSymbolOnSwitchBack` |
+| 4′ | 评审中新发现：所在函数模式下 ⌘+单击 完全不跳转（`explicitJump` 走去重分支，返回的 `symbolCandidate` 为 nil） | 同上测试的 `jump != nil` 失败 | 固定或所在函数模式下 `explicitJump` 走 `resolvedCandidate`；`resolvedCandidate` 的去重只在确有符号时短路 | 同上 |
+| 4″ | 评审中新发现：从所在函数切回符号模式不恢复符号（`locatedToken` 未清，回放被去重吞掉） | 同上测试的“symbol restored”等待超时 | 切换时清 `locatedToken`，离开所在函数时先置 `.idle` 再回放 | 同上 |
+| 4‴ | 评审中新发现：从控件或菜单切到所在函数时，要等下一次光标移动才显示 | 读代码确认（两条切换路径都只调 `setTracking`） | `MainWindowController` 记下最近一次光标位置，切换后立即回放；控件经 `onTrackingChange` 通知窗口 | `lensSwitchToEnclosingShowsTheCurrentCaretsScope`（窗口层） |
+| 5 | “跳到类型定义”从不调用精确层：语法给不出类型时直接报“需要精确分析”，推断变量和依赖类型永远跳不过去（R3.1、R1.6）；计划的 P2 也漏写了这条接线 | 读代码确认 | 新增 `exactTypeDefinitionTarget`：独立批次请求 `typeDefinition`，做代际和内容漂移校验，依赖目标复用 `exactCandidate`；未就绪时返回就绪状态的原因 | `typeDefinitionCommandFallsBackToExactForInferredBinding` |
+
+其他修正：
+
+- 删除 `tokenMissed`（无调用方的死代码）。
+- 删除 `debugGoldFailures`：遗留的调试测试，没有任何断言，却计入了 CI 计数。
+- goldset：Python 和 TS 的第三条探针原本是第一条的重复（标注为“声明位置探针”，其实是同一位置）。现在换成真正不同的探针：Python `self` → 所在 class，TS `T | null` 声明 → class。两条都实际通过，并且都做了注入验证。
+
+### 注入证据
+
+每条注入都单独执行：恢复修复前的代码 → 只跑对应测试 → 记录变红输出 → 还原。
+
+| 注入（还原成修复前） | 测试 | 变红输出 |
+|---|---|---|
+| 字段的 `typeFile` 退回 `file` | `typeHopReadsFieldTypeFromTheFieldsOwnFile` | `Issue recorded`（cross-file field hop returned no targets） |
+| `.last` 退回 `.first` | `enclosingPicksTheInnermostOfNestedFunctions` | `activeEnclosingScope?.name == "inner"` 失败 |
+| 去掉 `tokenClicked` 的 `tracking == .symbol` | `enclosingModeIgnores…` | `activeEnclosingScope?.name == "main"` 失败 |
+| 去掉 `explicitJump` 的所在函数分支 | 同上 | 同上（⌘+单击 走 `lookup` 覆盖了显示） |
+| `setTracking` 不清 `locatedToken` | 同上 | “symbol restored”等待失败 |
+| 去掉窗口层的光标回放 | `lensSwitchToEnclosingShowsTheCurrentCaretsScope` | `activeEnclosingScope?.name == "main"` 失败 |
+| 精确层回退改回 `.failed(needsExact)` | `typeDefinitionCommandFallsBack…` | `typeDefinition requested` 等待失败 |
+| goldset 期望改成错误目标（Python、TS 各一条） | 两个 goldset 测试 | `report.failures.isEmpty` 失败 |
+
+### 仍未解决（记录）
+
+- **Python 类属性**：`self.repo` 这类属性访问不能直达类型。第一跳只认词法绑定和 Rust 字段 facet；P4 抽取到的类体注解属性没有对应的 facet，因此用不上。要补一个 Python 字段 facet，属于需求层面的新工作，不在这次修复范围内。
+- **CLI**：`resolve --type-hop` 只支持 Rust 项目（CLI 的 `resolve` 本身只处理 Rust），R8.1 在 Python 和 TS 上未满足。P4 记录里的“CLI 输出”一节是占位文字，没有真实输出。
+- **P1“已知边界”不成立**：P1 记录说方法体内的形参只能按名字解析。实测 `impl S { fn m(&self, ps: &S) { ps.n } }` 里的 `ps` 能解析为 `lexicalBinding`，类型直达也能成功。该条说法作废。
+- **同文件类型的确定性**：同一文件里的类型，第二跳只有 `possible`。这是现有的仅按名字解析的行为，不是本次改动引入的。
+- **原生走查**：至今没有任何截图。界面层（一跳标签、图钉、所在函数截断、快捷键设置页）的 self-test 读取口也没有测试在用，只有本次新增的窗口层切换测试。这部分需要在有桌面授权的环境里补做。
+
+### CI
+
+`expected_main_test_count` 1309 → 1314（新增 6 条，删除 1 条调试测试）。

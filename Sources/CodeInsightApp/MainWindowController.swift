@@ -647,6 +647,9 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         secondaryReaderController.onFunctionChange = { [weak self] change in
             self?.openFunctionChange(change)
         }
+        contextController.onTrackingChange = { [weak self] in
+            self?.replayCaretForLensTracking()
+        }
         contextController.onOpenEnclosing = { [weak self] path, byteOffset in
             self?.open(path: path, byteOffset: byteOffset)
         }
@@ -1764,6 +1767,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func selfTestOpenContextSelection() {
         contextController.selfTestOpenSelection()
+    }
+
+    /// Feeds a user caret move from the primary reader, as `onCaretFollow` does.
+    func selfTestFollowCaret(offset: UInt32) {
+        handleReaderCaret(offset: offset, from: readerController)
+    }
+
+    /// Switches the lens tracking through its segmented control.
+    func selfTestChooseLensTracking(_ tracking: ContextWindowModel.Tracking) {
+        contextController.selfTestChooseTracking(tracking)
     }
 
     func selfTestReaderClick(offset: UInt32, commandClick: Bool) {
@@ -3918,6 +3931,22 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
     /// R6.4: the tracking-mode commands.
     func setLensTracking(_ tracking: ContextWindowModel.Tracking) {
         model.contextWindow.setTracking(tracking)
+        replayCaretForLensTracking()
+    }
+
+    /// The caret the lens last followed; switching to the enclosing mode
+    /// shows its scope at once instead of waiting for the next caret move.
+    private var lastLensCaret: (offset: UInt32, reader: ReaderViewController)?
+
+    private func replayCaretForLensTracking() {
+        guard model.contextWindow.tracking == .enclosing,
+              let caret = lastLensCaret,
+              let file = model.selectedFile,
+              let path = projectPath(for: file),
+              let document = caret.reader.caretDocument
+        else { return }
+        caretFollowTask?.cancel()
+        model.contextWindow.caretMoved(file: path, offset: caret.offset, document: document)
     }
 
     func toggleLensPin() {
@@ -3933,6 +3962,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         if reader !== readerController, !reader.hasFocusedText, readerController.hasFocusedText {
             return
         }
+        lastLensCaret = (offset, reader)
         guard let file = model.selectedFile,
               let path = projectPath(for: file),
               let document = reader.caretDocument
@@ -7368,6 +7398,9 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     var onOpen: ((ContextWindowModel.Candidate) -> Void)?
     /// R5.2: open the enclosing scope at its signature line.
     var onOpenEnclosing: ((String, UInt32) -> Void)?
+    /// Fired after the tracking control changes, so the window can feed the
+    /// current caret to the enclosing mode right away.
+    var onTrackingChange: (() -> Void)?
 
     private let model: ContextWindowModel
     private let modeControl = NSSegmentedControl(
@@ -7811,8 +7844,15 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         }
     }
 
+    func selfTestChooseTracking(_ tracking: ContextWindowModel.Tracking) {
+        loadViewIfNeeded()
+        modeControl.selectedSegment = tracking == .enclosing ? 1 : 0
+        trackingChanged(modeControl)
+    }
+
     @objc private func trackingChanged(_ sender: NSSegmentedControl) {
         model.setTracking(sender.selectedSegment == 1 ? .enclosing : .symbol)
+        onTrackingChange?()
         render()
     }
 

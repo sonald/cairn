@@ -497,7 +497,11 @@ public final class EngineSession: Sendable {
             file: file, candidates: candidates
         ) else { return .none }
 
+        // The typeRef's byte ranges belong to the file that holds the
+        // record: the source file for a lexical binding, the declaring file
+        // for a field (which may differ from the file being read).
         let typeRef: TypeRef?
+        let typeFile: PathID
         if let bindingIndex = firstHop.evidence.compactMap({
             if case let .lexicalBinding(bindingIndex) = $0 { return bindingIndex }
             return nil
@@ -507,20 +511,22 @@ public final class EngineSession: Sendable {
            index.bindings.indices.contains(Int(bindingIndex))
         {
             typeRef = index.bindings[Int(bindingIndex)].typeRef
+            typeFile = file
         } else if firstHop.target.localKind == .declarationFacet,
                   let index = content(at: firstHop.target.pathID)?.1,
                   index.symbols.indices.contains(Int(firstHop.target.localIndex))
         {
             typeRef = index.symbols[Int(firstHop.target.localIndex)].typeRef
+            typeFile = firstHop.target.pathID
         } else {
             typeRef = nil
+            typeFile = file
         }
         guard let typeRef else { return .none }
 
         let sourceName: (ByteRange) -> String = { [weak self] range in
-            guard let self, let bytes = self.sourceBytes(at: file) else { return "" }
-            let slice = bytes[Int(range.lowerBound)..<Int(range.upperBound)]
-            return String(decoding: slice, as: UTF8.self)
+            guard let self, let bytes = self.sourceBytes(at: typeFile) else { return "" }
+            return Self.spelledRange(range, bytes: bytes)
         }
 
         switch typeRef {
@@ -531,7 +537,7 @@ public final class EngineSession: Sendable {
         case let .named(range), let .selfType(range):
             return try hopToType(
                 spelling: range,
-                file: file,
+                file: typeFile,
                 firstHop: firstHop,
                 context: context,
                 capAtProbable: false
@@ -539,7 +545,7 @@ public final class EngineSession: Sendable {
         case let .constructed(range):
             return try hopToType(
                 spelling: range,
-                file: file,
+                file: typeFile,
                 firstHop: firstHop,
                 context: context,
                 capAtProbable: true
@@ -547,7 +553,7 @@ public final class EngineSession: Sendable {
         case let .genericBound(_, bound):
             return try hopToType(
                 spelling: bound,
-                file: file,
+                file: typeFile,
                 firstHop: firstHop,
                 context: context,
                 capAtProbable: false

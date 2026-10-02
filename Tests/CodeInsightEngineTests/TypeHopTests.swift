@@ -344,12 +344,45 @@ func typeHopProbesResolveThroughGoldSet() throws {
 }
 
 @Test
-func debugGoldFailures() throws {
-    let fixture = repositoryRoot.appendingPathComponent("goldset/fixtures/type-hop")
-    let report = try evaluateGoldSet(
-        at: fixture.appendingPathComponent("type-hop.gold"),
-        corpus: fixture
-    )
+func typeHopReadsFieldTypeFromTheFieldsOwnFile() throws {
+    let session = try makeSession([
+        "src/types.rs": """
+        pub struct Inner { pub id: u64 }
+
+        pub struct Outer {
+            pub count: u32,
+            pub inner: Inner,
+        }
+        """,
+        "src/main.rs": """
+        mod types;
+        use types::{Inner, Outer};
+
+        fn f(o: Outer) -> u64 {
+            o.inner.id + o.count as u64
+        }
+        """,
+    ])
+    let context = queryContext(for: session)
+    let main = try pathID("src/main.rs", in: session)
+    // `o.inner` — the field lives in types.rs; its type must come from there.
+    let innerOffset = try offset(line: 5, column: 7, in: session, path: "src/main.rs")
+    guard case let .targets(targets, _) = try session.typeHop(
+        file: main, offset: innerOffset, context: context
+    ) else {
+        Issue.record("cross-file field hop returned no targets")
+        return
+    }
+    #expect(targets.contains { facet(named: "Inner", at: $0, in: session) != nil })
+    // `o.count` — a primitive spelled in types.rs, named from types.rs bytes.
+    let countOffset = try offset(line: 5, column: 20, in: session, path: "src/main.rs")
+    guard case let .primitive(name) = try session.typeHop(
+        file: main, offset: countOffset, context: context
+    ) else {
+        Issue.record("cross-file primitive field did not report a primitive")
+        return
+    }
+    #expect(name == "u32")
 }
 
 // MARK: P4 — Python / TypeScript type hops

@@ -1467,6 +1467,47 @@ func emptyWindowRetiresPanelsWithoutAnObjectOfOperation() async {
     #expect(fixture.controller.selfTestEmptyStateOpenButtonIsVisibleDefaultAction)
 }
 
+/// R5.1: switching the lens to the enclosing mode — from its control or
+/// the menu command — shows the scope at the current caret at once,
+/// without waiting for another caret move.
+@MainActor
+@Test
+func lensSwitchToEnclosingShowsTheCurrentCaretsScope() async throws {
+    _ = NSApplication.shared
+    let source = "pub fn target() {}\npub fn main() {\n    target();\n}\n"
+    let root = try mainWindowTemporaryProject(["src/main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    let main = root.appendingPathComponent("src/main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+
+    let insideMain = UInt32(source.utf8.count - "target();\n}\n".utf8.count)
+    controller.selfTestFollowCaret(offset: insideMain)
+    #expect(await mainWindowWaitUntil(model.contextWindow.displayedCandidate != nil))
+
+    controller.selfTestChooseLensTracking(.enclosing)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "main")
+
+    controller.selfTestChooseLensTracking(.symbol)
+    #expect(await mainWindowWaitUntil(model.contextWindow.displayedCandidate != nil))
+
+    // The menu command path replays the caret too.
+    controller.setLensTracking(.enclosing)
+    #expect(model.contextWindow.activeEnclosingScope?.name == "main")
+}
+
 @MainActor
 @Test
 func nonSourceSurfacesRetireSourcePanelsAndRestoreThemOnReturn() async throws {

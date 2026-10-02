@@ -2,5 +2,5 @@
 type index.ts:5:15 -> index.ts:1:7
 # A use of the primitive-typed declarator stays put (Q3).
 type index.ts:6:16 -> primitive string
-# The declaration-position probe mirrors the usage probe.
-type index.ts:5:15 -> index.ts:1:7
+# A `T | null` declarator peels to the class at its use.
+type index.ts:11:11 -> index.ts:9:7

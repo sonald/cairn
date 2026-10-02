@@ -3785,6 +3785,33 @@ func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
     })
 }
 
+/// R3.1: "跳到类型定义" on a binding the syntax gives no type for asks the
+/// Exact layer, so an inferred binding still jumps to its type.
+@MainActor
+@Test
+func typeDefinitionCommandFallsBackToExactForInferredBinding() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        fn make_s() -> S { S { n: 1 } }
+        fn main() {
+            let made = make_s();
+            let _ = made;
+        }
+        """
+    let sOffset = byteOffset(of: "pub struct S", in: source) + 11
+    let (model, gate, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let use = byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
+    let jump = Task { await model.typeDefinitionTarget(file: "main.rs", offset: use) }
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
+    gate.resumeAll(with: .completed([exactTypeEntry(file: "main.rs", offset: sOffset)]))
+    guard case let .target(target) = await jump.value else {
+        Issue.record("inferred binding found no type target")
+        return
+    }
+    #expect(target.targetByteOffset == sOffset)
+}
+
 /// Q4: a manual declaration/type toggle before the Exact reply blocks the
 /// auto-switch.
 @MainActor
@@ -4141,6 +4168,81 @@ private func makeEnclosingLensModel(
         try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
     )
     return (model, document, root)
+}
+
+/// R5.3: in the enclosing mode a click neither replaces the enclosing
+/// presentation nor sends Exact requests; ⌘-click still answers a target.
+/// Switching back to the symbol mode shows the last symbol again.
+@MainActor
+@Test
+func enclosingModeIgnoresSymbolClicksAndRestoresSymbolOnSwitchBack() async throws {
+    let source = """
+        fn alpha() {}
+        fn main() {
+            alpha();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let document = try #require(
+        try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
+    )
+    let use = byteOffset(of: "alpha();", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: use)
+    #expect(await testWaitUntil("symbol shown") { model.symbolCandidate != nil })
+    #expect(await testWaitUntil("first click's exact request") { log.recorded.count == 1 })
+
+    model.setTracking(.enclosing)
+    model.caretMoved(file: "main.rs", offset: use, document: document)
+    #expect(model.activeEnclosingScope?.name == "main")
+
+    // A plain click on another symbol in the enclosing mode.
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "fn main", in: source) + 3)
+    // ⌘-click answers a target without touching the stage.
+    let jump = await model.explicitJump(file: "main.rs", offset: use)
+    #expect(jump != nil)
+    try await Task.sleep(for: .milliseconds(150))
+    #expect(model.activeEnclosingScope?.name == "main")
+    #expect(log.recorded.count == 1)
+
+    model.setTracking(.symbol)
+    #expect(await testWaitUntil("symbol restored") {
+        model.activeEnclosingScope == nil && model.displayedCandidate != nil
+    })
+}
+
+/// R5.1: of nested functions, the innermost one encloses the caret.
+@MainActor
+@Test
+func enclosingPicksTheInnermostOfNestedFunctions() async throws {
+    let source = """
+        fn outer() {
+            fn inner() {
+                let z = 1;
+            }
+            let y = 2;
+        }
+        """
+    let (model, document, root) = try makeEnclosingLensModel(source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.setTracking(.enclosing)
+
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "let z", in: source),
+        document: document
+    )
+    #expect(model.activeEnclosingScope?.name == "inner")
+
+    // Back in the outer body, after the nested function → the outer one.
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "let y", in: source),
+        document: document
+    )
+    #expect(model.activeEnclosingScope?.name == "outer")
 }
 
 /// R5.1: the innermost function wins over the enclosing type; outside every

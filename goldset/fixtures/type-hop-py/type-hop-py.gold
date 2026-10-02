@@ -2,5 +2,5 @@
 type lib.py:11:12 -> lib.py:1:7
 # A primitive-typed parameter's use stays put (Q3).
 type lib.py:11:18 -> primitive int
-# The declaration-position probe mirrors the usage probe.
-type lib.py:11:12 -> lib.py:1:7
+# `self` hops to the enclosing class (Q6).
+type lib.py:16:16 -> lib.py:14:7

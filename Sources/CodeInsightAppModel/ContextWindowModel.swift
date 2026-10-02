@@ -591,7 +591,19 @@ public final class ContextWindowModel {
     public func setTracking(_ tracking: Tracking) {
         guard tracking != self.tracking else { return }
         self.tracking = tracking
-        if tracking == .symbol, mode == .follow, let displayedToken {
+        // Drop in-flight symbol lookups and Exact work: their results belong
+        // to the other mode. Forget the located token so the replay below
+        // is not swallowed by the same-token dedup.
+        requestID &+= 1
+        cancelExactUpgrade()
+        pendingDwellTask?.cancel()
+        pendingDwellTask = nil
+        dwellArmedToken = nil
+        locatedToken = nil
+        isShowingPreviousToken = false
+        guard tracking == .symbol else { return }
+        if case .enclosing = stage { stage = .idle }
+        if mode == .follow, let displayedToken {
             tokenClicked(file: displayedToken.file, offset: displayedToken.offset)
         }
     }
@@ -713,19 +725,12 @@ public final class ContextWindowModel {
         offset: UInt32,
         trigger: Trigger = .click
     ) {
-        guard mode == .follow else { return }
+        // R5.3: the enclosing mode follows the caret's scope, not symbols.
+        guard mode == .follow, tracking == .symbol else { return }
         let token = Token(file: file, offset: offset)
         Task { [weak self] in
             _ = await self?.lookup(token, trigger: trigger)
         }
-    }
-
-    /// R4.3: a click/caret that lands on no symbol keeps the last content.
-    public func tokenMissed(trigger: Trigger = .click) {
-        guard mode == .follow else { return }
-        pendingDwellTask?.cancel()
-        pendingDwellTask = nil
-        isShowingPreviousToken = true
     }
 
     /// R5: the enclosing-function mode. Purely syntactic — no index and no
@@ -735,10 +740,12 @@ public final class ContextWindowModel {
         let facets = ReadingPlan.enclosingAssociatedFacets(at: offset, in: document)
         // Innermost function or method first (closures are not outline
         // facets, so they cannot win); then the innermost type; else idle.
+        // `enclosingAssociatedFacets` orders outermost first, so the
+        // innermost match is the last one.
         let functions: Set<OutlineKind> = [.fn, .method]
         let types: Set<OutlineKind> = [.impl, .struct, .enum, .trait, .class]
-        let chosen = facets.first { functions.contains($0.kind) }
-            ?? facets.first { types.contains($0.kind) }
+        let chosen = facets.last { functions.contains($0.kind) }
+            ?? facets.last { types.contains($0.kind) }
         // R5.1: no function and no type — the placeholder (idle) state.
         guard let facet = chosen,
               let scope = enclosingScope(facet, in: document, path: file)
@@ -833,7 +840,9 @@ public final class ContextWindowModel {
     }
 
     public func explicitJump(file: String, offset: UInt32) async -> Candidate? {
-        if mode == .pinned {
+        // Pinned or tracking the enclosing scope: answer the jump without
+        // replacing what the lens shows (R6.2, R5.3).
+        if mode == .pinned || tracking == .enclosing {
             return await resolvedCandidate(file: file, offset: offset)
         }
         return await lookup(Token(file: file, offset: offset))
@@ -843,9 +852,10 @@ public final class ContextWindowModel {
         guard case let .ready(session, context) = projectState else { return nil }
         if let locatedToken,
            locatedToken.file == file,
-           locatedToken.range.contains(offset)
+           locatedToken.range.contains(offset),
+           let current = symbolCandidate
         {
-            return symbolCandidate
+            return current
         }
         guard let pathID = pathID(file, in: session) else { return nil }
         guard let candidates = try? await resolveCandidates(
@@ -1226,6 +1236,57 @@ public final class ContextWindowModel {
         case let .genericUnbounded(name):
             return .failed(localizedFormat("model.typehop.genericNote", name))
         case .targets, .none:
+            // R3.1 / R1.6: the syntax spells no type here (an inferred
+            // binding, a dependency type); the Exact layer may still know.
+            return await exactTypeDefinitionTarget(
+                file: file, offset: offset, session: session, context: context
+            )
+        }
+    }
+
+    /// The Exact `typeDefinition` answer for the jump command, held to the
+    /// same generation and content-drift checks as the lens upgrade. It uses
+    /// its own batch so it never cancels the lens's in-flight requests.
+    private func exactTypeDefinitionTarget(
+        file: String,
+        offset: UInt32,
+        session: EngineSession,
+        context: QueryContext
+    ) async -> TypeTargetResult {
+        guard let typeDefinitionResolver else {
+            return .failed(localized("model.typehop.needsExact"))
+        }
+        if let notReady = typeDefinitionReadiness?() {
+            return .failed(notReady)
+        }
+        let batch = ExactRequestBatch()
+        let result = await typeDefinitionResolver(file, offset, context.generation, batch)
+        guard sessionIsCurrent(session, context) else {
+            return .failed(localized("model.typehop.noType"))
+        }
+        switch result {
+        case let .completed(entries):
+            guard let exact = entries.first,
+                  let targetOffset = UInt32(exactly: exact.location.byteOffset)
+            else { return .failed(localized("model.typehop.noType")) }
+            let targetPath = projectPath(exact.location.file)
+            let sourceIsCurrent = await indexContentIsCurrent(file, session: session)
+            let targetIsCurrent = await indexContentIsCurrent(targetPath, session: session)
+            guard sourceIsCurrent && targetIsCurrent else {
+                onStaleIndexContent?(sourceIsCurrent ? targetPath : file)
+                return .failed(localized("model.typehop.noType"))
+            }
+            guard sessionIsCurrent(session, context),
+                  let candidate = await exactCandidate(
+                      at: targetPath,
+                      offset: targetOffset,
+                      attribution: exact.attribution,
+                      origin: exact.origin,
+                      session: session
+                  )
+            else { return .failed(localized("model.typehop.noType")) }
+            return .target(candidate)
+        case .cancelled, .unsupported, .unavailable, nil:
             return .failed(localized("model.typehop.needsExact"))
         }
     }

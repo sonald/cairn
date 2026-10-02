@@ -9,3 +9,8 @@ def f(repo, count):
 
 def g(repo: "Repository", count: int):
     return repo, count
+
+
+class Holder:
+    def me(self):
+        return self
