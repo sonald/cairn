@@ -8,6 +8,12 @@ import Observation
 @MainActor
 @Observable
 public final class ContextWindowModel {
+    /// R6.1: what the lens tracks (T1=B) — orthogonal to `isPinned`.
+    public enum Tracking: String, Codable, Sendable {
+        case symbol
+        case enclosing
+    }
+
     public enum Mode: Sendable {
         case follow
         case pinned
@@ -159,6 +165,22 @@ public final class ContextWindowModel {
         case candidates([Candidate], selected: Int)
         /// The lens shows the type a value binding or field points to (P1).
         case typeHop(TypeHop, selected: Int)
+        /// R5: the lens shows the declaration enclosing the caret.
+        case enclosing(EnclosingScope)
+    }
+
+    /// R5.2: the declaration enclosing the caret — document comment start
+    /// through the signature end, plus the first body line, and its size.
+    public struct EnclosingScope: Sendable, Equatable {
+        public let path: String
+        public let kind: OutlineKind
+        public let name: String
+        public let nameLine: UInt32
+        public let displayRange: CodeInsightCore.ByteRange
+        public let signatureEndLine: UInt32
+        public let bodyFirstLine: UInt32
+        public let bodyLineCount: Int
+        public let methodCount: Int?
     }
 
     /// Everything the model needs from the syntactic type hop (P1.4).
@@ -234,6 +256,12 @@ public final class ContextWindowModel {
         UInt32,
         QueryContext
     ) async throws -> TypeHopAnswer
+    typealias TypeDefinitionResolver = @MainActor (
+        String,
+        UInt32,
+        UInt64,
+        ExactRequestBatch
+    ) async -> ExactCoordinator.TypeDefinitionResult?
     typealias Loader = @Sendable (URL, LanguageMode) async -> ReaderDocument?
     typealias ExactResolver = @MainActor (
         String,
@@ -246,6 +274,10 @@ public final class ContextWindowModel {
     typealias ContentIdentityReader = @Sendable (URL) async -> ContentID?
 
     public private(set) var mode: Mode = .follow
+    public private(set) var tracking: Tracking = .symbol
+    public private(set) var isPinned = false
+    /// R4.3: the caret sits on no symbol; the lens keeps the last content.
+    public private(set) var isShowingPreviousToken = false
     public private(set) var stage: Stage = .idle
     public private(set) var requestID: UInt64 = 0
     /// Reports a project path whose content no longer matches the indexed
@@ -255,6 +287,8 @@ public final class ContextWindowModel {
 
     private let resolver: Resolver
     private var typeHopResolver: TypeHopResolver?
+    private var typeDefinitionResolver: TypeDefinitionResolver?
+    private var typeDefinitionReadiness: (() -> String?)?
     private let loader: Loader
     private var exactResolver: ExactResolver?
     private var hoverResolver: (@MainActor (
@@ -305,12 +339,16 @@ public final class ContextWindowModel {
         loader: @escaping Loader = loadReaderDocument,
         exactResolver: ExactResolver? = nil,
         contentIdentity: ContentIdentityReader? = nil,
-        typeHopResolver: TypeHopResolver? = nil
+        typeHopResolver: TypeHopResolver? = nil,
+        typeDefinitionResolver: TypeDefinitionResolver? = nil,
+        typeDefinitionReadiness: (() -> String?)? = nil
     ) {
         self.resolver = resolver
         self.loader = loader
         self.exactResolver = exactResolver
         self.typeHopResolver = typeHopResolver
+        self.typeDefinitionResolver = typeDefinitionResolver
+        self.typeDefinitionReadiness = typeDefinitionReadiness
         contentIdentityOverride = contentIdentity
     }
 
@@ -333,6 +371,22 @@ public final class ContextWindowModel {
                 generation: generation,
                 batch: batch
             )
+        }
+        typeDefinitionResolver = { [weak coordinator] file, offset, generation, batch in
+            await coordinator?.typeDefinition(
+                file: file,
+                byteOffset: offset,
+                generation: generation,
+                batch: batch
+            )
+        }
+        typeDefinitionReadiness = { [weak coordinator] in
+            guard let coordinator else { return nil }
+            return switch coordinator.readiness {
+            case .ready: nil
+            case .preparing: localized("model.typehop.pendingExact")
+            case let .unavailable(reason), let .off(reason): reason
+            }
         }
     }
 
@@ -431,6 +485,9 @@ public final class ContextWindowModel {
     /// "对符号做事"的入口只读它；类型直达（P1）下它仍是那个绑定。
     public var symbolCandidate: Candidate? {
         switch stage {
+        case .enclosing:
+            // R5.4: the enclosing mode points at no symbol.
+            return nil
         case let .typeHop(hop, _):
             return hop.via
         case let .candidates(candidates, selected):
@@ -444,6 +501,10 @@ public final class ContextWindowModel {
     /// 类型直达下按 `showing` 返回类型目标或绑定本身（R7）。
     public var displayedCandidate: Candidate? {
         switch stage {
+        case .enclosing:
+            // R5.4: the enclosing scope renders through its own header and
+            // mini reader; there is no candidate to open as a symbol.
+            return nil
         case let .typeHop(hop, selected):
             if hop.showing == .type, hop.targets.indices.contains(selected) {
                 return hop.targets[selected]
@@ -459,6 +520,12 @@ public final class ContextWindowModel {
     /// The active type-hop presentation, for the one-hop label (P1.5).
     public var activeTypeHop: TypeHop? {
         if case let .typeHop(hop, _) = stage { return hop }
+        return nil
+    }
+
+    /// The enclosing-scope presentation (R5).
+    public var activeEnclosingScope: EnclosingScope? {
+        if case let .enclosing(scope) = stage { return scope }
         return nil
     }
 
@@ -491,7 +558,7 @@ public final class ContextWindowModel {
             return candidates.count
         case let .typeHop(hop, _):
             return hop.targets.count
-        case .idle, .indexBuilding:
+        case .idle, .indexBuilding, .enclosing:
             return 0
         }
     }
@@ -502,7 +569,7 @@ public final class ContextWindowModel {
             return candidates.indices.contains(selected) ? selected : nil
         case let .typeHop(hop, selected):
             return hop.targets.indices.contains(selected) ? selected : nil
-        case .idle, .indexBuilding:
+        case .idle, .indexBuilding, .enclosing:
             return nil
         }
     }
@@ -513,7 +580,26 @@ public final class ContextWindowModel {
     }
 
     public func setMode(_ mode: Mode) {
-        let enteringPin = mode == .pinned && self.mode != .pinned
+        switch mode {
+        case .follow: setPinned(false)
+        case .pinned: setPinned(true)
+        }
+    }
+
+    /// R6.1: switch what the lens tracks. Switching away from the enclosing
+    /// mode replays the current token so the lens shows the symbol again.
+    public func setTracking(_ tracking: Tracking) {
+        guard tracking != self.tracking else { return }
+        self.tracking = tracking
+        if tracking == .symbol, mode == .follow, let displayedToken {
+            tokenClicked(file: displayedToken.file, offset: displayedToken.offset)
+        }
+    }
+
+    /// R6.1/R6.2: the pin is orthogonal to tracking. Entering the pin keeps
+    /// the exact-upgrade semantics of the old `setMode(.pinned)`.
+    public func setPinned(_ pinned: Bool) {
+        let enteringPin = pinned && !isPinned
         if enteringPin {
             requestID &+= 1
             cancelExactUpgrade()
@@ -526,7 +612,8 @@ public final class ContextWindowModel {
             }
             if !hasDisplayedLocatedToken { locatedToken = nil }
         }
-        self.mode = mode
+        mode = pinned ? .pinned : .follow
+        isPinned = pinned
         if enteringPin,
            let displayedToken,
            case let .ready(session, context) = projectState,
@@ -609,12 +696,140 @@ public final class ContextWindowModel {
         }
     }
 
-    public func tokenClicked(file: String, offset: UInt32) {
+    /// R4.2: `.click` fires exact requests immediately; `.caret` delays them
+    /// until the caret has dwelled on the same token for `exactDwell`.
+    public enum Trigger: Sendable {
+        case click
+        case caret
+    }
+
+    /// Test seam for the caret dwell (R4.2); production uses 400 ms.
+    public var exactDwell: Duration = .milliseconds(400)
+    private var pendingDwellTask: Task<Void, Never>?
+    private var dwellArmedToken: (file: String, range: ByteRange)?
+
+    public func tokenClicked(
+        file: String,
+        offset: UInt32,
+        trigger: Trigger = .click
+    ) {
         guard mode == .follow else { return }
         let token = Token(file: file, offset: offset)
         Task { [weak self] in
-            _ = await self?.lookup(token)
+            _ = await self?.lookup(token, trigger: trigger)
         }
+    }
+
+    /// R4.3: a click/caret that lands on no symbol keeps the last content.
+    public func tokenMissed(trigger: Trigger = .click) {
+        guard mode == .follow else { return }
+        pendingDwellTask?.cancel()
+        pendingDwellTask = nil
+        isShowingPreviousToken = true
+    }
+
+    /// R5: the enclosing-function mode. Purely syntactic — no index and no
+    /// exact requests; the same outline facet does not refresh the stage.
+    public func caretMoved(file: String, offset: UInt32, document: ReaderDocument) {
+        guard tracking == .enclosing, !isPinned else { return }
+        let facets = ReadingPlan.enclosingAssociatedFacets(at: offset, in: document)
+        // Innermost function or method first (closures are not outline
+        // facets, so they cannot win); then the innermost type; else idle.
+        let functions: Set<OutlineKind> = [.fn, .method]
+        let types: Set<OutlineKind> = [.impl, .struct, .enum, .trait, .class]
+        let chosen = facets.first { functions.contains($0.kind) }
+            ?? facets.first { types.contains($0.kind) }
+        // R5.1: no function and no type — the placeholder (idle) state.
+        guard let facet = chosen,
+              let scope = enclosingScope(facet, in: document, path: file)
+        else {
+            stage = .idle
+            isShowingPreviousToken = false
+            return
+        }
+        if let current = activeEnclosingScope,
+           current.path == file,
+           current.name == facet.name,
+           current.kind == facet.kind,
+           current.displayRange == scope.displayRange
+        {
+            return // same outline facet — no refresh (R5.3)
+        }
+        enclosingRefreshCount += 1
+        stage = .enclosing(scope)
+        isShowingPreviousToken = false
+    }
+
+    /// Test observable for the same-facet dedup (R5.3): how many enclosing
+    /// stages were written.
+    package private(set) var enclosingRefreshCount = 0
+
+    /// Builds the display facts for an enclosing facet (R5.2).
+    private func enclosingScope(
+        _ facet: OutlineFacet,
+        in document: ReaderDocument,
+        path: String
+    ) -> EnclosingScope? {
+        let table = document.lineTable
+        guard let nameLine = table.lineColumn(at: facet.nameRange.lowerBound)?.line
+        else { return nil }
+
+        // Signature end: the first fold region inside the facet that starts
+        // after the name; its opening line is the signature's last line.
+        var signatureEndLine = nameLine
+        var bodyFirstLine = nameLine
+        for region in document.foldRegions {
+            // The first fold region inside the facet that starts after the
+            // name: its body start (`{` line) is the signature's last line.
+            guard region.bodyRange.lowerBound >= facet.nameRange.upperBound,
+                  region.bodyRange.lowerBound < facet.range.upperBound
+            else { continue }
+            if let line = table.lineColumn(at: region.bodyRange.lowerBound)?.line {
+                signatureEndLine = max(signatureEndLine, line)
+                bodyFirstLine = line + 1
+                break
+            }
+        }
+        // Fallback: display just the name's line.
+        if signatureEndLine == nameLine {
+            bodyFirstLine = nameLine
+        }
+
+        let docStart: UInt32
+        if let docRange = docCommentRange(above: facet.range, in: document),
+           let line = table.lineColumn(at: docRange.lowerBound)?.line
+        {
+            docStart = line
+        } else {
+            docStart = nameLine
+        }
+
+        let facetStartLine = table.lineColumn(at: facet.range.lowerBound)?.line ?? docStart
+        let displayStart = min(docStart, facetStartLine, nameLine)
+        guard let lower = table.byteOffset(line: displayStart, column: 1) else {
+            return nil
+        }
+        let bodyLineCount = max(
+            0,
+            Int((table.lineColumn(at: facet.range.upperBound)?.line ?? bodyFirstLine)) - Int(bodyFirstLine)
+        )
+        var methodCount: Int?
+        if facet.kind == .impl {
+            methodCount = document.outlineFacets.filter {
+                $0.kind == .method && facet.range.contains($0.range.lowerBound)
+            }.count
+        }
+        return EnclosingScope(
+            path: path,
+            kind: facet.kind,
+            name: facet.name,
+            nameLine: nameLine,
+            displayRange: ByteRange(lowerBound: lower, upperBound: facet.range.upperBound),
+            signatureEndLine: signatureEndLine,
+            bodyFirstLine: bodyFirstLine,
+            bodyLineCount: bodyLineCount,
+            methodCount: methodCount
+        )
     }
 
     public func explicitJump(file: String, offset: UInt32) async -> Candidate? {
@@ -654,7 +869,7 @@ public final class ContextWindowModel {
             guard !hop.targets.isEmpty else { return }
             selectionEpoch &+= 1
             stage = .typeHop(hop, selected: (selected + 1) % hop.targets.count)
-        case .idle, .indexBuilding:
+        case .idle, .indexBuilding, .enclosing:
             break
         }
     }
@@ -669,7 +884,7 @@ public final class ContextWindowModel {
             guard hop.targets.indices.contains(index), index != selected else { return }
             selectionEpoch &+= 1
             stage = .typeHop(hop, selected: index)
-        case .idle, .indexBuilding:
+        case .idle, .indexBuilding, .enclosing:
             break
         }
     }
@@ -690,12 +905,12 @@ public final class ContextWindowModel {
                 hop,
                 selected: (selected - 1 + hop.targets.count) % hop.targets.count
             )
-        case .idle, .indexBuilding:
+        case .idle, .indexBuilding, .enclosing:
             break
         }
     }
 
-    private func lookup(_ token: Token) async -> Candidate? {
+    private func lookup(_ token: Token, trigger: Trigger = .click) async -> Candidate? {
         guard case let .ready(session, context) = projectState else {
             pendingToken = token
             if case .indexing = projectState { stage = .indexBuilding }
@@ -709,6 +924,9 @@ public final class ContextWindowModel {
         }
         requestID &+= 1
         cancelExactUpgrade()
+        pendingDwellTask?.cancel()
+        pendingDwellTask = nil
+        dwellArmedToken = nil
         let currentRequest = requestID
         guard let pathID = pathID(token.file, in: session) else {
             locatedToken = nil
@@ -720,8 +938,12 @@ public final class ContextWindowModel {
             offset: token.offset,
             context: context
         ) else {
-            locatedToken = nil
-            stage = .idle
+            // R4.3: the caret/click sits on no symbol — keep the previous
+            // content and flag it (T4).
+            pendingDwellTask?.cancel()
+            pendingDwellTask = nil
+            dwellArmedToken = nil
+            isShowingPreviousToken = true
             return nil
         }
         if let locatedToken,
@@ -746,19 +968,47 @@ public final class ContextWindowModel {
             }
             stage = .candidates(candidates, selected: 0)
             displayedToken = token
-            await applyTypeHop(
+            isShowingPreviousToken = false
+            var wantsTypeDefinition = await applyTypeHop(
                 firstCandidate: candidates[0],
                 file: pathID,
                 offset: token.offset,
                 session: session,
-                context: context
-            )
-            startExactUpgrade(
-                token,
-                session: session,
                 context: context,
                 request: currentRequest
             )
+            if trigger == .caret {
+                // R4.2: delay exact requests until the caret dwells on this
+                // token; leaving the token cancels the pending request.
+                dwellArmedToken = (token.file, range)
+                let dwell = exactDwell
+                pendingDwellTask = Task { [weak self] in
+                    try? await Task.sleep(for: dwell)
+                    guard !Task.isCancelled else { return }
+                    await MainActor.run {
+                        guard let self, self.mode == .follow else { return }
+                        guard self.dwellArmedToken?.file == token.file,
+                              self.dwellArmedToken?.range == range
+                        else { return }
+                        self.dwellArmedToken = nil
+                        self.startExactUpgrade(
+                            token,
+                            session: session,
+                            context: context,
+                            request: self.requestID,
+                            requestTypeDefinition: wantsTypeDefinition
+                        )
+                    }
+                }
+            } else {
+                startExactUpgrade(
+                    token,
+                    session: session,
+                    context: context,
+                    request: currentRequest,
+                    requestTypeDefinition: wantsTypeDefinition
+                )
+            }
             return symbolCandidate ?? candidates[0]
         } catch {
             guard requestID == currentRequest else { return nil }
@@ -871,22 +1121,26 @@ public final class ContextWindowModel {
     /// type. Primitives and unconstrained generics stay on the declaration
     /// with an explanatory note; `.none` keeps the plain candidate list
     /// (P2 may still promote it once the Exact layer answers).
+    /// Returns true when the Exact `typeDefinition` should ride the same
+    /// batch as the definition upgrade (value bindings and fields whose type
+    /// is not a primitive or an unconstrained generic).
     private func applyTypeHop(
         firstCandidate: Candidate,
         file: PathID,
         offset: UInt32,
         session: EngineSession,
-        context: QueryContext
-    ) async {
-        guard let typeHopResolver else { return }
+        context: QueryContext,
+        request: UInt64
+    ) async -> Bool {
+        guard let typeHopResolver else { return false }
         guard let answer = try? await typeHopResolver(
             session, file, offset, context
-        ) else { return }
-        guard requestIDMatchesLatest(tokenless: true) else { return }
+        ) else { return false }
+        guard requestID == request else { return false }
         switch answer.result {
         case let .targets(resolutions, certainty) where !resolutions.isEmpty:
             var targets = await present(resolutions, session: session)
-            if targets.isEmpty { return }
+            if targets.isEmpty { return false }
             targets = targets.map { candidate in
                 candidate.withCertainty(certainty)
             }
@@ -899,6 +1153,7 @@ public final class ContextWindowModel {
                 showing: .type,
                 boundNote: answer.boundNote
             ), selected: 0)
+            return true
         case let .primitive(name):
             stage = .candidates(
                 [firstCandidate.withNote(localizedFormat(
@@ -906,6 +1161,7 @@ public final class ContextWindowModel {
                 ))],
                 selected: 0
             )
+            return false
         case let .genericUnbounded(name):
             stage = .candidates(
                 [firstCandidate.withNote(localizedFormat(
@@ -913,12 +1169,27 @@ public final class ContextWindowModel {
                 ))],
                 selected: 0
             )
+            return false
         case .targets, .none:
-            break
+            // R1.2 item 4 / R1.5: only value bindings and fields park in a
+            // pending type hop for the Exact layer; targets that are already
+            // types, functions, or modules keep the existing presentation.
+            guard answer.viaKind != nil,
+                  typeDefinitionResolver != nil,
+                  exactResolver != nil
+            else { return false }
+            stage = .typeHop(TypeHop(
+                via: firstCandidate,
+                viaText: answer.viaText ?? firstCandidate.excerpt,
+                viaKind: answer.viaKind.map(viaKindLabel)
+                    ?? viaKindLabel(.parameter),
+                targets: [],
+                showing: .type,
+                pendingExact: true
+            ), selected: 0)
+            return true
         }
     }
-
-    private func requestIDMatchesLatest(tokenless _: Bool) -> Bool { true }
 
     private func viaKindLabel(_ kind: TypeHopViaKind) -> String {
         switch kind {
@@ -963,7 +1234,8 @@ public final class ContextWindowModel {
         _ token: Token,
         session: EngineSession,
         context: QueryContext,
-        request: UInt64
+        request: UInt64,
+        requestTypeDefinition: Bool = false
     ) {
         guard exactResolver != nil else { return }
         Task { [weak self] in
@@ -971,7 +1243,8 @@ public final class ContextWindowModel {
                 token,
                 session: session,
                 context: context,
-                request: request
+                request: request,
+                requestTypeDefinition: requestTypeDefinition
             )
         }
     }
@@ -980,7 +1253,8 @@ public final class ContextWindowModel {
         _ token: Token,
         session: EngineSession,
         context: QueryContext,
-        request: UInt64
+        request: UInt64,
+        requestTypeDefinition: Bool = false
     ) async {
         guard let exactResolver,
               let batch = makeUpgradeBatch()
@@ -992,22 +1266,73 @@ public final class ContextWindowModel {
             context.generation,
             batch
         )
-        defer { finishExactUpgrade(batch) }
         guard requestID == request,
               batch.isCurrent,
               sessionIsCurrent(session, context)
-        else { return }
-        guard case .completed(let entries) = result else { return }
-        for exact in entries {
-            await applyExact(
-                exact,
-                token: token,
-                session: session,
-                context: context,
-                request: request,
-                selectionEpoch: requestSelectionEpoch
-            )
+        else {
+            finishExactUpgrade(batch)
+            return
         }
+        if case .completed(let entries) = result {
+            for exact in entries {
+                await applyExact(
+                    exact,
+                    token: token,
+                    session: session,
+                    context: context,
+                    request: request,
+                    selectionEpoch: requestSelectionEpoch
+                )
+            }
+        }
+        // P2: the typeDefinition request rides the same batch as the
+        // definition upgrade.
+        if requestTypeDefinition, let typeDefinitionResolver {
+            let typeResult = await typeDefinitionResolver(
+                token.file,
+                token.offset,
+                context.generation,
+                batch
+            )
+            defer { finishExactUpgrade(batch) }
+            guard requestID == request,
+                  batch.isCurrent,
+                  sessionIsCurrent(session, context)
+            else { return }
+            switch typeResult {
+            case .completed(let entries):
+                for exact in entries {
+                    await applyTypeDefinition(
+                        exact,
+                        token: token,
+                        session: session,
+                        context: context,
+                        request: request,
+                        selectionEpoch: requestSelectionEpoch
+                    )
+                }
+            case nil:
+                break
+            case .cancelled, .unsupported, .unavailable:
+                // A cancelled batch normally means a newer click already
+                // replaced the stage; when it was the final reply, stop the
+                // resolving state instead of spinning forever.
+                markTypeHopExactUnavailable()
+            }
+        } else {
+            finishExactUpgrade(batch)
+        }
+    }
+
+    /// P2: the exact layer cannot answer the type hop — surface the
+    /// "not ready" status instead of an endless resolving state.
+    private func markTypeHopExactUnavailable() {
+        guard case let .typeHop(hop, selected) = stage, hop.pendingExact else {
+            return
+        }
+        var updated = hop
+        updated.pendingExact = false
+        stage = .typeHop(updated, selected: selected)
     }
 
     package func cancelExactUpgrade() {
@@ -1115,6 +1440,109 @@ public final class ContextWindowModel {
             [candidate] + latest,
             selected: keepsUserChoice ? latestSelected + 1 : 0
         )
+    }
+
+    /// P2: applies a `typeDefinition` reply. In a `.typeHop` stage the
+    /// matching target upgrades to Exact in place (never moving the user's
+    /// selection) and non-matching targets are inserted at the front; a
+    /// pending stage (no syntactic type) is promoted in place (R1.7).
+    private func applyTypeDefinition(
+        _ exact: ExactOverlay.Entry,
+        token: Token,
+        session: EngineSession,
+        context: QueryContext,
+        request: UInt64,
+        selectionEpoch requestSelectionEpoch: UInt64
+    ) async {
+        guard requestID == request,
+              sessionIsCurrent(session, context),
+              let targetOffset = UInt32(exactly: exact.location.byteOffset)
+        else { return }
+        let targetPath = projectPath(exact.location.file)
+        let sourceIsCurrent = await indexContentIsCurrent(
+            token.file,
+            session: session
+        )
+        let targetIsCurrent = await indexContentIsCurrent(
+            targetPath,
+            session: session
+        )
+        guard requestID == request,
+              sessionIsCurrent(session, context)
+        else { return }
+        guard sourceIsCurrent && targetIsCurrent else {
+            onStaleIndexContent?(
+                sourceIsCurrent ? targetPath : token.file
+            )
+            return
+        }
+        // Re-read the stage after every await; replies may interleave with
+        // user selection or newer clicks.
+        switch stage {
+        case let .typeHop(hop, selected):
+            var updated = hop
+            updated.pendingExact = false
+            if let index = updated.targets.firstIndex(where: {
+                $0.path == targetPath && $0.targetByteOffset == targetOffset
+            }) {
+                updated.targets[index] = exactCandidate(
+                    upgrading: updated.targets[index],
+                    attribution: exact.attribution,
+                    origin: exact.origin,
+                    language: session.analysisProfile.language
+                )
+                stage = .typeHop(updated, selected: selected)
+                return
+            }
+            guard mode != .pinned,
+                  let candidate = await exactCandidate(
+                      at: targetPath,
+                      offset: targetOffset,
+                      attribution: exact.attribution,
+                      origin: exact.origin,
+                      session: session
+                  ),
+                  requestID == request,
+                  sessionIsCurrent(session, context),
+                  case let .typeHop(latest, latestSelected) = stage
+            else { return }
+            updated = latest
+            updated.pendingExact = false
+            let keepsUserChoice = selectionEpoch != requestSelectionEpoch
+                && latest.targets.indices.contains(latestSelected)
+            updated.targets = [candidate] + latest.targets
+            stage = .typeHop(
+                updated,
+                selected: keepsUserChoice ? latestSelected + 1 : 0
+            )
+        case let .candidates(current, selected):
+            // R1.7: the syntax spelled no type; the Exact answer promotes the
+            // lens to the type in place.
+            guard current.indices.contains(selected),
+                  mode != .pinned,
+                  let candidate = await exactCandidate(
+                      at: targetPath,
+                      offset: targetOffset,
+                      attribution: exact.attribution,
+                      origin: exact.origin,
+                      session: session
+                  ),
+                  requestID == request,
+                  sessionIsCurrent(session, context),
+                  case let .candidates(latest, latestSelected) = stage,
+                  latest.indices.contains(latestSelected)
+            else { return }
+            let via = latest[latestSelected]
+            stage = .typeHop(TypeHop(
+                via: via,
+                viaText: via.excerpt,
+                viaKind: via.bindingKind ?? viaKindLabel(.parameter),
+                targets: [candidate],
+                showing: .type
+            ), selected: 0)
+        case .idle, .indexBuilding, .enclosing:
+            return
+        }
     }
 
     private func exactCandidate(

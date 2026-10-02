@@ -1242,3 +1242,69 @@ func typeDefinitionNavigationCauseRoundTrips() throws {
     #expect(NavigationCause.typeDefinition.persistenceKey == "typeDefinition")
     #expect(NavigationCause(persistenceKey: "typeDefinition") == .typeDefinition)
 }
+
+/// R6.3: the lens tracking mode round-trips through the session codec; the
+/// pin has no field and never persists.
+@Test
+func sessionRestoresTrackingButNotPin() throws {
+    let nodeA = UUID()
+    let jump = SessionCodec.Jump(
+        path: "a.rs",
+        contentID: nil,
+        byteOffset: 0,
+        line: 1,
+        column: 1,
+        symbolAnchor: nil,
+        revision: nil
+    )
+    let snapshot = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: SessionCodec.NavigationState(
+            records: [.init(jump: jump, trailNodeID: nodeA)],
+            cursor: 0,
+            forwardRecord: nil
+        ),
+        readingTrail: nil,
+        contextTracking: "enclosing"
+    )
+    let data = try SessionCodec.encode(
+        snapshot,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    let decoded = try SessionCodec.decode(
+        data,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(decoded.contextTracking == "enclosing")
+    #expect(ContextWindowModel.Tracking(rawValue: decoded.contextTracking ?? "") == .enclosing)
+
+    // The default snapshot (no tracking written) decodes as nil — the pin
+    // itself has no representation at all.
+    let plain = SessionCodec.Snapshot(
+        projectRoot: "/tmp/project",
+        languages: [.rust],
+        revision: nil,
+        activeTabOrdinal: 0,
+        panelPreset: PanelPresetModel.reading.rawValue,
+        tabs: [],
+        navigationHistory: nil,
+        readingTrail: nil
+    )
+    let plainData = try SessionCodec.encode(
+        plain,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    )
+    #expect(try SessionCodec.decode(
+        plainData,
+        maximumTabCount: 10,
+        dependencyAllowed: { _ in false }
+    ).contextTracking == nil)
+}

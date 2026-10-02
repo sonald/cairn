@@ -615,3 +615,18 @@
 "trail.typeDefinition" = "类型";
 "model.typehop.noType" = "没有可跳转的类型";
 "model.typehop.needsExact" = "类型需要精确分析";
+
+/* 上下文窗口跟踪模式与图钉（P3）。 */
+"lens.trackSymbol" = "跟踪光标下的符号";
+"lens.trackEnclosing" = "跟踪所在函数";
+"lens.togglePin" = "固定 / 取消固定";
+"lens.previousTokenNote" = "光标不在符号上 · 保留上一次";
+"lens.enclosing.fn" = "函数";
+"lens.enclosing.method" = "方法";
+"lens.enclosing.struct" = "结构体";
+"lens.enclosing.enum" = "枚举";
+"lens.enclosing.trait" = "trait";
+"lens.enclosing.class" = "类";
+"lens.enclosing.bodyNote" = "⋯ 函数体 %lld 行 · 双击打开";
+"lens.enclosing.implNote" = "⋯ %1$lld 个方法 · 主体 %2$lld 行 · 双击打开";
+"lens.enclosing.placeholder" = "光标不在任何函数或类型里";

@@ -11433,6 +11433,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         projectCommandTarget()?.selectNextTab()
     }
 
+    @objc private func trackLensSymbol(_ sender: Any?) {
+        projectCommandTarget()?.setLensTracking(.symbol)
+    }
+
+    @objc private func trackLensEnclosing(_ sender: Any?) {
+        projectCommandTarget()?.setLensTracking(.enclosing)
+    }
+
+    @objc private func toggleLensPin(_ sender: Any?) {
+        projectCommandTarget()?.toggleLensPin()
+    }
+
     @objc private func previousContextCandidate(_ sender: Any?) {
         projectCommandTarget()?.selectPreviousContextCandidate(sender)
     }
@@ -11817,6 +11829,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         .lensPreviousCandidate: CommandAction(
             #selector(AppDelegate.previousContextCandidate(_:))
         ),
+        .lensTrackSymbol: CommandAction(#selector(AppDelegate.trackLensSymbol(_:))),
+        .lensTrackEnclosing: CommandAction(#selector(AppDelegate.trackLensEnclosing(_:))),
+        .lensTogglePin: CommandAction(#selector(AppDelegate.toggleLensPin(_:))),
         .lensNextCandidate: CommandAction(#selector(AppDelegate.nextContextCandidate(_:))),
     ]
 
@@ -12009,6 +12024,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuItemValidation,
         goMenu.addItem(.separator())
         appendMenuItem(for: .lensPreviousCandidate, to: goMenu)
         appendMenuItem(for: .lensNextCandidate, to: goMenu)
+        appendMenuItem(for: .lensTrackSymbol, to: goMenu)
+        appendMenuItem(for: .lensTrackEnclosing, to: goMenu)
+        appendMenuItem(for: .lensTogglePin, to: goMenu)
         goMenu.addItem(.separator())
         appendMenuItem(for: .goPreviousDiffHunk, to: goMenu)
         appendMenuItem(for: .goNextDiffHunk, to: goMenu)

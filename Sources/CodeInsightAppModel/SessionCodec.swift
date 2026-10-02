@@ -19,6 +19,8 @@ package enum SessionCodec {
         package let tabs: [Tab]
         package let navigationHistory: NavigationState?
         package let readingTrail: TrailState?
+        /// R6.3: the lens tracking mode per window; the pin never persists.
+        package let contextTracking: String?
 
         package init(
             projectRoot: String,
@@ -28,7 +30,8 @@ package enum SessionCodec {
             panelPreset: String,
             tabs: [Tab],
             navigationHistory: NavigationState? = nil,
-            readingTrail: TrailState? = nil
+            readingTrail: TrailState? = nil,
+            contextTracking: String? = nil
         ) {
             self.init(
                 projectRoot: projectRoot,
@@ -38,7 +41,8 @@ package enum SessionCodec {
                 panelPreset: panelPreset,
                 tabs: tabs,
                 navigationHistory: navigationHistory,
-                readingTrail: readingTrail
+                readingTrail: readingTrail,
+                contextTracking: contextTracking
             )
         }
 
@@ -50,8 +54,10 @@ package enum SessionCodec {
             panelPreset: String,
             tabs: [Tab],
             navigationHistory: NavigationState? = nil,
-            readingTrail: TrailState? = nil
+            readingTrail: TrailState? = nil,
+            contextTracking: String? = nil
         ) {
+            self.contextTracking = contextTracking
             self.projectRoot = projectRoot
             self.languages = languages
             self.revision = revision
@@ -567,6 +573,7 @@ package enum SessionCodec {
         let tabs: [TabDTO]
         let navigationHistory: NavigationStateDTO?
         let readingTrail: TrailStateDTO?
+        let contextTracking: String?
 
         init(_ snapshot: Snapshot) {
             schemaVersion = 3
@@ -581,6 +588,7 @@ package enum SessionCodec {
                 NavigationStateDTO.init
             )
             readingTrail = snapshot.readingTrail.map(TrailStateDTO.init)
+            contextTracking = snapshot.contextTracking
         }
 
         func snapshot() throws -> Snapshot {
@@ -620,6 +628,11 @@ package enum SessionCodec {
                 } else {
                     nil
                 }
+                let tracking: String? = if schemaVersion == 3 {
+                    contextTracking
+                } else {
+                    nil
+                }
                 return Snapshot(
                     projectRoot: projectRoot,
                     languages: languages,
@@ -628,7 +641,8 @@ package enum SessionCodec {
                     panelPreset: panelPreset,
                     tabs: try decodeTabs(),
                     navigationHistory: history,
-                    readingTrail: trail
+                    readingTrail: trail,
+                    contextTracking: tracking
                 )
             default:
                 throw DecodeError.unsupportedSchemaVersion(schemaVersion)

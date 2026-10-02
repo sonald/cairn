@@ -906,7 +906,9 @@ public final class AppModel {
             navigationHistory: Self.persistedNavigation(
                 navigationHistory.exportState()
             ),
-            readingTrail: Self.persistedTrail(readingTrail)
+            readingTrail: Self.persistedTrail(readingTrail),
+            // R6.3: the tracking mode survives per window; the pin does not.
+            contextTracking: contextWindow.tracking.rawValue
         )
     }
 

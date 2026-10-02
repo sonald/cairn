@@ -196,9 +196,11 @@ func clickGestureRequiresModifierAndChecksConflicts() {
     let table = KeyBindingTable(scheme: .default)
     // K-R2.4: a modifier-less click stays the plain click.
     #expect(table.validate(.click([]), for: .readerGestureDefinition) == .needsModifier)
-    // Conflicts are checked among gestures only.
+    // Conflicts are checked among gestures only. (⌘⇧+click is lawfully
+    // taken by reader.gesture.typeDefinition since P1, so ⌘⌥ is the free
+    // combination here.)
     #expect(
-        table.validate(.click([.command, .shift]), for: .readerGestureSymbolDoc) == .ok
+        table.validate(.click([.command, .option]), for: .readerGestureSymbolDoc) == .ok
     )
     var redefined = table
     redefined.setBindings([.click([.command, .shift])], for: .readerGestureDefinition)

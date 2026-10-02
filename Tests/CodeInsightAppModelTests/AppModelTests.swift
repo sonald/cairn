@@ -2366,15 +2366,26 @@ func contextWindowRecoversAfterClickOnUnresolvableLocation() async throws {
     model.tokenClicked(file: "main.rs", offset: tokenOffset)
     #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
 
-    // Click a location with no resolvable token: stage empties and the stale
-    // located token must be cleared, not retained.
+    // R4.3 (T4): a click with no resolvable token KEEPS the previous content
+    // and the located token — the lens stays usable and flags the miss.
     model.tokenClicked(file: "main.rs", offset: commentOffset)
     for _ in 0..<10 { await Task.yield() }
+    #expect(model.candidateCount == 1)
+    #expect(model.isShowingPreviousToken)
 
-    // Clicking the original token again must re-resolve instead of hitting the
-    // debounce guard with a stale locatedToken and staying blank forever.
+    // Re-clicking the retained token is deduped (no re-resolve)…
     model.tokenClicked(file: "main.rs", offset: tokenOffset)
-    #expect(await testWaitUntil("model.candidateCount == 1") { model.candidateCount == 1 })
+    for _ in 0..<10 { await Task.yield() }
+    #expect(model.candidateCount == 1)
+    #expect(resolveCount == 1)
+    // …and a genuinely new token still resolves after the miss.
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "fn main() {", in: source) + 4
+    )
+    #expect(await testWaitUntil("model.candidateCount == 1 && !model.isShowingPreviousToken") {
+        model.candidateCount == 1 && !model.isShowingPreviousToken
+    })
     #expect(resolveCount == 2)
 }
 
@@ -3631,4 +3642,694 @@ func lensPrimitiveFieldStaysOnDeclarationWithNote() async throws {
     }
     #expect(model.displayedCandidate?.note != nil)
 }
+
+
+// MARK: P2 — exact typeDefinition in the lens
+
+private final class ExactTypeGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuations: [CheckedContinuation<ExactCoordinator.TypeDefinitionResult?, Never>] = []
+
+    var suspendedCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return continuations.count
+    }
+
+    func suspend() async -> ExactCoordinator.TypeDefinitionResult? {
+        await withCheckedContinuation { continuation in
+            lock.lock()
+            continuations.append(continuation)
+            lock.unlock()
+        }
+    }
+
+    /// Resumes callers in suspension order: the first gets `first`, the rest
+    /// get `others`. Keeps stale-reply tests deterministic.
+    func resumeFirst(
+        _ first: ExactCoordinator.TypeDefinitionResult?,
+        others: ExactCoordinator.TypeDefinitionResult?
+    ) {
+        lock.lock()
+        let pending = continuations
+        continuations = []
+        lock.unlock()
+        for (index, continuation) in pending.enumerated() {
+            continuation.resume(returning: index == 0 ? first : others)
+        }
+    }
+
+    func resumeAll(with result: ExactCoordinator.TypeDefinitionResult?) {
+        lock.lock()
+        let pending = continuations
+        continuations = []
+        lock.unlock()
+        pending.forEach { $0.resume(returning: result) }
+    }
+}
+
+private func exactTypeEntry(
+    file: String, offset: UInt32
+) -> ExactOverlay.Entry {
+    ExactOverlay.Entry(
+        location: ExactLocation(
+            file: file,
+            byteOffset: Int(offset),
+            line: 1,
+            column: 1
+        ),
+        attribution: ExactAttribution(
+            provider: "fake-exact",
+            toolVersion: "test",
+            configFingerprint: "config",
+            environmentFingerprint: "",
+            environment: ExactAnalysisEnvironment(
+                trustMode: .safe,
+                limitations: []
+            ),
+            generatedAt: Date(timeIntervalSince1970: 0)
+        ),
+        origin: .worktree
+    )
+}
+
+@MainActor
+private func makeLensTypeHopModel(
+    _ source: String,
+    typeDefinitionResult: ExactCoordinator.TypeDefinitionResult?
+) throws -> (ContextWindowModel, ExactTypeGate, URL) {
+    let root = try temporaryProject(["main.rs": source])
+    let session = try ProjectIndexer().index(root: root)
+    let gate = ExactTypeGate()
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _, _ in .completed([]) },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            let spelling = try? session.bindingSpelling(
+                file: file, offset: offset, context: context
+            )
+            return ContextWindowModel.TypeHopAnswer(
+                result: result,
+                viaText: spelling?.text,
+                viaKind: spelling?.kind,
+                boundNote: spelling?.boundNote
+            )
+        },
+        typeDefinitionResolver: { _, _, _, _ in
+            await gate.suspend()
+        },
+        typeDefinitionReadiness: { nil }
+    )
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    return (model, gate, root)
+}
+
+/// R1.2 item 4: an inferred binding (`let made = make_s();`) parks the lens
+/// in a pending type hop; the Exact reply promotes it to the type in place.
+@MainActor
+@Test
+func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        fn make_s() -> S { S { n: 1 } }
+        fn main() {
+            let made = make_s();
+            let _ = made;
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(
+        source,
+        typeDefinitionResult: .completed([
+            exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+        ])
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
+    )
+    #expect(await testWaitUntil("model.activeTypeHop?.pendingExact == true") {
+        model.activeTypeHop?.pendingExact == true
+    })
+    gate.resumeAll(with: .completed([
+        exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+    ]))
+    let sOffset = byteOffset(of: "pub struct S", in: source) + 11
+    #expect(await testWaitUntil(
+        "model.displayedCandidate?.targetByteOffset == \(sOffset)"
+    ) {
+        model.displayedCandidate?.targetByteOffset == sOffset
+    })
+}
+
+/// Q4: a manual declaration/type toggle before the Exact reply blocks the
+/// auto-switch.
+@MainActor
+@Test
+func lensKeepsDeclarationWhenUserToggledBeforeExactArrives() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+
+        fn use_it(ps: &S) -> u32 {
+            ps.n
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(
+        source,
+        typeDefinitionResult: .completed([
+            exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+        ])
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
+    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
+    // The user toggles to the declaration before the Exact reply arrives.
+    model.showTypeHop(.declaration)
+    gate.resumeAll(with: .completed([
+        exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+    ]))
+    try await Task.sleep(for: .milliseconds(120))
+    let hop = try #require(model.activeTypeHop)
+    #expect(hop.showing == .declaration)
+    #expect(model.displayedCandidate?.targetByteOffset
+        == model.symbolCandidate?.targetByteOffset)
+}
+
+/// The syntactic type target upgrades to Exact in place, keeping the
+/// selection (P2.4).
+@MainActor
+@Test
+func lensUpgradesSyntacticTypeTargetToExactInPlace() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+
+        fn use_it(ps: &S) -> u32 {
+            ps.n
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(
+        source,
+        typeDefinitionResult: .completed([
+            exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+        ])
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
+    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
+    let selectedBefore = model.selectedIndex
+    gate.resumeAll(with: .completed([
+        exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+    ]))
+    #expect(await testWaitUntil("model.displayedCandidate?.certainty == .exact") {
+        model.displayedCandidate?.certainty == .exact
+    })
+    #expect(model.selectedIndex == selectedBefore)
+    #expect(model.activeTypeHop?.targets.count == 1)
+}
+
+/// Q3: primitive-typed bindings never fire a typeDefinition request.
+@MainActor
+@Test
+func lensSkipsTypeDefinitionForPrimitiveTypeRef() async throws {
+    final class RequestLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        func increment() {
+            lock.lock()
+            count += 1
+            lock.unlock()
+        }
+        var value: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return count
+        }
+    }
+    let requests = RequestLog()
+    let source = """
+        pub struct S { pub n: u32 }
+        impl S {
+            fn get(&self) -> u32 {
+                self.n
+            }
+        }
+        """
+    let root = try temporaryProject(["main.rs": source])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, _, _, _ in .completed([]) },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            return ContextWindowModel.TypeHopAnswer(result: result, viaText: nil, viaKind: nil, boundNote: nil)
+        },
+        typeDefinitionResolver: { _, _, _, _ in
+            requests.increment()
+            return .completed([])
+        },
+        typeDefinitionReadiness: { nil }
+    )
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "self.n", in: source) + UInt32("self.".utf8.count)
+    )
+    #expect(await testWaitUntil("model.displayedCandidate != nil") {
+        model.displayedCandidate != nil
+    })
+    try await Task.sleep(for: .milliseconds(120))
+    #expect(requests.value == 0)
+}
+
+/// A stale typeDefinition reply (a newer click already changed the token)
+/// is dropped (P2.4). The gate hands the S entry to the FIRST suspended
+/// request (the retired click) and cancels the second, so a missing
+/// request-id check would land the stale entry on the newest stage.
+@MainActor
+@Test
+func lensDropsStaleTypeDefinitionReply() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+
+        fn use_it(ps: &S) -> u32 {
+            let local = 1;
+            ps.n + local
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(
+        source,
+        typeDefinitionResult: .completed([
+            exactTypeEntry(file: "main.rs", offset: byteOffset(of: "pub struct S", in: source) + 11)
+        ])
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    let sOffset = byteOffset(of: "pub struct S", in: source) + 11
+
+    // Click 1 on `ps.n` — its upgrade request suspends at the gate first.
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "ps.n", in: source))
+    #expect(await testWaitUntil("model.activeTypeHop != nil") { model.activeTypeHop != nil })
+    #expect(await testWaitUntil("gate.suspendedCount == 1") { gate.suspendedCount >= 1 })
+
+    // Click 2 retires that request; its own request suspends second.
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "ps.n + local", in: source)
+            + UInt32("ps.n + ".utf8.count)
+    )
+    #expect(await testWaitUntil("model.activeTypeHop?.pendingExact == true") {
+        model.activeTypeHop?.pendingExact == true
+    })
+    #expect(await testWaitUntil("gate.suspendedCount == 2") { gate.suspendedCount >= 2 })
+
+    // First (stale) request receives the S entry; the newest is cancelled.
+    gate.resumeFirst(
+        .completed([exactTypeEntry(file: "main.rs", offset: sOffset)]),
+        others: .cancelled
+    )
+    #expect(await testWaitUntil(
+        "model.activeTypeHop?.pendingExact == false"
+    ) {
+        model.activeTypeHop?.pendingExact == false
+    })
+    // The lens still shows the newest click's declaration, not the stale S.
+    #expect(model.displayedCandidate?.targetByteOffset != sOffset)
+}
+
+// MARK: P3 — caret follow, dwell, enclosing mode, pin
+
+private final class ExactRequestLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var offsets: [UInt32] = []
+    func append(_ offset: UInt32) {
+        lock.lock()
+        offsets.append(offset)
+        lock.unlock()
+    }
+    var recorded: [UInt32] {
+        lock.lock()
+        defer { lock.unlock() }
+        return offsets
+    }
+}
+
+@MainActor
+private func makeCaretLensModel(
+    _ source: String,
+    requestLog: ExactRequestLog
+) throws -> (ContextWindowModel, URL) {
+    let root = try temporaryProject(["main.rs": source])
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        exactResolver: { _, offset, _, _ in
+            requestLog.append(offset)
+            return .completed([])
+        },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            return ContextWindowModel.TypeHopAnswer(
+                result: result, viaText: nil, viaKind: nil, boundNote: nil
+            )
+        },
+        typeDefinitionResolver: nil,
+        typeDefinitionReadiness: { nil }
+    )
+    model.exactDwell = .milliseconds(250)
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    return (model, root)
+}
+
+/// R4.2: a caret trigger sends no exact request before the dwell elapses,
+/// then sends it once.
+@MainActor
+@Test
+func caretTriggerDelaysExactUntilDwell() async throws {
+    let source = """
+        fn alpha() {}
+        fn main() {
+            alpha();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "alpha();", in: source),
+        trigger: .caret
+    )
+    try await Task.sleep(for: .milliseconds(80))
+    #expect(log.recorded.isEmpty)
+
+    try await Task.sleep(for: .milliseconds(400))
+    #expect(log.recorded == [byteOffset(of: "alpha();", in: source)])
+}
+
+/// R4.2: leaving the token before the dwell cancels the pending request.
+@MainActor
+@Test
+func caretLeavingTokenCancelsPendingExact() async throws {
+    let source = """
+        fn alpha() {}
+        fn beta() {}
+        fn main() {
+            alpha();
+            beta();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let alphaUse = byteOffset(of: "alpha();", in: source)
+    let betaUse = byteOffset(of: "beta();", in: source)
+    model.tokenClicked(file: "main.rs", offset: alphaUse, trigger: .caret)
+    try await Task.sleep(for: .milliseconds(80))
+    // The caret moves on before alpha's dwell elapses.
+    model.tokenClicked(file: "main.rs", offset: betaUse, trigger: .caret)
+    try await Task.sleep(for: .milliseconds(700))
+
+    // alpha's pending request never fired; only beta's did.
+    #expect(log.recorded == [betaUse])
+}
+
+/// A click schedules the exact request immediately; the caret event on the
+/// same token does not schedule a second one (locatedToken dedup).
+@MainActor
+@Test
+func clickDoesNotDoubleScheduleCaretExact() async throws {
+    let source = """
+        fn alpha() {}
+        fn main() {
+            alpha();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    let use = byteOffset(of: "alpha();", in: source)
+    model.tokenClicked(file: "main.rs", offset: use, trigger: .click)
+    #expect(await testWaitUntil("log.recorded.count == 1") { log.recorded.count == 1 })
+
+    // The caret event the same click produces arrives later on the same token.
+    model.tokenClicked(file: "main.rs", offset: use, trigger: .caret)
+    try await Task.sleep(for: .milliseconds(500))
+    #expect(log.recorded.count == 1)
+}
+
+/// R4.3/T4: the caret onto whitespace keeps the previous content and flags it.
+@MainActor
+@Test
+func lensKeepsPreviousContentWhenCaretLeavesSymbols() async throws {
+    let source = """
+        fn alpha() {}
+        fn main() {
+            alpha();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "alpha();", in: source))
+    #expect(await testWaitUntil("model.symbolCandidate != nil") {
+        model.symbolCandidate != nil
+    })
+    let stageBefore = model.stage
+    // The caret moves to the blank line before `fn main`.
+    let blank = byteOffset(of: "fn main() {", in: source) - 2
+    model.tokenClicked(file: "main.rs", offset: blank, trigger: .caret)
+    try await Task.sleep(for: .milliseconds(80))
+
+    if case .candidates = stageBefore {} else if case .typeHop = stageBefore {} else {
+        Issue.record("unexpected pre-stage")
+    }
+    #expect(model.isShowingPreviousToken)
+    // The previous candidate content survives.
+    #expect(model.displayedCandidate != nil)
+    // A later hit clears the flag.
+    model.tokenClicked(
+        file: "main.rs", offset: byteOffset(of: "fn main() {", in: source) + 4
+    )
+    #expect(await testWaitUntil("model.isShowingPreviousToken == false") {
+        !model.isShowingPreviousToken
+    })
+}
+
+// MARK: P3 — enclosing mode
+
+@MainActor
+private func makeEnclosingLensModel(
+    _ source: String
+) throws -> (ContextWindowModel, ReaderDocument, URL) {
+    let root = try temporaryProject(["main.rs": source])
+    let session = try ProjectIndexer().index(root: root)
+    let model = ContextWindowModel()
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+    let document = try #require(
+        try DocumentLoader().loadSyntax(for: ReaderDocument(bytes: Array(source.utf8)))
+    )
+    return (model, document, root)
+}
+
+/// R5.1: the innermost function wins over the enclosing type; outside every
+/// function the type wins; outside both, idle.
+@MainActor
+@Test
+func enclosingPrefersInnermostFunctionOverType() async throws {
+    let source = """
+        // top-level comment line — no function or type encloses it.
+        struct S;
+
+        impl S {
+            fn small(&self) -> u32 {
+                1
+            }
+        }
+
+        fn main() {
+            let s = S;
+        }
+        """
+    let (model, document, root) = try makeEnclosingLensModel(source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.setTracking(.enclosing)
+
+    // Inside `small` → the method.
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "1", in: source),
+        document: document
+    )
+    let methodScope = try #require(model.activeEnclosingScope)
+    #expect(methodScope.kind == .method)
+    #expect(methodScope.name == "small")
+
+    // On the impl's own line, outside every method → the impl.
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "impl S {", in: source) + 8,
+        document: document
+    )
+    let typeScope = try #require(model.activeEnclosingScope)
+    #expect(typeScope.kind == .impl)
+    #expect(typeScope.name == "S")
+
+    // Top-level whitespace (the blank line before fn main) → idle.
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "// top-level", in: source) + 5,
+        document: document
+    )
+    guard case .idle = model.stage else {
+        Issue.record("expected idle outside every function and type")
+        return
+    }
+}
+
+/// R5.1: closures do not count; the caret inside a closure still shows the
+/// enclosing function.
+@MainActor
+@Test
+func enclosingSkipsClosures() async throws {
+    let source = """
+        fn outer() {
+            let add = |a: u32| a + 1;
+            let _ = add(1);
+        }
+        """
+    let (model, document, root) = try makeEnclosingLensModel(source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.setTracking(.enclosing)
+
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "add(1)", in: source) + 5,
+        document: document
+    )
+    let scope = try #require(model.activeEnclosingScope)
+    #expect(scope.kind == .fn)
+    #expect(scope.name == "outer")
+}
+
+/// R5.3: moving within the same outline facet does not refresh the stage.
+@MainActor
+@Test
+func enclosingDoesNotRefreshWithinSameFacet() async throws {
+    let source = """
+        fn outer() {
+            let a = 1;
+            let b = 2;
+        }
+        """
+    let (model, document, root) = try makeEnclosingLensModel(source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.setTracking(.enclosing)
+
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "let a", in: source),
+        document: document
+    )
+    let first = try #require(model.activeEnclosingScope)
+    let countAfterFirst = model.enclosingRefreshCount
+    // Moving within the same fn writes no new stage.
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "let b", in: source),
+        document: document
+    )
+    let second = try #require(model.activeEnclosingScope)
+    #expect(model.enclosingRefreshCount == countAfterFirst)
+    #expect(first.displayRange == second.displayRange)
+    #expect(first.nameLine == second.nameLine)
+}
+
+/// R5.2: a multi-line `where` clause keeps every signature line; the body
+/// starts after the `{`.
+@MainActor
+@Test
+func enclosingSignatureEndsAtBodyFold() async throws {
+    let source = """
+        fn long<T>(
+            t: T,
+        ) -> u32
+        where
+            T: Clone,
+        {
+            let _ = t;
+            1
+        }
+        """
+    let (model, document, root) = try makeEnclosingLensModel(source)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.setTracking(.enclosing)
+
+    model.caretMoved(
+        file: "main.rs",
+        offset: byteOffset(of: "let _ = t;", in: source),
+        document: document
+    )
+    let scope = try #require(model.activeEnclosingScope)
+    // The `{` sits on line 6; the signature ends there and the body follows.
+    #expect(scope.signatureEndLine == 6)
+    #expect(scope.bodyFirstLine == 7)
+}
+
+/// R6: the pin is orthogonal to tracking and blocks both update paths.
+@MainActor
+@Test
+func pinIsOrthogonalToTracking() async throws {
+    let source = """
+        fn alpha() {}
+        fn main() {
+            alpha();
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+
+    // Symbol mode pins.
+    model.setPinned(true)
+    #expect(model.isPinned)
+    #expect(model.tracking == .symbol)
+    guard case .idle = model.stage else {
+        Issue.record("expected idle before pinning")
+        return
+    }
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "alpha();", in: source))
+    try await Task.sleep(for: .milliseconds(120))
+    guard case .idle = model.stage else {
+        Issue.record("pinned mode must not follow clicks")
+        return
+    }
+
+    // Enclosing mode pins too, and blocks caretMoved.
+    model.setTracking(.enclosing)
+    model.setPinned(true)
+    model.caretMoved(file: "main.rs", offset: 0, document: ReaderDocument(bytes: Array(source.utf8)))
+    #expect(model.activeEnclosingScope == nil)
+    guard case .idle = model.stage else {
+        Issue.record("pinned enclosing mode must not present a scope")
+        return
+    }
+    // Unpinning resumes following.
+    model.setPinned(false)
+    #expect(!model.isPinned)
+    #expect(model.tracking == .enclosing)
+}
+
+
 

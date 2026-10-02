@@ -537,6 +537,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             self?.handleReaderTypeDefinition(offset: offset)
         }
         for reader in [readerController, secondaryReaderController] {
+            reader.onCaretFollow = { [weak self, weak reader] offset in
+                guard let reader else { return }
+                self?.handleReaderCaret(offset: offset, from: reader)
+            }
+        }
+        for reader in [readerController, secondaryReaderController] {
             reader.onHover = { [weak self] request in self?.handleHover(request) }
             reader.onHoverRequest = { [weak self] request in
                 self?.showSymbolDocumentation(for: request)
@@ -640,6 +646,12 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         }
         secondaryReaderController.onFunctionChange = { [weak self] change in
             self?.openFunctionChange(change)
+        }
+        contextController.onOpenEnclosing = { [weak self] path, byteOffset in
+            self?.open(path: path, byteOffset: byteOffset)
+        }
+        contextController.onEnclosingSlice = { [weak self] scope in
+            self?.enclosingSlice(for: scope)
         }
         contextController.onOpen = { [weak self] candidate in
             self?.open(candidate)
@@ -875,6 +887,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         pendingRecentProjectLanguages = overridingLanguages ?? snapshot.languages
         if let preset = PanelPresetModel(rawValue: snapshot.panelPreset) {
             applyPanelPreset(preset, restoring: true)
+        }
+        // R6.3: restore the lens tracking; the pin always starts released.
+        if let tracking = ContextWindowModel.Tracking(rawValue: snapshot.contextTracking ?? "") {
+            model.contextWindow.setTracking(tracking)
         }
         sessionRestoreTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -3875,6 +3891,72 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         )?.menuFormRepresentation
     }
 
+    /// R5.2: slices the reader's displayed document to the scope's display
+    /// lines (doc comment start through the first body line).
+    private func enclosingSlice(
+        for scope: ContextWindowModel.EnclosingScope
+    ) -> ReaderDocument? {
+        guard let document = readerController.caretDocument else { return nil }
+        let table = document.lineTable
+        guard let firstLine = table.lineColumn(
+            at: scope.displayRange.lowerBound
+        )?.line,
+            let lastLine = table.lineColumn(
+                at: min(scope.displayRange.upperBound, UInt32(document.bytes.count))
+            )?.line,
+            let lower = table.byteOffset(line: firstLine, column: 1),
+            let upper = table.byteOffset(
+                line: min(lastLine + 1, UInt32(table.lineStarts.count)),
+                column: 1
+            )
+        else { return nil }
+        let slice = Array(document.bytes[Int(lower)..<Int(upper)])
+        let plain = ReaderDocument(bytes: slice)
+        return (try? DocumentLoader().loadSyntax(for: plain)) ?? plain
+    }
+
+    /// R6.4: the tracking-mode commands.
+    func setLensTracking(_ tracking: ContextWindowModel.Tracking) {
+        model.contextWindow.setTracking(tracking)
+    }
+
+    func toggleLensPin() {
+        model.contextWindow.setPinned(!model.contextWindow.isPinned)
+    }
+
+    /// P3.2: caret follow. Symbol mode debounces 150 ms (R4.1); the
+    /// enclosing mode needs only a light 32 ms debounce so held arrow keys
+    /// stay smooth. Only the focused reader drives the lens (R4.5).
+    private var caretFollowTask: Task<Void, Never>?
+    private func handleReaderCaret(offset: UInt32, from reader: ReaderViewController) {
+        // The focused reader wins; the split peer only observes.
+        if reader !== readerController, !reader.hasFocusedText, readerController.hasFocusedText {
+            return
+        }
+        guard let file = model.selectedFile,
+              let path = projectPath(for: file),
+              let document = reader.caretDocument
+        else { return }
+        caretFollowTask?.cancel()
+        let tracking = model.contextWindow.tracking
+        let delay: Duration = tracking == .enclosing
+            ? .milliseconds(32) : .milliseconds(150)
+        caretFollowTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            guard self.model.contextWindow.tracking == tracking else { return }
+            if tracking == .enclosing {
+                self.model.contextWindow.caretMoved(
+                    file: path, offset: offset, document: document
+                )
+            } else {
+                self.model.contextWindow.tokenClicked(
+                    file: path, offset: offset, trigger: .caret
+                )
+            }
+        }
+    }
+
     /// P1.6: ⌘⇧+click / ⌃⌘J / context menu — jump to the type definition of
     /// the binding under the position; failures surface as a brief status.
     private func handleReaderTypeDefinition(offset: UInt32) {
@@ -4535,6 +4617,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     var onTokenClick: ((UInt32, Bool) -> Void)?
     /// ⌘⇧+click: jump to the type definition of the binding under the click.
     var onTypeDefinitionClick: ((UInt32) -> Void)?
+    /// R4: USER caret movement (mouse selection, arrow keys) drives the lens;
+    /// programmatic navigation/restores do not (the owner debounces).
+    var onCaretFollow: ((UInt32) -> Void)?
     /// The identifier under the pointer, or `nil` over anything else.
     var onHover: ((ReaderHoverRequest?) -> Void)?
     /// ⌥-click: show documentation now.
@@ -4622,6 +4707,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
     private var displayedSnapshotID: SnapshotID?
     private var displayedLanguageMode: LanguageMode?
     private var displayedDocument: ReaderDocument?
+
+    /// P3.2: caret-follow reads the currently displayed document.
+    var caretDocument: ReaderDocument? { displayedDocument }
 
     var hasFocusedText: Bool {
         view.window?.firstResponder === textView.view
@@ -4868,6 +4956,9 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
         textView.onCaretChange = { [weak self] byteOffset in
             self?.renderScopeHeader(at: byteOffset)
             self?.onSelectionChange?(byteOffset)
+        }
+        textView.onUserCaretChange = { [weak self] byteOffset in
+            self?.onCaretFollow?(byteOffset)
         }
 
         let relationMenu = NSMenu(title: localized("main.relations"))
@@ -7275,14 +7366,26 @@ final class ReaderViewController: NSViewController, NSSearchFieldDelegate,
 final class ContextWindowViewController: NSViewController, NSTableViewDataSource, NSTableViewDelegate {
     var selfTestReaderDrawCount: Int { miniReader.backgroundDrawCount }
     var onOpen: ((ContextWindowModel.Candidate) -> Void)?
+    /// R5.2: open the enclosing scope at its signature line.
+    var onOpenEnclosing: ((String, UInt32) -> Void)?
 
     private let model: ContextWindowModel
     private let modeControl = NSSegmentedControl(
-        labels: [localized("main.follow"), localized("main.pin")],
+        labels: [localized("lens.trackSymbol"), localized("lens.trackEnclosing")],
         trackingMode: .selectOne,
         target: nil,
         action: nil
     )
+    /// R6.1: the pin is an independent button next to the two-segment
+    /// tracking control.
+    private let pinButton = NSButton(title: "", target: nil, action: nil)
+    /// R5: the enclosing mode's header — kind badge, serif name, path.
+    private let enclosingKindLabel = NSTextField(labelWithString: "")
+    private let enclosingNameLabel = NSTextField(labelWithString: "")
+    /// R4.3: the "caret on no symbol" corner note.
+    private let previousTokenNoteLabel = NSTextField(labelWithString: "")
+    /// R5.2: the fade + body-size line under the mini reader.
+    private let enclosingBodyNoteLabel = NSTextField(labelWithString: "")
     private let previousButton = NSButton(title: "‹", target: nil, action: nil)
     private let countLabel = NSTextField(labelWithString: "")
     private let nextButton = NSButton(title: "›", target: nil, action: nil)
@@ -7352,12 +7455,18 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         applyBadgeStyle()
     }
 
-    /// Pinned is a mode the reader must not forget: the header turns amber.
+    /// Pinned is a state the reader must not forget: the header turns amber.
     private func applyHeaderStyle() {
-        let pinned = model.mode == .pinned
+        let pinned = model.isPinned
         headerSurface.layer?.backgroundColor = (pinned
             ? theme.amberSoftColor : theme.chromeHeaderColor).cgColor
-        modeControl.selectedSegmentBezelColor = pinned ? theme.amberMarkColor : theme.accentColor
+        modeControl.selectedSegmentBezelColor = theme.accentColor
+        pinButton.image = NSImage(
+            systemSymbolName: pinned ? "pin.fill" : "pin",
+            accessibilityDescription: localized("lens.togglePin")
+        )
+        pinButton.contentTintColor = pinned
+            ? theme.amberMarkColor : theme.chromeSecondaryColor
         symbolLabel.textColor = theme.foregroundColor
         pathLabel.textColor = theme.chromeSecondaryColor
         countLabel.textColor = theme.chromeSecondaryColor
@@ -7379,8 +7488,8 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     func selfTestSetPinned(_ pinned: Bool) {
         loadViewIfNeeded()
-        modeControl.selectedSegment = pinned ? 1 : 0
-        modeChanged(modeControl)
+        pinButton.state = pinned ? .on : .off
+        togglePin(pinButton)
     }
 
     var selfTestSummary: String? {
@@ -7406,7 +7515,23 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     var selfTestPinned: Bool {
         loadViewIfNeeded()
-        return modeControl.selectedSegment == 1
+        return pinButton.state == .on
+    }
+
+    /// P3.3 self-test readouts.
+    var selfTestTracking: String {
+        loadViewIfNeeded()
+        return modeControl.selectedSegment == 1 ? "enclosing" : "symbol"
+    }
+
+    var selfTestEnclosingTitle: String? {
+        loadViewIfNeeded()
+        return enclosingNameLabel.stringValue.isEmpty ? nil : enclosingNameLabel.stringValue
+    }
+
+    var selfTestShowsPreviousTokenNote: Bool {
+        loadViewIfNeeded()
+        return !previousTokenNoteLabel.isHidden
     }
 
     var selfTestPlaceholderText: String? {
@@ -7441,7 +7566,18 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     override func loadView() {
         modeControl.selectedSegment = 0
         modeControl.target = self
-        modeControl.action = #selector(modeChanged(_:))
+        modeControl.action = #selector(trackingChanged(_:))
+        pinButton.bezelStyle = .texturedRounded
+        pinButton.imagePosition = .imageOnly
+        pinButton.image = NSImage(
+            systemSymbolName: "pin",
+            accessibilityDescription: localized("lens.togglePin")
+        )
+        pinButton.contentTintColor = nil
+        pinButton.target = self
+        pinButton.action = #selector(togglePin(_:))
+        pinButton.setButtonType(.toggle)
+        pinButton.setAccessibilityLabel(localized("lens.togglePin"))
         previousButton.target = self
         previousButton.action = #selector(selectPrevious(_:))
         nextButton.target = self
@@ -7473,6 +7609,20 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         typeHopArrowLabel.textColor = theme.chromeTertiaryColor
         typeHopBoundLabel.font = .monospacedSystemFont(ofSize: 12, weight: .regular)
         typeHopBoundLabel.textColor = theme.chromeTertiaryColor
+        enclosingKindLabel.font = .systemFont(ofSize: 11, weight: .semibold)
+        enclosingKindLabel.textColor = theme.chromeSecondaryColor
+        enclosingNameLabel.font = cairnSerifFont(ofSize: 15, weight: .medium)
+        enclosingNameLabel.lineBreakMode = .byTruncatingTail
+        enclosingNameLabel.textColor = theme.foregroundColor
+        previousTokenNoteLabel.font = .systemFont(ofSize: 10)
+        previousTokenNoteLabel.textColor = theme.chromeTertiaryColor
+        previousTokenNoteLabel.alignment = .right
+        previousTokenNoteLabel.stringValue = localized("lens.previousTokenNote")
+        previousTokenNoteLabel.isHidden = true
+        enclosingBodyNoteLabel.font = .systemFont(ofSize: 11)
+        enclosingBodyNoteLabel.textColor = theme.chromeSecondaryColor
+        enclosingBodyNoteLabel.alignment = .left
+        enclosingBodyNoteLabel.isHidden = true
         typeHopLabel.orientation = .horizontal
         typeHopLabel.alignment = .firstBaseline
         typeHopLabel.spacing = 4
@@ -7518,11 +7668,14 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
         let header = NSStackView(views: [
             modeControl,
+            pinButton,
             previousButton,
             countLabel,
             nextButton,
             symbolLabel,
             typeHopLabel,
+            enclosingKindLabel,
+            enclosingNameLabel,
             pathLabel,
             stones,
             candidateBadge,
@@ -7574,6 +7727,8 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         container.addSubview(candidateScroll)
         container.addSubview(scrollView)
         container.addSubview(placeholderLabel)
+        container.addSubview(previousTokenNoteLabel)
+        container.addSubview(enclosingBodyNoteLabel)
         excerptBesideList = scrollView.leadingAnchor.constraint(equalTo: candidateScroll.trailingAnchor, constant: 1)
         excerptFullWidth = scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor)
         excerptFullWidth?.isActive = true
@@ -7601,6 +7756,22 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             placeholderLabel.trailingAnchor.constraint(
                 lessThanOrEqualTo: container.trailingAnchor,
                 constant: -16
+            ),
+        ])
+        previousTokenNoteLabel.translatesAutoresizingMaskIntoConstraints = false
+        enclosingBodyNoteLabel.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            previousTokenNoteLabel.trailingAnchor.constraint(
+                equalTo: container.trailingAnchor, constant: -8
+            ),
+            previousTokenNoteLabel.bottomAnchor.constraint(
+                equalTo: headerSurface.bottomAnchor, constant: 14
+            ),
+            enclosingBodyNoteLabel.leadingAnchor.constraint(
+                equalTo: container.leadingAnchor, constant: 8
+            ),
+            enclosingBodyNoteLabel.bottomAnchor.constraint(
+                equalTo: container.bottomAnchor, constant: -6
             ),
         ])
         view = container
@@ -7631,12 +7802,23 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
     }
 
     private func openSelection() {
-        guard let candidate = model.displayedCandidate else { return }
-        onOpen?(candidate)
+        if let candidate = model.displayedCandidate {
+            onOpen?(candidate)
+            return
+        }
+        if let scope = model.activeEnclosingScope {
+            onOpenEnclosing?(scope.path, scope.displayRange.lowerBound)
+        }
     }
 
-    @objc private func modeChanged(_ sender: NSSegmentedControl) {
-        model.setMode(sender.selectedSegment == 1 ? .pinned : .follow)
+    @objc private func trackingChanged(_ sender: NSSegmentedControl) {
+        model.setTracking(sender.selectedSegment == 1 ? .enclosing : .symbol)
+        render()
+    }
+
+    @objc private func togglePin(_ sender: NSButton) {
+        model.setPinned(sender.state == .on)
+        render()
     }
 
     @objc private func selectPrevious(_ sender: Any?) {
@@ -7663,12 +7845,18 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     private func render() {
         guard !isClosing else { return }
-        modeControl.selectedSegment = model.mode == .pinned ? 1 : 0
+        modeControl.selectedSegment = model.tracking == .enclosing ? 1 : 0
+        pinButton.state = model.isPinned ? .on : .off
         applyHeaderStyle()
         let text: String
         let highlightsSyntax: Bool
         renderTypeHopLabel()
-        if let candidate = model.displayedCandidate {
+        previousTokenNoteLabel.isHidden = !model.isShowingPreviousToken
+        if let scope = model.activeEnclosingScope {
+            renderEnclosing(scope)
+            text = ""
+            highlightsSyntax = false
+        } else if let candidate = model.displayedCandidate {
             pathLabel.stringValue = "\(candidate.path):\(candidate.line):\(candidate.column)"
             let name = Self.declaredName(in: candidate.excerpt) ?? ""
             symbolLabel.stringValue = name
@@ -7693,14 +7881,23 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             text = candidate.excerpt
             highlightsSyntax = true
             candidateBadge.isHidden = false
+            enclosingKindLabel.isHidden = true
+            enclosingNameLabel.isHidden = true
+            enclosingBodyNoteLabel.isHidden = true
             placeholderLabel.isHidden = true
             scrollView.isHidden = false
             applyBadgeStyle()
         } else {
+            placeholderLabel.stringValue = model.tracking == .enclosing
+                ? localized("lens.enclosing.placeholder")
+                : localized("main.click.a.symbol.to.see.its.definition.here.click.jumps.to.it")
             pathLabel.stringValue = ""
             symbolLabel.stringValue = ""
             symbolLabel.isHidden = true
             typeHopLabel.isHidden = true
+            enclosingKindLabel.isHidden = true
+            enclosingNameLabel.isHidden = true
+            enclosingBodyNoteLabel.isHidden = true
             stones.isHidden = true
             candidateLabel.stringValue = ""
             candidateLabel.toolTip = nil
@@ -7715,6 +7912,15 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         previousButton.isEnabled = model.candidateCount > 1
         nextButton.isEnabled = model.candidateCount > 1
         renderCandidateList()
+        if model.activeEnclosingScope != nil {
+            // R5: the slice comes from the owner's displayed document.
+            if let slice = enclosingDocument(model.activeEnclosingScope!) {
+                miniReader.display(document: slice)
+            } else {
+                miniReader.clear()
+            }
+            return
+        }
         guard let document = readerDocument(
             text,
             languageMode: model.selectedLanguageMode,
@@ -7728,6 +7934,63 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     /// P1.5: the inline one-hop label — `ps: &S → S (T: Read)`. The side the
     /// window displays is bold; the other side dims and stays clickable.
+    /// R5: the enclosing-mode presentation — kind badge, serif name, path,
+    /// no stones; the body shows the doc comment through the signature plus
+    /// the first body line, fading into the "⋯ N lines" note.
+    private func renderEnclosing(_ scope: ContextWindowModel.EnclosingScope) {
+        enclosingKindLabel.stringValue = Self.enclosingKindText(for: scope.kind)
+        enclosingKindLabel.sizeToFit()
+        enclosingKindLabel.isHidden = false
+        enclosingNameLabel.stringValue = scope.name
+        enclosingNameLabel.isHidden = false
+        pathLabel.stringValue = scope.path
+        symbolLabel.isHidden = true
+        typeHopLabel.isHidden = true
+        stones.isHidden = true // R5.4: no certainty stones
+        candidateBadge.isHidden = true
+        previousButton.isEnabled = false
+        nextButton.isEnabled = false
+        countLabel.stringValue = ""
+        enclosingBodyNoteLabel.isHidden = false
+        if let methods = scope.methodCount {
+            enclosingBodyNoteLabel.stringValue = localizedFormat(
+                "lens.enclosing.implNote",
+                Int64(methods), Int64(scope.bodyLineCount)
+            )
+        } else {
+            enclosingBodyNoteLabel.stringValue = localizedFormat(
+                "lens.enclosing.bodyNote", Int64(scope.bodyLineCount)
+            )
+        }
+        placeholderLabel.isHidden = true
+        scrollView.isHidden = false
+    }
+
+    /// Slices the displayed document to the scope's display lines (doc
+    /// comment start through the first body line). The owner supplies the
+    /// bytes because only it knows the active reader's document.
+    var onEnclosingSlice: ((ContextWindowModel.EnclosingScope) -> ReaderDocument?)?
+
+    private func enclosingDocument(
+        _ scope: ContextWindowModel.EnclosingScope
+    ) -> ReaderDocument? {
+        onEnclosingSlice?(scope)
+    }
+
+    static func enclosingKindText(for kind: OutlineKind) -> String {
+        switch kind {
+        case .fn: localized("lens.enclosing.fn")
+        case .method: localized("lens.enclosing.method")
+        case .impl: "impl"
+        case .struct: localized("lens.enclosing.struct")
+        case .enum: localized("lens.enclosing.enum")
+        case .trait: localized("lens.enclosing.trait")
+        case .class: localized("lens.enclosing.class")
+        case .mod: "mod"
+        default: kind.rawValue
+        }
+    }
+
     /// P1.5 self-test readout: the one-hop label's via text, the displayed
     /// type name, and the current showing side.
     var selfTestTypeHop: (via: String, target: String?, showing: String)? {
@@ -7755,7 +8018,15 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         typeHopLabel.isHidden = false
         let showingType = hop.showing == .type
         let targetShownName: String
-        if showingType {
+        if hop.targets.isEmpty {
+            // P2: the syntax spelled no type and the Exact layer is pending
+            // (resolving) or unable to answer (not ready).
+            targetShownName = localized(
+                hop.pendingExact
+                    ? "model.typehop.resolving"
+                    : "model.typehop.pendingExact"
+            )
+        } else if showingType {
             targetShownName = Self.declaredName(
                 in: model.displayedCandidate?.excerpt ?? ""
             ) ?? ""

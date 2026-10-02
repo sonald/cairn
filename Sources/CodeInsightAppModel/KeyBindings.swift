@@ -192,6 +192,10 @@ extension CommandID {
 
     public static let lensPreviousCandidate = CommandID(rawValue: "lens.previousCandidate")
     public static let lensNextCandidate = CommandID(rawValue: "lens.nextCandidate")
+    // K-R4 (P3): the tracking-mode commands carry no default chords.
+    public static let lensTrackSymbol = CommandID(rawValue: "lens.trackSymbol")
+    public static let lensTrackEnclosing = CommandID(rawValue: "lens.trackEnclosing")
+    public static let lensTogglePin = CommandID(rawValue: "lens.togglePin")
 
     public static let readerGestureDefinition = CommandID(rawValue: "reader.gesture.definition")
     public static let readerGestureSymbolDoc = CommandID(rawValue: "reader.gesture.symbolDoc")
@@ -399,6 +403,9 @@ public extension KeyBindingScheme {
                 keyboard([.command], .character("i")),
             ]),
 
+            def(.lensTrackSymbol, .lens, "lens.trackSymbol", []),
+            def(.lensTrackEnclosing, .lens, "lens.trackEnclosing", []),
+            def(.lensTogglePin, .lens, "lens.togglePin", []),
             def(.lensPreviousCandidate, .lens, "app.menu.previous.context.candidate", [
                 keyboard([.option, .command], .special(.left)),
             ]),

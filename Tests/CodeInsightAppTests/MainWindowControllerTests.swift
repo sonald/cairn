@@ -1630,16 +1630,20 @@ func contextCandidateChangesPreserveTheReadersVisibleSourceAnchor() async throws
         _ = controller.selfTestActivateReading(at: UInt32(clicked))
         controller.selfTestReaderClick(offset: UInt32(clicked), commandClick: false)
         try #require(await mainWindowWaitUntil(
-            (model.contextWindow.candidateCount > 0) == hasCandidate
+            model.contextWindow.candidateCount > 0
         ))
         try await settle()
-        #expect(controller.selfTestContextPaneCollapsed == !hasCandidate)
+        // R4.3 (T4): a click on no symbol KEEPS the previous lens content —
+        // the pane stays open and the open-pane reader height persists; the
+        // pre-T4 contract cleared the pane on empty clicks.
+        #expect(controller.selfTestContextPaneCollapsed == false)
         #expect(model.navigationGeneration == generation)
         if hasCandidate {
             #expect(scroll.contentView.bounds.height < expandedHeight - 50,
                     "Opening Context must actually exercise a Reader height change")
         } else {
-            #expect(abs(scroll.contentView.bounds.height - expandedHeight) <= 2)
+            #expect(scroll.contentView.bounds.height < expandedHeight - 50,
+                    "Keeping Context on an empty click must keep the reader height")
         }
         let actualY = sourceRect(target).minY - scroll.contentView.bounds.minY
         #expect(abs(actualY - anchorY) <= 2,

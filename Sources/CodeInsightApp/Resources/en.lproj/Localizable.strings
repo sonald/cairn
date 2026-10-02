@@ -615,3 +615,18 @@
 "trail.typeDefinition" = "type";
 "model.typehop.noType" = "No type to jump to";
 "model.typehop.needsExact" = "Type needs exact analysis";
+
+/* Lens tracking modes and the pin (P3). */
+"lens.trackSymbol" = "Track Symbol";
+"lens.trackEnclosing" = "Track Enclosing Function";
+"lens.togglePin" = "Pin / Unpin";
+"lens.previousTokenNote" = "caret on no symbol · showing previous";
+"lens.enclosing.fn" = "function";
+"lens.enclosing.method" = "method";
+"lens.enclosing.struct" = "struct";
+"lens.enclosing.enum" = "enum";
+"lens.enclosing.trait" = "trait";
+"lens.enclosing.class" = "class";
+"lens.enclosing.bodyNote" = "⋯ %lld body lines · double-click to open";
+"lens.enclosing.implNote" = "⋯ %1$lld methods · %2$lld body lines · double-click to open";
+"lens.enclosing.placeholder" = "The caret is not inside any function or type";

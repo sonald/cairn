@@ -230,6 +230,51 @@ private func languageHint(_ language: LanguageID) -> String {
 
 // MARK: - Rust doc comments
 
+/// R5.2 (P3): the byte range of the doc comment directly above a
+/// declaration — `///` runs, `#[doc = "..."]`, or `/** ... */` blocks — using
+/// the same recognition rules as the hover card's syntactic doc. `nil` when
+/// no doc comment precedes the declaration.
+public func docCommentRange(
+    above range: ByteRange,
+    in document: ReaderDocument
+) -> ByteRange? {
+    guard let start = document.lineTable.lineColumn(at: range.lowerBound) else {
+        return nil
+    }
+    var index = Int(start.line) - 2
+    var firstLine = Int(start.line) - 1
+    var found = false
+    while index >= 0 {
+        let trimmed = sourceLine(index, in: document)
+            .trimmingCharacters(in: .whitespaces)
+        if trimmed.hasPrefix("///"), !trimmed.hasPrefix("////") {
+            firstLine = index
+            found = true
+            index -= 1
+        } else if trimmed.hasPrefix("#[doc") {
+            firstLine = index
+            found = true
+            index -= 1
+        } else if trimmed.hasPrefix("#["), trimmed.hasSuffix("]") {
+            index -= 1
+        } else if trimmed.hasSuffix("*/"),
+                  let (_, opening) = docBlock(endingAt: index, in: document)
+        {
+            firstLine = opening
+            found = true
+            index = opening - 1
+        } else {
+            break
+        }
+    }
+    guard found,
+          let begin = document.lineTable.byteOffset(
+            line: UInt32(firstLine + 1), column: 1
+          )
+    else { return nil }
+    return ByteRange(lowerBound: begin, upperBound: range.lowerBound)
+}
+
 private func rustDocComment(
     above range: ByteRange,
     in document: ReaderDocument

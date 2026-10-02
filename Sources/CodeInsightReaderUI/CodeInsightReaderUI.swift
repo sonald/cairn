@@ -468,6 +468,9 @@ public final class ReaderTextView {
     private var lastHoverTarget: ReaderHoverTarget?
     public var onViewportChange: (() -> Void)?
     package var onCaretChange: ((UInt32) -> Void)?
+    /// R4 (P3): fires only for USER caret moves — mouse selection and
+    /// keyboard navigation — not for programmatic reveals/restores.
+    package var onUserCaretChange: ((UInt32) -> Void)?
     private let backingTextStorage: NSTextStorage
     private var displayMap: DisplayMap?
     private var displayedDocument: ReaderDocument?
@@ -653,6 +656,7 @@ public final class ReaderTextView {
             invalidateReflowSequence()
             if let byteOffset = byteOffset(forCharacterIndex: index) {
                 updateCurrentLine(byteOffset: byteOffset)
+                onUserCaretChange?(byteOffset)
             }
             // A native gesture can select the same symbol range as activation.
             // It still needs the native selection background and anchor semantics.
