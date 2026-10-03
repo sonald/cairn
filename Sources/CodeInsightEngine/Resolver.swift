@@ -115,6 +115,17 @@ struct Resolver {
             )]
         }
 
+        if session.analysisProfile.language == .python,
+           let members = memberAttributeCandidates(
+               range: located.range,
+               nameID: located.nameID,
+               from: file,
+               context: context
+           )
+        {
+            return members
+        }
+
         let sameFile = index.symbols.enumerated().compactMap {
             facetIndex, facet -> ResolutionCandidate? in
             guard facet.parentFacetIndex == nil,
@@ -280,7 +291,11 @@ struct Resolver {
             default: return false
             }
         }
-        guard hasLocalBinding || hasGlobalDefinition else {
+        // Python attribute access (`h.repo`): the name may be declared only
+        // in another file's class body — let it reach the member lookup.
+        let isPythonAttribute = session.analysisProfile.language == .python
+            && precededByDot(lower, in: bytes)
+        guard hasLocalBinding || hasGlobalDefinition || isPythonAttribute else {
             guard let qualifierMatch else { return nil }
             return (
                 qualifierMatch.0,
@@ -471,6 +486,71 @@ struct Resolver {
             )
         }
         return resolved.count == 1 ? resolved[0] : nil
+    }
+
+    /// Python attribute access `<receiver>.<name>`: the receiver's type
+    /// (through the type hop) is a project class whose body declares
+    /// `name` (`repo: Repository`). Certainty follows the receiver's hop;
+    /// nil when the name is not an attribute access or nothing matches.
+    private func memberAttributeCandidates(
+        range: ByteRange,
+        nameID: NameID,
+        from file: PathID,
+        context: QueryContext
+    ) -> [ResolutionCandidate]? {
+        guard let bytes = session.sourceBytes(at: file) else { return nil }
+        func isSpace(_ byte: UInt8) -> Bool {
+            byte == UInt8(ascii: " ") || byte == UInt8(ascii: "\t")
+        }
+        var cursor = Int(range.lowerBound)
+        while cursor > 0, isSpace(bytes[cursor - 1]) { cursor -= 1 }
+        guard cursor > 0, bytes[cursor - 1] == UInt8(ascii: ".") else { return nil }
+        cursor -= 1
+        while cursor > 0, isSpace(bytes[cursor - 1]) { cursor -= 1 }
+        guard cursor > 0, isIdentifierByte(bytes[cursor - 1]) else { return nil }
+        let receiverOffset = UInt32(cursor - 1)
+        guard case let .targets(classes, certainty) = try? session.typeHop(
+            file: file, offset: receiverOffset, context: context
+        ) else { return nil }
+
+        var result: [ResolutionCandidate] = []
+        for classCandidate in classes {
+            guard classCandidate.target.localKind == .declarationFacet,
+                  let (_, classIndex) = session.content(at: classCandidate.target.pathID),
+                  classIndex.symbols.indices.contains(Int(classCandidate.target.localIndex))
+            else { continue }
+            let facet = classIndex.symbols[Int(classCandidate.target.localIndex)]
+            guard facet.kind == .pythonClass,
+                  let body = classIndex.scopes.filter({
+                      $0.kind == .class
+                          && facet.range.lowerBound <= $0.range.lowerBound
+                          && $0.range.upperBound <= facet.range.upperBound
+                  }).max(by: { $0.range.length < $1.range.length })
+            else { continue }
+            for (bindingIndex, binding) in classIndex.bindings.enumerated()
+                where binding.scopeID == body.id && binding.localNameID == nameID
+            {
+                guard let bindingIndex = UInt32(exactly: bindingIndex) else { continue }
+                result.append(candidate(
+                    pathID: classCandidate.target.pathID,
+                    localIndex: bindingIndex,
+                    certainty: certainty,
+                    dispatch: .direct,
+                    evidence: [.memberBinding(bindingIndex: bindingIndex)],
+                    context: context
+                ))
+            }
+        }
+        return result.isEmpty ? nil : result
+    }
+
+    /// Whether `.` (spaces allowed) comes right before byte `start`.
+    private func precededByDot(_ start: Int, in bytes: [UInt8]) -> Bool {
+        var cursor = start
+        while cursor > 0,
+              bytes[cursor - 1] == UInt8(ascii: " ") || bytes[cursor - 1] == UInt8(ascii: "\t")
+        { cursor -= 1 }
+        return cursor > 0 && bytes[cursor - 1] == UInt8(ascii: ".")
     }
 
     private func isIdentifierByte(_ byte: UInt8) -> Bool {

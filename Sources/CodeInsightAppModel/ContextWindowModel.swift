@@ -1052,13 +1052,21 @@ public final class ContextWindowModel {
             let targetRange: ByteRange
             let targetOffset: UInt32
             let bindingKind: String?
+            // A class attribute reached through its receiver (Python): a
+            // field, with no engine facet behind it.
+            let isMember = resolution.evidence.contains {
+                if case .memberBinding = $0 { return true }
+                return false
+            }
             if let bindingIndex = lexicalBindingIndex(in: resolution.evidence),
                index.bindings.indices.contains(Int(bindingIndex))
             {
                 let binding = index.bindings[Int(bindingIndex)]
                 targetRange = binding.declarationRange
                 targetOffset = binding.declarationRange.lowerBound
-                bindingKind = bindingLabel(binding.kind)
+                bindingKind = isMember
+                    ? localized("model.typehop.field")
+                    : bindingLabel(binding.kind)
             } else {
                 bindingKind = nil
                 switch resolution.target.localKind {
@@ -1109,7 +1117,9 @@ public final class ContextWindowModel {
                 text = ""
             }
             candidates.append(Candidate(
-                symbol: resolution.target,
+                // The member's localIndex is a binding index, not a facet:
+                // relations must not read it as a symbol.
+                symbol: isMember ? nil : resolution.target,
                 path: path,
                 line: coordinate.line,
                 column: coordinate.column,
@@ -1863,7 +1873,9 @@ public final class ContextWindowModel {
         in evidence: [ResolutionEvidence]
     ) -> UInt32? {
         for item in evidence {
+            // Both bind into the target file's bindings.
             if case let .lexicalBinding(bindingIndex) = item { return bindingIndex }
+            if case let .memberBinding(bindingIndex) = item { return bindingIndex }
         }
         return nil
     }

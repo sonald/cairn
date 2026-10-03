@@ -5,7 +5,7 @@ import TreeSitterKit
 
 public struct PythonExtractor: LanguageExtractor, Sendable {
     public static let grammarVersion: UInt32 = 1
-    public static let extractorVersion: UInt32 = 2
+    public static let extractorVersion: UInt32 = 3
 
     public init() {}
 
@@ -500,7 +500,12 @@ private func buildIndex(
                let left = childField(node, "left"),
                let name = simpleIdentifier(left)
             {
-                appendBinding(name, scopeID: currentScopeID, kind: .assignment)
+                appendBinding(
+                    name,
+                    scopeID: currentScopeID,
+                    kind: .assignment,
+                    typeRef: pythonAssignmentTypeRef(node, bytes: bytes)
+                )
             }
             return
         }
@@ -715,6 +720,20 @@ func pythonParameterTypeRef(_ parameter: Node, bytes: [UInt8]) -> TypeRef? {
             ?? childField(parameter, "annotation")
     }
     guard let annotation else { return nil }
+    return pythonAnnotationTypeRef(annotation, bytes: bytes)
+}
+
+/// `x: S` / `x: S = …` (R1.2): tree-sitter-python keeps the annotation in
+/// the assignment's own `type` field, not on its left side.
+func pythonAssignmentTypeRef(_ assignment: Node, bytes: [UInt8]) -> TypeRef? {
+    childField(assignment, "type").flatMap {
+        pythonAnnotationTypeRef($0, bytes: bytes)
+    }
+}
+
+/// The head type an annotation spells: primitives stay primitive, quoted
+/// annotations point inside the quotes.
+func pythonAnnotationTypeRef(_ annotation: Node, bytes: [UInt8]) -> TypeRef? {
     guard let head = pythonTypeHead(annotation, bytes: bytes) else { return nil }
     if let name = text(head, in: bytes), pythonPrimitiveNames.contains(name) {
         return .primitive(coreRangeOf(head))
@@ -952,15 +971,11 @@ package func pythonLocalReferences(
             if let left = childField(node, "left"),
                let name = simpleIdentifier(left)
             {
-                // `x: S = …` — the annotation rides the left's type field.
-                let typeRef = childField(left, "type")
-                    .flatMap { pythonTypeHead($0, bytes: bytes) }
-                    .map { head in
-                        text(head, in: bytes).map(pythonPrimitiveNames.contains) == true
-                            ? TypeRef.primitive(coreRange(head))
-                            : TypeRef.named(coreRange(head))
-                    }
-                appendBinding(name, kind: .assignment, typeRef: typeRef)
+                appendBinding(
+                    name,
+                    kind: .assignment,
+                    typeRef: pythonAssignmentTypeRef(node, bytes: bytes)
+                )
             }
             return
         case "import_statement", "import_from_statement",

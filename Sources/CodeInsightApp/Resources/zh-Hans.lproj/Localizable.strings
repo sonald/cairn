@@ -493,6 +493,7 @@
 "trail.partial" = "候选生成部分完成";
 "trail.previousEvidence" = "导航时的证据 · 保存在先前会话中";
 "trail.receiver" = "接收者类型";
+"trail.member" = "类属性";
 "trail.relation" = "关系";
 "trail.restore" = "恢复此节点";
 "trail.restoreAX" = "恢复此轨迹节点";

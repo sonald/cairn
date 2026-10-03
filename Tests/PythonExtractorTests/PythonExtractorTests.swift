@@ -543,3 +543,23 @@ func pythonPrimitiveAnnotationStaysPut() throws {
     #expect(typeRef("count") == .primitive(pyLineRange(of: "int", line: 1, in: source)))
     #expect(typeRef("label") == .primitive(pyLineRange(of: "str", line: 1, in: source)))
 }
+
+/// R1.2: an annotated assignment — with or without a value — records its
+/// type, including a class-body attribute declaration (`repo: Repository`).
+@Test
+func pythonAnnotatedAssignmentsCarryTypeRef() throws {
+    let source = """
+        class Holder:
+            repo: Repository
+            count: int = 0
+
+        current: Optional[Holder] = None
+        """
+    let result = try extract(source)
+    func typeRef(_ name: String) -> TypeRef? {
+        result.index.bindings.first { result.names.resolve($0.localNameID) == name }?.typeRef
+    }
+    #expect(typeRef("repo") == .named(pyLineRange(of: "Repository", line: 2, in: source)))
+    #expect(typeRef("count") == .primitive(pyLineRange(of: "int", line: 3, in: source)))
+    #expect(typeRef("current") == .named(pyLineRange(of: "Holder", line: 5, in: source)))
+}

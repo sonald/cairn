@@ -441,7 +441,7 @@ func typescriptPersistentCacheExtractsOnceThenVariantOnlyMisses() throws {
     let bumped = try ProjectIndexer(
         parallelism: 1,
         cache: cache!,
-        extractor: VersionedTypeScriptExtractor(version: 3) // one above the real v2 (P4)
+        extractor: VersionedTypeScriptExtractor(version: TypeScriptExtractor.extractorVersion + 1) // never the real version
     ).index(root: root, language: .typescript)
     cache?.flush()
     cache = nil
@@ -625,7 +625,7 @@ func pythonPersistentCacheExtractsOnceThenOnlyVersionMissesPython() throws {
     let bumped = try ProjectIndexer(
         parallelism: 1,
         cache: cache!,
-        extractor: VersionedPythonExtractor(version: 3) // one above the real v2 (P4)
+        extractor: VersionedPythonExtractor(version: PythonExtractor.extractorVersion + 1) // never the real version
     ).index(root: root, language: .python)
     cache?.flush()
     cache = nil

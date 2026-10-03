@@ -3785,6 +3785,59 @@ func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
     })
 }
 
+/// R1.1 (Python): clicking a class attribute (`h.repo`) shows its type
+/// through the class-body declaration; the declaration is labelled a field
+/// and carries no engine symbol, so relations never act on a wrong facet.
+@MainActor
+@Test
+func lensShowsPythonAttributeTypeThroughTheReceiversClass() async throws {
+    let models = """
+        class Repository:
+            pass
+
+
+        class Holder:
+            repo: Repository
+        """
+    let use = """
+        from models import Holder
+
+
+        def go(h: Holder):
+            keep = h.repo
+        """
+    let root = try temporaryProject(["models.py": models, "use.py": use])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let session = try ProjectIndexer().index(root: root, language: .python)
+    let model = ContextWindowModel(
+        { session, file, offset, context in
+            try session.resolve(file: file, offset: offset, context: context)
+        },
+        typeHopResolver: { session, file, offset, context in
+            let result = try session.typeHop(file: file, offset: offset, context: context)
+            let spelling = try? session.bindingSpelling(file: file, offset: offset, context: context)
+            return ContextWindowModel.TypeHopAnswer(
+                result: result,
+                viaText: spelling?.text,
+                viaKind: spelling?.kind,
+                boundNote: spelling?.boundNote
+            )
+        }
+    )
+    model.updateProjectState(.ready(session, queryContext(for: session)), root: root)
+
+    model.tokenClicked(file: "use.py", offset: byteOffset(of: "h.repo", in: use) + 2)
+    #expect(await testWaitUntil("type hop") { model.activeTypeHop != nil })
+    let hop = try #require(model.activeTypeHop)
+    #expect(hop.viaText == "repo: Repository")
+    #expect(hop.viaKind == localized("model.typehop.field"))
+    #expect(hop.via.bindingKind == localized("model.typehop.field"))
+    #expect(hop.via.symbol == nil)
+    #expect(model.displayedCandidate?.path == "models.py")
+    #expect(model.displayedCandidate?.targetByteOffset
+        == byteOffset(of: "class Repository", in: models) + 6)
+}
+
 /// R3.1: "跳到类型定义" on a binding the syntax gives no type for asks the
 /// Exact layer, so an inferred binding still jumps to its type.
 @MainActor

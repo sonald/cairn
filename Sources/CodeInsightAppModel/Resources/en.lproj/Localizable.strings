@@ -162,6 +162,7 @@
 "model.narrative.partial" = "partial";
 "model.narrative.pending" = "Exact verification is in progress.";
 "model.narrative.receiver" = "Receiver type narrowed the candidate.";
+"model.narrative.member" = "Found the attribute declared in the receiver's class.";
 "model.narrative.sameFile" = "Matched a declaration in the same file.";
 "model.narrative.truncated" = "truncated";
 "model.narrative.truncatedTotal" = "The source relation result set was truncated after %lld of about %lld results.";
@@ -198,6 +199,7 @@
 "model.relation.parameter" = "Parameter";
 "model.relation.parameterReference" = "Parameter reference";
 "model.relation.receiverType" = "receiver type";
+"model.relation.member" = "class attribute";
 "model.relation.referencesTruncated" = "Showing first 500 of %lld references";
 "model.relation.relationsTruncated" = "Showing first 500 of %lld relations";
 "model.relation.sameFile" = "same file";

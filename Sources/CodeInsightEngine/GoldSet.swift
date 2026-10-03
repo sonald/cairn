@@ -335,9 +335,13 @@ private func targetPosition(
     }
     var range: ByteRange?
     for evidence in candidate.evidence {
-        if case let .lexicalBinding(bindingIndex) = evidence,
-           index.bindings.indices.contains(Int(bindingIndex)) {
-            range = index.bindings[Int(bindingIndex)].declarationRange
+        switch evidence {
+        case let .lexicalBinding(bindingIndex), let .memberBinding(bindingIndex):
+            if index.bindings.indices.contains(Int(bindingIndex)) {
+                range = index.bindings[Int(bindingIndex)].declarationRange
+            }
+        default:
+            break
         }
     }
     if range == nil {

@@ -461,3 +461,72 @@ func typeHopTypeScriptProbesResolveThroughGoldSet() throws {
     #expect(report.total == 3)
     #expect(report.failures.isEmpty)
 }
+
+/// Python attribute access: `self.repo` / `h.repo` resolves to the class-body
+/// declaration `repo: Repository` through the receiver's type, and the type
+/// hop continues to `Repository` — also from another file.
+@Test
+func pythonAttributeAccessHopsThroughTheReceiversClass() throws {
+    let session = try makeSession([
+        "pkg/models.py": """
+        class Repository:
+            pass
+
+
+        class Holder:
+            repo: Repository
+
+            def show(self):
+                print(self.repo)
+        """,
+        "pkg/use.py": """
+        from pkg.models import Holder
+
+
+        def go(h: Holder):
+            keep = h.repo
+        """,
+    ], language: .python)
+    let context = queryContext(for: session)
+    let models = try pathID("pkg/models.py", in: session)
+    let repoDeclaration = try offset(line: 6, column: 5, in: session, path: "pkg/models.py")
+    for (path, line, column) in [("pkg/models.py", 9, 20), ("pkg/use.py", 5, 14)] {
+        let file = try pathID(path, in: session)
+        let at = try offset(line: UInt32(line), column: UInt32(column), in: session, path: path)
+        let first = try #require(
+            try session.resolve(file: file, offset: at, context: context).first,
+            "\(path):\(line):\(column) resolved nothing"
+        )
+        #expect(first.target.pathID == models)
+        let bindingIndex = first.evidence.compactMap {
+            if case let .memberBinding(bindingIndex) = $0 { return bindingIndex }
+            return nil
+        }.first
+        let declared = try #require(bindingIndex.flatMap {
+            session.content(at: models)?.1.bindings[Int($0)].declarationRange.lowerBound
+        })
+        #expect(declared == repoDeclaration)
+        guard case let .targets(targets, _) = try session.typeHop(
+            file: file, offset: at, context: context
+        ) else {
+            Issue.record("\(path):\(line):\(column) attribute hop returned no targets")
+            continue
+        }
+        #expect(targets.contains { facet(named: "Repository", at: $0, in: session) != nil })
+    }
+}
+
+/// R8.1: the CLI indexes Python / TypeScript projects too — `--language`
+/// wins, else the position's file extension decides, else Rust.
+@Test
+func cliProjectLanguageComesFromOptionOrPositionFile() throws {
+    let inferred = try ProjectOptions.parse(["--project", "p"])
+    #expect(try inferred.languageID(inferringFrom: "pkg/models.py") == .python)
+    #expect(try inferred.languageID(inferringFrom: "src/index.tsx") == .typescript)
+    #expect(try inferred.languageID(inferringFrom: "src/main.rs") == .rust)
+    #expect(try inferred.languageID() == .rust)
+    let explicit = try ProjectOptions.parse(["--project", "p", "--language", "python"])
+    #expect(try explicit.languageID(inferringFrom: "src/main.rs") == .python)
+    let wrong = try ProjectOptions.parse(["--project", "p", "--language", "cobol"])
+    #expect(throws: (any Error).self) { try wrong.languageID() }
+}

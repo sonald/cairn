@@ -267,6 +267,7 @@ package func renderLocalized(_ clause: NarrativeClause, language: String?) -> St
             case .nameOnly: localized("model.narrative.name", language: language)
             case .methodNameOnly: localized("model.narrative.method", language: language)
             case .receiverType: localized("model.narrative.receiver", language: language)
+            case .memberBinding: localized("model.narrative.member", language: language)
             }
         }.joined(separator: " ")
     case .candidateCompleteness(let completeness):

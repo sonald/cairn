@@ -493,6 +493,7 @@
 "trail.partial" = "candidate generation partial";
 "trail.previousEvidence" = "Evidence at navigation · frozen in an earlier session";
 "trail.receiver" = "receiver type";
+"trail.member" = "class attribute";
 "trail.relation" = "relation";
 "trail.restore" = "Restore this node";
 "trail.restoreAX" = "Restore this trail node";

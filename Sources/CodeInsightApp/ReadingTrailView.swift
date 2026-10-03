@@ -816,6 +816,7 @@ final class ReadingTrailView: NSView, NSTableViewDataSource,
             case .nameOnly: localized("trail.nameOnly")
             case .methodNameOnly: localized("trail.methodNameOnly")
             case .receiverType: localized("trail.receiver")
+            case .memberBinding: localized("trail.member")
             }
         }
         return values.isEmpty ? localized("trail.candidate") : values.joined(separator: ", ")

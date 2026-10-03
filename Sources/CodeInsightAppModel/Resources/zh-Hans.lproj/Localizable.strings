@@ -162,6 +162,7 @@
 "model.narrative.partial" = "部分";
 "model.narrative.pending" = "正在进行精确验证。";
 "model.narrative.receiver" = "接收者类型缩小了候选范围。";
+"model.narrative.member" = "通过接收者的类型找到了类中声明的属性。";
 "model.narrative.sameFile" = "匹配到同一文件中的声明。";
 "model.narrative.truncated" = "截断";
 "model.narrative.truncatedTotal" = "源码关系结果集在约 %2$lld 项中的 %1$lld 项后截断。";
@@ -198,6 +199,7 @@
 "model.relation.parameter" = "参数";
 "model.relation.parameterReference" = "参数引用";
 "model.relation.receiverType" = "接收者类型";
+"model.relation.member" = "类属性";
 "model.relation.referencesTruncated" = "显示 %lld 个引用中的前 500 个";
 "model.relation.relationsTruncated" = "显示 %lld 个关系中的前 500 个";
 "model.relation.sameFile" = "同一文件";

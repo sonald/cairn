@@ -32,7 +32,31 @@ struct ProjectOptions: ParsableArguments {
     @Flag(name: .long, help: "Persist extracted content indexes.")
     var persist = false
 
+    @Option(
+        name: .long,
+        help: "Project language: rust, python, or typescript (default: rust; resolve infers it from the position's file)."
+    )
+    var language: String?
+
     @OptionGroup var global: GlobalOptions
+
+    /// The language to index as: the explicit option, else the one the
+    /// given source file implies, else Rust.
+    func languageID(inferringFrom file: String? = nil) throws -> LanguageID {
+        if let language {
+            switch language.lowercased() {
+            case "rust", "rs": return .rust
+            case "python", "py": return .python
+            case "typescript", "ts": return .typescript
+            default: throw ValidationError("Unknown --language \(language); use rust, python, or typescript.")
+            }
+        }
+        switch URL(fileURLWithPath: file ?? "").pathExtension.lowercased() {
+        case "py", "pyi": return .python
+        case "ts", "tsx", "mts", "cts": return .typescript
+        default: return .rust
+        }
+    }
 }
 
 extension CodeInsight {
@@ -470,7 +494,11 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let pathID = try findPath(file, project: options.project, session: session)
             let index = try content(at: pathID, in: session)
             let dump = CanonicalDump.render(index, names: session.names, strings: session.strings)
@@ -493,7 +521,11 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let definitions = try session.definitions(
                 of: name,
                 context: queryContext(for: session)
@@ -534,7 +566,11 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let callers = try session.callers(
                 of: name,
                 context: queryContext(for: session)
@@ -599,7 +635,11 @@ extension CodeInsight {
         }
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let pathID = try findPath(file, project: options.project, session: session)
             let index = try content(at: pathID, in: session)
             guard let lineStart = index.lineTable.byteOffset(line: line, column: 1)
@@ -696,7 +736,11 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let implementations = try session.implementations(
                 ofTrait: traitName,
                 context: queryContext(for: session)
@@ -765,7 +809,11 @@ extension CodeInsight {
             }
             let traitName = String(traitMethod[..<separator])
             let methodName = String(traitMethod[traitMethod.index(after: separator)...])
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let context = queryContext(for: session)
             let traitDefinitions = try session.definitions(
                 of: traitName,
@@ -843,8 +891,12 @@ extension CodeInsight {
         @OptionGroup var options: ProjectOptions
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
             let parsed = try parsePosition(position)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID(inferringFrom: parsed.file)
+            )
             let pathID = try findPath(parsed.file, project: options.project, session: session)
             let sourceIndex = try content(at: pathID, in: session)
             guard let offset = sourceIndex.lineTable.byteOffset(
@@ -937,7 +989,11 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         }
 
         func run() throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let hits = try session.searchSymbols(
                 query: query,
                 limit: limit,
@@ -997,7 +1053,11 @@ static func codeinsightTypeHopLine(_ hop: TypeHopResult, session: EngineSession)
         var caseSensitive = false
 
         func run() async throws {
-            let session = try indexProject(options.project, persist: options.persist)
+            let session = try indexProject(
+                options.project,
+                persist: options.persist,
+                language: options.languageID()
+            )
             let stream = try session.search(
                 ContentSearchQuery(
                     pattern: pattern,
@@ -1350,10 +1410,14 @@ private struct ContentSearchMatchJSON: Codable {
     }
 }
 
-private func indexProject(_ path: String, persist: Bool = false) throws -> EngineSession {
+private func indexProject(
+    _ path: String,
+    persist: Bool = false,
+    language: LanguageID = .rust
+) throws -> EngineSession {
     let root = URL(fileURLWithPath: path, isDirectory: true)
     let indexer = persist ? ProjectIndexer(persistingProjectAt: root) : ProjectIndexer()
-    let session = try indexer.index(root: root)
+    let session = try indexer.index(root: root, language: language)
     if persist { indexer.flushPersistentWrites() }
     return session
 }
@@ -1431,10 +1495,13 @@ private func target(
 ) throws -> (index: ContentIndex, range: CodeInsightCore.ByteRange) {
     let index = try content(at: candidate.target.pathID, in: session)
     for evidence in candidate.evidence {
-        if case let .lexicalBinding(bindingIndex) = evidence,
-           index.bindings.indices.contains(Int(bindingIndex))
-        {
-            return (index, index.bindings[Int(bindingIndex)].declarationRange)
+        switch evidence {
+        case let .lexicalBinding(bindingIndex), let .memberBinding(bindingIndex):
+            if index.bindings.indices.contains(Int(bindingIndex)) {
+                return (index, index.bindings[Int(bindingIndex)].declarationRange)
+            }
+        default:
+            break
         }
     }
     let localIndex = Int(candidate.target.localIndex)
@@ -1458,6 +1525,7 @@ private func evidenceSummary(_ evidence: ResolutionEvidence) -> String {
     case let .nameOnly(nameID): "nameOnly#\(nameID.rawValue)"
     case let .methodNameOnly(nameID): "methodNameOnly#\(nameID.rawValue)"
     case let .receiverType(nameID): "receiverType#\(nameID.rawValue)"
+    case let .memberBinding(index): "memberBinding#\(index)"
     }
 }
 

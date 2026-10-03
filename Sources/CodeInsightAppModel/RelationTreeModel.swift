@@ -2192,7 +2192,9 @@ public final class RelationTreeModel {
         _ evidence: [ResolutionEvidence]
     ) -> UInt32? {
         for item in evidence {
+            // Both bind into the target file's bindings.
             if case let .lexicalBinding(bindingIndex) = item { return bindingIndex }
+            if case let .memberBinding(bindingIndex) = item { return bindingIndex }
         }
         return nil
     }
@@ -2223,6 +2225,7 @@ public final class RelationTreeModel {
         case .nameOnly: localized("model.relation.nameMatch")
         case .methodNameOnly: localized("model.relation.methodMatch")
         case .receiverType: localized("model.relation.receiverType")
+        case .memberBinding: localized("model.relation.member")
         }
     }
 

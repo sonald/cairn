@@ -41,6 +41,10 @@ public enum ResolutionEvidence: Sendable {
     case nameOnly(nameID: NameID)
     case methodNameOnly(nameID: NameID)
     case receiverType(nameID: NameID)
+    /// `<receiver>.<name>`: a class-body attribute binding found through the
+    /// receiver's type. The index points into the target file's bindings
+    /// (unlike `lexicalBinding`, whose binding lives in the queried file).
+    case memberBinding(bindingIndex: UInt32)
 }
 
 public enum LocalOccurrenceKind: Hashable, Sendable {

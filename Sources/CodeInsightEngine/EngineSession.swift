@@ -499,19 +499,13 @@ public final class EngineSession: Sendable {
 
         // The typeRef's byte ranges belong to the file that holds the
         // record: the source file for a lexical binding, the declaring file
-        // for a field (which may differ from the file being read).
+        // for a field or class attribute (which may differ from the file
+        // being read).
         let typeRef: TypeRef?
         let typeFile: PathID
-        if let bindingIndex = firstHop.evidence.compactMap({
-            if case let .lexicalBinding(bindingIndex) = $0 { return bindingIndex }
-            return nil
-        }).first,
-           let key = contentKeysByPath[file],
-           let index = contentIndexes[key],
-           index.bindings.indices.contains(Int(bindingIndex))
-        {
-            typeRef = index.bindings[Int(bindingIndex)].typeRef
-            typeFile = file
+        if let hit = firstHopBinding(firstHop, queried: file) {
+            typeRef = hit.binding.typeRef
+            typeFile = hit.file
         } else if firstHop.target.localKind == .declarationFacet,
                   let index = content(at: firstHop.target.pathID)?.1,
                   index.symbols.indices.contains(Int(firstHop.target.localIndex))
@@ -561,16 +555,45 @@ public final class EngineSession: Sendable {
         }
     }
 
-    /// The first-hop candidate for a type hop: a lexical binding or a rust
-    /// field (P1.3).
+    /// The binding a first hop names and the file holding it: a lexical
+    /// binding lives in the queried file, a class attribute (member
+    /// binding) in the target's file.
+    private func firstHopBinding(
+        _ firstHop: ResolutionCandidate,
+        queried file: PathID
+    ) -> (binding: BindingRecord, file: PathID, isMember: Bool)? {
+        for evidence in firstHop.evidence {
+            switch evidence {
+            case let .lexicalBinding(bindingIndex):
+                guard let key = contentKeysByPath[file],
+                      let index = contentIndexes[key],
+                      index.bindings.indices.contains(Int(bindingIndex))
+                else { return nil }
+                return (index.bindings[Int(bindingIndex)], file, false)
+            case let .memberBinding(bindingIndex):
+                guard let index = content(at: firstHop.target.pathID)?.1,
+                      index.bindings.indices.contains(Int(bindingIndex))
+                else { return nil }
+                return (index.bindings[Int(bindingIndex)], firstHop.target.pathID, true)
+            default:
+                continue
+            }
+        }
+        return nil
+    }
+
+    /// The first-hop candidate for a type hop: a lexical binding, a class
+    /// attribute, or a rust field (P1.3).
     private func firstTypeHopCandidate(
         file: PathID,
         candidates: [ResolutionCandidate]
     ) throws -> ResolutionCandidate? {
         candidates.first { candidate in
             candidate.evidence.contains {
-                if case .lexicalBinding = $0 { return true }
-                return false
+                switch $0 {
+                case .lexicalBinding, .memberBinding: true
+                default: false
+                }
             }
         } ?? candidates.first { candidate in
             guard candidate.target.localKind == .declarationFacet,
@@ -596,21 +619,16 @@ public final class EngineSession: Sendable {
             file: file, candidates: candidates
         ) else { return nil }
 
-        if let bindingIndex = firstHop.evidence.compactMap({
-            if case let .lexicalBinding(bindingIndex) = $0 { return bindingIndex }
-            return nil
-        }).first,
-           let key = contentKeysByPath[file],
-           let index = contentIndexes[key],
-           index.bindings.indices.contains(Int(bindingIndex))
-        {
-            let binding = index.bindings[Int(bindingIndex)]
-            guard let bytes = sourceBytes(at: file) else { return nil }
+        if let hit = firstHopBinding(firstHop, queried: file) {
+            let binding = hit.binding
+            guard let bytes = sourceBytes(at: hit.file) else { return nil }
             let text = Self.bindingSpellingText(
                 bytes: bytes, nameRange: binding.declarationRange
             )
             let kind: TypeHopViaKind
-            if binding.kind == .param,
+            if hit.isMember {
+                kind = .field
+            } else if binding.kind == .param,
                text == "self" || text.hasSuffix("self") && text.contains("&")
             {
                 kind = .receiver
@@ -903,7 +921,7 @@ public final class EngineSession: Sendable {
             case .sameFile, .uniqueImport, .nameOnly, .methodNameOnly,
                  .receiverType:
                 true
-            case .lexicalBinding:
+            case .lexicalBinding, .memberBinding:
                 false
             }
         }
@@ -933,7 +951,7 @@ public final class EngineSession: Sendable {
                     $0.parentFacetIndex == nil && $0.nameID == definitionNameID
                 }
                 if matches.count == 1 { return .strong }
-            case .lexicalBinding, .nameOnly, .methodNameOnly, .receiverType:
+            case .lexicalBinding, .memberBinding, .nameOnly, .methodNameOnly, .receiverType:
                 continue
             }
         }
