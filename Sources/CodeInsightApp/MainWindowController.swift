@@ -1240,6 +1240,10 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
         contextController.selfTestCandidateCount
     }
     var selfTestContextPinned: Bool { contextController.selfTestPinned }
+    var selfTestContextEnclosingTitle: String? { contextController.selfTestEnclosingTitle }
+    var selfTestRenderedTypeHop: (via: String, target: String, viaWidth: CGFloat, targetWidth: CGFloat)? {
+        contextController.selfTestRenderedTypeHop
+    }
     var selfTestTypeHop: (via: String, target: String?, showing: String)? {
         contextController.selfTestTypeHop
     }
@@ -1943,8 +1947,16 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     private func updateContextVisibility() {
         guard contentSurfaceMode == .source, !readingSetLayoutActive else { return }
-        let hasContext = model.contextWindow.candidateCount > 0
-            || model.contextWindow.mode == .pinned
+        // Anything the lens can show counts: a candidate, a type hop still
+        // waiting for Exact (no targets yet), the enclosing scope — and the
+        // enclosing mode itself, which the user chose from the pane.
+        let lens = model.contextWindow
+        let hasContext = lens.candidateCount > 0
+            || lens.displayedCandidate != nil
+            || lens.activeTypeHop != nil
+            || lens.activeEnclosingScope != nil
+            || lens.tracking == .enclosing
+            || lens.isPinned
         let visible = contextVisibilityOverride ?? (panelPreset != .focus && hasContext)
         contextItem.isCollapsed = !visible
         contextButton.setAccessibilityLabel(visible ? localized("main.hide.definition.context") : localized("main.show.definition.context"))
@@ -2858,6 +2870,8 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
             _ = model.exactCoordinator.trustMode
             _ = model.contextWindow.stage
             _ = model.contextWindow.mode
+            _ = model.contextWindow.tracking
+            _ = model.contextWindow.isPinned
             _ = model.readingTrail
             _ = model.bookmarkModel.records
             _ = model.bookmarkModel.storageError
@@ -8033,6 +8047,19 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
 
     /// P1.5 self-test readout: the one-hop label's via text, the displayed
     /// type name, and the current showing side.
+    /// What the one-hop label actually renders: the button titles and their
+    /// laid-out widths (zero means the text never reached the screen).
+    var selfTestRenderedTypeHop: (via: String, target: String, viaWidth: CGFloat, targetWidth: CGFloat)? {
+        guard model.activeTypeHop != nil, !typeHopLabel.isHiddenOrHasHiddenAncestor else { return nil }
+        view.layoutSubtreeIfNeeded()
+        return (
+            typeHopViaButton.attributedTitle.string,
+            typeHopTargetButton.attributedTitle.string,
+            typeHopViaButton.frame.width,
+            typeHopTargetButton.frame.width
+        )
+    }
+
     var selfTestTypeHop: (via: String, target: String?, showing: String)? {
         guard let hop = model.activeTypeHop else { return nil }
         let target: String?
@@ -8076,7 +8103,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             } ?? ""
         }
 
-        typeHopViaButton.attributedStringValue = NSAttributedString(
+        typeHopViaButton.attributedTitle = NSAttributedString(
             string: hop.viaText,
             attributes: [
                 .font: showingType
@@ -8089,7 +8116,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         )
         typeHopViaButton.toolTip = hop.viaKind + " · "
             + localized("model.typehop.showDeclarationHint")
-        typeHopTargetButton.attributedStringValue = NSAttributedString(
+        typeHopTargetButton.attributedTitle = NSAttributedString(
             string: targetShownName.isEmpty ? "…" : targetShownName,
             attributes: [
                 .font: showingType

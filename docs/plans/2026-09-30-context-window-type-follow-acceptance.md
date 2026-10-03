@@ -480,3 +480,100 @@ $ codeinsight resolve goldset/fixtures/type-hop-py/../main.rs  # 探针见 golds
 ### CI
 
 `expected_main_test_count` 1309 → 1314（新增 6 条，删除 1 条调试测试）。
+
+---
+
+## 第二轮修复：Python 类属性、CLI 多语言、原生验收
+
+日期：2026-10-02
+
+### CLI 支持 Python 和 TS（R8.1）
+
+CLI 的项目类命令新增 `--language rust|python|typescript`；`resolve` 不给这个选项时，按位置所在文件的扩展名推断（`.py/.pyi`、`.ts/.tsx/.mts/.cts`，其他按 Rust）。回归测试：`cliProjectLanguageComesFromOptionOrPositionFile`。
+
+实测输出（P4 记录里原本的占位文字由此替代）：
+
+```
+$ codeinsight resolve pkg/models.py:9:20 --project <attr> --type-hop      # print(self.repo)
+strong direct [memberBinding#0] -> pkg/models.py:6:5
+type -> pkg/models.py:1:7 (probable)
+$ codeinsight resolve pkg/use.py:5:14 --project <attr> --type-hop         # keep = h.repo（跨文件）
+possible direct [memberBinding#0] -> pkg/models.py:6:5
+type -> pkg/models.py:1:7 (possible)
+$ codeinsight resolve lib.py:16:16 --project goldset/fixtures/type-hop-py --type-hop   # self
+strong direct [lexicalBinding#4] -> lib.py:15:12
+type -> lib.py:14:7 (strong)
+$ codeinsight resolve index.ts:11:11 --project goldset/fixtures/type-hop-ts --type-hop  # b: Box | null
+strong direct [lexicalBinding#4] -> index.ts:10:7
+type -> index.ts:9:7 (possible)
+$ codeinsight resolve index.ts:6:16 --project goldset/fixtures/type-hop-ts --type-hop
+strong direct [lexicalBinding#0] -> index.ts:2:14
+type -> primitive string
+```
+
+### Python 类属性（`self.repo`、`h.repo`）
+
+修复过程中又查出三个问题：
+
+1. **带注解赋值从未记录类型**（P4 记录里“`x: S = …` 也记录 TypeRef”的说法不成立）。索引路径完全没传 `typeRef`；引用路径从 `left` 节点上取 `type` 字段，而 tree-sitter-python 把注解放在 `assignment` 节点自己身上。两条路径改为共用 `pythonAssignmentTypeRef`，类体里的 `repo: Repository`（没有赋值）也覆盖到了。Python `extractorVersion` 2 → 3；`SnapshotIndexerTests` 的版本失配桩改为“真实版本 + 1”，以后不会再撞号。
+2. **`resolve` 对属性名完全没有结果**，所以窗口直接空白。新增证据 `.memberBinding(bindingIndex:)`：仅限 Python，在词法查找失败后，先用类型直达求出接收者所属的类，再在这个类的类体作用域里找同名的属性绑定。这条证据和 `lexicalBinding` 分开，因为它的绑定在**目标文件**里。确定性跟随接收者那一跳。
+3. **跨文件属性被入口拦下**。`locatedName` 的标识符回退要求“本文件有这个名字的绑定，或者全局有同名的定义 facet”，另一个文件类体里的属性两者都不满足。现在 Python 里紧跟在 `.` 后面的标识符也能进入后续查找。
+
+上下文窗口里，这类候选的标签是“字段”，`symbol` 为 nil，这样“查看引用”不会把绑定下标当成 facet 下标，去查一个无关的符号。CLI、goldset、关系树、阅读轨迹、叙述文本都已识别 `.memberBinding`（中英文案齐全）。
+
+回归测试：`pythonAnnotatedAssignmentsCarryTypeRef`、`pythonAttributeAccessHopsThroughTheReceiversClass`（同文件和跨文件）、`lensShowsPythonAttributeTypeThroughTheReceiversClass`。
+
+**仍未解决：方法调用的接收者。** 在 M7-S0A 里定下、并由 goldset `def5`/`nostrong` 锚定的规则是：单击方法调用的接收者（`ps` in `ps.get()`、`repo` in `self.repo.open()`）解析为方法本身。这和 R1.1“单击值绑定显示它的类型”冲突，Rust、Python、TS 都受影响。这需要用户裁决，本轮没有改：已就此提问，用户拒绝了提问。
+
+### 原生验收：离屏渲染发现两个界面 bug
+
+宿主两次都没有回应全屏控制的授权，之后屏幕锁定，所以在真实应用里点击和按键都做不了（后台模式下，点击只会通过辅助功能设置光标，按键也到不了没有焦点的窗口）。改为在测试里驱动真实的 `MainWindowController`，并用 `cacheDisplay`（真实的 AppKit 绘制路径）渲染成 PNG。新测试 `lensTypeFollowSurfacesRenderInTheNativeWindow` 要求渲染结果不能是空白，并且检查**实际渲染出来**的标签文字和宽度。
+
+这次渲染马上暴露出两个此前所有断言都没发现的问题：
+
+| 问题 | 现象 | 原因 | 修复 |
+|---|---|---|---|
+| 一跳标签从未显示 | 头部只剩一个孤零零的 `→`，`ps: &S` 和 `S` 都不见了 | 两个 `NSButton` 用 `attributedStringValue` 设文字：这设的是控件的值，不是标题，标题为空，被压成零宽 | 改用 `attributedTitle`。新增 `selfTestRenderedTypeHop`，读的是渲染出来的标题和布局宽度，不再读模型字段 |
+| 所在函数模式下整个上下文窗口被折叠 | 切到所在函数后，面板消失 | 面板是否显示只看 `candidateCount > 0 \|\| pinned`，所在函数模式下 `candidateCount` 为 0。等待精确结果的类型直达（`targets` 为空）同样会被折叠 | 改为：有显示内容、有类型直达、有所在作用域、处于所在函数模式或已固定，任一成立就显示。窗口的观察也加上 `tracking` 和 `isPinned` |
+
+证据截图（`docs/plans/evidence/context-window-type-follow/native-2026-10-02/`）：
+
+- `01-lens-parameter-type-hop.png`：头部显示 `ps: &S → S`，正文是 `S` 的定义。
+- `02-lens-cross-file-field.png`：`o.inner` 显示 `types.rs` 里的 `Inner`。
+- `03-lens-enclosing-nested-function.png`：显示 `function helper`（嵌套函数的内层），以及“⋯ 2 body lines · double-click to open”。
+- `04-lens-pinned.png`：固定之后移动光标，仍然显示 `helper`。
+
+另外在真实应用里确认（后台读取菜单）：“导航”菜单含“跳到类型定义”“跟踪光标下的符号”“跟踪所在函数”“固定 / 取消固定”。
+
+小观察（不影响阅读，没有改）：很短的函数在所在函数模式下，会把结尾的 `}` 也显示出来。
+
+**设置页仍没有截图。** SwiftUI 的 `ImageRenderer` 画不出 `ScrollView` 的内容，也画不出 AppKit 支撑的控件（列表空白、搜索框是占位块）；离屏窗口的 `cacheDisplay` 也捕获不到托管的 SwiftUI。设置页的录制、冲突、替换、恢复由单测覆盖，但缺一张真实的截图，需要在有桌面授权、屏幕未锁定时补做。
+
+### 注入证据（逐条单独执行，均已还原）
+
+| 注入 | 测试 | 变红 |
+|---|---|---|
+| 索引路径不传 `typeRef` | `pythonAnnotatedAssignmentsCarryTypeRef` | `typeRef("repo") == .named(…)` 失败 |
+| `locatedName` 不放行属性名 | `pythonAttributeAccessHops…` | `resolve(…).first` 为 nil |
+| 成员查找只对 Rust 开放 | 同上 | 同上 |
+| `typeHop` 的第一跳不认 `.memberBinding` | 同上 | attribute hop returned no targets |
+| 成员候选保留 `symbol` | `lensShowsPythonAttributeType…` | `hop.via.symbol == nil` 失败 |
+| 成员候选的标签退回“赋值” | 同上 | `bindingKind == 字段` 失败 |
+| CLI 不认 `.py` 扩展名 | `cliProjectLanguage…` | `languageID(inferringFrom: "pkg/models.py") == .python` 失败 |
+| 按钮标题退回 `attributedStringValue` | `lensTypeFollowSurfacesRender…` | `rendered.via == "ps: &S"` 失败，`viaWidth > 20 && targetWidth > 5` 失败 |
+| 面板显示条件退回旧规则 | 同上 | 所在函数那一步的 `!selfTestContextPaneCollapsed` 失败 |
+
+该测试连续独立运行 3 次都通过。它在等待一跳标签渲染出来之后才断言，因为上下文窗口在自己的观察回调里异步渲染，直接断言会和渲染抢时序。
+
+### CI
+
+`expected_main_test_count` 1314 → 1319（新增 5 条）。
+
+本轮宿主环境异常，结论如下：
+
+- 锁屏后，`~/.gitconfig`（符号链接到 `~/sian_configs/.gitconfig`）读取时报 `Interrupted system call`，导致 SwiftPM 的 `git describe` 卡住约 20 分钟，涉及 git 的测试大面积失败（98 处）。随后用 `GIT_CONFIG_GLOBAL=/dev/null` 重跑完整 CI：测试使用自己的临时仓库，不依赖全局配置；用户的配置未改动。
+- 重跑结果：主批 1319 条里剩 6 条失败，其余批次全部通过。失败分两组：
+  - 3 条滚动位置测试（`readonlyResize…`、`wrapToggleClamps…`、`ligaturePendingRestore…`），与 P2 记录的环境漂移是同样三条；
+  - 3 条 rust-analyzer 测试（`textDocument/definition` 超时；同一时段 `cargo locate-project` 也卡住了 30 分钟以上）。
+- 对照：在干净的工作树里检出上一提交 53346ec（它在 22:23 完整 CI 通过），只跑这 6 条，6 条全部同样失败。可以判定是当前宿主环境的问题，不是本轮改动引入的。
+- 宿主恢复正常（解锁、gitconfig 可读、rust-analyzer 不再卡住）后，需要在不加 `GIT_CONFIG_GLOBAL` 的情况下补跑一次完整 CI。

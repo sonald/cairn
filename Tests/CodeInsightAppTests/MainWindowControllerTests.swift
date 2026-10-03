@@ -2514,3 +2514,149 @@ func readerClickGestureResolvesThroughTable() {
     #expect(ReaderClickGesture.action(for: [.command], table: withoutGestures) == nil)
     #expect(ReaderClickGesture.action(for: [.option], table: withoutGestures) == nil)
 }
+
+// MARK: Native acceptance evidence — lens type follow and shortcut settings
+
+
+/// Native acceptance for the lens type-follow work: the real window is
+/// driven through its self-test hooks and drawn
+/// through AppKit (`cacheDisplay`), so the evidence is rendered pixels, not
+/// view-model booleans. With CAIRN_LENS_EVIDENCE_DIR set, each surface is also
+/// written as a PNG for the acceptance record.
+@MainActor
+private func renderEvidence(_ name: String, view: NSView) throws {
+    view.window?.contentView?.layoutSubtreeIfNeeded()
+    let rect = view.bounds
+    try #require(!rect.isEmpty)
+    let bitmap = try #require(view.bitmapImageRepForCachingDisplay(in: rect))
+    view.cacheDisplay(in: rect, to: bitmap)
+    var colors = Set<[CGFloat]>()
+    for y in stride(from: 0, to: bitmap.pixelsHigh, by: max(1, bitmap.pixelsHigh / 60)) {
+        for x in stride(from: 0, to: bitmap.pixelsWide, by: max(1, bitmap.pixelsWide / 80)) {
+            if let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) {
+                colors.insert([color.redComponent, color.greenComponent, color.blueComponent])
+            }
+        }
+    }
+    if let directory = ProcessInfo.processInfo.environment["CAIRN_LENS_EVIDENCE_DIR"] {
+        let png = try #require(bitmap.representation(using: .png, properties: [:]))
+        let output = URL(fileURLWithPath: directory)
+        try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
+        try png.write(to: output.appendingPathComponent(name + ".png"), options: .atomic)
+    }
+    // A blank (single-color) surface is not evidence of anything.
+    try #require(colors.count > 8, "\(name) rendered \(colors.count) colors")
+}
+
+private let lensTypes = """
+    /// A shared object header.
+    pub struct Inner {
+        pub id: u64,
+    }
+
+    /// A parsed record.
+    pub struct Outer {
+        pub count: u32,
+        pub inner: Inner,
+    }
+
+    """
+
+private let lensMain = """
+    mod types;
+    use types::{Inner, Outer};
+
+    /// A parsed object header.
+    pub struct S {
+        pub n: u32,
+    }
+
+    impl S {
+        /// Sums this header with a boxed copy.
+        pub fn use_it(&self, ps: &S, o: &Outer) -> u32 {
+            let local: Box<S> = Box::new(S { n: 1 });
+            fn helper(x: u32) -> u32 {
+                x + 1
+            }
+            self.n + ps.n + local.n + o.count + o.inner.id as u32 + helper(1)
+        }
+    }
+
+    fn main() {}
+
+    """
+
+/// R1/R7/R5/R6 in the real window: the one-hop label for a parameter, a
+/// cross-file field, the enclosing-function mode on a nested function, and
+/// the pin.
+@MainActor
+@Test
+func lensTypeFollowSurfacesRenderInTheNativeWindow() async throws {
+    _ = NSApplication.shared
+    let root = try mainWindowTemporaryProject([
+        "src/main.rs": lensMain,
+        "src/types.rs": lensTypes,
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    let model = AppModel(indexService: ProjectIndexService())
+    let controller = MainWindowController(
+        model: model,
+        settings: ReaderSettings(),
+        offscreen: true
+    )
+    defer { controller.close() }
+    controller.openProject(root: root)
+    #expect(await mainWindowWaitUntil(model.snapshotPhase == .fullReady))
+    controller.showWindow(nil)
+    let main = root.appendingPathComponent("src/main.rs")
+    controller.openFileForSelfTest(main)
+    #expect(await mainWindowWaitUntil(
+        controller.displayedReaderFile?.standardizedFileURL == main.standardizedFileURL
+    ))
+    let content = try #require(controller.window?.contentView)
+    func offset(of needle: String, plus delta: Int = 0) -> UInt32 {
+        let range = lensMain.range(of: needle)!
+        return UInt32(lensMain.utf8.distance(from: lensMain.startIndex, to: range.lowerBound) + delta)
+    }
+
+    // 1. `ps` in `ps.n`: the lens shows `ps: &S → S`.
+    controller.selfTestReaderClick(offset: offset(of: "ps.n"), commandClick: false)
+    #expect(await mainWindowWaitUntil(controller.selfTestTypeHop?.target == "S"))
+    #expect(controller.selfTestTypeHop?.via == "ps: &S")
+    #expect(controller.selfTestTypeHop?.showing == "type")
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestContextPaneCollapsed)
+    // The label must reach the screen, not just the model. The lens renders
+    // on its own observation pass, so wait for it rather than racing it.
+    #expect(await mainWindowWaitUntil(controller.selfTestRenderedTypeHop?.target == "S"))
+    let rendered = try #require(controller.selfTestRenderedTypeHop)
+    #expect(rendered.via == "ps: &S")
+    #expect(rendered.target == "S")
+    #expect(rendered.viaWidth > 20 && rendered.targetWidth > 5)
+    controller.renderForSelfTest()
+    try renderEvidence("01-lens-parameter-type-hop", view: content)
+
+    // 2. `o.inner` — a field declared in types.rs hops to `Inner`.
+    controller.selfTestReaderClick(offset: offset(of: "o.inner", plus: 2), commandClick: false)
+    #expect(await mainWindowWaitUntil(controller.selfTestTypeHop?.target == "Inner"))
+    #expect(controller.selfTestTypeHop?.via.hasPrefix("inner") == true)
+    controller.renderForSelfTest()
+    try renderEvidence("02-lens-cross-file-field", view: content)
+
+    // 3. Enclosing mode on the nested `helper` shows `helper`, not `use_it`.
+    controller.selfTestFollowCaret(offset: offset(of: "x + 1"))
+    controller.selfTestChooseLensTracking(.enclosing)
+    #expect(controller.selfTestContextEnclosingTitle?.contains("helper") == true)
+    controller.renderForSelfTest()
+    #expect(!controller.selfTestContextPaneCollapsed, "the enclosing mode must stay on screen")
+    try renderEvidence("03-lens-enclosing-nested-function", view: content)
+
+    // 4. The pin: amber header, the scope stays while the caret moves.
+    controller.selfTestSetContextPinned(true)
+    controller.selfTestFollowCaret(offset: offset(of: "fn main"))
+    try await Task.sleep(for: .milliseconds(100))
+    #expect(controller.selfTestContextPinned)
+    #expect(controller.selfTestContextEnclosingTitle?.contains("helper") == true)
+    controller.renderForSelfTest()
+    try renderEvidence("04-lens-pinned", view: content)
+}
