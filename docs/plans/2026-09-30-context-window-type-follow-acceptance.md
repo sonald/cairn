@@ -577,3 +577,53 @@ type -> primitive string
   - 3 条 rust-analyzer 测试（`textDocument/definition` 超时；同一时段 `cargo locate-project` 也卡住了 30 分钟以上）。
 - 对照：在干净的工作树里检出上一提交 53346ec（它在 22:23 完整 CI 通过），只跑这 6 条，6 条全部同样失败。可以判定是当前宿主环境的问题，不是本轮改动引入的。
 - 宿主恢复正常（解锁、gitconfig 可读、rust-analyzer 不再卡住）后，需要在不加 `GIT_CONFIG_GLOBAL` 的情况下补跑一次完整 CI。
+
+---
+
+## 真实应用原生验收
+
+日期：2026-10-03
+
+用户授权全屏控制后，在打包应用（`.build/distribution/Cairn.app`，演示项目 `lensdemo`）里实际操作。截图在 `docs/plans/evidence/context-window-type-follow/native-app-2026-10-03/`。
+
+**操作限制**：全屏单击被工具的命中检测判为“程序坞”（Cairn 窗口下层的桌面图层归程序坞所有），始终放不过去。所以改用三种方式驱动：后台原地拖动（真实鼠标事件）、全屏键盘、辅助功能按下按钮。
+
+### 已在真实应用里看到
+
+| 截图 | 内容 |
+|---|---|
+| 01 | 键盘把光标移到 `ps` 上（R4.1 键盘跟随）：头部 `ps: &S → S`，正文是 `S` 的定义 |
+| 02 | `let local: Box<S>`：`local: Box<S> → S`（剥掉 `Box`） |
+| 03 | ⌃⌘J：跳到 `struct S`；阅读轨迹记为“S —类型→ main.rs:5”（R3.3） |
+| 04 | 推断类型的 `made`：头部 `made → 类型解析中…`（中文标签，修复后） |
+| 05 | 切到“跟踪所在函数”：立即显示内层的 `helper`（不是 `use_it`），面板不折叠，带“⋯ 函数体 2 行 · 双击打开” |
+| 06 | 图钉：头部变成琥珀色；光标移到 `main` 里，窗口仍是 `helper` |
+| 07 | 设置 → 快捷键页：分组吸顶、锁定项、未设置项、全部恢复默认 |
+| 08 | 搜索“类型”：两条“跳到类型定义”带“新增”小标，`⌃⌘J` / `⇧⌘ + 点击` |
+| 09、10 | 按键搜索 `⌘[` → 只剩“后退”；之后键盘输入 `back` 正常进入搜索框（按键搜索只录一次，不再吞键） |
+
+### 真实应用里发现并已修复
+
+| 问题 | 原因 | 修复 | 回归测试 |
+|---|---|---|---|
+| 等待精确结果时显示键名原文 `model.typehop.resolving` | 应用层用自己的 `localized` 去取 AppModel 的 `model.*` 键（共 5 处，包括悬停提示和无障碍标签） | AppModel 新增 `package` 级的 `modelText` / `modelTextFormat`；CI 新增 `scripts/check-model-key-usage.py`，按括号配对查找多行调用，注入原来的写法会准确报出行号 | CI 门禁（已注入验证） |
+| 点完推断变量后，再点空白处，“解析中”永远不结束 | `lookup` 在判断“是不是新 token”**之前**就作废了进行中的请求；点到空白时内容保留了，请求却已被取消 | 只有确认是新 token 才作废旧请求；点到空白只取消还没发出的停留请求 | `lensBlankClickKeepsThePendingTypeHopResolving` |
+| 精确层不回答（nil）或批次被外部取消时，一直转圈 | `case nil: break`；检查失败时直接 return | 窗口仍停在这次请求时，改显示“类型需要精确分析 · 未就绪” | `lensStopsResolvingWhenExactGivesNoAnswer` |
+| 点在 `let` 声明的名字上，窗口变成空白 | `let` 绑定在自己的声明名处还不在作用域内，词法查找查不到 | 点在绑定声明名上，直接解析为这个绑定 | `clickOnALetDeclarationNameResolvesTheBindingAndHopsToItsType` |
+| 窗口空白时仍显示“光标不在符号上 · 保留上一次” | 结果为空、进入空白状态时没有清掉标记 | 进入空白状态时清除标记；视图层只在确有内容时显示小标 | `lensEmptyResultClearsThePreviousTokenFlag` |
+| 目标还没回来时计数显示“1/0” | 计数没有判空 | 没有目标时不显示计数 | 无（只是判空，按 AGENTS.md 不写复述实现的测试） |
+
+5 条回归测试都做了逐条注入：恢复修复前的代码，对应测试变红，再还原。
+
+### 环境问题（不是这次改动引入的，已记录）
+
+真实应用里，rust-analyzer 拉起的 `cargo locate-project` 一直卡住。用 `sample` 看到卡在 `init_git → git_config_open_default → access(~/.gitconfig)`。这个文件是指向 `~/sian_configs/.gitconfig` 的符号链接，在安全模式沙箱里访问它会阻塞，所以真实应用里精确层永远拿不到答案（截图 04 一直停在“解析中”）。CLI 不经过这个沙箱，`exact-typedef` 3 秒就返回了 `S`。这很可能也是 2026-09-29 那次“精确层不空闲”的真正原因，建议单独跟进：要么把配置文件移出那个目录，要么让安全模式下的 rust-analyzer 进程不去读全局 git 配置。
+
+### 仍未在真实应用里完成
+
+- 快捷键录制和冲突提示条：键帽和“+”按钮是 SwiftUI 的点击手势，并且只在悬停时出现；后台注入和辅助功能都触发不了。这部分由单测覆盖（录制、冲突、替换、恢复、跨窗口结束录制）。
+- 所在函数模式下，“⋯ 函数体 N 行”这行提示和最后一行代码有轻微重叠（截图 05），属于排版问题，没有修。
+
+### CI
+
+`expected_main_test_count` 1321 → 1325。完整 CI：`PASS: swift test total=1333 (main=1325 isolated=2 panels=2 mouse=2 fonts=2)`，并输出 `PASS: App 层的 model.* 文案都经 modelText()`，exit 0。
