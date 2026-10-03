@@ -124,7 +124,7 @@ func qualifiedCallQualifierResolvesItsOwnSymbol() throws {
 }
 
 @Test
-func methodCallReceiverResolvesMethodsWithoutClaimingStrong() throws {
+func methodCallReceiverResolvesItselfAndMethodNameStaysBelowStrong() throws {
     let source = """
         struct A; impl A { fn tick(&self) {} }
         struct B; impl B { fn tick(&self) {} }
@@ -152,9 +152,23 @@ func methodCallReceiverResolvesMethodsWithoutClaimingStrong() throws {
             context: queryContext(for: session)
         ) == receiverRange)
 
-        let resolved = try session.resolve(
+        // The receiver resolves as itself — the generic parameter `a`
+        // (2026-10-03, superseding the M7-S0A receiver-to-method rule).
+        let atReceiver = try session.resolve(
             file: path,
             offset: receiverOffset,
+            context: queryContext(for: session)
+        )
+        #expect(atReceiver.count == 1)
+        #expect(atReceiver.first?.evidence.contains {
+            if case .lexicalBinding = $0 { return true }
+            return false
+        } == true)
+
+        // The method name resolves the methods, never Strong for a generic.
+        let resolved = try session.resolve(
+            file: path,
+            offset: receiverOffset + 2,
             context: queryContext(for: session)
         )
         let firstTickOffset = offset(of: "tick(&self)", in: source)
@@ -920,7 +934,7 @@ func evaluatesGoldSetMetricsAndKnownFailures() throws {
         corpus: fixture
     )
 
-    #expect(report.total == 9)
+    #expect(report.total == 10)
     #expect(report.defTop1Passed == 1)
     #expect(report.defTop1Total == 2)
     #expect(report.def5Top5Passed == 1)
@@ -1526,9 +1540,10 @@ func pythonResolverScoresClassConstructorsStrongAndMethodsPossible() throws {
     ]) { session in
         let context = queryContext(for: session)
         let path = try #require(pathID("models.py", in: session))
+        // Query the method name `run`; the receiver `obj` resolves as itself.
         let method = try session.resolve(
             file: path,
-            offset: methodCall.lowerBound,
+            offset: methodCall.lowerBound + 4,
             context: context
         )
         let constructor = try session.resolve(

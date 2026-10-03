@@ -3785,6 +3785,35 @@ func lensPromotesInferredBindingWhenExactTypeArrives() async throws {
     })
 }
 
+/// 2026-10-03 (superseding M7-S0A): a click on a method call's receiver
+/// points at the receiver — the lens shows its type and ⌘-click jumps to
+/// its declaration; the method name still points at the method.
+@MainActor
+@Test
+func lensReceiverClickShowsTheReceiversTypeAndJumpsToItsDeclaration() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        impl S { pub fn get(&self) -> u32 { self.n } }
+        fn f(ps: &S) -> u32 {
+            ps.get()
+        }
+        """
+    let (model, _, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let receiver = byteOffset(of: "ps.get()", in: source)
+
+    model.tokenClicked(file: "main.rs", offset: receiver)
+    #expect(await testWaitUntil("type hop") { model.activeTypeHop != nil })
+    #expect(model.activeTypeHop?.viaText == "ps: &S")
+    #expect(model.displayedCandidate?.targetByteOffset
+        == byteOffset(of: "pub struct S", in: source) + 11)
+    let jump = await model.explicitJump(file: "main.rs", offset: receiver)
+    #expect(jump?.targetByteOffset == byteOffset(of: "ps: &S", in: source))
+
+    let method = await model.resolvedCandidate(file: "main.rs", offset: receiver + 3)
+    #expect(method?.targetByteOffset == byteOffset(of: "get(&self)", in: source))
+}
+
 /// R1.1 (Python): clicking a class attribute (`h.repo`) shows its type
 /// through the class-body declaration; the declaration is labelled a field
 /// and carries no engine symbol, so relations never act on a wrong facet.

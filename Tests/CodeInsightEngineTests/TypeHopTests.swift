@@ -530,3 +530,76 @@ func cliProjectLanguageComesFromOptionOrPositionFile() throws {
     let wrong = try ProjectOptions.parse(["--project", "p", "--language", "cobol"])
     #expect(throws: (any Error).self) { try wrong.languageID() }
 }
+
+/// 2026-10-03 (superseding M7-S0A): clicking the receiver of a method call
+/// resolves the receiver, so the lens hops it to its type in every language;
+/// the method name still resolves the method.
+@Test
+func receiverClickHopsToTheReceiversTypeInEveryLanguage() throws {
+    func hopsToType(
+        _ files: [String: String],
+        language: LanguageID,
+        path: String,
+        line: UInt32,
+        column: UInt32,
+        type: String
+    ) throws {
+        let session = try makeSession(files, language: language)
+        let context = queryContext(for: session)
+        let file = try pathID(path, in: session)
+        let at = try offset(line: line, column: column, in: session, path: path)
+        guard case let .targets(targets, _) = try session.typeHop(
+            file: file, offset: at, context: context
+        ) else {
+            Issue.record("\(language) receiver at \(path):\(line):\(column) did not hop")
+            return
+        }
+        #expect(targets.contains { facet(named: type, at: $0, in: session) != nil })
+    }
+    try hopsToType([
+        "src/main.rs": """
+        pub struct S { pub n: u32 }
+        impl S { pub fn get(&self) -> u32 { self.n } }
+        fn f(ps: &S) -> u32 {
+            ps.get()
+        }
+        """,
+    ], language: .rust, path: "src/main.rs", line: 4, column: 5, type: "S")
+    try hopsToType([
+        "pkg/models.py": """
+        class Repository:
+            def open(self):
+                pass
+
+
+        class Holder:
+            repo: Repository
+
+            def use(self, r: Repository):
+                r.open()
+                self.repo.open()
+        """,
+    ], language: .python, path: "pkg/models.py", line: 10, column: 9, type: "Repository")
+    try hopsToType([
+        "pkg/models.py": """
+        class Repository:
+            def open(self):
+                pass
+
+
+        class Holder:
+            repo: Repository
+
+            def use(self):
+                self.repo.open()
+        """,
+    ], language: .python, path: "pkg/models.py", line: 10, column: 14, type: "Repository")
+    try hopsToType([
+        "src/index.ts": """
+        class Snapshot { save(): void {} }
+        export function f(s: Snapshot): void {
+            s.save();
+        }
+        """,
+    ], language: .typescript, path: "src/index.ts", line: 3, column: 5, type: "Snapshot")
+}

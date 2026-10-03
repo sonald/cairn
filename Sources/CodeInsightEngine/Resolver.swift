@@ -224,14 +224,13 @@ struct Resolver {
         identifierFallback: Bool
     )? {
         var matches: [(range: ByteRange, nameID: NameID, call: UnresolvedCall?)] = []
+        // A click resolves the token under it (2026-10-03, superseding the
+        // M7-S0A receiver rule): only the method name names the call. A
+        // receiver (`ps` in `ps.get()`, `repo` in `self.repo.open()`) falls
+        // through to the binding / member / identifier lookup below, so it
+        // resolves as itself; `receiverRange` still drives method dispatch.
         matches += index.calls.compactMap { call in
-            if call.nameRange.contains(offset) {
-                return (call.nameRange, call.nameID, call)
-            }
-            if let range = call.receiverRange, range.contains(offset) {
-                return (range, call.nameID, call)
-            }
-            return nil
+            call.nameRange.contains(offset) ? (call.nameRange, call.nameID, call) : nil
         }
         matches += index.bindings.compactMap { binding in
             binding.declarationRange.contains(offset)
