@@ -89,6 +89,25 @@ struct Resolver {
             )
         }
 
+        // A click on a binding's own declaration name resolves that binding
+        // (a `let` is not yet in scope at its own name, so the lexical walk
+        // below would miss it).
+        if located.call == nil,
+           let bindingIndex = index.bindings.firstIndex(where: {
+               $0.declarationRange == located.range
+           }),
+           let localIndex = UInt32(exactly: bindingIndex)
+        {
+            return [candidate(
+                pathID: file,
+                localIndex: localIndex,
+                certainty: .strong,
+                dispatch: .direct,
+                evidence: [.lexicalBinding(bindingIndex: localIndex)],
+                context: context
+            )]
+        }
+
         let scopes = scopeChain(at: offset, in: index)
         if let lexical = lexicalBinding(
             named: located.nameID,

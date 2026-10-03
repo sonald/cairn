@@ -4030,7 +4030,7 @@ final class MainWindowController: NSWindowController, NSToolbarDelegate,
 
     func jumpToTypeDefinitionAtCaret() {
         guard let offset = model.tabStrip.activeTab?.selectionByteOffset else {
-            showTransientStatus(localized("model.typehop.noType"))
+            showTransientStatus(modelText("model.typehop.noType"))
             return
         }
         handleReaderTypeDefinition(offset: offset)
@@ -7905,7 +7905,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         let text: String
         let highlightsSyntax: Bool
         renderTypeHopLabel()
+        // "Keeping the previous" only makes sense with something on screen.
         previousTokenNoteLabel.isHidden = !model.isShowingPreviousToken
+            || (model.displayedCandidate == nil && model.activeTypeHop == nil
+                && model.activeEnclosingScope == nil)
         if let scope = model.activeEnclosingScope {
             renderEnclosing(scope)
             text = ""
@@ -7931,7 +7934,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             )
             candidateLabel.toolTip = fullProvenance
             candidateLabel.setAccessibilityLabel(fullProvenance)
-            countLabel.stringValue = "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"
+            // No count while a type hop waits for its targets ("1/0").
+            countLabel.stringValue = model.candidateCount > 0
+                ? "\((model.selectedIndex ?? 0) + 1)/\(model.candidateCount)"
+                : ""
             text = candidate.excerpt
             highlightsSyntax = true
             candidateBadge.isHidden = false
@@ -8088,7 +8094,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
         if hop.targets.isEmpty {
             // P2: the syntax spelled no type and the Exact layer is pending
             // (resolving) or unable to answer (not ready).
-            targetShownName = localized(
+            targetShownName = modelText(
                 hop.pendingExact
                     ? "model.typehop.resolving"
                     : "model.typehop.pendingExact"
@@ -8115,7 +8121,7 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
             ]
         )
         typeHopViaButton.toolTip = hop.viaKind + " · "
-            + localized("model.typehop.showDeclarationHint")
+            + modelText("model.typehop.showDeclarationHint")
         typeHopTargetButton.attributedTitle = NSAttributedString(
             string: targetShownName.isEmpty ? "…" : targetShownName,
             attributes: [
@@ -8127,10 +8133,10 @@ final class ContextWindowViewController: NSViewController, NSTableViewDataSource
                     : theme.chromeTertiaryColor,
             ]
         )
-        typeHopTargetButton.toolTip = localized("model.typehop.showTypeHint")
+        typeHopTargetButton.toolTip = modelText("model.typehop.showTypeHint")
         typeHopBoundLabel.stringValue = hop.boundNote.map { "(\($0))" } ?? ""
         typeHopBoundLabel.isHidden = hop.boundNote == nil
-        typeHopLabel.setAccessibilityLabel(localizedFormat(
+        typeHopLabel.setAccessibilityLabel(modelTextFormat(
             "model.typehop.accessibility",
             hop.viaText,
             hop.viaKind,

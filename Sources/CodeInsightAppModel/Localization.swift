@@ -32,3 +32,14 @@ func localizedFormat(_ key: String, language: String?, _ arguments: CVarArg...) 
     } ?? localizationLocale
     return String(format: localized(key, language: language), locale: locale, arguments: arguments)
 }
+
+/// Text for a `model.*` key, resolved in this target's bundle. The app target
+/// must use these for model keys: its own `localized` looks in the app bundle
+/// and would show the raw key.
+package func modelText(_ key: String) -> String {
+    localized(key)
+}
+
+package func modelTextFormat(_ key: String, _ arguments: CVarArg...) -> String {
+    String(format: localized(key), locale: localizationLocale, arguments: arguments)
+}

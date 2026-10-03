@@ -603,3 +603,34 @@ func receiverClickHopsToTheReceiversTypeInEveryLanguage() throws {
         """,
     ], language: .typescript, path: "src/index.ts", line: 3, column: 5, type: "Snapshot")
 }
+
+/// "Click the token under the pointer": a click on a `let` binding's own
+/// name resolves that binding (it is not yet in scope at its name), so the
+/// lens hops a declaration to its type like any use.
+@Test
+func clickOnALetDeclarationNameResolvesTheBindingAndHopsToItsType() throws {
+    let session = try makeSession([
+        "src/main.rs": """
+        pub struct S { pub n: u32 }
+        fn f() -> u32 {
+            let local: Box<S> = Box::new(S { n: 1 });
+            local.n
+        }
+        """,
+    ])
+    let context = queryContext(for: session)
+    let file = try pathID("src/main.rs", in: session)
+    let declaration = try offset(line: 3, column: 9, in: session, path: "src/main.rs")
+    let resolved = try session.resolve(file: file, offset: declaration, context: context)
+    #expect(resolved.first?.evidence.contains {
+        if case .lexicalBinding = $0 { return true }
+        return false
+    } == true)
+    guard case let .targets(targets, _) = try session.typeHop(
+        file: file, offset: declaration, context: context
+    ) else {
+        Issue.record("declaration did not hop")
+        return
+    }
+    #expect(targets.contains { facet(named: "S", at: $0, in: session) != nil })
+}

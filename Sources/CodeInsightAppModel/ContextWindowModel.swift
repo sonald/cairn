@@ -932,15 +932,18 @@ public final class ContextWindowModel {
         {
             return symbolCandidate
         }
-        requestID &+= 1
-        cancelExactUpgrade()
-        pendingDwellTask?.cancel()
-        pendingDwellTask = nil
-        dwellArmedToken = nil
-        let currentRequest = requestID
+        // Only a new token supersedes the displayed one. A miss (blank,
+        // keyword) or a caret echo inside the same token keeps the displayed
+        // content — and its in-flight Exact work, which it still needs.
         guard let pathID = pathID(token.file, in: session) else {
+            requestID &+= 1
+            cancelExactUpgrade()
+            pendingDwellTask?.cancel()
+            pendingDwellTask = nil
+            dwellArmedToken = nil
             locatedToken = nil
             stage = .idle
+            isShowingPreviousToken = false
             return nil
         }
         guard let range = try? session.tokenRange(
@@ -949,7 +952,8 @@ public final class ContextWindowModel {
             context: context
         ) else {
             // R4.3: the caret/click sits on no symbol — keep the previous
-            // content and flag it (T4).
+            // content and flag it (T4). Only a not-yet-sent dwell request
+            // is dropped (R4.2).
             pendingDwellTask?.cancel()
             pendingDwellTask = nil
             dwellArmedToken = nil
@@ -962,6 +966,12 @@ public final class ContextWindowModel {
         {
             return symbolCandidate
         }
+        requestID &+= 1
+        cancelExactUpgrade()
+        pendingDwellTask?.cancel()
+        pendingDwellTask = nil
+        dwellArmedToken = nil
+        let currentRequest = requestID
 
         locatedToken = LocatedToken(file: token.file, range: range)
         do {
@@ -974,6 +984,7 @@ public final class ContextWindowModel {
             guard requestID == currentRequest else { return nil }
             guard !candidates.isEmpty else {
                 stage = .idle
+                isShowingPreviousToken = false
                 return nil
             }
             stage = .candidates(candidates, selected: 0)
@@ -1024,6 +1035,7 @@ public final class ContextWindowModel {
             guard requestID == currentRequest else { return nil }
             locatedToken = nil
             stage = .idle
+            isShowingPreviousToken = false
             return nil
         }
     }
@@ -1342,6 +1354,9 @@ public final class ContextWindowModel {
               sessionIsCurrent(session, context)
         else {
             finishExactUpgrade(batch)
+            // Still this request's stage (the batch was cancelled from
+            // outside): a pending type hop must not spin forever.
+            if requestID == request { markTypeHopExactUnavailable() }
             return
         }
         if case .completed(let entries) = result {
@@ -1369,7 +1384,10 @@ public final class ContextWindowModel {
             guard requestID == request,
                   batch.isCurrent,
                   sessionIsCurrent(session, context)
-            else { return }
+            else {
+                if requestID == request { markTypeHopExactUnavailable() }
+                return
+            }
             switch typeResult {
             case .completed(let entries):
                 for exact in entries {
@@ -1382,9 +1400,7 @@ public final class ContextWindowModel {
                         selectionEpoch: requestSelectionEpoch
                     )
                 }
-            case nil:
-                break
-            case .cancelled, .unsupported, .unavailable:
+            case nil, .cancelled, .unsupported, .unavailable:
                 // A cancelled batch normally means a newer click already
                 // replaced the stage; when it was the final reply, stop the
                 // resolving state instead of spinning forever.
@@ -1545,6 +1561,7 @@ public final class ContextWindowModel {
             onStaleIndexContent?(
                 sourceIsCurrent ? targetPath : token.file
             )
+            markTypeHopExactUnavailable()
             return
         }
         // Re-read the stage after every await; replies may interleave with

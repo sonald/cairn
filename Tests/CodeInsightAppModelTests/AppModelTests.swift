@@ -3894,6 +3894,90 @@ func typeDefinitionCommandFallsBackToExactForInferredBinding() async throws {
     #expect(target.targetByteOffset == sOffset)
 }
 
+/// R4.3 + R1.7 (native acceptance, 2026-10-03): a click that lands on no
+/// symbol keeps the displayed type hop — and its in-flight Exact request,
+/// so the hop still resolves instead of spinning forever.
+@MainActor
+@Test
+func lensBlankClickKeepsThePendingTypeHopResolving() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        fn make_s() -> S { S { n: 1 } }
+        fn main() {
+            let made = make_s();
+            let _ = made;
+
+        }
+        """
+    let sOffset = byteOffset(of: "pub struct S", in: source) + 11
+    let (model, gate, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
+    )
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
+    // A click on the blank line below.
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "made;\n", in: source) + 7)
+    try await Task.sleep(for: .milliseconds(50))
+    #expect(model.isShowingPreviousToken)
+    gate.resumeAll(with: .completed([exactTypeEntry(file: "main.rs", offset: sOffset)]))
+    #expect(await testWaitUntil("resolved to S") {
+        model.displayedCandidate?.targetByteOffset == sOffset
+    })
+}
+
+/// R4.3: the "keeping the previous" flag belongs to content on screen — a
+/// later lookup that finds nothing clears it instead of leaving it over an
+/// empty lens.
+@MainActor
+@Test
+func lensEmptyResultClearsThePreviousTokenFlag() async throws {
+    let source = """
+        fn f(x: u32) {
+            x.nothing();
+
+        }
+        """
+    let log = ExactRequestLog()
+    let (model, root) = try makeCaretLensModel(source, requestLog: log)
+    defer { try? FileManager.default.removeItem(at: root) }
+    // The blank line: nothing under the caret.
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "();\n", in: source) + 4)
+    #expect(await testWaitUntil("miss flagged") { model.isShowingPreviousToken })
+    // An unknown method name: located, but nothing resolves.
+    model.tokenClicked(file: "main.rs", offset: byteOffset(of: "nothing", in: source))
+    #expect(await testWaitUntil("flag cleared") { !model.isShowingPreviousToken })
+    #expect(model.displayedCandidate == nil)
+}
+
+/// R1.7: when the Exact layer gives no answer at all (nil), the hop stops
+/// "resolving" and shows "not ready" instead of spinning forever.
+@MainActor
+@Test
+func lensStopsResolvingWhenExactGivesNoAnswer() async throws {
+    let source = """
+        pub struct S { pub n: u32 }
+        fn make_s() -> S { S { n: 1 } }
+        fn main() {
+            let made = make_s();
+            let _ = made;
+        }
+        """
+    let (model, gate, root) = try makeLensTypeHopModel(source, typeDefinitionResult: nil)
+    defer { try? FileManager.default.removeItem(at: root) }
+    model.tokenClicked(
+        file: "main.rs",
+        offset: byteOffset(of: "let _ = made", in: source) + UInt32("let _ = ".utf8.count)
+    )
+    #expect(await testWaitUntil("pending") { model.activeTypeHop?.pendingExact == true })
+    #expect(await testWaitUntil("typeDefinition requested") { gate.suspendedCount == 1 })
+    gate.resumeAll(with: nil)
+    #expect(await testWaitUntil("no longer resolving") {
+        model.activeTypeHop != nil && model.activeTypeHop?.pendingExact == false
+    })
+}
+
 /// Q4: a manual declaration/type toggle before the Exact reply blocks the
 /// auto-switch.
 @MainActor

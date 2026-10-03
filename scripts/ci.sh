@@ -38,7 +38,7 @@ panel_test_two='CodeInsightAppTests.productPolishOutlineUsesNativeHierarchyAndPr
 # each finish in their own SwiftPM process. Mixing the rebuild pair with a later
 # async inspector test can exit 0 before the Swift Testing summary. Never accept
 # that exit code alone. Every test must report completion exactly once.
-expected_main_test_count=1321
+expected_main_test_count=1325
 expected_isolated_test_count=2
 expected_panel_test_count=2
 
@@ -163,6 +163,9 @@ else
         exit 1
     fi
 fi
+
+# Model keys live in CodeInsightAppModel's bundle (see the script).
+python3 scripts/check-model-key-usage.py
 
 if grep -rnE 'import AppKit|import SwiftUI' \
     Sources/CodeInsightCore Sources/TreeSitterKit \
